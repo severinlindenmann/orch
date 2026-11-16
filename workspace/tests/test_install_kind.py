@@ -53,23 +53,24 @@ def test_missing_record_on_a_non_source_install_is_normal(tmp_path, monkeypatch)
 
 def test_installer_records_match_the_format(tmp_path):
     """install.sh's record line, run through sh, equals install_record_text."""
-    for kind in ("normal", "test", "dev"):
+    for kind in ("normal", "test", "dev") if os.name != "nt" else ():  # install.sh needs a POSIX sh
         out = tmp_path / f"{kind}.json"
         line = [
             ln
-            for ln in (ROOT / "install.sh").read_text().splitlines()
+            for ln in (ROOT / "install.sh").read_text(encoding="utf-8").splitlines()
             if "orch-install.json" in ln and "printf" in ln
         ]
         assert len(line) == 1
         cmd = line[0].replace('"$TOOL_DIR/orch-install.json"', f"'{out}'")
         subprocess.run(["sh", "-c", f"KIND={kind}; ROOT={tmp_path}; {cmd}"], check=True)
         assert json.loads(out.read_text()) == json.loads(home_mod.install_record_text(kind, tmp_path))
-    sh = (ROOT / "install.sh").read_text()
+    sh = (ROOT / "install.sh").read_text(encoding="utf-8")
     assert "ORCH_INSTALL_KIND" in sh and "normal|dev|test" in sh
-    ps = (ROOT / "install.ps1").read_text()
+    ps = (ROOT / "install.ps1").read_text(encoding="utf-8")
     assert "InstallKind" in ps and '"normal","dev","test"' in ps and "orch-install.json" in ps
 
 
+@pytest.mark.skipif(os.name == "nt", reason="install.sh is a POSIX shell script")
 @pytest.mark.skipif(shutil.which("uv") is None, reason="the installer would fetch uv")
 def test_installer_rejects_a_bad_kind():
     r = subprocess.run(
@@ -134,8 +135,9 @@ def test_addon_add_says_so_on_a_normal_install(proj, monkeypatch, capsys):
 
 
 @pytest.fixture
-def tws(tmp_path, monkeypatch):
-    acct = tmp_path / "acct"
+def tws(tmp_path_factory, monkeypatch):
+    # a short base: snapshot folders carry a 64-character hash and Windows folders stop at 248 characters
+    acct = tmp_path_factory.mktemp("a") / "acct"
     ws = acct / ".orch-test" / "ws"
     (ws / ".orch").mkdir(parents=True)
     (acct / ".orch-test" / "home").mkdir()
@@ -157,7 +159,8 @@ def test_launch_url_on_a_test_install(tws):
         and 0 < int(exp) - __import__("time").time() <= pagelaunch.LAUNCH_LIFE
         and pagelaunch.LAUNCH_LIFE == 30
     )
-    assert oct((home_mod.key_dir(tws) / "launch-focus.token").stat().st_mode & 0o777) == "0o600"
+    if os.name != "nt":  # Windows has no file modes; the folder is locked down by winacl
+        assert oct((home_mod.key_dir(tws) / "launch-focus.token").stat().st_mode & 0o777) == "0o600"
 
 
 def test_launch_url_refused_on_dev_normal_and_outside_the_test_folder(tws, tmp_path, monkeypatch):
@@ -166,7 +169,7 @@ def test_launch_url_refused_on_dev_normal_and_outside_the_test_folder(tws, tmp_p
         with pytest.raises(Refused, match="only on a test install"):
             pagelaunch.printable_launch_url(tws, "focus", "http://127.0.0.1:1")
     monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
-    other = tmp_path / "acct" / "real-ws"
+    other = tws.parents[1] / "real-ws"  # next to the test home, inside the same account folder
     other.mkdir()
     with pytest.raises(Refused, match="only on a test install"):
         pagelaunch.printable_launch_url(other, "focus", "http://127.0.0.1:1")
@@ -268,9 +271,9 @@ def test_lane_c_layout_tool_env_under_orch_test_testnet(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def rws(tmp_path, monkeypatch):
+def rws(tmp_path_factory, monkeypatch):
     """A REAL workspace on a NORMAL install: guarded home = the (temp) account's default orch home."""
-    acct = tmp_path / "acct"
+    acct = tmp_path_factory.mktemp("a") / "acct"  # short: see tws
     ws = acct / "work" / "ws"
     (ws / ".orch").mkdir(parents=True)
     monkeypatch.setattr(addons, "real_home", lambda: acct)
@@ -341,6 +344,9 @@ def throwaway(tmp_path, monkeypatch):
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setenv("ORCH_HOME", str(orch_home))
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    from orch import winfinish
+
+    monkeypatch.setattr(winfinish, "needed", lambda: False)  # Windows would finish in the background
     monkeypatch.chdir(ws)
     monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     return acct, orch_home, ws
@@ -585,8 +591,8 @@ def test_start_json_with_launch_urls_is_valid_json(proj, monkeypatch, capsys):
 
 
 def test_installers_print_a_visible_line_and_validate_the_kind():
-    sh = (ROOT / "install.sh").read_text()
-    ps = (ROOT / "install.ps1").read_text()
+    sh = (ROOT / "install.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "install.ps1").read_text(encoding="utf-8")
     assert "INSTALL: this orch is marked" in sh and "INSTALL: this orch is marked" in ps
     assert "ConvertTo-Json" in ps and "-notin" in ps and "ORCH_INSTALL_KIND" in ps
 

@@ -81,6 +81,13 @@ _REMINDER = {
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
 
 
+@pytest.fixture(autouse=True)
+def _record_hooks_wired(monkeypatch):
+    """The adapter leaves the record hooks out on Windows (#547, no process-tree reader there); these tests
+    check the wiring itself, so they run it as on POSIX; the Windows test below sets it back."""
+    monkeypatch.setattr(adapters, "_is_windows", lambda: False)
+
+
 def _claude_argvs(root):
     """The snapshots: the permission flags (the adapter's own disallowed-tools list stays)."""
     deny = DENY

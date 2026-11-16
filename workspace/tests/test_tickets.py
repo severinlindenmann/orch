@@ -605,6 +605,9 @@ def test_closed_without_a_live_run_or_from_inside_its_own_run_stops_nothing(
     assert stopped == []  # a one-shot run ends by itself (its copy waits for it)
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="the process-tree reader of record_hook has no Windows version yet (#547)"
+)
 def test_closed_from_inside_the_runs_process_tree_stops_nothing(proj, new_ticket, stopped):
     """No ORCH_TICKET, but this process is the run's own (its pid is an ancestor): not stopped from within."""
     tid = new_ticket()

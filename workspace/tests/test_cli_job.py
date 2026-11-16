@@ -117,7 +117,8 @@ def test_happy_path_is_stored_in_order_and_valid(live):
     assert all(STORED.is_valid(e) for e in events)
     assert {(e["run"], e["ticket"], e["job"]) for e in events} == {(run, tid, job)}
     assert jobs.state_of(events) == "ok"
-    assert oct(stream_file(root, run, job).stat().st_mode & 0o777) == "0o600"
+    if os.name == "posix":  # Windows has no file modes: its rights are ACLs
+        assert oct(stream_file(root, run, job).stat().st_mode & 0o777) == "0o600"
 
 
 def test_jobs_appear_in_the_record_as_job_events(live):
@@ -443,7 +444,8 @@ def test_huge_and_deep_payloads_are_refused(live):
     for _ in range(5000):
         x["n"] = {}
         x = x["n"]
-    refused("too_large", send, root, job, type="table", table=deep)
+    # json of 5000 levels hits Python's recursion limit sooner on Windows, which refuses it as not valid
+    refused("invalid" if os.name == "nt" else "too_large", send, root, job, type="table", table=deep)
     shallow = x = {}
     for _ in range(300):
         x["n"] = {}

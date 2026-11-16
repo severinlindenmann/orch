@@ -312,7 +312,9 @@ def test_list_has_no_values_and_matches_the_schema(store, run):
     assert code == 0
     data = json.loads(out)
     schema = json.loads(
-        (Path(__file__).resolve().parents[2] / "contracts" / "secrets.schema.json").read_text()
+        (Path(__file__).resolve().parents[2] / "contracts" / "secrets.schema.json").read_text(
+            encoding="utf-8"
+        )
     )
     jsonschema.validate(data, {"$ref": "#/$defs/list_answer", "$defs": schema["$defs"]})
     assert {i["name"] for i in data["items"]} == {"api-token", "other-token", "sa.pem"}
@@ -1140,7 +1142,9 @@ def test_secret_change_by_must_be_a_person_or_reset():
     import jsonschema
 
     schema = json.loads(
-        (Path(__file__).resolve().parents[2] / "contracts" / "activity.schema.json").read_text()
+        (Path(__file__).resolve().parents[2] / "contracts" / "activity.schema.json").read_text(
+            encoding="utf-8"
+        )
     )
     v = jsonschema.Draft202012Validator(schema)
     ev = json.loads(
@@ -1470,6 +1474,9 @@ def test_h3_the_child_runs_in_a_private_empty_cwd_with_that_as_home(store, run, 
     assert "planted module ran" not in out
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="secret commands that start programs are not available on Windows yet"
+)
 def test_h3_the_real_home_only_with_the_persons_real_home_setting(store, run, ws, monkeypatch):
     from orch import launchenv
 
@@ -1617,6 +1624,9 @@ def test_h2_arguments_with_a_path_must_be_a_full_path_on_their_own(store, run, w
     assert code == 2 and "full path" in err and "pathy" not in keystore.read_profiles(ws)
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="secret commands that start programs are not available on Windows yet"
+)
 def test_h2_a_full_path_argument_in_a_safe_place_is_accepted(store, run, ws, monkeypatch):
     code, out, err = _set(run, monkeypatch, ws, "safe", "--run", "/usr/bin/true", "--run", _safe_file())
     assert code == 0, out + err
@@ -1647,6 +1657,9 @@ def test_h2_the_stored_command_is_checked_again_for_argument_less_system_program
     assert secretrun.approve_program(ws, "/usr/bin/true")[0]
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="secret commands that start programs are not available on Windows yet"
+)
 def test_nothing_starts_as_root(ws, monkeypatch):
     monkeypatch.setattr(secretrun.os, "getuid", lambda: 0)
     with pytest.raises(Refused, match="as root"):
@@ -1664,6 +1677,9 @@ def test_a_real_home_profile_is_for_the_person_only(store, run, ws, monkeypatch,
     assert code == 0, err
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="secret commands that start programs are not available on Windows yet"
+)
 def test_a_command_argument_is_checked_again_at_every_start(store, run, ws, monkeypatch, tmp_path):
     folder, _ = _open_folder(tmp_path)
     mine = folder / "data.txt"
@@ -1720,6 +1736,9 @@ def test_get_is_refused_on_windows(store, ws, monkeypatch):
         secretrun.get(ws, "plain", "other-token", stdout_is_tty=False, out=io.BytesIO(), agent=False)
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="secret commands that start programs are not available on Windows yet"
+)
 def test_nothing_uses_keys_as_root_in_run_or_get(store, ws, monkeypatch):
     monkeypatch.setattr(secretrun.os, "getuid", lambda: 0)
     with pytest.raises(Refused, match="service user"):
@@ -1754,6 +1773,9 @@ def test_an_o_option_is_refused_for_programs_that_can_run_a_command_through_it(w
     secretrun.check_arguments(ws, ["-oProxyCommand=x"])  # any command: not our rule
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="secret commands that start programs are not available on Windows yet"
+)
 def test_only_plain_web_and_git_addresses_are_not_paths(ws):
     secretrun.check_arguments(
         ws,

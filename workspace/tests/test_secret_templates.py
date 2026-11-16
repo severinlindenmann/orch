@@ -66,6 +66,10 @@ BYPASS = [
 
 @pytest.mark.parametrize(("kind", "args"), VALID)
 def test_each_fixed_form_is_accepted(tmp_path, kind, args):
+    if os.name == "nt" and TRUE in args:
+        pytest.skip(
+            "secret commands that start programs are not available on Windows yet (local paths start with /)"
+        )
     secretrun.check_arguments(tmp_path, args, kind, {"KEY": "k"})
 
 

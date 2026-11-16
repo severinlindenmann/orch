@@ -192,8 +192,10 @@ def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
     assert run("init")[0] == 0
     assert (proj / ".claude/skills/mine/SKILL.md").is_file()
     assert (proj / ".claude/skills/orch/SKILL.md").is_file()
-    link = proj / ".claude/skills/orch"  # a symlink; on Windows a junction (no privileges needed)
-    is_link = link.is_symlink() or getattr(link, "is_junction", lambda: False)()
+    link = (
+        proj / ".claude/skills/orch"
+    )  # a symlink; on Windows a copy marked as orch's (no links there, #438)
+    is_link = link.is_symlink() or (os.name == "nt" and (link / ".orch-copy").is_file())
     assert not (proj / ".claude/skills").is_symlink() and is_link
 
 
@@ -750,7 +752,7 @@ def test_a_git_failure_inside_a_repo_refuses_and_no_repo_is_fine(proj, monkeypat
     real = subprocess.Popen
 
     def broken(cmd, *a, **k):
-        if "check-ignore" in cmd and os.path.basename(cmd[0]) == "git":
+        if "check-ignore" in cmd and os.path.splitext(os.path.basename(cmd[0]))[0] == "git":
             return _FakeProc(128, b"fatal: detected dubious ownership")
         return real(cmd, *a, **k)
 
@@ -936,7 +938,10 @@ def test_reminder_settings_created_with_both_hooks(proj, run):
     for event in ("SessionStart", "UserPromptSubmit"):
         (h,) = _ours(doc, event)
         assert h["type"] == "command" and h["timeout"] == 5
-        assert h["command"].startswith(sys.executable.replace(" ", "\\ ")) or sys.executable in h["command"]
+        exe = (
+            sys.executable.replace("\\", "/") if os.name == "nt" else sys.executable
+        )  # the hook line uses "/"
+        assert h["command"].startswith(exe.replace(" ", "\\ ")) or exe in h["command"]
     if sys.platform != "win32":
         assert ((proj / ".claude/settings.local.json").stat().st_mode & 0o777) == 0o600
 

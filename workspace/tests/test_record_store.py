@@ -32,8 +32,8 @@ from orch.record import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = ROOT / "contracts"
-VECTORS = json.loads((CONTRACTS / "vectors/activity-v1.json").read_text())
-SCHEMA = json.loads((CONTRACTS / "activity.schema.json").read_text())
+VECTORS = json.loads((CONTRACTS / "vectors/activity-v1.json").read_text(encoding="utf-8"))
+SCHEMA = json.loads((CONTRACTS / "activity.schema.json").read_text(encoding="utf-8"))
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA, format_checker=jsonschema.FormatChecker())
 SECRET = "KEYVALUE-abc123XYZ-secret"
 
@@ -46,7 +46,7 @@ def store(tmp_path):
 
 
 def event(**changes):
-    value = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+    value = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text(encoding="utf-8"))
     value.update(changes)
     return value
 
@@ -56,7 +56,7 @@ def event(**changes):
 )
 def test_examples(store, path):
     ws, writer = store
-    value = json.loads(path.read_text())
+    value = json.loads(path.read_text(encoding="utf-8"))
     if path.name.startswith("invalid"):
         with pytest.raises(RecordRefused):
             writer.append(value)
@@ -307,7 +307,9 @@ def test_detail_schema_and_runtime_schema():
     assert _SCHEMA == SCHEMA
     validator = jsonschema.Draft202012Validator({"$ref": "#/$defs/detail_file", "$defs": SCHEMA["$defs"]})
     for path in (CONTRACTS / "examples/activity-detail").glob("*.json"):
-        assert validator.is_valid(json.loads(path.read_text())) == path.name.startswith("valid-")
+        assert validator.is_valid(json.loads(path.read_text(encoding="utf-8"))) == path.name.startswith(
+            "valid-"
+        )
 
 
 def test_preflight_leaves_nothing(store):
@@ -341,7 +343,7 @@ def test_secret_id_never_stored_plain_or_unsalted_hash(store):
     }
     seen = 0
     for path in record_dir(ws).rglob("*"):
-        text = path.name + (path.read_text() if path.is_file() else "")
+        text = path.name + (path.read_text(encoding="utf-8") if path.is_file() else "")
         seen += 1
         assert SECRET not in text
         assert not any(h in text for h in unsalted)
@@ -358,7 +360,7 @@ def test_hardlinked_run_file_refused(store, tmp_path):
     os.link(outside, path)
     with pytest.raises(RecordRefused):
         writer.append(event(id="another"))
-    assert outside.read_text() == "keep"
+    assert outside.read_text(encoding="utf-8") == "keep"
     assert (outside.stat().st_mode & 0o777) == (tmp_path / "outside.txt").stat().st_mode & 0o777
 
 
@@ -376,7 +378,7 @@ def test_detail_of_colliding_id_never_replaces_other_detail(store):
     )
     other2 = writer.append(other, detail={"input": "fake", "output": "fake"})
     assert other2["detail"] != stored["detail"]
-    assert json.loads((record_dir(ws) / stored["detail"]).read_text())["input"] == "real"
+    assert json.loads((record_dir(ws) / stored["detail"]).read_text(encoding="utf-8"))["input"] == "real"
 
 
 def test_detail_pointer_and_reserved_ids(store):
@@ -394,7 +396,7 @@ def test_late_started_detail_keeps_finished_detail(store):
         event(id="s1", outcome={"ok": True, "error": None, "ms": 1}), detail={"input": "a", "output": "final"}
     )
     writer.append(event(id="s1"), detail={"input": "b", "output": "early"})
-    assert json.loads((record_dir(ws) / done["detail"]).read_text())["output"] == "final"
+    assert json.loads((record_dir(ws) / done["detail"]).read_text(encoding="utf-8"))["output"] == "final"
 
 
 def test_detail_name_property():
@@ -444,7 +446,7 @@ def test_case_variants_and_collisions_never_drop_the_line(store):
     )
     kept = writer.append(event(id="z1"), detail={"input": "x", "output": "y"})
     assert kept is not None and kept["detail"] and not kept.get("detail_lost")
-    assert json.loads(target.read_text())["id"] == "z1" and kept["detail_hash"]
+    assert json.loads(target.read_text(encoding="utf-8"))["id"] == "z1" and kept["detail_hash"]
     assert [e["id"] for e in read_run(ws, "r_8k2m01").unwrap()] == ["A", "a", "z1"]
     # unreadable planted file: replaced too
     target2 = record_dir(ws) / writer_detail_path(ws, "z2")
@@ -461,6 +463,7 @@ def writer_detail_path(ws, eid):
     return f"detail/r_8k2m01/{detail_name('r_8k2m01', 'step', eid, event()['ticket'])}.json"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no named pipes made with os.mkfifo")
 def test_fifo_planted_as_run_file_does_not_hang(store):
     ws, writer = store
     fifo = record_dir(ws) / "runs/r_8k2m01.jsonl"
@@ -471,6 +474,7 @@ def test_fifo_planted_as_run_file_does_not_hang(store):
     assert not (record_dir(ws) / "runs/r_8k2m01.lock").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no os.fchmod to remove")
 def test_no_fchmod_still_writes(store, monkeypatch):
     ws, writer = store
     monkeypatch.delattr(record.os, "fchmod")
@@ -487,15 +491,15 @@ def test_finished_detail_is_write_once(store):
     hook = writer.append(event(id="w1", via="hook", outcome=done), detail={"input": "b", "output": "hook"})
     assert hook is None  # a hook line after the log's is dropped (the log wins) ...
     assert (
-        json.loads((record_dir(ws) / first["detail"]).read_text())["output"] == "collector"
+        json.loads((record_dir(ws) / first["detail"]).read_text(encoding="utf-8"))["output"] == "collector"
     )  # ... and so is its detail
     # the other order: the log line writes its own detail over the hook's
     writer.append(event(id="w3", via="hook", outcome=done), detail={"input": "b", "output": "hook"})
     log = writer.append(event(id="w3", via="log", outcome=done), detail={"input": "a", "output": "collector"})
-    assert json.loads((record_dir(ws) / log["detail"]).read_text())["output"] == "collector"
+    assert json.loads((record_dir(ws) / log["detail"]).read_text(encoding="utf-8"))["output"] == "collector"
     started = writer.append(event(id="w2"), detail={"input": "a", "output": "early"})
     writer.append(event(id="w2", outcome=done), detail={"input": "a", "output": "final"})
-    assert json.loads((record_dir(ws) / started["detail"]).read_text())["output"] == "final"
+    assert json.loads((record_dir(ws) / started["detail"]).read_text(encoding="utf-8"))["output"] == "final"
 
 
 def _foreign_owner(monkeypatch):
@@ -522,6 +526,8 @@ def _hardlink(path, tmp_path, name):
 
 @pytest.mark.parametrize("how", ["foreign", "hardlink"])
 def test_every_read_path_distrusts_foreign_and_hardlinked_files(store, tmp_path, monkeypatch, how):
+    if how == "foreign" and os.name == "nt":
+        pytest.skip("the owner of a file is checked by user id on POSIX; Windows uses ACLs (winacl)")
     ws, writer = store
     done = {"ok": True, "error": None, "ms": 1}
     stored = writer.append(event(id="p1", outcome=done), detail={"input": "i", "output": "o"})
@@ -553,6 +559,8 @@ def test_every_read_path_distrusts_foreign_and_hardlinked_files(store, tmp_path,
 
 @pytest.mark.parametrize("how", ["foreign", "hardlink"])
 def test_store_detail_with_untrusted_existing_target_is_lost(store, tmp_path, monkeypatch, how):
+    if how == "foreign" and os.name == "nt":
+        pytest.skip("the owner of a file is checked by user id on POSIX; Windows uses ACLs (winacl)")
     ws, writer = store
     from orch.collect_execjson import detail_name
 

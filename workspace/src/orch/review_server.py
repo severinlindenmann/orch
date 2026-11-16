@@ -397,6 +397,13 @@ def run_answer(root: Path, argv: list[str]) -> tuple[int, dict]:
 class _Server(ThreadingHTTPServer):
     request_queue_size = 128
     daemon_threads = True
+    # Windows: SO_REUSEADDR lets a second program bind a port that is in use; the port is taken exclusively
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def make_server(root: Path, port: int = 0) -> ThreadingHTTPServer:

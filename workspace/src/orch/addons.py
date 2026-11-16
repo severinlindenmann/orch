@@ -359,6 +359,8 @@ def _trace_fallback(real: Path, reason: str) -> None:
         )
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
         flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        if not hasattr(os, "O_NOFOLLOW") and os.path.islink(log):
+            return  # Windows has no O_NOFOLLOW: a symlinked trace file is refused up front
         fd = os.open(log, flags, 0o600)
         try:
             st = os.fstat(fd)

@@ -270,7 +270,11 @@ def person_state(rule) -> dict:
         return st
     closed = {"strict": True, "approval": True}
     home, file = str(rule["home"]), str(rule["file"])
-    if any(Path(x).is_absolute() or ".." in Path(x).parts or ":" in x or "\\" in x for x in (home, file)):
+    # "/etc" is not absolute on Windows (no drive) yet leaves the tool home: a rooted path is refused too
+    if any(
+        Path(x).is_absolute() or x[:1] == "/" or ".." in Path(x).parts or ":" in x or "\\" in x
+        for x in (home, file)
+    ):
         return closed
     base = Path(os.environ.get(rule.get("home_env") or "") or Path.home() / home)
     path = base / file

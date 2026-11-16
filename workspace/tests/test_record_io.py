@@ -26,11 +26,14 @@ from orch import hider, record
 ROOT = Path(__file__).resolve().parents[2]
 RUN = "r_8k2m01"
 DETAIL = {"input": "hello", "output": "world"}
+LINK = "reparse" if os.name == "nt" else "link"  # Windows sees a symlink as a reparse point first
 CORE = {
     "_io_setup",
     "_try_lock",
     "_release_lock",
     "_lock_check",
+    "_touch",
+    "_release_for_replace",
     "_io_error",
     "_io",
     "_parts",
@@ -59,7 +62,9 @@ CORE = {
 
 
 def event(**changes):
-    value = json.loads((ROOT / "contracts/examples/activity/valid-step-started.json").read_text())
+    value = json.loads(
+        (ROOT / "contracts/examples/activity/valid-step-started.json").read_text(encoding="utf-8")
+    )
     return dict(value, **{}) | changes
 
 
@@ -432,7 +437,7 @@ def scan_record_source(source):
 
 
 def test_01_io_core_is_the_only_fs_user():
-    scan_record_source(Path(record.__file__).read_text())
+    scan_record_source(Path(record.__file__).read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize(
@@ -566,13 +571,13 @@ def test_03_symlink_each_level(store, part):
     else:
         with pytest.raises(record.RecordTampered) as caught:
             writer.append(event(), detail=DETAIL)
-        assert caught.value.reason == "link"
+        assert caught.value.reason == LINK
         expected = "lock" if part.endswith(".lock") else "meta" if part.endswith("meta.json") else None
         if expected:
             assert caught.value.alert["target"] == expected
     assert [p.name for p in outside.iterdir()] == []
     if "runs" in part and not part.endswith(".lock") or part in (".orch", ".orch/record"):
-        assert record.read_run(ws, RUN).reason == "link"
+        assert record.read_run(ws, RUN).reason == LINK
 
 
 def test_04_hardlinks_and_alert(store):
@@ -582,9 +587,9 @@ def test_04_hardlinks_and_alert(store):
     assert read.status == "tampered" and read.reason == "hardlink" and read.alert
     with pytest.raises(record.RecordTampered):
         writer.append(event(), detail=DETAIL)
-    assert (ws / "outside").read_text() == "unchanged"
+    assert (ws / "outside").read_text(encoding="utf-8") == "unchanged"
     alerts = list((record.record_dir(ws) / "alerts").glob("*.jsonl"))
-    assert json.loads(alerts[0].read_text().splitlines()[0])["reason"] == "hardlink"
+    assert json.loads(alerts[0].read_text(encoding="utf-8").splitlines()[0])["reason"] == "hardlink"
     runfile(ws).unlink()
     stored = writer.append(event(), detail=DETAIL)
     target = record.record_dir(ws) / stored["detail"]
@@ -693,6 +698,8 @@ def test_07_windows_junction(store):
 def test_08_untrusted_run_precedes_every_write(store, monkeypatch, kind):
     ws, writer = store
     if kind == "foreign_owner":
+        if os.name == "nt":
+            pytest.skip("Windows has no numeric file owner (the record checks owners on POSIX only)")
         path = runfile(ws)
         path.parent.mkdir(parents=True)
         path.write_text("unchanged")
@@ -707,7 +714,7 @@ def test_08_untrusted_run_precedes_every_write(store, monkeypatch, kind):
 
 
 def test_09_no_broad_catches(store, monkeypatch):
-    scan_record_source(Path(record.__file__).read_text())
+    scan_record_source(Path(record.__file__).read_text(encoding="utf-8"))
     ws, writer = store
 
     def invalid(*args):
@@ -757,6 +764,15 @@ def test_12_public_read_statuses(store, monkeypatch, mode):
             return real(path, *args, **kwargs)
 
         monkeypatch.setattr(os, "open", denied)
+        if os.name == "nt":  # no folder fds on Windows: the walk lstat()s each folder by its path
+            real_lstat = os.lstat
+
+            def denied_lstat(path, *args, **kwargs):
+                if Path(path).name == ".orch":
+                    raise PermissionError(errno.EACCES, "private")
+                return real_lstat(path, *args, **kwargs)
+
+            monkeypatch.setattr(os, "lstat", denied_lstat)
     elif mode == "tampered":
         (ws / ".orch").rename(ws / "parked")
         (ws / ".orch").symlink_to(ws / "parked", target_is_directory=True)
@@ -831,13 +847,13 @@ def test_retention_is_not_vetoed_by_a_planted_detail_file(store, how):
     assert folds == [RUN] and result["delete_detail"] == [RUN] and result["delete_run"] == [RUN]
     assert not (record.record_dir(ws) / line["detail"]).exists() and not runfile(ws).exists()
     assert planted.is_symlink() or planted.exists()
-    assert (ws / "outside").read_text() == "unchanged"
+    assert (ws / "outside").read_text(encoding="utf-8") == "unchanged"
     alerts = [
         json.loads(x)
         for day in (record.record_dir(ws) / "alerts").glob("*.jsonl")
-        for x in day.read_text().splitlines()
+        for x in day.read_text(encoding="utf-8").splitlines()
     ]
-    reason = {"fifo": "not_regular", "link": "link", "hardlink": "hardlink"}[how]
+    reason = {"fifo": "not_regular", "link": LINK, "hardlink": "hardlink"}[how]
     assert (reason, RUN, "retention") in {(x.get("reason"), x.get("run"), x.get("seen_by")) for x in alerts}
 
 
@@ -849,7 +865,7 @@ def test_15_listing_keeps_symlinks(store):
 
 
 def test_16_cli_marker_contract():
-    schema = json.loads((ROOT / "contracts/cli-answer.schema.json").read_text())
+    schema = json.loads((ROOT / "contracts/cli-answer.schema.json").read_text(encoding="utf-8"))
     validator = Draft202012Validator({"$ref": "#/$defs/stream_line", "$defs": schema["$defs"]})
     validator.validate(
         dict(
@@ -915,7 +931,7 @@ def test_19b_detail_name_binds_the_ticket(store):
     other = record.read_detail(ws, RUN, name, line_id="t1", ticket="t_other9")
     assert (other.status, other.reason) == ("tampered", "swapped")
     target = record.record_dir(ws) / stored["detail"]
-    target.write_text(json.dumps(dict(json.loads(target.read_text()), ticket="t_other9")))
+    target.write_text(json.dumps(dict(json.loads(target.read_text(encoding="utf-8")), ticket="t_other9")))
     changed = record.read_detail(ws, RUN, name, line_id="t1")
     assert (changed.status, changed.reason) == ("tampered", "swapped")
 
@@ -952,7 +968,7 @@ def test_planted_detail_file_at_the_name_is_replaced_and_hashed(store):
     target.write_text(json.dumps(dict(run=RUN, kind="usage", id="other", ticket=event()["ticket"])))
     kept = writer.append(event(), detail=DETAIL)
     assert kept["detail"] and kept["detail_hash"] == record.detail_hash(target.read_bytes())
-    assert json.loads(target.read_text())["input"] == "hello"
+    assert json.loads(target.read_text(encoding="utf-8"))["input"] == "hello"
 
 
 def test_21_hider_failure_leaves_nothing(store, monkeypatch):
@@ -964,11 +980,13 @@ def test_21_hider_failure_leaves_nothing(store, monkeypatch):
 
 
 def test_22_alert_contract():
-    schema = json.loads((ROOT / "contracts/activity.schema.json").read_text())
+    schema = json.loads((ROOT / "contracts/activity.schema.json").read_text(encoding="utf-8"))
     validator = Draft202012Validator({"$ref": "#/$defs/record_alert", "$defs": schema["$defs"]})
     for path in (ROOT / "contracts/examples/activity-alert").glob("*.json"):
-        assert validator.is_valid(json.loads(path.read_text())) == path.name.startswith("valid-")
-    vectors = json.loads((ROOT / "contracts/vectors/activity-v1.json").read_text())
+        assert validator.is_valid(json.loads(path.read_text(encoding="utf-8"))) == path.name.startswith(
+            "valid-"
+        )
+    vectors = json.loads((ROOT / "contracts/vectors/activity-v1.json").read_text(encoding="utf-8"))
     for case in vectors["integrity"]:
         reason = case["reason"]
         if reason in record.TAMPER_REASONS:
@@ -1024,7 +1042,7 @@ def test_25_fast_strict_read_and_spool(store, monkeypatch):
     lock.unlink()
     assert writer.append(event(id="drain"))["seq"] == 3003
     assert not list(pending.iterdir())
-    lines = [json.loads(line) for line in runfile(ws).read_text().splitlines()]
+    lines = [json.loads(line) for line in runfile(ws).read_text(encoding="utf-8").splitlines()]
     assert [e["id"] for e in lines[-2:]] == ["spooled", "drain"]
 
 
@@ -1108,14 +1126,15 @@ def test_28_empty_hider_stale_identity_and_torn_line(store):
     writer.append(event())
     lock = record.record_dir(ws) / "runs" / (RUN + ".lock")
     lock.touch()
-    fd = record._open(ws, ("runs", RUN + ".lock"), "read")
-    try:
-        lock.unlink()
-        lock.write_text("replacement")
-        assert record._unlink(ws, ("runs", RUN + ".lock"), expected=fd) is False
-        assert lock.read_text() == "replacement"
-    finally:
-        record._close(fd)
+    if os.name != "nt":  # Windows can not remove a file that is open, so the name can not be swapped
+        fd = record._open(ws, ("runs", RUN + ".lock"), "read")
+        try:
+            lock.unlink()
+            lock.write_text("replacement")
+            assert record._unlink(ws, ("runs", RUN + ".lock"), expected=fd) is False
+            assert lock.read_text(encoding="utf-8") == "replacement"
+        finally:
+            record._close(fd)
     os.utime(lock, (1, 1))
     with runfile(ws).open("ab") as stream:
         stream.write(b"torn")
@@ -1124,7 +1143,7 @@ def test_28_empty_hider_stale_identity_and_torn_line(store):
 
 
 def test_29_bundled_schema_exact():
-    schema = json.loads((ROOT / "contracts/activity.schema.json").read_text())
+    schema = json.loads((ROOT / "contracts/activity.schema.json").read_text(encoding="utf-8"))
     assert json.dumps(record._SCHEMA, sort_keys=True) == json.dumps(schema, sort_keys=True)
 
 
@@ -1144,9 +1163,9 @@ def test_pending_tampering_is_alerted_and_skipped(store, monkeypatch):
     alerts = [
         json.loads(line)
         for p in (record.record_dir(ws) / "alerts").glob("*")
-        for line in p.read_text().splitlines()
+        for line in p.read_text(encoding="utf-8").splitlines()
     ]
-    assert {a["reason"] for a in alerts} == {"content", "link"}  # a bad entry is refused, a link is reported
+    assert {a["reason"] for a in alerts} == {"content", LINK}  # a bad entry is refused, a link is reported
 
 
 def test_actual_unreadable_directory(store):
@@ -1208,9 +1227,9 @@ def test_detail_delete_skips_only_the_unsafe_file(store, how):
     alerts = [
         json.loads(line)
         for day in (record.record_dir(ws) / "alerts").glob("*.jsonl")
-        for line in day.read_text().splitlines()
+        for line in day.read_text(encoding="utf-8").splitlines()
     ]
-    reason = {"hardlink": "hardlink", "link": "link", "fifo": "not_regular"}[how]
+    reason = {"hardlink": "hardlink", "link": LINK, "fifo": "not_regular"}[how]
     assert {(x["reason"], x["run"], x["seen_by"]) for x in alerts} == {(reason, RUN, "retention")}
 
 
@@ -1233,7 +1252,7 @@ def test_live_aged_lock_never_allows_second_writer(store, monkeypatch):
         monkeypatch.setattr(record, "_LOCK_WAIT", 0.02)
         result = writer.append(event(id="waiting"))
         assert result["pending"] is True and result["seq"] is None
-        assert len(runfile(ws).read_text().splitlines()) == 1
+        assert len(runfile(ws).read_text(encoding="utf-8").splitlines()) == 1
     finally:
         release.set()
         thread.join(5)
@@ -1326,7 +1345,7 @@ def test_tampered_pending_alert_targets_folder(store):
     alerts = [
         json.loads(line)
         for path in (record.record_dir(ws) / "alerts").iterdir()
-        for line in path.read_text().splitlines()
+        for line in path.read_text(encoding="utf-8").splitlines()
     ]
     assert alerts and all(alert["target"] == "folder" for alert in alerts)
 
@@ -1349,6 +1368,7 @@ def test_fallback_lock_refreshes_mtime(store, monkeypatch):
         assert time.time() - lock.stat().st_mtime < 2
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows can not rename a lock file that is open")
 def test_retention_rechecks_lock_identity_after_fold(store, monkeypatch):
     ws, writer = store
     writer.append(event(), detail=DETAIL)
@@ -1419,6 +1439,7 @@ def test_failure_after_lock_creation_removes_lock(store, monkeypatch, step):
     assert not runfile(ws).with_suffix(".lock").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows can not rename a lock file that is open")
 def test_first_lock_check_retries_swapped_name(store, monkeypatch):
     ws, _ = store
     original = record._lock_check
@@ -1469,7 +1490,7 @@ def test_retention_post_fold_pending_skips_all_deletion_and_fold_is_idempotent(s
     result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, fold)
     assert (result["status"], result["reason"]) == ("unavailable", "pending")
     assert result["delete_run"] == result["delete_detail"] == []
-    assert runfile(ws).exists() and detail.exists() and (jobs / "job").read_text() == "keep"
+    assert runfile(ws).exists() and detail.exists() and (jobs / "job").read_text(encoding="utf-8") == "keep"
     for path in (record.record_dir(ws) / "pending" / RUN).iterdir():
         path.unlink()
     first_count = sum(sink.values())
@@ -1559,7 +1580,7 @@ def test_a_planted_line_with_another_id_cannot_decide_about_a_detail_file(store)
         detail={"input": "new-input", "output": "new-output"},
     )
     assert finished["detail"] == started["detail"]
-    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()
+    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text(encoding="utf-8")
 
 
 def test_a_planted_line_of_another_ticket_cannot_decide_about_a_detail_file(store):
@@ -1572,4 +1593,4 @@ def test_a_planted_line_of_another_ticket_cannot_decide_about_a_detail_file(stor
         event(id="toolu_d", outcome=dict(ok=True, error=None, ms=2)),
         detail={"input": "new-input", "output": "new-output"},
     )
-    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()
+    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text(encoding="utf-8")

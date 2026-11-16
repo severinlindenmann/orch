@@ -532,6 +532,8 @@ def _raw_bytes(
     except subprocess.TimeoutExpired:
         return 124, b"", f"git {argv[-1] if argv else ''} took longer than {int(timeout)} s"
     except OSError as e:  # the program exists but could not be started: not "git is not installed"
+        if not os.path.isdir(cwd):  # no such folder (Windows: "invalid directory name", not ENOENT)
+            return 127, b"", "git is not installed"  # as on POSIX
         return CANNOT_START, b"", str(e)
     return p.returncode, p.stdout, p.stderr.decode("utf-8", "replace").strip()
 

@@ -63,7 +63,13 @@ def test_orch_still_running_changes_nothing(tmp_path):
     job = _job(tmp_path)
     job["wait"] = 1
     job["test_held"] = job["free"]
-    assert _run_finisher(tmp_path, job).returncode == 1
+    if sys.platform != "win32":
+        assert _run_finisher(tmp_path, job).returncode == 1
+    else:  # Windows: really hold a file open (no sharing allowed), as a running orch does
+        held = tmp_path / "tool-env" / "held.exe"
+        job["free"] = [str(held)]
+        with open(held, "w"):
+            assert _run_finisher(tmp_path, job).returncode == 1
     assert "still in use after 1s" in (tmp_path / "finish.log").read_text()
     assert not (tmp_path / "addons.json").exists()
     assert (tmp_path / "tool-env").is_dir()  # nothing was renamed

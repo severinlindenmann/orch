@@ -197,7 +197,8 @@ def test_the_hook_catches_every_kind_of_write(fsguard):
     for go in attempts:
         with pytest.raises(AccountHomeWritten):
             go()
-    dfd = real_os_open(home, os.O_RDONLY) if home.exists() else None
+    # no folder fds on Windows (os.open of a folder is refused, dir_fd is not supported)
+    dfd = real_os_open(home, os.O_RDONLY) if home.exists() and os.open in os.supports_dir_fd else None
     if dfd is not None:  # a write relative to a folder fd is seen too (resolved to the folder's path)
         try:
             with pytest.raises(AccountHomeWritten):

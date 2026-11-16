@@ -270,8 +270,9 @@ def test_record_refusals(proj, run, tid, tmp_path):
     (proj / "ok.txt").write_text("fine", encoding="utf-8")
     (proj / "hard.txt").hardlink_to(proj / "ok.txt")
     assert refused("--output", "hard.txt")  # two names: refused
-    os.mkfifo(proj / "pipe.txt")
-    assert refused("--output", "pipe.txt")  # a FIFO never blocks us
+    if hasattr(os, "mkfifo"):  # no FIFOs on Windows
+        os.mkfifo(proj / "pipe.txt")
+        assert refused("--output", "pipe.txt")  # a FIFO never blocks us
     (proj / "dir.txt").mkdir()
     assert refused("--output", "dir.txt")
     assert read(proj, tid)["checklist"][0]["evidence"] == []

@@ -44,7 +44,7 @@ def test_report_layout_modes_and_summary_size(proj, hid):
         and made["ref"].endswith(f"-{tid}")
         and f.parent == proj / ".orch/diag/reports"
     )
-    got = files(f)
+    got = [g.replace("\\", "/") for g in files(f)]
     for must in (
         "SUMMARY.md",
         "manifest.json",
@@ -61,7 +61,10 @@ def test_report_layout_modes_and_summary_size(proj, hid):
     assert len(summary.encode()) < 20 * 1024
     assert "run_gone_ticket_working" in summary and "stuck since 10:00" in summary and "PROBLEM" in summary
     assert summary.index("## Checks") < summary.index("## Top errors") < summary.index("## Last")
-    assert (f.stat().st_mode & 0o777) == 0o700 and all(((f / g).stat().st_mode & 0o777) == 0o600 for g in got)
+    if os.name == "posix":  # Windows has no file modes: its rights are ACLs
+        assert (f.stat().st_mode & 0o777) == 0o700 and all(
+            ((f / g).stat().st_mode & 0o777) == 0o600 for g in got
+        )
     man = json.loads((f / "manifest.json").read_text())
     assert (
         man["schema"] == "orch.diag-report/1"

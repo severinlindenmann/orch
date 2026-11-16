@@ -440,7 +440,7 @@ def _unlink(ws, rel, *, expected=None):
             kw = {"dir_fd": directory.fd} if _FD else {}
             if expected is not None:
                 current = os.stat(name, follow_symlinks=False, **kw)
-                before = os.fstat(expected)
+                before = expected if isinstance(expected, os.stat_result) else os.fstat(expected)
                 if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
                     return False
             os.unlink(name, **kw)
@@ -465,6 +465,9 @@ def _write_new(ws, rel, payload, *, expected=None):
             _write(fd, payload)
             with _io():
                 os.fsync(fd)
+            if not _FD:  # Windows cannot rename a file that is still open
+                done, fd = fd, None
+                os.close(done)
             _verify_walk(directory)
             if expected is not None:
                 # the file we read through `expected` must still be the one at this name (no swap in between)
@@ -472,7 +475,7 @@ def _write_new(ws, rel, payload, *, expected=None):
                     current = os.stat(
                         rel[-1] if _FD else directory.path / rel[-1], follow_symlinks=False, **kw
                     )
-                    before = os.fstat(expected)
+                    before = expected if isinstance(expected, os.stat_result) else os.fstat(expected)
                 if (current.st_dev, current.st_ino, current.st_nlink) != (
                     before.st_dev,
                     before.st_ino,
@@ -498,7 +501,8 @@ def _write_new(ws, rel, payload, *, expected=None):
                 with _io():
                     os.fsync(directory.fd)
         finally:
-            os.close(fd)
+            if fd is not None:
+                os.close(fd)
             try:
                 os.unlink(name, **kw)
             except FileNotFoundError:
@@ -672,7 +676,26 @@ def _lock_check(ws, rel, fd, *, fallback=False):
         if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
             raise RecordTampered("swapped")
         if fallback or (_FCNTL is None and _MSVCRT is None):
-            os.utime(fd)
+            _touch(fd)
+
+
+def _touch(fd):
+    """Set the open file's mtime to now (the fallback lock's sign of life). Windows has no utime on an fd: the
+    time is set through the same handle (SetFileTime), never by the path, which could name another file."""
+    if os.utime in os.supports_fd:
+        os.utime(fd)
+        return
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    now = int(time.time() * 10_000_000) + 116_444_736_000_000_000  # 100 ns steps since 1601
+    stamp = wintypes.FILETIME(now & 0xFFFFFFFF, now >> 32)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.SetFileTime.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    k32.SetFileTime.restype = wintypes.BOOL
+    if not k32.SetFileTime(msvcrt.get_osfhandle(fd), None, None, ctypes.byref(stamp)):
+        raise ctypes.WinError(ctypes.get_last_error())
 
 
 def _release_lock(ws, rel, fd, *, _directory=None):
@@ -686,12 +709,20 @@ def _release_lock(ws, rel, fd, *, _directory=None):
         with _io("lock"), walk as directory:
             name = rel[-1] if _FD else directory.path / rel[-1]
             kw = {"dir_fd": directory.fd} if _FD else {}
-            try:
-                current = os.stat(name, follow_symlinks=False, **kw)
-                if (current.st_dev, current.st_ino) == (before.st_dev, before.st_ino):
-                    os.unlink(name, **kw)
-            except FileNotFoundError:
-                pass
+            # Windows: a waiting writer that has the lock file open for a moment blocks the delete; try again
+            for attempt in range(200 if os.name == "nt" else 1):
+                try:
+                    current = os.stat(name, follow_symlinks=False, **kw)
+                    if (current.st_dev, current.st_ino) == (before.st_dev, before.st_ino):
+                        os.unlink(name, **kw)
+                except FileNotFoundError:
+                    pass
+                except PermissionError:
+                    if attempt == 199 or os.name != "nt":
+                        raise
+                    time.sleep(0.01)
+                    continue
+                break
     finally:
         if fd is not None:
             _close(fd)
@@ -1139,6 +1170,17 @@ def list_jobs(workspace, run=None, *, seen_by="reader") -> ReadResult[list[tuple
         return _report(workspace, error, "folder", run, seen_by)
 
 
+def _release_for_replace(fd):
+    """(fd to keep, what _write_new compares the file at the name with). Windows cannot replace a file that is
+    still open here: its identity is read once (same check) and the fd is closed, so the caller holds none."""
+    if _FD:
+        return fd, fd
+    with _io():
+        info = os.fstat(fd)
+    _close(fd)
+    return None, info
+
+
 def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
     """Append one line to a job stream under the run's lock (one writer per job). `decide(events, size)` runs
     inside the lock on the strictly read stream and returns (line_dict | None, replace_last, result); the line
@@ -1164,9 +1206,11 @@ def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
                 raw = _read_bytes(fd)
                 if raw and not raw.endswith(b"\n"):
                     raw = raw[: raw.rfind(b"\n") + 1]
-                    _write_new(workspace, rel, raw, expected=fd)
+                    fd, expected = _release_for_replace(fd)
+                    _write_new(workspace, rel, raw, expected=expected)
                     old, fd = fd, _open(workspace, rel, "read_append")
-                    _close(old)
+                    if old is not None:
+                        _close(old)
                     if _read_bytes(fd) != raw:  # the repaired file must be exactly what we wrote
                         raise RecordTampered("swapped")
                 events = _job_events(raw, run, job, valid)
@@ -1196,15 +1240,19 @@ def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
                 check_lock()
                 if replace_last and len(raw) <= JOB_REPLACE_BYTES:
                     rows = raw.splitlines(keepends=True)[:-1]
-                    _write_new(workspace, rel, b"".join(rows) + data, expected=fd)
+                    fd, expected = _release_for_replace(fd)
+                    _write_new(workspace, rel, b"".join(rows) + data, expected=expected)
                 else:
                     _write(fd, data)
                 stored = True
                 return result
             finally:
-                if not stored and raw == b"":  # a refused first line leaves no empty file behind
-                    _unlink(workspace, rel, expected=fd)
-                _close(fd)
+                # a refused first line leaves no empty file behind (Windows cannot delete an open file)
+                if not stored and raw == b"" and fd is not None:
+                    fd, expected = _release_for_replace(fd)
+                    _unlink(workspace, rel, expected=expected)
+                if fd is not None:
+                    _close(fd)
     except RecordBusy:
         raise
     except (RecordTampered, RecordUnavailable) as error:

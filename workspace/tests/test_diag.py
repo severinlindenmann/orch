@@ -66,9 +66,11 @@ def test_vectors_event_names(case):
 def test_folder_and_file_modes(proj):
     diag.log("test.mode", root=proj)
     d = proj / ".orch" / "diag"
-    assert d.is_dir() and (d.stat().st_mode & 0o777) == 0o700
+    assert d.is_dir()
     (f,) = list(d.iterdir())
-    assert (f.stat().st_mode & 0o777) == 0o600 and re.fullmatch(r"\d{4}-\d{2}-\d{2}\.cli\.1\.jsonl", f.name)
+    if os.name == "posix":  # Windows has no file modes: its rights are ACLs
+        assert (d.stat().st_mode & 0o777) == 0o700 and (f.stat().st_mode & 0o777) == 0o600
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}\.cli\.1\.jsonl", f.name)
 
 
 def test_hider_is_applied(proj, monkeypatch):

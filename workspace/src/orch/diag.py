@@ -25,7 +25,8 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import __version__
+from orch import __version__, winacl
+from orch.errors import Refused
 
 SCHEMA = "orch.diag/1"
 KEEP_DAYS = 7
@@ -268,6 +269,17 @@ def _folder(root: Path) -> Path | None:
     return d if d.is_dir() and not d.is_symlink() else None
 
 
+def _is_link(path: Path) -> bool:
+    """Windows has no O_NOFOLLOW: a symlink or junction at the file's name (or above it) counts as a link."""
+    if os.name != "nt":
+        return False
+    try:
+        winacl.no_reparse(path)
+    except Refused:
+        return True
+    return False
+
+
 def _append(d: Path, src: str, day: str, data: bytes) -> bool:
     """Append one line to the newest part of today's file of `src` (a full part starts the next)."""
     part = 1
@@ -281,8 +293,12 @@ def _append(d: Path, src: str, day: str, data: bytes) -> bool:
         flags = (
             os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
         )
+        if _is_link(path):
+            return False
         fd = os.open(path, flags, 0o600)
         try:
+            if _is_link(path):  # swapped for a link between the check and the open: write nothing
+                return False
             size = os.fstat(fd).st_size
             if size + len(data) > FILE_MAX and size > 0:
                 part += 1

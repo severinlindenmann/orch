@@ -462,6 +462,7 @@ def test_query_lists_unavailable_and_run_filter_errors(ws, capsys):
     check(validator("cli-answer", "error"), err, "error")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a file mode can not make a file unreadable on Windows")
 def test_query_run_io_error_is_not_available(ws, capsys):
     path = run_file(ws)
     path.chmod(0)

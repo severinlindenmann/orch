@@ -16,9 +16,17 @@ import pytest
 from orch import hider, record, record_hook, runs, tickets
 
 ROOT = Path(__file__).resolve().parents[2]
-VECTORS = json.loads((ROOT / "contracts/vectors/activity-v1.json").read_text())
+VECTORS = json.loads((ROOT / "contracts/vectors/activity-v1.json").read_text(encoding="utf-8"))
 USED = {"kind": "tool", "name": "Read", "action": None, "source": "builtin", "version": None}
 SECRET = "KEYVALUE-abc123XYZ-secret"
+
+
+@pytest.fixture(autouse=True)
+def _windows_process_table(monkeypatch):
+    """Windows has no process-tree proof yet (contracts/activity.md: the hook records nothing there), so the
+    ancestors are only this process. The claims here use this process's pid."""
+    if os.name == "nt":
+        monkeypatch.setattr(record_hook, "_parents", lambda: {})
 
 
 @pytest.fixture
@@ -39,7 +47,7 @@ def line(**kw):
 
 def lost_notes(root, unattributed=False):
     pattern = "hook-lost-unattributed-*.jsonl" if unattributed else "hook-lost-2*.jsonl"
-    return "".join(p.read_text() for p in (root / ".orch/record/alerts").glob(pattern))
+    return "".join(p.read_text(encoding="utf-8") for p in (root / ".orch/record/alerts").glob(pattern))
 
 
 def lost_lines(root):
@@ -361,7 +369,7 @@ def test_too_large_entry_still_leaves_an_audit_line(live, capsys):
     record_hook.cli(root, big)
     got = events(root, run)
     assert len(got) == 1 and got[0]["kind"] == "step" and got[0]["detail"] is None
-    raw = (root / f".orch/record/runs/{run}.jsonl").read_text()
+    raw = (root / f".orch/record/runs/{run}.jsonl").read_text(encoding="utf-8")
     assert '"detail_lost":true' in raw.replace(" ", "")
     assert capsys.readouterr().err == ""
     # a big but readable line (4 MB payload) is also written, detail lost
@@ -490,7 +498,7 @@ def test_pid_must_match_the_recorded_start_time(live, monkeypatch):
     root, run, tid = live
     assert record_hook.hook(root, line(id="toolu_ok")) is not None  # stored and current start times match
     path = _claim_file(root)
-    claim = json.loads(path.read_text())
+    claim = json.loads(path.read_text(encoding="utf-8"))
     assert claim.get("pid_started")
     real_started = procs.pid_started
     monkeypatch.setattr(procs, "pid_started", lambda pid: None)  # current start time unreadable
@@ -696,6 +704,10 @@ def test_helper_env_with_the_parent_claim_among_ancestors_writes_only_its_own_ru
     assert record.read_run(proj, parent["run"]).status == "unavailable"  # the parent's log is untouched
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="workspace file names come from /-style absolute paths only, not Windows paths yet",
+)
 def test_files_from_the_caller_are_normalised_and_kept(live):
     root, run, _ = live
     files = [
@@ -735,6 +747,10 @@ def test_files_filter_keeps_them_and_refused_kinds_stay_refused():
         record.hook_entry_filter({"kind": "run.state", "files": ["a.py"]})
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="workspace file names come from /-style absolute paths only, not Windows paths yet",
+)
 def test_a_file_path_that_changes_under_the_hider_is_dropped(live):
     root, run, _ = live
     got = record_hook.hook(root, line(files=[f"{root}/src/app.py", f"{root}/{SECRET}.txt"]))
@@ -777,7 +793,10 @@ def result_line(tid=TOOL_ID, content="hello", uuid="u-2"):
 
 def run_lines(root, run):
     """The run file as written (not the reader's dedupe view)."""
-    return [json.loads(x) for x in (root / f".orch/record/runs/{run}.jsonl").read_text().splitlines()]
+    return [
+        json.loads(x)
+        for x in (root / f".orch/record/runs/{run}.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
 
 
 @pytest.fixture
@@ -806,7 +825,9 @@ def test_pre_and_post_tool_use_of_one_call_make_one_step_with_its_detail(tool_ru
     assert record_hook.hook(root, tool_hook("PostToolUse")) is None  # delivered twice: one line
     model = cli_record.run_model(run, events(root, run))
     assert [(u["name"], u["result"]) for u in model["uses"]] == [("Read", "unknown")]  # one call, one use
-    assert "/elsewhere" not in (root / f".orch/record/runs/{run}.jsonl").read_text()  # nothing else is kept
+    assert "/elsewhere" not in (root / f".orch/record/runs/{run}.jsonl").read_text(
+        encoding="utf-8"
+    )  # nothing else is kept
 
 
 FAILED_TEXT = f"Exit code 1\nrm: build: Permission denied {SECRET}"
@@ -832,9 +853,11 @@ def test_a_failed_tool_call_in_a_live_run_is_recorded_as_failed(tool_run, interr
     detail = record.read_detail(root, run, end["detail"].rsplit("/", 1)[1][:-5], line_id=end["id"]).unwrap()
     assert detail["input"] == {"file_path": "notes.txt"}
     assert detail["output"] == "Exit code 1\nrm: build: Permission denied [hidden: deploy-key]"
-    stored = (root / f".orch/record/runs/{run}.jsonl").read_text()
+    stored = (root / f".orch/record/runs/{run}.jsonl").read_text(encoding="utf-8")
     assert "Permission denied" not in stored and "Exit code" not in stored  # the text is never in the line
-    assert SECRET not in "".join(p.read_text() for p in (root / ".orch/record").rglob("*") if p.is_file())
+    assert SECRET not in "".join(
+        p.read_text(encoding="utf-8") for p in (root / ".orch/record").rglob("*") if p.is_file()
+    )
     assert record_hook.hook(root, failure_hook(interrupt=interrupt)) is None  # delivered twice: one line
     model = cli_record.run_model(run, events(root, run))
     assert [(u["name"], u["result"]) for u in model["uses"]] == [("Read", "failed")]
@@ -1076,6 +1099,10 @@ def _fake_agent(tmp_path, root):
     return [sys.executable, str(script)], seen
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="workspace file names come from /-style absolute paths only, not Windows paths yet",
+)
 def test_the_wrapper_records_the_agents_stream_its_lines_replace_the_hooks(tool_run, tmp_path, monkeypatch):
     root, run, tid = tool_run
     monkeypatch.setattr(runs, "_on_term", lambda *a: None)  # no SIGTERM handler left in the test process
@@ -1100,7 +1127,7 @@ def test_the_wrapper_records_the_agents_stream_its_lines_replace_the_hooks(tool_
     assert [(e["via"], e["outcome"] and e["outcome"]["ok"]) for e in shown] == [("log", None), ("log", True)]
     assert not any("conflict" in e for e in shown)
     assert "hooks_missing" not in lost_notes(root) and "hooks_off" not in lost_notes(root)
-    env = json.loads(seen.read_text())
+    env = json.loads(seen.read_text(encoding="utf-8"))
     assert (env["ORCH_RUN"], env["ORCH_TICKET"], env["ORCH_AGENT"]) == (run, tid, "claude")
     assert set(env) == before | {"ORCH_RUN", "ORCH_TICKET", "ORCH_AGENT", "ORCH_ROOT"}  # nothing new to forge
 
@@ -1374,7 +1401,7 @@ def test_one_bad_spooled_entry_never_stops_the_runs_record(tool_run, monkeypatch
         run_record.collect_turn(root, run, tid, "claude", root, [use_line(), result_line()])
     ids = [e["id"] for e in run_lines(root, run)]
     assert ids[:2] == ["toolu_first", "toolu_b"] and "toolu_a" not in ids and ids.count(TOOL_ID) == 2
-    alerts = "".join(p.read_text() for p in (root / ".orch/record/alerts").glob("2*.jsonl"))
+    alerts = "".join(p.read_text(encoding="utf-8") for p in (root / ".orch/record/alerts").glob("2*.jsonl"))
     assert '"target":"folder"' in alerts and '"reason":"swapped"' in alerts
 
 
@@ -1511,7 +1538,7 @@ def test_a_live_run_gives_its_agent_the_tool_name_the_hook_needs(tool_run, tmp_p
     seen = tmp_path / "env.json"
     code = f"import json, os; open({str(seen)!r}, 'w').write(json.dumps(dict(os.environ)))"
     runs.wrap_live(root, run, tid, "claude", [sys.executable, "-c", code], None)
-    env = json.loads(seen.read_text())
+    env = json.loads(seen.read_text(encoding="utf-8"))
     assert (env["ORCH_AGENT"], env["ORCH_RUN"], env["ORCH_TICKET"]) == ("claude", run, tid)
 
 
@@ -1842,7 +1869,9 @@ def test_the_installed_orch_script_records_a_tool_call(proj, subprocess_home, tm
             root, rec["run"], seen[1]["detail"].rsplit("/", 1)[1][:-5], line_id=seen[1]["id"]
         ).unwrap()
         assert detail["input"] == {"file_path": "notes.txt", "note": "[hidden: deploy-key]"}  # store's hider
-        kept = "".join(p.read_text() for p in (root / ".orch/record").rglob("*") if p.is_file())
+        kept = "".join(
+            p.read_text(encoding="utf-8") for p in (root / ".orch/record").rglob("*") if p.is_file()
+        )
         assert SECRET not in kept and not lost_text(root)  # nothing raw, nothing set aside
     finally:
         if root.name.startswith("pytest-hook-") and root.parent == base:  # only our own temp folder
@@ -1851,7 +1880,7 @@ def test_the_installed_orch_script_records_a_tool_call(proj, subprocess_home, tm
 
 def test_every_lost_reason_is_named_in_the_contract():
     """N6: no strict validator of orch.record-lost/1 exists; the contract names every reason written."""
-    text = (ROOT / "contracts/activity.md").read_text()
+    text = (ROOT / "contracts/activity.md").read_text(encoding="utf-8")
     for reason in (*record.LOST_REASONS, *record.UNPROVEN_REASONS, "trimmed"):
         assert reason in text, reason
 
@@ -1909,7 +1938,7 @@ def _record_strings(root):
 
     for p in (root / ".orch/record").rglob("*"):
         if p.is_file():
-            content = p.read_text()
+            content = p.read_text(encoding="utf-8")
             for text in content.splitlines() or [content]:
                 try:
                     walk(json.loads(text))

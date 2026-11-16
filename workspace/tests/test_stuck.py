@@ -3,6 +3,7 @@ checks with no helper on it, and a helper idle at its prompt. GitHub is asked on
 
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -32,7 +33,7 @@ def no_real_look(monkeypatch):
 @pytest.fixture
 def child():
     """A throwaway process standing for a run's wrapper (never the test process itself)."""
-    p = subprocess.Popen(["sleep", "120"])
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
     yield p.pid
     p.kill()
     p.wait()

@@ -448,6 +448,7 @@ def test_lock_times_out_with_a_clear_message(proj):
         th.join()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no SIGHUP")
 def test_restart_retries_once_and_restores_sighup(proj, tmp_path, monkeypatch):  # noqa: F811
     import signal
 
@@ -474,6 +475,7 @@ def test_restart_retries_once_and_restores_sighup(proj, tmp_path, monkeypatch): 
     assert lines == ["Restarted: dashboard (Pilatus)"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no SIGHUP")
 def test_spawned_services_do_not_inherit_ignored_sighup():
     import signal
     import subprocess
@@ -534,6 +536,9 @@ def test_one_unverified_service_is_skipped_but_the_verified_sibling_restarts(pro
     assert any("focus (Pilatus) not restarted (can't verify)" in x for x in lines)
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="the same-user check uses ps and os.getuid; Windows keeps the add-on's own checks"
+)
 def test_other_users_process_is_not_verified(monkeypatch):
     monkeypatch.setattr(addons.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "0\n"})())
     assert addons._same_user(1234) is False
@@ -587,6 +592,10 @@ def _with_env(f, rec):
     services.running = f.running
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_update_with_a_test_home_starts_services_with_the_system_home(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
     _with_env(f, {"HOME": _real_home(), "PATH": "/usr/bin:/bin"})
@@ -600,6 +609,10 @@ def test_update_with_a_test_home_starts_services_with_the_system_home(proj, tmp_
     assert "Restarted: dashboard (Pilatus), focus (Pilatus), dashboard (Rigi), focus (Rigi)" in lines
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_a_recorded_path_or_login_folder_is_never_used(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
     evil = tmp_path / "evil"
@@ -628,6 +641,10 @@ def launchenv_apply(over):
     return launchenv.apply(dict(os.environ), over)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_a_different_recorded_home_or_path_is_reported_once(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
     _with_env(f, {"HOME": "/some/other/home", "PATH": "/old/path"})
@@ -638,6 +655,10 @@ def test_a_different_recorded_home_or_path_is_reported_once(proj, tmp_path, monk
     assert "different" not in "\n".join(addons._restart_updated())  # same HOME and PATH: no line
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_without_a_system_home_the_callers_home_is_kept_and_said(proj, tmp_path, monkeypatch):  # noqa: F811
     from orch import launchenv
 
@@ -695,6 +716,10 @@ def test_start_records_home_and_path_for_information_only(proj, monkeypatch):
     assert services.running()[0]["env"]["HOME"] == "/first/home"
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the system home comes from the POSIX password database; Windows keeps the caller's HOME",
+)
 def test_pwd_failure_note_is_said_once_per_workspace(proj, tmp_path, monkeypatch):  # noqa: F811
     from orch import launchenv
 

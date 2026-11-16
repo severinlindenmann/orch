@@ -20,7 +20,7 @@ def test_every_kit_file_a_page_links_exists_in_the_master():
         "factory": (ADDONS / "factory/src/orch_factory/web/index.html", "__P__/kit/"),
     }
     for name, (path, prefix) in pages.items():
-        links = _links(path.read_text(), prefix)
+        links = _links(path.read_text(encoding="utf-8"), prefix)
         assert links, name
         for link in links:
             assert (STATIC / link).is_file(), f"{name} links kit/{link} but the master has no such file"
@@ -28,10 +28,14 @@ def test_every_kit_file_a_page_links_exists_in_the_master():
 
 def test_add_on_servers_serve_what_their_pages_link():
     for name, mod in (("focus", "orch_focus"), ("insights", "orch_insights"), ("factory", "orch_factory")):
-        server = (ADDONS / name / "src" / mod / "server.py").read_text()
+        server = (ADDONS / name / "src" / mod / "server.py").read_text(encoding="utf-8")
         table = server.split("KIT_FILES", 1)[1].split(")", 1)[0]
         listed = set(re.findall(r'"([a-z0-9-]+\.(?:css|js))"', table))
-        linked = set(_links((ADDONS / name / "src" / mod / "web" / "index.html").read_text(), "__P__/kit/"))
+        linked = set(
+            _links(
+                (ADDONS / name / "src" / mod / "web" / "index.html").read_text(encoding="utf-8"), "__P__/kit/"
+            )
+        )
         assert linked <= listed, f"{name}: page links kit files its server does not serve: {linked - listed}"
 
 
@@ -40,7 +44,7 @@ def test_no_add_on_carries_a_kit_copy():
 
 
 def test_gallery_links_exist_and_use_only_the_master():
-    html = (STATIC / "gallery.html").read_text()
+    html = (STATIC / "gallery.html").read_text(encoding="utf-8")
     for link in re.findall(r'(?:href|src)="([a-z0-9][a-z0-9._/-]*\.(?:css|js|svg|pdf|csv|md))"', html):
         assert (STATIC / link).is_file(), link
     assert "<style" not in html.lower()
@@ -49,27 +53,29 @@ def test_gallery_links_exist_and_use_only_the_master():
     # loading, empty and error each have an example
     for word in ("Loaded", "Loading", "Empty", "Error"):
         assert word in html
-    js = (STATIC / "gallery.js").read_text()
+    js = (STATIC / "gallery.js").read_text(encoding="utf-8")
     for builder in ("statusIcon", "state(", "stat(", "progress(", "table(", "sheet("):
         assert builder in js, builder
 
 
 def test_design_doc_names_how_to_add_a_component():
-    doc = (STATIC / "DESIGN.md").read_text()
+    doc = (STATIC / "DESIGN.md").read_text(encoding="utf-8")
     assert "How to add a component" in doc and "gallery" in doc and "SX-1" in doc
 
 
 def test_one_chevron_no_text_glyph():
     for name in ("select.js", "components.css", "widgets.js"):
-        assert "⌄" not in (STATIC / name).read_text() and "⌄" not in (STATIC / name).read_text(), name
+        assert "⌄" not in (STATIC / name).read_text(encoding="utf-8") and "⌄" not in (
+            STATIC / name
+        ).read_text(encoding="utf-8"), name
 
 
 def test_an_unsized_icon_sizes_itself():
-    css = (STATIC / "components.css").read_text()
+    css = (STATIC / "components.css").read_text(encoding="utf-8")
     assert ":where(svg.ic,svg.ico,.ico>svg){width:20px;height:20px}" in css
 
 
 def test_shared_date_picker_offers_today_and_tomorrow():
-    js = (STATIC / "date.js").read_text()
+    js = (STATIC / "date.js").read_text(encoding="utf-8")
     assert "data-today" in js and "data-tomorrow" in js and "data-clear" in js
-    assert ".ui-quick" in (STATIC / "interaction.css").read_text()
+    assert ".ui-quick" in (STATIC / "interaction.css").read_text(encoding="utf-8")

@@ -49,7 +49,7 @@ def test_core_has_no_addon_name_literals():
     names = set(ADDONS) | {f"orch_{n}" for n in ADDONS}
     bad = []
     for f in CORE:
-        rel = str(f.relative_to(ROOT / "workspace/src"))
+        rel = f.relative_to(ROOT / "workspace/src").as_posix()
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in names:
                 if node.value not in ALLOW.get(rel, {}):
@@ -63,7 +63,7 @@ def test_core_has_no_addon_name_literals():
 def test_allowlist_has_no_stale_entries():
     seen = {}
     for f in CORE:
-        rel = str(f.relative_to(ROOT / "workspace/src"))
+        rel = f.relative_to(ROOT / "workspace/src").as_posix()
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 seen.setdefault(rel, set()).add(node.value)

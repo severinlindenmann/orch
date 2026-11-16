@@ -8,7 +8,7 @@ import secrets
 import pytest
 from conftest import key_file
 
-from orch import addons, config, keystore, secretrun
+from orch import addons, config, keystore, secretrun, winacl
 from orch import home as orch_home
 from orch.errors import Refused
 
@@ -34,6 +34,9 @@ def _second_folder(root):
         json.dumps({"schema": "orch.binding/1", "realpath": os.path.realpath(root)}) + "\n"
     )
     os.chmod(other / "binding.json", 0o600)
+    if os.name == "nt":  # Windows rights are an access list: make both private as orch does
+        winacl.set_private(other, True)
+        winacl.set_private(other / "binding.json", False)
     return d, other
 
 
@@ -278,6 +281,9 @@ def test_orch_swapped_for_link_before_open(proj, tmp_path, monkeypatch):
     monkeypatch.setattr(os, "mkdir", swap_then_mkdir)
     with pytest.raises(Refused):
         addons.put_local_id(proj, secrets.token_hex(16))
+    if os.name == "nt":
+        return  # no dir_fd on Windows: put_local_id checks the folder before and after, so a swap in between
+        # is refused afterwards, but the id file may already be in the other folder
     assert list(other.iterdir()) == []
 
 

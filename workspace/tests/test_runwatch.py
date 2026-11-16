@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 import time
 
 import pytest
@@ -35,7 +36,7 @@ def _key(proj, tid):
 def child():
     """A throwaway process to stand for the run's wrapper: never this test process, which orch's idle cleanup
     may stop (a session idle over the limit is closed with its process tree)."""
-    p = subprocess.Popen(["sleep", "120"])
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
     yield p.pid
     p.kill()
     p.wait()

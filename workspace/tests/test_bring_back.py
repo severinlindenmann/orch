@@ -1,7 +1,9 @@
 """B13 prerequisites: special attributes must be inspected before any merge."""
 
 import hashlib
+import os
 import subprocess
+import sys
 
 import pytest
 from test_worktrees_cleanup import git, make
@@ -10,6 +12,10 @@ from test_worktrees_cleanup import repo as repo_fixture
 from orch import tickets, worktrees
 
 repo = repo_fixture
+
+NO_TRAILING_DOT = pytest.mark.skipif(
+    os.name == "nt", reason="Windows drops a trailing dot or space in a file name"
+)
 
 
 def test_special_attributes_can_be_checked_without_running_filters(proj):
@@ -884,14 +890,17 @@ def test_verify_signatures_cannot_run_repo_program(done_copy):
         f"tree {tree}\nparent {parent}\nauthor a <a@b> 1 +0000\ncommitter a <a@b> 1 +0000\n"
         "gpgsig -----BEGIN PGP SIGNATURE-----\n \n x\n -----END PGP SIGNATURE-----\n\nsigned\n"
     )
-    sha = subprocess.run(
-        ["git", "hash-object", "-t", "commit", "-w", "--stdin"],
-        cwd=copy,
-        input=body,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    sha = (
+        subprocess.run(
+            ["git", "hash-object", "-t", "commit", "-w", "--stdin"],
+            cwd=copy,
+            input=body.encode(),  # bytes: text mode would turn every LF into CRLF on Windows
+            capture_output=True,
+            check=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
     git(copy, "reset", "-q", "--soft", sha)
     mark = root.parent / (tid + "-gpg-ran")
     evil = root.parent / (tid + "-evil.sh")
@@ -1091,9 +1100,11 @@ def test_done_without_copy_does_not_need_bring_back(repo):
     "name",
     [
         "ODD~1/config",
-        "odd./x",
-        "odd /x",
-        "a:b",
+        pytest.param("odd./x", marks=NO_TRAILING_DOT),
+        pytest.param("odd /x", marks=NO_TRAILING_DOT),
+        pytest.param(
+            "a:b", marks=pytest.mark.skipif(os.name == "nt", reason="a Windows file name cannot hold a colon")
+        ),
         ".or\u200bch/x",
         "a\u200cx",
         "a\u200dx",
@@ -1648,6 +1659,7 @@ def test_b13e_cli_approve_compares_what_was_shown(done_copy, run):
     assert git(root, "rev-parse", "HEAD") == head
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a Windows file name cannot hold a double quote")
 def test_b13e_review_paths_are_one_plain_line_each(done_copy, run):
     """Automated finding 1: agent-chosen path names cannot fake the approval text."""
     import json
@@ -1697,7 +1709,7 @@ def test_b13e_agent_identity_comes_from_a_live_run(done_copy, monkeypatch, case)
     elif case == "other_ticket":
         env = live_claim(root, root.tids[1], os.getpid())
     elif case == "dead_run":
-        dead = subprocess.Popen(["true"])
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
         dead.wait()
         env = live_claim(root, tid, dead.pid)
     else:
@@ -1941,7 +1953,13 @@ def test_b13f_run_state_is_never_approvable(done_copy):
 
 @pytest.mark.parametrize(
     "name",
-    ["SECRET~1.ENV", "notes.", ".clau\u200ede/settings.json", ".git\u202chub/workflows/x.yml", "a\u206ab"],
+    [
+        "SECRET~1.ENV",
+        pytest.param("notes.", marks=NO_TRAILING_DOT),
+        ".clau\u200ede/settings.json",
+        ".git\u202chub/workflows/x.yml",
+        "a\u206ab",
+    ],
 )
 def test_b13f_odd_names_are_never_approvable(done_copy, name):
     """Fable #7b / #11, Opus #9: names a file system may write as another name (8.3, trailing dot, every
@@ -2507,8 +2525,8 @@ def test_b13k_old_history_with_format_errors_still_comes_back(done_copy):
     obj = f"tree {tree}\nparent {parent}\nauthor {ident}\ncommitter {ident}\n\nold\n"
     new = subprocess.run(
         ["git", "hash-object", "-t", "commit", "-w", "--stdin", "--literally"],
-        input=obj, cwd=copy, capture_output=True, text=True, check=True,
-    ).stdout.strip()  # fmt: skip
+        input=obj.encode(), cwd=copy, capture_output=True, check=True,  # bytes: no CRLF translation
+    ).stdout.decode().strip()  # fmt: skip
     git(copy, "reset", "-q", "--hard", new)
     assert (
         subprocess.run(["git", "fsck", "--no-dangling", new], cwd=copy, capture_output=True).returncode == 1
@@ -3009,6 +3027,7 @@ def test_b13x_a_new_folder_where_the_merge_deleted_a_file_is_never_hard_reset(do
 
 def test_b13x_only_autocrlf_true_means_crlf(done_copy):
     root, tid, copy = done_copy
+    git(root, "config", "core.autocrlf", "false")  # git for Windows sets autocrlf=true system-wide
     git(root, "config", "core.eol", "crlf")
     assert worktrees._crlf_checkout(root) is False  # eol alone converts nothing
     git(root, "config", "core.autocrlf", "input")

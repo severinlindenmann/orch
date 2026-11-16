@@ -160,9 +160,12 @@ def test_every_key_store_write_sets_the_windows_rights_before_the_secret(tws, mo
     calls = []
     real_write = os.fdopen
 
+    real_set = winacl.set_private
+
     def spy(path, is_dir):
         p = Path(path)
         calls.append((p.name, is_dir, p.stat().st_size if p.exists() else None))
+        real_set(path, is_dir)  # a no-op on POSIX; on Windows the files must still end up private
 
     monkeypatch.setattr(winacl, "set_private", spy)
     keystore.add(tws, "k", "token", TOKEN)
@@ -408,7 +411,11 @@ def test_a_moved_workspace_is_refused_and_a_link_to_the_same_folder_is_not(tws, 
     keystore.add(tws, "k", "token", TOKEN)
     link = acct / ".orch-test" / "link"
     link.symlink_to(tws)
-    assert keystore.get_value(link, "k") == TOKEN  # same folder through a link
+    if os.name == "nt":  # Windows refuses any link below the profile folder (winacl.no_reparse)
+        with pytest.raises(Refused):
+            keystore.get_value(link, "k")
+    else:
+        assert keystore.get_value(link, "k") == TOKEN  # same folder through a link
     moved = acct / ".orch-test" / "moved"
     tws.rename(moved)
     with pytest.raises(Refused, match="copied or moved"):

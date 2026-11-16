@@ -44,10 +44,10 @@ def validator(name, defname=None):
     if not _REG:
         reg = Registry()
         for f in sorted(CONTRACTS.glob("*.schema.json")):
-            doc = _expand(json.loads(f.read_text()))
+            doc = _expand(json.loads(f.read_text(encoding="utf-8")))
             reg = reg.with_resource(doc.get("$id", f.name), Resource.from_contents(doc))
         _REG.append(reg)
-    schema = _expand(json.loads((CONTRACTS / f"{name}.schema.json").read_text()))
+    schema = _expand(json.loads((CONTRACTS / f"{name}.schema.json").read_text(encoding="utf-8")))
     if defname:
         schema = {"$id": schema["$id"], "$ref": f"#/$defs/{defname}", "$defs": schema["$defs"]}
     return Draft202012Validator(schema, format_checker=FormatChecker(), registry=_REG[0])
@@ -94,7 +94,7 @@ def test_tail_events_valid_with_cursors():
 
 
 def test_tail_and_query_replay_files_from_the_vectors():
-    vectors = json.loads((CONTRACTS / "vectors/activity-v1.json").read_text())["files"]
+    vectors = json.loads((CONTRACTS / "vectors/activity-v1.json").read_text(encoding="utf-8"))["files"]
     want = [c["stored"] for c in vectors if c["schema"] and c["stored"] == c["files"]]
     assert want and [] in want and any(len(f) == 8 for f in want)
     _, lines = tail_all()
