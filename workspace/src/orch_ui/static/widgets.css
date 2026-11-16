@@ -790,7 +790,7 @@ body.dock-max .fx.fx-shell .fx-left,body.dock-max .fx.fx-shell .fx-human{display
 .pill.failed,.pill.failed .st{color:var(--failed)}
 .card-row.helper-row{align-items:center;gap:var(--s3);flex-wrap:nowrap}
 .helper-main{min-width:0;display:grid;gap:var(--s1)}
-.helper-title{color:var(--text);font-weight:500;text-decoration:none;overflow-wrap:anywhere}
+.helper-title{color:var(--text);font-weight:500;text-decoration:none;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
 a.helper-title:hover{text-decoration:underline}
 .helper-key{color:var(--text-muted);font-weight:400}
 .helper-side{display:flex;align-items:center;gap:var(--s2);flex:none}

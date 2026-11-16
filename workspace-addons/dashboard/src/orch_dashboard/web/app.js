@@ -345,9 +345,9 @@ function render(arrived = new Set()) {
     const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
   }
-  // On Review and on a ticket the page has its own primary action (decision, Watch live, Start): New ticket steps back
-  // to an outline, so the screen keeps one filled button (report r-1116-1748)
-  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn ' + (['review', 'ticket'].includes(r.kind) ? 'outline' : 'primary') + ' sm';
+  // New ticket is always an outline (design guide, UX checklist B2): every page keeps its own one filled button, Home's
+  // Review all included (report r-1116-1748, ORCH-61)
+  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn outline sm';
   if (newTicket && newTicket.className !== newCls) newTicket.className = newCls;
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }

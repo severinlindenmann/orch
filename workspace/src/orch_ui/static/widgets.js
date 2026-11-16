@@ -31,7 +31,7 @@ UI.helperList=(rows,o)=>{o=o||{};rows=rows||[];const box=el('section','card help
  const head=el('header','card-h');head.append(el('h2','',o.title||'Helpers'));const sum=UI.helperSummary(rows);if(sum)head.append(el('span','meta helper-sum',sum));box.append(head);
  if(!rows.length){box.append(el('p','card-row meta',o.empty||'No helper is running.'));return box}
  rows.forEach(r=>{const row=el('div','card-row helper-row');row.dataset.state=r.state||'';if(r.dataKey)row.dataset.key=r.dataKey;
-  const main=el('div','grow helper-main'),title=el(r.href?'a':'span','helper-title');if(r.href)title.href=r.href;
+  const main=el('div','grow helper-main'),title=el(r.href?'a':'span','helper-title');if(r.href)title.href=r.href;title.title=(r.key?r.key+' ':'')+(r.title||'');
   if(r.key)title.append(el('span','helper-key',r.key),document.createTextNode(' '));title.append(document.createTextNode(r.title||''));main.append(title);
   const meta=r.meta!=null?r.meta:UI.helperMeta(r);if(meta)main.append(el('p','meta',meta));
   const side=el('div','helper-side');side.append(UI.helperPill(r.state,r.word));
