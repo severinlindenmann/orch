@@ -140,6 +140,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("id")
     t = argparse.ArgumentParser(add_help=False)
     t.add_argument("--ticket")
+    t.add_argument("--dry-run", action="store_true", help="show what would leave this machine; send nothing")
     x = rel.add_parser("send", parents=[common, t], help="send a message or file to a workspace or phone")
     x.add_argument("workspace")
     x.add_argument("text", nargs="?", default="")
@@ -169,6 +170,11 @@ def add_parsers(sub, common) -> None:
         "--group",
         action="store_true",
         help="open the ticket's group chat with that workspace (needs --ticket)",
+    )
+    x.add_argument(
+        "--full",
+        action="store_true",
+        help="share the whole ticket (checklist, open question), not only the summary (needs --ticket)",
     )
     x = rel.add_parser("start", parents=[common, t], help="start a named task on another workspace")
     x.add_argument("workspace")
@@ -536,7 +542,10 @@ def run_relay(args, root: Path, out) -> None:
     if sub == "mobile":
         return run_mobile(args, root, out)
     t = getattr(args, "ticket", None)
-    if sub not in ("connect", "status", "outbox", "view"):
+    dry = bool(getattr(args, "dry_run", False))
+    if (
+        sub not in ("connect", "status", "outbox", "view") and not dry
+    ):  # a preview sends nothing, not even the outbox
         _resend_waiting(root)
     if sub == "group":
         return run_group(args, root, out)
@@ -630,34 +639,22 @@ def run_relay(args, root: Path, out) -> None:
         if r["ticket"]:
             txt += f" Ticket: {r['ticket']}"
         out(args, r, txt)
+    elif sub in ("send", "delegate", "start") and dry:
+        with relay.dry_run():
+            m = _build_send(root, args, sub, t)
+        out(args, _preview_dict(m), _preview_text(m))
     elif sub == "send":
-        if args.file and (args.update or args.reply_to or args.speak):
-            raise Refused("--update, --reply-to and --speak go with a text, not a file.")
-        if args.summary and not args.speak:
-            raise Refused("--summary goes with --speak.")
-        if args.file:
-            m = relay.send_file(root, args.workspace, Path(args.file), args.text or None, t)
-        elif args.text:
-            speak = relay.speak_hint(root, t, args.text, args.summary) if args.speak else None
-            refs = [
-                {"kind": k, {"ticket": "key", "reference": "url", "proposal": "title"}.get(k, "path"): v}
-                for k, _, v in (r.partition(":") for r in args.ref)
-            ]
-            m = relay.send_text(
-                root, args.workspace, args.text, t, args.update, args.reply_to, speak=speak, refs=refs
-            )
-        else:
-            raise Refused("Nothing to send. Give a text or --file.")
+        m = _build_send(root, args, sub, t)
         out(args, m, _sent_line(root, m, "Message sent to {}."))
         _view_hint(m, t, args.update)
     elif sub == "topic":
         r = relay.topic(root, args.message, args.title, tickets.current_actor())
         out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
     elif sub == "delegate":
-        m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t, args.group)
+        m = _build_send(root, args, sub, t)
         out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
     elif sub == "start":
-        m = relay.send_start(root, args.workspace, args.key, args.text, t)
+        m = _build_send(root, args, sub, t)
         out(args, m, _sent_line(root, m, "Start request sent to {}."))
     elif sub == "allow":
         mode = "once" if args.once else "permanent"
@@ -699,6 +696,64 @@ def _view_hint(m: dict, ticket: str | None, update: str | None) -> None:
             )
     elif m.get("view_note"):
         print(f"Sent without the ticket page: {m['view_note']}.", file=sys.stderr)
+
+
+def _build_send(root: Path, args, sub: str, t: str | None) -> dict:
+    """send, delegate and start: one path for a real send and for --dry-run (relay.dry_run())."""
+    if sub == "delegate":
+        return relay.send_delegate(
+            root, args.workspace, args.title, args.text, args.check, t, args.group, args.full
+        )
+    if sub == "start":
+        return relay.send_start(root, args.workspace, args.key, args.text, t)
+    if args.file and (args.update or args.reply_to or args.speak):
+        raise Refused("--update, --reply-to and --speak go with a text, not a file.")
+    if args.summary and not args.speak:
+        raise Refused("--summary goes with --speak.")
+    if args.file:
+        return relay.send_file(root, args.workspace, Path(args.file), args.text or None, t)
+    if not args.text:
+        raise Refused("Nothing to send. Give a text or --file.")
+    speak = relay.speak_hint(root, t, args.text, args.summary) if args.speak else None
+    refs = [
+        {"kind": k, {"ticket": "key", "reference": "url", "proposal": "title"}.get(k, "path"): v}
+        for k, _, v in (r.partition(":") for r in args.ref)
+    ]
+    return relay.send_text(
+        root, args.workspace, args.text, t, args.update, args.reply_to, speak=speak, refs=refs
+    )
+
+
+def _preview_dict(m: dict) -> dict:
+    """The message exactly as it would leave, without what a send makes up (id, time) or a preview adds."""
+    return {k: v for k, v in m.items() if k not in ("id", "created_at", "dry_run")}
+
+
+def _preview_text(m: dict) -> str:
+    lines = ["Nothing was sent. This would leave this machine:", f"to: {m['to']}", f"type: {m['type']}"]
+    if m.get("ticket"):
+        lines.append(f"ticket: {m['ticket']}")
+    for k, v in m["body"].items():
+        if k == "ticket_card":
+            lines.extend(_card_lines(v))
+            continue
+        v = "; ".join(map(str, v)) if isinstance(v, list) else v
+        lines.append(f"{k}: {v if k != 'allow_token' else '(permission token)'}")
+    lines.append("Send it for real: run the same command without --dry-run.")
+    return "\n".join(lines)
+
+
+def _card_lines(c: dict) -> list[str]:
+    """The whole ticket (--full) as it leaves: every field of the card."""
+    out = ["whole ticket:"]
+    for k in ("key", "title", "status", "summary"):
+        if c.get(k):
+            out.append(f"  {k}: {c[k]}")
+    if c.get("question"):
+        out.append(f"  open question: {c['question']['text']}")
+    out.append(f"  checklist: {c.get('done', 0)} of {c.get('total', 0)} done")
+    out.extend(f"    [{'x' if i['done'] else ' '}] {i['text']}" for i in c.get("checklist", []))
+    return out
 
 
 def _sent_line(root: Path, m: dict, ok: str) -> str:
