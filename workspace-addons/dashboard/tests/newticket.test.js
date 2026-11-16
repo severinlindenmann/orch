@@ -248,7 +248,7 @@ test('window closes through the shared overlay; an empty submit shows the plain 
 });
 
 // Owner feedback 14 Nov (sweep d-new-ticket): the box starts small and grows; Start opens the new ticket, Save stays on the list.
-test('the text box starts at 3 rows; Start opens the new ticket, Save without starting does not', async () => {
+test('the text box starts at 3 rows; Start and Save without starting both open the new ticket', async () => {
   assert.equal(setup().input.rows, 3);
   for (const label of ['Start', 'Save without starting']) {
     const s = setup();
@@ -257,7 +257,8 @@ test('the text box starts at 3 rows; Start opens the new ticket, Save without st
     const node = walk(s.d).find(n => n.textContent === label);
     if (label === 'Start') { await node.click(); await s.form.fire('submit'); } else await node.click();
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(s.c.location.hash, label === 'Start' ? '#ticket/new' : '', label);
+    assert.equal(s.c.location.hash, '#ticket/new', label);
+    if (label !== 'Start') assert.ok(s.toasts.some(x => /^Saved/.test(x[0])), 'Save without starting says it saved');
   }
 });
 
@@ -286,4 +287,18 @@ test('UI.pastedFiles gives pasted image.png a readable unique name and leaves ot
   assert.match(out[1].name, /^Screenshot \d\d-\d\d \(2\)\.png$/);
   assert.equal(out[2], doc);
   assert.equal(w.UI.pastedFiles({clipboardData:{getData: () => 'x'}}).length, 0);
+});
+test('b4: Save without starting says Saving… at once, then the ticket opens', async () => {
+  const s = setup();
+  s.form.requestSubmit = () => s.form.fire('submit');
+  let release; const hold = new Promise(r => { release = r; });
+  const base = s.c.act; s.c.act = async (op, args) => { if (op === 'ticket.new') await hold; return base(op, args); };
+  s.input.value = 'Work'; await s.input.fire('input');
+  const node = walk(s.d).find(n => n.textContent === 'Save without starting');
+  const pending = node.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(node.textContent, 'Saving…');
+  assert.equal(node.disabled, true);
+  release(); await pending; await new Promise(resolve => setImmediate(resolve));
+  assert.equal(s.c.location.hash, '#ticket/new');
 });

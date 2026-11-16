@@ -189,6 +189,8 @@ final class Outbox {
         case failed(clientId: String, status: Int, message: String)
         /// Someone else answered first (409).
         case answerTaken(clientId: String, questionMessageId: String, message: String)
+        /// The workspace took the question back (409 taken_back): the card goes, `message` is the relay's line.
+        case questionTakenBack(clientId: String, questionMessageId: String, message: String)
         case unauthorized
         /// 408 / 429 / 503: kept queued with a backoff (30 s, doubling, at most 5 min). Show "Try again later".
         case throttled(clientId: String, status: Int)
@@ -429,6 +431,8 @@ final class Outbox {
                         if status >= 500 { events.append(.offline); return events }
                         if item.kind == .answer && status == 409 && code == "already_answered" {
                             events.append(.answerTaken(clientId: id, questionMessageId: item.questionMessageId ?? "", message: message)); discard(id)
+                        } else if item.kind == .answer && status == 409 && code == "taken_back" {
+                            events.append(.questionTakenBack(clientId: id, questionMessageId: item.questionMessageId ?? "", message: message)); discard(id)
                         } else { mark(id) { $0.failure = message; $0.failureStatus = status }; events.append(.failed(clientId: id, status: status, message: message)) }
                     case .badLink: break
                     }
