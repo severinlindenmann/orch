@@ -774,3 +774,62 @@ def test_handover_crew_rows_use_one_plain_word_mapping(ws, run, srv):
     assert row["with"]["since"] and not any(
         c["with"] for c in o["crew"] if c["ticket"] != tid and "with" in c
     )
+
+
+# ---- fix wave b5: the page frame first, the newest draft, the draft's questions as cards ----------------------
+
+
+def _page_js():
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
+    js = _page_js()
+    early = js.index("view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea()")
+    assert early < js.index("await read('/api/home', signal)")
+    assert (
+        "view.append(theIdea(), askRow(auto))" in js
+    )  # the same box (and its typed text) stays when the list comes
+
+
+def test_the_newest_draft_opens_without_a_click():
+    js = _page_js()
+    assert "'/draft')" in js and "'/draft/' + order.draft_v" not in js  # "Read draft" always means the newest
+    assert "location.hash = '#/order/' + result.order + '/draft'" in js
+    assert "match[6] || String(newest || 1)" in js
+
+
+def test_draft_questions_are_cards_with_options_and_a_suggestion(ws, run, srv):
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    run("draft", order, "--file", "-", data=b"v2")
+    path = ws / "fake-tickets" / f"{order}.json"
+    t = json.loads(path.read_text())
+    t["questions"] = [
+        {
+            "id": "q1",
+            "text": "Who uses it?",
+            "options": ["Customers", "Staff"],
+            "recommended": "Customers",
+            "answer": None,
+        },
+        {
+            "id": "q2",
+            "text": "Old",
+            "options": [],
+            "recommended": None,
+            "answer": "x",
+            "answered_by": "human:a",
+        },
+        {"id": "q3", "text": "Ship?", "kind": "factory:stop", "options": [], "answer": None},
+    ]
+    path.write_text(json.dumps(t))
+    o = get(srv, f"/api/order/{order}")[1]
+    assert o["questions"] == [
+        {"q": "q1", "text": "Who uses it?", "options": ["Customers", "Staff"], "recommended": "Customers"}
+    ]
+    js = _page_js()
+    assert "...questionCards(order)" in js and "decide(order, 'Answer', true, x.q)" in js

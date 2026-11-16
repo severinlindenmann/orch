@@ -76,13 +76,13 @@
   const embedded = () => { try { return window.top !== window; } catch (_) { return true; } };
   // Inside the dashboard a decision asks it to open its own question card for this order's open question (the page itself
   // never answers). Outside the dashboard, or with nothing open, it stays a link to the ticket.
-  function decide(order, label = 'Answer', primary = true) {
-    if (!embedded() || !order.open || !validId(order.id) || !validQuestion(order.open.q)) return ticket(order.id, label, primary);
+  function decide(order, label = 'Answer', primary = true, question = order.open?.q) {
+    if (!embedded() || !question || !validId(order.id) || !validQuestion(question)) return ticket(order.id, label, primary);
     const b = node('button', label, primary ? 'btn primary f-btn' : 'btn outline sm f-btn');
     b.type = 'button';
     b.addEventListener('click', () => {
       b.disabled = true;
-      window.parent.postMessage({type: 'orch.question', ticket: order.id, question: order.open.q}, location.origin);
+      window.parent.postMessage({type: 'orch.question', ticket: order.id, question}, location.origin);
       setTimeout(() => { b.disabled = false; }, 1500);
     });
     return b;
@@ -110,6 +110,19 @@
     document.title = text(title) + ' · Factory';
     const h1 = node('h1', title); h1.tabIndex = -1;
     return group('f-heading', group('stack', h1, meta(subtitle)), group('actions', ...actions));
+  }
+  // The questions your helper asked on the order (the draft's open questions): one card each, its options and its
+  // suggestion shown, the answer given in the dashboard's own question card (the page never answers).
+  function questionCards(order) {
+    const rows = array(order.questions).filter(x => validQuestion(x?.q));
+    if (!rows.length) return [];
+    return rows.map(x => {
+      const c = card(x.text || 'A question for you');
+      if (array(x.options).length) c.append(meta('Options: ' + array(x.options).join(' · ')));
+      if (x.recommended) c.append(meta('Your agent suggests: ' + x.recommended));
+      c.append(tail(decide(order, 'Answer', true, x.q)));
+      c.classList.add('f-attention'); return c;
+    });
   }
   function answer(order) {
     return group('stack', group('actions', decide(order)), meta(embedded() && order.open ? 'Your answer opens in a card here, where orch confirms it\'s you.' : "You answer on the order's ticket, where orch confirms it's you."));
@@ -261,13 +274,17 @@
       go.disabled = true; field.readOnly = true; fallback.hidden = true; say('Saving your idea…');
       const result = await fileIdea(idea);
       field.readOnly = false;
-      if (result.order) { field.value = ''; say(''); location.hash = '#/order/' + result.order + '/draft/1'; return; }
+      if (result.order) { field.value = ''; say(''); location.hash = '#/order/' + result.order + '/draft'; return; }
       go.disabled = false;
       say((result.error ? result.error + ' ' : "That didn't work. ") + 'Your idea is still here.');
       fallback.hidden = false;
     });
     el.append(field, group('row', go, fallback), status); el.classList.add('f-idea'); return el;
   }
+  // One idea box for the whole page: it is on screen before the order list has been read, and what you type in it
+  // stays when the list arrives.
+  let idea = null;
+  const theIdea = () => idea || (idea = ideaBox());
   function askRow(auto) {
     const asks = !auto?.on, row = group('setting-row f-ask');
     const input = node('input', null, 'switch'); input.type = 'checkbox'; input.checked = asks; input.setAttribute('aria-label', 'Ask me at every stop');
@@ -286,7 +303,7 @@
     view.append(heading('Factory', needing.length
       ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
       : 'Nothing in Factory waits for you right now. Your ideas and planned runs are below.'));
-    view.append(ideaBox(), askRow(auto));
+    view.append(theIdea(), askRow(auto));
     if (auto?.on) {
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
       const autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
@@ -303,7 +320,7 @@
     };
     section(primary, 'Drafts waiting for you', orders.filter(draftWaiting), o => {
       const c = card(o.title, meta('Read the draft, then plan the run or ask for changes.'),
-        tail(orderLink(o, 'Read draft', validVersion(o.draft_v) ? '/draft/' + o.draft_v : '')), draftActions(o, render));
+        tail(orderLink(o, 'Read draft', '/draft')), draftActions(o, render));
       c.classList.add('f-attention'); return c;
     }, 'No drafts waiting for you.');
     section(primary, 'Proposals waiting for Start', orders.filter(o => o.phase === 'proposed'), o => {
@@ -439,7 +456,7 @@
     if (order.phase === 'draft') {  // the same rule as Factory home and the draft page (draftWaiting)
       const c = draftWaiting(order)
         ? card('Your draft is ready', meta('Read the draft, then plan the run or ask for changes.'),
-          tail(orderLink(order, 'Read draft', validVersion(order.draft_v) ? '/draft/' + order.draft_v : '')), draftActions(order, render))
+          tail(orderLink(order, 'Read draft', '/draft')), draftActions(order, render))
         : card('Draft', draftNote(order));
       if (draftWaiting(order)) c.classList.add('f-attention');
       aside.append(c);
@@ -448,6 +465,7 @@
       const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
     }
+    aside.append(...questionCards(order));
     if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
     const changes = card('Changes');
     for (const c of array(order.changes)) changes.append(group('f-record', badge(capital(c.state)), node('h3', c.title), meta('+' + text(c.adds_min) + ' min'), ...(c.state === 'open' ? [group('actions', decide(order))] : [])));
@@ -618,7 +636,11 @@
     const controllerForRequest = controller;
     const timeout = setTimeout(() => controllerForRequest.abort(), 15000);
     view.setAttribute('aria-busy', 'true'); notices.replaceChildren();
-    view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...['title','thumb','thumb'].map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; })));
+    const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
+    if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
+      // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
+      view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+    } else view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...skeletons(['title','thumb','thumb'])));
     try {
       // Always begin with home, including deep links, to get watcher/stale status.
       const homeData = await read('/api/home', signal);
@@ -633,8 +655,8 @@
         if (serial !== request) return;
         showNotices(homeData, data); draw = () => autopilot(data);
       } else {
-        const match = /^#\/order\/(t_[a-z0-9]{6,16})(?:\/(proposal)|\/(stop|draft)\/([1-9][0-9]*))?$/.exec(hash);
-        if (!match || !validId(match[1]) || (match[4] && !validVersion(match[4]))) throw new Error('Unknown route');
+        const match = /^#\/order\/(t_[a-z0-9]{6,16})(?:\/(proposal)|\/(stop)\/([1-9][0-9]*)|\/(draft)(?:\/([1-9][0-9]*))?)?$/.exec(hash);
+        if (!match || !validId(match[1]) || (match[4] && !validVersion(match[4])) || (match[6] && !validVersion(match[6]))) throw new Error('Unknown route');
         const order = await read('/api/order/' + match[1], signal);
         if (serial !== request) return;
         if (order.id !== match[1]) throw new Error('Order reference mismatch');
@@ -645,11 +667,14 @@
           if (serial !== request) return;
           draw = () => stopPage(order, match[4], array(reach));
         }
-        else if (match[3] === 'draft') {
-          const draft = await read('/api/order/' + match[1] + '/draft/' + match[4], signal);
+        else if (match[5] === 'draft') {
+          // without a version the newest one opens, and it moves on by itself when your helper files a newer one
+          const newest = array(order.drafts).reduce((n, x) => validVersion(x.v) ? Math.max(n, Number(x.v)) : n, 0);
+          const version = match[6] || String(newest || 1);
+          const draft = await read('/api/order/' + match[1] + '/draft/' + version, signal);
           if (serial !== request) return;
           showNotices(homeData, order, draft);
-          draw = () => view.append(heading(order.title, 'Draft · version ' + match[4], orderLink(order)), draftTabs(order, match[4]), node('pre', draft.text, 'card f-draft'), ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
+          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), node('pre', draft.text, 'card f-draft'), ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;

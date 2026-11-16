@@ -31,8 +31,16 @@ The owner may also file it with one click on the Factory page (the idea box): yo
 is the owner's own words; its note says it is a Factory order. Then write the real first draft as v2 with `orch factory
 draft`, ask your open questions and stop: do NOT build it, however small it sounds. The owner presses Plan the run.
 
-The draft is one short page in plain words: what it is, for whom, 3 rough parts or screens, open questions. Answer in the
-chat with 3–5 lines and say where the draft is. Keep it small: the goal is that you and the owner mean the same thing.
+The draft is one short page in plain words: what it is, for whom, 3 rough parts or screens. Answer in the chat with 3–5
+lines and say where the draft is. Keep it small: the goal is that you and the owner mean the same thing.
+
+Open questions do NOT go into the draft as a list. Ask each one as a normal ticket question on the order, with short
+options and your suggestion, so the owner answers with one click on a card in Factory:
+
+    orch ask <order> "Who uses the booking page?" --option "Customers" --option "Staff" --recommend "Customers"
+
+Ask only what you cannot decide yourself (at most 5). When a question no longer matters, take it back
+(`orch ask <order> --take-back <q> "why"`).
 
 ### 2. Polish together
 Every owner reply that changes the idea → a new version with "what changed" at the top:
