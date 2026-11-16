@@ -492,6 +492,19 @@ def _workflow_set(a):
     return ["config", "set", "workflow.agents_may_finish", "on" if a["on"] else "off"], [], []
 
 
+def _live_set(a):
+    """Settings > Helper > Helpers at once: null = no limit, else 2 to 10; `orch config set workspace.live_max`."""
+    _only(a, ("max",))
+    if "max" not in a:
+        raise BadRequest("Pick No limit or a number from 2 to 10.")
+    v = a["max"]
+    if v is None:
+        return ["config", "set", "workspace.live_max", "none"], [], []
+    if type(v) is not int or not 2 <= v <= 10:
+        raise BadRequest("Pick No limit or a number from 2 to 10.")
+    return ["config", "set", "workspace.live_max", str(v)], [], []
+
+
 COPY_MODES = ("off", "together", "always")
 
 
@@ -950,6 +963,7 @@ OPS = {
     "ref.add": _ref_add,
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
+    "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
     "diag.delete_reports": _diag_delete("reports"),
@@ -1291,6 +1305,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "config.permissions",
             "workspace.set",
             "workflow.set",
+            "live.set",
             "copies.set",
             "copies.clean",
             "copies.remove_orphaned",

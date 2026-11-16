@@ -185,29 +185,43 @@ def test_init_prints_the_permission_mode_in_one_line(proj, run):
     ]
 
 
+LIMIT = 4  # a limit a person picked in Settings > Helper > Helpers at once
+
+
+def _limit(proj, n=LIMIT):
+    config.set_live_max(proj, str(n))
+
+
 @pytest.mark.parametrize("status", ["review", "done", "dropped"])
 def test_finished_tickets_do_not_count_toward_the_live_limit(proj, run, closed, status):
-    tids = [_live(proj, run, "idle", 1) for _ in range(runs_live.MAX_LIVE)]
-    assert len(runs_live.live_alive(proj)) == runs_live.MAX_LIVE
+    _limit(proj)
+    tids = [_live(proj, run, "idle", 1) for _ in range(LIMIT)]
+    assert len(runs_live.live_alive(proj)) == LIMIT and runs_live._full(proj) == LIMIT
     for t in tids:
         tickets.set_status(proj, t, status, "human:t")
-    assert runs_live.live_alive(proj) == []  # a fifth start is allowed
+    assert runs_live.live_alive(proj) == [] and runs_live._full(proj) is None  # a fifth start is allowed
 
 
 @pytest.mark.parametrize("status", ["active", "waiting"])
 def test_working_or_waiting_tickets_still_count(proj, run, status):
-    tids = [_live(proj, run, "idle", 1) for _ in range(runs_live.MAX_LIVE)]
+    tids = [_live(proj, run, "idle", 1) for _ in range(LIMIT)]
     for t in tids:
         tickets.set_status(proj, t, status, "human:t")
-    assert len(runs_live.live_alive(proj)) == runs_live.MAX_LIVE
+    assert len(runs_live.live_alive(proj)) == LIMIT
 
 
+@pytest.mark.parametrize("limit", [None, 2])
 @pytest.mark.parametrize(
     "status,age,shut",
     [("review", 11, True), ("review", 5, False), ("active", 11, False), ("waiting", 11, False)],
 )
-def test_review_session_closes_after_ten_minutes_when_sessions_are_full(proj, run, closed, status, age, shut):
-    for _ in range(runs_live.MAX_LIVE - 1):
+def test_review_session_closes_after_ten_minutes_when_sessions_are_full(
+    proj, run, closed, status, age, shut, limit
+):
+    """The finished-ticket clean-up stays: with no limit at CROWDED_AT open sessions, else at the limit."""
+    if limit:
+        _limit(proj, limit)
+    for _ in range((limit or runs_live.CROWDED_AT) - 1):
         _live(proj, run, "working", 1)
     tid = _live(proj, run, "idle", age)
     tickets.set_status(proj, tid, status, "human:t")
@@ -222,19 +236,74 @@ def test_review_session_stays_warm_the_hour_when_there_is_room(proj, run, closed
 
 
 def test_a_working_session_on_a_review_ticket_still_counts(proj, run):
-    for _ in range(runs_live.MAX_LIVE - 1):
+    _limit(proj)
+    for _ in range(LIMIT - 1):
         _live(proj, run, "idle", 1)
     tid = _live(proj, run, "working", 1)
     tickets.set_status(proj, tid, "review", "human:t")
-    assert len(runs_live.live_alive(proj)) == runs_live.MAX_LIVE
-    assert runs_live._full(proj)
+    assert len(runs_live.live_alive(proj)) == LIMIT
+    assert runs_live._full(proj) == LIMIT
 
 
 def test_hard_cap_over_all_sessions(proj, run, closed):
-    for _ in range(runs_live.MAX_LIVE + runs_live.HARD_EXTRA):
+    _limit(proj)
+    for _ in range(LIMIT + runs_live.HARD_EXTRA):
         tid = _live(proj, run, "idle", 1)
         tickets.set_status(proj, tid, "done", "human:t")
-    assert runs_live.live_alive(proj) == [] and runs_live._full(proj)
+    assert runs_live.live_alive(proj) == [] and runs_live._full(proj) == LIMIT + runs_live.HARD_EXTRA
+
+
+def test_no_limit_by_default(proj, run):
+    """ORCH-16: any number of helpers may work at once unless a person sets a limit."""
+    assert config.live_max(proj) is None
+    for _ in range(12):
+        _live(proj, run, "working", 1)
+    assert len(runs_live.live_alive(proj)) == 12 and runs_live._full(proj) is None
+
+
+def test_a_set_limit_queues_the_start_and_names_where_to_change_it(proj, run):
+    _limit(proj, 2)
+    for _ in range(2):
+        _live(proj, run, "working", 1)
+    tid = _ticket(run)
+    with pytest.raises(runs.Busy) as e:
+        runs_live.start_live(
+            proj, tid, "human:t", "claude", fresh=False, take_over=False, busy_text="start it"
+        )
+    msg = str(e.value)
+    assert "Settings > Helper > Helpers at once" in msg and "orch run stop" not in msg
+    assert msg.startswith("2 helpers are working at once") and runs_live.ref(proj, tid) in msg
+    assert [i["via"] for i in runs.undelivered(proj, tid)] == ["slots"]  # waits in line for a slot
+
+
+@pytest.mark.parametrize(
+    "value,want", [("3", 3), ("10", 10), ("2", 2), ("none", None), ("off", None), ("0", None)]
+)
+def test_live_max_setting_values(proj, value, want):
+    config.set_live_max(proj, "5")
+    assert config.set_live_max(proj, value) == want
+    assert config.live_max(proj) == want
+    if want is None:
+        assert "live_max" not in config.path(proj).read_text(encoding="utf-8")  # no limit = no line
+
+
+@pytest.mark.parametrize("value", ["1", "11", "-2", "many", ""])
+def test_live_max_refuses_other_values(proj, value):
+    from orch.errors import Refused
+
+    with pytest.raises(Refused):
+        config.set_live_max(proj, value)
+    assert config.live_max(proj) is None
+
+
+def test_live_max_through_the_cli(proj, run):
+    assert run("config", "get", "workspace.live_max")[1].strip().endswith("none")
+    code, out, err = run("config", "set", "workspace.live_max", "3")
+    assert code == 0 and "3" in out, err
+    assert config.live_max(proj) == 3
+    code, out, _ = run("config", "set", "workspace.live_max", "none")
+    assert code == 0 and config.live_max(proj) is None
+    assert run("config", "set", "workspace.live_max", "1")[0] != 0
 
 
 def test_attention_on_a_review_ticket_keeps_the_full_hour(proj, run, closed):

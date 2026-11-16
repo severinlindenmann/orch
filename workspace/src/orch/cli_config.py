@@ -25,6 +25,7 @@ KEYS = (
     "workspace.tags",
     "workspace.permissions",
     "workspace.live_idle_minutes",
+    "workspace.live_max",
     "workflow.agents_may_finish",
     "workflow.copies",
     "workflow.copies_max",
@@ -251,6 +252,7 @@ def _config(args, root: Path) -> None:
             "workspace.tags": lambda: config.workspace_tags(root),
             "workspace.permissions": lambda: config.permissions(root),
             "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
+            "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
@@ -338,6 +340,15 @@ def _config(args, root: Path) -> None:
             args,
             {"workspace.permissions": mode},
             f"Saved: workspace.permissions = {mode}. It applies to the next agent start.",
+        )
+    elif args.sub == "set" and args.key == "workspace.live_max":
+        n = config.set_live_max(root, args.value)
+        _out(
+            args,
+            {"workspace.live_max": n or "none"},
+            "Saved: workspace.live_max = none. Any number of helpers may work at once."
+            if n is None
+            else f"Saved: workspace.live_max = {n}. When {n} helpers work at once, the next waits in line.",
         )
     elif args.sub == "set" and args.key == "workspace.live_idle_minutes":
         mins = config.set_live_idle_minutes(root, args.value)

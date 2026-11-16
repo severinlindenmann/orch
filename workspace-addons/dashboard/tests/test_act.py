@@ -1245,6 +1245,30 @@ def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
             build_argv("copies.set", bad)
 
 
+def test_live_set_builds_the_helpers_at_once_argv_and_refuses_odd_values():
+    """ORCH-16: Settings > Helper > Helpers at once: null = no limit, 2 to 10 a number."""
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    assert build_argv("live.set", {"max": None})[:4] == ["config", "set", "workspace.live_max", "none"]
+    for n in (2, 5, 10):
+        assert build_argv("live.set", {"max": n})[:4] == ["config", "set", "workspace.live_max", str(n)]
+    for bad in ({"max": 1}, {"max": 11}, {"max": "3"}, {"max": True}, {}, {"max": 3, "extra": 1}):
+        with pytest.raises(BadRequest):
+            build_argv("live.set", bad)
+
+
+def test_helpers_at_once_survives_load_settings(tmp_path):
+    from orch import config
+
+    from orch_dashboard.data import load_settings
+
+    ws = tmp_path / "ws"
+    (ws / ".orch").mkdir(parents=True)
+    assert load_settings(ws, None)["live_max"] is None  # no limit by default
+    config.set_live_max(ws, "3")
+    assert load_settings(ws, None)["live_max"] == 3
+
+
 def test_check_wont_do_argv():
     common = ["--by", actions.actor(), "--json"]
     args = {"ticket": "t_abcdef", "check": "c1"}
