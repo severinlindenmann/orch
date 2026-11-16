@@ -32,7 +32,8 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--all", action="store_true", help="stop every running workspace")
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
-    sub.add_parser("pause", parents=[common], help="stop all automation in this workspace")
+    x = sub.add_parser("pause", parents=[common], help="stop all automation in this workspace")
+    x.add_argument("--reason", help="why, in one short line (shown when a start is held back)")
     sub.add_parser("resume", parents=[common], help="turn automation back on after orch pause")
     c = sub.add_parser("copy", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     for name in ("update", "ask-update", "review", "approve"):
@@ -171,8 +172,9 @@ def _services_cmd(args, root: Path) -> None:
         if (root / ".orch").is_dir() and not args.json:
             from orch import brake
 
-            if brake.paused(root) is not None:
-                lines.append("Automation is paused. Turn it back on with: orch resume")
+            rec = brake.paused(root)
+            if rec is not None:
+                lines.append(brake.paused_words(rec))
         _out(
             args,
             ws,
@@ -307,11 +309,12 @@ def _brake_cmd(args, root: Path) -> None:
     if not (root / ".orch").is_dir():
         raise Refused("This folder is not an orch workspace. Go into one, or run: orch init")
     if args.cmd == "pause":
-        rec = brake.pause(root, tickets.current_actor(args.by))
+        rec = brake.pause(root, tickets.current_actor(args.by), getattr(args, "reason", None))
+        why = f" ({rec['reason']})" if rec.get("reason") else ""
         _out(
             args,
             {"paused": True, **rec},
-            "Automation paused in this workspace. Nothing starts on its own until you run: orch resume",
+            f"Automation paused in this workspace{why}. Nothing starts on its own until you run: orch resume",
         )
     else:
         was = brake.resume(root)
