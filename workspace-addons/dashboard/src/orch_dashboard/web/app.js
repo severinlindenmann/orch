@@ -338,8 +338,9 @@ function render(arrived = new Set()) {
     const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
   }
-  // On Review the decision is the one primary action: New ticket steps back to an outline
-  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn ' + (r.kind === 'review' ? 'outline' : 'primary') + ' sm';
+  // On Review and on a ticket the page has its own primary action (decision, Watch live, Start): New ticket steps back
+  // to an outline, so the screen keeps one filled button (report r-1116-1748)
+  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn ' + (['review', 'ticket'].includes(r.kind) ? 'outline' : 'primary') + ' sm';
   if (newTicket && newTicket.className !== newCls) newTicket.className = newCls;
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
