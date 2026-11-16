@@ -22,6 +22,7 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
 CID = re.compile(r"c[0-9]{1,4}")
+PID = re.compile(r"p_[a-z0-9]{6,32}")
 
 
 class BadRequest(Exception):
@@ -135,6 +136,12 @@ def _run_send(a):
     # The ticket goes AFTER the options, with the text: `run send` has an optional text, and some Python versions
     # (3.11, early 3.12) let `send <ticket>` swallow it, then fail on `-- <text>` with "unrecognized arguments".
     return ["run", "send"], [], [_t(a), _text(a.get("text"), "message")]
+
+
+def _run_take_back(a):
+    """Take back one waiting message: `orch run take-back <ticket> <id>`; the answer carries its text."""
+    _only(a, ("ticket", "id"))
+    return ["run", "take-back", _t(a), _id(PID, a.get("id"), "message")], [], []
 
 
 def _check_add(a):
@@ -273,6 +280,7 @@ OPS = {
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,
+    "run.take_back": _run_take_back,
     "check.add": _check_add,
     "check.edit": _check_edit,
     "check.wont_do": _check_wont_do,

@@ -588,8 +588,10 @@ def outbox_list(root: Path) -> list[dict]:
 
 def resend_outbox(root: Path) -> dict:
     """Post what is left in .orch/outbox/, byte for byte (same id: the relay never makes a second message).
-    Returns {"sent": [ids], "waiting": [ids], "dropped": [{id, reason}]}. Stops at the first unreachable."""
-    res: dict = {"sent": [], "waiting": [], "dropped": []}
+    Returns {"sent": [ids], "waiting": [ids], "dropped": [{id, reason}], "failed": [{id, reason}]}.
+    Stops at the first unreachable. R5.2: an entry written before the send-time scan is scanned here too;
+    a hit is not sent, is removed from disk and reported as failed (one sentence, never the value)."""
+    res: dict = {"sent": [], "waiting": [], "dropped": [], "failed": []}
     with contextlib.suppress(Refused):
         apply_allow_answers(root)  # the next orch relay command applies an answered allow question
     items = outbox_list(root)
@@ -598,6 +600,19 @@ def resend_outbox(root: Path) -> dict:
         try:
             raw = p.read_bytes()
         except OSError:
+            continue
+        try:
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                msg = None
+            if isinstance(msg, dict):
+                scan_outgoing(root, msg)  # the whole message, every field, as decoded (escapes resolved)
+            else:
+                secretscan.refuse_if_secret(raw, "message", root)  # not a message we know: scan the bytes
+        except Refused as e:
+            res["failed"].append({"id": m["id"], "reason": str(e)})
+            p.unlink(missing_ok=True)  # a secret is not kept on disk for another try
             continue
         try:
             _post_message(root, raw)
@@ -1043,6 +1058,10 @@ def send_question(
     }
     sign_asked(root, msg["id"], rec)
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
+    with contextlib.suppress(
+        Refused, OSError
+    ):  # a page says "Sent to your phone 12:31"; never blocks the send
+        tickets.mark_question_sent(root, ticket["id"], q["id"])
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
         send_text(root, "phones", "Waiting for your answer", ticket["id"], "note", view=True)

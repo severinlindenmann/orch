@@ -18,6 +18,8 @@
 - The ticket window now shows its reference quietly without a Details toggle.
 - Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
 
+- A due with a time reads "Due 18:30" on a card, and "Late since 09:00" in the warning colour once it has passed (the ticket page Due row shows the same words).
+
 ### list.html
 
 - Put Changes to add on its own line beneath the ticket title and removed the repeated status line so the words do not run together.
@@ -66,3 +68,6 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 ## Owner feedback 14 Nov (lane owner-fb-v2)
 New ticket: 560 px, the box starts at 3 rows and grows, Start opens the new ticket, Save stays on the list (`../sweep/d-new-ticket.html`). Files tab: `../sweep/d-files.html`.
+
+## Fix wave 15 Nov (b4)
+Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy local link" with the hint "Works only on this computer". Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).

@@ -507,6 +507,7 @@ class Tracker:
             "run": {
                 "running": running, "mode": claim.get("mode"), "agent": agent, "label": label, "run": claim.get("run"),
                 "pending": status.get("pending", 0),
+                "waiting_input": _waiting_input(status),
             },
             "state": state,
             "generic": generic,
@@ -937,6 +938,21 @@ class Handler(BaseHTTPRequestHandler):
                 any(q.get("answer") is None for q in view["ticket"].get("questions", [])) if view else False,
             )
         self._json(200, {"result": extra, "view": view, "note": note})
+
+
+def _waiting_input(status: dict) -> list[dict]:
+    """The messages the helper has not read yet: [{id, text, at}], from `orch run status` (a person can take one back)."""
+    out = []
+    for i in status.get("waiting_input") or []:
+        if isinstance(i, dict) and isinstance(i.get("id"), str) and isinstance(i.get("text"), str):
+            out.append(
+                {
+                    "id": i["id"][:40],
+                    "text": i["text"][:2000],
+                    "at": i.get("at") if isinstance(i.get("at"), str) else None,
+                }
+            )
+    return out[:20]
 
 
 def stop_started(srv) -> None:
