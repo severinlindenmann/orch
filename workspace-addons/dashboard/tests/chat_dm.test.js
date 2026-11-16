@@ -214,6 +214,18 @@ test('an accepted send shows Delivered at once and refreshes in the background',
   finishReload();
 });
 
+// Issue 865 (c): Contacts -> Send a message opens the conversation with the name, never an empty "Workspace" pane.
+test('opening a workspace before the contacts load shows its name and a loading line', () => {
+  const c = context();
+  vm.runInContext(`chatDm.contacts = []; chatDm.loaded = false; chatUi.open = '${WS}'; chatDmHint('${WS}', 'Pilatus');`, c);
+  let view = JSON.stringify(c.chatDmThread());
+  assert.match(view, /Pilatus/); assert.match(view, /Loading…/); assert.doesNotMatch(view, /"Workspace"/);
+  vm.runInContext("chatDm.loaded = true", c);
+  assert.match(JSON.stringify(c.chatDmThread()), /not in your contacts/);
+  vm.runInContext(`chatDm.contacts = [{ws:'${WS}',name:'Pilatus',can:{chat:true}}]`, c);
+  assert.doesNotMatch(JSON.stringify(c.chatDmThread()), /not in your contacts|Loading…/);
+});
+
 // Issue 865 (b): Other workspaces keep their place above the groups, also while the contacts load; newest group first.
 test('chat list: Other workspaces above Groups (placeholder while loading), newest group first', () => {
   const c = context();
