@@ -6,7 +6,7 @@ through `orch record … --json` (add-ons never read the files).
 
 Schema: `activity.schema.json` (one event, plus `$defs/detail_file`). Examples: `examples/activity/`, `examples/activity-detail/`.
 Vectors: `vectors/activity-v1.json` (ids, detail file names, dedupe, retention, fail closed, the Codex mapping on real
-captures, `files` shapes and normalisation). T0: `uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py activity`.
+captures, `files` shapes and normalisation). T0: `uv run --python ">=3.11" --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py activity`.
 The core names no agent tool here: tool-specific mapping lives in the collectors and in agents.json (agent-adapter.schema.json).
 
 ## Where (owner decision R2)
