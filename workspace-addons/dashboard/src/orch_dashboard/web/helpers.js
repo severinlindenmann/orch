@@ -261,6 +261,37 @@
     return out.sort((a, b) => rank[a.state] - rank[b.state]);
   }
 
+  /* ORCH-61: the ONE state of a running helper, as the core words it (orch run status "helper"):
+     {state: working|starting|you|waiting|idle|stuck, word, detail}; null when no helper runs. An older core without
+     the field: the same words from the claim, so the page never shows a second set. */
+  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Waits for you', waiting: 'Waiting', idle: 'Idle', stuck: 'Stuck'};
+  function helperState(run, ticket) {
+    const r = run || null;
+    if (!r || (r.running !== true && r.state !== 'maybe-stale')) return null;
+    const h = r.helper;
+    if (h && typeof h === 'object' && HELPER_WORDS[h.state]) return {state: h.state, word: HELPER_WORDS[h.state], detail: typeof h.detail === 'string' ? h.detail : ''};
+    if (r.state === 'maybe-stale') return {state: 'stuck', word: 'Stuck', detail: 'No sign of life for a while'};
+    const live = (r.claim && r.claim.live) || {}, asks = arr(ticket && ticket.questions).some(q => q && q.answer == null);
+    const key = live.state === 'attention' || (asks && live.state !== 'working') ? 'you' : live.state === 'starting' ? 'starting' : live.state === 'idle' ? 'idle' : 'working';
+    return {state: key, word: HELPER_WORDS[key], detail: key === 'you' ? (asks ? 'Your answer' : 'Your OK on the screen') : ''};
+  }
+  /* Rows of the Helpers list (Home side panel; Focus draws the same widget): one per running helper, in the order
+     working, starting, waits for you, waiting, idle, stuck. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
+  const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck'];
+  function helperRows(tickets, runs) {
+    const out = [];
+    for (const t of arr(tickets)) {
+      const run = runs && runs[t.id], st = helperState(run, t);
+      if (!st) continue;
+      const tasks = arr(t.checklist).filter(c => c && !c.wont_do), at = tasks.findIndex(c => c.state === 'doing');
+      const n = at >= 0 ? at : tasks.findIndex(c => !c.done);
+      out.push({ticket: t, ...st, step: tasks.length && n >= 0 ? {n: n + 1, of: tasks.length} : null,
+        minutes: Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
+        idle: Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null,
+        finished: ['review', 'done', 'dropped'].includes(t.status)});
+    }
+    return out.sort((a, b) => HELPER_ORDER.indexOf(a.state) - HELPER_ORDER.indexOf(b.state));
+  }
   /* Links to other running pages of this workspace (label and address come from the services data). */
   function serviceLinks(services, ownOrigin) {
     return arr(services).filter(s => s && s.running === true && typeof s.url === 'string' && /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/.test(s.url)
@@ -536,5 +567,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

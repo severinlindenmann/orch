@@ -221,6 +221,61 @@ def signal(rec: dict | None, waits: list[dict]) -> str:
     return "waiting" if waits else "idle"
 
 
+STUCK_MINUTES = 20  # idle at its prompt this long with nothing to wait on: Stuck, not Idle
+HELPER_WORDS = {
+    "working": "Working",
+    "starting": "Starting",
+    "you": "Waits for you",
+    "waiting": "Waiting",
+    "idle": "Idle",
+    "stuck": "Stuck",
+}
+
+
+def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict | None:
+    """The ONE state of a helper that every page shows (Home, the ticket page, Focus): a key, its word and a
+    plain detail line. None when no helper runs (signal none or ended)."""
+    if sig in ("none", "ended"):
+        return None
+    detail = ""
+    if sig == "stale":
+        key, detail = "stuck", "No sign of life for a while"
+    elif sig == "idle":
+        idle = idle_seconds or 0
+        key = "stuck" if idle >= STUCK_MINUTES * 60 else "idle"
+        detail = f"Nothing running for {span(idle)}" if idle_seconds is not None else "Nothing running"
+    elif sig == "waiting":
+        person = [w for w in waits if w.get("kind") == "person"]
+        if person:
+            key = "you"
+            answer, ok = any(w.get("ref") for w in person), any(not w.get("ref") for w in person)
+            detail = {
+                (True, False): "Your answer",
+                (False, True): "Your OK on the screen",
+                (True, True): "Your answer and your OK on the screen",
+            }[(answer, ok)]
+        else:
+            key = "waiting"
+            detail = "Waits on " + ", ".join(w["what"] for w in waits if w.get("what"))
+    elif sig == "starting":
+        key = "starting"
+    else:
+        key = "working"
+        cmds = [w["label"] for w in waits if w.get("kind") == "command" and w.get("label")]
+        if cmds:
+            detail = "Running " + ", ".join(cmds)
+    return {"state": key, "word": HELPER_WORDS[key], "detail": detail}
+
+
+def last_activity(ticket: dict | None) -> dict | None:
+    """When a helper last wrote to the ticket and what (its newest history line), or None."""
+    for h in reversed((ticket or {}).get("history") or []):
+        if isinstance(h, dict) and str(h.get("by") or "").startswith("agent:") and h.get("at"):
+            text = " ".join(str(h.get("text") or "").split())[:200]
+            return {"at": h["at"], "text": text, "seconds": _age(h["at"])}
+    return None
+
+
 def describe(root: Path, tid: str, rec: dict | None = None, table: list | None = None) -> dict:
     """The monitor fields of one ticket's run (orch run status and orch run list share them)."""
     rec = runs.read(root, tid) if rec is None else rec
@@ -229,8 +284,11 @@ def describe(root: Path, tid: str, rec: dict | None = None, table: list | None =
         ticket = tickets.load(root, tid)
     waits = waiting_on(root, rec, ticket, table)
     since = idle_since(rec)
+    sig = signal(rec, waits)
     return {
-        "signal": signal(rec, waits),
+        "signal": sig,
+        "helper": helper_state(sig, waits, _age(since)),
+        "last_activity": last_activity(ticket),
         "waiting_on": waits,
         "idle_since": since,
         "idle_seconds": _age(since),

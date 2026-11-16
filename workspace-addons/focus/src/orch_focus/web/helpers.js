@@ -84,9 +84,14 @@
   }
   /* The one source for the session's words: pill, feed headline, and whether work is shown as happening now
      ("Now:" marks and the "Waiting for the first step…" row). pill null: not started, the ticket's own status word. */
+  const HELPER_KEY = {working: ['running', 'Working', true], starting: ['running', 'Starting', true], you: ['waiting-for-you', 'Waits for you', false],
+    waiting: ['paused', 'Waiting', false], idle: ['paused', 'Idle', false], stuck: ['paused', 'Stuck', false]};
   function sessionState(v) {
     const t = v.ticket || {}, run = v.run || {};
     if (v.state === 'done') return {key: 'finished', pill: 'Done', headline: 'Work completed', active: false};
+    /* a running helper: the core's one state word (ORCH-61), the same as the dashboard's Home and ticket page */
+    const hs = run.running === true && run.helper && HELPER_KEY[run.helper.state];
+    if (hs) return {key: hs[0], pill: hs[1], headline: hs[2] ? 'The work is taking shape' : String(run.helper.detail || hs[1]), active: hs[2], detail: String(run.helper.detail || '')};
     if ((t.questions || []).some(q => q.answer == null)) return {key: 'waiting-for-you', pill: 'Needs you', headline: '', active: false};
     if (v.state === 'needs') return {key: 'waiting-for-you', pill: 'Needs you', headline: run.running === true ? 'The work is taking shape' : 'Work so far', active: run.running === true};
     if (v.state === 'working') return {key: 'running', pill: 'Working', headline: 'The work is taking shape', active: true};

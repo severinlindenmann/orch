@@ -188,3 +188,45 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
     data = json.loads(out)
     assert data["lines"] == ["two", "three"] and data["signal"] == "working"
     assert all(a[0] == "capture-pane" for a in calls)  # nothing is typed into the session
+
+
+@pytest.mark.parametrize(
+    "sig, waits, idle, want",
+    [
+        ("none", [], None, None),
+        ("ended", [], None, None),
+        ("working", [], None, ("working", "Working", "")),
+        ("working", [{"kind": "command", "label": "pytest", "what": "pytest (running 1 min)"}], None,
+         ("working", "Working", "Running pytest")),
+        ("starting", [], None, ("starting", "Starting", "")),
+        ("waiting", [{"kind": "person", "what": "an answer from the person", "ref": "q1"}], 60,
+         ("you", "Waits for you", "Your answer")),
+        ("waiting", [{"kind": "person", "what": "the person's OK on the screen"}], None,
+         ("you", "Waits for you", "Your OK on the screen")),
+        ("waiting", [{"kind": "person", "what": "x", "ref": "q1"}, {"kind": "person", "what": "y"}], None,
+         ("you", "Waits for you", "Your answer and your OK on the screen")),
+        ("waiting", [{"kind": "command", "label": "pr-green.sh", "what": "pr-green.sh (running 6 min)"}], 60,
+         ("waiting", "Waiting", "Waits on pr-green.sh (running 6 min)")),
+        ("idle", [], 300, ("idle", "Idle", "Nothing running for 5 min")),
+        ("idle", [], runwatch.STUCK_MINUTES * 60, ("stuck", "Stuck", "Nothing running for 20 min")),
+        ("stale", [], None, ("stuck", "Stuck", "No sign of life for a while")),
+    ],
+)  # fmt: skip
+def test_helper_state_is_one_word_per_signal(sig, waits, idle, want):
+    got = runwatch.helper_state(sig, waits, idle)
+    assert (got if got is None else (got["state"], got["word"], got["detail"])) == want
+
+
+def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run, monkeypatch, child):
+    tid = new_ticket()
+    run("ask", tid, "Which colour?", "--option", "red", "--option", "blue", "--by", "agent:helper")
+    _live(proj, tid, "idle", child)
+    monkeypatch.setattr(runwatch, "_table", lambda: [])
+    data = json.loads(run("run", "status", tid, "--json")[1])
+    assert data["helper"] == {"state": "you", "word": "Waits for you", "detail": "Your answer"}
+    last = data["last_activity"]
+    assert last["at"].endswith("Z") and last["seconds"] >= 0 and last["text"]
+    rows = json.loads(run("run", "list", "--json")[1])["runs"]
+    assert rows[0]["helper"]["word"] == "Waits for you"  # orch run list says the same
+    data = json.loads(run("run", "status", new_ticket("B"), "--json")[1])
+    assert data["helper"] is None and data["last_activity"] is None

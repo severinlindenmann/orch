@@ -472,7 +472,7 @@ test('home: notices fold into one quiet line, are not counted, and Show lists th
   assert.equal(c.needsToday().count, 1);
   assert.match(text, /1 thing needs you/); assert.match(text, /3 sync notes, nothing to do/); assert.doesNotMatch(text, /Restored it/);
 });
-test('home: Working now and Finished are side cards; an empty Finished says what was last', () => {
+test('home (read-only copy, no run data): Working now and Finished are side cards; an empty Finished says what was last', () => {
   const t = new Date(); t.setDate(t.getDate() - 1);
   const items = [{id:'w', title:'Plan', status:'active', checklist:[{id:'c1', text:'Send a test mail'}]}, {id:'d', title:'Old sign', status:'done', done_at:t.toISOString()}];
   const home = context(items, {parse:v => v ? new Date(v) : null, state:{runs:{}, settings:{}}}).home(), text = JSON.stringify(home);
@@ -573,8 +573,8 @@ test('Watch live and Stop exist only while a helper is at work (not on a ticket 
   assert.equal(helpers.helperAlive({status:'active'}, null), false);
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   // one Stop / Watch live pair, in the helper line; the header keeps only status, title, sentence and the menu
-  assert.equal((ticket.match(/ticketButton\('Stop'/g) || []).length, 1);
-  assert.match(ticket, /function agentBar[\s\S]*className:'btn primary sm'[\s\S]*Watch live[\s\S]*ticketButton\('Stop', 'outline sm'/);
+  assert.equal((ticket.match(/ticketButton\((idle \? 'Stop idle helper' : )?'Stop'/g) || []).length, 1);
+  assert.match(ticket, /function agentBar[\s\S]*className:'btn primary sm'[\s\S]*Watch live[\s\S]*ticketButton\(idle \? 'Stop idle helper' : 'Stop', 'outline sm'/);
   assert.doesNotMatch(ticket, /Watch live ↗/);
   assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
 });

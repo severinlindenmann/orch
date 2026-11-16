@@ -187,7 +187,7 @@ test('UX B: the picker says its list is on Home too, and row actions are 32 px m
   assert.match(src, /They are on Home too\./);
   assert.match(src, /\['review', 'Sent back to you', 'Check result'\]/);
 });
-test('UX B2: Focus opens on the next ticket that needs you (oldest question, then oldest result); nothing waiting -> start page', () => {
+test('UX B2 / ORCH-61: Focus opens on its start page (the Helpers list); the next ticket that needs you is one button', () => {
   const H = require('../src/orch_focus/web/helpers.js');
   const rows = [{id:'a', status:'review', updated_at:'2026-11-01T00:00:00Z'}, {id:'b', status:'waiting', question_count:1, updated_at:'2026-11-05T00:00:00Z'},
     {id:'c', status:'waiting', question_count:1, updated_at:'2026-11-03T00:00:00Z'}, {id:'d', status:'active'}, {id:'e', status:'review', updated_at:'2026-11-02T00:00:00Z'}];
@@ -197,8 +197,8 @@ test('UX B2: Focus opens on the next ticket that needs you (oldest question, the
   assert.equal(H.nextNeeding([]), null);
   const src = web('ticket.js');
   assert.match(src, /INAPP \? window\.FocusHelpers\.nextNeeding\(list\) : null/);
-  assert.match(src, /location\.replace\(P \+ '\/t\/'/);
-  assert.match(src, /all=1/); assert.match(src, /See everything on Home/);
+  assert.doesNotMatch(src, /location\.replace\(P \+ '\/t\/'/);
+  assert.match(src, /Open the next ticket that needs you/); assert.match(src, /See everything on Home/);
   assert.match(src, /INAPP && \(status === 'waiting' \|\| status === 'review'\)/);
 });
 
