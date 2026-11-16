@@ -1017,7 +1017,7 @@ function startAddon(id) {
   activeAddon = id;
   paintAddon(id);
   loadAddon(id);
-  if (!snapshot) addonTimer = setInterval(() => loadAddon(id), 15000);
+  if (!snapshot) addonTimer = setInterval(() => { if (document.visibilityState !== 'hidden') loadAddon(id); }, 15000);
 }
 
 // An add-on row's switch or button: the DOM only carries verb + ticket (blocks.js checked them); the page adds

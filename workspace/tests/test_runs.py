@@ -630,3 +630,13 @@ def test_option_like_session_never_resumed(proj, new_ticket, sid, agent, mode, o
     assert not plan["resumed"]
     assert plan["session"] != sid
     assert sid not in plan["argv"]
+
+
+def test_status_of_several_tickets_is_one_call_with_the_same_answers(proj, new_ticket, run):
+    a, b = new_ticket("A"), new_ticket("B")
+    single = {t: json.loads(run("run", "status", t, "--json")[1]) for t in (a, b)}
+    code, out, _ = run("run", "status", a, b, "t_nosuchone", "--json")
+    assert code == 0
+    got = json.loads(out)["runs"]
+    assert got[a] == single[a] and got[b] == single[b]
+    assert "error" in got["t_nosuchone"]  # one unreadable ticket does not spoil the others
