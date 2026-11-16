@@ -47,8 +47,9 @@ test('list groups have owner order and every ticket belongs to exactly one group
   const items = ['done','review','ready','open','active','waiting'].map(status => ({id:status,status}));
   items.push({id:'question',status:'active',questions:[{text:'Choose?'}]});
   const groups = context(items).ticketGroups(items);
-  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','To do','Check','Done']);
-  assert.deepEqual(Array.from(groups, g => Array.from(g.tickets, t => t.id)), [['waiting','question'],['active'],['ready','open'],['review'],['done']]);
+  // ORCH-62: a waiting ticket without an open question is in its own group, not Needs you
+  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','Waiting','To do','Check','Done']);
+  assert.deepEqual(Array.from(groups, g => Array.from(g.tickets, t => t.id)), [['question'],['active'],['waiting'],['ready','open'],['review'],['done']]);
 });
 test('home renders one need card per ticket with question count and yellow chip', () => {
   const t = {id:'p',title:'Pick a plan',status:'active',questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
@@ -100,7 +101,7 @@ test('ORCH-14: an epic says Epic on its board card; a ticket inside it says Part
   assert.match(JSON.stringify(c.boardCard(items[2])), /Part of the epic Dashboard fixes/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[2])), /Step of/);
 });
-test('parts on the real /api/state shape: list nests parts under the parent whatever their status', () => {
+test('parts on the real /api/state shape: each part sits in its OWN status group (ORCH-62), standing alone with its parent named', () => {
   const real = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/state-pilatus-parts.json'), 'utf8'));
   const items = real.tickets, [parent] = items.filter(t => t.key === 'PIL-2');
   assert.deepEqual(parent.children, ['t_1wis33', 't_fhm1w4']);
@@ -108,12 +109,13 @@ test('parts on the real /api/state shape: list nests parts under the parent what
   assert.equal(helpers.parentOf(items, items.find(t => t.key === 'PIL-10')).key, 'PIL-2');
   const c = context(items, {state:real});
   const groups = c.ticketGroups(c.ticketParents(items));
-  const waiting = groups.find(g => g.status === 'waiting'), open = groups.find(g => g.status === 'open');
-  assert.equal([...waiting.tickets.map(t => t.key)].sort().join(), 'PIL-10,PIL-11,PIL-2');
-  assert.ok(!open.tickets.some(t => t.key === 'PIL-10'));
-  const rows = helpers.treeRows(waiting.tickets);
-  assert.equal(rows.find(r => r.ticket.key === 'PIL-2').children, 2);
-  assert.equal(rows.filter(r => /PIL-1[01]/.test(r.ticket.key)).map(r => r.depth).join(), '1,1');
+  const blocked = groups.find(g => g.status === 'blocked'), open = groups.find(g => g.status === 'open');
+  assert.ok(blocked.tickets.some(t => t.key === 'PIL-2') && !blocked.tickets.some(t => /PIL-1[01]/.test(t.key)));
+  assert.ok(['PIL-10', 'PIL-11'].every(k => open.tickets.some(t => t.key === k)), 'To do parts sit in To do');
+  const rows = helpers.treeRows(open.tickets).filter(r => /PIL-1[01]/.test(r.ticket.key));
+  assert.equal(rows.map(r => r.depth).join(), '0,0');
+  assert.ok(rows.every(r => r.parentMissing), 'each names its parent on a Step of line');
+  for (const g of groups) assert.equal(g.tickets.filter(t => c.ticketGroupOf(t) !== g.status).length, 0, 'a group holds only its own status');
 });
 
 test('Copy/Repeat capability is read from the real state.addons shape (active add-ons only, no active field)', () => {

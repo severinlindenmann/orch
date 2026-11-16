@@ -10,8 +10,18 @@ function ticketFileError(file, files) {
   if (files.reduce((sum, item) => sum + item.size, file.size) > 100 * 1024 * 1024) return 'Files are over 100 MB';
   return '';
 }
+// ORCH-62: a first line longer than the limit is cut at a whole word, never right after an abbreviation such as
+// "e.g." (it read like the end of a sentence), and ends with "…" so it reads as cut. The core cuts the same way.
+const TITLE_ABBR = /(?:^|\s)(?:e\.\s?g\.|i\.\s?e\.|etc\.|z\.\s?B\.|d\.\s?h\.|u\.\s?a\.|bzw\.|vs\.|ca\.|approx\.)$/i;
+const TITLE_TAIL = /\s(?:and|or|but|then|for|to|of|the|a|an|with|in|on|at|by|like|und|oder|dann|für|mit|der|die|das|zu)$/i;  // a cut never ends on a small word
 function ticketTextTitle(text, limit) {
-  return (text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '').slice(0, limit).trim();  // orch keeps no trailing space
+  const line = (text.split(/\r?\n/).map(l => l.trim()).find(Boolean) || '').replace(/\s+/g, ' ');
+  if (line.length <= limit) return line;
+  let cut = line.slice(0, limit - 1);
+  const space = cut.lastIndexOf(' ');
+  if (line[limit - 1] !== ' ' && space > limit / 2) cut = cut.slice(0, space);
+  for (let prev = ''; prev !== cut;) { prev = cut; cut = cut.replace(TITLE_ABBR, '').replace(/[\s,;:.\-–—(]+$/, ''); if (cut.length > limit / 2) cut = cut.replace(TITLE_TAIL, ''); }
+  return (cut || line.slice(0, limit - 1).trim()) + '…';
 }
 // "Pasted text (about 3 pages)": about 3000 characters to a page.
 function pastedLabel(text) {

@@ -1489,10 +1489,40 @@ LONG_NOTE = (
 PLACEHOLDER_TITLE = 80  # characters of a person's text kept as the title until the agent writes one
 
 
+_TITLE_ABBR = re.compile(
+    r"(?:^|\s)(?:e\.\s?g\.|i\.\s?e\.|etc\.|z\.\s?B\.|d\.\s?h\.|u\.\s?a\.|bzw\.|vs\.|ca\.|approx\.)$", re.I
+)
+
+
+_TITLE_TAIL = re.compile(  # a cut never ends on a small word
+    r"\s(?:and|or|but|then|for|to|of|the|a|an|with|in|on|at|by|like|und|oder|dann|für|mit|der|die|das|zu)$",
+    re.I,
+)
+
+
+def cut_title(line: str, limit: int = PLACEHOLDER_TITLE) -> str:
+    """ORCH-62: a line longer than `limit` is cut at a whole word, never right after an abbreviation such as
+    "e.g." (it read like the end of a sentence), and ends with "…" so it reads as cut. The dashboard's New
+    ticket dialog cuts the same way (ticketTextTitle)."""
+    if len(line) <= limit:
+        return line
+    cut = line[: limit - 1]
+    space = cut.rfind(" ")
+    if line[limit - 1] != " " and space > limit / 2:
+        cut = cut[:space]
+    prev = None
+    while prev != cut:
+        prev = cut
+        cut = re.sub(r"[\s,;:.\-–—(]+$", "", _TITLE_ABBR.sub("", cut))
+        if len(cut) > limit / 2:
+            cut = _TITLE_TAIL.sub("", cut)
+    return (cut or line[: limit - 1].strip()) + "…"
+
+
 def placeholder_title(text: str) -> str:
     """The first words of what a person wrote, on one line: the title until the agent writes the real one."""
     first = next((x for x in clean_untrusted(str(text), 4000).splitlines() if x.strip()), "")
-    return " ".join(first.split())[:PLACEHOLDER_TITLE].strip() or "New ticket"
+    return cut_title(" ".join(first.split())).strip() or "New ticket"
 
 
 def needs_agent_title(text: str) -> bool:

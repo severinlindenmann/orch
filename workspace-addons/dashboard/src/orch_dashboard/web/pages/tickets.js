@@ -13,7 +13,7 @@ function savedView() {
 const changesPending = t => t?.bring_back?.state === 'waiting';
 function inView(t, view, nowMs = Date.now()) {
   const status = window.DashHelpers.columnOf(shown(t).status);
-  if (view === 'needs-you') return (status !== 'done' && (questions(t).length > 0 || ['waiting', 'review'].includes(status))) || changesPending(t);
+  if (view === 'needs-you') return (status !== 'done' && (questions(t).length > 0 || status === 'review')) || changesPending(t);
   if (view === 'working') return status === 'active';
   if (view === 'done-week') { const at = Date.parse(t.done_at || t.updated_at); return status === 'done' && (!Number.isFinite(at) || nowMs - at <= 7 * 86400000); }
   return true;
@@ -41,14 +41,26 @@ function ticketParents(items) {
     return parent ? {...t, parent:parent.id} : t;
   });
 }
+// ORCH-62: a waiting ticket without an open question only waits (for another ticket, a time or the outside): its own
+// group, never Needs you, and not counted as Needs you.
+const ticketWaitsOnly = t => window.DashHelpers.columnOf(shown(t).status) === 'waiting' && !questions(t).length;
+function ticketGroupOf(t) { return ticketWaitsOnly(t) ? 'blocked' : ticketColumn(t); }
 function ticketGroups(items) {
-  const groups = ['waiting', 'active', 'open', 'review', 'done'].map(status => [status, window.DashHelpers.STATUS_WORD[status]]).map(([status, title]) => ({status, title, tickets:[]}));
-  const byId = new Map(items.map(t => [t.id, t]));
-  const own = t => { const column = window.DashHelpers.columnOf(shown(t).status); return questions(t).length || column === 'waiting' ? 'waiting' : column; };
-  // A part sits under its parent in the parent's group, whatever its own status is (its status chip still says it).
-  const rootOf = t => { const seen = new Set(); while (t && byId.has(t.parent) && !seen.has(t.id)) { seen.add(t.id); t = byId.get(t.parent); } return t; };
-  for (const t of items) groups.find(group => group.status === own(rootOf(t)))?.tickets.push(t);
+  const groups = ['waiting', 'active', 'blocked', 'open', 'review', 'done'].map(status => ({status, title:status === 'blocked' ? blockedTitle(items) : window.DashHelpers.STATUS_WORD[status], tickets:[]}));
+  // ORCH-62: every ticket sits in the group of its OWN status, so a group's count is the rows it shows and equals its
+  // filter. A part whose parent is in another group stands alone with a "Step of <parent>" line.
+  for (const t of items) groups.find(group => group.status === ticketGroupOf(t))?.tickets.push(t);
   return groups;
+}
+const blockedTitle = items => items.filter(ticketWaitsOnly).every(t => t.waiting_on?.kind === 'ticket') ? 'Waiting for another ticket' : 'Waiting';
+// "Waits for ORCH-56" under a ticket that waits for another one; "Waits until 18:00" for a time.
+function waitsLine(t) {
+  if (!ticketWaitsOnly(t)) return null;
+  const w = t.waiting_on || {};
+  let text = '';
+  if (w.kind === 'ticket' && w.ref) { const other = tickets().find(o => o.id === w.ref || (o.key && String(o.key).toLowerCase() === String(w.ref).toLowerCase())); text = 'Waits for ' + (other ? other.key || clean(other.title) : 'another ticket'); }
+  else if (w.until) text = 'Waits until ' + (window.UI?.stamp ? window.UI.stamp(w.until) : w.until);
+  return text ? h('p', {className:'meta ticket-sub', 'data-key':'waits-' + t.id}, text) : null;
 }
 function boardParentLine(t) {
   const parent = boardParent(tickets(), t);
@@ -107,7 +119,7 @@ const widthSpan = pct => { const node = h('span', {}); node.style.width = pct + 
 function ticketNext(t) {
   const status = shown(t).status, need = needsList().find(n => n.ticket === t.id);
   let text = '', action = null;
-  if (status === 'waiting' || questions(t).length) {
+  if (questions(t).length || (status === 'waiting' && !ticketWaitsOnly(t))) {
     text = window.DashHelpers.questionPreview(t) || need?.title || '';
     if (!snapshot) {
       action = button('Answer', 'outline sm', event => {
@@ -116,7 +128,7 @@ function ticketNext(t) {
         else { ticketTabs.set(t.id, 'questions'); location.hash = href(t.id); }
       });
     }
-    if (text) text = 'Next step: ' + text;
+    if (text) text = 'Question: ' + text;
   } else if (status === 'review') {
     action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
@@ -142,18 +154,22 @@ function ticketMenu(t, scope) {
   return menu;
 }
 // Status badge of a table row: icon + the shared word (To do, Working, Needs you, Check, Done).
-const STATUS_BADGE = {open:['○', 'todo'], active:['◉', 'working'], waiting:['!', 'needs'], review:['◇', 'review'], done:['✓', 'done']};
+const STATUS_BADGE = {open:['○', 'todo'], active:['◉', 'working'], waiting:['!', 'needs'], blocked:['○', 'todo'], review:['◇', 'review'], done:['✓', 'done']};
 function ticketColumn(t) { const status = shown(t).status; return questions(t).length && status !== 'done' ? 'waiting' : window.DashHelpers.columnOf(status); }
-function statusBadge(t) {
-  const column = ticketColumn(t), [icon, cls] = STATUS_BADGE[column] || STATUS_BADGE.open;
-  return h('span', {className:'badge ' + cls}, icon + ' ' + (window.DashHelpers.STATUS_WORD[column] || column));
+// ORCH-62: the group says the status; a row carries a chip only when its helper is Idle or Stuck.
+function helperChip(t) {
+  const run = state?.runs?.[t.id], st = window.DashHelpers.helperState(run, t);
+  if (!st || !['idle', 'stuck'].includes(st.state)) return null;
+  const mins = Number.isFinite(run?.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null;
+  return {chip:window.UI?.helperPill ? window.UI.helperPill(st.state, st.word) : chip(st.word, st.state === 'stuck' ? 'danger' : 'outline'),
+    line:st.state === 'idle' ? (mins != null ? 'Nothing running for ' + mins + ' min' : 'Nothing running') : st.detail || ''};
 }
+// Steps as "3/4" with a bar, always on one line (ORCH-62); "–" when there are none.
 function stepsCell(t, row) {
   const tasks = array(t.checklist), total = tasks.length || row.children || 0, done = tasks.length ? tasks.filter(window.DashHelpers.resolved).length : row.done || 0;
-  if (ticketColumn(t) === 'waiting') return h('span', {className:'meta'}, 'Question for you');
   if (!total) return h('span', {className:'meta'}, '–');
-  return h('div', {className:'step-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-label':'Steps done', 'aria-valuemin':0, 'aria-valuemax':total, 'aria-valuenow':done}, widthSpan(Math.round(done / total * 100))),
-    h('span', {className:'meta'}, window.DashHelpers.stepsText(done, total)));
+  return h('div', {className:'step-progress', title:window.DashHelpers.stepsText(done, total)}, h('div', {className:'progress', role:'progressbar', 'aria-label':'Steps done', 'aria-valuemin':0, 'aria-valuemax':total, 'aria-valuenow':done}, widthSpan(Math.round(done / total * 100))),
+    h('span', {className:'meta steps-count'}, done + '/' + total));
 }
 // One table row (a ticket or a part under its parent). `section` is the group it sits in.
 function treeBranch(rows, index, section) {
@@ -162,15 +178,14 @@ function treeBranch(rows, index, section) {
   const open = treeExpanded.has(t.id), children = [];
   for (let i = index + 1; i < rows.length && rows[i].depth > row.depth; i++) if (rows[i].depth === row.depth + 1) children.push(i);
   const next = ticketNext(t), nextText = next?.querySelector('.meta'), nextAction = next?.querySelector('.btn');
-  const sub = changesLine(t) || (nextText ? h('p', {className:'meta ticket-sub'}, nextText.textContent) : null) || (row.parentMissing ? parentLine(t) : null);
+  const helper = helperChip(t);
+  const sub = changesLine(t) || waitsLine(t) || (nextText ? h('p', {className:'meta ticket-sub'}, nextText.textContent) : null) || (helper?.line ? h('p', {className:'meta ticket-sub'}, helper.line) : null) || (row.parentMissing ? parentLine(t) : null);
   const at = shown(t).status === 'done' ? t.done_at || t.updated_at : t.updated_at;
   const node = h('tr', {className:'ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
     h('td', {className:'ticket-cell'}, h('div', {className:'ticket-line'},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
-      h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t)), sub),
-    h('td', {}, statusBadge(t)),
-    h('td', {}, name(t.owner) ? h('span', {className:'who'}, h('span', {className:'avatar', 'aria-hidden':'true'}, initials(t.owner)), name(t.owner)) : h('span', {className:'meta'}, '–')),
-    h('td', {}, stepsCell(t, row)),
+      h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t), helper?.chip), sub),
+    h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'meta when', title:String(at || '')}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
     h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, nextAction, ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
@@ -263,7 +278,7 @@ function moveTicket(id, status, undoing = false, extra = {}) {
   run.finally(() => { if (movePending.get(id) === run) movePending.delete(id); });
   return run;
 }
-const GROUP_ORDER = ['waiting', 'review', 'active', 'open', 'done'];
+const GROUP_ORDER = ['waiting', 'review', 'active', 'blocked', 'open', 'done'];
 const foldedGroups = new Set(), searchFolds = new Set();
 let foldSeen = false;
 // The group's main action for all its tickets: "Answer 2 questions" opens the first question, "Check 3 results" the first result.
@@ -294,11 +309,11 @@ function ticketTable(visible) {
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = folds.has(status);
     const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(group.tickets.length)));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
-    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
+    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:4}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
     if (!folded) for (const {i} of roots) body.push(treeBranch(rows, i, status));
   }
   return h('div', {className:'table-wrap', 'data-key':'ticket-table'}, h('table', {className:'ticket-table'},
-    h('thead', {}, h('tr', {}, [searchHead(visible.length), 'Status', 'Owner', 'Steps done', 'Last change'].map(label => h('th', {scope:'col'}, label)), h('th', {scope:'col'}, h('span', {className:'sr-only'}, 'Actions')))),
+    h('thead', {}, h('tr', {}, [searchHead(visible.length), 'Steps', 'Last change'].map(label => h('th', {scope:'col'}, label)), h('th', {scope:'col'}, h('span', {className:'sr-only'}, 'Actions')))),
     h('tbody', {}, body)));
 }
 function list() {

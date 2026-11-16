@@ -16,7 +16,7 @@ def test_long_or_multiline_text_gets_a_placeholder_title_and_the_flag(proj):
     assert t["title"] == "Evaluate the AI inventory prompts" and t["title_auto"] is True
     assert tickets.load(proj, t["id"])["title_auto"] is True
     assert tickets.create_from_input(proj, "one\ntwo", "human:t")["title_auto"] is True
-    assert tickets.create_from_input(proj, "x" * 200, "human:t")["title"] == "x" * 80
+    assert tickets.create_from_input(proj, "x" * 200, "human:t")["title"] == "x" * 79 + "…"
     short = tickets.create_from_input(proj, "Fix the login page", "human:t")
     assert short["title"] == "Fix the login page" and "title_auto" not in short
     assert tickets.create_from_input(proj, "  \n ", "human:t")["title"] == "New ticket"
@@ -205,3 +205,18 @@ def test_long_note_on_an_add_on_ticket_gets_no_plan_line(proj):
     t["ext"] = {"factory": {"role": "order"}}
     prompt = runs.fresh_prompt(t, [], proj)
     assert "write a plan, split it into tasks" not in prompt and "word word word" in prompt
+
+
+def test_a_long_first_line_is_cut_at_a_whole_word_never_after_e_g(proj):
+    """ORCH-62: 'let me add like a "Release" Tag ... and then for e.g.' was the title: a cut at 80 characters
+    that ended on an abbreviation and read like a sentence.
+    Now: a whole word, no trailing small word, and "…"."""
+    text = (
+        'let me add like a "Release" Tag to the properties of a ticket and then for e.g. on the ticket page '
+        "group them also by release tags"
+    )
+    title = tickets.create_from_input(proj, text, "human:t")["title"]
+    assert title == 'let me add like a "Release" Tag to the properties of a ticket…'
+    assert len(tickets.cut_title("word " * 40)) <= tickets.PLACEHOLDER_TITLE
+    assert tickets.cut_title("Use short names, i.e. " + "y" * 90, 30).endswith("names…")
+    assert tickets.cut_title("Fix the login page") == "Fix the login page"

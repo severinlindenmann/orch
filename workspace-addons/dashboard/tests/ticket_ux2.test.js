@@ -111,3 +111,52 @@ test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch pick, an
   ctx.snapshot = true;
   assert.equal(text(ctx.modelField({id:'t1'})), 'orch picks it when work starts');
 });
+test('ORCH-62: every ticket sits in its own status group, so group counts match the rows and the filters', () => {
+  const items = [
+    {id:'p', status:'active', title:'Parent'},
+    {id:'c1', parent:'p', status:'done'}, {id:'c2', parent:'p', status:'open'}, {id:'c3', parent:'p', status:'review'},
+    {id:'w', status:'active'}, {id:'q', status:'waiting', questions:[{text:'Which?'}]},
+    {id:'b', status:'waiting', waiting_on:{kind:'ticket', ref:'w'}},
+  ];
+  const c = listCtx({tickets:() => items});
+  const groups = JSON.parse(JSON.stringify(Object.fromEntries(c.ticketGroups(items).map(g => [g.status, g.tickets.map(t => t.id)]))));
+  assert.deepEqual(groups.active, ['p', 'w']);
+  assert.deepEqual(groups.done, ['c1']);
+  assert.deepEqual(groups.open, ['c2']);
+  assert.deepEqual(groups.review, ['c3']);
+  assert.deepEqual(groups.waiting, ['q'], 'only a ticket with an open question needs you');
+  assert.deepEqual(groups.blocked, ['b']);
+  assert.equal(c.ticketGroups(items).find(g => g.status === 'blocked').title, 'Waiting for another ticket');
+  assert.equal(items.filter(t => c.inView(t, 'working')).length, groups.active.length, 'Working filter = Working group');
+  assert.ok(!c.inView(items[6], 'needs-you'), 'waiting for another ticket is not Needs you');
+  assert.ok(c.inView(items[5], 'needs-you'));
+});
+test('ORCH-62: a ticket waiting for another names it; a time wait says until when', () => {
+  const items = [{id:'t_a', key:'ORCH-56', status:'active'}, {id:'b', status:'waiting', waiting_on:{kind:'ticket', ref:'t_a'}}];
+  const c = listCtx({tickets:() => items});
+  assert.equal(text(c.waitsLine(items[1])), 'Waits for ORCH-56');
+  assert.match(text(c.waitsLine({id:'x', status:'waiting', waiting_on:{kind:'time', until:'2026-11-17T08:00:00Z'}})), /^Waits until /);
+  assert.equal(c.waitsLine({id:'q', status:'waiting', questions:[{text:'Which?'}]}), null);
+  assert.equal(c.ticketGroups([{id:'x', status:'waiting', waiting_on:{kind:'time', until:'2026-11-17T08:00:00Z'}}]).find(g => g.status === 'blocked').title, 'Waiting');
+});
+test('ORCH-62: steps read 3/4 on one line, never "3 of 4 steps" split over lines', () => {
+  const c = listCtx({h:(...a) => Object.assign(h(...a), {style:{}})});
+  const cell = c.stepsCell({checklist:[{done:true}, {done:true}, {done:true}, {}]}, {});
+  assert.equal(nodes(cell).find(n => /steps-count/.test(n.attrs?.className || '')).children.join(''), '3/4');
+  assert.equal(text(c.stepsCell({status:'waiting', questions:[{text:'Which?'}]}, {})), '–', 'no "Question for you" in the steps column');
+});
+test('ORCH-62: a chip only for an Idle or Stuck helper, with how long nothing ran', () => {
+  const idle = {running:true, idle_seconds:18 * 60, helper:{state:'idle'}}, busy = {running:true, helper:{state:'working'}};
+  const c = listCtx({state:{runs:{i:idle, w:busy, s:{state:'maybe-stale'}}}});
+  const i = c.helperChip({id:'i', status:'active'});
+  assert.equal(text(i.chip), 'Idle');
+  assert.equal(i.line, 'Nothing running for 18 min');
+  assert.equal(text(c.helperChip({id:'s', status:'active'}).chip), 'Stuck');
+  assert.equal(c.helperChip({id:'w', status:'active'}), null, 'a working helper gets no chip');
+  assert.equal(c.helperChip({id:'n', status:'open'}), null);
+  assert.doesNotMatch(listSrc, /'Owner', 'Steps done'|'Status', 'Owner'/, 'no Status or Owner column');
+});
+test('ORCH-62: an open question reads "Question: ..." under the title', () => {
+  const c = listCtx();
+  assert.match(text(c.ticketNext({id:'q', status:'waiting', questions:[{text:'Start the run?'}]})), /^Question: /);
+});
