@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Login warning · orch (draft)</title>
+<link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/gallery.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/interaction.css">
+</head>
+<body><main class="page wide" aria-label="Login warning draft">
+<div class="page-heading"><div><h1>When a login runs out</h1><p>Draft 16 Nov 2026 · ORCH-43 · built only from parts the design system already has. Nothing here is in the product yet.</p></div></div>
+
+<section class="card"><header class="card-h"><h2>On the computer: dashboard Home</h2></header>
+<div class="card-row"><div class="grow"><h3>1 · Three days before</h3><p class="meta">One more row in "Needs you", with the tickets the helper stops on and one button.</p></div><a class="btn outline sm" href="../../home/home.html?login=soon">Open</a></div>
+<div class="card-row"><div class="grow"><h3>2 · Renew</h3><p class="meta">Press Renew on that row: one small window, one button that opens the tool's own sign-in page. Home then says "renewed" by itself.</p></div><a class="btn outline sm" href="../../home/home.html?login=soon">Open, then press Renew</a></div>
+<div class="card-row"><div class="grow"><h3>3 · After it ran out</h3><p class="meta">The one notice on top of Home, because all helper work stands still. Same Renew button.</p></div><a class="btn outline sm" href="../../home/home.html?login=out">Open</a></div>
+</section>
+
+<section class="card"><header class="card-h"><h2>On the phone</h2></header><div class="pad">
+<div class="device-row">
+ <div class="device-cap"><h3>4 · Three days before</h3><p>One push message, and a row on top of Chats until the login is renewed. The phone only tells you; you renew on the computer.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><h2>Chats</h2></div><div class="app-body">
+   <a class="phone-review" href="#"><span class="tx"><strong>Claude Code login runs out tomorrow</strong><span>22:24 · the helper then stops on 3 tickets · renew it on your computer</span></span></a>
+   <a class="phone-row" href="#"><span class="av">D</span><span class="tx"><strong>Demo</strong><span>Helper: Survey summary is ready to check</span></span></a>
+  </div></div>
+ </div>
+ <div class="device-cap"><h3>5 · After it ran out</h3><p>The same row with the new text. It leaves by itself once the login is renewed.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><h2>Chats</h2></div><div class="app-body">
+   <a class="phone-review" href="#"><span class="tx"><strong>Claude Code login ran out</strong><span>The helper stopped on 3 tickets · renew it on your computer</span></span></a>
+   <a class="phone-row" href="#"><span class="av">D</span><span class="tx"><strong>Demo</strong><span>Helper: Survey summary is ready to check</span></span></a>
+  </div></div>
+ </div>
+</div></div></section>
+
+<section class="card"><header class="card-h"><h2>What I chose, and you can change</h2></header>
+<div class="card-row"><div class="grow"><h3>No new word</h3><p class="meta">It is called "login" everywhere, with the tool's name in front: "Claude Code login", "GitHub login". The button is "Renew". No new page and no new menu entry.</p></div></div>
+<div class="card-row"><div class="grow"><h3>Warning starts 3 days before</h3><p class="meta">Early enough for a weekend, late enough that it is not noise. No setting for it.</p></div></div>
+<div class="card-row"><div class="grow"><h3>A code may have to be pasted once</h3><p class="meta">When you open the dashboard from another computer, the Claude sign-in page ends with a code. The window has one field for it. It goes straight to the tool and is not kept.</p></div></div>
+<div class="card-row"><div class="grow"><h3>The phone warns, the computer renews</h3><p class="meta">Renewing from the phone is not part of this ticket.</p></div></div>
+<div class="card-row"><div class="grow"><h3>Tools that tell no end date</h3><p class="meta">Some logins (GitHub on this computer) give no end date. For those there is no early warning, only the "ran out" notice the moment the login stops working.</p></div></div>
+</section>
+</main></body></html>
