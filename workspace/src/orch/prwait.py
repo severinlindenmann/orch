@@ -208,9 +208,24 @@ class Live:
             time.sleep(15)
             v = self.view()
             if v and v.get("headRefOid") != head:
+                new = v["headRefOid"]
+                # only GitHub's own merge of the checked commit and the base branch: any other new commit
+                # (someone pushed meanwhile) is never taken for it
+                if not self.merge_of(new, head):
+                    return None
                 self.start = time.monotonic()  # the wait for the new checks starts now
-                return v["headRefOid"]
+                return new
         return None
+
+    def merge_of(self, sha: str, head: str) -> bool:
+        """True when `sha` is a merge commit whose first parent is `head` and whose second parent is on the
+        base branch."""
+        got = self.gh_json("api", f"repos/{self.repo}/commits/{sha}")
+        parents = [p.get("sha") for p in (got or {}).get("parents") or [] if isinstance(p, dict)]
+        if len(parents) != 2 or parents[0] != head:
+            return False
+        on_base = self.gh_json("api", f"repos/{self.repo}/compare/{self.base}...{parents[1]}")
+        return isinstance(on_base, dict) and on_base.get("ahead_by") == 0
 
     def sleep(self, secs: float) -> None:
         time.sleep(secs)
@@ -374,11 +389,10 @@ def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | No
         new = src.update_branch(head)
         if new is None:
             line = (
-                f"{base} changed files of {url} ({shown}) and GitHub could not take {base} in (a conflict?); "
+                f"{base} changed files of {url} ({shown}) and was not taken in (a conflict, or a push "
+                f"meanwhile); not merged. Merge {base} into the branch by hand and push, then run this again."
             )
-            return Outcome(
-                url, False, "behind", line + f"merge {base} into the branch by hand and push.", verdict
-            )
+            return Outcome(url, False, "behind", line, verdict)
         head = new
         verdict = wait(src, timeout=timeout)
         if not verdict.green:

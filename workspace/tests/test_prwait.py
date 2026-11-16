@@ -336,3 +336,29 @@ def test_a_persons_merge_card_is_never_merged_here(proj, tk, run, fake_gh, monke
     pulls[PR] = FakePull(PR, _case("pr978-second-run"))
     code, _, err = run("ref", "wait", tk, "--merge")
     assert code == 2 and merges == [] and "Merge card" in err
+
+
+def test_after_taking_develop_in_only_githubs_merge_commit_is_taken(monkeypatch):
+    """Someone pushes while develop is taken in: that commit is never waited for and merged in its place."""
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+    monkeypatch.setattr(prwait.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, timeout=30: subprocess.CompletedProcess(argv, 0, "{}", "")
+    )
+    new, base_tip = "c" * 40, "d" * 40
+
+    def live(parents, base_has_it=True):
+        src = prwait.Live(PR)
+        src.base = "develop"
+        answers = {
+            f"repos/acme/app/commits/{new}": {"parents": [{"sha": p} for p in parents]},
+            f"repos/acme/app/compare/develop...{base_tip}": {"ahead_by": 0 if base_has_it else 3},
+        }
+        src.view = lambda: {"state": "OPEN", "isDraft": False, "baseRefName": "develop", "headRefOid": new}
+        src.gh_json = lambda *args: answers.get(args[1])
+        return src
+
+    assert live([HEAD, base_tip]).update_branch(HEAD) == new
+    assert live([HEAD]).update_branch(HEAD) is None  # a plain push on top
+    assert live(["e" * 40, base_tip]).update_branch(HEAD) is None  # a merge, but not of the checked commit
+    assert live([HEAD, base_tip], base_has_it=False).update_branch(HEAD) is None  # merged something else
