@@ -267,9 +267,11 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
     return {"state": key, "word": HELPER_WORDS[key], "detail": detail}
 
 
-def last_activity(ticket: dict | None) -> dict | None:
-    """When a helper last wrote to the ticket and what (its newest history line), or None."""
-    for h in reversed((ticket or {}).get("history") or []):
+def last_activity(root: Path, ticket: dict | None) -> dict | None:
+    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None."""
+    from orch import history
+
+    for h in reversed(history.lines(root, ticket)):
         if isinstance(h, dict) and str(h.get("by") or "").startswith("agent:") and h.get("at"):
             text = " ".join(str(h.get("text") or "").split())[:200]
             return {"at": h["at"], "text": text, "seconds": _age(h["at"])}
@@ -288,7 +290,7 @@ def describe(root: Path, tid: str, rec: dict | None = None, table: list | None =
     return {
         "signal": sig,
         "helper": helper_state(sig, waits, _age(since)),
-        "last_activity": last_activity(ticket),
+        "last_activity": last_activity(root, ticket),
         "waiting_on": waits,
         "idle_since": since,
         "idle_seconds": _age(since),
