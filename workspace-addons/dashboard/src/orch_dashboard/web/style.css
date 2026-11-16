@@ -296,7 +296,7 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .topbar>.topbar-actions{display:flex;flex:0 0 auto;flex-wrap:nowrap;gap:8px;align-items:center;margin-left:auto}
 .topbar-actions>.btn{margin-left:0;white-space:nowrap}
 .topbar-actions>.btn[hidden]{display:none}
-@media(max-width:480px){.topbar-actions>.btn{padding-left:10px;padding-right:10px}}
+@media(max-width:480px){.topbar>.topbar-actions{gap:4px}.topbar-actions>.btn{padding-left:10px;padding-right:10px}}
 /* "Send questions to my phone" sits in the menu (the sidebar), once: the words left, the switch right */
 .sidebar>.mm-toggle{margin:0;width:100%;justify-content:space-between;gap:10px;border-radius:8px;padding:6px 10px;text-align:left}
 .sidebar>.mm-toggle:not([hidden]){margin-top:auto}

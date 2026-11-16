@@ -229,6 +229,8 @@ HINTS = {
     "review answer": "orch needs",
     "review wait": _on_ticket,
     "review link": "orch needs",
+    "review tend": "orch review accepted  (what was accepted for you today)",
+    "review accepted": "orch needs",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",

@@ -16,3 +16,4 @@
   buttons and the arrow keys, the answered card fades.
 - 16 Nov (ORCH-110): a choice whose options have no pictures (a plain question) shows plain option rows with the whole
   title and its description: no dark frame, no empty picture box, no zoom, and the letter chip only for short ids (A, B).
+- 16 Nov (ORCH-77): "Accepted for you" card under "All cards" (the Reviewer's Done-for-you tickets of today): ticket link, the why line, a Send back button that asks for a short note, or "Sent back". Hidden when nothing was accepted. It stays on a phone width (below the deck) while the All cards aside hides. Settings > General has the switch "Accept small finished work for me".

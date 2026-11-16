@@ -160,3 +160,29 @@ test('Review opens at the card the ticket page asked for (#review?card=...)', ()
   c.mountReview(main);
   assert.equal(calls[0].startId, 'core:q:t_abcdef:q2');
 });
+
+test('"Accepted for you": hidden when empty, a link and the why line per row, one tap sends back with a note (ORCH-77)', async () => {
+  const row = (ticket, extra = {}) => ({ticket, key:'ORCH-' + ticket.slice(-2), title:'Fix ' + ticket, why:'pull request #12 merged, 17 checks green.', sent_back:false, ...extra});
+  const c = ctx({review:{cards:[], accepted:[]}}, {iconEl:n => n});
+  assert.equal(c.reviewAcceptedCard(), null, 'nothing accepted: no section');
+  c.state.review.accepted = [row('t_aaaa11'), row('t_bbbb22', {sent_back:true})];
+  const card = c.reviewAcceptedCard();
+  assert.match(text(card), /^Accepted for you/);
+  const links = nodes(card).filter(n => n.tag === 'a');
+  assert.deepEqual(links.map(a => a.attrs.href), ['#ticket/t_aaaa11', '#ticket/t_bbbb22']);
+  assert.match(text(card), /pull request #12 merged, 17 checks green\./);
+  const buttons = nodes(card).filter(n => n.tag === 'button');
+  assert.equal(buttons.length, 1, 'only the row that is not sent back has the button');
+  assert.equal(text(buttons[0]), 'Send back');
+  assert.match(text(card), /Sent back/);
+  // the page keeps the card beside the "All cards" aside, not inside it (the aside hides on a phone)
+  const page = nodes(c.reviewPage());
+  const side = page.find(n => n.attrs?.['data-review-side'] !== undefined), rail = page.find(n => n.attrs?.['data-key'] === 'review-rail');
+  assert.ok(rail && !nodes(side).some(n => n.attrs?.['data-key'] === 'review-accepted') && nodes(rail).some(n => n.attrs?.['data-key'] === 'review-accepted'));
+  // the send: ticket.changes with the note, then the row reads "Sent back"
+  assert.equal(await c.reviewSendBack(row('t_aaaa11'), '   '), false, 'an empty note sends nothing');
+  assert.equal(c.acts.length, 0);
+  assert.equal(await c.reviewSendBack(row('t_aaaa11'), ' Keep the old name '), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts[0])), ['ticket.changes', {ticket:'t_aaaa11', text:'Keep the old name'}]);
+  assert.equal(nodes(c.reviewAcceptedCard()).filter(n => n.tag === 'button').length, 0);
+});

@@ -83,6 +83,61 @@ function reviewDrawSide(queue, deck) {
     return sec;
   }));
 }
+// "Accepted for you" (ORCH-77): what the Reviewer marked Done today; one tap sends a ticket back with a short note.
+// A phone width keeps this card (the "All cards" aside hides there), so it sits under the deck.
+const reviewSentBack = new Set();
+function reviewAccepted() { return array(state?.review?.accepted).filter(a => a && typeof a.ticket === 'string'); }
+async function reviewSendBack(a, note) {
+  const text = String(note || '').trim();
+  if (snapshot || !text) return false;
+  const r = await act('ticket.changes', {ticket:a.ticket, text});
+  window.orch.toast(r.ok ? 'Changes sent' : String(r.text || 'Could not send it back.').slice(0, 200), r.ok ? 'ok' : 'error');
+  if (r.ok) reviewSentBack.add(a.ticket);
+  return r.ok;
+}
+function reviewAcceptedRow(a) {
+  const key = 'review-accepted-' + a.ticket;
+  const host = h('div', {'data-key':key});
+  const sent = a.sent_back === true || reviewSentBack.has(a.ticket);
+  const open = sent || snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-send'}, 'Send back');
+  // The reason takes the full card width under the title; Send back sits on its own line below it (the side
+  // column is narrow at 1280).
+  const head = h('div', {className:'card-row'},
+    h('div', {className:'grow'},
+      h('a', {href:'#ticket/' + encodeURIComponent(a.ticket)}, clean([a.key, a.title].filter(Boolean).join(' · '))),
+      a.why ? h('p', {className:'meta'}, clean(a.why)) : null,
+      sent ? h('p', {className:'meta'}, 'Sent back') : open ? h('div', {}, open) : null));
+  host.append(head);
+  if (open) open.onclick = () => {
+    locks.add(key);
+    let busy = false;
+    const input = h('input', {type:'text', className:'input', placeholder:'What should change?', 'aria-label':'What should change?'});
+    const close = () => { if (busy) return; locks.delete(key); host.replaceChildren(head); open.focus(); };
+    const send = h('button', {type:'button', className:'btn primary sm', disabled:true}, 'Send back');
+    const cancel = h('button', {type:'button', className:'btn ghost icon', 'aria-label':'Cancel'}, iconEl('x'));
+    send.onclick = async () => {
+      if (!input.value.trim() || busy) return;
+      busy = true; send.disabled = input.disabled = cancel.disabled = true;
+      let ok = false;
+      try { ok = await reviewSendBack(a, input.value); } finally { busy = false; input.disabled = cancel.disabled = false; send.disabled = !input.value.trim(); }
+      if (ok) { locks.delete(key); render(); }
+    };
+    cancel.onclick = close;
+    input.oninput = () => { send.disabled = busy || !input.value.trim(); };
+    input.onkeydown = e => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send.click(); }
+    };
+    host.replaceChildren(head, h('div', {className:'ticket-ask-line'}, input, send, cancel));
+    input.focus();
+  };
+  return host;
+}
+function reviewAcceptedCard() {
+  const rows = reviewAccepted();
+  if (!rows.length) return null;
+  return card('review-accepted', 'Accepted for you', '', rows.map(reviewAcceptedRow));
+}
 function reviewPage() {
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':''},
     h('h2', {}, 'All cards'),
@@ -91,7 +146,8 @@ function reviewPage() {
   return fragment(
     heading('Review', reviewSubtitle()),
     h('div', {className:'review-layout', 'data-key':'review-layout'},
-      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})), side));
+      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})),
+      h('div', {className:'stack', 'data-key':'review-rail'}, side, reviewAcceptedCard())));
 }
 // Mount the kit page once per host (render() calls this after every reconcile; the mounted host is left alone).
 function mountReview(main) {
