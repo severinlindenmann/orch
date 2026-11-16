@@ -374,6 +374,7 @@ def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     assert "columnOf(status) === section) return null" in chip  # the status word is left out where it matches
     nxt = src[src.index("function ticketNext") : src.index("function ticketMenu")]
     assert "'Question: '" in nxt and "text = 'Paused'" in nxt  # text only when it adds something
+    assert "'Start helper'" not in nxt and "'Resume'" not in nxt and "run.start" not in nxt  # ORCH-69: no start on cards
     assert "ticketNext(t)" in tree and "ticketMenu(t, 'tree')" in tree
     assert "activity(t," not in tree
 
