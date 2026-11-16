@@ -200,6 +200,7 @@ HINTS = {
     "ref list": _on_ticket,
     "ref rm": _on_ticket,
     "ref set": _on_ticket,
+    "ref merge": _on_ticket,
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": "keep working on what does not wait: orch ticket list",

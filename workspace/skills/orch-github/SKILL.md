@@ -51,6 +51,14 @@ A deleted issue, or one you cannot see: `orch ref set <ticket> <n> --status "not
 
 **5. Finish**
 
+When the ticket or the workspace rules say to merge the pull request once its checks pass ("merge on green"), the merge is part of your work. Do not finish before it:
+
+    gh pr checks <pull request url> --watch     # wait until every check has finished
+    gh pr merge <pull request url> --merge       # only when all of them passed
+    orch ref set <ticket> <n> --status merged
+
+Checks failed: fix, push and wait again. You may not merge (branch rules, no rights): say so in the ticket summary. Never leave a pull request open with passed checks and stop without a word; orch then shows the person "passed its checks but was not merged".
+
 Refresh the states (recipe 4) before `orch ticket summary` and `orch ticket status <ticket> done`. For each linked issue that is still open and that no linked pull request closes:
 - if the workspace's autonomy list allows "close our GitHub issues": check it is still open, scan the summary (`orch secret scan`), run `gh issue close <url> --comment "<summary>"`, then `orch ref set <ticket> <n> --status closed`;
 - otherwise write "GitHub #812 is still open" in the ticket summary. Ask no question and wait for nothing.

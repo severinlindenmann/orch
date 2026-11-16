@@ -103,6 +103,19 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
         ("run.start", {"ticket": "t_abcdef", "agent": "x"}),
         ("addon.start", {"name": "x"}),
+        (
+            "pull.merge",
+            {"ticket": "t_abcdef", "url": "https://example.com/acme/app/pull/1", "head": "a" * 40},
+        ),
+        (
+            "pull.merge",
+            {"ticket": "t_abcdef", "url": "https://github.com/acme/app/pull/1 --admin", "head": "a" * 40},
+        ),
+        (
+            "pull.merge",
+            {"ticket": "t_abcdef", "url": "https://github.com/acme/app/pull/1", "head": "--admin"},
+        ),
+        ("pull.merge", {"ticket": "t_abcdef", "url": "https://github.com/acme/app/pull/1"}),
     ]
     for op, args in bad:
         assert post(act_server, {"op": op, "args": args})[0] == 400, (op, args)
@@ -195,6 +208,17 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        (
+            {
+                "op": "pull.merge",
+                "args": {
+                    "ticket": "t_abcdef",
+                    "url": "https://github.com/acme/app/pull/12",
+                    "head": "a" * 40,
+                },
+            },
+            ["ref", "merge", "t_abcdef", "https://github.com/acme/app/pull/12", "--head", "a" * 40, *common],
+        ),
         (
             {"op": "run.take_back", "args": {"ticket": "t_abcdef", "id": "p_abcdef12"}},
             ["run", "take-back", "t_abcdef", "p_abcdef12", *common],
