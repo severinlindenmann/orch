@@ -53,9 +53,11 @@ Check (Test-Path "$p\.agents\skills\orch\SKILL.md") "orch init wrote the skill"
 Check (((Get-Item "$p\.claude\skills\orch" -Force -ErrorAction SilentlyContinue).LinkType -eq "Junction") -or (Test-Path "$p\.claude\skills\orch\.orch-copy")) ".claude\skills\orch is a junction (or a copy where links are refused)"
 Check (Test-Path "$p\.claude\skills\orch\SKILL.md") "the skill is found through .claude\skills"
 Check ((-not (Test-Path "$p\AGENTS.md")) -and (-not (Test-Path "$p\CLAUDE.md")) -and (-not (Test-Path "$p\.gitignore"))) "init wrote no team file"
-$before = (Get-ChildItem -Recurse -Force -File | Get-FileHash | Out-String)
+# .orch\diag is the debug log: every command adds a line there by design (#932), so it is left out.
+function Hashes { Get-ChildItem -Recurse -Force -File | Where-Object { $_.FullName -notmatch '\\\.orch\\diag\\' } | Get-FileHash | Out-String }
+$before = Hashes
 O init | Out-Null
-Check ($before -eq (Get-ChildItem -Recurse -Force -File | Get-FileHash | Out-String)) "a second orch init changes nothing"
+Check ($before -eq (Hashes)) "a second orch init changes nothing (the debug log aside)"
 
 L "--- ticket"; $t = O ticket new '"Windows smoke"' --json | Out-String; L $t
 Check ($LASTEXITCODE -eq 0) "orch ticket new"

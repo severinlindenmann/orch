@@ -1,5 +1,5 @@
 # The automation add-on (the scheduler) on Windows, as a standard user: it runs in the background, starts the agent on a
-# repeat ("every 1 minutes") and at a one-time wake-up in a named time zone ("today HH:MM" --tz Europe/Zurich), and
+# repeat ("every 5 minutes", the shortest a repeat may be) and at a one-time wake-up in a named time zone ("today HH:MM" --tz Europe/Zurich), and
 # stops. The agent is the repo's fake one (e2e/fixtures/generic-agent): it finishes the first open task. Runs after
 # standard-user-flow.ps1 (orch is installed); appends to the same log; ends with "RESULT ok" or "RESULT fail: ...".
 $ErrorActionPreference = "Continue"
@@ -53,8 +53,8 @@ Check ($LASTEXITCODE -eq 0) "a custom agent (the fake one) is chosen"
 
 $rep = ((O ticket new '"Scheduled smoke"' --json --by human:owner) | ConvertFrom-Json).id
 O check add $rep '"Say hello"' --by human:owner | Out-Null
-L (O automation repeat $rep '"every 1 minutes"' | Out-String)
-Check ($LASTEXITCODE -eq 0) "a repeat: every 1 minutes"
+L (O automation repeat $rep '"every 5 minutes"' | Out-String)
+Check ($LASTEXITCODE -eq 0) "a repeat: every 5 minutes"
 
 $one = ((O ticket new '"Wake-up smoke"' --json --by human:owner) | ConvertFrom-Json).id
 O check add $one '"Say hello"' --by human:owner | Out-Null
@@ -66,7 +66,7 @@ L (O automation list | Out-String)
 
 L "--- start"; L (O start --no-open | Out-String)
 Check ((O automation status | Out-String) -match 'run' -and $LASTEXITCODE -eq 0) "automation runs in the background"
-Check (DoneWithin $rep 180) "the repeat started the agent and the task got done"
+Check (DoneWithin $rep 420) "the repeat started the agent and the task got done"
 Check (DoneWithin $one 300) "the one-time wake-up started the agent and the task got done"
 L (O needs | Out-String)
 
