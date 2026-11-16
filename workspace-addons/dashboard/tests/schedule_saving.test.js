@@ -4,23 +4,33 @@ const fs = require('node:fs');
 const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
 
-// owner feedback 14 Nov (W8): saving a schedule takes seconds; the button must say so, not only grey out
-test('Save repeat shows "Saving…" while it works and restores its label after', () => {
-  const i = src.indexOf("const save = button('Save repeat'");
-  const body = src.slice(i, src.indexOf('const refreshSummary', i));
-  const on = body.indexOf("'Saving…'"), call = body.indexOf("act('addon.act'"), back = body.indexOf('save.textContent = label');
-  assert.ok(on > 0 && on < call, 'the label changes before the request');
-  assert.ok(back > call, 'the label is restored after the answer');
+const saveBody = () => { const i = src.indexOf("const save = button('Save repeat'"); return src.slice(i, src.indexOf('const refreshSummary', i)); };
+
+// e2e 15 Nov (item 3/4): Save closes the dialog at once; the list shows the repeat as "Saving…" until it is stored
+test('Save repeat closes the dialog before the request and shows a "Saving…" row', () => {
+  const body = saveBody();
+  const close = body.indexOf('window.orch.close(d)'), pend = body.indexOf('pendingRepeat = {title}'), call = body.indexOf("act('addon.act'");
+  assert.ok(close > 0 && close < call, 'the dialog closes before the request');
+  assert.ok(pend > close && pend < call, 'the pending row is set before the request');
+  assert.match(src, /pendingRepeat\.title \+ ' · Saving…'/);
+  assert.ok(body.indexOf('pendingRepeat = null') > call, 'the pending row ends with the answer');
 });
 
-// "Saving…" must always end: a lost or very slow answer gives a plain message after 30 s, the button comes back
-test('Save repeat gives up waiting after 30 s and always restores the button', () => {
-  const i = src.indexOf("const save = button('Save repeat'");
-  const body = src.slice(i, src.indexOf('const refreshSummary', i));
+// "Saving…" must always end: a lost or very slow answer gives a plain message after 30 s
+test('Save repeat gives up waiting after 30 s and always clears the pending row', () => {
+  const body = saveBody();
   assert.match(body, /Promise\.race\(\[act\('addon\.act'/);
   assert.match(body, /30000/);
-  assert.match(body, /finally \{[^}]*save\.disabled = false; save\.textContent = label;/);
-  assert.ok(body.indexOf('window.orch.close(d)') < body.indexOf('loadAddon('), 'the dialog closes before the list reloads');
+  assert.match(body, /finally \{[^}]*pendingRepeat = null;/);
+  assert.ok(body.indexOf('pendingRepeat = null') < body.indexOf('loadAddon('), 'the list reloads after the pending row ends');
+});
+
+// e2e 15 Nov: the reload after Save was dropped while a poll was loading, so the new row stayed missing until the next poll
+test('a reload asked while another load is under way is queued, not dropped', () => {
+  const i = src.indexOf('async function loadAddon');
+  const body = src.slice(i, src.indexOf('// The view of an add-on tab costs', i));
+  assert.match(body, /if \(addonBusy\.has\(id\)\) \{ addonAgain\.add\(id\); return; \}/);
+  assert.match(body, /if \(addonAgain\.delete\(id\)\) await loadAddon\(id\);/);
 });
 
 // owner feedback 14 Nov: choosing Custom must start on a valid value (5 minutes), so Save is never disabled at the start
