@@ -35,6 +35,18 @@ The phrases: `every <day> HH:MM`, `daily HH:MM`, `every N minutes|hours`, `month
 `today|tomorrow HH:MM` (once; this is a plain wait). Times are read in this computer's time zone; `--tz` changes it.
 `--agent <name>` makes this repeat use another agent (a name from `orch agents`). `--each-run sub-ticket` (daily or
 slower) gives every run its own sub-ticket. If the computer was off, one catch-up run happens, not several.
+
+**A script instead of an agent** (no agent is needed, for example a check or a backup)
+
+    orch automation script add report-watch -- python3 scripts/watch.py   # this computer only
+    orch automation repeat <id> "every 5 minutes" --script report-watch
+    orch automation script list   /   orch automation script remove <name>
+
+The command is kept only in this computer's settings (never in the ticket, never synced) and runs without a shell in the
+workspace folder; one run per ticket at a time. It runs only after a person allowed it on this computer: one a person
+adds is allowed; one you add waits (`script list` shows its key; the person runs `script allow <name> --key <key>`). Its output goes to `.orch/run/logs/<ticket>-script-*.log`; the run
+history shows Done or Stopped. A script that fails asks one question on the ticket (Try again / Leave it). Only add a
+script the person asked for.
 {{#relay}}
 
 **Start from outside**
