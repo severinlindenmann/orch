@@ -3,8 +3,9 @@
 `orch config propose --json` (Settings > Workspace profile > Suggest). Read-only: nothing is saved; the person
 accepts or edits the proposal in the dashboard, which then saves it with `orch config set workspace.*`.
 
-Sources, in this order: README, AGENTS.md / CLAUDE.md, package.json, pyproject.toml, Cargo.toml (first heading
-and first line of prose), the ticket titles, the file types at the top of the folder and the folder name.
+Sources, in this order: README, the agents' guide files, package.json, pyproject.toml, Cargo.toml (first
+heading and first line of prose), the ticket titles, the file types at the top of the folder and the
+folder name.
 Every file is read through `saferead.read_private` (no links, nothing outside the folder, bounded), never
 anything under .orch/ except the ticket titles orch already lists. No network, no helper run: it answers
 at once.
@@ -18,10 +19,10 @@ import tomllib
 from collections import Counter
 from pathlib import Path
 
-from orch import config, look, saferead
+from orch import adapters, config, look, saferead
 
 LIMIT = 64 * 1024  # bytes read from one file
-DOCS = ("README.md", "README.markdown", "README.txt", "README", "readme.md", "AGENTS.md", "CLAUDE.md")
+DOCS = ("README.md", "README.markdown", "README.txt", "README", "readme.md", *adapters.GUIDE_FILES)
 TECH = (  # file at the top -> tag
     ("pyproject.toml", "python"),
     ("requirements.txt", "python"),
@@ -32,8 +33,9 @@ TECH = (  # file at the top -> tag
     ("pom.xml", "java"),
 )
 # Headings that name the file, not the work.
+_GUIDES = "|".join(re.escape(f.removesuffix(".md")) + r"(\.md)?" for f in adapters.GUIDE_FILES)
 GENERIC = re.compile(
-    r"^(readme|agents?(\.md)?|claude(\.md)?|instructions?|rules|notes|todo|overview|introduction|"
+    r"^(readme|agents?|" + _GUIDES + r"|instructions?|rules|notes|todo|overview|introduction|"
     r"table of contents|contents|about|getting started|setup|installation|usage|license)$",
     re.I,
 )
@@ -218,7 +220,8 @@ def propose(root: Path) -> dict:
     used: list[str] = []
     for rel in DOCS:
         text = _read(root, rel)
-        pointer = rel == "CLAUDE.md" and all(x.startswith("@") for x in text.split())  # only "@AGENTS.md"
+        # a guide file that only points at another one ("@AGENTS.md") says nothing itself
+        pointer = rel in adapters.GUIDE_FILES and all(x.startswith("@") for x in text.split())
         if not text.strip() or pointer:
             continue
         h, p = _heading_and_line(text)
