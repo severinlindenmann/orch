@@ -28,4 +28,5 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   admin can read messages.
 - 2026-10-27: Product text never names the VPN product; it says "private network".
 - 2026-11-15: Linked work = core references + `orch ref set` + tool skills; no tracker add-on.
+- 2026-11-15: Factory (#816): ask another workspace at a stop + hand a task over; no share-of-time cap on hand-overs.
 - 2026-11-15: Lessons are written by helpers themselves: one list, 3 KB in the start text, local only (no questions, no proofs).
