@@ -92,16 +92,6 @@ def stored_keys_readable(root: Path) -> bool:
     return phone_results.value_hider(root) is not None
 
 
-def find_tokens(text: str) -> list[dict]:
-    """[{kind, line}] of the token patterns only (PATTERNS: private keys, known token shapes, URL passwords),
-    without the label=value, spaced-value and flag rules. For picture data: those rules read chance bytes as a
-    label and a value (#1022); a token shape practically never appears by chance."""
-    found = {
-        (text.count("\n", 0, m.start()) + 1, kind): None for kind, rx in PATTERNS for m in rx.finditer(text)
-    }
-    return [{"kind": k, "line": ln} for (ln, k) in sorted(found)]
-
-
 def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[dict]:
     """[{kind, line}] (line from 1, one entry per kind and line), in text order. Pattern kinds first, then any
     other line the phone view's scrub would change (key=value, spaced values, flag values), then lines that
@@ -125,12 +115,6 @@ def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[di
         forms = (raw, phone_view._clean_full(raw), unicodedata.normalize("NFKC", raw))
         if any(phone_view._scrub_text(f) != f for f in dict.fromkeys(forms)):
             found[(n, "secret-value")] = None
-    _stored_keys(text, root, strict, found)
-    return [{"kind": k, "line": ln} for (ln, k) in sorted(found)]
-
-
-def _stored_keys(text: str, root: Path | None, strict: bool, found: dict) -> None:
-    """find()'s stored-key part: lines of `text` that hold a stored key value of the workspace (`root`)."""
     if root is not None:
         from orch import phone_results
 
@@ -149,6 +133,7 @@ def _stored_keys(text: str, root: Path | None, strict: bool, found: dict) -> Non
                     found[(1, "stored-key")] = None  # a value that spans lines
             except Exception:  # noqa: BLE001 - never a pass
                 found[(1, "stored-key")] = None
+    return [{"kind": k, "line": ln} for (ln, k) in sorted(found)]
 
 
 def refusal(found: list[dict]) -> str:
@@ -236,30 +221,14 @@ def refuse_if_secret(
     data: bytes, what: str = "file", root: Path | None = None, *, verb: str = "sent"
 ) -> None:
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
-    read in every encoding (_views) with the full find() including the stored-key check. A PNG that holds
-    only pixel chunks (phone_view._image_clean: no text chunk, nothing after its end, spec lengths) gets the
-    token patterns (find_tokens) and the stored-key check over every window, and the full find() over its
-    readable runs (phone_view.picture_text): its compressed data read as one text spells a label and a value
-    by chance (#1022)."""
-    from orch import phone_view
-
+    read in every encoding (_views) with the full find() including the stored-key check."""
     step, overlap = MAX_BYTES, 65536
     assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
     found: list[dict] = []
     try:
-        pixels_only = phone_view._image_clean(data) and not any(m in data for m in phone_view._PACKED_MAGIC)
-        if pixels_only:
-            found = find(phone_view.picture_text(data), root, strict=False)
-        for start in range(0, 0 if found else max(len(data), 1), step - overlap):
+        for start in range(0, max(len(data), 1), step - overlap):
             for text in _views(data[start : start + step]):
-                if pixels_only:
-                    hits: dict[tuple[int, str], None] = {
-                        (f["line"], f["kind"]): None for f in find_tokens(text)
-                    }
-                    _stored_keys(text, root, False, hits)
-                    found = [{"kind": k, "line": ln} for (ln, k) in sorted(hits)]
-                else:
-                    found = find(text, root, strict=False)
+                found = find(text, root, strict=False)
                 if found:
                     break
             if found or start + step >= len(data):

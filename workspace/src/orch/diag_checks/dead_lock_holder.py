@@ -19,7 +19,7 @@ def check(snap):
     for tid, r in run_recs.items():
         if r.get("pid") and r.get("process") == "dead":
             bad.append(
-                f"claim of {tid} run {r['run']}: pid {r['pid']} (started {r.get('pid_started')}) is gone"
+                f"claim of {tid} run {r['run']} - pid {r['pid']} (started {r.get('pid_started')}) is gone"
             )
     if bad:
         return verdict(NAME, "problem", "a lock or claim is held by a process that no longer exists", bad)
