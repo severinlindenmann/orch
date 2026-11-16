@@ -665,7 +665,9 @@ _OWN_ID_SECRET = re.compile(
 )
 
 
-_PROSE = re.compile(r"[A-Za-z][a-z]{2,}+(?:[ \t]++[^\s]++)+")
+# a plain word, a space and the start of a second word: bounded (at most 44 characters looked at per name,
+# never the rest of the line), so a line full of id-shaped names stays linear
+_PROSE = re.compile(r"[A-Za-z][a-z]{2,40}[ \t]{1,2}[^\s]")
 
 
 def own_id_before_prose(name: str, text: str, pos: int) -> bool:
@@ -674,7 +676,7 @@ def own_id_before_prose(name: str, text: str, pos: int) -> bool:
     return (
         _OWN_ID.fullmatch(name) is not None
         and not _OWN_ID_SECRET.search(name)
-        and _PROSE.match(text, pos, _line_end(text, pos)) is not None
+        and _PROSE.match(text, pos) is not None
     )
 
 

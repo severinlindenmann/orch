@@ -106,6 +106,16 @@ def test_real_secrets_are_still_caught(text, tmp_path):
         secretscan.refuse_if_secret(text.encode(), "report file SUMMARY.md", tmp_path)
 
 
+def test_a_line_full_of_ids_stays_fast():
+    """Every own id before prose is looked at a bounded distance, never to the end of its line."""
+    import time
+
+    line = "t_abc1pw: Working " * 20000 + "password: hunter2"
+    t0 = time.monotonic()
+    assert secretscan.find(line) != []  # the real label at the end is still found
+    assert time.monotonic() - t0 < 5
+
+
 def _chunk(kind: bytes, body: bytes) -> bytes:
     return len(body).to_bytes(4, "big") + kind + body + zlib.crc32(kind + body).to_bytes(4, "big")
 
