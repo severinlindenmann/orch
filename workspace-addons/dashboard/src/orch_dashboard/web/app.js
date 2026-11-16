@@ -286,6 +286,21 @@ function route() {
   const kind = {'#home':'home', '#tickets':'tickets', '#review':'review', '#settings':'home', '#chat':'home', '#general':'home'}[hash] || (hash.startsWith('#chat/') ? 'home' : '');
   return kind ? {kind, hash:full} : {kind:'notfound', hash:full};
 }
+// THE needs-you number goes to the shown add-on page orch ships (same origin, that frame only), so a page that shows it says the same
+// number as the top bar (ORCH-63). Sent on every header paint and when the page asks ({orch:'needs-count'}).
+function needsCountFrame() {
+  const r = route(), frame = document.querySelector('iframe.embed[data-key="embed"]');
+  if (snapshot || r.kind !== 'page' || !state?.addons?.find?.(a => a.name === r.id)?.shipped) return null;
+  return frame?.contentWindow || null;
+}
+function postNeedsCount(n) {
+  const win = needsCountFrame();
+  try { win?.postMessage({type:'orch.needs.count', count:n}, location.origin); } catch (_) { /* the page was left */ }
+}
+globalThis.addEventListener?.('message', e => {
+  if (e.origin !== location.origin || e.data?.orch !== 'needs-count' || !state) return;
+  if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
+});
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
@@ -313,6 +328,7 @@ function render(arrived = new Set()) {
   // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
   const needCount = needsYouTotal(), menuToggle = document.getElementById('menu-toggle');
   menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
+  postNeedsCount(needCount);
   menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
   const wait = document.getElementById('topbar-wait');
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack

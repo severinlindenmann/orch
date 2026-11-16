@@ -18,10 +18,13 @@
     const at = t.closed_at || [...(t.history || [])].reverse().find(e => /(?:status.*(?:->|→)\s*done|marked done|ticket completed)/i.test(e.text || ''))?.at;
     return at && !isNaN(Date.parse(at)) ? at : null;
   }
-  /* The one "Needs you" rule (picker line and the Needs you group): each waiting ticket counts once. */
-  const needsYou = t => t.status === 'waiting';
+  /* The one "Needs you" rule (picker line and the Needs you group): each ticket with an open question counts once.
+     Not the status: a ticket stays "waiting" after its question was answered until its helper runs again (ORCH-63). */
+  const needsYou = t => Number(t.question_count) > 0 && t.status !== 'done' && t.status !== 'dropped';
+  /* Inside the dashboard the line says the dashboard's own number (the top bar's), in Home's words. */
+  const dashCountText = n => !n ? 'Nothing needs you right now.' : n + (n === 1 ? ' thing needs you.' : ' things need you.');
   function attentionText(rows) {
-    const q = rows.filter(needsYou).length, r = rows.filter(t => t.status === 'review').length;
+    const q = rows.filter(needsYou).length, r = rows.filter(t => t.status === 'review' && !needsYou(t)).length;
     if (!q && !r) return 'Nothing needs you right now.';
     const number = n => ['zero', 'one', 'two', 'three', 'four', 'five'][n] || String(n);
     const parts = [];
@@ -111,6 +114,6 @@
     const asking = (t.questions || []).some(q => q.answer == null) || (v && v.state === 'needs');
     return t.status === 'review' && !asking && !(v && v.run && v.run.running);
   }
-  root.FocusHelpers = {reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, nextNeeding, listOrder, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
+  root.FocusHelpers = {reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, dashCountText, attentionText, nextNeeding, listOrder, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);

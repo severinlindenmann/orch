@@ -98,6 +98,33 @@ test('"Review all" is a link to #review with the card count, and never changes t
   assert.equal(withCards.reviewCount(), 1);
   assert.equal(withCards.needsToday().count, without.needsToday().count, 'cards are the questions and results Home already counts');
 });
+test('ORCH-63: the Review subtitle says the top bar number; a Factory start question is a card like any question', () => {
+  const base = {settings:{}, runs:{}, services:[]};
+  const t1 = {id:'t_abcdef', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]};
+  const t2 = {id:'t_fffaaa', title:'Services', status:'waiting', questions:[{id:'q1', text:"Start 'Services'?", kind:'factory:start'}]};
+  const rows = [
+    {id:'core:q:t_abcdef:q3', source:'core', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'Newsletter', answer:{question:'q3', digest:ID, options:['A', 'B']}},
+    {id:'core:q:t_fffaaa:q1', source:'core', kind:'factory:start', ticket:'t_fffaaa', since:'2026-11-15T10:00:00Z', title:'Services', answer:{question:'q1', digest:ID, options:['Start', 'Edit', 'Not now']}}];
+  const factory = {...CARD, id:'core:q:t_fffaaa:q1', ticket:'t_fffaaa', key:'q1', kind:'choice', card:{kind:'choice', title:"Start 'Services'?"}};
+  const c = home({...base, review:{cards:[CARD, factory], answered:[]}}, [t1, t2], rows);
+  assert.equal(c.needsToday().count, 2);
+  assert.equal(c.reviewSubtitle(), '2 things wait on you, most urgent first.');
+  // a row with no card (a helper idle at its prompt on a third ticket) is counted once and named as on Home
+  const idle = {id:'core:stuck:t_ccccdd', source:'core', kind:'stuck:idle', ticket:'t_ccccdd', since:'2026-11-15T11:00:00Z', title:'Docs', text:'The helper waits at its prompt', tone:'warn'};
+  const more = home({...base, review:{cards:[CARD, factory], answered:[]}}, [t1, t2, {id:'t_ccccdd', title:'Docs', status:'active', questions:[]}], [...rows, idle]);
+  assert.equal(more.needsToday().count, 3);
+  assert.equal(more.reviewSubtitle(), '3 things wait on you: 2 here, 1 more on Home.');
+  const onlyHome = home({...base, review:{cards:[], answered:[]}}, [t1], [rows[0]]);
+  assert.equal(onlyHome.reviewSubtitle(), '1 thing waits on you, all on Home.');
+  assert.equal(home({...base, review:{cards:[], answered:[]}}, [], []).reviewSubtitle(), 'Nothing waits for you.');
+});
+test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
+  const src = read('app.js');
+  assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, location\.origin\)/);
+  assert.match(src, /menuToggle\.textContent = [^\n]+\n\s*postNeedsCount\(needCount\);/);
+  assert.match(src, /e\.data\?\.orch !== 'needs-count'/);
+  assert.match(src, /\.shipped\) return null;/, 'only an add-on orch ships gets the number');
+});
 test('"Review all" is not shown in a shared copy', () => {
   assert.ok(home({review:{cards:[CARD]}}).reviewAllButton());
   const c = home({review:{cards:[CARD]}}); c.snapshot = true; assert.equal(c.reviewAllButton(), null);
