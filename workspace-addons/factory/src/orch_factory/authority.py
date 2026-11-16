@@ -57,6 +57,9 @@ def _caps(d, kind):
             _too_long("A suggested answer", i.get("recommend", ""), 40)
             _too_long("A before reference", i.get("before", ""), 80)
             _too_long("An after reference", i.get("after", ""), 80)
+            _too_long("A preview address", i.get("preview", ""), 300)
+            if "preview" in i and not re.fullmatch(r"https?://[^\s]+", i["preview"]):
+                raise Refused("A preview address must be a web address (http or https).", "invalid")
         for key in ("checked", "not_checked", "changed_during_run"):
             each("A stop note", d.get(key))
     elif kind == "autopilot":
