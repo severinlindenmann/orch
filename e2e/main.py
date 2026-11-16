@@ -223,6 +223,7 @@ KNOWN = [
     ("attachments: []", "https://github.com/severinlindenmann/orch/issues/926"),
     ("from this computer", "https://github.com/severinlindenmann/orch/issues/924"),
     ("Skills updated; they apply from the next agent session", "https://github.com/severinlindenmann/orch/issues/923"),
+    ("The file has a password or secret value, so nothing was sent", "https://github.com/severinlindenmann/orch/issues/997"),
 ]
 
 

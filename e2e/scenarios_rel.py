@@ -68,7 +68,8 @@ def r2(e):
     """Pilatus sends text + file to Reports; Reports sees both in its inbox; file sha256 matches."""
     i = ids(e)
     f = e.tmp / "r2-data.bin"
-    f.write_bytes(os.urandom(200_000))
+    # bytes the secret check cannot misread: random bytes are refused about 4 times in 10 at this size (#997)
+    f.write_bytes(bytes(0x80 | b for b in os.urandom(200_000)))
     e.orch("Pilatus", "relay", "send", i["Reports"], "hello reports")
     e.orch("Pilatus", "relay", "send", i["Reports"], "the file", "--file", str(f))
     items = inbox(e, "Reports")
@@ -79,6 +80,12 @@ def r2(e):
     got = Path(out["path"]).read_bytes()
     check(hashlib.sha256(got).hexdigest() == hashlib.sha256(f.read_bytes()).hexdigest() == fil[0]["body"]["sha256"], "sha256 differs")
     check("/received/" in out["path"], f"download path {out['path']}")
+    # a plain binary file must go out too; this one is refused today (known product bug #997, an XFAIL in main.py)
+    import random
+
+    g = e.tmp / "r2-random.bin"
+    g.write_bytes(random.Random(42).randbytes(200_000))
+    e.orch("Pilatus", "relay", "send", i["Reports"], "a binary file", "--file", str(g))
 
 
 @scenario("R3")
@@ -299,12 +306,17 @@ def r11(e):
     check(ad.call("PUT", "/admin/api/shared/credentials/ACME_TOKEN", {"value": "acme-secret-value"}).status == 200, "cred")
     try:
         check(ad.call("PUT", f"/admin/api/shared/assign/{i['Home']}", {"skills": ["acme-sql"], "mcp": ["acme-docs"], "credentials": ["ACME_TOKEN"]}).status == 200, "assign")
-        hint = [m for m in inbox(e, "Home") if m["type"] == "refresh-hint"]
-        check(hint, "Home got no refresh-hint")
-        e.orch("Home", "relay", "refresh")
+        # reading the inbox applies the admin's new settings by itself and then has nothing to tell (#221); a notice
+        # that is still listed means it could not, and `orch relay refresh` does it
         home = e.ws("Home")
+        hint = [m for m in inbox(e, "Home") if m["type"] == "refresh-hint"]
+        check(hint or (home / ".agents/skills/acme-sql/SKILL.md").is_file(), "Home got neither the new settings nor a refresh-hint")
+        e.orch("Home", "relay", "refresh")
         check((home / ".agents/skills/acme-sql/SKILL.md").is_file(), "skill not installed")
-        check(json.loads((home / ".orch/secrets/credentials.json").read_text()) == {"ACME_TOKEN": "acme-secret-value"}, "credentials.json")
+        # the admin's keys live in orch's own key store, never in the workspace (no credentials.json since W2b 1.1)
+        check(not (home / ".orch/secrets/credentials.json").exists(), "the key was written into the workspace")
+        check("ACME_TOKEN" in e.orch("Home", "secret", "list")[1], "the admin's key is not in the key list")
+        check("acme-secret-value" not in e.orch("Home", "secret", "list", "--json")[1], "secret list shows the value")
         check("acme-docs" in json.loads((home / ".orch/secrets/mcp.json").read_text())["mcpServers"], "mcp.json")
         check(not (e.ws("Pilatus") / ".agents/skills/acme-sql").exists(), "Pilatus got the skill")
         e.orch("Pilatus", "relay", "refresh")
@@ -312,7 +324,7 @@ def r11(e):
         ad.call("PUT", f"/admin/api/shared/assign/{i['Home']}", {"skills": [], "mcp": [], "credentials": []})
         e.orch("Home", "relay", "refresh")
         check(not (home / ".agents/skills/acme-sql").exists(), "skill not removed after unassign")
-        check(json.loads((home / ".orch/secrets/credentials.json").read_text()) == {}, "credential not removed")
+        check("ACME_TOKEN" not in e.orch("Home", "secret", "list")[1], "credential not removed")
         evil = tar_gz({"../x": "evil", "SKILL.md": "x"})
         r = ad.call("PUT", "/admin/api/shared/skills/evil", raw=evil)
         check(r.status in (400, 422), f"a ../ archive was accepted by the admin API: {r.status}")
