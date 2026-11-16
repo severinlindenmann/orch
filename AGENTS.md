@@ -126,6 +126,9 @@ again.
 - **R7.4** Use established patterns. Research the web for best practice before inventing a new interaction.
 - **R7.5** One word for one thing in the CLI, UI, phone and skills (`docs/wording.md`, enforced by
   `brand/tests/test_wording.py`).
+- **R7.6** Every UI change passes the UX/UI checklist (skill `orch-ux-checklist` in `.agents/skills/`, list in the
+  master `DESIGN.md`): screenshots at 1280, 1920 and 390, every item yes / no / n.a., and the result named in the PR
+  body. Its cheap automatic checks run in CI (`workspace/src/orch_ui/tests/ux_checks.cjs`, `brand/tests/test_contrast.py`).
 
 ## 8. Fast and stable
 

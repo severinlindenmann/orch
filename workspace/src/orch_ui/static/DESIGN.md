@@ -33,8 +33,71 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 1. Read this file and open `gallery.html`; check it does not already exist (search the gallery and `components.css`).
 2. Write the CSS on tokens only (no hex colours, no px outside the spacing scale, durations from `--dur-*`).
 3. If it needs script, add a builder to `widgets.js` that uses `textContent` for text.
-4. Add the gallery entry with every state; run the gallery check (`uv run pytest tests/test_orch_ui_kit.py`).
+4. Add the gallery entry with every state; run the gallery check (`uv run pytest tests/test_orch_ui_kit.py`) and the UX checks (`node workspace/src/orch_ui/tests/ux_checks.cjs`).
 5. Use it from the page; update the matching mockup page in the same PR.
+
+## UX/UI checklist (owner, 16 Nov 2026)
+
+Every UI change (page, component, state, words on screen, motion, mockup, visual fix) and every review of one passes
+this list before it is called done. It extends the rules above and never overrides them: owner rules > this file and
+`AGENTS.md` R6/R7 > the checklist > general practice. The procedure is skill `orch-ux-checklist`
+(`.agents/skills/orch-ux-checklist/`); thresholds, how to check each item and the sources (WCAG 2.2, NN/g, web.dev,
+GOV.UK, Material) are in its `references/CHECKLIST.md` and `references/RESEARCH.md`.
+
+**How:** screenshots at exactly 1280x800, 1920x1080 and 390x844 (plus 320 for reflow), one set per state the change
+touches (loaded, loading, empty, error, stale, long content), one with keyboard focus on the main action and a
+before/after pair around the main click. Answer every item yes / no / n.a.; fix every "no" or say why. The PR body
+says `UX checklist: 61 items, N n.a., all others yes` (or the "no" lines with reasons), `Screenshots:`,
+`Mockup: updated <where>`, `Master: <change or none>`. A change of look, flow or words goes to the owner as a review
+card with the before and after pictures.
+
+**Never ship with a "no":** A1, A3, B2, D2, E3, H1, H3, H5, I1, L1.
+
+| Group | Items |
+|---|---|
+| A Design system | A1 no new CSS, `<style>` or hex outside the master · A2 tokens only, 4-pt spacing, radius 8/10/12 · A3 master components only, new ones in the gallery · A4 SX-2 type scale, SX-1/SX-4 edges judged at exactly 1280 · A5 mockup changed in the same PR and matching · A6 polish: one edge per side, status icon in pills, no lone-initial avatars, ellipsis, nothing clipped |
+| B Hierarchy | B1 5-second test: what, why, what can I do · B2 exactly one filled button per view, counting the top bar; New ticket outlined · B3 at most 7 facts per card, 5 KPIs, no Details toggles · B4 long text at most 3 lines on level 1, prose at most 76ch · B5 no repeated sentence, counts match everywhere |
+| C Navigation | C1 active nav, crumb, title = nav label · C2 every view, tab and filter has a URL; Back keeps scroll · C3 no dead ends, every state has a next step |
+| D Actions | D1 verb labels that name the outcome, no OK or Submit · D2 costly action: cost and time above it, not filled, not autofocused, a cheaper choice beside it · D3 destructive: Danger style, set apart, Undo over confirm · D4 dialog footer `[tertiary] … [Cancel] [Primary]` · D5 a disabled control says why, next to it |
+| E States | E1 skeleton shaped like the result within 100 ms when a load may pass 1 s, no page spinner · E2 master empty state, one sentence, one button, only after loading · E3 error: what happened, what to do, one button, next to its source · E4 stale, partial or offline keeps the data, "Updated … ago" · E5 0 / 1 / many, plurals, a 200-character title, a long word · E6 missing permission or add-on: hidden, or disabled with the reason |
+| F Feedback | F1 response within 0.1 s · F2 1-10 s inline spinner with a label; over 10 s the step, elapsed time and Cancel · F3 toast 5 s, names the object, Undo; error toasts stay · F4 live updates `role=status`, never steal the scroll |
+| G Forms | G1 visible labels, `autocomplete` / `inputmode` · G2 a default chosen, choices before typing · G3 validate on continue, error next to the field plus a summary |
+| H Accessibility (WCAG 2.2 AA) | H1 text 4.5:1, large text 3:1 · H2 control borders and focus 3:1 · H3 everything by keyboard, visual order, no trap, Escape returns focus · H4 focus visible and never under a sticky bar · H5 targets at least 24x24 CSS px (touch 44x44) · H6 name, role and state; axe 0 serious · H7 one h1, ordered headings, landmarks, skip link, unique title · H8 colour never the only signal · H9 320 px and 200% text, no page sideways scroll · H10 reduced motion = no motion |
+| I Responsive | I1 no page sideways scroll or clipping at 1920 / 1280 / 390 / 320 · I2 main action above the fold at 1280x800; 1920 not stretched · I3 phone: navigation reachable, thumb reach, nothing hover-only, text at least 12 px |
+| J Motion | J1 token durations (100 / 150 / 200 / 240, exit 120), at most 240 ms · J2 every animation has a job, ease-out in, shorter ease-in out, nothing moves at idle · J3 only transform and opacity, CLS at most 0.1 · J4 at most 3 flashes a second, a pause for motion over 5 s |
+| K Performance | K1 p75 LCP at most 2.5 s, INP 200 ms, CLS 0.1; first paint under 1 s · K2 old content stays while loading, no spinner over 1 s |
+| L Words | L1 wording and banned-word tests green · L2 Helper, Evidence; the SX-18 bans the test misses; new nouns owner-approved · L3 sentence case, at most 25 words, no IDs, jargon or raw values · L4 errors say what happened and what to do, no blame, no "invalid" · L5 dates only through `UI.stamp` / `UI.clock` · L6 one word per thing everywhere |
+| M Helper trust | M1 before a start: what, helper time, your time and cost in at most 3 lines · M2 evidence on the same screen as "Looks good" · M3 a plain timeline of what the helper did · M4 stop or undo visible at the decision and on the ticket |
+
+### Checked automatically in CI
+
+| Check | Items | Where |
+|---|---|---|
+| Master gallery at 1280, 390 and 320 px wide: no page sideways scroll | I1, H9 (width part) | `workspace/src/orch_ui/tests/ux_checks.cjs` (job `page-smoke`) |
+| Every control at least 24x24 CSS px, or 24 px clear of the next one (WCAG 2.5.8; links inside a sentence exempt) | H5 (pointer part) | same |
+| Every control reached with Tab shows a focus mark (outline or ring), first 60 Tab stops | H4 (mark part) | same |
+| With reduced motion asked for, no animation or transition still runs | H10 | same |
+| Rendered text at least 4.5:1 (large 3:1) against the colour behind it | H1 | same |
+| No console error, uncaught exception or failed request on the gallery and on every Focus and Insights screen | (load health) | same, and `e2e/focus_insights_smoke.cjs` |
+| A planted page with one fault of each kind must trip every check above (the checks cannot go blind) | — | `ux_checks.cjs --selftest` |
+| Every text token on every surface 4.5:1; status text on its soft colour; text on filled buttons; control borders and the focus colour 3:1 on every surface | H1, H2 | `brand/tests/test_contrast.py` (job `brand`) |
+| No new stylesheet, `<style>` block or hex colour outside the master | A1 | `scripts/check_style.py` |
+| Wording and banned words | L1 | `brand/tests/test_wording.py`, `scripts/check_banned_words.py` |
+
+Run them locally before the PR: `node workspace/src/orch_ui/tests/ux_checks.cjs` (needs `playwright` with a
+Chromium) and `python -m pytest -q brand/tests`. A new master component shows up in the gallery and so is checked by
+the first rows without any extra work.
+
+### Checked by hand
+
+- **By eye on the screenshots, every time:** A3-A6, B1, B3-B5, C1, C3, D1-D5, E1-E6, F1-F3, G2, G3, H4 (focus hidden
+  under a sticky bar, toast or sheet), H8, I2, I3, J2, K2, L2-L4, L6, M1-M4. They need judgement or a real flow; no
+  cheap test answers them.
+- **Could be automated, not in CI yet (run by hand when the change touches them):** A2 (tokens only), B2 (one filled
+  button), C2 (URL per view), F4 (`role=status`), G1 (labels and `autocomplete`), H3 (keyboard run, Escape), H5 touch
+  44x44, H6 (axe-core, as in `e2e/full/web/stepper.mjs`), H7 (headings, landmarks), H9 200% text, J1, J3, J4, K1
+  (Lighthouse or a DevTools trace), L5 (`UI.stamp` only). The automatic checks above run on the master gallery only;
+  product pages and mockups are checked by these hand steps and the screenshots.
 
 ## Sweep rules SX-1..20 (14 Nov)
 
