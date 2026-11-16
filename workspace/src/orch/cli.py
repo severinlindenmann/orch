@@ -165,7 +165,7 @@ def _chip(root: Path | None, ev: dict) -> str:
 
 def _who_added(t: dict, c: dict, ev: dict) -> str:
     """`t` is a SHOWN ticket (history.shown_ticket): unproven synced evidence is the sync role there."""
-    return "● You" if history.evidence_author(t, c, ev) == "person" else "○ Agent says"
+    return "● You" if history.evidence_author(t, c, ev) == "person" else "○ Helper says"
 
 
 def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> list[str]:

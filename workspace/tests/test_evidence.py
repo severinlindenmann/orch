@@ -111,7 +111,7 @@ def test_show_chips_marks_and_finish_line(proj, run, tid):
         "--by", "agent:claude-code")  # fmt: skip
     run("check", "done", tid, "c1", "--command", "pytest -q", "--by", "agent:claude-code")
     text = run("ticket", "show", tid)[1]
-    assert "Q3 invoices (file, 2 KB)" in text and "○ Agent says" in text
+    assert "Q3 invoices (file, 2 KB)" in text and "○ Helper says" in text
     assert "All done" not in text
     run("check", "done", tid, "c2", "--note", "Looks right", "--by", "human:severin")
     text = run("ticket", "show", tid)[1]
