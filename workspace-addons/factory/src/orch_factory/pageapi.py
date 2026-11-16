@@ -9,7 +9,7 @@ import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import authority, autopilot, flow, orchcli, service
+from . import ask, authority, autopilot, flow, handover, orchcli, render, service
 from .render import clean
 from .store import Refused, Store, clock, no_links
 
@@ -59,6 +59,44 @@ def _open_question(e):
             "data"
         ]  # frozen structured data: the page titles the question from it, never the raw text
     return out
+
+
+def _plain_questions(ticket):
+    """The questions your helper asked on the order itself (no Factory kind) that still wait for you: the draft's open
+    questions as cards, each with its options and its suggestion. Text from the record is cut and cleaned."""
+    out = []
+    for q in ticket.get("questions") or []:
+        if not isinstance(q, dict) or q.get("kind") is not None or q.get("answer") is not None:
+            continue
+        if not isinstance(q.get("id"), str):
+            continue
+        options = [_text(o, 80) for o in (q.get("options") or []) if isinstance(o, str)][:6]
+        rec = _text(q.get("recommended"), 80) if q.get("recommended") else None
+        out.append({"q": q["id"], "text": _text(q.get("text"), 300), "options": options, "recommended": rec})
+    return out[:10]
+
+
+def _results(d):
+    """The crew's results that wait for your Looks good (core: the ticket is in Check), one row each."""
+    out = []
+    for slug, t in (d.get("crew") or {}).items():
+        if t.get("status") == "review" and slug in d["tasks"]:
+            out.append({"ticket": t["id"], "title": _text(d["tasks"][slug]["title"])})
+    return out[:10]
+
+
+def _starting(d):
+    """The stage the run is about to start: nothing waits for you and none of its crew tickets has been started yet."""
+    if d.get("open") or d.get("shipped") or not d.get("stage"):
+        return None
+    mine = [slug for slug, t in d["tasks"].items() if t["stage"] == d["stage"]]
+    if not mine:
+        return None
+    started = [d["crew"][slug] for slug in mine if slug in d["crew"]]
+    if any(t.get("status") not in (None, "open") for t in started):
+        return None
+    done_before = any(x["state"] == "done" for x in d["line"])
+    return d["stage"] if done_before else None
 
 
 def _labelled(line, proposal):
@@ -130,6 +168,9 @@ def _summary(ticket, d, root=None):
         "working": _working(root, ticket, phase),
         "agent_draft": _agent_draft(ticket),
         "draft_v": _draft_v(ticket),
+        "questions": _plain_questions(ticket),
+        "results": _results(d) if started_run else [],
+        "starting": _starting(d) if started_run else None,
     }
 
 
@@ -185,6 +226,9 @@ def _broken(ticket, error):
         "working": False,
         "agent_draft": False,
         "draft_v": None,
+        "questions": [],
+        "results": [],
+        "starting": None,
         "problem": _text(str(error), 200),
     }
 
@@ -305,8 +349,10 @@ def _tiny(d):
     return out
 
 
-def _stops(d):
+def _stops(d, root=None, tickets=()):
     out = []
+    outbox = None
+    named = ask.names(root) if root is not None else {}
     for e in sorted((e for e in d["ents"] if e["row"]["kind"] == "factory:stop"), key=lambda e: e["n"]):
         eff = d["effective"](e)
         if eff:
@@ -315,6 +361,10 @@ def _stops(d):
             state, answer, by = "ignored", None, authority.who(e["q"]) or None
         else:
             state, answer, by = "open", None, None
+        asks = ask.view(root, tickets, d["tid"], e["n"], named, outbox) if root is not None else []
+        if any(a["state"] == "queued" for a in asks) and outbox is None:
+            outbox = _outbox(root)  # one look at what waits to be sent, only when an ask says it is queued
+            asks = ask.view(root, tickets, d["tid"], e["n"], named, outbox)
         out.append(
             {
                 "n": e["n"],
@@ -323,9 +373,33 @@ def _stops(d):
                 "state": state,
                 "answer": answer,
                 "by": by,
+                "asks": asks,
+                "autopilot_waits": state == "open"
+                and any(a["state"] != "failed" and a["state"] != "closed" for a in asks),
             }
         )
     return out
+
+
+def _outbox(root):
+    try:
+        return orchcli.call(root, "relay", "outbox").get("waiting") or []
+    except Refused:
+        return []
+
+
+def reach(root):
+    """Workspaces a stop may be shared with (empty when the relay is off, so the page shows no button)."""
+    return ask.reach(root)
+
+
+def scan(root, order_id, n):
+    if not ORDER_ID.fullmatch(order_id):
+        return None
+    try:
+        return ask.scan_stop(root, order_id, n)
+    except Refused:
+        return None
 
 
 def _changes(d):
@@ -344,19 +418,37 @@ def _changes(d):
     return out
 
 
-def _crew(d):
+def _crew(d, root, store):
     out = []
+    handovers = {h["task"]: h for h in d.get("proposal", {}).get("handovers", [])}
     for slug, task in d["tasks"].items():
         t = d["crew"].get(slug)
-        out.append(
-            {
-                "ticket": t["id"] if t else None,
-                "title": _text(task["title"]),
-                "role": task["role"],
-                "agent": task.get("agent"),
-                "status": (t.get("status") if t else None) or ("open" if t else "todo"),
+        row = {
+            "ticket": t["id"] if t else None,
+            "title": _text(task["title"]),
+            "role": task["role"],
+            "agent": task.get("agent"),
+            "status": (t.get("status") if t else None) or ("open" if t else "todo"),
+        }
+        h = handover.of(d, slug)
+        if h is not None:
+            mine = handover.cached(t) if t else None
+            name = handover.display_name(root, h["workspace"])
+            state = (mine or {}).get("state")
+            row["with"] = {
+                "name": name,
+                "state": state,
+                "words": render.handover_words(name, state) if state else "Goes to " + name,
+                "since": handover.sent_at(store, t["id"]) if t else None,
             }
-        )
+        elif slug in handovers and t and handover.cached(t):
+            row["with"] = {
+                "name": handover.cached(t).get("name"),
+                "state": "not_needed",
+                "words": "Done here instead",
+                "since": None,
+            }
+        out.append(row)
     return out
 
 
@@ -390,10 +482,11 @@ def order(root, order_id):
         **_summary(ticket, d, root),
         "proposal": proposal,
         "drafts": _drafts(store, order_id),
-        "crew": _crew(d),
+        "crew": _crew(d, root, store),
+        "handover": handover.lines(root, proposal) if proposal and proposal.get("kind") == "run" else [],
         "changes": _changes(d),
         "tiny": _tiny(d),
-        "stops": _stops(d),
+        "stops": _stops(d, root, tickets),
         "activity": _activity(ticket),
     }
 

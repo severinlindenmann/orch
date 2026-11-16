@@ -93,6 +93,34 @@ struct QuestionBody: Codable, Sendable, Equatable {
     var proposal: String? = nil
     var when: String? = nil
     var groupRef: GroupRef? = nil // group_ref via JSONCoding
+    /// Review stack (relay-api.md "Review cards on the phone"). `digest` is echoed in a verdict; `card` / `cardFiles` via JSONCoding.
+    var digest: String? = nil
+    var card: ReviewCard? = nil
+    var cardFiles: [CardFile]? = nil
+}
+
+extension QuestionBody {
+    // Keep this initializer in an extension to preserve the memberwise initializer.
+    // The three review fields are forgiving: a card this phone cannot read leaves a plain question (never a lost one).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        questionId = try c.decode(String.self, forKey: .questionId)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        text = try c.decode(String.self, forKey: .text)
+        options = try c.decode([String].self, forKey: .options)
+        recommended = try c.decodeIfPresent(String.self, forKey: .recommended)
+        previews = try c.decodeIfPresent([String: String].self, forKey: .previews)
+        scope = try c.decodeIfPresent(String.self, forKey: .scope)
+        allowQuestion = try c.decodeIfPresent(Bool.self, forKey: .allowQuestion)
+        review = try c.decodeIfPresent(Bool.self, forKey: .review)
+        proposal = try c.decodeIfPresent(String.self, forKey: .proposal)
+        when = try c.decodeIfPresent(String.self, forKey: .when)
+        groupRef = try c.decodeIfPresent(GroupRef.self, forKey: .groupRef)
+        digest = try? c.decodeIfPresent(String.self, forKey: .digest)
+        card = try? c.decodeIfPresent(ReviewCard.self, forKey: .card)
+        cardFiles = try? c.decodeIfPresent([CardFile].self, forKey: .cardFiles)
+        if card == nil { cardFiles = nil }
+    }
 }
 
 struct QuestionMessage: Codable, Sendable, Equatable {
@@ -191,10 +219,23 @@ struct ProposalResult: Codable, Sendable, Equatable {
     var reason: String? = nil
 }
 
+/// A workspace took one of its questions back (relay-api.md "Question taken back"); `reason` is one plain line.
+struct TakenBack: Codable, Sendable, Equatable {
+    let reason: String
+}
+
 /// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction).
 struct TextBody: Codable, Sendable, Equatable {
     var proposalResult: ProposalResult? = nil
     var isProposalResult: Bool { proposalResult != nil }
+    /// The workspace's result for a phone verdict (reply_to = the question): never chat, never unread.
+    var reviewResult: ReviewResult? = nil
+    var isReviewResult: Bool { reviewResult != nil }
+    /// "Question taken back" (reply_to = the question): closes its card; never a bubble, never unread.
+    var takenBack: TakenBack? = nil
+    var isTakenBack: Bool { takenBack != nil }
+    /// Workspace texts that only update a card and never show as a chat bubble.
+    var isSilentResult: Bool { isProposalResult || isReviewResult || isTakenBack }
     /// Empty when the text only carries attachments, a voice memo, a location or feedback.
     var text: String = ""
     /// Work update about the message's ticket; nil on a plain text.
@@ -226,21 +267,25 @@ struct TextBody: Codable, Sendable, Equatable {
          attachments: [MessageAttachment] = [], voice: VoiceMemo? = nil, location: LocationShare? = nil, feedback: Feedback? = nil,
          ticketView: TicketSnapshot? = nil,
          group: GroupInfo? = nil, groupEvent: GroupEvent? = nil, by: String? = nil, via: String? = nil, phone: String? = nil,
-         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil) {
-        self.proposalResult = proposalResult
+         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil, reviewResult: ReviewResult? = nil, takenBack: TakenBack? = nil) {
+        self.proposalResult = proposalResult; self.reviewResult = reviewResult; self.takenBack = takenBack
         self.text = text; self.update = update; self.clientId = clientId; self.general = general; self.speak = speak
         self.attachments = attachments; self.voice = voice; self.location = location; self.feedback = feedback; self.ticketView = ticketView
         self.group = group; self.groupEvent = groupEvent; self.by = by; self.via = via; self.phone = phone
         self.origin = origin; self.echoOf = echoOf; self.toPerson = toPerson; self.task = task; self.sharedFiles = sharedFiles
     }
     private enum CodingKeys: String, CodingKey {
-        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult
+        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult, reviewResult, takenBack
         case group, groupEvent, by, via, phone, day, origin, echoOf, toPerson, task, sharedFiles
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         proposalResult = try? c.decodeIfPresent(ProposalResult.self, forKey: .proposalResult)
         if let result = proposalResult, !["made", "refused", "decided"].contains(result.result) { proposalResult = nil }
+        reviewResult = try? c.decodeIfPresent(ReviewResult.self, forKey: .reviewResult)
+        if let r = reviewResult, !ReviewResult.known.contains(r.result) { reviewResult = nil }
+        takenBack = try? c.decodeIfPresent(TakenBack.self, forKey: .takenBack)
+        if let t = takenBack, t.reason.isEmpty { takenBack = nil }
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         update = try? c.decodeIfPresent(TextUpdate.self, forKey: .update)
         clientId = try? c.decodeIfPresent(String.self, forKey: .clientId)
@@ -266,6 +311,8 @@ struct TextBody: Codable, Sendable, Equatable {
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(proposalResult, forKey: .proposalResult)
+        try c.encodeIfPresent(reviewResult, forKey: .reviewResult)
+        try c.encodeIfPresent(takenBack, forKey: .takenBack)
         if !text.isEmpty { try c.encode(text, forKey: .text) }
         try c.encodeIfPresent(update, forKey: .update); try c.encodeIfPresent(clientId, forKey: .clientId)
         try c.encodeIfPresent(general, forKey: .general); try c.encodeIfPresent(speak, forKey: .speak)
@@ -476,9 +523,13 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var refs: [TicketRef] = []
     var results: [TicketResult] = []
     var light: Bool? = nil
+    /// The ticket's due, `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM` (workspace local time); full snapshots only. Words: `TicketDue.words`.
+    var due: String? = nil
 
     init(title: String? = nil, status: String? = nil, agent: String? = nil, summary: String? = nil, checklist: [Task] = [],
-         running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = [], results: [TicketResult] = [], light: Bool? = nil) {
+         running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = [], results: [TicketResult] = [], light: Bool? = nil,
+         due: String? = nil) {
+        self.due = due
         self.refs = refs; self.results = light == true ? [] : results; self.light = light
         self.title = title; self.status = status; self.agent = agent; self.summary = summary; self.checklist = checklist
         self.done = checklist.filter(\.done).count; self.total = checklist.count
@@ -501,9 +552,10 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         historyTail = (try? c.decodeIfPresent([Line].self, forKey: .historyTail)) ?? []
         refs = TicketRef.decodeList(c, forKey: .refs)
         light = try? c.decodeIfPresent(Bool.self, forKey: .light)
+        due = try? c.decodeIfPresent(String.self, forKey: .due)
         results = light == true ? [] : TicketResult.decodeList(c, forKey: .results)
     }
-    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, results, light }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, results, light, due }
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(title, forKey: .title)
@@ -516,6 +568,7 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         try c.encodeIfPresent(running, forKey: .running)
         try c.encodeIfPresent(started, forKey: .started)
         try c.encodeIfPresent(light, forKey: .light)
+        try c.encodeIfPresent(due, forKey: .due)
         try c.encode(checklist, forKey: .checklist)
         try c.encode(attachments, forKey: .attachments)
         try c.encode(historyTail, forKey: .historyTail)
@@ -543,6 +596,48 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var doneCount: Int { done ?? checklist.filter(\.done).count }
     var wontDoCount: Int { wontDo ?? checklist.filter(\.wontDo).count }
     var totalCount: Int { total ?? checklist.count }
+}
+
+/// The plain words for a ticket's due, the same rules as the dashboard and the CLI: with a time "Due 18:30" (today),
+/// "Due Mon 18:30" (within a week), "Due 14 Nov 2026, 18:30" (further), "Late since ..." once it has passed on a ticket
+/// that is not done or dropped; a day only reads "Due today" / "Due Mon 16 Nov" / "Late since Sat 14 Nov".
+/// Pure: the clock and calendar come in, so tests fix them. A value that is not a due gives nil.
+enum TicketDue {
+    private static let days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    private static let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    private static func number(_ text: Substring, digits: Int) -> Int? {
+        guard text.count == digits, text.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return Int(text)
+    }
+
+    static func words(_ due: String?, status: String?, now: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard let due, due.count == 10 || due.count == 16 else { return nil }
+        let day = due.prefix(10).split(separator: "-", omittingEmptySubsequences: false)
+        guard day.count == 3, let y = number(day[0], digits: 4), let m = number(day[1], digits: 2), let d = number(day[2], digits: 2) else { return nil }
+        var clock: (hour: Int, minute: Int)?
+        if due.count == 16 {
+            let rest = due.dropFirst(10)
+            let hm = rest.dropFirst().split(separator: ":", omittingEmptySubsequences: false)
+            guard rest.first == "T", hm.count == 2, let h = number(hm[0], digits: 2), let mi = number(hm[1], digits: 2), h < 24, mi < 60 else { return nil }
+            clock = (h, mi)
+        }
+        guard let at = calendar.date(from: DateComponents(year: y, month: m, day: d, hour: clock?.hour ?? 0, minute: clock?.minute ?? 0)) else { return nil }
+        let parts = calendar.dateComponents([.year, .month, .day], from: at)
+        guard parts.year == y, parts.month == m, parts.day == d else { return nil }  // 2026-02-31 is no day
+        let gap = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: at)).day ?? 0
+        let closed = status == "done" || status == "dropped"
+        let weekday = days[max(0, min(6, calendar.component(.weekday, from: at) - 1))]
+        let month = months[max(0, min(11, m - 1))]
+        guard let clock else {
+            let late = gap < 0 && !closed
+            if gap == 0 { return "Due today" }
+            return (late ? "Late since " : "Due ") + "\(weekday) \(d) \(month)"
+        }
+        let hm = String(format: "%02d:%02d", clock.hour, clock.minute)
+        let when = gap == 0 ? hm : abs(gap) < 7 ? "\(weekday) \(hm)" : "\(d) \(month) \(y), \(hm)"
+        return (at < now && !closed ? "Late since " : "Due ") + when
+    }
 }
 
 struct IdResponse: Decodable, Sendable { let id: String }
@@ -661,4 +756,8 @@ struct SendRequest: Codable, Sendable, Equatable {
     }
 }
 /// `POST /v1/phone/answer`.
-struct AnswerRequest: Codable, Sendable, Equatable { let questionMessageId: String; let answer: String; let clientId: String }
+struct AnswerRequest: Codable, Sendable, Equatable {
+    let questionMessageId: String; let answer: String; let clientId: String
+    /// Review stack swipe (phone-api.schema.json answer_request.verdict). `answer` stays the plain summary line.
+    var verdict: ReviewVerdict? = nil
+}

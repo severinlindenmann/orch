@@ -20,7 +20,9 @@ BUILTIN = ROOT / "workspace/src/orch/builtin"
 HUMAN_ONLY = {
     *(f"relay mobile {x}" for x in ("on", "off", "status", "hours", "ack", "keeper")),  # a person's switch
     "look shared-pages",  # a person's switch in the dashboard (agents are refused)
+    "review answer",  # a person decides a card (agents are refused: needs_person)
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
+    "run take-back",  # a person takes back a waiting message (agents are refused)
     "check wont-do",  # a person decides a step will not be done (agents ask with orch ask)
     "chat",  # the dashboard and the Chat helper (its prompt names the commands)
     "copy clean",  # a person's call (the dashboard's "Clean up now"); `orch copy` is hidden from help
@@ -33,9 +35,13 @@ HUMAN_ONLY = {
     "share",
     "private",  # a person's approvals and Move to private (agents are refused)
     "update",
+    "doctor",  # a person's check of the install
+    "uninstall",  # a person takes orch out of a folder
     "start",
     "stop",
     "status",
+    "pause",  # a person's runaway brake
+    "resume",
     "addon",
     "agents",
     "config",
@@ -59,7 +65,11 @@ PENDING: set[str] = set()
 
 
 def skill_dirs() -> dict[str, Path]:
-    out = {"orch": ROOT / "workspace/skills/orch", "orch-diagnose": ROOT / "workspace/skills/orch-diagnose"}
+    out = {
+        "orch": ROOT / "workspace/skills/orch",
+        "orch-diagnose": ROOT / "workspace/skills/orch-diagnose",
+        "orch-github": ROOT / "workspace/skills/orch-github",
+    }
     for p in sorted(BUILTIN.glob("*/skills/orch-*")):
         out[p.name] = p
     for p in sorted((ROOT / "workspace-addons").glob("*/src/*/skills/orch-*")):
@@ -295,7 +305,7 @@ def test_refresh_writes_only_on_change(proj, capsys):
         ' "rights": {"files": true, "apps": false, "permanent": true, "public": false}}'
     )
     assert skillrender.refresh_skills(proj) == ["publish"]
-    assert "they apply from the next agent session" in capsys.readouterr().out
+    assert "they apply from the next agent session" in capsys.readouterr().err
     text = skill.read_text(encoding="utf-8")
     assert "--permanent" in text and "--public" not in text and "orch publish app" not in text
 
@@ -361,3 +371,30 @@ def test_orch_block_is_five_numbered_rules():
     assert "orch check done" in numbered[2] and "orch ask" in numbered[3]
     assert "orch ticket summary" in numbered[4]
     assert "There are no signing or planning gates" in block
+
+
+def test_asking_keeps_the_agent_working():
+    """R2.6: after `orch ask` the agent keeps working on what does not need the answer; never stops there."""
+    block = (SKILLS["orch"] / "AGENTS-block.md").read_text(encoding="utf-8")
+    text = (SKILLS["orch"] / "SKILL.md").read_text(encoding="utf-8")
+    for where, t in (("AGENTS block", block), ("SKILL.md", text)):
+        flat = " ".join(t.split())
+        assert not re.search(r"orch ask[^.]*(then|and) stop\b", flat), f"{where}: asking must not mean stop"
+        assert "keep working" in flat.lower(), f"{where}: say to keep working while the ticket waits"
+
+
+def test_ask_list_is_in_the_skill_and_editable_in_one_file():
+    """R2.4: the five cases are in the skill, and the person can replace them in one file the skill names."""
+    text = " ".join((SKILLS["orch"] / "SKILL.md").read_text(encoding="utf-8").split())
+    block = (SKILLS["orch"] / "AGENTS-block.md").read_text(encoding="utf-8")
+    assert "## When to ask" in text
+    for case in (
+        "cannot be undone",
+        "costs money",
+        "touches production",
+        "deletes real data",
+        "visible to people outside",
+    ):
+        assert case in text, case
+    assert 'Never ask "may I do this step"' in text and "recommended answer" in text
+    assert "`.orch/ask-when.md`" in text and "`.orch/ask-when.md`" in block

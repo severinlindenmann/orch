@@ -4,7 +4,7 @@ import json
 import re
 from datetime import datetime
 
-from . import authority, autopilot, commands, irreversible, measure, orchcli
+from . import ask, authority, autopilot, commands, handover, irreversible, measure, orchcli
 from .render import clean
 from .store import Refused, Store, clock, digest, validate
 
@@ -278,7 +278,9 @@ def _measure(root, d):
     can't be read the cached value stays (and nothing is claimed as measured)."""
     if d.get("phase") != "started" or d.get("kind") != "run":
         return
-    minutes = measure.active_minutes(root, [d["tid"], *(t["id"] for t in d.get("crew", {}).values())])
+    # a task handed to another workspace is their time, never counted in this order's active-time budget
+    crew = [t["id"] for t in d.get("crew", {}).values() if not handover.delegated(t)]
+    minutes = measure.active_minutes(root, [d["tid"], *crew])
     if minutes is not None:
         d["used"], d["measured"] = minutes, True
 
@@ -338,6 +340,21 @@ def _log_ignored(root, store, order, d):
         if not any(h.get("text") == text for h in authority.history(ticket)):
             orchcli.call(root, "log", order, text, write=True)
             ticket = commands.order_ticket(root, order)
+
+
+def close_older_questions(root, order, upto, why):
+    """The step a question asked about has happened: the order's own plain questions (no Factory kind) that are still open
+    and were asked before question `upto` are taken back through core, with the plain reason. Never stops the run."""
+    try:
+        questions = commands.order_ticket(root, order).get("questions") or []
+        ids = [q.get("id") for q in questions]
+        if upto not in ids:
+            return
+        for q in questions[: ids.index(upto)]:
+            if q.get("kind") is None and q.get("answer") is None:
+                orchcli.call(root, "ask", order, why, "--take-back", q["id"], write=True)
+    except Refused:
+        pass
 
 
 def _step(d):
@@ -417,6 +434,7 @@ def next_step(root, order):
             )
             if kind == "factory:start" and answer == "Start":
                 store.journal_append({"type": "started", "order": order, "q": q["id"], "by": by})
+                close_older_questions(root, order, q["id"], "Not needed any more: the run has started.")
             elif kind == "factory:autopilot" and answer == "Start":
                 g = next((x for x in autopilot.grants_of(store, ticket) if x["q"] == q["id"]), None)
                 if g:
@@ -444,7 +462,12 @@ def next_step(root, order):
                 store.journal_append(
                     {"type": "stop-answered", "order": order, "q": q["id"], "answer": answer, "by": by}
                 )
+                ask.close_for_stop(root, tickets, order, e["n"])
+                if answer in ("Continue", "Ship it"):
+                    close_older_questions(root, order, q["id"], "Not needed any more: this step is done.")
         d["rows"] = [r for r in store.journal_read() if r["order"] == order]
+        if d["kind"] == "run" and d["phase"] == "started" and d.get("proposal", {}).get("handovers"):
+            handover.settle(root, store, d)
         if d["kind"] == "autopilot":
             d["grant_valid"] = any(clock() < g["until"] for g in autopilot.grants_of(store, ticket))
         refresh(root, store, order, d)
@@ -517,6 +540,12 @@ def crew_start(root, order, task):
         crew = d["crew"].get(task)
         if crew is None:
             raise Refused("Add the crew ticket first (orch factory crew add).", "invalid")
+        if any(h["task"] == task for h in d["proposal"].get("handovers", [])):
+            handover.settle(root, store, d)  # a taken-back task is told once and then runs here
+            h = handover.of(d, task)
+            if h is not None:
+                info = handover.start(root, store, d, t, crew, h)
+                return {"order": d["tid"], "task": task, "ticket": crew["id"], "handover": info}
         _measure(root, d)  # the budget check uses measured time, never the (synced, settable) cache (#681)
         if d["cap"] and not d.get("measured"):
             raise Refused(
@@ -549,6 +578,15 @@ def change(root, order, data):
                 raise Refused("A new task needs a stage of the line and a new name.", "invalid")
             if t["role"] not in roles:
                 raise Refused("A new task cannot use a crew role the proposal does not have.", "not_allowed")
+        task = value.get("takes_back")
+        if task is not None:
+            if task not in {h["task"] for h in d["proposal"].get("handovers", [])}:
+                raise Refused(
+                    "That task was not handed to another workspace, so there is nothing to take back.",
+                    "invalid",
+                )
+            if task in handover.taken_back(d):
+                raise Refused("That task was already taken back.", "invalid")
         info = freeze_ask(root, store, ticket, "factory:change", data, value, ext={"stage": "waiting"})
         d = derive(root, store, commands.order_ticket(root, d["tid"]))
         refresh(root, store, d["tid"], d)
@@ -628,6 +666,7 @@ def reconcile(root):
     result = []
     with store.locked():
         tickets = orchcli.tickets(root)
+        ask.resume(root, tickets)
         for t in tickets:
             ext = t.get("ext", {}).get("factory", {})
             if ext.get("role") != "order":
@@ -665,7 +704,7 @@ def reconcile(root):
                 item["problems"].append("The cache says started but no person pressed Start.")
             known = {x["id"] for x in d["crew"].values()}
             for c in tickets:
-                if c.get("parent") == t["id"] and c["id"] not in known:
+                if c.get("parent") == t["id"] and c["id"] not in known and ask._x(c).get("role") != "ask":
                     item["problems"].append(
                         f"Sub-ticket {c['id']} is not a crew ticket of the approved tasks."
                     )

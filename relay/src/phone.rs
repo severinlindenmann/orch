@@ -135,7 +135,8 @@ pub const OPEN_QUESTIONS_SQL: &str = "SELECT seq,id,from_addr,to_addr,type,creat
         UNION ALL
         SELECT m.* FROM json_each(?2) j CROSS JOIN messages m
           WHERE m.type='question' AND m.to_addr=?1 AND m.from_addr=j.value
-     ) m WHERE NOT EXISTS (SELECT 1 FROM messages a WHERE a.reply_to=m.id AND a.type='answer') ORDER BY seq DESC";
+     ) m WHERE NOT EXISTS (SELECT 1 FROM messages a WHERE a.reply_to=m.id AND a.type='answer')
+       AND NOT EXISTS (SELECT 1 FROM question_taken_back t WHERE t.question_id=m.id) ORDER BY seq DESC";
 
 /// Texts for a phone: ?1 phone id, ?2 cursor, ?3 JSON workspace list, ?4 paired-at, ?5 limit.
 pub const MESSAGES_SQL: &str = "SELECT seq,id,from_addr,to_addr,type,created_at,ticket,reply_to,payload,acked_at FROM (
@@ -467,7 +468,7 @@ async fn blob(
         let ok: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM blobs WHERE id=?1 AND uploader=?4)
              OR EXISTS(SELECT 1 FROM view_blobs v JOIN messages m ON m.id=v.msg_id JOIN blobs b ON b.id=v.blob_id
-               WHERE v.blob_id=?1 AND m.type='text' AND b.uploader=m.from_addr
+               WHERE v.blob_id=?1 AND m.type IN ('text','question') AND b.uploader=m.from_addr
                  AND m.from_addr IN (SELECT value FROM json_each(?2))
                  AND ((m.to_addr='phones' AND m.stored_at>=?3) OR m.to_addr=?4))",
             params![id, serde_json::to_string(&ws).unwrap_or("[]".into()), since, pid],
@@ -609,9 +610,49 @@ async fn answer(
                 b["answer"].as_str().unwrap_or("")
             )));
         }
+        // The workspace took this question back: closed, nothing stored (relay-api.md "Question taken back").
+        if let Some(reason) = store::taken_back_reason(&c, &app.key, qid)? {
+            return Err(taken_back(format!(
+                "This question was taken back: {reason}"
+            )));
+        }
         let (qb, qextra) = store::open_payload(&app.key, &q);
+        // A verdict (relay-api.md "Review cards on the phone"): only on a question with a digest, naming exactly that
+        // digest, at most 8 KB, every voice file an upload of this phone (another's, a workspace's or an unknown blob
+        // answers the same 404).
+        let verdict = &v["verdict"];
+        let mut voice: Vec<&str> = vec![];
+        if !verdict.is_null() {
+            if qb["digest"].as_str().is_none() || verdict["digest"] != qb["digest"] {
+                return Err(invalid(
+                    "This answer's verdict does not fit the question it answers.",
+                ));
+            }
+            if crate::rules::compact_len(verdict) > crate::rules::MAX_VERDICT {
+                return Err(invalid("The verdict is bigger than 8 KB."));
+            }
+            for vo in verdict["note"]["words"]["voice"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                let b = vo["blob_id"].as_str().unwrap_or("");
+                let own: bool = c.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM blobs WHERE id=?1 AND uploader=?2)",
+                    [b, &pid],
+                    |r| r.get(0),
+                )?;
+                if !own {
+                    return Err(not_found("Upload the file first (POST /v1/phone/blobs)."));
+                }
+                voice.push(b);
+            }
+        }
         let tx = c.unchecked_transaction()?;
         let mut abody = json!({"question_id": qb["question_id"], "answer": text, "answered_by": format!("human:{name}")});
+        if !verdict.is_null() {
+            abody["verdict"] = verdict.clone();
+        }
         if let Some(cid) = &cid {
             abody["client_id"] = cid.clone().into();
         }
@@ -629,6 +670,13 @@ async fn answer(
         let id = m["id"].as_str().unwrap().to_string();
         if let Some(cid) = &cid {
             remember_client_id(&c, &pid, cid, &id)?;
+        }
+        // The workspace this answer goes to may read its voice files (GET /v1/blobs/<id>); they are used, not purged.
+        for b in &voice {
+            c.execute(
+                "INSERT OR IGNORE INTO phone_blobs(blob_id,msg_id) VALUES(?1,?2)",
+                params![b, id],
+            )?;
         }
         tx.commit()?;
         (id, cid)
@@ -1213,7 +1261,10 @@ pub async fn push_message(app: &AppState, q: &Value) {
     let to = q["to"].as_str().unwrap_or("").to_string();
     let from = q["from"].as_str().unwrap_or("").to_string();
     let is_text = q["type"] == "text";
-    if q["body"].get("proposal_result").is_some() {
+    if q["body"].get("proposal_result").is_some()
+        || q["body"].get("review_result").is_some()
+        || q["body"].get("taken_back").is_some()
+    {
         return;
     }
     // Work updates: only result / question / failure / stopped are pushed. ack, working and note stay quiet

@@ -74,7 +74,8 @@ saved locally (`config set workspace.description`, a plain action, no proof) and
 text and the tags are sent to the first one that is connected, through the **same proposal path** as `orch relay|publish profile`: `PATCH /v1/me
 {description, tags}` → pending → the owner approves it in the admin portal → `description_by = workspace`. The card
 shows "Waiting for relay approval" while `whoami.pending` is set and "Live on relay" after; the name on the relay is
-shown read only. Icon and colour apply at once (`look set`). Relay rows appear only when the relay is on (AGENTS.md R1.1).
+shown read only. Only the first connected service gets the proposal (relay before publish): the profile is one text with
+one owner answer, and a workspace rarely runs both; the card shows that service's state. Icon and colour apply at once (`look set`). Relay rows appear only when the relay is on (AGENTS.md R1.1).
 No new endpoint, no new trust path.
 
 ## Body rules (`PATCH /v1/me`, admin PATCH)

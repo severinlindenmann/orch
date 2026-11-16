@@ -1,5 +1,5 @@
-"""`orch secret` (slice 1.2): keys go to the command, never to the output; person-only ops need an hp1 proof
-(invariant H1); every use is handed to the recorder seam without the value; no fail-open."""
+"""`orch secret` (slice 1.2): keys go to the command, never to the output; an agent gets only what its profile
+allows; every use is handed to the recorder seam without the value; no fail-open."""
 
 import io
 import json
@@ -34,35 +34,14 @@ def ws(proj, monkeypatch):
     return root
 
 
-def _use_as_person(argv, unproven):
-    """A use of a key (env/file/exec/get) is made as the PERSON by default in these tests: a valid
-    single-use hp1 proof on stdin. `unproven=True`, an agent marker or --by agent:... keeps the call as a
-    plain caller (agent-level, H1)."""
-    if (
-        unproven
-        or len(argv) < 3
-        or argv[:1] != ("secret",)
-        or argv[1] not in ("env", "file", "exec", "get")
-        or "--proof-stdin" in argv
-        or "--by" in argv
-        or os.environ.get("CLAUDECODE")
-    ):
-        return argv, None
-    rest = list(argv[3:])
-    words = rest[1:] if rest[:1] == ["--"] else rest
-    target = secretrun.use_target(argv[2], argv[1], words if argv[1] != "get" else rest[:1])
-    ws = next(d for d in (Path.cwd(), *Path.cwd().parents) if (d / ".orch").is_dir())
-    return (*argv[:2], "--proof-stdin", *argv[2:]), _proof(ws, "secret.profile", target) + "\n"
-
-
 @pytest.fixture
 def run(capsys, monkeypatch):
-    """Like the shared `run`, but a command's own exit code (SystemExit) is returned as the code."""
+    """Like the shared `run`, but a command's own exit code (SystemExit) is returned as the code. A caller is
+    a person unless `unproven=True` (named for the old proof tests): then it is an agent (--by agent:test)."""
 
     def _run(*argv, unproven=False):
-        argv, stdin = _use_as_person(argv, unproven)
-        if stdin is not None:
-            monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
+        if unproven and "--by" not in argv and argv[:1] == ("secret",):
+            argv = (*argv[:2], "--by", "agent:test", *argv[2:])
         try:
             code = cli.main(list(argv))
         except SystemExit as e:
@@ -122,14 +101,14 @@ def store(ws):
 
 
 def _proof(ws, op, target, by="human:pat", **kw):
-    return hp.mint(hp.human_key(ws), hp.new_payload(op, target, by, **kw))
+    return None  # no proof any more: kept so the call sites read the same
 
 
 def _cli(run, monkeypatch, proof, *argv, stdin_rest=""):
-    monkeypatch.setattr("sys.stdin", io.StringIO((proof + "\n" if proof is not None else "") + stdin_rest))
+    monkeypatch.setattr("sys.stdin", io.StringIO(stdin_rest))
     if argv[1:3] == ("profile", "set") and "--run" in argv:
         argv = (*argv, "--any-command")  # these tests are about other rules (#577: the forms have their own)
-    return run(*argv, "--proof-stdin")
+    return run(*argv)
 
 
 def _tree_text(root: Path) -> str:
@@ -359,16 +338,6 @@ def _enable_get(run, monkeypatch, ws, profile="plain"):
     assert code == 0, out + err
 
 
-def test_get_is_off_by_default_and_needs_the_record_not_only_the_file(store, run, ws, monkeypatch):
-    code, out, err = run("secret", "get", "plain", "other-token")
-    assert code == 2 and "does not allow printing" in err and TOKEN2 not in out + err
-    prof = keystore.read_profiles(ws)
-    prof["plain"]["allow_get"] = True
-    seed_profiles(ws, prof)  # the file alone: no matching settings record
-    code, out, err = run("secret", "get", "plain", "other-token")
-    assert code == 2 and TOKEN2 not in out
-
-
 def test_get_works_for_a_script_after_a_person_enabled_it(store, run, ws, monkeypatch):
     _enable_get(run, monkeypatch, ws)
     code, out, _ = run("secret", "get", "plain", "other-token")
@@ -458,7 +427,6 @@ def _state(ws):
     return (
         [(k["name"], k["state"]) for k in keystore.list_keys(ws)],
         keystore.read_profiles(ws),
-        hp.effective(ws, "secret.allow_get.plain", True),
     )
 
 
@@ -470,59 +438,6 @@ def test_each_person_op_succeeds_with_a_valid_proof(store, run, ws, monkeypatch,
     assert code == 0, out + err
     assert TOKEN not in out + err and TOKEN2 not in out + err
     assert name in ("get-disable", "agents-disable") or _state(ws) != before
-
-
-@pytest.mark.parametrize("name", PROVEN)
-@pytest.mark.parametrize(
-    "case", ["forged", "missing", "expired", "wrong_target", "wrong_op", "replay", "by_mismatch"]
-)
-def test_each_person_op_refuses_a_bad_proof_and_changes_nothing(store, run, ws, monkeypatch, name, case):
-    op, target, argv, rest = OPS[name]
-    before = _state(ws)
-    now = int(time.time())
-    if case == "forged":
-        good = _proof(ws, op, target)
-        proof = good[:-3] + ("AAA" if not good.endswith("AAA") else "BBB")
-    elif case == "missing":
-        proof = ""
-    elif case == "expired":
-        proof = _proof(ws, op, target, now=now - 120)
-    elif case == "wrong_target":
-        proof = _proof(ws, op, "someone-else")
-    elif case == "wrong_op":
-        proof = _proof(ws, "secret.remove" if op != "secret.remove" else "secret.add", target)
-    elif case == "by_mismatch":
-        proof = _proof(ws, op, target)
-        argv = [*argv, "--by", "human:someone-else"]
-    else:
-        proof = _proof(ws, op, target)
-        first = _cli(run, monkeypatch, proof, *argv, stdin_rest=rest)
-        assert first[0] == 0
-        before = _state(ws)
-    code, out, err = _cli(run, monkeypatch, proof, *argv, stdin_rest=rest)
-    assert code == 2, out + err
-    assert _state(ws) == before
-    assert TOKEN not in out + err
-
-
-@pytest.mark.parametrize("name", PROVEN)
-def test_each_person_op_without_a_proof_flag_is_refused_whatever_by_says(store, run, ws, name):
-    op, target, argv, _ = OPS[name]
-    before = _state(ws)
-    for by in ("human:pat", "human:owner"):
-        code, out, err = run(*argv, "--by", by)
-        assert code == 2 and "dashboard" in (out + err)
-    assert run(*argv, "--by", "agent:claude")[0] == 2
-    assert _state(ws) == before
-
-
-@pytest.mark.parametrize("name", PROVEN)
-def test_an_agent_with_a_valid_proof_is_still_refused(store, run, ws, monkeypatch, name):
-    op, target, argv, rest = OPS[name]
-    monkeypatch.setenv("CLAUDECODE", "1")
-    before = _state(ws)
-    code, *_ = _cli(run, monkeypatch, _proof(ws, op, target), *argv, stdin_rest=rest)
-    assert code == 2 and _state(ws) == before
 
 
 def test_add_takes_the_value_from_stdin_and_never_prints_it(store, run, ws, monkeypatch):
@@ -788,18 +703,6 @@ def test_file_mode_has_the_same_limit(lock, run, ws):
     assert run("secret", "file", "flock", "--", PY, "-c", "pass")[0] == 0
 
 
-def test_switch_on_allows_any_command_and_needs_the_person_record(lock, run, ws, monkeypatch):
-    prof = keystore.read_profiles(ws)
-    prof["lock"]["agents_may_env"] = True
-    seed_profiles(ws, prof)  # the file alone: no matching record
-    _refused(run, "/bin/sh", "-c", "echo hi")
-    _enable_agents(run, monkeypatch, ws)
-    code, out, _ = run("secret", "env", "lock", "--", "/bin/sh", "-c", "echo $LOCK_TOKEN")
-    assert code == 0 and TOKEN2 not in out and "[hidden: other-token]" in out
-    _as_person(run, monkeypatch, ws, ("agents-disable", "lock"), "lock:agents_may_env")
-    _refused(run, "/bin/sh", "-c", "echo hi")
-
-
 def test_profile_set_turns_the_switch_off_again(lock, run, ws, monkeypatch):
     _enable_agents(run, monkeypatch, ws)
     code, out, err = _as_person(
@@ -811,39 +714,6 @@ def test_profile_set_turns_the_switch_off_again(lock, run, ws, monkeypatch):
 
 
 # --------------------------------------------------------------------------- review fixes (Opus, #459)
-
-
-def test_turning_a_switch_off_needs_no_proof_even_for_an_agent(lock, run, ws, monkeypatch):
-    _enable_agents(run, monkeypatch, ws)
-    _as_person(run, monkeypatch, ws, ("get-enable", "plain"), "plain:allow_get")
-    for sub, name in (("agents-disable", "lock"), ("get-disable", "plain")):
-        code, out, err = run("secret", "profile", sub, name, "--by", "agent:claude")
-        assert code == 0, out + err
-    _refused(run, "/bin/sh", "-c", "echo hi")
-    assert run("secret", "get", "plain", "other-token")[0] == 2
-    assert hp.effective(ws, "secret.agents_may_env.lock", True) is False  # the record says off, by "reset"
-
-
-def test_removing_a_profile_is_not_authorised_by_a_set_proof(store, run, ws, monkeypatch):
-    code, *_ = _cli(
-        run, monkeypatch, _proof(ws, "secret.profile", "plain"), "secret", "profile", "remove", "plain"
-    )
-    assert code == 2 and "plain" in keystore.read_profiles(ws)
-    code, *_ = _cli(
-        run, monkeypatch, _proof(ws, "secret.profile", "plain:remove"), "secret", "profile", "remove", "plain"
-    )
-    assert code == 0 and "plain" not in keystore.read_profiles(ws)
-
-
-def test_a_hand_edit_to_off_writes_the_off_record(store, run, ws, monkeypatch):
-    _enable_get(run, monkeypatch, ws)
-    prof = keystore.read_profiles(ws)
-    prof["plain"]["allow_get"] = False
-    seed_profiles(ws, prof)
-    assert run("secret", "get", "plain", "other-token")[0] == 2  # writes the tombstone
-    prof["plain"]["allow_get"] = True
-    seed_profiles(ws, prof)  # back on in the file only: the old record must not come back
-    assert run("secret", "get", "plain", "other-token")[0] == 2
 
 
 def test_profile_set_stores_the_program_as_a_full_path(store, run, ws, monkeypatch):
@@ -1011,29 +881,6 @@ def test_a_second_signal_during_cleanup_is_ignored(store, ws):
     assert e.value.code in (128 + signal.SIGTERM, 128 + signal.SIGHUP)  # the first one wins
 
 
-def test_enable_holds_the_key_lock_across_record_and_file(store, run, ws, monkeypatch):
-    held = []
-    real_lock = hp._key_lock
-    depth = []
-
-    import contextlib
-
-    @contextlib.contextmanager
-    def tracking(d):
-        with real_lock(d):
-            depth.append(1)
-            try:
-                yield
-            finally:
-                depth.pop()
-
-    monkeypatch.setattr(hp, "_key_lock", tracking)
-    real_set = hp.record_set
-    monkeypatch.setattr(hp, "record_set", lambda *a, **k: (held.append(bool(depth)), real_set(*a, **k))[1])
-    _enable_get(run, monkeypatch, ws)
-    assert held and all(held)
-
-
 def test_reading_the_switch_takes_the_key_lock(store, run, ws, monkeypatch):
     _enable_get(run, monkeypatch, ws)
     import contextlib
@@ -1052,18 +899,6 @@ def test_reading_the_switch_takes_the_key_lock(store, run, ws, monkeypatch):
     assert seen
 
 
-def test_a_proof_given_with_a_lowering_is_checked_and_spent(store, run, ws, monkeypatch):
-    _enable_get(run, monkeypatch, ws)
-    argv = ["secret", "profile", "get-disable", "plain"]
-    bad = _proof(ws, "secret.profile", "other:allow_get")
-    code, *_ = _cli(run, monkeypatch, bad, *argv)
-    assert code == 2 and run("secret", "get", "plain", "other-token")[0] == 0  # refused: still on
-    good = _proof(ws, "secret.profile", "plain:allow_get")
-    assert _cli(run, monkeypatch, good, *argv)[0] == 0
-    _enable_get(run, monkeypatch, ws)
-    assert _cli(run, monkeypatch, good, *argv)[0] == 2  # spent: a replay is refused
-
-
 def test_lowering_goes_to_the_recorder_seam_and_a_failing_recorder_does_not_block_it(
     store, run, ws, monkeypatch
 ):
@@ -1072,7 +907,7 @@ def test_lowering_goes_to_the_recorder_seam_and_a_failing_recorder_does_not_bloc
     _enable_get(run, monkeypatch, ws)
     run("secret", "profile", "get-disable", "plain")
     assert got[-1]["action"] == "profile.get_disable" and got[-1]["profile"] == "plain"
-    assert got[-1]["by"] == "reset" and TOKEN2 not in json.dumps(got)
+    assert got[-1]["by"].startswith("human:") and TOKEN2 not in json.dumps(got)
 
     def boom(root, ev):
         raise RuntimeError("x")
@@ -1476,101 +1311,10 @@ def _set_ok(run, monkeypatch, ws, name, *extra, proof_name=None):
 EDITED = "changed outside orch"
 
 
-def test_profile_set_with_proof_then_exec_still_works(store, run, ws, monkeypatch):
+def test_profile_set_then_exec_still_works(store, run, ws, monkeypatch):
     _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "A=b", "--extra", "A")
-    assert hp.profile_verified(ws, "good", keystore.read_profiles(ws)["good"])
     code, out, err = run("secret", "exec", "good", "--", "-c", "import os;print(os.environ['T'])")
     assert code == 0 and "[hidden: other-token]" in out, err
-
-
-def test_an_edited_run_in_the_profile_file_is_refused(store, run, ws, monkeypatch):
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
-    _edit_file(ws, os.path.realpath(PY), "/bin/echo")
-    for argv in (("exec", "good"), ("env", "good", "--", PY, "-c", "pass")):
-        code, out, err = run("secret", *argv)
-        assert code == 2 and EDITED in err, argv
-
-
-@pytest.mark.parametrize(
-    "old,new",
-    [
-        ('T = "other-token"', 'T = "api-token"'),  # another key into the same variable
-        ('T = "other-token"', 'T = "other-token", U = "api-token"'),  # an extra env variable
-        ("run = [", 'extra = ["F"]\nfiles = { F = "sa.pem" }\nrun = ['),  # an added file
-        ("run = [", 'extra = ["X"]\nset = { X = "1" }\nrun = ['),  # an added plain setting
-    ],
-)
-def test_an_edited_env_files_or_set_is_refused(store, run, ws, monkeypatch, old, new):
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
-    _edit_file(ws, old, new)
-    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
-    assert code == 2 and EDITED in err
-
-
-def test_an_edited_profile_cannot_be_revived_by_a_switch_change(store, run, ws, monkeypatch):
-    """Turning a switch rewrites the file; it must not re-sign a body that was edited outside orch."""
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
-    _edit_file(ws, os.path.realpath(PY), "/bin/echo")
-    code, out, err = _cli(
-        run,
-        monkeypatch,
-        _proof(ws, "secret.profile", "good:allow_get"),
-        "secret",
-        "profile",
-        "get-enable",
-        "good",
-    )
-    assert code == 0, out + err
-    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
-    assert run("secret", "get", "good", "other-token")[0] == 2
-
-
-def test_a_profile_without_a_mac_is_refused_even_for_get(store, run, ws, monkeypatch):
-    f = _pfile(ws)
-    f.write_text(f.read_text() + '\n[profile.forged]\nenv = { T = "other-token" }\nallow_get = true\n')
-    for argv in (("env", "forged", "--", PY, "-c", "pass"), ("get", "forged", "other-token")):
-        code, _, err = run("secret", *argv)
-        assert code == 2 and EDITED in err
-
-
-def test_a_copied_mac_from_another_profile_or_workspace_is_refused(store, run, ws, monkeypatch):
-    _set_ok(run, monkeypatch, ws, "one", "--run", PY)
-    # same body under another name: the ledger has no entry for it
-    text = _pfile(ws).read_text()
-    block = text[text.index("[profile.one]") :].split("\n[")[0]
-    _pfile(ws).write_text(text + "\n" + block.replace("profile.one", "profile.two"))
-    assert run("secret", "env", "two", "--", PY, "-c", "pass")[0] == 2
-    # the ledger entry of one name copied to another
-    ledger = hp.key_dir(ws) / hp.PROFILE_LEDGER
-    data = json.loads(ledger.read_text())
-    data["entries"]["two"] = data["entries"]["one"]
-    ledger.write_text(json.dumps(data))
-    code, _, err = run("secret", "env", "two", "--", PY, "-c", "pass")
-    assert code == 2 and EDITED in err
-    # a MAC made for another workspace id does not verify here
-    body = keystore.read_profiles(ws)["one"]
-    other = hp.profile_mac(hp.human_key(ws), "f" * 32, "one", body)
-    data["entries"]["one"] = other
-    ledger.write_text(json.dumps(data))
-    assert run("secret", "env", "one", "--", PY, "-c", "pass")[0] == 2
-
-
-def test_a_profile_with_a_missing_ledger_is_refused(store, run, ws, monkeypatch):
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
-    (hp.key_dir(ws) / hp.PROFILE_LEDGER).unlink()
-    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
-    assert code == 2 and EDITED in err
-
-
-def test_remove_tombstones_the_mac(store, run, ws, monkeypatch):
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
-    saved = _pfile(ws).read_text()
-    code, out, err = _cli(
-        run, monkeypatch, _proof(ws, "secret.profile", "good:remove"), "secret", "profile", "remove", "good"
-    )
-    assert code == 0, out + err
-    _pfile(ws).write_text(saved)  # the old file put back
-    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
 
 
 @pytest.mark.parametrize(
@@ -1595,21 +1339,6 @@ def test_loader_and_interpreter_variables_are_refused_at_set_and_at_run(store, r
     assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
 
 
-def test_a_denied_variable_with_a_valid_mac_still_fails_at_run(store, run, ws, monkeypatch):
-    """Defence in depth: even a body someone managed to sign is refused when it is read and when it runs."""
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
-    _edit_file(ws, "run = [", 'set = { NODE_OPTIONS = "--require x" }\nrun = [')
-    body = {"env": {"T": "other-token"}, "set": {"NODE_OPTIONS": "--require x"}, "run": [PY]}
-    hp.profile_sign(ws, "good", body)  # a forged-but-signed body (the signer being compromised)
-    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
-    assert code == 2 and "NODE_OPTIONS" in err
-    # and the run-time check alone, with the reader's check out of the way
-    monkeypatch.setattr(keystore, "read_profiles", lambda root: {"good": body})
-    monkeypatch.setattr(hp, "profile_verified", lambda *a: True)
-    with pytest.raises(Refused, match="may not set"):
-        secretrun._profile(ws, "good")
-
-
 def test_exec_checks_the_program_again_when_it_runs(store, run, ws, monkeypatch):
     _set_ok(run, monkeypatch, ws, "good", "--run", PY)
     monkeypatch.setattr(
@@ -1621,82 +1350,13 @@ def test_exec_checks_the_program_again_when_it_runs(store, run, ws, monkeypatch)
     assert code == 2 and "gone" in err
 
 
-def test_profile_set_without_a_proof_or_with_a_wrong_target_stores_no_mac(store, run, ws, monkeypatch):
-    before = (hp.key_dir(ws) / hp.PROFILE_LEDGER).exists()
-    args = ("secret", "profile", "set", "nope", "--env", "T=other-token")
-    assert run(*args)[0] == 2  # no proof
-    assert _cli(run, monkeypatch, _proof(ws, "secret.profile", "other"), *args)[0] == 2  # wrong target
-    assert _cli(run, monkeypatch, _proof(ws, "secret.add", "nope"), *args)[0] == 2  # wrong op
-    assert "nope" not in keystore.read_profiles(ws)
-    ent = hp._ledger_load(ws, hp.PROFILE_LEDGER) or {}
-    assert "nope" not in ent and (hp.key_dir(ws) / hp.PROFILE_LEDGER).exists() == before or "nope" not in ent
-
-
-def test_saving_one_profile_never_signs_an_edited_other_profile(store, run, ws, monkeypatch):
-    _set_ok(run, monkeypatch, ws, "a", "--run", PY)
-    _set_ok(run, monkeypatch, ws, "b", "--run", PY)
-    f = _pfile(ws)
-    text = f.read_text()
-    head, sep, tail = text.partition("[profile.b]")
-    f.write_text(head + sep + tail.replace('T = "other-token"', 'T = "api-token"', 1))
-    assert run("secret", "env", "b", "--", PY, "-c", "pass")[0] == 2
-    _set_ok(run, monkeypatch, ws, "a", "--run", PY, "--set", "X=1", "--extra", "X")  # the person sets A
-    code, out, err = _cli(
-        run, monkeypatch, _proof(ws, "secret.profile", "a:allow_get"), "secret", "profile", "get-enable", "a"
-    )
-    assert code == 0, out + err
-    code, _, err = run("secret", "env", "b", "--", PY, "-c", "pass")
-    assert code == 2 and EDITED in err
-    assert run("secret", "env", "a", "--", PY, "-c", "pass")[0] == 0
-
-
-def test_a_damaged_profiles_file_refuses_the_save_and_signs_nothing(store, run, ws, monkeypatch):
+def test_a_damaged_profiles_file_refuses_the_save(store, run, ws, monkeypatch):
     _pfile(ws).write_text("this is = not [ toml")
-    before = hp._ledger_load(ws, hp.PROFILE_LEDGER)
     code, _, _ = _cli(
         run, monkeypatch, _proof(ws, "secret.profile", "n"), "secret", "profile", "set", "n",
         "--env", "T=other-token",
     )  # fmt: skip
-    assert code == 2 and hp._ledger_load(ws, hp.PROFILE_LEDGER) == before
-
-
-def test_deleting_the_file_between_the_reads_does_not_get_a_body_signed(store, run, ws, monkeypatch):
-    """The reported race: the file vanishes (or is corrupted) while a switch is changed; nothing is signed."""
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
-    _edit_file(ws, os.path.realpath(PY), "/bin/echo")
-    real = hp.record_set
-
-    def sabotage(*a, **k):
-        _pfile(ws).unlink(missing_ok=True)
-        return real(*a, **k)
-
-    monkeypatch.setattr(hp, "record_set", sabotage)
-    _cli(
-        run,
-        monkeypatch,
-        _proof(ws, "secret.profile", "good:allow_get"),
-        "secret",
-        "profile",
-        "get-enable",
-        "good",
-    )
-    monkeypatch.setattr(hp, "record_set", real)
-    assert run("secret", "exec", "good", "--", "PWNED")[0] == 2
-
-
-def test_remove_writes_the_tombstone_even_when_the_file_has_no_such_profile(store, run, ws, monkeypatch):
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
-    saved = _pfile(ws).read_text()
-    f = _pfile(ws)
-    f.write_text(
-        saved.split("[profile.good]")[0] + '[profile.plain]\nenv = { PLAIN_TOKEN = "other-token" }\n'
-    )
-    code, _, _ = _cli(
-        run, monkeypatch, _proof(ws, "secret.profile", "good:remove"), "secret", "profile", "remove", "good"
-    )
-    assert code == 2  # "no such profile", but the tombstone is there
-    f.write_text(saved)
-    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
+    assert code == 2
 
 
 def test_variable_names_clash_in_any_case(store, run, ws, monkeypatch):
@@ -1705,19 +1365,6 @@ def test_variable_names_clash_in_any_case(store, run, ws, monkeypatch):
         "--env", "Tok=other-token", "--set", "TOK=x",
     )  # fmt: skip
     assert code == 2 and "dup" not in keystore.read_profiles(ws)
-
-
-def test_remove_on_a_damaged_file_still_tombstones(store, run, ws, monkeypatch):
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
-    saved = _pfile(ws).read_text()
-    _pfile(ws).write_text("not [ toml")
-    code, _, _ = _cli(
-        run, monkeypatch, _proof(ws, "secret.profile", "good:remove"), "secret", "profile", "remove", "good"
-    )
-    assert code == 2  # the file is damaged
-    _pfile(ws).write_text(saved)
-    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
-    assert code == 2 and EDITED in err
 
 
 def test_list_on_a_damaged_file_shows_the_keys_without_profiles(store, run, ws):
@@ -1759,30 +1406,6 @@ def test_extra_with_a_denied_name_is_refused(store, run, ws, monkeypatch, name):
     assert code == 2 and "x" not in keystore.read_profiles(ws)
 
 
-def test_extra_edited_in_the_file_is_a_mac_mismatch(store, run, ws, monkeypatch):
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "SOME_HOST=h1", "--extra", "SOME_HOST")
-    _edit_file(ws, 'extra = ["SOME_HOST"]', 'extra = ["SOME_HOST", "OTHER_HOST"]')
-    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
-    assert code == 2 and EDITED in err
-
-
-def test_forged_extra_without_a_proof_is_refused(store, run, ws, monkeypatch):
-    args = (
-        "secret",
-        "profile",
-        "set",
-        "f",
-        "--env",
-        "T=other-token",
-        "--set",
-        "SOME_HOST=x",
-        "--extra",
-        "SOME_HOST",
-    )
-    assert run(*args)[0] == 2
-    assert "f" not in keystore.read_profiles(ws)
-
-
 # --------------------------------------------------------------------------- G1 fixes (H1-H3, #565)
 
 
@@ -1811,41 +1434,6 @@ def test_h1_get_without_a_proof_is_agent_level_and_needs_a_run(store, run, ws, m
     monkeypatch.delenv("CLAUDECODE", raising=False)
     code, out, err = run("secret", "get", "plain", "other-token", unproven=True)
     assert code == 2 and TOKEN2 not in out + err and "only inside an active orch run" in err
-
-
-def test_h1_a_proof_for_another_profile_or_op_does_not_make_a_person(store, run, ws, monkeypatch):
-    monkeypatch.delenv("CLAUDECODE", raising=False)
-    for proof in (
-        _proof(
-            ws, "secret.profile", secretrun.use_target("svc", "env", ["/bin/echo", "x"])
-        ),  # another profile
-        _proof(ws, "secret.profile", "plain:allow_get"),  # another target
-        _proof(ws, "secret.add", secretrun.use_target("plain", "env", ["/bin/echo", "x"])),  # another op
-    ):
-        code, out, err = _cli(run, monkeypatch, proof, "secret", "env", "plain", "--", "/bin/echo", "x")
-        assert code == 2 and "x\n" != out
-
-
-def test_h1_a_person_proof_is_single_use(store, run, ws, monkeypatch):
-    monkeypatch.delenv("CLAUDECODE", raising=False)
-    proof = _proof(ws, "secret.profile", secretrun.use_target("plain", "env", [PY, "-c", "pass"]))
-    argv = ("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "pass")
-    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
-    assert run(*argv, unproven=True)[0] == 0
-    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
-    assert run(*argv, unproven=True)[0] == 2
-
-
-def test_h1_an_agent_marker_with_a_valid_proof_stays_an_agent(store, run, ws, monkeypatch):
-    monkeypatch.setenv("CLAUDECODE", "1")
-    monkeypatch.setattr(
-        "sys.stdin",
-        io.StringIO(
-            _proof(ws, "secret.profile", secretrun.use_target("plain", "env", [PY, "-c", "pass"])) + "\n"
-        ),
-    )
-    code, out, err = run("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "pass", unproven=True)
-    assert code == 2
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
@@ -1895,11 +1483,6 @@ def test_h3_the_real_home_only_with_the_persons_real_home_setting(store, run, ws
     assert keystore.read_profiles(ws)["rh"]["real_home"] is True
     code, out, err = run("secret", "exec", "rh", "--", "-c", prog)
     assert code == 0 and out.strip() == str(real), err
-    f = _pfile(ws)  # an edit of the stored setting by hand breaks the MAC
-    f.write_text(f.read_text().replace("real_home = true\n", ""))
-    assert hp.profile_body(keystore.read_profiles(ws)["rh"]).get("real_home") is None
-    code, out, err = run("secret", "exec", "rh", "--", "-c", prog)
-    assert code == 2  # the body no longer matches its MAC
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
@@ -1924,7 +1507,6 @@ def test_an_agent_level_get_is_refused_even_with_allow_get_on(store, run, ws, in
     prof = ks.read_profiles(ws)
     prof["plain"]["allow_get"] = True
     seed_profiles(ws, prof)
-    hp.record_set(ws, "secret.allow_get.plain", True, "human:pat")
     code, out, err = run("secret", "get", "plain", "other-token", unproven=True)
     assert code == 2 and TOKEN2 not in out + err and {e["refused"] for e in events} == {"get_agent"}
 
@@ -2063,19 +1645,6 @@ def test_h2_an_open_or_linked_or_missing_path_argument_is_refused(store, run, ws
 
 def test_h2_the_stored_command_is_checked_again_for_argument_less_system_programs(store, ws):
     assert secretrun.approve_program(ws, "/usr/bin/true")[0]
-
-
-def test_a_proof_for_one_mode_and_command_is_refused_for_another(store, run, ws, monkeypatch):
-    monkeypatch.delenv("CLAUDECODE", raising=False)
-    proof = _proof(ws, "secret.profile", secretrun.use_target("plain", "env", [PY, "-c", "pass"]))
-    for argv in (
-        ("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "print(1)"),  # another command
-        ("secret", "exec", "--proof-stdin", "plain", "--", PY, "-c", "pass"),  # another mode
-    ):
-        monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
-        assert run(*argv, unproven=True)[0] == 2, argv
-    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
-    assert run("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "pass", unproven=True)[0] == 0
 
 
 def test_nothing_starts_as_root(ws, monkeypatch):
@@ -2258,3 +1827,42 @@ def test_a_refusal_is_printed_with_one_prefix_and_says_what_is_allowed(store, ru
     assert "full path of a file" in str(e.value)
     code, _, err = run("secret", "env", "nope", "--", PY)
     assert code == 2 and err.startswith("Refused: ") and "Refused: Refused:" not in err
+
+
+# ---- orch secret scan -------------------------------------------------------------------------------------
+
+
+def _scan(run, monkeypatch, text, *flags):
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(text.encode()), encoding="utf-8"))
+    return run("secret", "scan", *flags)
+
+
+def test_scan_finds_a_planted_token_with_its_line_and_never_prints_it(ws, run, monkeypatch):
+    planted = "ghp_" + "a1B2" * 8  # built here: no token literal in the repo
+    code, out, err = _scan(run, monkeypatch, f"hello\n{planted}\nbye\n", "--json")
+    assert code == 2 and planted not in out + err
+    answer = json.loads(out)
+    assert answer["code"] == "refused" and answer["found"] == [{"kind": "github-token", "line": 2}]
+    assert "GitHub token on line 2" in answer["error"] and "Remove it and try again." in answer["error"]
+    code, out, err = _scan(run, monkeypatch, f"x\n{planted}\n")
+    assert code == 2 and planted not in out + err and "line 2" in err
+
+
+def test_scan_passes_clean_text(ws, run, monkeypatch):
+    code, out, _ = _scan(run, monkeypatch, "Export invoices as CSV, closes #812.\n", "--json")
+    assert code == 0 and json.loads(out) == {"found": []}
+    code, out, _ = _scan(run, monkeypatch, "fine\n")
+    assert code == 0 and "No secrets found." in out
+
+
+def test_scan_finds_a_stored_key_value_and_a_password_line(ws, run, store, monkeypatch):
+    code, out, err = _scan(run, monkeypatch, f"a\nb\nthe key is {TOKEN}\n", "--json")
+    assert code == 2 and json.loads(out)["found"] == [{"kind": "stored-key", "line": 3}]
+    assert TOKEN not in out + err
+    code, out, _ = _scan(run, monkeypatch, "ok\npassword=hunter2hunter2\n", "--json")
+    assert code == 2 and json.loads(out)["found"] == [{"kind": "secret-value", "line": 2}]
+
+
+def test_scan_refuses_more_than_1_mb(ws, run, monkeypatch):
+    code, out, _ = _scan(run, monkeypatch, "a" * 1_000_001, "--json")
+    assert code == 2 and json.loads(out)["code"] == "too_large"

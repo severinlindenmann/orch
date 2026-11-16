@@ -2,7 +2,7 @@
 "What a machine shows as the person").
 
 A ticket can hold person attribution in several fields: history[].by, checklist[].evidence[].by,
-checklist[].by and wont_by, verdicts[].person, questions[].answered_by, refs[].by, plan.by and
+checklist[].by and wont_by, questions[].answered_by, refs[].by, plan.by and
 description_by. Once sync is ENABLED for a workspace (sync_enabled), a field whose value is not a plain agent
 label shows as written only when this core can prove it here:
 
@@ -14,11 +14,7 @@ label shows as written only when this core can prove it here:
       local store, .orch/run/own-lines/<ticket id>.json (never synced), carrying this core's local1 MAC. The
       old file is never diffed against the new one: a line core did not create in this process is never
       recorded. A store that cannot be written leaves the object unverified (fail closed); or
-  (b) a decision this core verifies binds it: the line a current verdict or a Won't do this core's ledger
-      vouches for was signed with (person, {text, via} digest, at), matched ONCE (the closest line within 5 s
-      of the decision; any other copy is not the decision's), the decision's own person field (wont_by,
-      verdict person, the step's by on a verified Won't do), and a question's answered_by when a proven line
-      of that actor records exactly that answer.
+  (b) a question's answered_by when a line of that actor records exactly that answer.
 
 Everything else is shown as SYNC_BY ("(synced, not verified here) " before a history text), to people and
 agents alike. The stored bytes are never changed (both machines keep the same file).
@@ -55,7 +51,6 @@ SYNC_RUN = (".orch", "run", "sync")  # the sync add-on's local records
 ENABLED_DIR = "sync-enabled"  # guarded orch home: <sha256("path:"+realpath)>.json and <sha256("ws:"+id)>.json
 OWN_MAX = 20_000  # digests kept per kind and ticket (the oldest go first)
 OWN_BYTES = 4 * 1024 * 1024  # a larger store file verifies nothing for THAT ticket only
-DECISION_SECONDS = 5
 _TID_RE = re.compile(r"t_[a-z0-9]{6,16}")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 KINDS = ("lines", "evidence", "refs", "steps", "answers")
@@ -116,7 +111,15 @@ def _digest(kind: str, obj) -> str | None:
         if kind == "steps" and isinstance(obj, dict):
             obj = {k: obj.get(k) for k in _STEP_MARK}
         if kind == "answers" and isinstance(obj, dict):
-            obj = {k: obj.get(k) for k in _ANSWER_MARK}
+            orig, obj = obj, {k: obj.get(k) for k in _ANSWER_MARK}
+            # Review stack (RULE A): bound only when present, so an answer without them keeps its digest;
+            # decision.replaced_by changes later (a newer answer) and is never part of the binding
+            for k in ("decision", "card", "shown"):
+                v = orig.get(k)
+                if k == "decision" and isinstance(v, dict):
+                    v = {a: b for a, b in v.items() if a != "replaced_by"} or None
+                if v is not None:
+                    obj[k] = v
         return hashlib.sha256(_canon([kind, obj]).encode("utf-8")).hexdigest()
     except (TypeError, ValueError, RecursionError):
         return None
@@ -540,87 +543,11 @@ def _at(v) -> float | None:
 
 class _Proof:
     """Everything one read needs to judge person fields, built once per call (shown_json over many tickets
-    shares it): the key, the verdict checker (ledger snapshot), the Won't do ledger (read once)."""
+    shares it): the workspace root and the local key of the own-lines store."""
 
     def __init__(self, root: Path):
         self.root = Path(root)
         self.ctx = _ctx_key(self.root)
-        self._checker = None
-        self._wont = None
-        self._wont_read = False
-
-    def verdict_state(self, entry, ticket) -> str | None:
-        if self._checker is None:
-            self._checker = humanproof.VerdictChecker(self.root, snapshot=True)
-        try:
-            return self._checker.state(entry, ticket)
-        except Exception:  # noqa: BLE001 - fail closed
-            return None
-
-    def wont_ok(self, step, tid) -> bool:
-        if not isinstance(step, dict) or not isinstance(tid, str) or self.ctx is None:
-            return False
-        if not self._wont_read:
-            self._wont_read = True
-            self._wont = humanproof._ledger_read(self.root)
-        led = self._wont
-        mac, cur = step.get("wont_mac"), (led or {}).get(f"{tid}:{step.get('id')}")
-        if not isinstance(mac, str) or not mac or not isinstance(cur, str) or mac != cur:
-            return False
-        try:
-            return humanproof.wontdo_is_human(
-                self.ctx[1], self.ctx[0], tid, humanproof.wont_decision(step), mac, False
-            )
-        except Exception:  # noqa: BLE001
-            return False
-
-
-def _decision_lines(proof: _Proof, ticket: dict, hist: list) -> set[int]:
-    """Indexes of the history lines a verified decision on this ticket was signed with: per decision
-    (person, line digest, at) the ONE matching line closest to its time (within DECISION_SECONDS)."""
-    tid = ticket.get("id")
-    decisions = []
-    for e in ticket.get("verdicts") if isinstance(ticket.get("verdicts"), list) else []:
-        if (
-            isinstance(e, dict)
-            and isinstance(e.get("line"), str)
-            and proof.verdict_state(e, ticket) == "current"
-        ):
-            decisions.append((e.get("person"), e["line"], _at(e.get("at"))))
-    for c in ticket.get("checklist") if isinstance(ticket.get("checklist"), list) else []:
-        if (
-            isinstance(c, dict)
-            and c.get("wont_do") is True
-            and isinstance(c.get("wont_line"), str)
-            and proof.wont_ok(c, tid)
-        ):
-            decisions.append((c.get("wont_by"), c["wont_line"], _at(c.get("wont_at"))))
-    out: set[int] = set()
-    for person, digest, at in decisions:
-        if not isinstance(person, str) or at is None:
-            continue
-        best = None
-        for i, h in enumerate(hist):
-            if i in out or not isinstance(h, dict) or h.get("by") != person:
-                continue
-            if (
-                set(h) - {"at", "by", "via", "text", "chat_message"}
-                or h.get("chat_message", False) is not False
-            ):
-                continue
-            hat = _at(h.get("at"))
-            if hat is None or abs(hat - at) > DECISION_SECONDS:
-                continue
-            try:
-                if humanproof.history_digest(h.get("text"), h.get("via")) != digest:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            if best is None or abs(hat - at) < best[0]:
-                best = (abs(hat - at), i)
-        if best is not None:
-            out.add(best[1])
-    return out
 
 
 # ------------------------------------------------------------------------------------------- shown
@@ -639,15 +566,11 @@ def _shown(proof: _Proof, t: dict) -> dict:
 
     hist = t.get("history") if isinstance(t.get("history"), list) else None
     if hist is not None and any(isinstance(h, dict) and needs_proof(h.get("by")) for h in hist):
-        decided = None
         new_hist = []
-        for i, h in enumerate(hist):
+        for h in hist:
             if isinstance(h, dict) and needs_proof(h.get("by")) and not has("lines", h):
-                if decided is None:
-                    decided = _decision_lines(proof, t, hist)
-                if i not in decided:
-                    new_hist.append(_demoted_line(h))
-                    continue
+                new_hist.append(_demoted_line(h))
+                continue
             new_hist.append(h)
         if new_hist != hist:
             out["history"], changed = new_hist, True
@@ -675,31 +598,16 @@ def _shown(proof: _Proof, t: dict) -> dict:
                 ]
                 if new_evs != evs:
                     nc = {**nc, "evidence": new_evs}
-            wont_proven = None
             for field in ("wont_by", "by"):
-                if field == "by" and has("steps", c):  # a "doing" mark core made here (tickets.check_start)
+                # a step mark core made here (tickets.check_start, tickets.check_wont_do); wont_by is the
+                # same person as the mark's `by`
+                if has("steps", c) and (field == "by" or c.get("wont_by") == c.get("by")):
                     continue
                 if field in c and needs_proof(c.get(field)):
-                    if wont_proven is None:
-                        wont_proven = c.get("wont_do") is True and proof.wont_ok(c, tid)
-                    # the decision record (humanproof.wont_decision) covers wont_by, not `by`: `by` is
-                    # proven by it only as the very same value
-                    if not wont_proven or (field == "by" and c.get("by") != c.get("wont_by")):
-                        nc = {**nc, field: SYNC_BY}
+                    nc = {**nc, field: SYNC_BY}
             new_list.append(nc)
         if any(a is not b for a, b in zip(new_list, checklist, strict=True)):
             out["checklist"], changed = new_list, True
-
-    verdicts = t.get("verdicts") if isinstance(t.get("verdicts"), list) else None
-    if verdicts is not None:
-        new_v = [
-            {**e, "person": SYNC_BY}
-            if isinstance(e, dict) and "person" in e and proof.verdict_state(e, t) != "current"
-            else e
-            for e in verdicts
-        ]
-        if any(a is not b for a, b in zip(new_v, verdicts, strict=True)):
-            out["verdicts"], changed = new_v, True
 
     questions = t.get("questions") if isinstance(t.get("questions"), list) else None
     if questions is not None:
@@ -808,7 +716,7 @@ def _all_demoted(t: dict) -> dict:
             else c
             for c in t["checklist"]
         ]
-    for field, key in (("verdicts", "person"), ("questions", "answered_by"), ("refs", "by")):
+    for field, key in (("questions", "answered_by"), ("refs", "by")):
         if isinstance(t.get(field), list):
             out[field] = [
                 {**x, key: SYNC_BY}

@@ -165,7 +165,7 @@
         "handovers": {
           "type": "array",
           "maxItems": 2,
-          "description": "Rare: a task done by another workspace (about 90 % of the work stays here). Phase 1 shows it only; settlement comes later.",
+          "description": "Rare: a task done by another connected workspace (most of the work stays here; no fixed share). The add-on refuses at freeze: a workspace that is not a ws_ id in the relay workspace list with delegate allowed, or a task that is not in tasks. Crew start hands the task over with the relay delegate (the crew ticket stays the owner; the other workspace holds a linked copy) and shares sends.files into that ticket's group; pressing Start counts as the person's click for those files.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -184,6 +184,30 @@
               },
               "why": {
                 "$ref": "#/$defs/line"
+              },
+              "minutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080,
+                "description": "Optional: their estimated time, shown on the proposal (about N min). Not counted in this workspace's active-time budget."
+              },
+              "sends": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Optional: what the other workspace gets besides the task's brief (title, done-means it proves).",
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "maxItems": 6,
+                    "description": "Workspace-relative paths (forward slashes) of files shared into the hand-over group at crew start. The Start question lists them with the receiving workspace, and the answer is bound to the frozen proposal hash, so files cannot be added after Start. At share time the core's group share path rule (inside the workspace, no symlink escape, no dotfiles, VCS or config folders) and the shared secret scan apply; a hit refuses the crew start.",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120,
+                      "pattern": "^(?![/~])(?!.*\\.\\.)(?!.*(^|/)\\.)[^\\\\:\\u0000-\\u001f\\u007f]+$"
+                    }
+                  }
+                }
               }
             }
           }
@@ -489,6 +513,10 @@
           "items": {
             "$ref": "#/$defs/proposal/properties/tasks/items"
           }
+        },
+        "takes_back": {
+          "$ref": "#/$defs/slug",
+          "description": "\"Do it here instead\": the slug of a hand-over task of the started proposal that this change takes back. The add-on refuses a slug that is not a hand-over. On the person's Accept the other workspace is told (a group text) and the task runs here."
         }
       }
     },

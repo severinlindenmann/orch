@@ -32,6 +32,8 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--all", action="store_true", help="stop every running workspace")
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
+    sub.add_parser("pause", parents=[common], help="stop all automation in this workspace")
+    sub.add_parser("resume", parents=[common], help="turn automation back on after orch pause")
     c = sub.add_parser("copy", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     for name in ("update", "ask-update", "review", "approve"):
         item = c.add_parser(name, parents=[common])
@@ -166,6 +168,11 @@ def _services_cmd(args, root: Path) -> None:
             lines += cli_config.private_lines(root)
         from orch import updateinfo
 
+        if (root / ".orch").is_dir() and not args.json:
+            from orch import brake
+
+            if brake.paused(root) is not None:
+                lines.append("Automation is paused. Turn it back on with: orch resume")
         _out(
             args,
             ws,
@@ -255,65 +262,18 @@ def _copy_clean(args, root: Path) -> None:
             shown != tip or args.control_paths != count or args.paths_hash != digest
         ):
             raise Refused("The copy changed after it was shown. Review it again.")
-        who = humanproof.person_by(
-            root,
-            args,
-            "copy.retry",
-            target,
-            label="Review and bring back",
-            argv=[
-                "copy",
-                "retry",
-                args.ticket,
-                "--approve-tip",
-                tip,
-                "--control-paths",
-                str(count),
-                "--paths-hash",
-                digest,
-            ],
-            parts={
-                "title": humanproof.ticket_name(root, args.ticket),
-                "tip": tip,
-                "changes": "{} commits, {} files".format(*size) if size else "unknown",
-                "control_paths": count,
-                "paths": humanproof.part(worktrees.control_summary([humanproof.part(p) for p in paths])),
-            },
-        )
-        if not who.startswith("human:"):
-            raise Refused("Only a person can approve changes to bring back.")
         result = worktrees.approve_copy(root, args.ticket, target)
         _out(args, result, result.get("reason") or "Brought back.")
         return
     if args.sub == "remove-orphaned":
         if not isinstance(args.ws8, str) or not worktrees._WS8.fullmatch(args.ws8):
             raise Refused("That is not a copies folder.")
-        who = humanproof.person_by(
-            root,
-            args,
-            "copy.remove_orphaned",
-            f"{args.ws8}:discard" if args.discard else args.ws8,
-            label="Remove copies of a project that is gone",
-            parts={"ws8": humanproof.part(args.ws8), "discard": args.discard},
-        )
-        if not who.startswith("human:"):
-            raise Refused("Only a person can remove copies of a project that is gone.")
         notes = worktrees.remove_orphaned(root, args.ws8, args.discard)
         _out(args, {"notes": notes}, "\n".join(notes) or "Removed.")
         return
     if args.sub == "retry":
         if not isinstance(args.ticket, str) or not worktrees._TID.fullmatch(args.ticket):
             raise Refused("That is not a ticket id.")
-        who = humanproof.person_by(
-            root,
-            args,
-            "copy.retry",
-            args.ticket,
-            label="Try again where git was interrupted",
-            parts={"title": humanproof.ticket_name(root, args.ticket)},
-        )
-        if not who.startswith("human:"):
-            raise Refused("Only a person can do this.")
         notes = worktrees.retry(root, args.ticket)
         _out(args, {"notes": notes}, "\n".join(notes) or "Done.")
         return
@@ -341,9 +301,35 @@ def _copy_clean(args, root: Path) -> None:
     )
 
 
+def _brake_cmd(args, root: Path) -> None:
+    from orch import brake, tickets
+
+    if not (root / ".orch").is_dir():
+        raise Refused("This folder is not an orch workspace. Go into one, or run: orch init")
+    if args.cmd == "pause":
+        rec = brake.pause(root, tickets.current_actor(args.by))
+        _out(
+            args,
+            {"paused": True, **rec},
+            "Automation paused in this workspace. Nothing starts on its own until you run: orch resume",
+        )
+    else:
+        was = brake.resume(root)
+        _out(
+            args,
+            {"paused": False, "was_paused": was},
+            "Automation is on again in this workspace."
+            if was
+            else "Automation was not paused. Nothing to do.",
+        )
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd == "copy":
         _copy_clean(args, root)
+        return True
+    if args.cmd in ("pause", "resume"):
+        _brake_cmd(args, root)
         return True
     if args.cmd not in ("start", "stop", "status"):
         return False

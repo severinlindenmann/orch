@@ -299,6 +299,18 @@ progress::-moz-progress-bar{background:var(--brand)}
 .skeleton-region{position:relative}
 .skeleton-region>.skeleton-cover{position:absolute;inset:0;z-index:1;background:var(--surface-3);border-radius:inherit}
 .skeleton-region>*:not(.skeleton-cover){visibility:hidden}
+/* Per-route loading skeletons: the shapes of the dashboard pages (home, tickets list and board, ticket, section), moved from dashboard style.css (#795 A2a). */
+.skeleton-page{display:grid;gap:16px;align-content:start}
+.sk-stack{display:grid;gap:16px}
+.sk-columns{display:grid;grid-template-columns:minmax(0,1fr) var(--panel-width);gap:24px}
+.sk-title{height:32px;width:40%}
+.sk-toolbar{height:32px;width:100%}
+.sk-card{height:120px;border-radius:var(--radius-card)}
+.sk-story{height:200px}
+.sk-row{height:40px}
+.sk-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:start}
+@media(max-width:899px){.sk-board{grid-template-columns:minmax(0,1fr)}.sk-board>:nth-child(n+2){display:none}}
+@media(max-width:899px){.sk-columns{grid-template-columns:minmax(0,1fr)}}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--text-faint);border-top-color:var(--brand);border-radius:50%}
 /* Overlays. details.menu is the trigger wrapper; .menu-pop (or a non-details .menu) is the raised panel. */
 details.menu,.dropdown{position:relative}
@@ -463,6 +475,14 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
   .preview-page{padding:var(--s4)}
   .preview-metrics{grid-template-columns:minmax(0,1fr)}
 }
+/* Split card header, check row, code block, disclosure, end-aligned actions (check-up card, any add-on) */
+.card-h-split{gap:16px}.card-h-split .grow{display:grid;gap:2px}
+.check-row{gap:8px;font-size:13px;cursor:pointer}
+.row-split .grow h3{font-size:14px}.row-split .grow p{margin-top:2px}
+.code-block{margin:0;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);font-size:12px;line-height:16px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+.code-block.dim{opacity:.7}
+.disclosure summary{cursor:pointer;color:var(--text-muted);font-size:13px;padding:4px 0}
+.actions-end{justify-content:flex-end;margin-top:16px}
 /* The scrollbar gutter is always reserved, so a long page (Factory, Insights) ends at the same right edge as a short one. */
 html{scrollbar-gutter:stable}
 /* A table's owner column never wraps a name ("Be/n", "Marie-/Louise"). */
@@ -476,3 +496,19 @@ html{scrollbar-gutter:stable}
 .ed.ed-plain .icon{flex:none;width:14px;height:14px;opacity:.55}
 .ed.ed-plain:hover .icon,.ed.ed-plain:focus-visible .icon{opacity:1}
 .ed.ed-plain.ed-link{color:var(--brand)}
+
+/* Week bands: a repeat shown as one band across the days it covers, above the day columns of a week strip. */
+.week-bands{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px 0;padding:12px 12px 0;border-bottom:1px solid var(--border)}
+.week-bands .run.band{display:flex;gap:8px;align-items:baseline;margin:0 4px 12px;padding:4px 8px;border-left:2px solid var(--brand);border-radius:4px;background:var(--surface-2);font-size:12px;line-height:16px;color:inherit;text-decoration:none}
+.week-bands .run.band time{display:inline;color:var(--text-muted)}.week-bands .run.band>span{display:inline}
+.week-bands .band-all{grid-column:1/8}
+@media(max-width:950px){.week-bands{grid-template-columns:1fr}.week-bands .run.band{grid-column:auto!important}}
+
+/* Desktop density (from dashboard pages/desktop.css, #795 A1): opt in with <html data-density="desktop">. A mouse screen
+   (721 px and wider, hover) gets 32 px controls; the 44 px touch targets stay for phones and touch screens. */
+@media (min-width:721px) and (hover:hover) {
+  :where([data-density=desktop]) .btn,:where([data-density=desktop]) .btn.sm{min-height:32px}
+  :where([data-density=desktop]) .btn.xs{min-height:28px}
+  :where([data-density=desktop]) .btn.icon,:where([data-density=desktop]) .btn.icon.sm{width:32px;min-width:32px}
+  :where([data-density=desktop]) .input{min-height:36px;font-size:14px}
+}

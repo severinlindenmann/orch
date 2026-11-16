@@ -223,6 +223,20 @@ def test_running_and_agent_from_the_run_record(proj, new_ticket, monkeypatch):
     assert_valid(tv)
 
 
+def test_due_is_in_the_full_snapshot_only(proj, new_ticket):
+    tid = new_ticket("Due")
+    assert "due" not in phone_view.build(proj, tickets.load(proj, tid), [])
+    for due in ("2026-11-20", "2026-11-20T18:30"):
+        t = tickets.load(proj, tid)
+        t["due"] = due
+        tv = phone_view.build(proj, t, [])
+        assert tv["due"] == due
+        assert_valid(tv)
+        assert "due" not in phone_view.light_view(proj, t)
+    t["due"] = "tomorrow"  # a value the schema would refuse never leaves
+    assert "due" not in phone_view.build(proj, t, [])
+
+
 def test_redact_and_safe_url_units():
     assert phone_view.redact("token: abc.def-123") == "token: [hidden]"
     assert (

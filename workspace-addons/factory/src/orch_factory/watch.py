@@ -3,7 +3,8 @@
 Wake reasons (all decided through authority/flow, never from the ext cache or raw rows):
   a) a person answered a question Factory asked and `next` has not consumed it yet;
   b) a crew sub-ticket of a started order became done or failed since the last pass;
-  c) autopilot: a live grant covers an open stop the manager could decide (once per stop).
+  c) autopilot: a live grant covers an open stop the manager could decide (once per stop);
+  d) a task handed to another workspace was denied, failed or done there (once per task and reason, no timer).
 Agent answers never wake anything. A run is started only through `orch run start` and only when none is live.
 State in .orch/addons/factory/watch.json: per order the crew statuses seen and the ids already woken for."""
 
@@ -13,7 +14,7 @@ import json
 import sys
 import time
 
-from . import authority, autopilot, flow, orchcli
+from . import ask, authority, autopilot, flow, handover, orchcli
 from .store import Refused, Store, clock
 
 INTERVAL = 20
@@ -37,6 +38,11 @@ def _save(store, orders):
 def _reasons(root, store, ticket, tickets, entry, granted, decided):
     """(why, [ids to remember], new crew statuses) for one order; nothing when it needs no wake."""
     d = flow.derive(root, store, ticket, tickets)
+    states = {}
+    if d["phase"] == "started" and d["kind"] == "run" and d.get("proposal", {}).get("handovers"):
+        states, changed = handover.settle(root, store, d)
+        if changed:  # a finished hand-over made its crew ticket done: rule (b) must see it
+            d = flow.derive(root, store, ticket, orchcli.tickets(root))
     woken = set(entry.get("woken", []))
     why, ids = [], []
     for e in d["pending"]:
@@ -57,13 +63,40 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
                 first = status in FINISHED and seen.get(task) != status
             if first:
                 why.append(f"crew task {task} is {status}")
+        for (
+            task,
+            state,
+        ) in states.items():  # d) a hand-over was said no to, failed or came back done (core leaves the crew ticket in review for the person): once per task and reason
+            if state in ("denied", "failed", "done") and f"handover:{task}:{state}" not in woken:
+                why.append(f"handover task {task} is {state}")
+                ids.append(f"handover:{task}:{state}")
         op = d["open"]
         if op and op["row"]["kind"] == "factory:stop" and f"stop:{op['q']['id']}" not in woken:
             options = list(op["q"].get("options") or [])
-            if any(autopilot.allowed(op, o, granted, clock(), ticket["id"], decided) for o in options):
+            if not ask.has_ask(tickets, ticket["id"], op["n"]) and any(
+                autopilot.allowed(op, o, granted, clock(), ticket["id"], decided) for o in options
+            ):
                 why.append("autopilot may decide a stop")
                 ids.append(f"stop:{op['q']['id']}")
     return why, ids, crew
+
+
+MEASURE_EVERY = 60  # seconds between two measurements of an order's active time
+
+
+def _keep_budget(root, store, ticket, tickets, entry):
+    """Keep the order's shown active time current while the crew works (the manager may be idle for a long while): the
+    measured minutes go into the same cache `next` writes. Returns the time of this measurement (or the old one)."""
+    seen = entry.get("measured")
+    if isinstance(seen, (int, float)) and time.time() - seen < MEASURE_EVERY:
+        return seen
+    d = flow.derive(root, store, ticket, tickets)
+    if d["phase"] != "started" or d["kind"] != "run" or d["shipped"]:
+        return None
+    flow._measure(root, d)
+    if d.get("measured"):
+        flow.refresh(root, store, ticket["id"], d)
+    return time.time()
 
 
 def _role(ticket):
@@ -80,6 +113,7 @@ def once(root):
     """One pass. Returns [{"order", "why"}] for the runs it started."""
     store = Store(root)
     tickets = orchcli.tickets(root)
+    ask.resume(root, tickets)  # asks that waited for the relay go on
     todo = []
     with store.locked():
         orders = _load(store)
@@ -92,6 +126,7 @@ def once(root):
                     continue
                 entry = orders.get(t["id"], {})
                 why, ids, crew = _reasons(root, store, t, tickets, entry, granted, decided)
+                measured = _keep_budget(root, store, t, tickets, entry)
                 live = run_live(root, t["id"]) if why else False
             except Refused:
                 continue  # a broken order or an unreachable core: next pass
@@ -101,6 +136,8 @@ def once(root):
             if live and why:
                 continue  # the live run reads the order itself; ask again when it ends (nothing saved)
             new = {"crew": crew, "woken": sorted(set(entry.get("woken", [])) | set(ids))}
+            if measured is not None:
+                new["measured"] = measured
             if new != entry:
                 orders[t["id"]] = new
                 changed = True

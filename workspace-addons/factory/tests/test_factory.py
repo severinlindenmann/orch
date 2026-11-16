@@ -357,10 +357,10 @@ def test_act_idea_files_the_order_as_the_person_and_starts_the_agent(ws):
         for c in map(json.loads, (ws / "calls.jsonl").read_text().splitlines())
         if c["args"][:2] == ["ticket", "new"]
     )
-    assert f"--note={commands.ORDER_NOTE}" in new["args"]
     assert (
-        len(commands.ORDER_NOTE) < 200
-    )  # core adds "write a plan, split it into tasks, then start" above 200
+        f"--note={commands.ORDER_NOTE} The person's idea: A page with our opening hours and a map"
+        in new["args"]
+    )
     for words in ("Factory order", "orch factory draft", "Don't build it", "Plan the run"):
         assert words in commands.ORDER_NOTE
 
@@ -421,3 +421,42 @@ def test_store_read_of_a_fifo_is_refused_without_hanging(ws):
     os.mkfifo(store.base / "drafts" / "t_000001" / "v2.md")
     with pytest.raises(Refused, match="not a regular file"):
         store.read("drafts/t_000001/v2.md")
+
+
+def test_act_idea_keeps_a_three_sentence_idea_whole_in_the_note(ws):
+    idea = (
+        "We want a booking page for our studio. It shows free slots for the next four weeks and "
+        "lets a visitor pick one with a name and email. The owner gets a mail for every booking, "
+        "and a visitor can cancel with a link."
+    )
+    assert len(idea) > 200
+    code, r = _act(ws, "idea", "--by", "human:alex", "--json", "--", idea)
+    assert code == 0
+    t = json.loads((ws / "fake-tickets" / f"{r['order']}.json").read_text())
+    assert len(t["title"]) <= 81 and t["title"] != idea
+    assert idea in t["note"] and "Factory order" in t["note"]
+    assert Store(ws).path(f"drafts/{r['order']}/v1.md").read_text() == idea + "\n"
+
+
+def test_skill_asks_routine_choices_with_options_and_cleans_up_its_own_checks():
+    import orch_factory
+
+    text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
+    # 49: the link lifetime is four buttons with a suggestion, not a typed answer
+    assert (
+        '--option "7 days" --option "30 days" --option "90 days" --option "Permanent" --recommend "7 days"'
+        in text
+    )
+    # 51: the check data of the ship step is removed before the hand-over
+    assert "remove\neverything you created only to check the live result" in text
+    # 50: plurals in built apps
+    assert '"1 point", "2 points", never "1 pts"' in text
+    # 43: draft questions are asked as ticket questions, not listed in the draft
+    assert "Open questions do NOT go into the draft as a list" in text
+
+
+def test_skill_tells_the_manager_to_file_the_testers_pictures_with_the_stop():
+    import orch_factory
+
+    text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
+    assert ".orch/addons/factory/stops/<order>/s<round>/" in text and '"after": "s1/make-poll.png"' in text

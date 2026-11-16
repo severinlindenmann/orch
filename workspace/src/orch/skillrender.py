@@ -9,6 +9,7 @@ turned-on add-on that has such a skill and writes only what changed.
 from __future__ import annotations
 
 import re
+import sys
 import tomllib
 from pathlib import Path
 
@@ -26,6 +27,7 @@ FACTS: dict[str, list[str]] = {
     "orch-publish": ["connected", "files", "apps", "permanent", "public"],
     "orch-automation": ["relay", "webhooks"],
     "orch-dashboard": ["publish"],
+    "orch-github": [],
 }
 
 
@@ -133,6 +135,89 @@ def remember_rights(root: Path, who: dict) -> None:
         net.write_json(p, {**cfg, "rights": {k: bool(v) for k, v in rights.items()}}, True)
 
 
+# ---------------------------------------------------------------- the GitHub skill (a local fact)
+
+GITHUB_SKILL = "orch-github"
+_REMOTE_URL = re.compile(r'^\s*\[remote\s+"[^"\n]*"\]|^\s*url\s*=\s*(\S.*?)\s*$', re.M)
+
+
+def _git_config_path(root: Path) -> Path | None:
+    """The config file of the workspace root's repository, read as text (no git program is run). A `.git` file
+    (a worktree or submodule) points at its git folder; a worktree shares the config of its common folder."""
+    g = root / ".git"
+    try:
+        if g.is_file():
+            first = g.read_text(encoding="utf-8", errors="replace").splitlines()[0]
+            if not first.startswith("gitdir:"):
+                return None
+            g = (root / first[len("gitdir:") :].strip()).resolve()
+            common = g / "commondir"
+            if common.is_file():
+                g = (g / common.read_text(encoding="utf-8").strip()).resolve()
+        return g / "config" if g.is_dir() else None
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def has_github_remote(root: Path) -> bool:
+    """True when a git remote of the workspace root points at github.com (https, ssh or git@ form)."""
+    cfg = _git_config_path(root)
+    if cfg is None:
+        return False
+    try:
+        text = cfg.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    section = False
+    for line in text.splitlines():
+        t = line.strip()
+        if t.startswith("["):
+            section = t.lower().startswith("[remote ")
+        elif section and t.lower().startswith("url"):
+            url = t.partition("=")[2].strip().lower()
+            m = re.match(r"(?:[a-z+]+://)?(?:[^@/\s]+@)?([^/:\s]+)", url)
+            if m and m.group(1) in ("github.com", "www.github.com", "ssh.github.com"):
+                return True
+    return False
+
+
+def github_on(root: Path) -> bool:
+    """The fact `github`: a github.com remote on the workspace root AND the `gh` program on PATH."""
+    import shutil
+
+    return has_github_remote(root) and shutil.which("gh") is not None
+
+
+def sync_github(root: Path) -> bool:
+    """Install the orch-github skill (and its AGENTS block) when the fact is true, remove both when it is not.
+    Installed like the core skills (under .orch/harness, linked from .agents/skills, kept out of git by
+    .git/info/exclude). Writes only on change. True if anything changed."""
+    src = skills.packaged_skills_dir() / GITHUB_SKILL
+    if not (src / "SKILL.md").is_file():
+        return False
+    dest = skills.harness_skill(root, GITHUB_SKILL)
+    if github_on(root):
+        body, block = render_skill(src, facts_for(root, GITHUB_SKILL))
+        if (
+            dest.is_dir()
+            and (dest / "SKILL.md").is_file()
+            and (dest / "SKILL.md").read_text(encoding="utf-8") == body
+            and (harness.current_block(root, GITHUB_SKILL, False) or "").strip()
+            == harness.strip_comments(block).strip()
+        ):
+            return False
+        skills.install_skill(root, GITHUB_SKILL, src)
+        _safe_write(root, dest / "SKILL.md", body)
+        skills.set_block(root, GITHUB_SKILL, block)
+    else:
+        if not dest.is_dir() and not (harness.current_block(root, GITHUB_SKILL, False) or "").strip():
+            return False
+        skills.remove_skill(root, GITHUB_SKILL)
+        skills.remove_block(root, GITHUB_SKILL)
+    skills.apply_agent_files(root)
+    return True
+
+
 # ---------------------------------------------------------------- writing
 
 
@@ -176,6 +261,8 @@ def refresh_skills(root: Path, say: bool = True) -> list[str]:
             continue
         if render_installed(root, name, source):
             changed.append(name)
+    if sync_github(root):
+        changed.append(GITHUB_SKILL)
     if changed and say:
-        print(MESSAGE)
+        print(MESSAGE, file=sys.stderr)
     return changed

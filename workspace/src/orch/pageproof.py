@@ -229,8 +229,7 @@ def run_with_proof(
     argv: list[str], proof: str, *, orch_bin: str, cwd: Path, env: dict, timeout: int
 ) -> subprocess.CompletedProcess:
     """Run the core with `--proof-stdin`; the proof is the first line of stdin, never argv or env."""
-    i = argv.index("--") if "--" in argv else len(argv)  # the flag goes BEFORE the free text after `--`
-    argv = [*argv[:i], "--proof-stdin", *argv[i:]]
+    # #799 P1: the core takes no proof any more; the page runs it as a plain person action (P2 renames this)
     return subprocess.run(
         [*argv0(orch_bin), *argv],
         check=False,
@@ -238,7 +237,7 @@ def run_with_proof(
         capture_output=True,
         text=True,
         timeout=timeout,
-        input=proof + "\n",
+        input="",
         env=child_env(env, orch_bin),
     )
 
@@ -247,8 +246,7 @@ def start_detached(argv: list[str], proof: str, *, orch_bin: str, cwd: Path, env
     """Run the core with `--proof-stdin` through a small detached RUNNER (own session, survives a restart of
     this server): it keeps the output in a log in the guarded home, stops a hung run after 30 minutes and
     records running / finished / failed for the page. The proof goes to its stdin; returns its pid at once."""
-    i = argv.index("--") if "--" in argv else len(argv)
-    full = [*argv0(orch_bin), *argv[:i], "--proof-stdin", *argv[i:]]
+    full = [*argv0(orch_bin), *argv]  # #799 P1: no proof flag; the core runs it as a plain person action
     kw: dict = {"start_new_session": True}
     if sys.platform == "win32":
         kw = {"creationflags": 0x00000008 | 0x00000200}  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP

@@ -16,7 +16,7 @@ from pathlib import Path
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from orch import net
+from orch import net, secretscan
 from orch.errors import Refused
 
 MAGIC = b"OPF1"
@@ -157,7 +157,61 @@ def _bundle_path(rel: str) -> str:
     return rel
 
 
-def bundle(folder: Path, report: dict | None = None) -> bytes:
+def _texts_of(data: bytes) -> list[str]:
+    """Every reading of a file that is scanned; always the plain UTF-8 text, so never empty (binary files
+    are scanned too). Extra readings: the text with its NUL bytes dropped (ASCII inside UTF-16/32 at any
+    alignment, tar and database files with NUL padding) and the byte-order-mark or NUL-parity decode."""
+    views = [data.decode("utf-8", "replace")]
+    if b"\0" in data:
+        views.append(data.replace(b"\0", b"").decode("utf-8", "replace"))
+    for bom, codec in (
+        (b"\xff\xfe\0\0", "utf-32"),
+        (b"\0\0\xfe\xff", "utf-32"),
+        (b"\xff\xfe", "utf-16"),
+        (b"\xfe\xff", "utf-16"),
+    ):
+        if data.startswith(bom):
+            views.append(data.decode(codec, "replace"))
+    head = data[:8192]
+    n = len(head) // 2
+    if n >= 8:  # BOM-less UTF-16: NULs sit at one parity only (ASCII text)
+        even, odd = head[0 : 2 * n : 2].count(0), head[1 : 2 * n : 2].count(0)
+        if max(even, odd) >= 0.4 * n and min(even, odd) <= 0.02 * n:
+            views.append(data.decode("utf-16-le" if odd > even else "utf-16-be", "replace"))
+    return views
+
+
+CHUNK = secretscan.MAX_BYTES // 2
+OVERLAP = 16384  # longer than any token pattern; a PEM block over this is still caught by its header line
+
+
+def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
+    """Refuse the upload when any text file holds a secret (secretscan, the one scanner). Runs on the plain
+    bytes that are about to be encrypted and sent. Names the kind, the file and the line, never the value."""
+    hits: dict[tuple[str, int, str], None] = {}
+    for name, data in items:
+        for text in _texts_of(data):
+            # chunks with an overlap, so a big file is scanned in full and no token is cut in two
+            pos = 0
+            while True:
+                end = min(pos + CHUNK, len(text))
+                line0 = text.count("\n", 0, pos)
+                for f in secretscan.find(text[pos:end], root):
+                    hits[(name, f["line"] + line0, f["kind"])] = None
+                if end >= len(text):
+                    break
+                pos = end - OVERLAP
+    if not hits:
+        return
+    name, line, kind = sorted(hits, key=lambda h: (h[0], h[1]))[0]
+    more = f" (and {len(hits) - 1} more)" if len(hits) > 1 else ""
+    raise Refused(
+        f"Nothing was shared: {name!r} has {secretscan.WORDS.get(kind, 'a secret')} on line {line}{more}. "
+        "Remove it from the file and share again."
+    )
+
+
+def bundle(folder: Path, report: dict | None = None, root: Path | None = None) -> bytes:
     """Folder -> bundle bytes (crypto.md "Folder bundle"): u32 BE index length, index JSON, files.
     `report` gets "files" (bundled paths) and "skipped" (secret-looking files left out)."""
     if (folder / ".orch").exists():
@@ -185,6 +239,7 @@ def bundle(folder: Path, report: dict | None = None) -> bytes:
     if sum(p.stat().st_size for _, p in files) > MAX_FILE:
         raise Refused("The folder is bigger than 100 MB.")
     datas = [p.read_bytes() for _, p in files]
+    scan_files(root, [(r, d) for (r, _), d in zip(files, datas, strict=True)])
     index = {
         "v": 1,
         "entry": "index.html" if "index.html" in pages else pages[0],
@@ -233,7 +288,7 @@ def share_file(
         key = b64u_decode(k)
     if path.is_dir():
         shown: dict = {}
-        content, mime = bundle(path, shown), BUNDLE_TYPE
+        content, mime = bundle(path, shown, root), BUNDLE_TYPE
         if len(content) > MAX_FILE:
             raise Refused("The folder is bigger than 100 MB.")
     elif not path.is_file():
@@ -242,6 +297,7 @@ def share_file(
         raise Refused("The file is bigger than 100 MB.")
     else:
         content = path.read_bytes()
+        scan_files(root, [(path.name, content)])
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     name = path.resolve().name if path.is_dir() else path.name
     if replace:
@@ -302,7 +358,7 @@ def list_all(root: Path) -> dict:
     apps = net.items(_api(root, "GET", "/v1/apps"))
     tokens = net.read_json(_tokens_path(root), {})
     for a in apps:
-        if not a.get("public") and a["name"] in tokens:
+        if ("auth" in a and a["auth"] or "auth" not in a and not a.get("public")) and a["name"] in tokens:
             a["link"] = f"{a['url']}/?token={tokens[a['name']]}"
     return {"files": files, "apps": apps}
 
@@ -373,9 +429,7 @@ def view(root: Path) -> dict:
     apps = [
         {
             "title": _plain(a["name"]),
-            "subtitle": _plain(
-                f"{a['status']}, {'public' if a['public'] else 'private'}, {_exp(a['expires_at'])}"
-            ),
+            "subtitle": _plain(f"{a['status']}, {describe(a)}, {_exp(a['expires_at'])}"),
             **({"link": a["url"]} if str(a.get("url", "")).startswith("https://") else {}),
         }
         for a in r["apps"]
@@ -465,11 +519,40 @@ def read_manifest(folder: Path) -> dict:
     return m
 
 
-def pack(folder: Path, public: bool | None) -> bytes:
-    """tar.gz of the folder. `public` overrides the public line of app.toml (None keeps it)."""
+def _set_line(text: str, key: str, value: str) -> str:
+    """Replace the `key = ...` line of a manifest, else add one."""
+    line = f"{key} = {value}"
+    if re.search(rf"(?m)^{key}\s*=", text):
+        return re.sub(rf"(?m)^{key}\s*=.*$", line, text)
+    return text.rstrip("\n") + "\n" + line + "\n"
+
+
+def _override(text: str, reach: str | None, auth: bool | None) -> str:
+    if reach is not None:
+        text = _set_line(text, "reach", f'"{reach}"')
+    if auth is not None:
+        # the server refuses `public` together with `auth`: the older line goes
+        text = re.sub(r"(?m)^public\s*=.*\n?", "", text)
+        text = _set_line(text, "auth", "true" if auth else "false")
+    return text
+
+
+# the manifest's own switches (`auth = true`) are settings, not secrets: blanked before the scan
+_MANIFEST_FLAGS = re.compile(
+    rb'(?m)^[ \t]*(?:(?:auth|public|reach)[ \t]*=[ \t]*(?:true|false|"public"|"private")'
+    # the two comment lines of the app templates, word for word: nothing may follow them
+    rb"|# reach: public = on the internet, private = only on the private network"
+    rb"|# auth: true = needs the app's private link, false = open to everyone who can reach it)"
+    rb"[ \t]*(?=\r?$)"
+)
+
+
+def pack(folder: Path, reach: str | None = None, auth: bool | None = None, root: Path | None = None) -> bytes:
+    """tar.gz of the folder. `reach` ("public" | "private") and `auth` override app.toml (None keeps it)."""
     if (folder / ".orch").exists():
         raise Refused("This folder is the workspace root. Publish an app folder inside it.")
     buf = io.BytesIO()
+    scanned: list[tuple[str, bytes]] = []
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for dirpath, dirs, files in os.walk(folder):
             dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
@@ -478,39 +561,63 @@ def pack(folder: Path, public: bool | None) -> bytes:
                 rel = p.relative_to(folder).as_posix()
                 if p.is_symlink() or f in SKIP_DIRS or f.startswith(".") or not p.is_file():
                     continue
-                if rel == "app.toml" and public is not None:
-                    text = p.read_text(encoding="utf-8")
-                    line = f"public = {'true' if public else 'false'}"
-                    text = (
-                        re.sub(r"(?m)^public\s*=.*$", line, text)
-                        if re.search(r"(?m)^public\s*=", text)
-                        else text.rstrip("\n") + "\n" + line + "\n"
-                    )
-                    raw = text.encode("utf-8")
+                if rel == "app.toml" and (reach is not None or auth is not None):
+                    raw = _override(p.read_text(encoding="utf-8"), reach, auth).encode("utf-8")
                     info = tarfile.TarInfo(rel)
-                    info.size = len(raw)
-                    tar.addfile(info, io.BytesIO(raw))
-                else:
-                    tar.add(p, arcname=rel, recursive=False)
+                else:  # read once: the bytes that are scanned are the bytes that are sent
+                    raw = p.read_bytes()
+                    info = tar.gettarinfo(str(p), arcname=rel)
+                info.size = len(raw)
+                scanned.append((rel, _MANIFEST_FLAGS.sub(b"", raw) if rel == "app.toml" else raw))
+                tar.addfile(info, io.BytesIO(raw))
+    scan_files(root, scanned)
     data = buf.getvalue()
     if len(data) > MAX_APP:
         raise Refused("The app folder is bigger than 100 MB.")
     return data
 
 
+def manifest_auth(m: dict) -> bool:
+    """auth of a manifest: `auth`, else the older `public` (public = no auth), else true."""
+    if "auth" in m:
+        return bool(m["auth"])
+    return not m["public"] if "public" in m else True
+
+
+def describe(a: dict) -> str:
+    """Plain words for an app: where it can be reached and whether it needs the link.
+
+    An older server sends only `public`: that means reach public, auth = not public."""
+    private = a.get("reach") == "private"
+    auth = bool(a["auth"]) if "auth" in a else not a.get("public", False)
+    return f"{'private network' if private else 'public'}, {'needs link' if auth else 'open'}"
+
+
 def deploy(
-    root: Path, folder: Path, days: int | None, permanent: bool, public: bool | None, new_token: bool
+    root: Path,
+    folder: Path,
+    days: int | None,
+    permanent: bool,
+    reach: str | None,
+    auth: bool | None,
+    new_token: bool,
 ) -> dict:
     m = read_manifest(folder)
     q = [x for x in (_life(days, permanent), "new_token=1" if new_token else "") if x]
-    res = _api(root, "PUT", f"/v1/apps/{m['name']}" + (f"?{'&'.join(q)}" if q else ""), pack(folder, public))
-    is_public = public if public is not None else bool(m.get("public", False))
-    res["private"] = not is_public
+    res = _api(
+        root,
+        "PUT",
+        f"/v1/apps/{m['name']}" + (f"?{'&'.join(q)}" if q else ""),
+        pack(folder, reach, auth, root),
+    )
+    needs_link = auth if auth is not None else manifest_auth(m)
+    res.setdefault("reach", reach or m.get("reach", "public"))
+    res["auth"] = needs_link
     tokens = net.read_json(_tokens_path(root), {})
     if res.get("view_token"):
         tokens[m["name"]] = res["view_token"]
         net.write_json(_tokens_path(root), tokens, True)
-    if is_public:
+    if not needs_link:
         res["link"] = res["url"]
     elif tokens.get(m["name"]):
         res["link"] = f"{res['url']}/?token={tokens[m['name']]}"

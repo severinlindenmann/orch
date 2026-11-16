@@ -16,7 +16,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import actions, adapterdata, areas, chat, livecards, proofs, runfiles, selfupdate
+from . import actions, adapterdata, areas, chat, livecards, proofs, results, runfiles, selfupdate
 from .board import Board, TicketWatcher
 from .clock import WorkClock
 from .events import RUN_ID, EventLog, for_display
@@ -47,6 +47,9 @@ def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
 
 DEFAULT_PORT = 8430
 MAX_BODY = 16384
+# a message with files (ticket.attach): up to 5 files of 25 MB as base64; one such body in memory at a time
+MAX_BIG_BODY = 5 * actions.ATTACH_MAX * 4 // 3 + MAX_BODY
+_BIG_READS = threading.BoundedSemaphore(1)
 TID_RE = re.compile(r"t_[a-z0-9]{6,16}")
 TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -504,6 +507,7 @@ class Tracker:
             "run": {
                 "running": running, "mode": claim.get("mode"), "agent": agent, "label": label, "run": claim.get("run"),
                 "pending": status.get("pending", 0),
+                "waiting_input": _waiting_input(status),
             },
             "state": state,
             "generic": generic,
@@ -581,21 +585,22 @@ class Tracker:
                     if started or t["status"] == "waiting"
                     else "Start"
                 )
-                out.append(
-                    {
-                        "id": t["id"],
-                        "next_step": next_step,
-                        "question_count": len(questions),
-                        "key": t.get("key"),
-                        "updated_at": t.get("updated_at") or t.get("created_at"),
-                        "title": str(t.get("title", ""))[:200],
-                        "status": t["status"],
-                        "closed_at": (t.get("closed_at") or ((t.get("history") or [{}])[-1] or {}).get("at"))
-                        if t["status"] == "done"
-                        else None,
-                        "started": bool(t.get("started") or (t.get("ticket_view") or {}).get("started")),
-                    }
-                )
+                row = {
+                    "id": t["id"],
+                    "next_step": next_step,
+                    "question_count": len(questions),
+                    "key": t.get("key"),
+                    "updated_at": t.get("updated_at") or t.get("created_at"),
+                    "title": str(t.get("title", ""))[:200],
+                    "status": t["status"],
+                    "closed_at": (t.get("closed_at") or ((t.get("history") or [{}])[-1] or {}).get("at"))
+                    if t["status"] == "done"
+                    else None,
+                    "started": bool(t.get("started") or (t.get("ticket_view") or {}).get("started")),
+                }
+                if t["status"] == "review":  # the newest result, from the ticket as listed (no file is read)
+                    row["result"] = results.newest_result(t)
+                out.append(row)
         return out[:200]
 
 
@@ -870,13 +875,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(415, b"send JSON", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
-            if not 0 < n <= MAX_BODY:
+            if not 0 < n <= MAX_BIG_BODY:
                 raise ValueError
-            body = json.loads(self.rfile.read(n))
+            if n > MAX_BODY:
+                with _BIG_READS:
+                    raw = self.rfile.read(n)
+            else:
+                raw = self.rfile.read(n)
+            body = json.loads(raw)
             if not isinstance(body, dict) or set(body) - {"op", "args"}:
                 raise ValueError
+            if n > MAX_BODY and body.get("op") != "ticket.attach":
+                raise ValueError  # only a message with files may be big
         except (ValueError, RecursionError, OSError):
-            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+            return self._send(
+                400,
+                b"That request could not be read. Try again with fewer or smaller files.",
+                "text/plain; charset=utf-8",
+            )
         args = body.get("args", {})
         if body.get("op") in ("proc.stop", "proc.stop_all"):
             return self._proc_op(body["op"], args)
@@ -922,6 +938,21 @@ class Handler(BaseHTTPRequestHandler):
                 any(q.get("answer") is None for q in view["ticket"].get("questions", [])) if view else False,
             )
         self._json(200, {"result": extra, "view": view, "note": note})
+
+
+def _waiting_input(status: dict) -> list[dict]:
+    """The messages the helper has not read yet: [{id, text, at}], from `orch run status` (a person can take one back)."""
+    out = []
+    for i in status.get("waiting_input") or []:
+        if isinstance(i, dict) and isinstance(i.get("id"), str) and isinstance(i.get("text"), str):
+            out.append(
+                {
+                    "id": i["id"][:40],
+                    "text": i["text"][:2000],
+                    "at": i.get("at") if isinstance(i.get("at"), str) else None,
+                }
+            )
+    return out[:20]
 
 
 def stop_started(srv) -> None:

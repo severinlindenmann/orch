@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Review · orch (draft)</title>
+<link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/interaction.css">
+<script src="../../../../../workspace/src/orch_ui/static/overlay.js"></script><script src="../../../../../workspace/src/orch_ui/static/components.js"></script><script src="../../../../../workspace/src/orch_ui/static/icons.js"></script><script src="../../../../../workspace/src/orch_ui/static/widgets.js"></script><script src="data.js"></script></head>
+<body><div class="banner" role="note" data-superseded><div><h3>Superseded draft (15 Nov 2026)</h3><p>Kept for history only. The shipped screens are in the mockup: review/review.html, ticket/ticket-answers.html (answers under the ticket questions, no Decisions tab) and the Home "Review all" button. Do not build from this page.</p></div></div>
+<!-- Served by orch itself (core, no dashboard needed): `orch review` prints this link. Same widget, same answers, same ticket record. -->
+<header class="review-solo-bar"><span class="review-solo-brand"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="22" height="22"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"/><circle cx="11" cy="12" r="3" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="var(--brand)"/></svg><strong>orch</strong><span class="meta">Review · Demo workspace</span></span>
+<nav class="segmented" aria-label="Show"><button class="btn sm" aria-pressed="true" data-show="deck">Waiting <span class="meta">8</span></button><button class="btn sm" aria-pressed="false" data-show="answered">Answered</button></nav>
+<span class="meta review-solo-note">This link works on this computer until 18:30.</span></header>
+<main class="review-solo" aria-label="Review">
+ <section id="deck" aria-label="Review deck"></section>
+ <section id="answered" hidden aria-label="Answered"></section>
+</main>
+<script>
+const items=window.SWIPE_ITEMS,deckEl=document.getElementById('deck'),ansEl=document.getElementById('answered');
+const word=a=>a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?(a.item.preview.type==='options'?'None of these':a.item.kind==='check'?'Sent back':"Don't do"):'Sent back for changes';
+const drawAnswered=()=>{ansEl.replaceChildren();const list=items.filter(it=>deck.answers[it.id]);
+ if(!list.length){ansEl.append(UI.state({kind:'empty',title:'No answers yet',text:'Your answers appear here and on each ticket.'}));return}
+ list.forEach(it=>{const a=deck.answers[it.id],c=document.createElement('article');c.className='decision';
+  const h=document.createElement('div');h.className='decision-h';const t=document.createElement('h3');t.textContent=it.title;const v=document.createElement('span');v.className='decision-verdict '+a.verdict;v.textContent=word(a);h.append(t,v);
+  const by=document.createElement('div');by.className='decision-by';by.textContent=it.ticket+' · just now · this page';c.append(h,by);
+  const w=a.note&&a.note.changes;if(w&&(w.text||w.clips.length||w.pins.length)){const box=document.createElement('div');box.className='decision-words';
+   [w.text,...w.clips.map(x=>'Voice: '+x.text),...w.pins.map((p,i)=>'Spot '+(i+1)+(p.on?' on '+p.on:'')+': '+p.text)].filter(Boolean).forEach(x=>{const p=document.createElement('p');p.textContent=x;box.append(p)});c.append(box)}
+  const f=document.createElement('div');f.className='decision-foot';f.textContent='Kept on '+it.ticket+' under Decisions. Helpers read it there.';c.append(f);ansEl.append(c)})};
+const deck=UI.swipeDeck(deckEl,items,{mode:'desk',onChange:()=>{document.querySelector('[data-show=deck] .meta').textContent=String(items.length-Object.keys(deck.answers).length)}});
+document.querySelectorAll('[data-show]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-show]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+ const d=b.dataset.show==='deck';deckEl.hidden=!d;ansEl.hidden=d;if(!d)drawAnswered();else deckEl.focus()});
+deckEl.focus();
+</script></body></html>

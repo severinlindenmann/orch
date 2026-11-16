@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import tarfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -215,10 +216,11 @@ def test_list_and_delete_file(proj, run, pub):
     assert run("publish", "list")[1].strip().startswith("Nothing shared yet")
 
 
-def make_app(proj, public="false"):
+def make_app(proj, public="false", extra=None):
     d = proj / "myapp"
     d.mkdir()
-    (d / "app.toml").write_text(f'name = "weekly-report"\nstack = "static"\npublic = {public}\n')
+    head = 'name = "weekly-report"\nstack = "static"\n'
+    (d / "app.toml").write_text(extra if extra is not None else head + f"public = {public}\n")
     (d / "index.html").write_text("<h1>hi</h1>")
     (d / ".git").mkdir()
     (d / ".git" / "config").write_text("secret")
@@ -236,13 +238,92 @@ def test_app_deploy_private_with_view_token(proj, run, pub):
     assert app["query"] == {"days": ["2"]}
 
 
-def test_app_public_flag_rewrites_manifest(proj, run, pub):
+def sent_manifest(pub):
+    tar = tarfile.open(fileobj=io.BytesIO(pub.apps["weekly-report"]["tar"]))
+    return tar.extractfile("app.toml").read().decode()
+
+
+def test_app_flags_rewrite_manifest(proj, run, pub):
+    connect(run, pub)
+    make_app(proj)  # legacy `public = false`
+    code, out, _ = run("publish", "app", "myapp", "--public", "--no-auth", "--permanent")
+    m = sent_manifest(pub)
+    assert 'reach = "public"' in m and "auth = false" in m and "public =" not in m.replace("reach", "")
+    assert "public, open" in out and "?token" not in out
+    assert pub.apps["weekly-report"]["query"] == {"permanent": ["1"]}
+    run("publish", "app", "myapp", "--private", "--auth")
+    m = sent_manifest(pub)
+    assert 'reach = "private"' in m and "auth = true" in m and m.count("auth") == 1
+
+
+def test_app_flag_replaces_existing_lines(proj, run, pub):
+    connect(run, pub)
+    make_app(proj, extra='name = "weekly-report"\nstack = "static"\nreach = "public"\nauth = true\n')
+    run("publish", "app", "myapp", "--private", "--no-auth")
+    m = sent_manifest(pub)
+    assert m.count("reach") == 1 and 'reach = "private"' in m and "auth = false" in m and m.count("auth") == 1
+    run("publish", "app", "myapp")  # no flag: the file is sent unchanged
+    assert sent_manifest(pub).count("auth = true") == 1
+
+
+def test_app_flags_are_exclusive(proj, run, pub):
     connect(run, pub)
     make_app(proj)
-    run("publish", "app", "myapp", "--public", "--permanent")
-    tar = tarfile.open(fileobj=io.BytesIO(pub.apps["weekly-report"]["tar"]))
-    assert b"public = true" in tar.extractfile("app.toml").read()
-    assert pub.apps["weekly-report"]["query"] == {"permanent": ["1"]}
+    for flags in (("--public", "--private"), ("--auth", "--no-auth")):
+        with pytest.raises(SystemExit) as e:
+            run("publish", "app", "myapp", *flags)
+        assert e.value.code == 2
+
+
+def test_deploy_auth_precedence(tmp_path):
+    f = tmp_path
+    for text, want in [
+        ("auth = false\npublic = true\n", False),  # auth wins over legacy public
+        ("public = true\n", False),
+        ("public = false\n", True),
+        ("", True),
+        ("auth = true\n", True),
+    ]:
+        assert publish.manifest_auth(tomllib.loads(text)) is want, text
+    # an override beats the manifest
+    (f / "app.toml").write_text('name = "my-app"\nstack = "static"\nauth = true\n')
+    sent = {}
+
+    def fake_api(root, method, path, body=None):
+        sent["body"] = body
+        return {"name": "x", "url": "https://h/a/x", "status": "running", "expires_at": None}
+
+    import orch.publish as p
+
+    orig = p._api
+    p._api = fake_api
+    try:
+        r = p.deploy(tmp_path, f, None, False, None, False, False)
+    finally:
+        p._api = orig
+    assert r["auth"] is False and r["link"] == "https://h/a/x"
+
+
+@pytest.mark.parametrize(
+    ("fields", "words"),
+    [
+        ({"reach": "public", "auth": True}, "public, needs link"),
+        ({"reach": "public", "auth": False}, "public, open"),
+        ({"reach": "private", "auth": True}, "private network, needs link"),
+        ({"reach": "private", "auth": False}, "private network, open"),
+        ({"public": True}, "public, open"),  # older server: no reach, no auth
+        ({"public": False}, "public, needs link"),
+    ],
+)
+def test_list_wording(proj, run, pub, fields, words):
+    connect(run, pub)
+    make_app(proj)
+    run("publish", "app", "myapp")
+    pub.apps["weekly-report"]["extra"] = fields
+    if "public" not in fields:
+        fields["public"] = not fields["auth"]  # the server sends `public` as well
+    code, out, _ = run("publish", "list")
+    assert f"running, {words}," in out
 
 
 def test_app_manifest_errors(proj, run, pub):
@@ -552,3 +633,134 @@ def test_net_keeps_pythons_tls_default_elsewhere(monkeypatch):
         assert net._tls() is None
     finally:
         net._tls.cache_clear()
+
+
+# ---- secret scan before every upload (#861) --------------------------------------------------------------
+
+PLANT = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"  # a made-up GitHub token shape
+
+
+def _no_echo(*texts):
+    assert all(PLANT not in t and PLANT[4:] not in t for t in texts)
+
+
+def test_file_with_a_secret_is_refused_and_nothing_is_uploaded(proj, run, pub):
+    connect(run, pub)
+    (proj / "settings.env").write_text(f"A=1\nTOKEN={PLANT}\n")
+    n = len(pub.calls)
+    code, out, err = run("publish", "file", "settings.env")
+    assert code != 0 and "settings.env" in err and "line" in err and "Nothing was shared" in err
+    _no_echo(out, err)
+    assert not pub.files and len(pub.calls) == n
+    code, out, err = run("publish", "file", "settings.env", "--json")
+    assert code != 0
+    _no_echo(out, err)
+
+
+def test_folder_with_a_secret_is_refused_and_a_clean_binary_passes(proj, run, pub):
+    connect(run, pub)
+    site = proj / "site"
+    (site / "js").mkdir(parents=True)
+    (site / "index.html").write_text("<h1>hi</h1>")
+    (site / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR" + bytes(range(256)) * 20)  # clean binary
+    code, out, _ = run("publish", "file", "site")
+    assert code == 0, out
+    (site / "js" / "app.js").write_text(f"x = 1;\nconst k = '{PLANT}';\n")
+    pub.files.clear()
+    code, out, err = run("publish", "file", "site")
+    assert code != 0 and "js/app.js" in err and "line 2" in err
+    _no_echo(out, err)
+    assert not pub.files
+
+
+def test_app_deploy_with_a_secret_is_refused_before_upload(proj, run, pub):
+    connect(run, pub)
+    app = make_app(proj)
+    (app / "config.py").write_text(f"X = 1\nKEY = '{PLANT}'\n")
+    n = len(pub.calls)
+    code, out, err = run("publish", "app", str(app))
+    assert code != 0 and "config.py" in err and "line 2" in err
+    _no_echo(out, err)
+    assert len(pub.calls) == n
+
+
+def test_replace_with_a_secret_is_refused(proj, run, pub):
+    connect(run, pub)
+    (proj / "a.txt").write_text("fine")
+    res = json.loads(run("publish", "file", "a.txt", "--json")[1])
+    (proj / "a.txt").write_text(f"token {PLANT}")
+    code, out, err = run("publish", "file", "a.txt", "--replace", res["id"])
+    assert code != 0 and "a.txt" in err
+    _no_echo(out, err)
+
+
+def test_large_text_file_is_scanned_past_the_first_megabyte(tmp_path):
+    big = b"x" * 99 + b"\n"
+    data = big * 11000 + f"TOKEN={PLANT}\n".encode()  # > 1 MB, secret at the end
+    with pytest.raises(Refused) as e:
+        publish.scan_files(None, [("big.log", data)])
+    assert "line 11001" in str(e.value) and PLANT not in str(e.value)
+
+
+def test_utf16_file_with_a_secret_is_scanned_not_skipped():
+    for text in (f"A=1\nTOKEN={PLANT}\n",):
+        for codec in ("utf-16", "utf-16-le", "utf-16-be", "utf-32"):
+            with pytest.raises(Refused) as e:
+                publish.scan_files(None, [("w.env", text.encode(codec))])
+            assert "line 2" in str(e.value) and PLANT not in str(e.value)
+
+
+def test_token_on_a_chunk_boundary_is_found():
+    line = ("y" * 99 + "\n") * 5000  # 500 KB per chunk of text
+    pad = "z" * (publish.CHUNK - 10)  # one long line: the token straddles the first cut
+    data = (pad + f" {PLANT}\n" + line).encode()
+    with pytest.raises(Refused):
+        publish.scan_files(None, [("min.js", data)])
+
+
+def test_fake_bom_before_a_utf8_token_does_not_hide_it():
+    for bom in (b"\xff\xfe", b"\xfe\xff", b"\xff\xfe\0\0", b"\0\0\xfe\xff"):
+        with pytest.raises(Refused) as e:
+            publish.scan_files(None, [("x.env", bom + f"A=1\nTOKEN={PLANT}\n".encode())])
+        assert PLANT not in str(e.value)
+
+
+def test_misaligned_bom_nul_padded_and_binary_files_do_not_hide_a_token():
+    tok = f"TOKEN={PLANT}\n"
+    cases = {
+        "shifted-bom": b"\xff\xfeX" + tok.encode("utf-16-le"),
+        "utf32-bom-utf16-body": b"\xff\xfe\0\0" + tok.encode("utf-16-le"),
+        "wrong-endian-bom": b"\xfe\xff" + tok.encode("utf-16-le"),
+        "one-nul": b"\0" + tok.encode(),
+        "tar-like": b"a.env" + b"\0" * 100 + tok.encode() + b"\0" * 400,
+        "utf32-no-bom": tok.encode("utf-32-le"),
+    }
+    for name, data in cases.items():
+        with pytest.raises(Refused) as e:
+            publish.scan_files(None, [(name, data)])
+        assert PLANT not in str(e.value), name
+
+
+def test_generated_app_templates_pass_the_scan(tmp_path):
+    from orch import templates
+
+    for stack in ("static", "python", "node", "docker"):
+        d = tmp_path / stack
+        templates.create(stack, "none", d)
+        publish.pack(d, None, None, None)
+
+
+def test_a_token_after_a_manifest_comment_or_flag_is_refused(tmp_path):
+    d = tmp_path / "app"
+    d.mkdir()
+    for tail in (
+        "# auth: true " + PLANT,
+        "# auth: true = needs the app's private link, false = open to everyone who can reach it " + PLANT,
+        "auth = true # " + PLANT,
+        "# reach: public " + f"TOKEN={PLANT}",
+    ):
+        (d / "app.toml").write_text(f'name = "x"\n{tail}\n')
+        (d / "index.html").write_text("hi")
+        with pytest.raises(Refused) as e:
+            publish.pack(d, None, None, None)
+        assert PLANT not in str(e.value), tail

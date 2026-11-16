@@ -45,7 +45,7 @@ test('classic script loads before state and snapshot detail stays read-only insi
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, text) => h(tag, {className:cls}, text), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:text => h('p', {}, text),
-    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
+    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'Done'), chip:text => h('span', {}, text), href:id => '#ticket/' + id,
     fetch:() => { throw Error('snapshot fetched'); }};
   vm.createContext(ctx); vm.runInContext(source, ctx); // No state or snapshot at script load.
@@ -137,7 +137,7 @@ test('the review buttons show whenever the status is Review, an open question fi
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, text) => h(tag, {className:cls}, text), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:text => h('p', {}, text),
-    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
+    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'Ready for review'), chip:text => h('span', {}, text), href:id => '#ticket/' + id, MOVE_CHOICES:[], moveTicket(){}, button:label => h('button', {}, label), locksX:0, loadArtifacts(){}, ticketArtifactPreview:() => null, agentBar:() => null,
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
@@ -164,7 +164,7 @@ test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats ad
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, text) => h(tag, {className:cls}, text), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:text => h('p', {}, text),
-    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
+    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'Ready for review'), chip:text => h('span', {}, text), href:id => '#ticket/' + id, MOVE_CHOICES:[], moveTicket(){}, button:label => h('button', {}, label), locksX:0, loadArtifacts(){}, ticketArtifactPreview:() => null, agentBar:() => null,
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
@@ -215,7 +215,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '',
     el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids),
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
-    questions:t => t.questions || [], capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
+    questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
     main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
   vm.createContext(ctx); vm.runInContext(source,ctx);
@@ -408,7 +408,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '',
     el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids),
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
-    questions:t => t.questions || [], capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
+    questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
     main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
   vm.createContext(ctx); vm.runInContext(source,ctx);
@@ -517,7 +517,7 @@ test('a file is listed once per list, and Overview chips skip the file already i
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '', route:() => ({kind:'ticket'}), render(){},
     el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids), button:(label, cls) => h('button',{className:cls},label),
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
-    questions:() => [], capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
+    questions:() => [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Review'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[], locks:new Set()};
   vm.createContext(ctx); vm.runInContext(source,ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[]}};
@@ -566,4 +566,24 @@ test('the Changes to add card offers Review changes and Keep as is; a kept copy 
   const kept = c.ticketBringBackRow(t);
   assert.match(JSON.stringify(kept), /Changes kept in a copy/);
   assert.deepEqual(labels(kept), ['Apply changes']);
+});
+test('Watch live opens the live-session add-on, not the first add-on with a running page', () => {
+  const rows = [{name:'factory', page:{path:'/'}}, {name:'focus', page:{path:'/', live_session:true}}];
+  const c = context({addons:() => rows, state:{services:[{addon:'factory', running:true}, {addon:'focus', running:true}]}, addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
+  vm.runInContext(source.slice(source.indexOf('function liveLinkFor'), source.indexOf('// Live session: the main click')), c);
+  assert.equal(c.liveLinkFor({id:'t-42', ext:{}}).url, '#addon/focus/t/t-42', 'Watch live opens Focus on this ticket');
+  assert.equal(c.liveLinkFor({ext:{}}).url, '#addon/focus//');
+  c.state.services = [{addon:'factory', running:true}, {addon:'focus', running:false}];
+  assert.equal(c.liveLinkFor({ext:{}}), null, 'no live-session page is running: no Watch live');
+});
+
+test('Live session card: the main click opens the live screen, the commands sit behind one small Copy command', () => {
+  const rows = [{name:'focus', page:{path:'/', live_session:true}}];
+  const c = context({addons:() => rows, state:{runs:{t1:{running:true, claim:{mode:'live'}}}, services:[{addon:'focus', running:true}]}, snapshot:false, button:() => ({tag:'button', attrs:{}, dataset:{}, children:[], append(...k) { this.children.push(...k); }}), addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
+  vm.runInContext(source.slice(source.indexOf('function liveLinkFor'), source.indexOf('function agentBar(t)')), c);
+  const json = JSON.stringify(c.liveSessionStrip({id:'t1', key:'DEMO-1'}));
+  assert.match(json, /live-open[\s\S]*Watch live/);
+  assert.match(json, /#addon\/focus\/t\/t1/);
+  assert.match(json, /Copy command/);
+  assert.doesNotMatch(json, /"Copy"/);
 });

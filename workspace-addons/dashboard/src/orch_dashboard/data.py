@@ -411,6 +411,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
     phone_delivery.mark(root, tickets)
     add_proof_state(tickets, root)
     add_artifact_marks(tickets)
+    add_quiet(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     by_id = {t["id"]: t for t in tickets}
     for t in tickets:
@@ -437,6 +438,23 @@ def add_proof_state(tickets: list[dict], root: Path | None = None) -> None:
             t["proof"] = core.proof_state(t, root, cache=True)
         except (KeyError, TypeError, ValueError):
             t.pop("proof", None)
+
+
+def add_quiet(tickets: list[dict]) -> None:
+    """`quiet_since` on a Working ticket with no news for 6 h (G2): the core's one rule, asked here for the CLI
+    listing and the file fallback alike. Not stored; no field on the ticket file."""
+    try:
+        from orch import tickets as core
+    except ImportError:
+        return
+    for t in tickets:
+        t.pop("quiet_since", None)
+        try:
+            since = core.quiet_since(t)
+        except (TypeError, ValueError, AttributeError):
+            since = None
+        if since:
+            t["quiet_since"] = since
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
@@ -554,6 +572,7 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "icon": d["icon"],
                         "order": d.get("order", 50),
                         "panel": d.get("panel") if d.get("panel") in ("repeats", "links", "phone") else None,
+                        "place": "settings" if d.get("place") == "settings" else "nav",
                         "title": str(d["title"])[:40] if isinstance(d.get("title"), str) else None,
                         "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },
@@ -854,6 +873,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copies_mode,
         copy_setup,
         diag_enabled,
+        focus_session_typing,
         workspace_description,
         workspace_name,
     )
@@ -874,6 +894,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "copy_setup": copy_setup(root) or "",
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
+        "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
         "copies_disk": copies_disk(root),
@@ -893,6 +914,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "active": r.get("active") is True,
                 "consent": _consent(r),
                 "detail": _addon_detail(root, r["name"]),
+                "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
             }
             for r in _addon_rows(rows)
             if r.get("installed") is not False
@@ -914,6 +936,16 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     }
 
 
+def _core_addons() -> tuple[str, ...]:
+    """The add-ons that are part of orch (core refuses `orch addon uninstall` for them)."""
+    try:
+        from orch.addons import CORE_ADDONS
+
+        return tuple(CORE_ADDONS)
+    except Exception:  # noqa: BLE001 - without the core list the CLI still refuses, in plain words
+        return ()
+
+
 def _addon_rows(rows) -> list[dict]:
     return [
         r
@@ -925,7 +957,7 @@ def _addon_rows(rows) -> list[dict]:
 def _label(r: dict) -> str:
     d = r.get("dashboard") if isinstance(r.get("dashboard"), dict) else None
     lab = d.get("label") if d else None
-    return lab[:40] if isinstance(lab, str) and lab.strip() else r["name"]
+    return lab[:40] if isinstance(lab, str) and lab.strip() else r["name"].capitalize()
 
 
 def load_services(root: Path, orch_bin: str | None) -> list[dict]:
@@ -940,7 +972,7 @@ def load_services(root: Path, orch_bin: str | None) -> list[dict]:
 
 _RUNS: dict[tuple[str, str], tuple[float, dict | None]] = {}
 _RUN_SIGNATURES = {}
-RUNS_TTL = 5.0
+RUNS_TTL = 30.0  # as the state cache's safety refresh: changes of the run files force a fresh read anyway
 RUNS_MAX = 30
 
 
@@ -967,8 +999,13 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
         i for i in ids if fresh or (str(root), i) not in _RUNS or now - _RUNS[(str(root), i)][0] > RUNS_TTL
     ]
     if todo:
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            got = list(pool.map(lambda i: run_orch(orch_bin, ["run", "status", i, "--json"], root), todo))
+        # one process for all tickets (a process per ticket was most of the idle cost of an open page)
+        batch = run_orch(orch_bin, ["run", "status", *todo, "--json"], root, timeout=5.0 + 0.5 * len(todo))
+        rows = batch.get("runs") if isinstance(batch, dict) else None
+        rows = rows if isinstance(rows, dict) else {}
+        got = [
+            rows.get(i) if isinstance(rows.get(i), dict) and "error" not in rows[i] else None for i in todo
+        ]
         for i, r in zip(todo, got, strict=True):
             if isinstance(r, dict) and "hold" in r:  # the core's one-line reason a live run waits: text only
                 r["hold"] = " ".join(r["hold"].split())[:200] if isinstance(r["hold"], str) else None
@@ -1006,6 +1043,23 @@ def add_warmth(root: Path, tickets: list[dict], statuses: dict) -> None:
         t["warmth"] = {"seconds_left": max(0, int(limit - (now - since)))}
 
 
+def load_review(root: Path, orch_bin: str | None) -> dict:
+    """The Review page's data: what waits (`orch review list --json`) and what was decided
+    (`orch review list --answered --json`). Empty lists when orch cannot say."""
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_cards = pool.submit(run_orch, orch_bin, ["review", "list", "--json"], root)
+        f_done = pool.submit(run_orch, orch_bin, ["review", "list", "--answered", "--json"], root)
+    cards, done = f_cards.result(), f_done.result()
+    if isinstance(cards, dict):  # {workspace, cards}
+        cards = cards.get("cards")
+    if isinstance(done, dict):
+        done = done.get("answered", done.get("entries"))
+    return {
+        "cards": [c for c in cards if isinstance(c, dict)] if isinstance(cards, list) else [],
+        "answered": [c for c in done if isinstance(c, dict)] if isinstance(done, list) else [],
+    }
+
+
 def load_state(
     root: Path,
     orch_bin: str | None = None,
@@ -1021,6 +1075,8 @@ def load_state(
         f_tickets = pool.submit(load_tickets, root, orch_bin)
         f_raw = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
         f_needs = pool.submit(run_orch, orch_bin, ["needs", "--json"], root) if with_addons else None
+        # the cards and decisions are for the live page only (a snapshot is shared and carries none)
+        f_review = pool.submit(load_review, root, orch_bin) if with_settings else None
         f_general = pool.submit(load_general, root) if with_addons else None
         f_chat = pool.submit(load_chat, root, orch_bin) if with_addons else None
         f_services = pool.submit(load_services, root, orch_bin) if with_addons else None
@@ -1081,6 +1137,7 @@ def load_state(
         # Chat (former General): helper name, today's texts with cards, the strip counts, the History list.
         "chat": chat,
         "needs": needs if isinstance(needs, list) else [],
+        "review": f_review.result() if f_review else {"cards": [], "answered": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,
         "groups": groups,  # group chats; snapshots carry none
@@ -1165,12 +1222,17 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
 
 # Workspace DM reads use the same CLI boundary as Chat History.
 def load_chat_contacts(root: Path, orch_bin: str | None) -> list | None:
-    data = run_orch(orch_bin, ["chat", "contacts", "--json"], root)
+    # `chat sync` imports new workspace texts first and prints the contacts; if that cannot run (busy lock), read as is.
+    data = run_orch(orch_bin, ["chat", "sync", "--json"], root)
+    if not isinstance(data, list):
+        data = run_orch(orch_bin, ["chat", "contacts", "--json"], root)
     return data if isinstance(data, list) else None
 
 
 def load_chat_thread(root: Path, orch_bin: str | None, ws: str) -> dict | None:
     if not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
         return None
-    data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
+    data = run_orch(orch_bin, ["chat", "thread", ws, "--sync", "--json"], root)
+    if not isinstance(data, dict):
+        data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
     return data if isinstance(data, dict) else None

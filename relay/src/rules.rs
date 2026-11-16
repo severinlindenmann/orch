@@ -99,6 +99,18 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         }
         check_proposal_result(c, key, sender, &msg)?;
     }
+    if msg["body"].get("review_result").is_some() {
+        if typ != "text" {
+            return Err(invalid("Invalid review result."));
+        }
+        check_review_result(c, key, sender, &msg)?;
+    }
+    if msg["body"].get("taken_back").is_some() {
+        if typ != "text" {
+            return Err(invalid("Invalid taken-back text."));
+        }
+        check_taken_back(c, key, sender, &msg)?;
+    }
     if let Some((idx, label)) = kind_of(&typ) {
         if to == "phones" || valid_id(&to, "ph_", 10) {
             if idx != 0 {
@@ -141,6 +153,7 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         if typ == "question" {
             check_review_question(&msg)?;
             check_proposal_question(&msg)?;
+            check_card_question(c, sender, &msg)?;
         }
         return Ok(msg);
     }
@@ -292,6 +305,286 @@ fn check_proposal_result(c: &Connection, key: &Key, sender: &str, msg: &Value) -
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+/// Largest compact `body.card` (relay-api.md "Review cards on the phone"; review.MAX_CARD_JSON).
+pub const MAX_CARD: usize = 65536;
+/// Largest sum of `card_files` sizes.
+pub const MAX_CARD_FILES: i64 = 20 * 1024 * 1024;
+/// Largest compact `verdict` in a phone answer (review.MAX_NOTE_BYTES).
+pub const MAX_VERDICT: usize = 8192;
+
+pub fn compact_len(v: &Value) -> usize {
+    serde_json::to_vec(v).map_or(usize::MAX, |b| b.len())
+}
+
+/// Every preview node of a card preview: itself, compare sides, option previews.
+fn preview_nodes<'a>(pv: &'a Value, out: &mut Vec<&'a Value>) {
+    if !pv.is_object() {
+        return;
+    }
+    out.push(pv);
+    for side in ["before", "after"] {
+        preview_nodes(&pv[side], out);
+    }
+    for o in pv["options"].as_array().into_iter().flatten() {
+        preview_nodes(&o["preview"], out);
+    }
+}
+
+/// `body.card` / `body.card_files` of a question (the schema checked shapes and keys already): card size, option ids
+/// that differ, table rows as wide as their columns, file indexes inside `card_files`, and every file blob an upload of
+/// the sender with exactly that size and sha256 (404 for another's or an unknown blob, no existence oracle), at most
+/// 20 MB together.
+fn check_card_question(c: &Connection, sender: &str, msg: &Value) -> Res<()> {
+    let b = &msg["body"];
+    let card = &b["card"];
+    let files: &[Value] = b["card_files"].as_array().map_or(&[], |a| a.as_slice());
+    if card.is_null() && files.is_empty() {
+        return Ok(());
+    }
+    let bad = |m: &str| Err(invalid(m));
+    if !card.is_null() {
+        if compact_len(card) > MAX_CARD {
+            return bad("The card is bigger than 64 KB.");
+        }
+        let mut nodes = vec![];
+        preview_nodes(&card["preview"], &mut nodes);
+        for n in &nodes {
+            let ids: Vec<&str> = n["options"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|o| o["id"].as_str())
+                .collect();
+            let mut seen = std::collections::HashSet::new();
+            if !ids.iter().all(|i| seen.insert(*i)) {
+                return bad("Option ids of a card must differ.");
+            }
+            if n["type"] == "table" {
+                let cols = n["cols"].as_array().map_or(0, |a| a.len());
+                if n["rows"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|r| r.as_array().map_or(0, |a| a.len()) != cols)
+                {
+                    return bad("Every table row needs one cell per column.");
+                }
+            }
+            if let Some(i) = n["src"]["file"].as_u64() {
+                if i as usize >= files.len() {
+                    return bad("A file reference points past card_files.");
+                }
+            }
+        }
+    }
+    let mut total: i64 = 0;
+    for f in files {
+        let id = f["blob_id"].as_str().unwrap_or("");
+        let row: Option<(i64, String)> = c
+            .query_row(
+                "SELECT size,sha256 FROM blobs WHERE id=?1 AND uploader=?2",
+                [id, sender],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((size, sha)) = row else {
+            return Err(not_found("Upload the card file first (POST /v1/blobs)."));
+        };
+        if Some(size) != f["size"].as_i64() || Some(sha.as_str()) != f["sha256"].as_str() {
+            return bad("A card file's size or sha256 does not match the uploaded file.");
+        }
+        total = total.saturating_add(size);
+    }
+    if total > MAX_CARD_FILES {
+        return bad("Card files add up to more than 20 MB.");
+    }
+    Ok(())
+}
+
+/// The one text a review result may carry (relay-api.md "Review result"): derived from the result, never free.
+fn review_result_text(r: &Value) -> Option<&'static str> {
+    Some(match r["result"].as_str()? {
+        "applied" => "Got it",
+        "changed" => "This changed. Look at it again",
+        "decided" => "Already decided",
+        "refused" => match r["reason"].as_str()? {
+            "needs_person" | "invalid" | "unavailable" => "Couldn't use your answer",
+            _ => return None,
+        },
+        _ => return None,
+    })
+}
+
+/// A workspace's `body.review_result` text (relay-api.md "Review cards on the phone"): fixed text, body only
+/// {text, review_result}, `to` one ph_, `reply_to` a question of this sender with a digest, the question's ticket,
+/// `to` is the phone whose answer the relay stored, at most one per question.
+fn check_review_result(c: &Connection, key: &Key, sender: &str, msg: &Value) -> Res<()> {
+    let body = &msg["body"];
+    let to = msg["to"].as_str().unwrap_or("");
+    let shape_ok = review_result_text(&body["review_result"])
+        .is_some_and(|t| body["text"].as_str() == Some(t))
+        && body.as_object().is_some_and(|o| o.len() == 2)
+        && msg.as_object().is_some_and(|o| {
+            o.keys().all(|k| {
+                matches!(
+                    k.as_str(),
+                    "schema"
+                        | "id"
+                        | "from"
+                        | "to"
+                        | "type"
+                        | "reply_to"
+                        | "created_at"
+                        | "body"
+                        | "ticket"
+                        | "key"
+                )
+            })
+        })
+        && valid_id(to, "ph_", 10)
+        && msg["reply_to"]
+            .as_str()
+            .is_some_and(|id| valid_id(id, "m_", 16));
+    if !shape_ok {
+        return Err(invalid("Invalid review result shape, text or destination."));
+    }
+    let rid = msg["reply_to"].as_str().unwrap();
+    let q = get_msg(c, rid)?
+        .filter(|q| q.from == sender && q.typ == "question")
+        .ok_or_else(|| not_found("The message you reply to does not exist."))?;
+    let (qbody, qextra) = open_payload(key, &q);
+    if qbody.get("digest").is_none() {
+        return Err(not_allowed("That is not one of your review questions."));
+    }
+    if msg.get("ticket").and_then(Value::as_str) != q.ticket.as_deref() {
+        return Err(invalid("The ticket must be the question's ticket."));
+    }
+    // The display key, when given, is the question's own (a result never relabels the ticket on the phone).
+    if let Some(k) = msg.get("key") {
+        if Some(k) != qextra.get("key") {
+            return Err(invalid("The key must be the question's key."));
+        }
+    }
+    let answered = c
+        .query_row(
+            "SELECT 1 FROM messages WHERE reply_to=?1 AND type='answer' AND from_addr=?2 AND to_addr=?3",
+            [rid, to, sender],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !answered {
+        return Err(not_allowed("That phone did not answer this question."));
+    }
+    let mut st = c.prepare(&format!(
+        "SELECT {} FROM messages WHERE reply_to=?1 AND type='text' AND from_addr=?2",
+        store::MSG_COLS
+    ))?;
+    for row in st.query_map([rid, sender], store::msg_from_row)? {
+        let (b, _) = open_payload(key, &row?);
+        if b.get("review_result").is_some() {
+            return Err(conflict("This question already has a result."));
+        }
+    }
+    Ok(())
+}
+
+/// Longest `taken_back.reason` (characters).
+const MAX_TAKEN_BACK_REASON: usize = 200;
+
+/// A character a one-line reason may not contain: controls (C0, DEL, C1), line/paragraph separators, zero-width and
+/// bidi format characters (U+200B-200F, 202A-202E, 2060-2064, 2066-2069, 061C, FEFF).
+fn bad_reason_char(ch: char) -> bool {
+    ch.is_control()
+        || matches!(
+            ch,
+            '\u{2028}' | '\u{2029}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{061c}' | '\u{feff}'
+        )
+}
+
+/// A workspace's `body.taken_back` text (relay-api.md "Question taken back"): body only {text, taken_back:{reason}},
+/// text exactly `Taken back: <reason>`, `to` exactly `phones`, `reply_to` a plain `q<n>` question of THIS sender (404
+/// for any other id, so no id is confirmed), the question's ticket, no phone answer stored yet, at most one per question.
+/// The caller holds the one database lock from the duplicate check to the insert, so the one-take-back rule cannot race.
+fn check_taken_back(c: &Connection, key: &Key, sender: &str, msg: &Value) -> Res<()> {
+    let body = &msg["body"];
+    let reason = body["taken_back"]["reason"].as_str().unwrap_or("");
+    let n = reason.chars().count();
+    let shape_ok = body["taken_back"].as_object().is_some_and(|o| o.len() == 1)
+        && (1..=MAX_TAKEN_BACK_REASON).contains(&n)
+        && !reason.chars().any(bad_reason_char)
+        && !reason.trim().is_empty()
+        && body["text"].as_str() == Some(format!("Taken back: {reason}").as_str())
+        && body.as_object().is_some_and(|o| o.len() == 2)
+        && msg.as_object().is_some_and(|o| {
+            o.keys().all(|k| {
+                matches!(
+                    k.as_str(),
+                    "schema"
+                        | "id"
+                        | "from"
+                        | "to"
+                        | "type"
+                        | "reply_to"
+                        | "created_at"
+                        | "body"
+                        | "ticket"
+                        | "key"
+                )
+            })
+        })
+        && msg["to"].as_str() == Some("phones")
+        && msg["reply_to"]
+            .as_str()
+            .is_some_and(|id| valid_id(id, "m_", 16));
+    if !shape_ok {
+        return Err(invalid("Invalid taken-back shape, text or destination."));
+    }
+    let rid = msg["reply_to"].as_str().unwrap();
+    let q = get_msg(c, rid)?
+        .filter(|q| q.from == sender && q.typ == "question")
+        .ok_or_else(|| not_found("The message you reply to does not exist."))?;
+    // Only a question sent to `phones` can be taken back (the sender owns it, so no id is probed here).
+    if q.to != "phones" {
+        return Err(not_allowed(
+            "Only a question sent to the phones can be taken back.",
+        ));
+    }
+    let (qbody, qextra) = open_payload(key, &q);
+    let plain = qbody["question_id"].as_str().is_some_and(|id| {
+        id.strip_prefix('q')
+            .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+    });
+    if !plain || qbody.get("proposal").is_some() || qbody.get("review").is_some() {
+        return Err(not_allowed("Only an ordinary question can be taken back."));
+    }
+    if msg.get("ticket").and_then(Value::as_str) != q.ticket.as_deref() {
+        return Err(invalid("The ticket must be the question's ticket."));
+    }
+    if let Some(k) = msg.get("key") {
+        if Some(k) != qextra.get("key") {
+            return Err(invalid("The key must be the question's key."));
+        }
+    }
+    let answered = c
+        .query_row(
+            "SELECT 1 FROM messages WHERE reply_to=?1 AND type='answer'",
+            [rid],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if answered {
+        return Err(already_answered("This question was already answered."));
+    }
+    // The same message id again is caught before this (a duplicate); another id for the same question is a conflict.
+    if store::taken_back_reason(c, key, rid)?.is_some() {
+        return Err(conflict("This question was already taken back."));
     }
     Ok(())
 }

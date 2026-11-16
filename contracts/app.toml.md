@@ -11,8 +11,23 @@ start  = "python3 main.py"         # python/node: command that starts the server
 health = "/health"                # python/node/docker: GET must answer 200 within 20 s
 test   = "python3 -m unittest discover -s tests"   # optional: must exit 0 before the switch
 store  = "sqlite"                 # none | json | markdown | sqlite
-public = false                    # false = needs ?token=<view token> (default), true = open link
+reach  = "public"                 # public = on the internet (default); private = only on the private network
+auth   = true                     # true = needs the app's private link (default); false = open to everyone who can reach it
 ```
+
+`reach` and `auth` combine freely:
+
+| | `auth = true` (default) | `auth = false` |
+|---|---|---|
+| `reach = "public"` (default) | internet, private link needed | internet, open link (needs the workspace right `public`) |
+| `reach = "private"` | private network only, private link needed | private network only, open to everyone on it |
+
+A private-reach app is served only on the server's private-network address (`ORCH_PUBLISH_PRIVATE_URL`, e.g.
+`http://publish-vps.office.internal/a/<name>/`); on the public address it answers exactly like an app that does not exist.
+A server without a private-network address refuses `reach = "private"` (`422 invalid`).
+
+Older manifests: `public = true` means `auth = false`, `public = false` means `auth = true`. Giving `public` together with
+`auth` is refused (`422 invalid`).
 
 | Field | Required | Default |
 |---|---|---|
@@ -22,7 +37,9 @@ public = false                    # false = needs ?token=<view token> (default),
 | health | python/node/docker: yes; static: not allowed | – |
 | test | no | none |
 | store | no | `none` |
-| public | no | `false`; `true` needs the workspace right `public` |
+| reach | no | `"public"`; `"private"` needs a server with a private-network address |
+| auth | no | `true`; `false` with `reach = "public"` needs the workspace right `public` |
+| public | no | older spelling, see above |
 
 ## Stacks
 
@@ -39,7 +56,7 @@ public = false                    # false = needs ?token=<view token> (default),
 |---|---|---|
 | `HOST` | `127.0.0.1` | Listen on `$HOST:$PORT`. `0.0.0.0` when the app runs in a container (only the host can reach that port) |
 | `PORT` | `9104` | The port to listen on |
-| `BASE_PATH` | `/a/weekly-report` | The app is served under this path. Use relative links (`style.css`, not `/a/<name>/style.css`): private apps are served under a secret address and root-absolute links get no access. Use `BASE_PATH` only where an absolute path is unavoidable, e.g. server-side redirects |
+| `BASE_PATH` | `/a/weekly-report` | The app is served under this path. Use relative links (`style.css`, not `/a/<name>/style.css`): apps with `auth = true` are served under a secret address and root-absolute links get no access. Use `BASE_PATH` only where an absolute path is unavoidable, e.g. server-side redirects |
 | `DATA_DIR` | `/var/lib/orch-publish/apps/weekly-report/data` (`/data` in a container) | The only writable folder; kept across deploys. Empty and read-only when `store = "none"` |
 | `STORE` | `sqlite` | The store from app.toml. The app picks file names itself (`data.json`, `*.md`, `app.db`) |
 
@@ -48,10 +65,10 @@ public = false                    # false = needs ?token=<view token> (default),
 that one app can never read another app's pages. Scripts, forms, popups and downloads work. But the page has no origin of its
 own: `localStorage`, `sessionStorage`, IndexedDB and cookies throw or stay empty. Keep state on the app's backend and
 identify people by a link token or a typed name. `fetch()` to the app's own paths works: the server answers the cross-origin
-check for public apps, and for private apps only under their own private address. A private app is served under a secret
+check for apps with `auth = false`, and for apps with `auth = true` only under their own secret address. An app with `auth = true` is served under a secret
 `/a/<name>/~<key>/` address (the server redirects there after the view link or cookie check). That private link, and the address
 it opens, is the key to the app, as before; both change when the link is reset. The server keeps its key for these addresses in `app-cap.key` in the data folder; it must stay private to the publish user. Use relative links (`style.css`, `data.json`),
-not root-absolute ones (`/a/<name>/style.css`), or they get no access. An app cannot switch the sandbox off.
+not root-absolute ones (`/a/<name>/style.css`), or they get no access. Apps with `reach = "private"` are served under a secret `~` address too, also with `auth = false` (a plain request is redirected there), so use relative links in all private-network apps. An app cannot switch the sandbox off.
 
 ## Sandbox
 

@@ -17,6 +17,7 @@
 <script src="__P__/kit/widgets.js" defer></script>
 <script src="__P__/web/insights.js" defer></script>
 <script src="__P__/web/settings.js" defer></script>
+<script src="__P__/web/checkup.js" defer></script>
 </head>
 <body>
 <main id="content" class="page wide area-page page-enter" tabindex="-1" aria-label="Insights">
@@ -33,20 +34,21 @@
 </header>
 <div id="view-region" aria-busy="true">
 <div id="main-view" class="area-body">
+<section id="checkup" class="stack" aria-label="Check-up" hidden><p id="checkup-note" class="note" role="status" hidden></p></section>
 <div id="loading" class="area-body loading-mask" inert aria-hidden="true">
-<div class="metric-grid"><article class="card metric"><p class="meta">Runs</p><strong>00</strong><small>Loading data</small></article><article class="card metric"><p class="meta">Connected services</p><strong>00</strong><small>Loading data</small></article></div>
-<div class="analysis-grid"><section class="card chart-card"><div class="section-head"><h2>Runs over time</h2><span class="meta">Last 30 days</span></div><div class="chart-stage"></div></section><section class="card chart-card"><div class="section-head"><h2>Skill use</h2></div><p class="muted">Loading the skills your helpers used.</p><div class="bar-row"><span>Loading</span><div class="progress"><span></span></div></div></section></div>
+<div class="metric-grid"><article class="card metric"><p class="meta">Times helpers worked</p><strong>00</strong><small>Loading data</small></article><article class="card metric"><p class="meta">Connected services</p><strong>00</strong><small>Loading data</small></article></div>
+<div class="analysis-grid"><section class="card chart-card"><div class="section-head roomy"><h2>Work over time</h2><span class="meta">Last 30 days</span></div><div class="chart-stage"></div></section><section class="card chart-card"><div class="section-head roomy"><h2>Skill use</h2></div><p class="muted">Loading the skills your helpers used.</p><div class="bar-row"><span>Loading</span><div class="progress"><span></span></div></div></section></div>
 <section><div class="table-wrap"><table class="data-table"><tbody><tr><td>Loading the list of skills</td><td>Loading</td><td>Loading</td><td>0</td><td>Loading</td></tr><tr><td>Loading the list of skills</td><td>Loading</td><td>Loading</td><td>0</td><td>Loading</td></tr></tbody></table></div></section>
 </div>
 <div id="message" role="status" hidden></div>
 <div id="overview" class="area-body" hidden>
 <section id="needs" class="needs" aria-label="Needs a look" hidden></section>
 <div class="metric-grid" id="metrics"></div>
-<div class="analysis-grid"><section class="card chart-card"><div class="section-head"><h2>Runs over time</h2><span class="meta" id="period">Last 30 days</span></div>
+<div class="analysis-grid"><section class="card chart-card"><div class="section-head roomy"><h2>Work over time</h2><span class="meta" id="period">Last 30 days</span></div>
 <div class="chart-stage" role="img" id="trend" aria-label="Daily run trend unavailable."><div class="chart-message"><h3>Daily history isn’t available yet</h3><p class="muted" id="trend-text"></p><button id="trend-settings" class="btn ghost sm" type="button">Review recording settings →</button></div></div>
 <div class="axis"><span id="axis-start">30 days ago</span><span>Today</span></div></section>
-<section class="card chart-card" id="skill-chart"><div class="section-head"><h2>Skill use</h2><span class="meta">Last 30 days</span></div><p class="muted" id="skill-text"></p><div id="bars"></div></section></div>
-<section id="breakdown"><div class="section-head"><div id="tabs" role="tablist" aria-label="Usage breakdown"></div></div>
+<section class="card chart-card" id="skill-chart"><div class="section-head roomy"><h2>Skill use</h2><span class="meta">Last 30 days</span></div><p class="muted" id="skill-text"></p><div id="bars"></div></section></div>
+<section id="breakdown"><div class="section-head roomy"><div id="tabs" role="tablist" aria-label="Usage breakdown"></div></div>
 <p class="meta" id="tab-help"></p>
 <div id="panel" class="table-wrap" role="tabpanel" tabindex="0"><table class="data-table"><caption class="sr-only" id="table-caption"></caption><thead id="thead"></thead><tbody id="rows"></tbody></table></div>
 <section class="space-top"><p class="meta" id="services-title"></p><div id="services" class="detail-content pad muted"></div></section></section>

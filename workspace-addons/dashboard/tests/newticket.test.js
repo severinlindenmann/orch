@@ -193,7 +193,7 @@ test('one Start button; Save without starting is a text link; neither sends plan
 
 test('attach is a link, drops land anywhere on the form, pasted text reads in pages', async () => {
   const s = setup();
-  assert.ok(walk(s.d).some(n => n.textContent === '＋ Add files or drop them here' && n.className === 'new-ticket-attach'));
+  assert.ok(walk(s.d).some(n => n.textContent === '＋ Add files: pick, drop or paste them here' && n.className === 'new-ticket-attach'));
   assert.equal(s.input.rows, 3);
   assert.equal((await s.form.fire('drop', {dataTransfer:{files:[{name:'plan.md', size:3, arrayBuffer:async () => new TextEncoder().encode('abc').buffer}]}})).prevented, true);
   await s.paste('x'.repeat(9000));
@@ -248,7 +248,7 @@ test('window closes through the shared overlay; an empty submit shows the plain 
 });
 
 // Owner feedback 14 Nov (sweep d-new-ticket): the box starts small and grows; Start opens the new ticket, Save stays on the list.
-test('the text box starts at 3 rows; Start opens the new ticket, Save without starting does not', async () => {
+test('the text box starts at 3 rows; Start and Save without starting both open the new ticket', async () => {
   assert.equal(setup().input.rows, 3);
   for (const label of ['Start', 'Save without starting']) {
     const s = setup();
@@ -257,6 +257,48 @@ test('the text box starts at 3 rows; Start opens the new ticket, Save without st
     const node = walk(s.d).find(n => n.textContent === label);
     if (label === 'Start') { await node.click(); await s.form.fire('submit'); } else await node.click();
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(s.c.location.hash, label === 'Start' ? '#ticket/new' : '', label);
+    assert.equal(s.c.location.hash, '#ticket/new', label);
+    if (label !== 'Start') assert.ok(s.toasts.some(x => /^Saved/.test(x[0])), 'Save without starting says it saved');
   }
+});
+
+test('a pasted screenshot becomes a chip and goes into ticket.new; short text paste is not intercepted', async () => {
+  const shot = {name:'Screenshot 18-30.png', size:3};
+  const s = setupWith(null, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
+  const e = await s.input.fire('paste', {clipboardData:{files:[shot], getData:() => ''}});
+  assert.equal(e.prevented, true);
+  walk(s.d).find(n => n.type === 'submit').disabled = true; await s.form.fire('submit');  // drain the read queue
+  assert.equal(s.chips().length, 1);
+  walk(s.d).find(n => n.type === 'submit').disabled = false; await s.form.fire('submit');
+  assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0].args.files)), [{name:'Screenshot 18-30.png', data:'YQ=='}]);
+  const t = setupWith(null, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
+  assert.equal((await t.input.fire('paste', {clipboardData:{files:[], getData:() => 'short'}})).prevented, undefined);
+});
+
+test('UI.pastedFiles gives pasted image.png a readable unique name and leaves other files alone', () => {
+  const root = path.join(__dirname, '../../../workspace/src/orch_ui/static/components.js');
+  class F { constructor(parts, name, o = {}) { this.name = name; this.type = o.type; } }
+  const w = {}, c = {window:w, document:{addEventListener() {}, querySelector() {}, querySelectorAll() { return []; }}, File:F, navigator:{}, setTimeout, clearTimeout};
+  vm.createContext(c); vm.runInContext(fs.readFileSync(root, 'utf8'), c);
+  const ev = files => ({clipboardData:{files}});
+  const a = new F([], 'image.png', {type:'image/png'}), b = new F([], 'image.png', {type:'image/png'}), doc = new F([], 'notes.txt');
+  const out = w.UI.pastedFiles(ev([a, b, doc]));
+  assert.match(out[0].name, /^Screenshot \d\d-\d\d\.png$/);
+  assert.match(out[1].name, /^Screenshot \d\d-\d\d \(2\)\.png$/);
+  assert.equal(out[2], doc);
+  assert.equal(w.UI.pastedFiles({clipboardData:{getData: () => 'x'}}).length, 0);
+});
+test('b4: Save without starting says Saving… at once, then the ticket opens', async () => {
+  const s = setup();
+  s.form.requestSubmit = () => s.form.fire('submit');
+  let release; const hold = new Promise(r => { release = r; });
+  const base = s.c.act; s.c.act = async (op, args) => { if (op === 'ticket.new') await hold; return base(op, args); };
+  s.input.value = 'Work'; await s.input.fire('input');
+  const node = walk(s.d).find(n => n.textContent === 'Save without starting');
+  const pending = node.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(node.textContent, 'Saving…');
+  assert.equal(node.disabled, true);
+  release(); await pending; await new Promise(resolve => setImmediate(resolve));
+  assert.equal(s.c.location.hash, '#ticket/new');
 });

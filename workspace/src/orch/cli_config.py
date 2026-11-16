@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import hashlib
 import json
 import os
 import re
@@ -15,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, diag, history, humanproof, tickets
+from orch import adapters, config, diag, history, nextstep, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -30,6 +29,7 @@ KEYS = (
     "workflow.copies_max",
     "workflow.copy_setup",
     "diag.enabled",
+    "focus.session_typing",
     *config.INSIGHTS_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
@@ -71,39 +71,16 @@ def _actor(args) -> str:
     return "agent:" + str(tickets.agent_tool()) if tickets.agent_tool() else who
 
 
-def _person(args, root: Path, op: str, target: str, **kw) -> str:
-    """A person's own decision (H1): the proof from the page, or a hand-off. An agent is refused in words."""
-    who = humanproof.person_by(root, args, op, target, **kw)
-    if not who.startswith("human:"):
-        raise Refused(humanproof.AGENT_REFUSED)
-    return who
-
-
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
-AGENT_ASKS = (
-    'Only a person can {what}. Ask them with orch ask: orch ask <ticket> "{what}?" --option yes --option no'
-)
-
-
-def _proven(root: Path, args, op: str, target: str, what: str, parts: dict, exact: str | None = None) -> str:
-    """The person behind a human-only op (invariant H1, one proof mechanism: humanproof.person_by). With
-    --proof-stdin: the person in a verified proof. An agent is refused and told to use `orch ask`. A person at
-    a terminal without a proof leaves a hand-off on the page and is refused until they click there."""
-    who = humanproof.person_by(root, args, op, target, parts=parts, exact=exact)
-    if not who.startswith("human:"):
-        raise Refused(AGENT_ASKS.format(what=what))
-    return who
-
-
 def _choose(root: Path, name: str, args) -> str:
-    """workspace.agent: a person's choice (an agent is refused here and again in config.select_agent)."""
+    """workspace.agent: the agent this workspace starts."""
     by = _actor(args)
-    config.require_person(by, "choose the agent for this workspace")
     adapters.load(name, root)  # refuses a name nobody knows
     config.select_agent(root, name, by)
     return name
@@ -249,36 +226,11 @@ def _insights_set(args, root: Path) -> None:
             raise _Coded("Choose on or off.", "invalid")
         value: bool | int = args.value == "on"
     else:
-        allowed = humanproof.RETENTION_ALLOWED[key]
+        allowed = config.RETENTION_ALLOWED[key]
         if not (args.value.isascii() and args.value.isdigit()) or int(args.value) not in allowed:
             raise _Coded("Choose one of: " + ", ".join(str(v) for v in allowed) + ".", "invalid")
         value = int(args.value)
-    agent = AGENT_ASKS.format(what=f"change {key}") if _actor(args).startswith("agent:") else None
-    # The proof line is read from stdin HERE, before change_insights takes keys.lock: a caller whose stdin
-    # never closes must not hold the lock. Only verify-and-consume runs inside it. An agent's stdin is never
-    # read. With --proof-stdin the line is ALWAYS passed on (empty when not read), so person_by never reads
-    # stdin again inside the lock.
-    proof_stdin = getattr(args, "proof_stdin", False)
-    proof = humanproof.read_proof_line() if agent is None and proof_stdin else None
-    extra = {"proof": proof or ""} if proof_stdin else {}
-    res = config.change_insights(
-        root,
-        key,
-        value,
-        agent=agent,
-        person=lambda target: _person(
-            args,
-            root,
-            "insights.settings",
-            target,
-            # no_handoff = the refusal words instead of a hand-off card (HANDOFF: "Do this in the dashboard on
-            # this computer."): page only, as a hand-off would wait for a click holding keys.lock
-            no_handoff=humanproof.HANDOFF,
-            parts={"setting": key, "value": config.insights_text(value)},
-            **extra,
-        ),
-        if_current=args.if_current,
-    )
+    res = config.change_insights(root, key, value, if_current=args.if_current, by=_actor(args))
     now = config.insights_text(res[key])
     text = f"Saved: {key} = {now}. {INSIGHTS_SAVED[key]}" if res["changed"] else f"Already {key} = {now}."
     _out(args, res, text)
@@ -298,6 +250,7 @@ def _config(args, root: Path) -> None:
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
             "diag.enabled": lambda: config.diag_enabled(root),
+            "focus.session_typing": lambda: config.focus_session_typing(root),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
             "insights.keep_days": lambda: config.record_keep_days(root),
@@ -321,21 +274,9 @@ def _config(args, root: Path) -> None:
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
-        who = None
-        if args.value == "on":
-            if _actor(args).startswith("agent:"):
-                raise Refused(
-                    "Only a person can allow agents to mark tickets Done. Ask them to run: "
-                    "orch config set workflow.agents_may_finish on"
-                )
-            who = _person(
-                args, root, "config.agents_may_finish", "on", parts={"setting": "agents_may_finish"}
-            )
-        value = config.set_agents_may_finish(root, args.value == "on", who or _actor(args))
+        value = config.set_agents_may_finish(root, args.value == "on", _actor(args))
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
     elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
-        if _actor(args).startswith("agent:"):  # copy_setup is a command orch runs: only a person chooses it
-            raise Refused(f"Only a person can change this. Ask them to run: orch config set {args.key} ...")
         if args.key == "workflow.copies":
             v = config.set_copies_mode(root, args.value)
             text = f"Saved: separate copies = {v}."
@@ -343,18 +284,18 @@ def _config(args, root: Path) -> None:
             v = config.set_copies_max(root, args.value)
             text = f"Saved: at most {v} separate copies at once."
         else:
-            setup = args.value.strip()
-            if setup not in (
-                "",
-                "none",
-            ):  # a command orch runs in every new copy: a person's proof, bound to it
-                _person(
-                    args, root, "config.copy_setup", hashlib.sha256(setup.encode()).hexdigest(),
-                    value=args.value, exact=setup,
-                )  # fmt: skip
             v = config.set_copy_setup(root, args.value)
             text = f"Saved: a new copy is prepared with: {v}." if v else "Saved: nothing runs in a new copy."
         _out(args, {args.key: v}, text)
+    elif args.sub == "set" and args.key == "focus.session_typing":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = config.set_focus_session_typing(root, args.value == "on")
+        _out(
+            args,
+            {"focus.session_typing": value},
+            "Saved: typing into the helper's screen is " + ("on." if value else "off."),
+        )
     elif args.sub == "set" and args.key == "diag.enabled":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
@@ -384,13 +325,6 @@ def _config(args, root: Path) -> None:
         )
     elif args.sub == "set" and args.key == "workspace.permissions":
         who = _actor(args)
-        modes = config.PERMISSION_MODES
-        if (
-            args.value in modes
-            and not who.startswith("agent:")
-            and modes.index(args.value) > modes.index(config.permissions(root))
-        ):  # giving agents MORE room is a person's decision (lowering is free for anyone)
-            who = _person(args, root, "config.permissions", args.value, parts={"mode": args.value})
         mode = config.set_permissions(root, args.value, who)
         _out(
             args,
@@ -421,7 +355,6 @@ def _config(args, root: Path) -> None:
             if args.name in adapters.builtin_names():
                 raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
             by = _actor(args)
-            config.require_person(by, "add an agent command")  # an agent is refused before anything else
             if not config.NAME_RE.fullmatch(args.name):
                 raise Refused(
                     f"'{args.name}' is not a name orch can use. Use lowercase letters, digits and '-'."
@@ -429,22 +362,7 @@ def _config(args, root: Path) -> None:
             for what, v in (("command", args.command), ("live command", args.interactive)):
                 if v is not None and not (1 <= len(v) <= 500 and "\n" not in v and "\r" not in v):
                     raise Refused(f"The {what} must be one line of at most 500 characters.")
-            # the person approves ALL saved values: they are all in the exact block and in the proof target
-            parts = {"name": args.name, "command": args.command}
-            if args.interactive:
-                parts["interactive"] = args.interactive
-            if args.prompt_via:
-                parts["prompt"] = args.prompt_via
-            _proven(
-                root,
-                args,
-                "config.agent_add",
-                humanproof.agent_add_target(args.name, args.command, args.interactive, args.prompt_via),
-                f"add the agent {args.name}",
-                parts,
-                exact=humanproof.agent_add_exact(args.command, args.interactive, args.prompt_via),
-            )
-            config.add_agent(  # a person proved it: approve ONLY what they typed (add_agent checks the file)
+            config.add_agent(  # approve ONLY what was typed (add_agent checks the file)
                 root,
                 args.name,
                 args.command,
@@ -466,14 +384,10 @@ def _config(args, root: Path) -> None:
 
 def _share(args, root: Path) -> None:
     """Share with team: one stable block in the team's AGENTS.md and merge=union in .gitattributes.
-    Human only (it changes files the team owns). Off removes both."""
+    Off removes both."""
     from orch import harness
 
     if args.state != "status":
-        if tickets.agent_tool():
-            raise Refused("Only a person can share the orch entry with the team.")
-        if args.state == "on":  # off needs no proof
-            _person(args, root, "config.share", "on", parts={})
         (harness.share_on if args.state == "on" else harness.share_off)(root)
     on = harness.share_state(root)
     _out(
@@ -523,23 +437,13 @@ def _private(args, root: Path) -> None:
         if not (config.NAME_RE.fullmatch(args.name) and re.fullmatch(r"[0-9a-f]{64}", args.key)):
             raise Refused("Look at orch private again: that name or key is not one it showed.")
         shown = next((p for p in config.pending_agents(root) if p["name"] == args.name), None)
-        config.require_person(_actor(args), "allow an agent command to run")  # an agent hears the ask text
         if shown is None or not shown["showable"] or shown["key"] != args.key:
             raise Refused("That command is not waiting for a yes here (or changed). Look at: orch private")
-        _proven(
-            root,
-            args,
-            "private.allow",
-            f"{args.name}:{args.key}",
-            f"allow the command of {args.name} to run on this computer",
-            {k: shown[k] for k in ("name", "command", "adapter", "interactive", "prompt") if shown.get(k)},
-            exact=humanproof.entry_exact(shown),
-        )
         done = config.allow_agent(root, args.name, args.key, _actor(args))
         _out(args, {"allowed": [done]}, f"Allowed on this computer: {done}.")
         return
     if args.state == "move":
-        who = _proven(root, args, "private.move", "move", "move these files out of the team repo", {})
+        who = _actor(args)
         moved = harness.move_to_private(root, who)
         if args.json:
             print(json.dumps({"moved": len(moved)}))

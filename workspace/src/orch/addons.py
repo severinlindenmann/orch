@@ -62,8 +62,26 @@ EXT_SCHEMA_MAX = 32 * 1024
 # off until `orch addon add <name>`; their commands are parsed by the core CLI. No other add-on may take
 # these names (they stay in RESERVED).
 CORE_ADDONS = ("publish", "relay")
-# Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
-SHIPPED_ADDONS = ("automation", "dashboard", "factory", "focus", "insights", "sync")
+
+
+def _shipped_names() -> tuple[str, ...]:
+    """The add-ons that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
+    The names come from the generated catalog shipped_addons.json (scripts/gen_shipped_addons.py lists
+    workspace-addons/), never from a list in the code."""
+    try:
+        data = json.loads(
+            (Path(__file__).resolve().parent / "shipped_addons.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return ()
+    return (
+        tuple(sorted(n for n in data if isinstance(n, str) and NAME_RE.match(n)))
+        if isinstance(data, dict)
+        else ()
+    )
+
+
+SHIPPED_ADDONS = _shipped_names()
 
 
 # ---------------------------------------------------------------- sources
@@ -1106,8 +1124,16 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     m["background"] = bg
     d = m.get("dashboard")
     if d is not None:
-        if not isinstance(d, dict) or set(d) - {"label", "icon", "order", "panel", "title", "subtitle"}:
-            raise _bad("[dashboard] has label, icon, order, panel, title and subtitle")
+        if not isinstance(d, dict) or set(d) - {
+            "label",
+            "icon",
+            "order",
+            "panel",
+            "place",
+            "title",
+            "subtitle",
+        }:
+            raise _bad("[dashboard] has label, icon, order, panel, place, title and subtitle")
         for key, size in (("title", 40), ("subtitle", 120)):
             if key in d and not _text_ok(d[key], size):
                 raise _bad(f"dashboard {key} is at most {size} plain characters")
@@ -1116,6 +1142,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         # `panel`: an extra native card the dashboard knows how to draw (a fixed set)
         if d.get("panel") not in (None, "repeats", "links", "phone"):
             raise _bad("dashboard panel is repeats, links or phone")
+        if d.get("place") not in (None, "nav", "settings"):
+            raise _bad("dashboard place is nav or settings")
         if d.get("icon") not in ICONS:
             raise _bad("dashboard icon is not in the fixed icon set")
         order = d.get("order", 50)
@@ -1159,14 +1187,15 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     if pg is not None:
         if (
             not isinstance(pg, dict)
-            or set(pg) - {"path", "label"}
+            or set(pg) - {"path", "label", "live_session"}
+            or not isinstance(pg.get("live_session", False), bool)
             or not isinstance(pg.get("path"), str)
             or not PAGE_PATH_RE.fullmatch(pg["path"])
             or ".." in pg["path"]
             or pg["path"].startswith("//")
             or ("label" in pg and not _text_ok(pg["label"], 24))
         ):
-            raise _bad("[page] has a path that starts with / (and an optional label)")
+            raise _bad("[page] has a path that starts with / (and an optional label, live_session)")
         if not bg:
             raise _bad("[page] needs background = true")
     if any(r["format"] == "open-page" for r in tv) and pg is None:

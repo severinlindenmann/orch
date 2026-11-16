@@ -1,5 +1,7 @@
 """Settings contracts shared with delegated shell handlers and the API lane."""
 
+import pytest
+
 from tests import webjs
 
 
@@ -66,7 +68,10 @@ def test_repeat_window_offers_plain_choices_and_open_tickets():
         in src
     )
     assert "tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status))" in src
-    assert "{addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase}" in src
+    assert (
+        "addon = addonName || route().id" in src
+        and "{addon, verb:'repeat', target, value:plan.phrase}" in src
+    )
     assert "verb:'copy', target:ticket.value" in src
     assert "if (route().kind === 'addon') await loadAddon(route().id)" in src
 
@@ -131,11 +136,11 @@ global.act = async (op, args) => { calls.push({op, args}); return {ok:true}; };
 loadAddon = async () => {};
 (async () => {
   const plan = repeatPlan;
-  assert.deepEqual(plan({freq:'daily', time:'07:30'}), {phrase:'daily 07:30', summary:'Runs every day at 07:30', hint:''});
+  assert.deepEqual(plan({freq:'daily', time:'07:30'}), {phrase:'daily 07:30', summary:'Repeats every day at 07:30', hint:''});
   assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).phrase, 'every monday 08:00');
-  assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).summary, 'Runs every Monday at 08:00');
+  assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).summary, 'Repeats every Monday at 08:00');
   assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).phrase, '5 8 * * 1,3,5');
-  assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).summary, 'Runs every Monday, Wednesday and Friday at 08:05');
+  assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).summary, 'Repeats every Monday, Wednesday and Friday at 08:05');
   assert.equal(plan({freq:'weekly', days:[0], time:'09:00'}).phrase, 'every sunday 09:00');
   assert.equal(plan({freq:'weekly', days:[], time:'08:00'}).phrase, null);
   assert.equal(plan({freq:'monthly', monthday:15, time:'09:00'}).phrase, 'monthly 15 09:00');
@@ -145,11 +150,11 @@ loadAddon = async () => {};
   assert.equal(plan({freq:'custom', every:1, time:'06:10'}).phrase, 'daily 06:10');
   assert.equal(plan({freq:'custom', every:0, time:'06:10'}).phrase, null);
   // owner feedback 14 Nov (fb20): custom = every N minutes (5 or more) or hours, no time of day
-  assert.deepEqual(plan({freq:'custom', unit:'minutes', every:5, time:''}), {phrase:'every 5 minutes', summary:'Runs every 5 minutes', hint:''});
+  assert.deepEqual(plan({freq:'custom', unit:'minutes', every:5, time:''}), {phrase:'every 5 minutes', summary:'Repeats every 5 minutes', hint:''});
   assert.equal(plan({freq:'custom', unit:'minutes', every:4}).phrase, null);
   assert.equal(plan({freq:'custom', unit:'minutes', every:60}).phrase, null);
   assert.equal(plan({freq:'custom', unit:'hours', every:2}).phrase, 'every 2 hours');
-  assert.equal(plan({freq:'custom', unit:'hours', every:1}).summary, 'Runs every 1 hour');
+  assert.equal(plan({freq:'custom', unit:'hours', every:1}).summary, 'Repeats every 1 hour');
   assert.equal(plan({freq:'custom', unit:'hours', every:24}).phrase, null);
   assert.deepEqual(cronToChoice('*/10 * * * *'), {freq:'custom', days:[1], monthday:1, time:'08:00', unit:'minutes', every:10});
   assert.equal(cronToChoice('0 */3 * * *').unit, 'hours');
@@ -190,6 +195,20 @@ def test_load_addons_passes_only_known_panels():
 
     rows = load_addons(None, None, [row("aaa", "links"), row("bbb", "<script>"), row("ccc", None)])
     assert {r["name"]: r["dashboard"]["panel"] for r in rows} == {"aaa": "links", "bbb": None, "ccc": None}
+
+
+def test_load_addons_passes_place_settings_and_defaults_to_nav():
+    from orch_dashboard.data import load_addons
+
+    def row(name, **extra):
+        return {"name": name, "active": True, "dashboard": {"label": "X", "icon": "link", **extra}}
+
+    rows = load_addons(None, None, [row("aaa", place="settings"), row("bbb"), row("ccc", place="<x>")])
+    assert {r["name"]: r["dashboard"]["place"] for r in rows} == {
+        "aaa": "settings",
+        "bbb": "nav",
+        "ccc": "nav",
+    }
 
 
 def test_settings_git_private(ws, monkeypatch):
@@ -283,13 +302,39 @@ def test_settings_splits_installed_and_available(ws, monkeypatch):
     assert f["description"] == "Shows the plan." and "Adds a dashboard tab: Factory" in f["consent"]
 
 
+def test_settings_rows_say_what_can_be_removed_and_the_label_is_never_lower_case(ws, monkeypatch):
+    """core refuses `orch addon uninstall` for relay/publish: the row says removable false; a label never falls back to the package name."""
+    from orch_dashboard import data
+
+    rows = [
+        {"name": "relay", "installed": True, "active": False, "description": "R"},
+        {"name": "factory", "installed": True, "active": False, "description": "F"},
+        {"name": "insights", "installed": False, "active": False, "description": "I"},
+    ]
+    monkeypatch.setattr(
+        data, "run_orch", lambda b, args, root: rows if args == ["addon", "list", "--json"] else None
+    )
+    out = data.load_settings(ws, "orch")
+    assert {a["name"]: a["removable"] for a in out["addons"]} == {"relay": False, "factory": True}
+    assert out["available"][0]["label"] == "Insights"
+
+
+def test_a_fresh_state_read_forgets_the_cached_add_on_list():
+    """The catalogue opens with /api/state?fresh=1: an add-on removed in the terminal must not wait for the 10 s cache."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src/orch_dashboard/server.py").read_text(encoding="utf-8")
+    block = src[src.index("if fresh:") :][:200]
+    assert "forget_static()" in block
+
+
 def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
     src = webjs.all_js()
     start = src.index("function addonCatalog()")
     body = src[start : src.index("function settingsConfirm", start)]
     assert "addonSet(name, true)" in body  # same op as the switch (addon.set), recovered after a restart
     assert "act('addon.set', {name, on})" in src[src.index("async function addonSet(") :][:400]
-    assert "'Every add-on that comes with orch is already here.'" in body
+    assert "'Every add-on that comes with orch is already here and turned on.'" in body
     assert (
         "'Turned on.'" in body and "It starts with orch start" not in body
     )  # its service starts with the add
@@ -314,3 +359,21 @@ def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):
     monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: True)
     out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
     assert all(a["dashboard"] for a in out)
+
+
+def test_typing_on_is_a_plain_setting_the_dashboard_can_switch(ws, monkeypatch):
+    """885: the refusal names a real switch (Settings > Add-ons > Focus); the op is `orch config set focus.session_typing`."""
+    from orch_dashboard import actions, data, server
+
+    assert actions.build_argv("typing.set", {"on": True})[:4] == [
+        "config",
+        "set",
+        "focus.session_typing",
+        "on",
+    ]
+    assert actions.build_argv("typing.set", {"on": False})[3] == "off"
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("typing.set", {"on": "yes"})
+    assert "Let me type into the helper's screen" in server.TYPING_OFF and "Add-ons" in server.TYPING_OFF
+    monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
+    assert data.load_settings(ws, "orch")["typing_on"] is False

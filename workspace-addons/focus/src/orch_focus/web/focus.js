@@ -12,12 +12,15 @@
     const t = v.ticket;
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
+    S.views.ticket.renderPhoneLine(v);
     els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
     document.getElementById('fx-loading')?.remove();  /* the skeleton goes when the first view is there */
     root.dataset.state = v.state;
     if (prev && !root.hasAttribute('data-live')) root.setAttribute('data-live', '');  /* motion only after a live change */
     els.agent.textContent = 'Helper';  // never the vendor's name on screen
-    const stateText = window.FocusHelpers.sessionState(v).pill || statusWord(t);
+    /* the helper waits for an answer on its screen: one yellow line there, and here it is your turn */
+    const screenAsks = S.state.screenWaiting === true && v.run.running === true;
+    const stateText = screenAsks ? 'Needs you' : window.FocusHelpers.sessionState(v).pill || statusWord(t);
     const shownText = window.FocusHelpers.holdText(v) || stateText;  /* why orch waits, in the core's words; gone when it clears */
     if (els.stateText.textContent !== shownText) els.stateText.textContent = shownText;
     els.live.toggleAttribute('data-hold', shownText !== stateText);
@@ -36,6 +39,7 @@
     els.stopL.textContent = running ? 'Pause work' : 'Continue';
     els.stop.setAttribute('aria-label', running ? 'Pause work' : 'Continue');
     els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
+    S.views.compose.renderWaiting(v);
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
@@ -44,14 +48,15 @@
     els.review.hidden = !window.FocusHelpers.reviewBarShown(v);
     els.complete.hidden = v.state !== 'done';
     els.attachBtn.disabled = !(running && v.live);
+    els.interruptBtn.disabled = !running;
     els.sub.textContent = '';
     /* whose turn it is, and where the work is */
-    const turn = v.state === 'done' ? 'Finished' : asking || t.status === 'review' ? 'Your turn' : running ? 'Helper’s turn' : '';
+    const turn = v.state === 'done' ? 'Finished' : asking || screenAsks || t.status === 'review' ? 'Your turn' : running ? 'Helper’s turn' : '';
     const base = els.stateText.textContent.split(' · ')[0];
     if (turn && !base.startsWith('Finished') && turn !== 'Finished') els.stateText.textContent = base + ' · ' + turn;
     const now = t.checklist.find(c => !c.done && !c.wont_do);
     els.taskLine.textContent = v.total && now ? 'Task ' + (v.done + 1) + ' of ' + v.total + ' · ' + now.text : '';
-    if (!S.state.changesRequested) els.msg.placeholder = 'Write a message…';
+    if (!S.state.changesRequested) els.msg.placeholder = screenAsks ? 'Answer the helper…' : 'Write a message…';
     els.feed.setAttribute('aria-label', 'What ' + els.agent.textContent + ' is doing');
     els.railNote.textContent = '';
     S.views.ticket.renderTasks(v);
@@ -103,7 +108,7 @@
     try { await navigator.clipboard.writeText(url); toast('Link copied', 'ok'); } catch (e) { toast('Copy this address: ' + url, 'error'); }
   }
 
-  function wire() {
+  function wire(screen) {
     let saved = ''; try { saved = localStorage.getItem('focus-mode') || ''; } catch (e) { /* none */ }
     setMode(saved === 'terminal');
     const markFull = on => { root.classList.toggle('is-full', on); els.fullBtn.setAttribute('aria-pressed', String(on)); els.fullBtn.textContent = on ? 'Exit full screen' : 'Full screen'; els.full.setAttribute('aria-pressed', String(on)); els.full.lastElementChild.textContent = on ? 'Leave full screen' : 'Full screen'; els.full.setAttribute('aria-label', on ? 'Leave full screen' : 'Full screen'); document.body.style.overflow = on ? 'hidden' : ''; };
@@ -119,8 +124,19 @@
     /* The composer is pinned at the bottom on a phone: the pane keeps that much room below its last row. */
     if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => root.style.setProperty('--fx-compose-h', els.compose.offsetHeight + 'px')).observe(els.compose);
     const toggleHelp = force => { els.help.hidden = force === undefined ? !els.help.hidden : !force; if (!els.help.hidden) els.help.querySelector('button').focus(); else els.moreBtn.focus(); };
-    const selectTab = i => { if (els.tabs[i].hidden) return; S.state.tab = i; els.review.hidden = !S.state.view || !window.FocusHelpers.reviewBarShown(S.state.view); els.compose.hidden = S.state.view?.state === 'done' || i >= 2 || (S.state.view?.ticket.status === 'review' && !S.state.changesRequested); els.tabs.forEach((b, j) => { const on = i === j; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; }); };
+    /* i is a place in els.tabs, or 'screen' for the Screen tab (it shows the same screen as the strip above the message box) */
+    const selectTab = i => {
+      const onScreen = i === 'screen', tab = onScreen ? els.screenTab : els.tabs[i];
+      if (!tab || tab.hidden) return;
+      S.state.tab = onScreen ? 0 : i;
+      els.review.hidden = !S.state.view || !window.FocusHelpers.reviewBarShown(S.state.view);
+      els.compose.hidden = S.state.view?.state === 'done' || S.state.tab >= 2 || (S.state.view?.ticket.status === 'review' && !S.state.changesRequested);
+      [...els.tabs, ...(els.screenTab ? [els.screenTab] : [])].forEach(b => { const on = b === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; });
+      if (screen) screen.place(onScreen);
+      try { localStorage.setItem('focus-tab', onScreen ? 'screen' : ''); } catch (e) { /* not kept */ }
+    };
     els.tabs.forEach((b, i) => b.addEventListener('click', () => selectTab(i)));
+    if (els.screenTab) els.screenTab.addEventListener('click', () => selectTab('screen'));
     const setPopover = (panel, button, open) => {
       panel.hidden = !open;
       button.setAttribute('aria-expanded', String(open));
@@ -171,9 +187,9 @@
       if (els.menu.contains(e.target) && e.target.closest('button')) { closePopovers(); els.moreBtn.focus(); }
       if (a === 'mode') setMode(!root.classList.contains('fx-terminal'));
       else if (a === 'jump') S.views.live.jumpToNew();
-      else if (a === 'phone') { els.phoneNote.hidden = !els.phoneNote.hidden; els.phoneBtn.setAttribute('aria-expanded', String(!els.phoneNote.hidden)); }
       else if (a === 'copy') copyLink();
       else if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
+      else if (a === 'interrupt') S.views.compose.interruptNow();
       else if (a === 'answer') S.views.live.focusQuestion(); else if (a === 'stop') S.views.live.stopToggle(); else if (a === 'fresh') { armFresh(false); S.views.live.startFresh(); } else if (a === 'attach') S.views.session.showAttach();
       else if (a === 'all-work') { S.views.used.pickAgent(null, false); const head = els.feed.querySelector('h2'); if (head) { head.tabIndex = -1; head.focus(); } }
       else if (a === 'changes') { S.state.changesRequested = true; els.compose.hidden = false; els.msg.placeholder = 'What would you like changed?'; els.msg.focus(); }
@@ -255,5 +271,5 @@
     window.addEventListener('pagehide', () => { stream.close(); live = false; });
     window.addEventListener('pageshow', e => { if (e.persisted) connect(); });
   }
-  S.views.ticket.build(); S.views.compose.mount(); if (INAPP && S.views.term) S.views.term.mount(els.paneLive); wire(); poll();
+  S.views.ticket.build(); S.views.compose.mount(); wire(INAPP && S.views.term ? S.views.term.mount(els.stage) : null); poll();
 })();

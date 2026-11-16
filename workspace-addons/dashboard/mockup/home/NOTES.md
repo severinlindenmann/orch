@@ -30,3 +30,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 ## Owner feedback 14 Nov (lane owner-fb-v2)
 Home: the question is body text; answering moves the card out, the next one in, the badge counts down and a toast says "Answered · Undo" (`../sweep/d-home-answer.html`). "What changed" (from completion notes) sits under the columns and replaces the Notes page (`../proposals/fb23-home-what-changed.html`).
+
+## Review stack (15 Nov 2026)
+
+- Needs-you block: "Review all" button (primary) opens `../review/review.html`. Its number is the same set of questions and results Home already counts; the Home total is unchanged.

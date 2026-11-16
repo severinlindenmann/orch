@@ -19,9 +19,11 @@ from orch import (
     cli_conn,
     cli_diag,
     cli_job,
+    cli_leave,
     cli_look,
     cli_needs,
     cli_record,
+    cli_review,
     cli_run,
     cli_screen,
     cli_secret,
@@ -30,13 +32,13 @@ from orch import (
     diag_incident,
     fields,
     history,
-    humanproof,
     is_record_hook,
     mobile_mode,
     net,
+    nextstep,
     refs,
     relay,
-    runs,
+    review,
     runs_live,
     services,
     sharedfolder,
@@ -107,6 +109,7 @@ def _copies_folders() -> list[Path]:
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
@@ -120,6 +123,10 @@ def _progress(t: dict) -> str:
 
 def _line(t: dict) -> str:
     bits = [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
+    if due := tickets.due_label(t.get("due"), t["status"]):
+        bits.append(due)  # only a due with a time shows in the list; a day-only due stays as it was
+    if quiet := tickets.quiet_label(t.get("quiet_since")):
+        bits.append(quiet)  # G2: only `ticket list` sets quiet_since
     return (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
 
@@ -210,7 +217,9 @@ def _show(t: dict, root: Path) -> str:
             else f"✓ All resolved · {_progress(t)}"
         )
     out.append(f"Proof: {tickets.proof_state(t, root)['line']}")
-    extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
+    extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
+    if t.get("due"):
+        extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
@@ -255,11 +264,13 @@ def _show(t: dict, root: Path) -> str:
         out.append("\nChecklist:")
         for c in t["checklist"]:
             out += _check_lines(root, t, c, open_q)
-    answered = [q for q in t["questions"] if q["answer"] is not None]
-    if answered:
-        out.append("\nAnswered:")
-        for q in answered:
-            out.append(f"  {q['text']} - {q['answer']} ({q['answered_by']})")
+    if block := review.applies_now_block(t, root):
+        out.append("\n" + block.rstrip("\n"))
+    for q in (x for x in t["questions"] if x["answer"] is not None):
+        if (gone := tickets.taken_back_text(q)) is not None:
+            out.append(f"  Taken back {q['id']}: {q['text']} - {gone[len(tickets.TAKEN_BACK) :]}")
+        else:
+            out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({q['answered_by']})")
     rows = refs.all_refs(root, t)
     if rows:
         kinds = refs.active_kinds(root)
@@ -311,7 +322,7 @@ def _visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "dev-proof", "dev-mark"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -385,9 +396,6 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
-    common.add_argument(
-        "--proof-stdin", action="store_true", help=argparse.SUPPRESS
-    )  # human proof (H1): first line of stdin
 
     p = _Parser(prog="orch", description="orch: tickets with evidence for any agent tool")
     p.add_argument("--version", action=_Version)
@@ -404,23 +412,19 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
 
-    d = sub.add_parser(
-        "dev-proof", parents=[common], help=argparse.SUPPRESS
-    )  # e2e test human (dev workspaces)
-    d.add_argument("op")
-    d.add_argument("target")
-    sub.add_parser("dev-mark", parents=[common], help=argparse.SUPPRESS)  # e2e: mark a demo workspace dev
-
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
     cli_diag.add_parsers(sub, common)
+    cli_leave.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
     x.add_argument("title")
     x.add_argument("--parent", metavar="ID", help="make it a sub-ticket of this ticket")
     x.add_argument("--owner", help="who owns it (a name)")
-    x.add_argument("--due", metavar="YYYY-MM-DD", help="due day")
+    x.add_argument(
+        "--due", metavar="DAY[ HH:MM]|HH:MM", help="due day, with an optional time (18:30 = today)"
+    )
     x.add_argument("--note", help="a free note")
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
@@ -456,7 +460,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("--title")
     x.add_argument("--owner", help="who owns it (a name; empty clears)")
-    x.add_argument("--due", metavar="YYYY-MM-DD", help="due day (empty clears)")
+    x.add_argument(
+        "--due",
+        metavar="DAY[ HH:MM]|HH:MM",
+        help="due day, with an optional time (18:30 = today; empty clears)",
+    )
     x.add_argument("--note", help="a free note (empty clears)")
     x.add_argument("--done-when", help="what should be true when it is done (empty clears)")
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
@@ -491,7 +499,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("title")
     x.add_argument("--owner")
-    x.add_argument("--due", metavar="YYYY-MM-DD")
+    x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
@@ -581,6 +589,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("text")
     x.add_argument("--option", action="append", default=[])
     x.add_argument("--recommend", "--recommended", dest="recommend")
+    x.add_argument(
+        "--take-back",
+        metavar="QID",
+        help='take back your question; the text is the reason: --take-back q3 "why"',
+    )
     x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
     x.add_argument(
         "--preview",
@@ -593,6 +606,23 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--kind", metavar="KIND", help="plain (default) or <add-on>:<name>")
     x.add_argument("--action", metavar="JSON", help="data for the add-on that acts on the answer")
     x.add_argument("--check", metavar="CID", help="the task this question belongs to")
+    g = x.add_argument_group("show it as a card (something to look at and decide)")
+    k = g.add_mutually_exclusive_group()
+    k.add_argument("--draft", metavar="TITLE", help="a draft to approve")
+    k.add_argument("--link", metavar="TITLE", help="a link to approve before it goes public")
+    k.add_argument("--plan", metavar="TITLE", help="a plan that needs a yes")
+    k.add_argument(
+        "--choose", metavar="TITLE", help='options A/B/C to pick from (use --option "ID=Title[:file]")'
+    )
+    g.add_argument("--then", help="what happens after the answer (needed with a card)")
+    g.add_argument("--why", help="why this is asked (one line)")
+    g.add_argument("--need", help="what is needed, e.g. 'before Friday'")
+    g.add_argument("--ok", metavar="LABEL", help="the word on the approve button")
+    g.add_argument("--suggest", metavar="ID", help="the option you suggest (with --choose)")
+    g.add_argument("--before", metavar="FILE", help="the file as it is now (with --after)")
+    g.add_argument("--after", metavar="FILE", help="the file as it would become")
+    g.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
+    g.add_argument("--open", metavar="URL", help="an http(s) address to look at")
     x = sub.add_parser("answer", parents=[common], help="answer a question")
     x.add_argument("id")
     x.add_argument("question")
@@ -613,6 +643,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = lk.add_parser("rm", parents=[common], help="remove a reference")
     x.add_argument("id")
     x.add_argument("target")
+    x = lk.add_parser(
+        "set", parents=[common], help="record the state of a web reference (open, closed, merged)"
+    )
+    x.add_argument("id")
+    x.add_argument("target", help="the number from `orch ref list`, or the address")
+    x.add_argument("--status", required=True, metavar="WORD", help='a short lower-case word; "" clears it')
 
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
     x = e.add_parser("set", parents=[common])
@@ -627,6 +663,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_clients.add_parsers(sub, common)
     cli_run.add_parsers(sub, common)
     cli_needs.add_parsers(sub, common)
+    cli_review.add_parsers(sub, common)
     cli_conn.add_parsers(sub, common)
     cli_job.add_parsers(sub, common)
     cli_record.add_parsers(sub, common)
@@ -690,32 +727,8 @@ def _init_guard(cwd: Path) -> None:
         raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
 
 
-def _undo_gated(root: Path, args, who: str, action: str, call, value: str = ""):
-    """check reopen / edit / remove on a step that may be a Won't do: the requirement is decided UNDER THE
-    TICKET LOCK (tickets.NeedsProof), so there is no check-then-act gap and a ticket that cannot be read
-    refuses. `call(who, proven)` runs the locked operation."""
-    # the ACTION is part of the proof's target: a proof for "reopen" does not rename or remove the step
-    target = f"{args.id}:{args.check}:{action}"
-    if getattr(args, "proof_stdin", False):
-        return call(humanproof.person_by(root, args, "check.wont_do_undo", target), True)
-    try:
-        return call(who, False)
-    except tickets.NeedsProof:
-        who = humanproof.person_by(
-            root,
-            args,
-            "check.wont_do_undo",
-            target,
-            value=value,
-            parts=humanproof.step_parts(root, args.id, args.check, action=action),
-        )  # raises (hand-off) unless a person is proven
-        return call(who, who.startswith("human:"))
-
-
-def _is_verdict(root: Path, args, tid: str, status) -> bool:
-    """THE one place that decides "this ticket status change by a person is a verdict" (Done, or away from
-    Review). Every writer of a ticket's status from a person's command (`ticket status`, `ticket patch`)
-    calls it; test_every_status_writer_asks_the_verdict_gate walks the source to keep it so."""
+def _is_done_by_person(root: Path, args, tid: str, status) -> bool:
+    """A person's own Done (or leaving Review) from a command: the person is named, an agent keeps its own."""
     if status is None or (getattr(args, "by", None) or "").startswith("agent:") or tickets.agent_tool():
         return False
     if status == "done":
@@ -726,33 +739,24 @@ def _is_verdict(root: Path, args, tid: str, status) -> bool:
         return False
 
 
-def _verdict_who(root: Path, args, tid: str, data: str, by: str, shown: str = "") -> tuple[str, bool]:
-    """(actor, proven): the person's proof for a verdict, or the plain actor when the change is no verdict.
-    `proven` is True only when person_by verified a person for this verdict; it is what lets
-    tickets.set_status / patch sign a Done."""
+def _status_who(root: Path, args, tid: str, data: str, by: str) -> tuple[str, bool]:
+    """(actor, person): the person's name for their own Done, or the plain actor otherwise."""
     try:
         status = json.loads(data).get("status")
     except (ValueError, AttributeError):
         status = None
-    if not _is_verdict(root, args, tid, status):
+    if not _is_done_by_person(root, args, tid, status):
         return by, False
-    who = humanproof.person_by(
-        root,
-        args,
-        "ticket.verdict",
-        tid,
-        parts=humanproof.status_parts(root, tid, data),
-        value=shown,  # only a word of the command itself
-    )
+    who = tickets.acting_by(args)
     return who, who.startswith("human:")
 
 
-def _looked_at_this(root: Path, args, tid: str, status, proven: bool) -> bool:
+def _looked_at_this(root: Path, args, tid: str, status, person: bool) -> bool:
     """A person's Done from a page names the review tip the page showed (--shown-tip). Bound here, before
     the Done is written: False when new changes arrived after they looked (the Done still happens; bringing
     the work back waits for their approval). Without a shown tip (the terminal, older pages) nothing
     changes."""
-    if status != "done" or not proven:
+    if status != "done" or not person:
         return True
     try:
         if tickets.load(root, tid)["status"] == "done":
@@ -796,44 +800,18 @@ def run(args: argparse.Namespace) -> None:
             + agent
             + "\n"
             + "\n".join(lines)
-            + (f"\nTurned on: {', '.join(on)}" if on else "")
-            + (
-                "\nNext: orch init --recommended"
-                if not args.recommended and init_mod.has_recommended(root)
-                else ""
-            ),
+            + (f"\nTurned on: {', '.join(on)}" if on else ""),
         )
-    elif cmd == "dev-mark":
-        humanproof.dev_mark_cli(root, getattr(args, "by", None))
-        _out(args, {"ok": True}, "Marked as a dev workspace.")
-    elif cmd == "dev-proof":
-        # The e2e test human (humanproof.dev_proof_cli: test install, ~/.orch-test, allowlisted ops, no agent
-        # context). Printed on stdout, to be piped into `<command> --proof-stdin`.
-        print(humanproof.dev_proof_cli(root, args.op, args.target, getattr(args, "by", None)))
     elif cmd == "work-check":
         workcheck.run(root, args.json)
     elif cmd == "update":
-        if not args.project_only:  # first: with another ORCH_HOME there is nothing a click could approve
+        if not args.project_only:  # first: with another ORCH_HOME there is nothing to update
             addons.tool_env_change_ok()
-        if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
-            # The SOURCE is resolved first (a normal install ignores ORCH_REPO / ORCH_REF: the official
-            # channel or the one the install came from). It is part of what the person approves AND of the
-            # proof's target, so a proof for one source never installs another (no aiming a click at a fork).
-            repo, ref = addons.repo(), addons.ref()
-            if not args.json:
-                from orch import updateinfo
+        if not args.project_only and not args.after_install and not args.json:
+            from orch import updateinfo
 
-                for line in updateinfo.announce_lines():  # the versions, before waiting for the click
-                    print(line, file=sys.stderr)
-            if not humanproof.person_by(
-                root,
-                args,
-                "update",
-                humanproof.update_target(repo, ref),
-                parts={"source": f"{repo}@{ref}"},
-                exact=f"{repo}@{ref}",
-            ).startswith("human:"):
-                raise Refused(humanproof.AGENT_REFUSED)
+            for line in updateinfo.announce_lines():  # the versions, before the install starts
+                print(line, file=sys.stderr)
         report, notes = [], []
         done = addons.update(
             root,
@@ -849,9 +827,19 @@ def run(args: argparse.Namespace) -> None:
         elif args.project_only and (args.json or not report):
             data = {"ok": True, "refreshed": done, **({"notes": notes} if args.json and notes else {})}
             _out(args, data, "Refreshed: " + ", ".join(done or ["nothing"]))
-    elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root) or cli_diag.dispatch(args, root):
+    elif (
+        cli_status.dispatch(args, root)
+        or cli_addons.dispatch(args, root)
+        or cli_diag.dispatch(args, root)
+        or cli_leave.dispatch(args, root)
+    ):
         pass
-    elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
+    elif (
+        cli_run.dispatch(args, root)
+        or cli_needs.dispatch(args, root)
+        or cli_review.dispatch(args, root)
+        or cli_config.dispatch(args, root)
+    ):
         pass
     elif (
         cli_conn.dispatch(args, root)
@@ -878,8 +866,7 @@ def run(args: argparse.Namespace) -> None:
         _out(
             args,
             t,
-            f'Created {t["key"]} "{t["title"]}" [{t["id"]}]{part}\n'
-            f'Next: add one checklist item per step: orch check add {t["key"]} "<step>"',
+            f'Created {t["key"]} "{t["title"]}" [{t["id"]}]{part}',
         )
     elif cmd == "ticket" and sub == "tree":
         top = _visible(root, tickets.load(root, args.id))
@@ -902,12 +889,14 @@ def run(args: argparse.Namespace) -> None:
         ids = {x["id"] for x in everything}
         for t in ts:
             t["children"] = tickets.children_counts(everything, t["id"])
+            if quiet := tickets.quiet_since(t):
+                t["quiet_since"] = quiet
         txt = (
             "\n".join(
                 _line(t) + (" - parent missing" if t.get("parent") and t["parent"] not in ids else "")
                 for t in ts
             )
-            or 'No open tickets. Create one with: orch ticket new "<title>"'
+            or "No open tickets."
         )
         if hidden and not args.json:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
@@ -916,10 +905,10 @@ def run(args: argparse.Namespace) -> None:
         t = _visible(root, tickets.load(root, args.id))
         _out(args, t, _show(t, root))
     elif cmd == "ticket" and sub == "status":
-        who, proven = _verdict_who(root, args, args.id, json.dumps({"status": args.status}), by())
-        looked = _looked_at_this(root, args, args.id, args.status, proven)
+        who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
+        looked = _looked_at_this(root, args, args.id, args.status, person)
         hint = tickets.recheck_hint(root, args.id, args.status, who)
-        t = tickets.set_status(root, args.id, args.status, who, proven)
+        t = tickets.set_status(root, args.id, args.status, who)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         if hint and t["status"] == "review":
@@ -929,7 +918,7 @@ def run(args: argparse.Namespace) -> None:
             if args.status == "done" and t["status"] == "review"
             else shown.get("notice") or f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}"
         )
-        _out(args, shown, text + (f"\nNext: {hint}" if shown.get("next_step") else ""))
+        _out(args, shown, text)
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
@@ -976,26 +965,17 @@ def run(args: argparse.Namespace) -> None:
         rel = d.relative_to(root).as_posix()
         _out(args, {"path": rel}, rel)
     elif cmd == "ticket" and sub == "changes":
-        who = humanproof.person_by(
-            root,
-            args,
-            "ticket.verdict",
-            args.id,
-            parts={"title": humanproof.ticket_name(root, args.id)},
-            value=args.text,
-        )
-        t = tickets.ask_for_changes(root, args.id, args.text, who, proven=who.startswith("human:"))
+        who = tickets.acting_by(args)
+        t = tickets.ask_for_changes(root, args.id, args.text, who)
         _out(args, t, f"{t['title']} - sent back with your note. An agent picks it up.")
     elif cmd == "ticket" and sub == "patch":
-        who, proven = _verdict_who(
-            root, args, args.id, args.data, by(), args.data
-        )  # Looks good needs the person's proof
+        who, person = _status_who(root, args, args.id, args.data, by())
         try:
             status = json.loads(args.data).get("status")
         except (ValueError, AttributeError):
             status = None
-        looked = _looked_at_this(root, args, args.id, status, proven)
-        t = tickets.patch(root, args.id, args.if_revision, args.data, who, proven)
+        looked = _looked_at_this(root, args, args.id, status, person)
+        t = tickets.patch(root, args.id, args.if_revision, args.data, who)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         _out(
@@ -1020,14 +1000,7 @@ def run(args: argparse.Namespace) -> None:
         c = history.shown_item(root, t, "checklist", c)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
     elif cmd == "check" and sub == "wont-do":
-        who = humanproof.person_by(
-            root,
-            args,
-            "check.wont_do",
-            f"{args.id}:{args.check}",
-            value=args.reason or "",
-            parts=humanproof.step_parts(root, args.id, args.check),
-        )
+        who = tickets.acting_by(args)
         t, c = tickets.check_wont_do(root, args.id, args.check, who, args.reason)
         c = history.shown_item(root, t, "checklist", c)
         _out(args, c, f"{c['id']}: Won't do. Open it again: orch check reopen {args.id} {c['id']}")
@@ -1038,37 +1011,18 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
         if sub == "edit":
-            t, c = _undo_gated(
-                root,
-                args,
-                who,
-                "edit",
-                lambda w, p: tickets.check_edit(
-                    root, args.id, args.check, args.text, w, args.if_revision, args.was, args.covers, proven=p
-                ),
-                value=args.text or "",
+            t, c = tickets.check_edit(
+                root, args.id, args.check, args.text, who, args.if_revision, args.was, args.covers
             )
             msg = f"{c['id']} renamed."
         elif sub == "move":
             t, c = tickets.check_move(root, args.id, args.check, args.after, who)
             msg = f"{c['id']} now follows {args.after}."
         elif sub == "remove":
-            t, c = _undo_gated(
-                root,
-                args,
-                who,
-                "remove",
-                lambda w, p: tickets.check_remove(root, args.id, args.check, w, proven=p),
-            )
+            t, c = tickets.check_remove(root, args.id, args.check, who)
             msg = f"{c['id']} removed. It and its proof are kept in the history."
         elif sub == "reopen":
-            t, c = _undo_gated(
-                root,
-                args,
-                who,
-                "reopen",
-                lambda w, p: tickets.check_reopen(root, args.id, args.check, w, proven=p),
-            )
+            t, c = tickets.check_reopen(root, args.id, args.check, who)
             msg = f"{c['id']} is open again. Its proof stays in the history."
         elif sub == "start":
             t, c = tickets.check_start(root, args.id, args.check, who)
@@ -1103,15 +1057,52 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.log(root, args.id, args.text, by())
         h = history.lines(root, t)[-1]
         _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
+    elif cmd == "ask" and args.take_back:
+        if (
+            args.phone
+            or args.option
+            or args.recommend
+            or args.kind
+            or args.action
+            or args.check
+            or (cli_review.has_card_flags(args))
+        ):
+            raise Refused("--take-back goes with the reason only: orch ask <ticket> --take-back q3 'why'.")
+        t, q, changed = tickets.take_back(root, args.id, args.take_back, args.text, by())
+        if changed:
+            relay.send_taken_back(root, t["id"], q)  # the phones drop the card (only when it was sent there)
+        _out(
+            args,
+            q,
+            f"Taken back {q['id']}." if changed else f"{q['id']} was already taken back.",
+        )
     elif cmd == "ask":
         if args.phone and "relay" not in addons.active(root):
             raise Refused(addons.not_on_message(root, "relay"))
         if (args.preview or args.scope) and not args.phone:
             raise Refused("--preview and --scope go with --phone.")
-        t, q = tickets.ask(
-            root, args.id, args.text, args.option, args.recommend, by(), args.kind, args.action, args.check
-        )
-        if args.phone:
+        card = cli_review.has_card_flags(args)
+        if card and (args.phone or args.kind or args.action or args.check):
+            raise Refused("A card does not go with --phone, --kind, --action or --check.")
+        if card:  # the card goes where every question goes; a phone shows it from the stack
+            t, q = cli_review.ask_card(
+                args, root, tickets.resolve_cli(root, args.id, json_output=args.json), by()
+            )
+        else:
+            t, q = tickets.ask(
+                root,
+                args.id,
+                args.text,
+                args.option,
+                args.recommend,
+                by(),
+                args.kind,
+                args.action,
+                args.check,
+            )
+        if card:
+            pass
+        elif args.phone:
             cli_clients.send_phone_question(root, t["id"], q, args.preview, args.scope)
         elif mobile_mode.question_to_phone(root, t["id"], os.environ.get("ORCH_TICKET")):
             # Mobile mode, or a ticket from the phone (or one its agent made): also to the phone
@@ -1130,46 +1121,26 @@ def run(args: argparse.Namespace) -> None:
             (x for x in tickets.load(root, args.id).get("questions") or [] if x.get("id") == args.question),
             None,
         )
+        if shown_q is not None:
+            tickets.refuse_if_taken_back(shown_q)  # said before anything is asked of the person
         shown_digest = tickets.question_digest(shown_q)  # no question shown: any answer is refused
         given = getattr(args, "question_digest", None)
         if given is not None and not re.fullmatch(r"[0-9a-f]{64}", given):
             raise Refused("This question changed or can't be checked. Ask again.")
-        if getattr(args, "proof_stdin", False):
-            # the proof was made for the question the PAGE showed: its digest is part of the signed target,
-            # and the answer below is refused unless the current question is still exactly that one
-            if given is None:
-                raise Refused("This question changed or can't be checked. Ask again.")
-            shown_digest = given
-        elif given is not None and given != shown_digest:
+        if given is not None and given != shown_digest:
             raise Refused(
                 f"{args.question} changed after it was shown. Look at the question again, then answer."
             )
-        argv = humanproof._clean_argv(humanproof.CURRENT_ARGV)
-        if argv is not None and given is None:  # the page's resumed command carries the digest shown here
-            argv = [*argv[:1], "--question-digest", shown_digest, *argv[1:]]
-        who = humanproof.person_by(
-            root,
-            args,
-            "ticket.answer",
-            f"{args.id}:{args.question}:{shown_digest}",
-            argv=argv,
-            parts={
-                "title": humanproof.ticket_name(root, args.id),
-                "question": humanproof.question_text(root, args.id, args.question, shown_q),
-            },
-            value=args.answer,
-        )
+        who = tickets.acting_by(args)
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
-        if who.startswith("human:"):
-            runs.require_signing(root)  # a person's answer that could not be signed is refused, not half done
         t, q = tickets.answer(
             root, args.id, args.question, args.answer, who, args.via, expected_question_digest=shown_digest
         )
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent
-            runs_live.pass_answer(root, t["id"], q, who, proven=who.startswith("human:"))
+            runs_live.pass_answer(root, t["id"], q, who)
         note = _addon_note(root, q)
         _out(
             args,
@@ -1225,7 +1196,22 @@ def _ref(args, root: Path, by) -> None:
                 d = refs.describe(ref, kinds, root)
                 value = refs.one_line(d["title"], 300)
                 suffix = " (On this computer only)" if ref.get("local") else ""
-                print(f"  {n}  {d['type']}  {value}{suffix}" + (f"  {d['status']}" if d["status"] else ""))
+                print(
+                    f"  {n}  {d['type']}  {value}{suffix}"
+                    + (f"  {d['status'].capitalize()}" if d["status"] else "")
+                )
+    elif args.sub == "set":
+        t, ref, changed = tickets.ref_set(root, args.id, args.target, args.status, by())
+        d = refs.describe(ref, kinds, root)
+        n = next(i for i, r in refs.all_refs(root, t) if r is ref or r == ref)
+        shown = {"n": n, **history.shown_item(root, t, "refs", ref), "view": d}
+        _out(
+            args,
+            shown,
+            f"Shown on the ticket as: {d['label']}" + (f" · {ref['status']}" if ref.get("status") else "")
+            if changed
+            else "Nothing to change.",
+        )
     else:
         t, ref = tickets.ref_remove(root, args.id, args.target, by())
         _out(
@@ -1316,18 +1302,13 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
             s_.reconfigure(encoding="utf-8")
     if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
         return workcheck.hook_main(argv, watchdog)
-    humanproof.CURRENT_ARGV = list(argv)  # what a hand-off to the dashboard will run (H1)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
     want_json = "--json" in argv
 
     def refuse(e: Refused) -> int:
         # a confirmation that could not be asked (no terminal) is a question: no "Refused:" in front
-        plain = (
-            getattr(e, "confirm", False)
-            or isinstance(e, humanproof.HandOffPending)  # a click is awaited: not an error
-            or str(e).startswith("Refused:")
-        )  # many messages carry their own
+        plain = getattr(e, "confirm", False) or str(e).startswith("Refused:")  # many messages carry their own
         print(f"{e}" if plain else f"Refused: {e}", file=sys.stderr)
         if want_json:
             print(json.dumps({"error": str(e), **getattr(e, "extra", {})}, ensure_ascii=False))
@@ -1354,9 +1335,11 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
             "cli.command", "info", root=root, command=argv[0] if argv else "", sub=_sub_word(argv)
         ):
             run(args)
+        if not want_json:
+            line = nextstep.hint(nextstep.leaf_path(parser, args), getattr(args, "_next_data", None), args)
+            if line:
+                print(f"Next: {line}")
         cli_run.after_command(args, root, want_json)
-        for text in humanproof.cli_notices(root):  # e.g. "orch reset its protection ...": said once, in words
-            print(text, file=sys.stderr)
     except Refused as e:
         return refuse(e)
     except Exception as e:  # an unexpected crash: freeze what is there before the traceback ends the program

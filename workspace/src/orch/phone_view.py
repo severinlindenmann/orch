@@ -24,7 +24,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from orch import history, net, phone_results, refs, runs, safefile, tickets
+from orch import history, net, phone_results, refs, runs, safefile, secretscan, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -39,31 +39,7 @@ ATTACHMENTS = 50
 ARTIFACT_BYTES = 20 * 1024 * 1024
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic"}
 
-_SECRET_PATTERNS = [
-    re.compile(
-        r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*?(-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|\Z)",
-        re.S,
-    ),  # PEM and PGP (PRIVATE KEY BLOCK)
-    re.compile(r"\b(?:orn|orp|ora|whk|opk|apv)_[A-Za-z0-9_-]{16,}"),
-    re.compile(r"\b(?:sk|pk|rk)[-_](?:live|test|proj|ant)?[-_]?[A-Za-z0-9_-]{16,}"),
-    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}"),
-    re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}|\bxox[abprs]-[A-Za-z0-9-]{10,}"),
-    re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-    # JWT: one start per run of its characters (`-` is one of them but no word character: a \b start after
-    # every `-` made "eyJ-eyJ-..." quadratic), the parts possessive
-    re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{5,}"),
-    re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"),
-    # Google API key, Hugging Face, npm, PyPI, SendGrid, DigitalOcean
-    re.compile(r"\bAIza[0-9A-Za-z_-]{35}|\bhf_[A-Za-z0-9]{30,}|\bnpm_[A-Za-z0-9]{36}"),
-    re.compile(r"\bpypi-AgE[A-Za-z0-9_-]{50,}|\bSG\.[\w-]{22}\.[\w-]{43}|\bdop_v1_[a-f0-9]{64}"),
-    # user:password@ in any URL (postgres://u:p@db, https://bob:pw@git...): one start per scheme run, the user
-    # part possessive and without `:`, the password part stops at the last `@` before the path (linear)
-    re.compile(r"(?i)(?<![\w+.-])[a-z][a-z0-9+.-]*+://[^\s/?#@:]*+:[^\s/?#]*@"),
-    # webhook path tokens: Slack /services/T../B../x, Discord /api/webhooks/<id>/<token>, Telegram /bot<id>:x
-    re.compile(
-        r"(?<=/services/)T\w++/B\w++/\w++|(?<=/api/webhooks/)\d++/[\w-]++|(?<![\w-])bot\d++:[\w-]{20,}"
-    ),
-]
+_SECRET_PATTERNS = [rx for _, rx in secretscan.PATTERNS]  # the one list lives in secretscan.py
 # The ONE list of secret-name words: the key=value pattern of redact/_has_secret and secret_name() (labels of
 # phone results) are both built from it, so a word added here reaches both (tests/test_phone_results.py).
 SECRET_NAME_WORDS = (
@@ -123,6 +99,12 @@ _KV_VAL = re.compile(
 _TO_EOL = re.compile(r"(?i)cookie")
 
 
+# A value that is exactly the placeholder (also in matching quotes) is already hidden, not a secret: the ONE
+# place that says so. The url-encoded one safe_url writes (?token=%5Bhidden%5D&a=1) ends at its `&`. Anything
+# else glued to it or after it is a value like any other and goes through the detector unchanged.
+_PLACEHOLDER = re.compile(r"(?P<q>[\"'`]?)\[hidden\](?P=q)\Z|%5[Bb]hidden%5[Dd](?=&|\Z)")
+
+
 class _Hit:
     """What callers use of a regex match: group(0..3), start(), end() (1 name, 2 separator, 3 value)."""
 
@@ -153,9 +135,15 @@ class _KV:
                 continue
             if head.group("sep") == ":" or _TO_EOL.search(head.group(1)):
                 end = _line_end(text, pos)  # the rest of the line, scanned once: the scan goes on after it
+                if _PLACEHOLDER.fullmatch(text, pos, end):  # the value IS the placeholder: nothing to hide
+                    pos = end
+                    continue
             else:
                 val = _KV_VAL.match(text, pos)
                 end = val.end() if val is not None else pos
+                if (ph := _PLACEHOLDER.match(text, pos, end)) is not None:
+                    pos = ph.end()  # only the placeholder is the value; the scan goes on right after it
+                    continue
             if end > pos:
                 yield _Hit(text, head, end)
                 pos = end
@@ -902,8 +890,8 @@ def _photo_verdict(data: bytes) -> str:
     return "secret" if any(_has_secret(t) for t in texts) else "ok"
 
 
-def _gate(root: Path, tid: str, data: bytes, name: str, state: dict | None, photo_ok: bool = False) -> bool:
-    """The one secret gate in front of every phone upload (proof files and named artifacts alike): True when
+def _scan(root: Path, tid: str, data: bytes, name: str, state: dict | None, photo_ok: bool = False) -> bool:
+    """The one secret check in front of every phone upload (proof files and named artifacts alike): True when
     `data` may be sent. A file that looks like a password or key, or can't be checked, is not sent and is
     marked once in the ticket log and in state["secret_skipped"] (fail closed). `photo_ok` (evidence only): a
     picture that can't be fully checked (a JPEG photo) still goes when its raw bytes hold no secret."""
@@ -1053,7 +1041,7 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
             f = _proof_file(root, tid, ev)
             b = (
                 _upload(root, f[1], state)
-                if (f and upload and state is not None and _gate(root, tid, f[1], f[0], state, photo_ok=True))
+                if (f and upload and state is not None and _scan(root, tid, f[1], f[0], state, photo_ok=True))
                 else None
             )
             if not b:
@@ -1130,7 +1118,7 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         if data is None:
             continue
         sha = hashlib.sha256(data).hexdigest()
-        if not _gate(root, tid, data, name, state):
+        if not _scan(root, tid, data, name, state):
             continue
         if sha in evidence_hashes:  # the same content is already in the view (evidence or an artifact)
             continue
@@ -1295,6 +1283,9 @@ def _view_step(c: dict, h) -> dict:
     return step
 
 
+_DUE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?")
+
+
 def _status(ticket: dict) -> str:
     s = ticket.get("status", "open")
     return s if s in STATUSES else "open"
@@ -1360,6 +1351,8 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
         view["agent"] = agent
     if summary := shown_summary(ticket, h):
         view["summary"] = summary
+    if _DUE.fullmatch(str(ticket.get("due") or "")):  # YYYY-MM-DD or YYYY-MM-DDTHH:MM, as the schema says
+        view["due"] = ticket["due"]  # full snapshots only: light_view never has it
     try:
         results = phone_results.prepare(root, result_candidates(root, ticket), h)
     except Exception:  # whatever is wrong with a result: the snapshot goes without results
@@ -1835,6 +1828,163 @@ def sync_reviews(root: Path) -> list[str]:
 
             with contextlib.suppress(Refused):
                 update_state(root, undo)
+    return sent
+
+
+CARD_TRIES = 3  # a card the relay keeps refusing is given up after this many sends (the plain question stays)
+_CARD_NAME = re.compile(
+    r"[^./\\\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]"
+    r"[^/\\\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]{0,254}"
+)
+
+
+def _card_files(root: Path, tid: str, card: dict, shown: dict, state: dict) -> tuple[dict, list[dict]]:
+    """(refs, card_files) for the reviewed files of a card (relay-api.md 'Review cards on the phone'): every
+    file goes through the secret check (_scan) and the 20 MB card budget, then is uploaded once (_upload).
+    refs maps a stored src to its card_files index, or to "held_back" (not a sendable type or name, changed
+    since it was reviewed, a secret) / "too_large" (over the budget): never uploaded, the phone says
+    "Open on the computer". Raises Refused when an upload fails (the relay is away: the card is retried)."""
+    from orch import review
+
+    refs: dict = {}
+    files: list[dict] = []
+    total = 0
+    h = phone_results.value_hider(root)
+    for src in review.card_files_of(card):
+        name = src.rsplit("/", 1)[-1]
+        mime = review.MIMES.get(Path(name).suffix.lower())
+        data = review.read_reviewed(root, tid, shown, src)  # None: gone or no longer the reviewed bytes
+        if data is None or not data or mime is None or not _CARD_NAME.fullmatch(name):
+            refs[src] = "held_back"
+        elif h is None or not _text_clean(name, h):  # a file name is shown to the person: no secret in it
+            refs[src] = "held_back"
+        elif len(files) >= 20 or total + len(data) > review.MAX_PHONE_CARD:
+            refs[src] = "too_large"
+        elif not _scan(root, tid, data, name, state):
+            refs[src] = "held_back"
+        elif (blob := _upload(root, data, state)) is None:
+            raise Refused("A card file could not be uploaded.")
+        else:
+            total += len(data)
+            refs[src] = len(files)
+            files.append(
+                {
+                    "blob_id": blob["blob_id"],
+                    "name": name,
+                    "size": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "mime": mime,
+                }
+            )
+    return refs, files
+
+
+_CARD_NOT_TEXT = {"kind", "type", "id", "src", "signs"}  # enums, ids and file references: not shown as text
+
+
+def _text_clean(t: str, h) -> bool:
+    """True when a text is a fixed point of the value hider and redact: showing it hides nothing."""
+    return h.hide_text(t) == t and redact(t) == t
+
+
+def wire_card_clean(wire, h) -> bool:
+    """Every text of a wire card (title, why, need, then, open, doc, table cells, option texts, alt, note)
+    survives the value hider and redact unchanged. A card with a text that would be hidden is not sent."""
+    if isinstance(wire, str):
+        return _text_clean(wire, h)
+    if isinstance(wire, list):
+        return all(wire_card_clean(x, h) for x in wire)
+    if isinstance(wire, dict):
+        return all(wire_card_clean(v, h) for k, v in wire.items() if k not in _CARD_NOT_TEXT)
+    return True
+
+
+def sync_cards(root: Path) -> list[str]:
+    """Review stack: every open card question (a question with a stored card) of a ticket goes to the paired
+    phones ONCE, as the question with its card, the reviewed files (uploaded through the secret check) and the
+    digest the phone echoes (relay.send_question). Nothing goes out without a paired phone, and a question
+    already sent to the phones (by `orch ask` or an earlier sync) is not sent again. A card that does not pass
+    the wire check goes out without `card` (a plain question). Returns "<ticket>:<question>" sent."""
+    from orch import relay, review
+
+    if not _paired(root):
+        return []
+    sent: list[str] = []
+    for item in review.stack(root):
+        if item["key"] == "review":
+            continue
+        tid, qid = item["ticket"], item["key"]
+        key = f"{tid}:{qid}"
+        try:
+            ticket = tickets.load(root, tid)
+            q = next(x for x in ticket["questions"] if x["id"] == qid)
+        except (Refused, OSError, ValueError, KeyError, StopIteration):
+            continue
+        if not isinstance(q.get("card"), dict) or q.get("answer") is not None:
+            continue  # a plain question is asked with `orch ask`
+        digest = tickets.question_digest(q)
+        if relay.asked_to_phones(root, tid, qid):
+            continue
+        claimed: list[bool] = []
+
+        def claim(st, key=key, digest=digest, claimed=claimed):
+            rec = st.setdefault("cards", {}).get(key)
+            if rec and (rec.get("digest") == digest or rec.get("tries", 0) >= CARD_TRIES):
+                return  # sent (a changed card is re-sent later, M4) or given up
+            st["cards"][key] = {"digest": digest, "tries": (rec or {}).get("tries", 0) + 1, "done": False}
+            claimed.append(True)
+
+        update_state(root, claim)
+        if not claimed:
+            continue
+        state = load_state(root)
+        try:
+            refs, files = _card_files(root, tid, q["card"], q.get("shown") or {}, state)
+            h = phone_results.value_hider(root)
+            if h is None or not wire_card_clean([q["text"], q["options"]], h):
+                raise Refused("held back: the question text would be hidden or cannot be checked")
+            try:
+                wire: dict | None = review.wire_card(q["card"], refs)
+                if not wire_card_clean(wire, h):
+                    wire = None  # a card text with a key or value in it: the question goes without the card
+            except Refused:
+                wire = None  # the contract: send the question without the card
+            if wire is None:
+                files = []
+            relay.send_question(
+                root,
+                ticket,
+                q,
+                card=wire,
+                card_files=files or None,
+                digest=digest if wire else None,
+            )
+        except (Refused, OSError):
+
+            def undo(st, key=key, digest=digest):
+                rec = st.get("cards", {}).get(key)
+                if rec and rec.get("digest") == digest and not rec.get("done"):
+                    rec["digest"] = None  # retried at the next pull (up to CARD_TRIES)
+
+            with contextlib.suppress(Refused):
+                update_state(root, undo)
+            continue
+        finally:
+
+            def merge(st, state=state):
+                st["blobs"].update(state["blobs"])
+                if state.get("secret_skipped") is not None:
+                    st["secret_skipped"] = state["secret_skipped"]
+
+            with contextlib.suppress(Refused, OSError):
+                update_state(root, merge)
+
+        def done(st, key=key):
+            st["cards"][key]["done"] = True
+
+        with contextlib.suppress(Refused, OSError):
+            update_state(root, done)
+        sent.append(key)
     return sent
 
 

@@ -31,6 +31,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         DROP INDEX IF EXISTS msg_text_from;
         CREATE INDEX IF NOT EXISTS msg_type_to_from ON messages(type, to_addr, from_addr, seq);
         CREATE INDEX IF NOT EXISTS msg_type_from_to ON messages(type, from_addr, to_addr, seq);
+        CREATE TABLE IF NOT EXISTS question_taken_back(question_id TEXT PRIMARY KEY, msg_id TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS view_blobs(blob_id TEXT NOT NULL, msg_id TEXT NOT NULL, PRIMARY KEY(blob_id, msg_id));
         CREATE TABLE IF NOT EXISTS blobs(id TEXT PRIMARY KEY, uploader TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS webhooks(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, ticket TEXT,
@@ -180,7 +181,40 @@ const KNOWN: [&str; 9] = [
 ];
 
 /// Store a full message (already validated). `digest` identifies the submitted content for duplicate checks.
+/// One savepoint (safe inside a caller's transaction): the message row and the rows kept next to it (blob links,
+/// the taken-back marker) are all stored or none is.
 pub fn insert_message(
+    c: &Connection,
+    key: &Key,
+    msg: &Value,
+    digest: &str,
+) -> rusqlite::Result<()> {
+    let nested = !c.is_autocommit(); // inside a caller's transaction: never end it here
+    c.execute_batch("SAVEPOINT insert_message")?;
+    match insert_message_rows(c, key, msg, digest) {
+        Ok(()) => {
+            // When this savepoint is the outermost one, RELEASE is the commit: if it fails without SQLite rolling
+            // back, end the transaction so the next write does not silently nest inside it.
+            let done = c.execute_batch("RELEASE insert_message");
+            if done.is_err() && !nested && !c.is_autocommit() {
+                let _ = c.execute_batch("ROLLBACK");
+            }
+            done
+        }
+        Err(e) => {
+            // ROLLBACK TO and RELEASE run one by one: when either fails and this savepoint opened the transaction,
+            // end it, so the shared connection never stays inside an open transaction holding the write lock.
+            let undone = c.execute_batch("ROLLBACK TO insert_message").is_ok()
+                && c.execute_batch("RELEASE insert_message").is_ok();
+            if !undone && !nested && !c.is_autocommit() {
+                let _ = c.execute_batch("ROLLBACK");
+            }
+            Err(e)
+        }
+    }
+}
+
+fn insert_message_rows(
     c: &Connection,
     key: &Key,
     msg: &Value,
@@ -222,6 +256,17 @@ pub fn insert_message(
             }
         }
     }
+    // Blobs a question's card_files name: phones the question went to may read them too.
+    if msg["type"] == "question" {
+        for f in msg["body"]["card_files"].as_array().into_iter().flatten() {
+            if let Some(b) = f["blob_id"].as_str() {
+                c.execute(
+                    "INSERT OR IGNORE INTO view_blobs(blob_id,msg_id) VALUES(?1,?2)",
+                    params![b, id],
+                )?;
+            }
+        }
+    }
     c.execute(
         "INSERT INTO messages(id,from_addr,to_addr,type,created_at,ticket,reply_to,blob_id,digest,payload,stored_at)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -239,7 +284,44 @@ pub fn insert_message(
             now()
         ],
     )?;
+    // Written after the message row, so a failed message insert leaves no marker. The workspace took this question back (relay-api.md "Question taken back"): kept next to the question, so the
+    // phone answer check and the open-question list see it without opening any payload.
+    if msg["type"] == "text" && msg["body"].get("taken_back").is_some() {
+        if let Some(q) = msg["reply_to"].as_str() {
+            c.execute(
+                "INSERT OR IGNORE INTO question_taken_back(question_id,msg_id) VALUES(?1,?2)",
+                params![q, id],
+            )?;
+        }
+    }
     Ok(())
+}
+
+/// The reason a question was taken back (None = it was not): read from the stored take-back text.
+/// A database error is returned, never read as "not taken back" (callers answer 500).
+pub fn taken_back_reason(c: &Connection, key: &Key, qid: &str) -> rusqlite::Result<Option<String>> {
+    let Some(mid): Option<String> = c
+        .query_row(
+            "SELECT msg_id FROM question_taken_back WHERE question_id=?1",
+            [qid],
+            |r| r.get(0),
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    // The marker row decides; an unreadable text only loses the reason (still taken back).
+    let reason = get_msg(c, &mid)
+        .ok()
+        .flatten()
+        .map(|m| {
+            open_payload(key, &m).0["taken_back"]["reason"]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        })
+        .unwrap_or_default();
+    Ok(Some(reason))
 }
 
 #[allow(clippy::too_many_arguments)]

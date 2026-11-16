@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Review on the phone · orch (draft)</title>
+<link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/gallery.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/interaction.css">
+<script src="../../../../../workspace/src/orch_ui/static/overlay.js"></script><script src="../../../../../workspace/src/orch_ui/static/components.js"></script><script src="../../../../../workspace/src/orch_ui/static/icons.js"></script><script src="../../../../../workspace/src/orch_ui/static/widgets.js"></script><script src="data.js"></script></head>
+<body><div class="banner" role="note" data-superseded><div><h3>Superseded draft (15 Nov 2026)</h3><p>Kept for history only. The shipped screens are in the mockup: review/review.html, ticket/ticket-answers.html (answers under the ticket questions, no Decisions tab) and the Home "Review all" button. Do not build from this page.</p></div></div><main class="page wide" aria-label="Review on the phone">
+<div class="page-heading"><div><p class="eyebrow">Draft 15 Nov · <a href="index.html">overview + research</a> · <a href="desktop.html">workspace version</a></p><h1>Review on the phone</h1><p>Phone 2 is live: drag the card with the mouse (or touch), tap the screen to make it bigger. The others show one state each.</p></div></div>
+<div class="device-row">
+ <div class="device-cap"><h3>1 · Where it starts</h3><p>A yellow row on top of Chats when something waits on you; the push “8 things to review” opens the same stack.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><h2>Chats</h2></div><div class="app-body">
+   <a class="phone-review" href="#p2"><span class="stack"><i></i><i></i><i></i></span><span class="tx"><strong>8 things to review</strong><span>3 drafts · 2 choices · 2 results · 1 plan</span></span><span class="go">Review</span></a>
+   <a class="phone-row" href="#"><span class="av" style="background:var(--brand-soft);color:var(--brand)">W</span><span class="tx"><strong>Work</strong><span>Helper: Survey summary is ready</span></span><span class="meta">09:12</span></a>
+   <a class="phone-row" href="#"><span class="av">P</span><span class="tx"><strong>Private</strong><span>You: voice 0:12</span></span><span class="meta">Thu</span></a>
+   <a class="phone-row" href="#"><span class="av">A</span><span class="tx"><strong>Anna</strong><span>Can you look at the café page?</span></span><span class="meta">Wed</span></a>
+  </div></div></div>
+ <div class="device-cap" id="p2"><h3>2 · The stack (live)</h3><p>One card. Middle = the thing itself. Right = approve (the button names it: “Build it”, “Publish”), left = Don't do, down = Comment, up = Later. Buttons do the same. The card says what happens if you approve.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="live"></div></div></div></div>
+ <div class="device-cap"><h3>3 · While you drag right</h3><p>The stamp names the action (“Publish”). It needs a real drag, about a third of the width; let go before and it springs back. A drag from the very left edge stays the iPhone's back gesture.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="drag"></div></div></div></div>
+ <div class="device-cap"><h3>4 · Swipe down: comment</h3><p>Hold or tap the mic and talk (Swiss German, German, English), or type. The button says the outcome: “Send back for changes”. Nothing is approved by a comment. Pull the sheet down to close; your words stay.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="talk"></div></div></div></div>
+ <div class="device-cap"><h3>5 · Tap the middle: bigger</h3><p>Pinch to zoom, Open in the browser, or “Spot”: tap where you mean and say what to change.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="zoom"></div></div></div></div>
+ <div class="device-cap"><h3>6 · Before / after, bigger</h3><p>Things that changed show both. On the card: Before · After · Both. Bigger: drag the line across, or side by side.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="cmp"></div></div></div></div>
+ <div class="device-cap"><h3>7 · Before / after on the card</h3><p>“Both” on the card: old left, new right. Tap Before / After to see one big.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="cmp2"></div></div></div></div>
+ <div class="device-cap"><h3>8 · Options A / B / C</h3><p>Tap one to pick it (a drag on a tile still swipes); right = “Use C”. Left = none of these. “Suggested” = the helper's pick, never pre-selected.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="opt"></div></div></div></div>
+ <div class="device-cap"><h3>9 · Comment on option C</h3><p>Choosing what the comment is about never approves. Two clear buttons: “Send back for changes” or “Use C with these changes”.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="optc"></div></div></div></div>
+ <div class="device-cap"><h3>10 · All cards</h3><p>“All” at the top: every card with its answer, waiting ones first. Tap one to jump there; answered ones can be changed.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="ov"></div></div></div></div>
+ <div class="device-cap"><h3>11 · All done</h3><p>“You've answered everything in this review.” Undo stays at the top. Each ticket shows what happens next.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="end"></div></div></div></div>
+</div></main>
+<script>
+const I=window.SWIPE_ITEMS,$=id=>document.getElementById(id),hideKeys=e=>{e.classList.add('swipe-hide-keys');return e};
+UI.swipeDeck(hideKeys($('live')),I,{mode:'phone'});
+const d3=UI.swipeDeck(hideKeys($('drag')),I,{mode:'phone',quiet:true,start:2});requestAnimationFrame(()=>requestAnimationFrame(()=>d3.show(110,14)));
+const d4=UI.swipeDeck(hideKeys($('talk')),I,{mode:'phone',quiet:true,start:0,state:'comment'});requestAnimationFrame(()=>{const c=d4.openComment();c.start();setTimeout(c.stop,40);c.ta.value='And the date should be on the left.';c.ta.dispatchEvent(new Event('input'))});
+const d5=UI.swipeDeck(hideKeys($('zoom')),I,{mode:'phone',quiet:true,start:7,state:'zoom'});d5.pins.d6=[{x:72,y:30,on:'',text:'Button bigger, same green as the logo.'}];requestAnimationFrame(()=>{const v=d5.openViewer();v.askPin(30,62,'Show the month here','')});
+const d7=UI.swipeDeck(hideKeys($('cmp')),I,{mode:'phone',quiet:true,start:0,state:'zoom'});requestAnimationFrame(()=>{const v=d7.openViewer();v.compare.cut(38)});
+const d8=UI.swipeDeck(hideKeys($('cmp2')),I,{mode:'phone',quiet:true,start:5});requestAnimationFrame(()=>$('cmp2').querySelector('.swipe-card:not(.under):not(.under2) .swipe-cmp-ctl [data-v=both]').click());
+const d9=UI.swipeDeck(hideKeys($('opt')),I,{mode:'phone',quiet:true,start:1,picked:{o1:'C'}});
+const d10=UI.swipeDeck(hideKeys($('optc')),I,{mode:'phone',quiet:true,start:1,picked:{o1:'C'},state:'comment'});requestAnimationFrame(()=>{const c=d10.openComment();c.ta.value='Take C, but put the questions on top of the list.';c.ta.dispatchEvent(new Event('input'))});
+const d11=UI.swipeDeck(hideKeys($('ov')),I,{mode:'phone',quiet:true,start:0,picked:{o1:'B'}});
+const d6=UI.swipeDeck(hideKeys($('end')),I,{mode:'phone',quiet:true,start:0,picked:{o1:'B',o2:'B'}});
+const run=(d,seq,after)=>{let n=0;const step=()=>{if(n<seq.length){d.fly(seq[n++]);setTimeout(step,260)}else after&&after()};setTimeout(step,300)};
+run(d11,['ok','ok','no'],()=>d11.openOverview());
+run(d6,['ok','ok','no','ok','ok','ok','ok'],()=>{const c=d6.openComment();c.ta.value='Use real numbers';c.ta.dispatchEvent(new Event('input'));c.send.click()});
+</script></body></html>

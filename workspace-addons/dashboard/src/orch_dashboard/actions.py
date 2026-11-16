@@ -66,7 +66,7 @@ LONG_NOTE = (
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
 SHA = re.compile(r"[0-9a-f]{40,64}")
-DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
+DAY = re.compile(r"(\d{4}-\d\d-\d\d([T ]\d\d:\d\d)?)?")  # a day, or a day and a time (local)
 ADDON = re.compile(r"[a-z][a-z0-9-]{1,31}")
 VERB = re.compile(r"[a-z][a-z-]{0,20}")
 # A name that is also a core command is never an add-on target, whatever the add-on list says.
@@ -77,6 +77,7 @@ RESERVED = frozenset(
         "log",
         "ask",
         "answer",
+        "review",
         "ref",
         "ext",
         "wait",
@@ -293,6 +294,57 @@ def _answer(a):
     )
 
 
+REVIEW_KEY = re.compile(r"review|q[0-9]{1,4}")
+REVIEW_VERDICTS = ("ok", "no", "talk")
+MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
+
+
+def _review_answer(a):
+    """`orch review answer <ticket> <key> --verdict v [--picked ID] [--note JSON] --digest D --via dashboard`.
+    The core re-checks the digest and the size of the note; this only keeps the argv plain."""
+    _only(a, ("ticket", "key", "verdict", "picked", "note", "digest"))
+    key = a.get("key")
+    if not (isinstance(key, str) and REVIEW_KEY.fullmatch(key)):
+        raise BadRequest("That is not a card.")
+    verdict = a.get("verdict")
+    if verdict not in REVIEW_VERDICTS:
+        raise BadRequest("The answer must be ok, no or talk.")
+    flags = ["--verdict", verdict]
+    picked = a.get("picked")
+    if picked is not None:
+        if not (isinstance(picked, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,20}", picked)):
+            raise BadRequest("That is not an option.")
+        flags += ["--picked", picked]
+    note = a.get("note")
+    if note is not None:
+        if not isinstance(note, dict):
+            raise BadRequest("The note must be an object.")
+        if (
+            "text" in note and "words" not in note
+        ):  # the page's {text, pins} is the core's {words: {text}, pins}
+            note = {**{k: v for k, v in note.items() if k != "text"}, "words": {"text": note["text"]}}
+        text = json.dumps(note, ensure_ascii=False, separators=(",", ":"))
+        if len(text.encode("utf-8")) > MAX_REVIEW_NOTE:
+            raise BadRequest("A note is at most 8 KB.")
+        if "\x00" in text:
+            raise BadRequest("The note has a character that is not allowed.")
+        flags += ["--note", text]
+    flags += ["--digest", _question_digest(a), "--via", "dashboard"]
+    return ["review", "answer", _tid(a.get("ticket")), key], flags, []
+
+
+def review_error(out, stderr: str, status: int) -> str:
+    """The JSON the Review page reads for a refused card: {"ok": false, "error": {"code", "message"}}. The core's
+    codes (changed, too_large, not_found, needs_person, refused) pass through; anything else is "refused"."""
+    code = out.get("code") if isinstance(out, dict) else None
+    msg = out.get("error") if isinstance(out, dict) else None
+    if not isinstance(msg, str) or not msg:
+        msg = (stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
+    if code not in ("changed", "too_large", "not_found", "needs_person", "refused", "busy"):
+        code = "refused"
+    return json.dumps({"ok": False, "error": {"code": code, "message": msg[:500]}}, ensure_ascii=False)
+
+
 def _ticket_new(a):
     _only(
         a,
@@ -324,7 +376,7 @@ def _ticket_new(a):
         if v:
             v = _text(v, k)
             if k == "due" and not DAY.fullmatch(v):
-                raise BadRequest("The due day must look like 2026-11-30.")
+                raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
             flags.append(f"--{k.replace('_', '-')}={v}")
     return ["ticket", "new"], flags, [_text(a.get("title"), "title")]
 
@@ -403,7 +455,7 @@ def _ticket_patch(a):
         if k == "status" and v not in STATUSES:
             raise BadRequest("That is not a status.")
         if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
-            raise BadRequest("The due day must look like 2026-11-30.")
+            raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
         if k not in ("status", "due"):
             _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
@@ -433,7 +485,7 @@ def _ticket_edit(a):
         if k in a:
             v = _text(a[k], k, empty=k != "title")
             if k == "due" and not DAY.fullmatch(v):
-                raise BadRequest("The due day must look like 2026-11-30.")
+                raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
             flags.append(f"--{k.replace('_', '-')}={v}")
     if not flags:
         raise BadRequest("Nothing to change.")
@@ -566,6 +618,16 @@ def _diag_set(a):
     return ["config", "set", "diag.enabled", "on" if a["on"] else "off"], [], []
 
 
+def _typing_set(a):
+    """Settings > Add-ons: may the person type into the helper's screen, a plain `orch config set` (core names the key)."""
+    from orch.config import SESSION_TYPING_KEY
+
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", SESSION_TYPING_KEY, "on" if a["on"] else "off"], [], []
+
+
 def _diag_delete(what):
     def build(a):
         _only(a, ())
@@ -677,6 +739,14 @@ def _run_send(a):
     return ["run", "send"], [], [_tid(a.get("ticket")), _text(a.get("text"), "message")]
 
 
+def _run_take_back(a):
+    _only(a, ("ticket", "id"))
+    pid = a.get("id")
+    if not isinstance(pid, str) or not re.fullmatch(r"p_[a-z0-9]{6,32}", pid):
+        raise BadRequest("That is not a message id.")
+    return ["run", "take-back", _tid(a.get("ticket")), pid], [], []
+
+
 def _run_stop(a):
     _only(a, ("ticket",))
     return ["run", "stop", _tid(a.get("ticket"))], [], []
@@ -736,6 +806,12 @@ def _addon_act(a):
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
                 raise BadRequest("Set takes a whole number.")
             value = a["value"]
+        elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
+            value = _text(a["value"], "text").strip()
+            if HIDDEN_CHARS.search(value):
+                raise BadRequest("Use plain text on one line.")
+            if len(value) > 200:
+                raise BadRequest("Write at most 200 characters.")
         else:
             value = _text(a["value"], "time")
             if verb != "repeat" or len(value) > 200:
@@ -898,6 +974,15 @@ def _addon_set(a):
     return (["addon", "add", name], ["--yes"], []) if a["on"] else (["addon", "remove", name], [], [])
 
 
+def _addon_uninstall(a):
+    """Remove an add-on from this computer: `orch addon uninstall <name>` (the same CLI path as the terminal)."""
+    _only(a, ("name",))
+    name = a.get("name")
+    if not (isinstance(name, str) and ADDON.fullmatch(name) and name not in RESERVED):
+        raise BadRequest("That is not an add-on.")
+    return (["addon", "uninstall", name], [], [])
+
+
 def _link(a, extend=False):
     _only(a, ("id", "days") if extend else ("id",))
     fid = a.get("id")
@@ -917,6 +1002,7 @@ OPS = {
     "link.extend": lambda a: _link(a, True),
     "link.stop": _link,
     "answer": _answer,
+    "review.answer": _review_answer,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
     "ticket.attach": _ticket_attach,
@@ -935,6 +1021,7 @@ OPS = {
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,
+    "run.take_back": _run_take_back,
     "addon.start": _addon_start,
     "addon.act": _addon_act,
     "config.agent": _config_agent,
@@ -943,6 +1030,7 @@ OPS = {
     "config.permissions": _config_permissions,
     "workspace.set": _workspace_set,
     "addon.set": _addon_set,
+    "addon.uninstall": _addon_uninstall,
     "share.set": _share_set,
     "private.move": _private_move,
     "private.allow": _private_allow,
@@ -952,6 +1040,7 @@ OPS = {
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
     "diag.set": _diag_set,
+    "typing.set": _typing_set,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
@@ -986,6 +1075,8 @@ def build_argv(op, args, root: Path | None = None) -> list[str]:
     words, flags, tail = fn(args)
     if op == "config.agent.test":
         return [*words, "--json"]
+    if op == "review.answer":  # a card answer is the current person's plain answer: no proof, no --by
+        return [*words, *flags, "--json"]
     return [*words, *flags, "--by", actor(root), "--json", *(["--", *tail] if tail else [])]
 
 
@@ -1187,7 +1278,7 @@ def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, 
 
 def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
-    if op == "addon.set" and args.get("on") is True:
+    if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
     return 75 if op == "config.agent.test" else 60
 
@@ -1224,6 +1315,10 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
         raise BadRequest("That add-on is not installed.")
+    if op == "addon.uninstall":
+        row = _addon_row(root, orch_bin, args["name"])
+        if row is None or row.get("installed") is False:
+            raise BadRequest("That add-on is not installed.")
     if op == "addon.set" and args.get("on") is False:
         row = _addon_row(root, orch_bin, args["name"])
         if row is not None and row.get("installed") is False:
@@ -1297,6 +1392,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "link.stop",
             "config.agent.add",
             "addon.set",
+            "addon.uninstall",
             "config.agent",
             "config.permissions",
             "workspace.set",
@@ -1319,6 +1415,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
             out["attached"] = _attach_all(root, orch_bin, out["id"], files)
         return 200, "", out if isinstance(out, dict) else None
+    if op == "review.answer":  # JSON the page reads: the code decides what it says (changed = look again)
+        return 422, review_error(out, r.stderr, r.returncode), None
     msg = out.get("error") if isinstance(out, dict) else None
     if not msg:
         msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")

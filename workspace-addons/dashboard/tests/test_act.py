@@ -46,6 +46,7 @@ def acts(act_orch):
             ["ticket", "list"],
             ["config", "get"],
             ["look", "show"],
+            ["review", "list"],
             ["chat", "status"],
         )
         and c[:2] != ["private", "--json"]
@@ -176,6 +177,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ],
         ),
         (
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": "2026-11-30T18:30"}},
+            ["ticket", "edit", "t_abcdef", "--due=2026-11-30T18:30", *common],
+        ),
+        (
             {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": ""}},
             ["ticket", "edit", "t_abcdef", "--due=", *common],
         ),
@@ -189,6 +194,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        (
+            {"op": "run.take_back", "args": {"ticket": "t_abcdef", "id": "p_abcdef12"}},
+            ["run", "take-back", "t_abcdef", "p_abcdef12", *common],
+        ),
         ({"op": "share.set", "args": {"on": True}}, ["share", "on", *common]),
         ({"op": "share.set", "args": {"on": False}}, ["share", "off", *common]),
         ({"op": "private.move", "args": {}}, ["private", "move", *common]),
@@ -294,7 +303,7 @@ import json, sys
 a = sys.argv[1:]
 if a[:1] == ["needs"]: print(json.dumps([{{"id": "question:t_1:q1", "title": "x"}}]))
 elif a[:1] == ["status"]: print(json.dumps([{{"workspace": {str(ws.resolve())!r}, "name": "w", "addons": [{{"addon": "automation", "running": False}}]}}]))
-elif a[:2] == ["run", "status"]: print(json.dumps({{"ticket": a[2], "running": False, "pending": 0}}))
+elif a[:2] == ["run", "status"]: print(json.dumps({{"runs": {{t: {{"ticket": t, "running": False, "pending": 0}} for t in a[2:-1]}}}}))
 else: sys.exit(2)
 """)
     script.chmod(0o755)
@@ -338,7 +347,7 @@ import json, sys, pathlib
 a = sys.argv[1:]
 if a[:2] == ["run", "status"]:
     open(pathlib.Path(__file__).parent / "n", "a").write("x")
-    print(json.dumps({{"running": True}}))
+    print(json.dumps({{"runs": {{t: {{"running": True}} for t in a[2:-1]}}}}))
 else: sys.exit(2)
 """)
     script.chmod(0o755)
@@ -396,6 +405,50 @@ def test_addon_act_runs_one_generic_argv_for_an_active_addon(act_orch, ws):
         for args in bad:
             assert post(base, {"op": "addon.act", "args": args})[0] == 400, args
         assert not any(c[1:2] == ["act"] and c[0] in ("beta", "gamma", "ticket") for c in calls(act_orch))
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_addon_act_edit_takes_one_line_of_plain_text(act_orch, ws):
+    import threading
+
+    from orch_dashboard.server import make_server
+
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}]))\n    sys.exit(0)\n'
+        'if a[:2] in (["addon", "list"]',
+    )
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    me = actions.actor()
+    try:
+        args = {"addon": "alpha", "verb": "edit", "target": "l_k2m9q4"}
+        code, text, _ = post(
+            base, {"op": "addon.act", "args": {**args, "value": "  Use npm run test:web.  "}}
+        )
+        assert code == 200, text
+        assert acts(act_orch)[-1] == [
+            "alpha",
+            "act",
+            "edit",
+            "--value=Use npm run test:web.",
+            "--by",
+            me,
+            "--json",
+            "--",
+            "l_k2m9q4",
+        ]
+        n = len(acts(act_orch))
+        for bad in ("", "   ", "x" * 201, "two\nlines", "bell\x07", "zero\u200bwidth", 5, None):
+            assert post(base, {"op": "addon.act", "args": {**args, "value": bad}})[0] == 400, bad
+        # other verbs still refuse a free-text value
+        assert post(base, {"op": "addon.act", "args": {**args, "verb": "rm", "value": "x"}})[0] == 400
+        assert len(acts(act_orch)) == n
+        assert post(base, {"op": "addon.act", "args": {**args, "value": "x" * 200}})[0] == 200
     finally:
         srv.shutdown()
         srv.server_close()
@@ -477,6 +530,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 {"op": "addon.set", "args": {"name": "alpha", "on": False}},
                 ["addon", "remove", "alpha", *common],
             ),
+            (  # Remove: the same CLI path as `orch addon uninstall`
+                {"op": "addon.uninstall", "args": {"name": "alpha"}},
+                ["addon", "uninstall", "alpha", *common],
+            ),
             (  # the Add of the catalogue: an available (not installed) add-on, same op as the switch
                 {"op": "addon.set", "args": {"name": "avail", "on": True}},
                 ["addon", "add", "avail", "--yes", *common],
@@ -490,7 +547,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 for c in calls(act_orch)
                 if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
                 and c[0] not in ("needs", "status", "agents")
-                and c[:2] not in (["config", "get"], ["chat", "status"])
+                and c[:2] not in (["config", "get"], ["chat", "status"], ["review", "list"])
                 and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"])
                 and c[0] != "look"
                 and c[:2] != ["private", "--json"]
@@ -517,6 +574,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             {"op": "addon.set", "args": {"name": "ticket", "on": True}},
             {"op": "addon.set", "args": {"name": "alpha", "on": "yes"}},
             {"op": "addon.set", "args": {"name": "alpha"}},
+            {"op": "addon.uninstall", "args": {"name": "gamma"}},  # not installed
+            {"op": "addon.uninstall", "args": {"name": "avail"}},  # available, not added
+            {"op": "addon.uninstall", "args": {"name": "dashboard"}},  # never from itself
+            {"op": "addon.uninstall", "args": {"name": "alpha", "x": 1}},
             {
                 "op": "addon.set",
                 "args": {"name": "avail", "on": False},
@@ -527,7 +588,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
         assert not [
             c
             for c in calls(act_orch)[n:]
-            if c[0] in ("config", "addon") and c[1] in ("set", "agent", "add", "remove")
+            if c[0] in ("config", "addon") and c[1] in ("set", "agent", "add", "remove", "uninstall")
         ]
         assert actions.MAX_COMMAND == 500
         # a command that starts with a dash is still one argv value that begins with --command=
@@ -1294,6 +1355,106 @@ def test_attach_files_to_an_existing_ticket():
         actions.attachments(
             "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "x.exe", "text": "x"}]}
         )
+
+
+# --- Review page: review.answer ----------------------------------------------------------------------------
+D64 = "a" * 64
+
+
+def test_review_answer_argv_and_via(act_server, act_orch):
+    args = {
+        "ticket": "t_abcdef",
+        "key": "q3",
+        "verdict": "talk",
+        "picked": "C",
+        "note": {"text": "darker", "pins": [{"n": 1, "on": "after", "x": 0.2, "y": 0.4, "text": "here"}]},
+        "digest": D64,
+    }
+    code, text, _ = post(act_server, {"op": "review.answer", "args": args})
+    assert code == 200, text
+    a = acts(act_orch)[-1]
+    assert a[:4] == ["review", "answer", "t_abcdef", "q3"]
+    assert a[a.index("--verdict") + 1] == "talk" and a[a.index("--picked") + 1] == "C"
+    note = json.loads(a[a.index("--note") + 1])  # the core reads words.text, not text
+    assert note["words"] == {"text": "darker"} and "text" not in note and note["pins"][0]["n"] == 1
+    assert a[a.index("--digest") + 1] == D64 and a[a.index("--via") + 1] == "dashboard"
+    assert "--by" not in a and "--proof-stdin" not in a
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok"},  # no digest
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": "x"},
+        {"ticket": "t_abcdef", "key": "q1; ls", "verdict": "ok", "digest": D64},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "yes", "digest": D64},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "C; rm"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "note": "text"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "note": {"text": "x" * 9000}},
+        {"ticket": "../x", "key": "q1", "verdict": "ok", "digest": D64},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "by": "human:x"},
+    ],
+)
+def test_review_answer_is_checked(act_server, act_orch, args):
+    assert post(act_server, {"op": "review.answer", "args": args})[0] == 400
+    assert acts(act_orch) == []
+
+
+def test_review_answer_has_no_proof_and_no_by():
+    q = {"ticket": "t_abcdef", "key": "q3", "verdict": "ok", "digest": D64}
+    assert actions.proof_for("review.answer", q) is None
+    assert actions.proof_for("review.answer", {**q, "key": "review"}) is None
+    argv = actions.build_argv("review.answer", q)
+    assert "--by" not in argv and "--proof-stdin" not in argv and argv[-1] == "--json"
+    assert argv[:4] == ["review", "answer", "t_abcdef", "q3"] and argv[argv.index("--via") + 1] == "dashboard"
+    assert "review" in actions.RESERVED
+
+
+def test_review_answer_needs_the_page_session_but_no_proof(ws, monkeypatch):
+    from orch.pageproof import SELF
+
+    seen = {}
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **k: seen.update(argv=argv) or R())
+    args = {"ticket": "t_abcdef", "key": "review", "verdict": "ok", "digest": D64}
+    with pytest.raises(actions.NeedsPerson):  # watch-only: no page session, nothing runs
+        actions.run_op(ws, SELF, "review.answer", args, mint=None)
+    assert seen == {}
+    code, _, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: pytest.fail("no proof"))
+    assert code == 200 and "review" in seen["argv"] and "--by" not in seen["argv"]
+
+
+def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):
+    from orch.pageproof import SELF
+
+    for code_in, code_out in (("changed", "changed"), ("needs_person", "needs_person"), ("weird", "refused")):
+
+        class R:
+            returncode = 2
+            stdout = json.dumps({"error": "It changed.", "code": code_in})
+            stderr = "Refused: It changed.\n"
+
+        monkeypatch.setattr(actions, "_run", lambda argv, **k: R())
+        args = {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64}
+        status, text, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: "hp1.x")
+        assert status == 422
+        assert json.loads(text) == {"ok": False, "error": {"code": code_out, "message": "It changed."}}
+
+
+def test_review_agent_is_refused(act_server, act_orch):
+    # an agent's request has no page session: the real server is watch-only (see test_proof_session); here the
+    # core refuses an agent as a person, and the page gets needs_person
+    out = json.loads(
+        actions.review_error({"error": "Only a person can decide.", "code": "needs_person"}, "", 2)
+    )
+    assert out["error"]["code"] == "needs_person"
+
+
+def test_workspace_set_builds_one_config_set_argv_and_signs_the_text():
+    pass
 
 
 def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():

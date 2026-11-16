@@ -44,7 +44,7 @@
       "additionalProperties": { "type": "object" }
     },
     "owner": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The person who owns the ticket, free text (a name), e.g. 'Severin'. Not a login." },
-    "due": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "Optional. Due day, YYYY-MM-DD, no time and no zone." },
+    "due": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?$", "description": "Optional. Due day, YYYY-MM-DD, or day and time, YYYY-MM-DDTHH:MM (local wall time on that day, no seconds, no zone). A day-only value means the whole day." },
     "note": { "type": "string", "maxLength": 2000, "description": "Optional. Free note from people, shown on the ticket. Plain text." },
     "done_when": { "type": "string", "maxLength": 2000, "description": "Optional. What people want to be true when the ticket is done. Plain text." },
     "summary": { "type": "string", "maxLength": 200, "description": "Optional. Where things stand, one or two plain sentences, kept current by whoever works on it. Used to start a fresh agent session." },
@@ -210,12 +210,16 @@
         "status": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9 -]{0,23}$",
-          "description": "Set only by the add-on that owns kind (refresh act); shown only while it is on."
+          "description": "The state last seen: set by `orch ref set` (any web reference) or by the add-on that owns kind (refresh act). Lower-case word; shown for every web reference."
         },
         "thumb": {
           "type": "string",
           "pattern": "^artifacts/[A-Za-z0-9_.-]{1,100}$",
           "description": "A picture in the ticket's artifacts folder (add-on with preview = 'thumb')."
+        },
+        "seen_at": {
+          "$ref": "#/$defs/time",
+          "description": "Optional, web references. When `orch ref set` last recorded the status; `at` and `by` stay who added the reference."
         },
         "at": {
           "$ref": "#/$defs/time"
@@ -381,6 +385,8 @@
         "recommended": { "type": ["string", "null"] },
         "answer": { "type": ["string", "null"] },
         "answered_by": { "oneOf": [{ "$ref": "#/$defs/who" }, { "type": "null" }] },
+        "sent_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was sent to the person's phones. Set once by the core; absent when it never went to a phone." },
+        "answered_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was answered (set by the core with the answer, whatever `via` says)." },
         "via": { "oneOf": [{ "$ref": "#/$defs/token" }, { "type": "null" }], "description": "Where the answer came from (free word, e.g. cli, web, phone). null while unanswered." },
         "kind": {
           "type": "string",
@@ -389,7 +395,16 @@
           "description": "Optional. plain (default) or <add-on>:<name>; the add-on with that prefix acts on the answer. The core only records it."
         },
         "action": { "type": "object", "description": "Optional, opaque to the core: data the asking add-on needs to act on the answer." },
-        "check": { "type": "string", "pattern": "^c[0-9]{1,4}$", "description": "Optional. The checklist item this question belongs to." }
+        "check": { "type": "string", "pattern": "^c[0-9]{1,4}$", "description": "Optional. The checklist item this question belongs to." },
+        "card": { "type": "object", "description": "Optional (Review stack). What the person is shown: kind (draft|check|link|choice|plan), title, why, need, then, ok_label, signs, open, preview (page|img|doc|table|compare|options). File references point into reviewed/<sha12>/.", "required": ["kind", "title"], "properties": { "kind": { "enum": ["draft", "check", "link", "choice", "plan"] }, "title": { "type": "string" } } },
+        "shown": { "type": "object", "description": "Optional (Review stack). A fingerprint of exactly what the card showed: digest, copy (reviewed/<sha12>/, a content-addressed copy under .orch/tickets/<id>/) and files (name to sha256).", "required": ["digest", "copy", "files"], "properties": { "digest": { "type": "string" }, "copy": { "type": "string" }, "files": { "type": "object", "additionalProperties": { "type": "string" } } } },
+        "decision": { "type": "object", "description": "Optional (Review stack), set when answered. action (approve|use|use_with_changes|send_back|dont|none_of_these), picked, allows, changes[], words{text,voice[]}, pins[], summary (the one plain line that is also `answer`), replaces (an earlier entry this one answers again), replaced_by (set later on the old entry; never part of the signed binding).", "required": ["action", "summary"], "properties": { "action": { "enum": ["approve", "use", "use_with_changes", "send_back", "dont", "none_of_these"] }, "picked": { "type": ["string", "null"] }, "allows": { "type": ["string", "null"] }, "changes": { "type": "array", "items": { "type": "string" } }, "words": { "type": "object" }, "pins": { "type": "array", "items": { "type": "object" } }, "summary": { "type": "string" }, "replaces": { "type": ["string", "null"] }, "replaced_by": { "type": ["string", "null"] } } },
+        "at": { "$ref": "#/$defs/time", "description": "Optional (Review stack). When the decision was made." },
+        "taken_back": {
+          "type": "object", "additionalProperties": false, "required": ["at", "by", "reason"],
+          "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "$ref": "#/$defs/who" }, "reason": { "type": "string", "minLength": 1, "maxLength": 300 } },
+          "description": "Optional (orch ask --take-back). The asker took its own question back: the question stays in the ticket, settled; `answer` is `Taken back: <reason>`. Never set from an incoming message. A person's phone is told with one message (contracts: Question taken back); old ticket files without it keep working."
+        }
       }
     },
     "history": {

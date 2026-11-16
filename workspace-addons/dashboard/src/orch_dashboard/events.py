@@ -17,11 +17,12 @@ class Revisions:
 
     def signature(self):
         rows = []
-        for folder in (self.root / ".orch" / "tickets", self.root / ".orch" / "run"):
+        flat = ("tickets", "chat", "inbox")  # one level of .json files; run records can be nested
+        for folder in (self.root / ".orch" / n for n in (*flat, "run")):
             for parent, dirs, files in os.walk(folder, followlinks=False):
                 dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(parent, d))]
                 # Ticket artifacts are not state; run records can be nested.
-                if folder.name == "tickets":
+                if folder.name in flat:
                     dirs[:] = []
                 for name in sorted(files):
                     if name.endswith(".json"):

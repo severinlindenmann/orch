@@ -215,7 +215,11 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
         if b.get("by") == "you":
             if b.get("via") == "phone" and not (isinstance(o, dict) and o.get("from") == b.get("phone")):
                 out.append("by you via phone: origin.from must be that phone")
-            if b.get("via") == "dashboard" and isinstance(o, dict) and o.get("from") != "dashboard":
+            if (
+                b.get("via") == tickets.PERSON_VIA
+                and isinstance(o, dict)
+                and o.get("from") != tickets.PERSON_VIA
+            ):
                 out.append("by you via dashboard: origin.from must be dashboard")
         if isinstance(b.get("task"), dict) and b["task"].get("ws") == host:
             out.append("task.ws is the member that got the task, never the host")
@@ -433,7 +437,9 @@ def shown_as(m: dict, ctx: dict) -> str | None:
         return "Other phone"
     o = b.get("origin") or {}
     return (
-        "You" if o.get("from") == "dashboard" or o.get("from") in ctx.get("own_phones", []) else "Other phone"
+        "You"
+        if o.get("from") == tickets.PERSON_VIA or o.get("from") in ctx.get("own_phones", [])
+        else "Other phone"
     )
 
 
@@ -1521,8 +1527,13 @@ def _by_name(g: dict, ws: str) -> str:
 
 def card_for(root: Path, g: dict) -> dict | None:
     """body.shared_ticket without `rev`: title, status, summary, the open information question, checklist."""
+    return card_of_ticket(root, g["ticket"])
+
+
+def card_of_ticket(root: Path, tid: str) -> dict | None:
+    """The ticket card of one ticket (the group card, and `relay delegate --full`'s body.ticket_card)."""
     try:
-        t = tickets.load(root, g["ticket"])
+        t = tickets.load(root, tid)
     except (Refused, OSError, ValueError):
         return None
     q = next((x for x in t.get("questions", []) if x.get("answer") is None and x.get("kind") is None), None)
@@ -1546,6 +1557,16 @@ def card_for(root: Path, g: dict) -> dict | None:
     return card
 
 
+def fit_card(card: dict) -> dict:
+    """The card within CARD_MAX bytes as compact JSON: the checklist loses items from the end first."""
+    while (
+        len(json.dumps(card, separators=(",", ":"), ensure_ascii=False).encode()) > CARD_MAX
+        and card["checklist"]
+    ):
+        card["checklist"].pop()
+    return card
+
+
 def _send_card(root: Path, g: dict, ws: str, force: bool = False) -> dict | None:
     """The ticket card to one member (rev +1 when the content changed since the last one; `force`: again)."""
     card = card_for(root, g)
@@ -1558,12 +1579,7 @@ def _send_card(root: Path, g: dict, ws: str, force: bool = False) -> dict | None
     sent = g["card"].setdefault("sent", {})
     if sent.get(ws) == rev and not force:
         return None
-    card = {**card, "rev": rev}
-    while (
-        len(json.dumps(card, separators=(",", ":"), ensure_ascii=False).encode()) > CARD_MAX
-        and card["checklist"]
-    ):
-        card["checklist"].pop()
+    card = fit_card({**card, "rev": rev})
     body = {
         "text": f"From {_line(g['members'][g['host']]['name'], 60)} · {card.get('key') or card['ticket']}",
         "group": _wire(g),
@@ -1590,8 +1606,8 @@ def paired_phone(root: Path, ph: str) -> bool:
 def _by_via(origin_from: str, host: str, phone_ws_via: str = "helper") -> tuple[str, str, str | None]:
     if origin_from.startswith("ph_"):
         return "you", "phone", origin_from
-    if origin_from == "dashboard":
-        return "you", "dashboard", None
+    if origin_from == tickets.PERSON_VIA:
+        return "you", tickets.PERSON_VIA, None
     return origin_from, phone_ws_via, None
 
 
@@ -1750,11 +1766,13 @@ def say(
     dashboard)."""
     if not text.strip():
         raise Refused("A group message needs text.")
-    if via == "dashboard":  # "by you" is the person at this dashboard: an agent can't write as the person
+    if (
+        via == tickets.PERSON_VIA
+    ):  # "by you" is the person at this dashboard: an agent can't write as the person
         tickets.require_human("Write into the group as yourself?", "writing as the person")
     gid = ensure_group(root, tid, by)
     me = _me(root)
-    origin = "dashboard" if via == "dashboard" else me
+    origin = tickets.PERSON_VIA if via == tickets.PERSON_VIA else me
     from orch import relay
 
     errors: list = []
@@ -1772,13 +1790,13 @@ def say(
             origin_id=oid,
             origin_from=origin,
             at=tickets.now(),
-            to_person=to_person and via != "dashboard",
+            to_person=to_person and via != tickets.PERSON_VIA,
             errors=errors,
         )
     if tool := tickets.agent_tool():  # an agent never posts as the person, whatever via says
         who = "agent:" + str(tool)
     else:
-        who = by if via != "dashboard" else "human:owner"
+        who = by if via != tickets.PERSON_VIA else "human:owner"
     _history(root, tid, who, f"Group: {text}"[:2000], chat=True)
     return {"group": gid, "seq": seq, "origin": oid, "errors": errors}
 
@@ -1826,7 +1844,6 @@ def ask(root: Path, tid: str, ws: str, qid: str, by: str = "agent:relay") -> dic
         "group": gid,
         "question_digest": tickets.question_digest(q),  # the question as it was sent
     }
-    relay.sign_asked(root, mid, asked[mid])
     net.write_json(relay._asked_path(root), asked, True)
     _history(root, tid, by, f"Asked {ws} (group): {q['text']}"[:2000])
     return msg
@@ -2204,7 +2221,7 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         origin_id=m["id"],
         origin_from=frm,
         at=m.get("created_at") or tickets.now(),
-        via="dashboard" if b.get("via") == "dashboard" else "helper",
+        via=tickets.PERSON_VIA if b.get("via") == tickets.PERSON_VIA else "helper",
         update=update,
         task=task,
         extra=ev_extra or None,
@@ -3052,7 +3069,6 @@ def waiting_approval(root: Path, delegate_msg: dict, allow_tid: str, qid: str) -
                 "to": "phones",
                 "question_digest": tickets.question_digest(q),  # the question as it was sent
             }
-            relay.sign_asked(root, qm["id"], asked[qm["id"]])
             net.write_json(relay._asked_path(root), asked, True)
         _report(
             root,

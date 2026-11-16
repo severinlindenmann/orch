@@ -64,14 +64,7 @@ L "--- addon add dashboard"; $out = O addon add dashboard --yes | Out-String; L 
 Check ($LASTEXITCODE -eq 0) "orch addon add dashboard (installs from the zip, no git)"
 Check (WaitFinish $out "addon add" 0) "dashboard install finished"
 $since = (Results $out).Count
-O dev-mark | Out-Null   # the harness marks the demo workspace dev (test install, under .orch-test), before any key
 L "--- update"; $out = O update | Out-String; L $out
-if ($LASTEXITCODE -ne 0 -and $out -match "dashboard on this computer|Waiting for your click") {
-    # a person's action (H1): the scripted test human proves it in a dev demo workspace
-    $proof = (cmd /c "orch dev-proof update orch 2>NUL" | Out-String).Trim()
-    Check ($proof.StartsWith("hp1.")) "test-human proof for orch update"
-    $out = $proof | cmd /c "orch update --proof-stdin 2>&1" | Out-String; L $out
-}
 Check ($LASTEXITCODE -eq 0) "orch update"
 Check (WaitFinish $out "update" $since) "update finished"
 Check ("$(O --version)" -match "^orch ") "orch still runs after the update"

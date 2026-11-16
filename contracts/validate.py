@@ -5,7 +5,7 @@ phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (ve
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
-With kinds (activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal, diag) only those draft-02 checks run.
+With kinds (review-card, activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal, diag) only those draft-02 checks run.
 """
 import base64
 import hashlib
@@ -81,6 +81,7 @@ V = {
     "focus-ext": validator("addons/focus/ext"),
     "factory-ext": validator("addons/factory/ext"),
     "factory-proposal": validator("addons/factory/proposal"),
+    "lessons-list": validator("addons/lessons/list"),
 }
 # The [workspace] agent + [agents.<name>] part of .orch/config.toml: a $def of agent-adapter.schema.json.
 _adapters = json.loads((HERE / "agent-adapter.schema.json").read_text())
@@ -1679,15 +1680,14 @@ def kind_human():
 
 
 # --- proposals (proposal.md) -----------------------------------------------------------------------------------------
-CHECKUP_ALLOWED = {("record", "query"), ("record", "tail"), ("record", "counts"), ("record", "propose"), ("ticket", "list"),
+CHECKUP_ALLOWED = {("record", "query"), ("record", "tail"), ("record", "counts"), ("insights", "propose"), ("ticket", "list"),
                    ("ticket", "show"), ("conn", "list"), ("log", None), ("check", None)}
 SHELL_META = re.compile(r"[;&|`$<>\\\n(){}*?~]")
 
 
 def checkup_allowed(c):
-    """Layer 1 (the agent tool's own exact allowlist): the whole shell command must be `orch <cmd> [<sub>] ...` from the
-    list, no shell syntax; log/check only on the check-up's own ticket. Layer 2 (core): propose only when the run record
-    says profile checkup. Returns True when both layers allow it."""
+    """The read-only list of a check-up run (an agent without one runs normally): the whole shell command must be
+    `orch <cmd> [<sub>] ...` from the list, no shell syntax; log/check only on the check-up's own ticket."""
     cmd = c["command"]
     if SHELL_META.search(cmd):
         return False
@@ -1705,8 +1705,6 @@ def checkup_allowed(c):
         tick = rest[1] if top == "check" and len(rest) > 1 and rest[0] in ("add", "done", "start") else (rest[0] if rest else None)
         if tick != c["own_ticket"]:
             return False
-    if (top, sub) == ("record", "propose") and c.get("profile") != "checkup":
-        return False
     return True
 
 
@@ -1717,10 +1715,10 @@ def change_sha256(change):
 
 
 def proposal_from_draft(draft, ctx):
-    """The core builds the stored proposal; the agent's draft supplies only its own fields. 'refused:<why>' on a bad draft."""
+    """`orch insights propose` builds the stored proposal; the agent's draft supplies only its own fields. 'refused:<why>'."""
     if _msgs(_w("proposal", "draft"), draft):
         return "refused:invalid"
-    if ctx.get("profile") != "checkup":
+    if ctx.get("checkup") is None:
         return "refused:not_checkup"
     t = draft["target"]
     if draft["kind"] == "skill.new" and (t["name"].startswith("orch") or t["name"] in ctx["existing_names"]):
@@ -1735,48 +1733,40 @@ def proposal_from_draft(draft, ctx):
             "target": {"kind": t["kind"], "name": t["name"], "source": "new" if draft["kind"] == "skill.new" else ctx["source"],
                        "version": None if draft["kind"] == "skill.new" else ctx["version"]},
             "change": change, "change_sha256": change_sha256(change),
-            "tests": {"state": "not_run", "cases": [], "ran_at": None}, "status": "proposed", "decided": None, "applied": None}
+            "tests": {"state": "not_run", "cases": [], "ran_at": None, "hash": None}, "status": "proposed", "decided": None, "applied": None}
 
 
 def proposal_hash(doc):
-    """sha256 over {id, kind, target, change} of a proposal (canonical JSON); kept with the test result in orch home."""
-    core = {k: doc.get(k) for k in ("id", "kind", "target", "change")}
+    """sha256 over what a person reads and what gets written (id, kind, title, plain, likely, evidence, target, change),
+    canonical JSON. The test records it; Accept refuses when the file no longer hashes to it."""
+    core = {k: doc.get(k) for k in ("id", "kind", "title", "plain", "likely", "evidence", "target", "change")}
     return "sha256:" + hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
 def proposal_step(c):
-    """One decision. Status, tests and target come from the record in the guarded orch home (c["record"]); the workspace
-    copy (c["file"]) only has to hash to the recorded value. Returns the new status or a refusal code."""
-    rec, act = c["record"], c["action"]
-    if act in ("accept", "rollback", "send_to_admin", "reject") and c.get("proof") != "ok":
-        return "not_allowed"
-    if rec is None:
-        return "not_found"
-    st = rec["status"]
+    """One decision on the proposal file (c["file"]); c["status"], c["tests"] (state), c["tests_hash"] (what the test saw),
+    c["current_version"] (the skill now), c["applied_after"]. Returns the new status or a refusal code."""
+    act, st = c["action"], c["status"]
     if act == "skill_changed":
         return "stale" if st in ("proposed", "tested") else st
     if act == "tests_done":
         return "tested" if st == "proposed" and c["tests"] == "passed" else st
     if act == "reject":
-        return "rejected" if st in ("proposed", "tested") else "conflict"
-    if proposal_hash(c["file"]) != rec["hash"]:
-        return "changed"
-    if act == "send_to_admin":
-        return "sent_to_admin" if st == "tested" and rec["target"]["source"] == "admin" else "conflict"
+        return "rejected" if st in ("proposed", "tested", "stale") else "conflict"
     if act == "accept":
-        if rec["target"]["source"] == "admin":
+        if c["file"]["target"]["source"] == "admin":
             return "admin_only"
-        if st != "tested" or rec["tests"] != "passed":
+        if st != "tested" or c["tests"] != "passed":
             return "not_tested"
-        if c["current_version"] != rec["target"]["version"]:
-            return "stale"
-        if c["proof_target"] != f"{rec['id']}@{rec['hash'].removeprefix('sha256:')}":
+        if c["tests_hash"] != proposal_hash(c["file"]):
             return "changed"
+        if c["current_version"] != c["file"]["target"]["version"]:
+            return "stale"
         return "accepted"
     if act == "rollback":
         if st != "accepted":
             return "conflict"
-        return "rolled_back" if c["current_version"] == rec["applied_after"] else "conflict"
+        return "rolled_back" if c["current_version"] == c["applied_after"] else "conflict"
     return "invalid"
 
 
@@ -1811,8 +1801,152 @@ def kind_diag():
         _expect(f"diag event name {c['ev']!r}", bool(name.fullmatch(c["ev"])), c["valid"])
 
 
+# --- review cards on the phone (relay-api.md "Review cards on the phone") --------------------------------------------
+RC_CARD_MAX, RC_VERDICT_MAX, RC_FILES_MAX = 65536, 8192, 20 * 1024 * 1024
+RC_RESULT_TEXT = {"applied": "Got it", "changed": "This changed. Look at it again", "decided": "Already decided"}
+
+
+def _rc_bytes(o):
+    return len(json.dumps(o, separators=(",", ":"), ensure_ascii=False).encode())
+
+
+def _rc_srcs(pv):
+    """Every card_src in a wire preview (leaf src, compare sides, option previews)."""
+    if not isinstance(pv, dict):
+        return []
+    out = [pv["src"]] if isinstance(pv.get("src"), dict) else []
+    for side in ("before", "after"):
+        out += _rc_srcs(pv.get(side))
+    for o in pv.get("options") or []:
+        out += _rc_srcs(o.get("preview"))
+    return out
+
+
+def _rc_tables(pv):
+    if not isinstance(pv, dict):
+        return []
+    out = [pv] if pv.get("type") == "table" else []
+    for side in ("before", "after"):
+        out += _rc_tables(pv.get(side))
+    for o in pv.get("options") or []:
+        out += _rc_tables(o.get("preview"))
+    return out
+
+
+def rc_relay_question(msg, blobs, vmsg):
+    """Reference intake of a question with a card: (status, error)."""
+    if _msgs(vmsg, msg):
+        return 422, "invalid"
+    b = msg["body"]
+    card, files = b.get("card"), b.get("card_files") or []
+    if card is None:
+        return 201, None
+    if _rc_bytes(card) > RC_CARD_MAX:
+        return 422, "invalid"
+    pv = card.get("preview") or {}
+    ids = [o["id"] for o in pv.get("options") or []]
+    if len(ids) != len(set(ids)):
+        return 422, "invalid"
+    if any(len(r) != len(t["cols"]) for t in _rc_tables(pv) for r in t["rows"]):
+        return 422, "invalid"
+    if any(s.get("file") is not None and s["file"] >= len(files) for s in _rc_srcs(pv)):
+        return 422, "invalid"
+    for f in files:
+        st = blobs.get(f["blob_id"])
+        if st is None or st["uploader"] != msg["from"]:
+            return 404, "not_found"
+        if st["size"] != f["size"] or st["sha256"] != f["sha256"]:
+            return 422, "invalid"
+    if sum(f["size"] for f in files) > RC_FILES_MAX:
+        return 422, "invalid"
+    return 201, None
+
+
+def rc_relay_answer(req, phone, paired, questions, answered, blobs, vreq):
+    """Reference POST /v1/phone/answer for the verdict rules: (status, error)."""
+    if _msgs(vreq, req):
+        return 422, "invalid"
+    q = questions.get(req["question_message_id"])
+    if q is None or q["from"] not in paired.get(phone, {}).get("workspaces", []) or q["to"] not in ("phones", phone):
+        return 404, "not_found"
+    if q["id"] in answered:
+        return 409, "already_answered"
+    v = req.get("verdict")
+    if v is not None:
+        if "digest" not in q["body"] or v["digest"] != q["body"]["digest"] or _rc_bytes(v) > RC_VERDICT_MAX:
+            return 422, "invalid"
+        for vo in ((v.get("note") or {}).get("words") or {}).get("voice") or []:
+            st = blobs.get(vo["blob_id"])
+            if st is None or st["uploader"] != phone:
+                return 404, "not_found"
+    return 201, None
+
+
+def kind_review_card():
+    vm, vreq, vverdict = _w("message"), _w("phone-api", "answer_request"), _w("message", "verdict")
+    vec = _vec("review-card-v1.json")
+    for s in vec["question_shapes"] + vec["review_result_shapes"]:
+        _expect(f"review-card shape {s['name']}", not _msgs(vm, s["message"]), s["schema"])
+    for s in vec["answer_requests"]:
+        _expect(f"review-card answer_request {s['name']}", not _msgs(vreq, s["request"]), s["schema"])
+    ra = vec["relay_answer"]
+    _expect("review-card relay_answer valid", _msgs(vm, ra["message"]), [])
+    _expect("review-card relay_answer verdict copied", ra["message"]["body"]["verdict"], ra["request"]["verdict"])
+    for q in vec["stored_questions"]:
+        hit = next(s["message"] for s in vec["question_shapes"] if s["message"]["body"].get("question_id") == q["id"])
+        sent = {k: q.get(k) for k in ("id", "text", "options", "kind", "action", "recommended")}
+        sent.update({k: q[k] for k in ("card", "shown") if q.get(k) is not None})
+        dg = hashlib.sha256(json.dumps(sent, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        _expect(f"review-card digest {q['id']}", (hit["body"]["digest"], vec["digests"][q["id"]]), (dg, dg))
+    rl = vec["relay"]
+    questions = {m["id"]: m for m in [s["message"] for s in vec["question_shapes"][:3]] + [rl["plain_question"]]}
+    answered = set()
+    for c in rl["cases"]:
+        if c["call"] == "POST /v1/messages" and c["body"].get("type") == "question":
+            got = rc_relay_question(c["body"], rl["blobs"], vm)
+            if c["name"] == "question-files-over-20mb":  # the vector's note: blobs of these ids are 8 MB each
+                big = {**rl["blobs"], **{f["blob_id"]: {**rl["blobs"][f["blob_id"]], "size": f["size"]} for f in c["body"]["body"]["card_files"]}}
+                got = rc_relay_question(c["body"], big, vm)
+            _expect(f"review-card relay {c['name']}", list(got), [c["status"], c.get("error")])
+        elif c["call"] == "POST /v1/phone/answer":
+            got = rc_relay_answer(c["body"], c["as"], rl["paired"], questions, answered, rl["blobs"], vreq)
+            _expect(f"review-card relay {c['name']}", list(got), [c["status"], c.get("error")])
+            if got[0] == 201:
+                answered.add(c["body"]["question_message_id"])
+        elif c["call"] == "POST /v1/messages":  # a review_result: the schema part of the relay rules
+            schema_ok = not _msgs(vm, c["body"])
+            _expect(f"review-card relay {c['name']} schema", schema_ok, c["status"] != 422 or c["name"] == "result-ticket-differs")
+    for c in vec["workspace"]:
+        r = c["expect"].get("review_result")
+        if r is not None:
+            key = (r["result"], r.get("reason")) if r["result"] == "refused" else r["result"]
+            text = RC_RESULT_TEXT.get(key, "Couldn't use your answer")
+            m = {"schema": "orch.msg/1", "id": "m_wsres00000000001", "from": vec["workspace_id"], "to": c["from"], "type": "text",
+                 "created_at": "2026-11-15T09:02:00Z", "ticket": vec["ticket"], "reply_to": "m_card000000000004", "body": {"text": text, "review_result": r}}
+            for e in _msgs(vm, m):
+                fails.append(f"review-card workspace {c['name']}: review_result not valid: {e}")
+        if "verdict" in c["body"]:
+            for e in _msgs(vverdict, c["body"]["verdict"]):
+                fails.append(f"review-card workspace {c['name']}: verdict not valid: {e}")
+    rq = _vec("review-question-v1.json")
+    _expect("review-question question (old)", _msgs(vm, rq["question"]), [])
+    _expect("review-question question_with_digest", _msgs(vm, rq["question_with_digest"]), [])
+    for c in rq["verdict_cases"]:
+        for e in _msgs(vverdict, c["verdict"]):
+            fails.append(f"review-question verdict_cases {c['name']}: {e}")
+        if c["result"] is not None:
+            r = c["result"]
+            key = (r["result"], r.get("reason")) if r["result"] == "refused" else r["result"]
+            m = {"schema": "orch.msg/1", "id": "m_wsres00000000002", "from": rq["question"]["from"], "to": "ph_iphone0001", "type": "text",
+                 "created_at": "2026-11-15T09:02:00Z", "ticket": rq["question"]["ticket"], "reply_to": rq["question_with_digest"]["id"],
+                 "body": {"text": RC_RESULT_TEXT.get(key, "Couldn't use your answer"), "review_result": r}}
+            for e in _msgs(vm, m):
+                fails.append(f"review-question verdict_cases {c['name']}: result not valid: {e}")
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
+    "review-card": kind_review_card,
     "activity": kind_activity,
     "secrets": kind_secrets,
     "jobs": kind_jobs,

@@ -110,6 +110,9 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
     // answers
     var questionMessageId: String? = nil
     var answer: String? = nil
+    /// Review stack swipe: sent as `verdict` with the plain `answer` summary. Such an item stays after the relay stored it
+    /// (`sentMessageId`) until the workspace's review_result arrives (`reconcile`), so the phone can show Received / Changed / Refused.
+    var verdict: PendingVerdict? = nil
     // progress
     /// The relay stored it (first tick). The item stays until `/messages` lists it, so a restart in between never sends twice.
     var sentMessageId: String? = nil
@@ -128,6 +131,8 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
     var id: String { clientId }
     var isNewTopic: Bool { kind == .send && ticket == nil && !general && joinAfter == nil }
     var isWaiting: Bool { sentMessageId == nil && failure == nil }
+    /// A review verdict can still be changed while it only lives on this phone (M4): not stored by the relay yet.
+    var canChangeVerdict: Bool { kind == .answer && verdict != nil && sentMessageId == nil }
     /// Waiting and past its backoff.
     func isDue(now: Date = Date()) -> Bool {
         guard isWaiting else { return false }
@@ -184,6 +189,8 @@ final class Outbox {
         case failed(clientId: String, status: Int, message: String)
         /// Someone else answered first (409).
         case answerTaken(clientId: String, questionMessageId: String, message: String)
+        /// The workspace took the question back (409 taken_back): the card goes, `message` is the relay's line.
+        case questionTakenBack(clientId: String, questionMessageId: String, message: String)
         case unauthorized
         /// 408 / 429 / 503: kept queued with a backoff (30 s, doubling, at most 5 min). Show "Try again later".
         case throttled(clientId: String, status: Int)
@@ -290,6 +297,43 @@ final class Outbox {
         return item
     }
 
+    /// Why a swipe on a review card cannot be queued.
+    enum VerdictProblem: Error, Equatable {
+        /// The verdict breaks the contract rules (digest, size, picked, talk without words): the relay would refuse it.
+        case invalid
+        /// The relay already has this answer: it can no longer be changed (M4).
+        case alreadySent
+    }
+
+    /// Queue a review card swipe. The same `client_id` is used on every retry; one answer per question is queued.
+    /// `answer` is the plain summary line for old readers (contract). Throws `VerdictProblem`; nothing is queued then.
+    @discardableResult
+    func enqueueAnswer(question: Question, answer: String, verdict: PendingVerdict, now: Date = Date()) throws -> OutboxItem {
+        if let existing = items.first(where: { $0.kind == .answer && $0.questionMessageId == question.id }) { return existing }
+        try Self.checkVerdict(verdict, for: question)
+        let item = OutboxItem(clientId: UUID().uuidString.lowercased(), phone: phone, kind: .answer, workspace: question.message.from,
+                              createdAt: ISO8601DateFormatter().string(from: now), questionMessageId: question.id, answer: answer, verdict: verdict)
+        items.append(item); save()
+        return item
+    }
+
+    /// Change a swipe that has not left the Outbox yet (M4). After the relay stored it the answer is final: `.alreadySent`.
+    @discardableResult
+    func changeVerdict(question: Question, answer: String, verdict: PendingVerdict) throws -> OutboxItem {
+        guard let i = items.firstIndex(where: { $0.kind == .answer && $0.questionMessageId == question.id && $0.verdict != nil }) else { throw VerdictProblem.invalid }
+        guard items[i].canChangeVerdict else { throw VerdictProblem.alreadySent }
+        try Self.checkVerdict(verdict, for: question)
+        items[i].answer = answer; items[i].verdict = verdict; items[i].failure = nil; items[i].failureStatus = nil
+        items[i].retryAfter = nil; items[i].throttleCount = nil
+        save()
+        return items[i]
+    }
+
+    nonisolated static func checkVerdict(_ verdict: PendingVerdict, for question: Question) throws {
+        guard let digest = question.message.body.digest, verdict.digest == digest, verdict.isValid else { throw VerdictProblem.invalid }
+        if let picked = verdict.picked, case .options(let o)? = question.message.body.card?.preview, !o.contains(where: { $0.id == picked }) { throw VerdictProblem.invalid }
+    }
+
     // MARK: Manage
 
     func item(clientId: String) -> OutboxItem? { items.first { $0.clientId == clientId } }
@@ -312,7 +356,19 @@ final class Outbox {
     /// Items the relay now lists (by `client_id`) are done: drop them and their files. Call after every `/messages` load.
     func reconcile(with messages: [PhoneMessage]) {
         let known = Set(messages.compactMap { $0.clientId ?? $0.message.body.clientId })
-        let done = items.filter { $0.kind == .send && known.contains($0.clientId) }
+        // A stored review answer is done once the workspace's result for its question is listed (the result text itself stays in the list).
+        // Matched as (workspace, question) pairs: a result from another workspace never closes this answer.
+        // Only a result newer than the answer counts: an older "changed" result must not close a fresh answer.
+        var resulted: [String: String] = [:]   // "workspace|question" -> newest result time
+        for m in messages where m.message.body.isReviewResult {
+            guard let q = m.message.replyTo else { continue }
+            let k = "\(m.message.from)|\(q)"
+            if (resulted[k] ?? "") < m.message.createdAt { resulted[k] = m.message.createdAt }
+        }
+        let done = items.filter {
+            ($0.kind == .send && known.contains($0.clientId))
+                || ($0.kind == .answer && $0.verdict != nil && $0.sentMessageId != nil && (resulted["\($0.workspace)|\($0.questionMessageId ?? "")"] ?? "") >= $0.createdAt)
+        }
         guard !done.isEmpty else { return }
         for d in done { removeFolder(d.clientId) }
         items.removeAll { i in done.contains { $0.clientId == i.clientId } }
@@ -320,6 +376,11 @@ final class Outbox {
     }
 
     // MARK: Flush
+
+    /// Wire request of an answer item: `answer` (plain summary) plus the optional `verdict`.
+    nonisolated static func answerRequest(for item: OutboxItem) -> AnswerRequest {
+        AnswerRequest(questionMessageId: item.questionMessageId ?? "", answer: item.answer ?? "", clientId: item.clientId, verdict: item.verdict)
+    }
 
     /// Wire request of an item. Needs every blob id (`dummy` = placeholder ids, for validation only).
     nonisolated static func request(for item: OutboxItem, dummy: Bool = false) throws -> SendRequest {
@@ -370,6 +431,8 @@ final class Outbox {
                         if status >= 500 { events.append(.offline); return events }
                         if item.kind == .answer && status == 409 && code == "already_answered" {
                             events.append(.answerTaken(clientId: id, questionMessageId: item.questionMessageId ?? "", message: message)); discard(id)
+                        } else if item.kind == .answer && status == 409 && code == "taken_back" {
+                            events.append(.questionTakenBack(clientId: id, questionMessageId: item.questionMessageId ?? "", message: message)); discard(id)
                         } else { mark(id) { $0.failure = message; $0.failureStatus = status }; events.append(.failed(clientId: id, status: status, message: message)) }
                     case .badLink: break
                     }
@@ -417,8 +480,9 @@ final class Outbox {
     private func deliver(_ item: OutboxItem, _ client: any RelayAPI) async throws -> Event {
         mark(item.clientId) { $0.attempts += 1 }
         if item.kind == .answer {
-            let r = try await client.answer(AnswerRequest(questionMessageId: item.questionMessageId ?? "", answer: item.answer ?? "", clientId: item.clientId))
-            discard(item.clientId)
+            let r = try await client.answer(Self.answerRequest(for: item))
+            if item.verdict != nil { mark(item.clientId) { $0.sentMessageId = r.id; $0.retryAfter = nil; $0.throttleCount = nil } }   // stays until the result
+            else { discard(item.clientId) }
             return .answered(clientId: item.clientId, questionMessageId: item.questionMessageId ?? r.id, answer: item.answer ?? "")
         }
         try await uploadMissing(item.clientId, client)

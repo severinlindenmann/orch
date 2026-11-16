@@ -12,16 +12,21 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | status of a ticket not started | Backlog (status chip; the button that shows a ticket stays "Open") | `open` | Open (as a status) |
 | list of things for the person | Needs you | `orch needs` | Over to you, Inbox |
 | question with options | Question / Your answer | `question`, `q1` | Approval, Sign-off |
+| a question the helper withdrew | Taken back: <reason> | `--take-back`, `taken_back` | Cancelled, Deleted, Withdrawn |
+| the task a question belongs to, on its card | About: <task text> | `--check c1` | Regarding, Subject |
 | the suggested option | Suggested | `recommended` | Recommended |
-| proof on a task | Proof | `evidence` | Evidence, Artifact |
+| evidence on a task | Evidence | `evidence` | Proof, Artifact |
 | repeating work | Repeats | `ext.scheduler` | Scheduler, Cron, Schedule |
 | an AI tool working | its adapter label (Claude, Codex, ...) | `agent:<tool>` | Bot |
 | the person | You / first name | `human:<name>` | Human |
 | where it was done | dashboard, phone, terminal | `via` | CLI |
 | another workspace | its name (landing-site) | `ws_...` | Peer, Node |
+| stop all automation | Pause automation / Paused | `orch pause`, `orch resume` | Stop all, Kill switch, Disable |
+| outside item | its tool's name + its own word ("GitHub issue", "Jira issue") | web reference | "Issue" alone |
+| something a helper learned here | Lesson (list: Lessons) | `orch lessons`, `l_...` | Memory, Tip |
 | private network | private network (VPN) | - | NetBird (any product name) |
 
 Rules
-- Words are the same in sentences: "Needs you (2)", "Answered Yes · Marco · phone", "Proof on this task".
+- Words are the same in sentences: "Needs you (2)", "Answered Yes · Marco · phone", "Evidence on this task".
 - The agent's own text (what it writes in a ticket) is not rewritten. Only words that orch itself puts on screen follow the table.
 - Add a word here first, then in the UI; the test list is in `brand/tests/test_wording.py`.

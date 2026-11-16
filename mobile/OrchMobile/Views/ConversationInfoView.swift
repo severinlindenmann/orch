@@ -167,6 +167,9 @@ struct ConversationInfoView: View {
                         .foregroundStyle(Theme.muted)
                 }.themeFont(13)
                 TicketStatusChip(status: TopicStatus(ticket)).accessibilityIdentifier("info-summary")
+                if let due = TicketDue.words(ticket.view?.due, status: ticket.view?.status) {
+                    Text(due).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("info-due")
+                }
                 if let description = ticket.view?.summary, !description.isEmpty {
                     Text(ArtifactMentions.attributed(description, attachments: ticket.view?.attachments ?? []))
                         .themeFont(13).foregroundStyle(Theme.muted)
@@ -300,10 +303,10 @@ struct ConversationInfoView: View {
         case .artifact(_, let name, let item):
             if let item {
                 Button { viewer = item } label: {
-                    artifactCard(item, title: item.title, kindLabel: item.kind == .pdf ? "PDF" : "Artifact")
+                    artifactCard(item, title: item.title, kindLabel: item.kind == .pdf ? "PDF" : "Preview")
                 }.buttonStyle(.plain)
             } else {
-                artifactCard(nil, title: name, kindLabel: "Artifact").opacity(0.5)
+                artifactCard(nil, title: name, kindLabel: "Preview").opacity(0.5)
             }
         case .file(_, let text):
             DisclosureGroup("Details") { Text(text).font(.system(size: 15, design: .monospaced)) }

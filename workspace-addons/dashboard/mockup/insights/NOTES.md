@@ -41,3 +41,7 @@ Round 2 — working shared components.
 - Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+## 15 Nov (check-up, #375 phase 3)
+
+- insights.html: Check-up card above the numbers (last check-up line, Run a check-up, Every Monday 07:00 switch, proposals with state chip, Dismiss and one main button; ask-admin rows say "Ask your admin"). Accept opens the master sheet with the plain text and "Show the change". Master design system: no change.

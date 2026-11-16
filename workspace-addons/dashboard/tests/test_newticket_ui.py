@@ -32,7 +32,7 @@ def test_paste_title_and_description_use_existing_create_action():
 def test_attachments_and_safe_preview():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "maxLength = 20000" not in js
-    assert "button('＋ Add files or drop them here', 'new-ticket-attach'" in js
+    assert "button('＋ Add files: pick, drop or paste them here', 'new-ticket-attach'" in js
     assert "At most" not in js  # no file-count limit
     assert "up to 25 MB each" in js  # the real per-file limit
     assert "for (const target of [form])" in js  # drops land on the whole form
@@ -67,7 +67,6 @@ def test_paste_styles_are_scoped_to_new_ticket():
     assert ".new-ticket .new-ticket-text" in css
     for rule in (
         "width: 100%",
-        "min-height: 6.5em",
         "resize: vertical",
         "font-size: 16px",
         "min-height: 44px",
@@ -78,5 +77,5 @@ def test_paste_styles_are_scoped_to_new_ticket():
 def test_window_closes_through_the_shared_overlay_and_uses_the_shared_date_picker():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "'Close new ticket'" not in js  # the Close button, Esc and backdrop come from kit/overlay.js
-    assert "window.UI.date(dueInput, dueToggle)" in js
+    assert "window.UI.date(dueInput, dueToggle, null, {time:true})" in js
     assert "ticketDatePicker" not in js

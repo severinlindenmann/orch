@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>orch relay · Admin</title><meta name="color-scheme" content="dark"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="stylesheet" href="/admin/style.css"><link rel="stylesheet" href="/admin/look.css"><script src="/admin/look.js"></script></head>
 <body class="has-shell">
 <div class="shell"><aside class="sidebar">
-<a href="#overview" class="brand"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-label="orch"><circle cx="32" cy="32" r="20" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="32" cy="32" r="6" fill="#a78bfa"/><circle cx="47" cy="17" r="7" fill="#a78bfa" stroke="#0a0c0f" stroke-width="3"/></svg>orch <em>relay</em></a>
+<a href="#overview" class="brand"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-label="orch"><circle cx="32" cy="32" r="20" fill="none" stroke="var(--text)" stroke-width="6"/><circle cx="32" cy="32" r="6" fill="var(--brand)"/><circle cx="47" cy="17" r="7" fill="var(--brand)" stroke="var(--sidebar)" stroke-width="3"/></svg>orch <em>relay</em></a>
 <button type="button" class="btn mobile-menu" id="menu" aria-expanded="false" aria-controls="nav">Menu</button><nav class="side-nav" id="nav" aria-label="Admin"></nav><footer class="side-foot meta"><span data-icon="lock"></span> Private network only<br>Admin</footer></aside>
 <div><header class="topbar"><span id="crumb">Overview</span><span id="upd" class="updated muted"></span><a id="top-add" class="btn primary sm" href="#add">Add workspace</a></header><main id="app" class="page" aria-live="polite"></main></div></div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
@@ -303,7 +303,7 @@ async function webhooks(v){
 }
 
 // ---------- subscribers ----------
-const subscriberKinds=[['updates','Updates','Started, working, notes — can be a lot'],['questions','Questions','Asked by agents'],['results','Results','Done, failed, stopped'],['files','Files','Proof files attached to results']];
+const subscriberKinds=[['updates','Updates','Started, working, notes — can be a lot'],['questions','Questions','Asked by agents'],['results','Results','Done, failed, stopped'],['files','Files','Evidence files attached to results']];
 const subscriberPath=s=>'/subscribers/'+enc(s.id);
 const subscriberMembers=s=>[...new Set([...(s.workspaces||[]),...groupList.filter(g=>(s.groups||[]).includes(g.id)).flatMap(g=>g.members||[])])];
 function subscriberKindsText(s){const kinds=['updates','results','questions','files'].filter(k=>s.kinds?.[k]);return (kinds.length===4?'All kinds':kinds.map(k=>subscriberKinds.find(x=>x[0]===k)[1]).join(' · ')||'No kinds')+(s.can_answer?' · Answers':'')}

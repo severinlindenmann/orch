@@ -77,6 +77,26 @@ rows (for example "automation is not running"). The same list is on the dashboar
 
 To pause a ticket until a time: `orch wait <id> --until 2026-12-01T08:00:00+01:00`.
 
+When the agent asks: only when a step cannot be undone, costs money, touches production, deletes real data or is
+visible to people outside this workspace and its connected workspaces; everything else it just does. To change that
+list, write your own in `.orch/ask-when.md` (plain lines, one case each); the agent reads it before it asks and it
+replaces the default. While a question waits, the agent keeps working on the steps that do not need the answer.
+
+## Review stack
+
+Things that wait for your yes (a draft, a Check result, a plan, a link before it goes public, a question with
+choices) are shown as cards you answer with one gesture: right is yes, left is no, down is "change this". A
+card is a question on the ticket with a `card` (what you were shown) and `shown` (an exact copy of the files it
+showed, kept under `.orch/tickets/<id>/reviewed/`, so a later change to a file never moves your answer onto
+something else).
+
+Your answer is kept on the ticket, in the same list as questions: one entry per card, never overwritten. A
+decision has a plain one-line summary (for example "Use C with 2 changes: questions on top; month in the
+heading.") which is also the answer text in the history. If you change your mind, a new entry is added that
+replaces the old one; the old one stays and says what replaced it. Helpers read a short "what applies now"
+block built from these entries. A Check result answered "looks good" marks the ticket Done exactly as
+Accept does; "send back" works like Ask for changes.
+
 ## References and history
 
 ```sh
@@ -127,9 +147,19 @@ questions and answers, history. Relay and publish ship in the same package as bu
 | `orch ask` / `answer` / `needs` | Questions and the list of what needs a person |
 | `orch ref add\|list\|rm`, `orch ticket set`, `orch log`, `orch ext set\|unset` | References (URLs, tickets, artifacts and files; kind from the active add-ons, else the known-sites table, else Reference), add-on fields, history, add-on data (`ext.<addon>`; `ext unset <id> <addon>[.<key>] [--if-revision N]` removes it) |
 | `orch agents`, `orch config`, `orch run ...` | Agents and runs: [agents.md](agents.md) |
+| `orch doctor` | Shows what is wrong with orch here (read-only): PATH, git, uv, this folder's skill link, instruction file and reminder, plus the run checks of `orch diag inspect`. Each problem names the next step; ends with "Nothing wrong." or "N things to fix." |
+| `orch uninstall` | Takes orch out of this folder: add-ons, background processes, skills and links, orch's lines in `CLAUDE.local.md` / `.claude/settings.local.json` / `.git/info/exclude`, this folder's entries in the orch home, `.orch/harness`, `.orch/run`. Keeps `.orch/tickets`, `.orch/config.toml`, `.orch/secrets`. Safe to run twice; removing orch itself: `uv tool uninstall orch-workspace` |
 | `orch addon add\|list\|remove\|uninstall`, `orch start\|stop\|status`, `orch update` | Add-ons: [addons.md](addons.md) |
+| `orch pause` / `orch resume` | The runaway brake: pause stops all automation in this workspace (nothing starts on its own), resume turns it back on |
 
 All commands accept `--json` for agents. Exit code 0 = ok, 2 = refused (stderr `Refused: <reason>`; a confirmation that needs `--yes` without a terminal prints just its question; with `--json` stdout `{"error": "<reason>"}`), 1 = bug.
+
+## Pause and run cap
+`orch pause` writes `.orch/run/paused.json`. While it is there, every start that is not a person's is refused with
+one sentence ("Automation is paused in this workspace. Turn it back on with: orch resume."), extra turns of a
+running one-step agent are not continued, and `orch status` says so. A person's own start always works. On top of that,
+automatic starts are capped at 20 per ticket in a rolling 24 hours (counted in `.orch/run/starts.json`); the first refusal
+of the day adds one history line to the ticket. Person starts are never counted.
 
 ## Data storage
 `.orch/` in the workspace (contracts/local-files.md). Tickets may be committed; secrets and inbox are gitignored.
@@ -145,6 +175,7 @@ The core never names an add-on: no scheduler/dashboard words in core code or cor
 One line from GitHub (public repo): `install.sh` / `install.ps1` in the repo root install `uv` if missing, then
 `uv tool install https://github.com/severinlindenmann/orch/archive/<ref>.zip#subdirectory=workspace` (a zip download:
 no git needed). Then `orch init` per project. Add-ons and `orch update` install from the same place.
+Leave: `orch uninstall` in a project, then `uv tool uninstall orch-workspace` to remove orch itself.
 
 Windows: works for a standard user (no admin rights), without git and with the default execution policy (the uv
 installer runs with a bypass for that one process only). On Windows on ARM the installer picks an x64 Python
