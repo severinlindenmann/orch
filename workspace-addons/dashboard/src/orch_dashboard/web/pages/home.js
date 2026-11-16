@@ -32,6 +32,7 @@ let ANSWER_UNDO_MS = 5200, enterRowId = '';
 // `same`: rows on other tickets asking the identical question with the same choices; one answer goes to all of them.
 function needRow(row, newest, questionCount = 1, same = []) {
   const key = 'need-' + row.id;
+  if (isHelperRow(row)) return helperRow(row, key);
   if (needActs(row).length) return needActionsRow(row, key);
   if (!row.ticket && array(row.answer?.options).length) return needNoticeRow(row, key);
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row);
@@ -166,6 +167,49 @@ function needActionsRow(row, key) {
   return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-need-row':row.id},
     h('div', {className:'grow'}, h('p', {}, clean(row.text)), h('p', {className:'meta'}, source)),
     h('div', {className:'acts'}, signed ? h('span', {className:'sig', 'data-key':key + '-sig'}, iconEl('shield'), 'Needs your signature') : null, controls));
+}
+// Work that stopped short (core rows): a pull request left open after its checks passed, or a helper idle at its
+// prompt. Two buttons, each one click on an op the page already has; the words sent to the helper are fixed here.
+const HELPER_ROWS = ['helper:unmerged', 'helper:idle'];
+const isHelperRow = row => !!row && row.source === 'core' && HELPER_ROWS.includes(row.kind) && !!row.ticket;
+const MERGE_ASK = 'The pull request of this ticket passed its checks but is still open. If the ticket or the workspace rules say to merge it, merge it now and record it on the ticket; if not, say on the ticket why it stays open.';
+const NUDGE = 'You have been idle for a while with open tasks on this ticket. Carry on with the next open task, or ask if something blocks you.';
+async function nudgeHelper(tid, text) {
+  const sent = await act('run.send', {ticket:tid, text});
+  if (!sent.ok) return sent;
+  return state.runs?.[tid]?.running === true ? sent : act('run.start', {ticket:tid});
+}
+async function restartFresh(tid) {
+  if (state.runs?.[tid]?.running === true) {
+    const stopped = await act('run.stop', {ticket:tid});
+    if (!stopped.ok) return stopped;
+  }
+  return act('run.start', {ticket:tid, fresh:true});
+}
+function helperRow(row, key) {
+  const t = ticketOf(row.ticket), alive = state.runs?.[row.ticket]?.running === true, pull = row.pull || {};
+  const acts = row.kind === 'helper:unmerged'
+    ? [['Merge', 'primary sm', () => act('pull.merge', {ticket:row.ticket, url:pull.url, head:pull.head}), 'Merged'],
+      [alive ? 'Nudge' : 'Start helper', 'outline sm', () => nudgeHelper(row.ticket, MERGE_ASK), alive ? 'Message sent' : 'Helper started']]
+    : [['Nudge', 'outline sm', () => nudgeHelper(row.ticket, NUDGE), 'Message sent'],
+      ['Start fresh', 'outline sm', () => restartFresh(row.ticket), 'Helper started fresh']];
+  const controls = snapshot ? [] : acts.map(([label, style, run, done]) => {
+    const control = button(label, style, async () => {
+      if (changeUnavailable() || locks.has(key)) return;
+      locks.add(key);
+      try {
+        const result = await run();
+        window.orch.toast(result.ok ? done : changeError(result), result.ok ? 'ok' : 'error');
+      } finally { locks.delete(key); render(); }
+    });
+    control.dataset.key = key + '-act-' + label;
+    return control;
+  });
+  const link = row.kind === 'helper:unmerged' && /^https:\/\/github\.com\//.test(String(pull.url || '')) ? h('a', {href:pull.url, target:'_blank', rel:'noopener noreferrer'}, 'Pull request') : null;
+  return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-need-row':row.id},
+    h('div', {className:'grow'}, h('p', {}, clean(row.text)),
+      h('p', {className:'meta'}, t ? h('a', {href:href(t.id)}, clean(t.title)) : clean(row.title), link ? [' · ', link] : null)),
+    h('div', {className:'acts'}, controls));
 }
 function startFailedRow(t, sf) {
   return h('div', {className:'card-row home-need', 'data-key':'start-failed-' + t.id}, ticketTitle(t),
@@ -408,7 +452,7 @@ function home() {
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length);
-  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needActs(row).length || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
+  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
   const list = [first ? needRow(first.row, newest, first.count, first.same) : null, ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
     ...results.map(resultRow), ...changes.map(changeRow), ...notes];
   const finishedBody = finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');

@@ -106,6 +106,7 @@ const OrchBlocks = (() => {
     const ok = a && a.op === 'addon.act' && VERB.test(String(args.verb)) && ITEM.test(String(args.target));
     if (!ok) return false;
     node.dataset.addonAct = 'true'; node.dataset.verb = String(args.verb); node.dataset.target = String(args.target);
+    if (args.review === true) node.dataset.review = 'true';   // the page shows what the add-on says it does before the click
     if (label) node.dataset.label = label;
     return true;
   }

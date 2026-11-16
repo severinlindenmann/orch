@@ -103,6 +103,19 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
         ("run.start", {"ticket": "t_abcdef", "agent": "x"}),
         ("addon.start", {"name": "x"}),
+        (
+            "pull.merge",
+            {"ticket": "t_abcdef", "url": "https://example.com/acme/app/pull/1", "head": "a" * 40},
+        ),
+        (
+            "pull.merge",
+            {"ticket": "t_abcdef", "url": "https://github.com/acme/app/pull/1 --admin", "head": "a" * 40},
+        ),
+        (
+            "pull.merge",
+            {"ticket": "t_abcdef", "url": "https://github.com/acme/app/pull/1", "head": "--admin"},
+        ),
+        ("pull.merge", {"ticket": "t_abcdef", "url": "https://github.com/acme/app/pull/1"}),
     ]
     for op, args in bad:
         assert post(act_server, {"op": op, "args": args})[0] == 400, (op, args)
@@ -195,6 +208,17 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        (
+            {
+                "op": "pull.merge",
+                "args": {
+                    "ticket": "t_abcdef",
+                    "url": "https://github.com/acme/app/pull/12",
+                    "head": "a" * 40,
+                },
+            },
+            ["ref", "merge", "t_abcdef", "https://github.com/acme/app/pull/12", "--head", "a" * 40, *common],
+        ),
         (
             {"op": "run.take_back", "args": {"ticket": "t_abcdef", "id": "p_abcdef12"}},
             ["run", "take-back", "t_abcdef", "p_abcdef12", *common],
@@ -1533,6 +1557,37 @@ def test_ticket_new_reply_names_the_new_ticket(ws, act_orch):
         code, text, _ = post(base, {"op": "log", "args": {"ticket": "t_abcdef", "text": "x"}})
         assert code == 200, text
         assert "created" not in json.loads(text)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_addon_act_allow_script_takes_only_the_shown_key(act_orch, ws):
+    """automation's allow-script: the value is the 64-hex key of the script entry the page showed, nothing else."""
+    import threading
+
+    from orch_dashboard.server import make_server
+
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}]))\n    sys.exit(0)\n'
+        'if a[:2] in (["addon", "list"]',
+    )
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        args = {"addon": "alpha", "verb": "allow-script", "target": "t_abcdef"}
+        key = "ab" * 32
+        code, text, _ = post(base, {"op": "addon.act", "args": {**args, "value": key}})
+        assert code == 200, text
+        assert acts(act_orch)[-1][:4] == ["alpha", "act", "allow-script", f"--value={key}"]
+        assert acts(act_orch)[-1][-2:] == ["--", "t_abcdef"]
+        n = len(acts(act_orch))
+        for bad in ("", "AB" * 32, "ab" * 31, "ab" * 33, key + "\n", "rm -rf /", 5, None):
+            assert post(base, {"op": "addon.act", "args": {**args, "value": bad}})[0] == 400, bad
+        assert len(acts(act_orch)) == n
     finally:
         srv.shutdown()
         srv.server_close()

@@ -14,7 +14,7 @@
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:-]{1,200}$", "description": "<source>:<stable key>. Core: core:q:<ticket id>:<question id> and core:wait:<ticket id>." },
         "source": { "$ref": "#/$defs/name", "description": "core, or the add-on name that made the row." },
-        "kind": { "type": "string", "pattern": "^(question|overdue-wait|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$", "description": "question (a plain open question), overdue-wait (waiting_on.until passed, any wait kind), or <add-on>:<name> (a question of that kind, or an add-on's own row)." },
+        "kind": { "type": "string", "pattern": "^(question|overdue-wait|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$", "description": "question (a plain open question), overdue-wait (waiting_on.until passed, any wait kind), or <add-on>:<name> (a question of that kind, or an add-on's own row). Core rows for work that stopped short: helper:unmerged (see `pull`) and helper:idle (id core:idle:<ticket id>: a live helper at its prompt with nothing running for 10 minutes on a ticket that is not finished)." },
         "ticket": { "oneOf": [{ "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, { "type": "null" }] },
         "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Plain text (shown with textContent): usually the ticket title." },
         "text": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Plain text: the question, or what is late." },
@@ -30,6 +30,15 @@
           "description": "Present when the row can be answered in place: `orch answer <ticket> <question> <option>`."
         },
         "cli": { "type": "string", "minLength": 1, "maxLength": 300, "description": "Optional command that settles the row, shown to people who use the terminal." },
+        "pull": {
+          "type": "object", "required": ["url", "head"],
+          "properties": {
+            "url": { "type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}$" },
+            "head": { "type": "string", "pattern": "^[0-9a-f]{40}$", "description": "The commit whose checks passed: a Merge merges only this one." }
+          },
+          "description": "Core row helper:unmerged (id core:unmerged:<ticket id>): the ticket is in Review, this pull request is open with every check passed and no helper works on it. A person merges it with `orch ref merge <ticket> <url> --head <head>`, or starts the helper again. `helper` says whether a helper sits on the ticket: none or idle."
+        },
+        "helper": { "enum": ["none", "idle"] },
         "actions": {
           "type": "array", "maxItems": 4,
           "description": "Optional buttons of an add-on's own row (a page shows them instead of the answer options). Each runs `orch <source> act <verb> -- <target>` through the one generic add-on op; `sign` = the person's sign step first (the page asks the add-on `act <verb> --proof-target` for the target and the review it shows, and mints only that target, only ever `addon.act` under the add-on's own name). `later` hides the row for a day, `view` opens a ticket's file, `op` may only name a core op the page already signs (private.move, only in rows from the add-on that owns it; its label and review are the page's own).",

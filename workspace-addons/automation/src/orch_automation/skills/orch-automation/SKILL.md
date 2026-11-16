@@ -44,7 +44,8 @@ slower) gives every run its own sub-ticket. If the computer was off, one catch-u
 
 The command is kept only in this computer's settings (never in the ticket, never synced) and runs without a shell in the
 workspace folder; one run per ticket at a time. It runs only after a person allowed it on this computer: one a person
-adds is allowed; one you add waits (`script list` shows its key; the person runs `script allow <name> --key <key>`). Its output goes to `.orch/run/logs/<ticket>-script-*.log`; the run
+adds is allowed; one you add waits until the person presses Allow on this computer on the repeat in the dashboard's
+Automation tab (it shows the command in full first), or runs `script allow` with the key `script list` shows. Its output goes to `.orch/run/logs/<ticket>-script-*.log`; the run
 history shows Done or Stopped. A script that fails asks one question on the ticket (Try again / Leave it). Only add a
 script the person asked for.
 {{#relay}}

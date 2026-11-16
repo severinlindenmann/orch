@@ -38,3 +38,10 @@ Home: the question is body text; answering moves the card out, the next one in, 
 ## Clear old (16 Nov 2026)
 
 - Needs-you head: a quiet `Clear old` button (only when a question is older than a week). One click hides them with the toast "Cleared 37 old questions · Undo"; the helper sees each as dismissed. No setting, no new page.
+
+## Work that stopped short (16 Nov 2026, ORCH-26)
+
+- Needs-you block, `home.html?stuck=1`: two rows with two one-click buttons each, built from the existing need row, no new style.
+  "The pull request passed its checks but was not merged, and no helper is working on it." has `Merge` (the person's own GitHub login, exactly the commit shown) and `Start helper` (`Nudge` when a helper sits idle on it).
+  "The helper has been idle for 14 min with nothing running." has `Nudge` and `Start fresh`.
+  A click answers with a toast and the row leaves. Hidden without the flag, so the shared demo count (3) stays.

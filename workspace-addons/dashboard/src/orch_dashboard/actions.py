@@ -681,6 +681,21 @@ def _run_take_back(a):
     return ["run", "take-back", _tid(a.get("ticket")), pid], [], []
 
 
+PULL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}")
+
+
+def _pull_merge(a):
+    """Home: Merge on a pull request a helper left open. `orch ref merge` merges only the commit the row showed,
+    with the person's own GitHub login, and only for a person."""
+    _only(a, ("ticket", "url", "head"))
+    url, head = a.get("url"), a.get("head")
+    if not isinstance(url, str) or not PULL.fullmatch(url):
+        raise BadRequest("That is not a pull request.")
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise BadRequest("This pull request changed or can't be checked. Open it to merge it there.")
+    return ["ref", "merge", _tid(a.get("ticket")), url], ["--head", head], []
+
+
 def _run_stop(a):
     _only(a, ("ticket",))
     return ["run", "stop", _tid(a.get("ticket"))], [], []
@@ -738,6 +753,10 @@ def _addon_act(a):
         if verb == "set":  # a setting's value: a whole number (sync: every 5, 15 or 60 minutes)
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
                 raise BadRequest("Set takes a whole number.")
+            value = a["value"]
+        elif verb == "allow-script":  # the key (hash) of the script entry the person was shown
+            if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9a-f]{64}", a["value"])):
+                raise BadRequest("Look at the command again.")
             value = a["value"]
         elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
             value = _text(a["value"], "text").strip()
@@ -959,6 +978,7 @@ OPS = {
     "run.stop": _run_stop,
     "run.send": _run_send,
     "run.take_back": _run_take_back,
+    "pull.merge": _pull_merge,
     "addon.start": _addon_start,
     "addon.act": _addon_act,
     "config.agent": _config_agent,
