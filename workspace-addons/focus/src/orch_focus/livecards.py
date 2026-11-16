@@ -24,7 +24,7 @@ WORDS = {
     "working": "Working",
     "starting": "Starting",
     "you": "Waits for you",
-    "waiting": "Waiting",
+    "waiting": "On hold",
     "idle": "Idle",
     "stuck": "Stuck",
 }

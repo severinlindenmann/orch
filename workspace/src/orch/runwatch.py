@@ -226,7 +226,7 @@ HELPER_WORDS = {
     "working": "Working",
     "starting": "Starting",
     "you": "Waits for you",
-    "waiting": "Waiting",
+    "waiting": "On hold",  # never a bare "Waiting": the owner's word for a waiting ticket is Needs you
     "idle": "Idle",
     "stuck": "Stuck",
 }

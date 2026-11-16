@@ -230,7 +230,7 @@ function workingRow(t) {
 }
 // Helpers (ORCH-61, owner pick A on ORCH-64): one row per running helper with ORCH-n, step, minutes and the core's
 // state word (Working, Waits for you, Waiting, Idle, Stuck); Nudge on an idle or stuck row, Stop on one whose ticket
-// is finished. The same widget (kit UI.helperList) draws Focus's list.
+// is finished. The same kit widget (UI.helperList) draws the live list of the other add-on page.
 function helpersCard(rows) {
   const key = 'helpers';
   const action = (r, label, run, done) => ({label, key:key + '-' + r.ticket.id + '-' + label.toLowerCase(), run:async () => {

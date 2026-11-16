@@ -14,7 +14,7 @@ test('a running helper shows the core word and detail, never Paused', () => {
     ['Stuck', 'Nothing running for 25 min']);
   assert.equal(H.sessionState(view('idle', 'Nothing running for 5 min')).pill, 'Idle');
   assert.equal(H.sessionState(view('you', 'Your answer', {ticket: {questions: [{id: 'q1', answer: null}], status: 'waiting'}})).pill, 'Waits for you');
-  assert.equal(H.sessionState(view('waiting', 'Waits on pr-green.sh')).pill, 'Waiting');
+  assert.equal(H.sessionState(view('waiting', 'Waits on pr-green.sh')).pill, 'On hold');
   const working = H.sessionState(view('working', ''));
   assert.equal(working.pill, 'Working'); assert.equal(working.active, true);
 });

@@ -168,7 +168,7 @@ def test_card_carries_the_core_helper_state_step_and_minutes():
     c = livecards.card({"ticket": t, "run": run, "board": {"step": ""}, "state": "waiting", "events": []})
     assert (c["state"], c["word"], c["detail"]) == (
         "waiting",
-        "Waiting",
+        "On hold",
         "Waits on pr-green.sh (running 6 min)",
     )
     assert c["step"] == {"n": 2, "of": 3} and c["age_minutes"] == 52 and c["idle_minutes"] is None

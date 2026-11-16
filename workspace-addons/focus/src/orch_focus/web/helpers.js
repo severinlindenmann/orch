@@ -85,7 +85,7 @@
   /* The one source for the session's words: pill, feed headline, and whether work is shown as happening now
      ("Now:" marks and the "Waiting for the first step…" row). pill null: not started, the ticket's own status word. */
   const HELPER_KEY = {working: ['running', 'Working', true], starting: ['running', 'Starting', true], you: ['waiting-for-you', 'Waits for you', false],
-    waiting: ['paused', 'Waiting', false], idle: ['paused', 'Idle', false], stuck: ['paused', 'Stuck', false]};
+    waiting: ['paused', 'On hold', false], idle: ['paused', 'Idle', false], stuck: ['paused', 'Stuck', false]};
   function sessionState(v) {
     const t = v.ticket || {}, run = v.run || {};
     if (v.state === 'done') return {key: 'finished', pill: 'Done', headline: 'Work completed', active: false};

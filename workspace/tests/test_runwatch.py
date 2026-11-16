@@ -206,7 +206,7 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
         ("waiting", [{"kind": "person", "what": "x", "ref": "q1"}, {"kind": "person", "what": "y"}], None,
          ("you", "Waits for you", "Your answer and your OK on the screen")),
         ("waiting", [{"kind": "command", "label": "pr-green.sh", "what": "pr-green.sh (running 6 min)"}], 60,
-         ("waiting", "Waiting", "Waits on pr-green.sh (running 6 min)")),
+         ("waiting", "On hold", "Waits on pr-green.sh (running 6 min)")),
         ("idle", [], 300, ("idle", "Idle", "Nothing running for 5 min")),
         ("idle", [], runwatch.STUCK_MINUTES * 60, ("stuck", "Stuck", "Nothing running for 20 min")),
         ("stale", [], None, ("stuck", "Stuck", "No sign of life for a while")),

@@ -106,7 +106,7 @@ function activityInfo(t) {
   const run = state.runs?.[t.id], live = run?.claim?.live;
   const agent = window.DashHelpers.agentLabel(state.settings, run?.claim);
   const getting = starting.has(t.id) || live?.state === 'starting';
-  // a running helper shows the core's one state word (ORCH-61), the same as Home and Focus
+  // a running helper shows the core's one state word (ORCH-61), the same as Home and the live page
   const helper = window.DashHelpers.helperState(run, t);
   if (helper && !starting.has(t.id)) {
     const busy = ['working', 'starting'].includes(helper.state);
