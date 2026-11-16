@@ -813,12 +813,12 @@ def addon_review_target(
         out = None
     if not isinstance(out, dict) or r.returncode != 0 or "target" not in out:
         err = out.get("error") if isinstance(out, dict) else None
-        raise BadRequest(str(err or "This can't be signed right now. Nothing was changed.")[:300])
+        raise BadRequest(str(err or "This can't be confirmed right now. Nothing was changed.")[:300])
     target, review = out["target"], _review(out.get("review"))
     if target is None:
         return None, review
     if not (isinstance(target, str) and PROOF_TARGET.fullmatch(target) and target.startswith(addon + ":")):
-        raise BadRequest("This can't be signed right now. Nothing was changed.")
+        raise BadRequest("This can't be confirmed right now. Nothing was changed.")
     return target, review
 
 

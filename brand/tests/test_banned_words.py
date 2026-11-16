@@ -34,7 +34,7 @@ def test_added_word_fails(tmp_path, capsys):
 
 
 def test_each_word_fails(tmp_path):
-    for w in ["signing", "Signature", "certificate", "keypair", "approval", "GATE"]:
+    for w in ["signing", "Signature", "Signed", "signs", "certificate", "keypair", "approval", "GATE"]:
         assert cbw.find_hits(f"+++ b/x\n@@ -0,0 +1 @@\n+a {w} b\n", []), w
 
 

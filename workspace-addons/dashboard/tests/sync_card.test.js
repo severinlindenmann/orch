@@ -140,10 +140,10 @@ test('changing the choice, address or interval shows a review line; Undo drops i
   assert.deepEqual(calls, [['addon.act', {addon:'sync', verb:'set', target:'https://box.example.net/orch', value:'60', review:true}]]);
   const {d, actions, title} = dialogs.at(-1);
   assert.equal(title, 'Sync to this address?');
-  assert.equal(text(byKey(d, 'sign-value')), 'https://box.example.net/orch');
-  await click(byKey(actions, 'sign-ok'));
+  assert.equal(text(byKey(d, 'confirm-value')), 'https://box.example.net/orch');
+  await click(byKey(actions, 'confirm-ok'));
   assert.deepEqual(calls.slice(-2), [['addon.act', {addon:'sync', verb:'set', target:'https://box.example.net/orch', value:'60', sign:true, seen:SET_TARGET}], ['addon.act', {addon:'sync', verb:'status', target:'sync'}]]);
-  assert.deepEqual(toasts.at(-1), ['Signed. Sync address chosen.', 'ok']);
+  assert.deepEqual(toasts.at(-1), ['Confirmed. Sync address chosen.', 'ok']);
   assert.equal(ui.draft, null);
   // the same address, only how often: no sign step
   ui.card = {...BASE, remote:'https://box.example.net/orch', interval:60};
@@ -196,11 +196,11 @@ test('a public sync address: the warning, Use public location goes through the s
   assert.deepEqual(calls, [['addon.act', {addon:'sync', verb:'use-public', target:'pending', review:true}]], 'only the review before the person signs');
   const {d, actions, title} = dialogs.at(-1);
   assert.equal(title, 'Use a public location?');
-  assert.equal(text(byKey(d, 'sign-value')), 'https://github.com/mia/orch-public', 'the exact address the add-on signs');
-  assert.match(text(d), /Anyone who knows the address can read your tickets\. You sign this as mia\./);
-  await click(byKey(actions, 'sign-ok'));
+  assert.equal(text(byKey(d, 'confirm-value')), 'https://github.com/mia/orch-public', 'the exact address the add-on signs');
+  assert.match(text(d), /Anyone who knows the address can read your tickets\. You confirm this as mia\./);
+  await click(byKey(actions, 'confirm-ok'));
   assert.deepEqual(calls[1], ['addon.act', {addon:'sync', verb:'use-public', target:'pending', sign:true, seen:PUBLIC_TARGET}]);
-  assert.deepEqual(toasts.at(-1), ['Signed. Using the public location.', 'ok']);
+  assert.deepEqual(toasts.at(-1), ['Confirmed. Using the public location.', 'ok']);
   await click(keep);
   assert.deepEqual(calls.find(([, a]) => a.verb === 'set'), ['addon.act', {addon:'sync', verb:'set', target:'local'}]);
 });
@@ -219,7 +219,7 @@ const ROWS = [
       {label:'View file', view:{ticket:'t_abc123', name:'payroll-access.txt'}}]},
 ];
 
-test('Home › Needs you: the three sync rows in the draft words, with "Needs your signature" and their buttons', () => {
+test('Home › Needs you: the three sync rows in the draft words, with "Needs your OK" and their buttons', () => {
   const {c} = context({needs:ROWS});
   vm.runInContext('needsOpen = true', c);
   const home = c.home();
@@ -227,7 +227,7 @@ test('Home › Needs you: the three sync rows in the draft words, with "Needs yo
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map(r => text(all(r, n => n.tag === 'p')[0])), ROWS.map(r => r.text));
   assert.deepEqual(rows.map(r => text(all(r, n => n.tag === 'p')[1])), ['Sync', 'Sync', 'Sync']);
-  assert.deepEqual(rows.map(r => all(r, n => n.attrs?.className === 'sig').map(text)), [['Needs your signature'], ['Needs your signature'], ['Needs your signature']]);
+  assert.deepEqual(rows.map(r => all(r, n => n.attrs?.className === 'sig').map(text)), [['Needs your OK'], ['Needs your OK'], ['Needs your OK']]);
   assert.deepEqual(rows.map(r => all(r, n => n.tag === 'button').map(text)), [['Keep mine', 'Keep theirs'], ['Move', 'Not now'], ['Leave it out', 'View file']]);
   assert.match(text(home), /Needs you · 3/);
 });
@@ -246,13 +246,13 @@ test('a signed need shows the add-on’s review (not the row’s) and signs the 
   assert.equal(title, 'Keep the other computer’s version of “Close March books (v2)”?');
   assert.deepEqual(all(d, n => n.tag === 'li').map(text), ['Here: due: 2026-03-31; note: (none)', 'Other computer: due: (none); note: bank fees']);
   assert.doesNotMatch(text(d), /Due: 2026-03-31|Note: bank fees/, 'never the row’s own text');
-  assert.match(text(d), /The change made here is set aside\. You sign this as mia\./);
-  assert.match(text(byKey(actions, 'sign-ok')), /Sign/);
-  await click(byKey(actions, 'sign-ok'));
+  assert.match(text(d), /The change made here is set aside\. You confirm this as mia\./);
+  assert.match(text(byKey(actions, 'confirm-ok')), /Confirm/);
+  await click(byKey(actions, 'confirm-ok'));
   assert.deepEqual(calls[1], ['addon.act', {addon:'sync', verb:'keep-theirs', target:'tickets/t_abc123.json', sign:true, seen:KEEP_TARGET}]);
-  assert.deepEqual(toasts.at(-1), ['Signed. Kept the other version.', 'ok']);
+  assert.deepEqual(toasts.at(-1), ['Confirmed. Kept the other version.', 'ok']);
   await click(all(c.needRow(ROWS[1], null), n => n.tag === 'button')[0]);
-  await click(byKey(dialogs.at(-1).actions, 'sign-ok'));
+  await click(byKey(dialogs.at(-1).actions, 'confirm-ok'));
   assert.deepEqual(calls[2], ['private.move', {}]);
   await click(all(c.needRow(ROWS[2], null), n => n.tag === 'button')[1]);
   assert.deepEqual(calls[3], ['preview', 't_abc123', 'artifacts', 'payroll-access.txt']);
@@ -277,7 +277,7 @@ test('private.move in a row: only from the sync add-on, always with the core’s
   assert.equal(title, 'Move your orch files out of the team repository?');
   assert.match(text(d), /everyone on the team sees each change/);
   assert.doesNotMatch(text(d), /Keep your version|Nothing changes/);
-  await click(byKey(dialogs.at(-1).actions, 'sign-ok'));
+  await click(byKey(dialogs.at(-1).actions, 'confirm-ok'));
   assert.deepEqual(calls, [['private.move', {}]]);
   // from any other add-on: no button at all (also not when it names a verb next to the op)
   for (const source of ['insights', 'automation']) {
