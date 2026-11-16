@@ -318,7 +318,7 @@ def _tree(all_: list[dict], t: dict, prefix: str = "", seen: frozenset = frozens
 CORE_EXT = {"relay"}  # ext keys the core itself writes (relay-created tickets)
 
 
-def _visible(root: Path, t: dict) -> dict:
+def visible(root: Path, t: dict) -> dict:
     """Ticket data as the CLI shows it: ext keys of add-ons that are not on stay in the file, hidden."""
     ext = t.get("ext")
     if not ext:
@@ -946,28 +946,18 @@ def run(args: argparse.Namespace) -> None:
             f'Created {t["key"]} "{t["title"]}" [{t["id"]}]{part}',
         )
     elif cmd == "ticket" and sub == "tree":
-        top = _visible(root, tickets.load(root, args.id))
+        top = visible(root, tickets.load(root, args.id))
         everything = tickets.list_all(root)
         _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
-        all_ = [_visible(root, t) for t in tickets.list_all(root)]
-        ts = [
-            t
-            for t in all_
-            if (
-                t["status"] == args.status
-                if args.status
-                else args.all or t["status"] not in ("done", "dropped")
-            )
-        ]
-        hidden = 0 if args.status or args.all else sum(1 for t in all_ if t["status"] in ("done", "dropped"))
-        ts.sort(key=lambda t: tuple(tickets.STATUS_WORDS).index(t["status"]))
+        from orch import reads
+
+        ts = reads.ticket_rows(root, args.status, args.all)  # the dashboard reads the same rows in-process
         everything = tickets.list_all(root)
         ids = {x["id"] for x in everything}
-        for t in ts:
-            t["children"] = tickets.children_counts(everything, t["id"])
-            if quiet := tickets.quiet_since(t):
-                t["quiet_since"] = quiet
+        hidden = (
+            0 if args.status or args.all else sum(1 for t in everything if t["status"] in ("done", "dropped"))
+        )
         txt = (
             "\n".join(
                 _line(t) + (" - parent missing" if t.get("parent") and t["parent"] not in ids else "")
@@ -979,7 +969,7 @@ def run(args: argparse.Namespace) -> None:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
-        t = _visible(root, tickets.load(root, args.id))
+        t = visible(root, tickets.load(root, args.id))
         _out(args, t, _show(t, root))
     elif cmd == "ticket" and sub == "status":
         who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())

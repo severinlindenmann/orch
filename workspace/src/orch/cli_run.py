@@ -220,7 +220,7 @@ def _waiting_input(root: Path, tid: str) -> list[dict]:
 def _status(args, root: Path) -> None:
     ids = args.ticket if isinstance(args.ticket, list) else [args.ticket]
     if len(ids) == 1:  # the one-ticket answer is unchanged
-        data, text = _status_of(root, ids[0])
+        data, text = status_of(root, ids[0])
         _out(args, data, text)
         return
     # Several tickets in one process (the dashboard asks for all runs at once): the same answer per ticket,
@@ -229,14 +229,14 @@ def _status(args, root: Path) -> None:
     lines = []
     for tid in dict.fromkeys(ids):
         try:
-            out[tid], text = _status_of(root, tid)
+            out[tid], text = status_of(root, tid)
         except Refused as e:
             out[tid], text = {"ticket": tid, "error": str(e)}, str(e)
         lines.append(text)
-    _out(args, {"runs": out}, "\n".join(lines))
+    _out(args, {"runs": out}, "\n".join(lines))  # orch.reads.run_status: the same answer, in-process
 
 
-def _status_of(root: Path, tid: str) -> tuple[dict, str]:
+def status_of(root: Path, tid: str) -> tuple[dict, str]:
     tickets.load(root, tid)
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
     runs.check_start_timeout(root, tid)  # a start that never got an agent says why

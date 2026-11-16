@@ -26,6 +26,7 @@ from .data import (
     load_links,
     load_services,
     load_state,
+    patch_ticket,
 )
 from .events import Revisions
 from .state_cache import StateCache
@@ -42,6 +43,8 @@ MAX_BIG_BODY = (
     140 * 1024 * 1024
 )  # a new ticket with files: at most 100 MB of files (newticket.js) as base64, plus the text
 LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose")
+# ops that name a ticket but change more than it (settings, add-ons, the workspace): answered with a full build
+WIDE_OPS = ("addon.act", "addon.set", "addon.uninstall", "addon.start", "update.start")
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -860,11 +863,21 @@ class Handler(BaseHTTPRequestHandler):
         if code != 200:
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
+        tid = (body.get("args") or {}).get("ticket") if isinstance(body.get("args"), dict) else None
+        if isinstance(extra, dict) and body.get("op") in ("ticket.new", "ticket.paste"):
+            tid = extra.get("id")  # the new ticket
+        state = None
         if body.get("op") in LEAN_OPS:
             # A workspace text changes no ticket: answer with the cached state at once (a full rebuild took 10 s on a
             # big workspace and kept "Sending…" on screen), never as the new cache.
             state = dict(self.server.state_cache.get()[0])
-        else:
+        elif isinstance(tid, str) and actions.TID.fullmatch(tid) and body.get("op") not in WIDE_OPS:
+            # A click on one ticket (accept, answer, save, a task ...): the cached state with that ticket read again,
+            # at once; the full build runs in the background (ORCH-102: a click waited seconds for it).
+            state = patch_ticket(self.root, self.orch_bin, self.server.state_cache.get()[0], tid)
+            if state is not None:
+                self.server.state_cache.quick(state)  # before the reply's own keys are added
+        if state is None:
             state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
             self.server.state_cache.invalidate(state)  # before the reply's own keys are added
         if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
