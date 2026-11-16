@@ -1042,7 +1042,13 @@ def test_stop_item_preview_address(ws, run):
     order, _ = started(ws, run)
     run("next", order)
     base = {"title": "Typo", "tag": "routine", "recommend": "Continue"}
-    for bad in ("javascript:alert(1)", "file:///etc/passwd", "http://a b/", "http://x/" + "a" * 300, "http://a\n"):
+    for bad in (
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "http://a b/",
+        "http://x/" + "a" * 300,
+        "http://a\n",
+    ):
         refused = run("stop", order, "--file", "-", data=stop_file("build", {**base, "preview": bad}), code=2)
         assert refused["code"] == "invalid", bad
     ok = {**base, "preview": "http://127.0.0.1:5173/"}

@@ -139,6 +139,18 @@
     const c = card(order.title, node('h3', plural(rows.length, 'result', 'results') + ' built, waiting for your Looks good'),
       group('stack', ...rows.map((r, i) => link((rows.length > 1 ? 'Look at ' : 'Look at the result: ') + text(r.title), '/#ticket/' + r.ticket, i === 0))),
       ...(withOrder ? [tail(orderLink(order, 'Review order'))] : []));
+    // Two or more results: one click is the same Looks good on each ticket (only inside the dashboard, which does it).
+    if (rows.length > 1 && embedded()) {
+      const all = node('button', 'Looks good, all', 'btn outline sm f-btn'); all.type = 'button';
+      const problem = meta(''); problem.setAttribute('role', 'alert'); problem.hidden = true;
+      all.addEventListener('click', async () => {
+        all.disabled = true; problem.hidden = true;
+        const result = await askDashboard({type: 'orch.looksgood', tickets: rows.map(r => r.ticket)});
+        if (result.error === undefined) return render();
+        problem.textContent = result.error || 'Looks good could not be saved. Try again.'; problem.hidden = false; all.disabled = false;
+      });
+      c.append(tail(all), problem);
+    }
     c.classList.add('f-attention'); return c;
   }
   // The run goes on by itself; until its next step has started, say so instead of showing nothing.
@@ -226,7 +238,8 @@
       else asked.get(d.id)({error: 'orch did not confirm that your message was saved.'});
     }
     else if (d.type === 'orch.ask.done' && ['delivered', 'queued', 'partial'].includes(d.state)) asked.get(d.id)({state: d.state, said: typeof d.said === 'string' ? d.said.slice(0, 300) : ''});
-    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+    else if (d.type === 'orch.looksgood.done') asked.get(d.id)({moved: Number.isInteger(d.moved) ? d.moved : 0});
+    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed' || d.type === 'orch.looksgood.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
   function askDashboard(message, wait = 30000) {
     return new Promise(resolve => {
