@@ -491,7 +491,7 @@ dialog.report-dialog .actions{margin-top:12px}
 .ref-list>li.ref-sep{border-top:1px solid var(--border);margin-top:var(--s1);padding-top:var(--s1)}
 .ref-row{display:flex;align-items:center;gap:var(--s2);height:var(--s6);padding:0 var(--s2);margin:0 calc(-1 * var(--s2));border-radius:var(--r1);color:var(--text);text-decoration:none;font-size:var(--fs-2);line-height:20px;min-width:0}
 .ref-row:hover{background:var(--surface-2)}
-.ref-row:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}
+.ref-row:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
 .ref-row:hover .ref-text,.ref-row:focus-visible .ref-text{text-decoration:underline;text-underline-offset:2px}
 .ref-row .ic{flex:none;width:16px;height:16px;color:var(--text-muted)}
 .ref-key{flex:none;color:var(--text-muted);font-variant-numeric:tabular-nums}

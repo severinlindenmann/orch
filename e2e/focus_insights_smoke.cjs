@@ -6,6 +6,8 @@
 //   - any failed request (script, stylesheet, fetch) or HTTP status >= 400,
 //   - a missing window global the pages need (EXPECT_GLOBALS), e.g. window.FocusHelpers when helpers.js throws at load.
 // A page that throws at load must never reach develop (#525 lost holdText; nothing caught it).
+// Then it runs the UX checks of the master gallery (workspace/src/orch_ui/tests/ux_checks.cjs: self-test first, then
+// sideways scroll, target size, focus mark, reduced motion, text contrast).
 //
 //   node e2e/focus_insights_smoke.cjs        (exit 0 = all screens clean)
 'use strict';
@@ -50,4 +52,9 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
     process.exit(1);
   }
   console.log(`page smoke ok: ${SCREENS.length} screens`);
+  const ux = require('node:path').join(__dirname, '../workspace/src/orch_ui/tests/ux_checks.cjs');
+  for (const extra of [['--selftest'], []]) {
+    const r = require('node:child_process').spawnSync(process.execPath, [ux, ...extra], { stdio: 'inherit' });
+    if (r.status !== 0) process.exit(1);
+  }
 })().catch(e => { console.error(e); process.exit(1); });
