@@ -819,3 +819,23 @@ def test_missing_ticket_cards_are_grouped_and_one_ok_clears_all(machines):
     assert ok["label"] == "OK, all" and ok["verb"] == "restored"
     assert cli.main(["--dir", str(a), "deleted", ok["target"], "--keep", "--json"]) == 0
     assert not [r for r in needs.rows(a) if r["kind"] == "sync:deleted"]
+
+
+def test_ok_all_on_the_page_runs_plainly_with_no_confirm_step(machines):
+    """e2e #16 (owner 16 Nov): the card's "OK, all" just closes the notes; the page's add-on action carries no
+    review/confirm flag and the sync verb needs nothing more."""
+    from orch_sync import act as sync_act
+
+    a, _, _ = both(machines)
+    other = "tickets/t_def456.json"
+    save(a, other, {**ticket(), "id": "t_def456", "title": "Another"})
+    success(a)
+    for p in (TICKET, other):
+        repo.safe(a, p).unlink()
+    success(a)
+    (card,) = [r for r in needs.rows(a) if r["kind"] == "sync:deleted"]
+    (ok,) = card["actions"]
+    assert not {"review", "sign", "op"} & set(ok)
+    out = sync_act.act(a, {}, SimpleNamespace(verb=ok["verb"], target=ok["target"], value=None, by=None))
+    assert out["text"] == "Done."
+    assert not [r for r in needs.rows(a) if r["kind"] == "sync:deleted"]
