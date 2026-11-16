@@ -1866,6 +1866,35 @@ async function looksGoodAll(req) {
 }
 addEventListener('message', e => { const req = embedLooksGoodRequest(e); if (req) looksGoodAll(req); });
 
+// A shipped add-on page's own setting (Usage: a limit, the order, on/off, an end date, switching by itself): the shown
+// page names only one of ITS add-on's verbs and a plain target; the dashboard runs `orch <that add-on> act <verb> -- <target>`
+// through its own op (the person's click with this page's session) and tells the page the add-on's answer or why not.
+// The add-on checks the target itself; nothing here names an add-on. Same origin and shipped-frame fences as orch.idea.
+const EMBED_ACT_VERB = /^[a-z][a-z-]{0,20}$/, EMBED_ACT_MAX = 200, EMBED_ACT_HIDDEN = new RegExp(IDEA_HIDDEN.source);
+function embedActRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.act') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.verb !== 'string' || !EMBED_ACT_VERB.test(data.verb) || data.verb === 'refresh') return null;
+  const t = data.target;
+  if (typeof t !== 'string' || !t || t.length > EMBED_ACT_MAX || t.startsWith('-') || t !== t.trim() || EMBED_ACT_HIDDEN.test(t)) return null;
+  return {...shown, id:data.id, verb:data.verb, target:t};
+}
+let embedActBusy = false;  // one setting at a time: a second click while saving is dropped
+async function runEmbedAct(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (embedActBusy) return reply({type:'orch.act.failed', error:'Still saving the last change. Try again in a moment.'});
+  embedActBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:req.verb, target:req.target});
+    const answer = result.ok ? result.state?.act_answer : null;
+    if (result.ok) reply({type:'orch.act.done', answer:answer && answer.addon === req.addon && answer.answer && typeof answer.answer === 'object' ? {changed:answer.answer.changed !== false} : {}});
+    else reply({type:'orch.act.failed', error:String(result.text || '').slice(0, 300)});
+  } finally { embedActBusy = false; }
+}
+addEventListener('message', e => { const req = embedActRequest(e); if (req) runEmbedAct(req); });
+
 // Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
 // target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this
 // page's session) and tells the page whether it went out. Same origin and shipped-frame fences as orch.idea.

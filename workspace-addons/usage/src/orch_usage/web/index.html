@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" data-prefix="__P__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Usage · orch</title>
+<link rel="stylesheet" href="__P__/kit/tokens.css">
+<link rel="stylesheet" href="__P__/kit/components.css">
+<link rel="stylesheet" href="__P__/kit/motion.css">
+<link rel="stylesheet" href="__P__/kit/interaction.css">
+<link rel="stylesheet" href="__P__/kit/widgets.css">
+<script src="__P__/kit/overlay.js" defer></script>
+<script src="__P__/kit/components.js" defer></script>
+<script src="__P__/kit/date.js" defer></script>
+<script src="__P__/web/usage.js" defer></script>
+</head>
+<body>
+<main id="content" class="page wide area-page page-enter" tabindex="-1" aria-label="Usage">
+<header class="page-header">
+<div><h1>Usage</h1><p>Which account your helpers use, how far each may go, and when it starts again.</p></div>
+<div class="actions">
+<label class="row"><span>Switch by itself</span>
+<input id="auto" class="switch" type="checkbox" disabled aria-label="Switch accounts by itself" aria-describedby="auto-note"></label>
+</div>
+</header>
+<p id="auto-note" class="meta" hidden></p>
+<div id="view-region" aria-busy="true">
+<div id="loading" class="area-body stack loading-mask" inert aria-hidden="true">
+<section class="card pad stack"><div class="skeleton title"></div><div class="skeleton line"></div><div class="skeleton line short"></div></section>
+<section class="card pad stack"><div class="skeleton title"></div><div class="skeleton line"></div><div class="skeleton line short"></div></section>
+</div>
+<div id="error" class="area-body stack" hidden>
+<section class="card pad stack" role="alert"><h2>Can’t show Usage right now.</h2><p id="error-text">No answer.</p>
+<div class="row"><button id="retry" class="btn outline sm" type="button">Try again</button></div></section>
+</div>
+<div id="loaded" class="area-body stack" hidden></div>
+</div>
+<p id="local-feedback" class="sr-only" role="status" aria-live="polite"></p>
+</main>
+</body>
+</html>

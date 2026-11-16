@@ -7,6 +7,7 @@ description: Use when the person asks how far a subscription or API credit is us
 Every place the helpers can spend is an **Account**: a subscription, an API key or credit. Each account has a rule:
 one or two limits (any number, in % or $), the period each counts over (5 hours, week, month or until a date), its
 place in the order, on or off, and an optional end. Every change lands in the history with who and when.
+The person sees and changes the same on the Usage page of the dashboard; its clicks run these commands.
 
 ## When to use
 - The person asks how much of a subscription or credit is used, or which account is in use now.

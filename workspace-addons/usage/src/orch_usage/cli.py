@@ -1,4 +1,4 @@
-"""orch usage list|history|limit|period|order|on|off|end|switching|run|start|stop|status
+"""orch usage list|history|limit|period|order|on|off|end|switching|act|run|start|stop|status
 (store: store.py; readers: readers/; early switching: switching.py; background process: service.py)."""
 
 from __future__ import annotations
@@ -331,12 +331,21 @@ def _loop_cmd(args, root: Path) -> int:
             r = switching.look(root)
             return _emit(args, r, _look_text(r))
         print(f"orch usage for {root.name} started {store.now()}", flush=True)
-        nonce = service.announce(root)  # background run: record pid + start time in .orch/run/usage/
+        from . import server
+
+        page = server.serve_in_background(root, args.port or service.preferred_port())
+        port = page.server_address[1] if page else None
+        if page is None:
+            print("The Usage page could not start: no free port.", flush=True)
+        # background run: record pid, start time and the page's port in .orch/run/usage/
+        nonce = service.announce(root, port)
         try:
             switching.run_forever(root, log=lambda m: print(m, flush=True))
         except KeyboardInterrupt:
             pass
         finally:
+            if page:
+                page.shutdown()
             service.forget(root, nonce)
         return 0
     if cmd == "start":
@@ -344,7 +353,9 @@ def _loop_cmd(args, root: Path) -> int:
             pid = service.start(root)
         except RuntimeError as e:
             raise Refused(str(e)) from None
-        return _emit(args, {"running": True, "pid": pid}, f"Usage is running (pid {pid}).")
+        url = service.page_url(root)
+        data = {"running": True, "pid": pid, **({"url": url} if url else {})}
+        return _emit(args, data, f"Usage is running: {url}" if url else f"Usage is running (pid {pid}).")
     if cmd == "stop":
         try:
             res = service.stop(root)
@@ -373,6 +384,9 @@ def _loop_cmd(args, root: Path) -> int:
             "switcher": bool(cswap.command()),
             "last": last,
         }
+        url = service.page_url(root) if pid else None
+        if url:
+            data["url"] = url
         line = f"Usage is running (pid {pid})." if pid else "Usage is not running. Start it: orch start"
         if not data["switcher"]:
             line += " " + NO_SWITCHER
@@ -456,13 +470,23 @@ def main(argv=None) -> int:
     s = p("switching")
     s.add_argument("state", choices=("on", "off"))
     s.add_argument("--by")
+    s = p("act")
+    s.add_argument("verb")
+    s.add_argument("target")
+    s.add_argument("--by")
     s = p("run")
     s.add_argument("--once", action="store_true")
+    s.add_argument("--port", type=int, default=None, help=argparse.SUPPRESS)
     for name in ("start", "stop", "status"):
         p(name)
     args = ap.parse_args(argv)
     args.json = bool(getattr(args, "json", False)) or "--json" in (argv if argv is not None else sys.argv)
     try:
+        if args.cmd == "act":
+            from . import acts
+
+            words = acts.argv_for(_root(args.dir), args.verb, args.target, args.by)
+            return main(["--dir", args.dir, *words, "--json"])
         return run(args)
     except Refused as e:
         return _fail(args, str(e))

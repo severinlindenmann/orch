@@ -54,16 +54,35 @@ def running_pid(root: Path, clean: bool = True) -> int | None:
     return pid
 
 
-def announce(root: Path) -> str | None:
-    """In the background process: record who we are (only when started by `start`, which passed a nonce)."""
+def announce(root: Path, port: int | None = None) -> str | None:
+    """In the background process: record who we are and the page's port (only when started by `start`, which
+    passed a nonce)."""
     nonce = os.environ.get(NONCE_ENV, "")
     if not re.fullmatch(r"[0-9a-f]{32}", nonce):
         return None
     me = os.getpid()
     runfiles.write_json(
-        _dir(root) / "usage.json", {"pid": me, "nonce": nonce, "started": runfiles.proc_start(me) or ""}
+        _dir(root) / "usage.json",
+        {"pid": me, "nonce": nonce, "started": runfiles.proc_start(me) or "", "port": port},
     )
     return nonce
+
+
+def page_url(root: Path) -> str | None:
+    """http://127.0.0.1:<port> of the running process's page, or None."""
+    if not running_pid(root, clean=False):
+        return None
+    rec = runfiles.read_json(_dir(root) / "usage.json") or {}
+    port = rec.get("port")
+    if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536:
+        return f"http://127.0.0.1:{port}"
+    return None
+
+
+def preferred_port() -> int | None:
+    """ORCH_PREFERRED_PORT (set by `orch start`: the port this service had last time), only when valid."""
+    v = os.environ.get("ORCH_PREFERRED_PORT", "")
+    return int(v) if v.isdigit() and 1024 <= int(v) < 65536 else None
 
 
 def forget(root: Path, nonce: str | None) -> None:

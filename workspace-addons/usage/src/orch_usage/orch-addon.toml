@@ -1,4 +1,4 @@
-# Usage: accounts, limits, order, history and early switching (background loop). The page comes next.
+# Usage: accounts, limits, order, history and early switching (background loop) and its page (served by the loop).
 schema = "orch.addon/1"
 orch_api = 1
 name = "usage"
@@ -9,3 +9,41 @@ skill = "skills/orch-usage"
 agents_block = "skills/orch-usage/AGENTS-block.md"
 gitignore = [".orch/addons/usage/"]
 background = true
+
+[dashboard]
+label = "Usage"
+icon = "bolt"
+order = 35
+
+[page]
+path = "/"
+label = "Open Usage"
+
+# The page's clicks (the dashboard runs them as the person): `orch usage act <verb> --by X --json -- <target>`.
+[acts.limit]
+summary = "Set or remove one limit of an account"
+who = "people"
+
+[acts.period]
+summary = "Change what a limit counts over: 5 hours, a week, a month or until a date"
+who = "people"
+
+[acts.order]
+summary = "Use an account earlier or later"
+who = "people"
+
+[acts.on]
+summary = "Use an account again"
+who = "people"
+
+[acts.off]
+summary = "Stop using an account"
+who = "people"
+
+[acts.end]
+summary = "End an account's rule on a date, then go back to the rule before it"
+who = "people"
+
+[acts.switching]
+summary = "Switch accounts by itself, or only show and warn"
+who = "people"
