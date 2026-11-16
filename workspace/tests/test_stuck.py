@@ -340,6 +340,10 @@ def test_ref_merge_asks_github_again_and_never_trusts_the_kept_look(proj, run, n
     gh.rollup = [OK, {"status": "COMPLETED", "conclusion": "FAILURE"}]  # GitHub says a check failed
     code, out, err = run("ref", "merge", tid, PR, "--head", HEAD, "--by", "human:pat")
     assert code == 2 and "checks have not all passed" in out + err and gh.merges == []
+    gh.rollup, gh.state = [OK], "CLOSED"
+    code, out, err = run("ref", "merge", tid, PR, "--head", HEAD, "--by", "human:pat")
+    assert code == 2 and "not open on GitHub" in out + err and gh.merges == []
+    gh.state = "OPEN"
     gh.rollup = [{"status": "IN_PROGRESS", "conclusion": ""}]
     assert run("ref", "merge", tid, PR, "--head", HEAD, "--by", "human:pat")[0] == 2 and gh.merges == []
 

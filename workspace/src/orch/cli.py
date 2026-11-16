@@ -1247,10 +1247,16 @@ def _ref_merge(args, root: Path, who: str) -> None:
     now = ghmerge.checks(url)
     if now is None:
         raise Refused(f"GitHub did not show the pull request, so nothing was merged. {ghmerge.OPEN_IT}")
-    if now["state"] == "OPEN" and now["head"] != args.head:
-        raise Refused("The pull request changed after it was shown. Look at it again, then merge.")
-    if now["state"] == "OPEN" and not now["green"]:
-        raise Refused(f"Its checks have not all passed right now, so nothing was merged. {ghmerge.OPEN_IT}")
+    if now["state"] != "MERGED":  # merged before (a second click) is fine; anything else must be ready
+        if now["state"] != "OPEN":
+            raise Refused(f"The pull request is not open on GitHub, so nothing was merged. {ghmerge.OPEN_IT}")
+        if now["head"] != args.head:
+            raise Refused("The pull request changed after it was shown. Look at it again, then merge.")
+        if now["green"] is not True:
+            raise Refused(
+                f"Its checks have not all passed right now, so nothing was merged. {ghmerge.OPEN_IT}"
+            )
+    # the merge itself takes only this commit (--match-head-commit), so nothing newer than what was checked
     got = ghmerge.merge(url, args.head, add_review=False)  # one click never adds the person's review
     line = (
         f"The pull request was merged already on GitHub ({got['login']}): {url}"
