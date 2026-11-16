@@ -1,9 +1,6 @@
 """What the Insights settings page may do: one fixed table of ops, each building exactly one `orch` argv.
 
-No shell, no --by/--from/--as/--dev: who acts comes from the proof (H1, contracts/human-proof.md).
-The core decides under its own lock whether a change widens: every click first runs WITHOUT a proof;
-only when the core answers `needs_person` and the request has the person is a proof minted (value-bound,
-op and target fixed here) and the same argv run once more with the proof as the first line of stdin.
+No shell, no --by/--from/--as/--dev: the click runs the core as the person who has the page session.
 Settings changes are serialized here and carry `--if-current <observed>`, so a change in between is
 refused by the core (`changed`), never overwritten.
 """
@@ -32,7 +29,6 @@ SET_TIMEOUT = "That took too long. Reload to see the current setting."
 DELETE_TIMEOUT = "That took too long. Reload to see what is still kept."
 # The only core answers shown to the person, each as a fixed plain text (never core text or stderr).
 MESSAGES = {
-    "needs_person": PERSON,
     "invalid": "That value is not allowed.",
     "not_found": "That ticket was not found.",
     "unavailable": NOT_READ,
@@ -71,11 +67,11 @@ class Unavailable(Exception):
 
 
 class NeedsPerson(Exception):
-    """A human-only click without a proof session (HTTP 403): the page is watch-only here."""
+    """A human-only click without a page session (HTTP 403): the page is watch-only here."""
 
 
 try:
-    from orch.pageproof import SELF, argv0, child_env, run_with_proof
+    from orch.pagesession import SELF, argv0, child_env
 except ImportError:  # no orch: nothing runs
     SELF = "orch:self"
 
@@ -84,8 +80,6 @@ except ImportError:  # no orch: nothing runs
 
     def child_env(env, orch_bin):
         return {**env, "ORCH_BIN": str(orch_bin)}
-
-    run_with_proof = None
 
 
 def real_bin(orch_bin):
@@ -184,7 +178,6 @@ def orch(
     root: Path,
     orch_bin,
     argv: list[str],
-    proof: str | None = None,
     timeout: float | None = None,
     deadline=None,
 ):
@@ -196,15 +189,10 @@ def orch(
         if timeout <= 0:
             return 124, "", ""
     try:
-        if proof is not None:
-            if run_with_proof is None:
-                raise Unavailable("The orch command is not available here.")
-            r = run_with_proof(argv, proof, orch_bin=orch_bin, cwd=root, env=env, timeout=timeout)
-        else:
-            r = _run(
-                [*argv0(orch_bin), *argv], check=False, cwd=root, capture_output=True, text=True,
-                timeout=timeout, stdin=subprocess.DEVNULL, env=env,
-            )  # fmt: skip
+        r = _run(
+            [*argv0(orch_bin), *argv], check=False, cwd=root, capture_output=True, text=True,
+            timeout=timeout, stdin=subprocess.DEVNULL, env=env,
+        )  # fmt: skip
     except subprocess.TimeoutExpired:
         return 124, "", ""
     except OSError:
@@ -282,21 +270,13 @@ def _answer(code, out, timeout_text, clean=None) -> tuple[int, str, dict | None]
     why = _code(out)
     if why == "changed":
         return 409, CHANGED, None
-    if why == "needs_person":
-        return 403, PERSON, None
     return 422, MESSAGES.get(why, FAILED), None
 
 
-def _with_person(root, orch_bin, argv, mint, need, timeout_text, deadline=None):
-    """Run without a proof; only when the core says needs_person: mint (person here) and retry once."""
+def _run_once(root, orch_bin, argv, timeout_text, deadline=None):
+    """Run the core once as the person and give the fixed answer."""
     code, stdout, _ = orch(root, orch_bin, argv, deadline=deadline)
-    out = _parsed(stdout)
-    if code != 0 and code != 124 and _code(out) == "needs_person":
-        if mint is None:
-            raise NeedsPerson(PERSON)
-        code, stdout, _ = orch(root, orch_bin, argv, proof=mint(*need), deadline=deadline)
-        out = _parsed(stdout)
-    return _answer(code, out, timeout_text)
+    return _answer(code, _parsed(stdout), timeout_text)
 
 
 def _sharing_refusal(read) -> str | None:
@@ -309,44 +289,41 @@ def _sharing_refusal(read) -> str | None:
     return SHARING_LOCKS.get(state, SHARING_UNKNOWN)
 
 
-def _set(root, orch_bin, args, argv, mint, read, deadline):
+def _set(root, orch_bin, args, argv, read, deadline):
     key, value = args["key"], args["value"]
     if key == "insights.share_counts" and value == "on":
         refusal = _sharing_refusal(read)
         if refusal:
             return 409, refusal, None
     observed = current_value(read("record", "settings", "--json"), key)
-    if observed is None and mint is None:
-        raise NeedsPerson(PERSON)  # an unreadable current value counts as widening (M6)
     allowed = KEYS[key][1]
     guard = [f"--if-current={observed}"] if isinstance(observed, str) and observed in allowed else []
-    from orch.config import insights_target
-
-    need = ("insights.settings", insights_target(key, value))
-    return _with_person(root, orch_bin, [*argv, *guard, "--json"], mint, need, SET_TIMEOUT, deadline)
+    return _run_once(root, orch_bin, [*argv, *guard, "--json"], SET_TIMEOUT, deadline)
 
 
 def run_op(
-    root: Path, orch_bin, op, args, mint=None, read=lambda *argv: None
+    root: Path, orch_bin, op, args, session: bool = False, read=lambda *argv: None
 ) -> tuple[int, str, dict | None]:
-    """Run one op. Returns (http status, plain text, parsed json or None). `mint(op, target)` is given only when
-    the request has the person; `read(*argv)` is the server's read of a CLI answer (None when it fails)."""
+    """Run one op as the person. Returns (http status, plain text, parsed json or None). `session` is True when the
+    request carries the page session (a settings change or a delete is refused without it); `read(*argv)` is the
+    server's read of a CLI answer (None when it fails)."""
     argv = build_argv(op, args)
+    if op.startswith("checkup."):
+        return _checkup(root, orch_bin, op, args, argv, read)
+    if not session:
+        raise NeedsPerson(PERSON)
     if op == "settings.set":
         deadline = time.monotonic() + TOTAL_BUDGET
         if not _LOCK.acquire(timeout=LOCK_WAIT):
             return 503, BUSY, None
         try:
-            return _set(root, orch_bin, args, argv, mint, read, deadline)
+            return _set(root, orch_bin, args, argv, read, deadline)
         finally:
             _LOCK.release()
-    if op.startswith("checkup."):
-        return _checkup(root, orch_bin, op, args, argv, mint, read)
-    need = ("record.delete_detail", args["ticket"])
-    return _with_person(root, orch_bin, argv, mint, need, DELETE_TIMEOUT, time.monotonic() + TOTAL_BUDGET)
+    return _run_once(root, orch_bin, argv, DELETE_TIMEOUT, time.monotonic() + TOTAL_BUDGET)
 
 
-def _checkup(root, orch_bin, op, args, argv, mint, read):
+def _checkup(root, orch_bin, op, args, argv, read):
     """A check-up click is a plain action: one CLI call (`orch insights checkup ...`), no proof (R4.1)."""
     slow = op == "checkup.test"
     deadline = time.monotonic() + (TEST_TIMEOUT + WRITE_TIMEOUT if slow else TOTAL_BUDGET)

@@ -606,9 +606,6 @@ def claim(
     blocked = tickets.start_blocked(root, ticket)  # also a direct `orch run claim`, not only `run start`
     if blocked:
         raise Refused(blocked)
-    from orch import humanproof
-
-    humanproof.ensure_record_key(root)  # the record is sealed with a key made here (activity.md); idempotent
     with locked(root, tid):
         cur = read(root, tid)
         if cur:

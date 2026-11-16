@@ -89,7 +89,7 @@ def core(tmp_path):
 
 @pytest.fixture
 def fake_session(core):
-    return FakeSession(core.parent)  # minted proofs land where this core looks for them
+    return FakeSession(core.parent)
 
 
 def put(script, name, data):
@@ -140,7 +140,7 @@ def test_one_argv_per_op(op, args, argv):
 def test_bad_requests_refused_before_any_run(start_server, core, fake_session, op, args):
     srv = start_server(orch_bin=core, session=fake_session)
     assert act(srv, op, args)[0] == 400
-    assert calls(core) == [] and fake_session.minted == []
+    assert calls(core) == []
 
 
 def test_every_click_is_one_plain_call(start_server, core, fake_session):
@@ -156,7 +156,6 @@ def test_every_click_is_one_plain_call(start_server, core, fake_session):
     assert act(srv, "checkup.reject", {"id": PID})[0] == 200
     code, _, body = act(srv, "checkup.weekly", {"value": "on"})
     assert code == 200 and json.loads(body) == {"result": {"weekly": "on"}}
-    assert fake_session.minted == []  # no proof anywhere (R4.1)
     a = argvs(core)
     assert a[0] == ["insights", "checkup", "start", "--json"] and len(a) == 6
     assert all("--proof-stdin" not in x for x in a) and all(c["stdin"] == "" for c in calls(core))

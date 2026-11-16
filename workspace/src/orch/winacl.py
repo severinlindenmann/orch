@@ -7,7 +7,7 @@ POSIX has 0700/0600 and an lstat link check. Windows has neither, so this module
   allow-only, protected (no inheritance), and the path has no link or junction.
 - no_reparse(path): no symlink, junction or other reparse point on any part of the path.
 - allow_home(path) / check_scope(path): rights are only ever WRITTEN inside a guarded orch home that
-  humanproof.guarded_home resolved in this process (its real path, so a junction can not lead out). Never the
+  orch_home.guarded_home resolved in this process (its real path, so a junction can not lead out). Never the
   current folder, a workspace, the Public folder, the profile folder or anything above it. Fail closed.
 
 No child process is ever started (a planted icacls.exe or whoami.exe in the current folder or on PATH can
@@ -525,7 +525,7 @@ def _guard_profile() -> str:
 
 def _forbidden(rp: str, *, is_home: bool = False) -> str | None:
     """Why `rp` (real, normcased) may never get its rights changed by orch, or None. A guarded HOME (already
-    validated by humanproof: the account's own orch folder, or the test home) may contain the current folder:
+    validated by orch_home: the account's own orch folder, or the test home) may contain the current folder:
     ORCH_HOME=~/.orch-test with a workspace under it and the shell standing in that workspace is normal."""
     if rp == os.path.dirname(rp):
         return "it is a drive root"
@@ -550,7 +550,7 @@ def _forbidden(rp: str, *, is_home: bool = False) -> str | None:
 
 
 def allow_home(path: str | os.PathLike) -> None:
-    """Record a guarded home (humanproof.guarded_home calls this). Windows only; a home in a forbidden place
+    """Record a guarded home (orch_home.guarded_home calls this). Windows only; a home in a forbidden place
     (Public, the profile folder itself, a drive root) is refused."""
     if not _windows():
         return
@@ -645,7 +645,7 @@ def ensure_private(path: str | os.PathLike) -> None:
 
 
 def file_check(path: str | os.PathLike) -> str | None:
-    """The hook for humanproof.FILE_CHECKS: a secret or integrity file is never tightened and trusted.
+    """The hook for orch_home.FILE_CHECKS: a secret or integrity file is never tightened and trusted.
     "acl" = a real finding (loose, a link in its place): the caller resets the protection. "unknown" = Windows
     could not tell (API error): the caller refuses this call only, with no reset. None = private. A missing
     file raises FileNotFoundError, like lstat."""

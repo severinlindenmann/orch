@@ -27,12 +27,6 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
                     }
                 }
             }
-        elif name == "deny":  # W2b 1.4: how each adapter is told the deny rules (secrets.md, Deny rules)
-            assert {a: v["deny"]["format"] for a, v in got["adapters"].items()} == {
-                "claude": "patterns/1",
-                "codex": "none",
-                "generic": "none",
-            }
         else:
             assert got == {}
     merged = agentsdata.load()
@@ -48,7 +42,6 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     }
     for adapter in merged["adapters"].values():
         adapter.pop("mcp_settings", None)
-        adapter.pop("deny", None)
     for key in ("reminder_hooks", "record_hooks", "reminder"):
         merged["adapters"]["claude"].pop(key)
     merged["adapters"]["claude"]["oneshot"].pop("settings_args")
@@ -57,7 +50,6 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     assert merged == base
     assert {p.name for p in agentsdata.agents_dir().iterdir()} == {
         "base.json",
-        "deny.json",
         "capabilities.json",
         "connections.json",
         "readonly.json",
@@ -88,6 +80,6 @@ def test_merge(data):
 
 @pytest.mark.parametrize("fragment", [[], None, 1, {"adapters": {"new": {}}}, {"adapters": []}])
 def test_invalid_fragment(data, fragment):
-    (data / "deny.json").write_text(json.dumps(fragment))
+    (data / "readonly.json").write_text(json.dumps(fragment))
     with pytest.raises(RuntimeError):
         agentsdata.load(data)

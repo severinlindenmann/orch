@@ -1,5 +1,5 @@
-"""#539: every route of the page servers (dashboard, Focus, Insights) that mints a proof or acts with the page
-session goes through the ONE rule, PageSession.authed / can_mint (cookie + page secret). This test enumerates
+"""#539: every route of the page servers (dashboard, Focus, Insights) that acts with the page
+session goes through the ONE rule, PageSession.authed / can_act (cookie + page secret). This test enumerates
 the gate calls of each server by AST, so a new route that checks the cookie some other way, or a new gate in
 an unexpected handler, fails here and must be added to the list on purpose."""
 
@@ -17,26 +17,23 @@ SERVERS = {
 # (enclosing method, gate) pairs: the complete list of places a server asks the session.
 EXPECTED = {
     "dashboard": {
-        ("do_GET", "authed"),  # /api/notices, /api/update-status (twice)
-        ("do_POST", "can_mint"),  # /api/act (every op, handoff.confirm/dismiss, notice.ack), proxied act
-        ("do_POST", "mint"),  # the callable handed down ONLY when can_mint passed
+        ("do_GET", "authed"),  # /api/update-status
+        ("do_POST", "can_act"),  # /api/act (every op, update.start), proxied act
         ("_session_post", "launch"),
-        ("_term_keys", "can_mint"),  # POST /api/term/keys: typing into the live helper session (person only)
-        ("_diag_post", "can_mint"),  # POST /api/diag/report, /api/diag/open: a report holds ticket text
+        ("_term_keys", "can_act"),  # POST /api/term/keys: typing into the live helper session (person only)
+        ("_diag_post", "can_act"),  # POST /api/diag/report, /api/diag/open: a report holds ticket text
     },
     "focus": {
-        ("_area_op", "can_mint"),  # area.accept / area.remove
-        ("do_POST", "can_mint"),  # /api/act
-        ("do_POST", "mint"),  # the callable handed down ONLY when can_mint passed
+        ("_area_op", "can_act"),  # area.accept / area.remove
+        ("do_POST", "can_act"),  # /api/act
         ("_session_post", "launch"),
     },
     "insights": {
-        ("_can_act", "can_mint"),  # settings view flag and every /api/act click
-        ("_act", "mint"),  # handed down ONLY when _can_act() passed
+        ("_can_act", "can_act"),  # settings view flag and every /api/act click
         ("_session_post", "launch"),
     },
 }
-GATES = {"authed", "can_mint", "launch", "mint"}
+GUARDS = {"authed", "can_act", "launch"}
 
 
 def _gates(path: Path) -> tuple[set, list[str]]:
@@ -45,7 +42,7 @@ def _gates(path: Path) -> tuple[set, list[str]]:
     for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
         for node in ast.walk(fn):
             is_attr = isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)
-            if is_attr and node.attr in GATES and node.value.attr == "session":
+            if is_attr and node.attr in GUARDS and node.value.attr == "session":
                 found.add((fn.name, node.attr))
             # nobody compares the cookie by hand or reads the session secret/cookie outside the core
             if (
@@ -68,12 +65,8 @@ def test_every_session_gate_is_the_one_rule(name):
 
 
 @pytest.mark.parametrize("name", sorted(SERVERS))
-def test_no_server_mints_without_asking_the_session_rule(name):
-    """run_with_proof / .mint( may only be reached in a function that also asks authed/can_mint (directly or
-    via the `mint` callable handed down from a can_mint check)."""
+def test_no_server_still_mints_a_proof(name):
+    """A page action is a plain person action: nothing in a server mints or runs a core with a proof."""
     tree = ast.parse(SERVERS[name].read_text())
-    for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
-        names = {n.attr for n in ast.walk(fn) if isinstance(n, ast.Attribute)}
-        if "run_with_proof" in names or ("mint" in names and "session" in names):
-            guarded = names & {"can_mint", "authed", "_can_act"}
-            assert guarded, f"{name}.{fn.name} mints unguarded"
+    names = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert not names & {"mint", "run_with_proof"}, f"{name} still mints"

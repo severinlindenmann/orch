@@ -22,7 +22,7 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
-from orch import agentsdata, config, denyrules
+from orch import agentsdata, config
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE, valid_session_id
 
@@ -204,11 +204,6 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         if doc:
             blob = json.dumps(doc, separators=(",", ":"))
             extra += [x.replace("{reminder_json}", blob) for x in sect["settings_args"]]
-    if (a.get("deny") or {}).get("format", "none") != "none":
-        _deny_version_ok(a, out[0])  # the binary this run really starts
-    extra = denyrules.deny_args(
-        a.get("deny"), extra, root, v.get("workdir")
-    )  # orch's own folders, every mode (secrets.md); last
     if extra:
         at = out.index("--") if "--" in out else len(out)
         out[at:at] = extra
@@ -217,36 +212,6 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
             out.append("--")
         out.append(str(v["prompt"]))
     return out
-
-
-INSTALL_NAME = {"claude": "Claude Code"}  # the program people install, by binary (messages only)
-DENY_MIN_VERSION = (2, 0, 0)  # first build where Bash(*text*) patterns and Read(//path) rules are honoured
-
-
-@functools.cache
-def _binary_version(binary: str) -> str | None:
-    return _version(binary)
-
-
-def deny_version_check(a: Mapping, binary: str | None = None) -> None:
-    """Fail closed (deny by default): the tool must be found and report a version >= DENY_MIN_VERSION.
-    Not found, no output, garbage output and too old all refuse."""
-    tool = INSTALL_NAME.get((a.get("detect") or {}).get("binary") or "", a["label"])
-    cannot = f"{tool} is missing or too old on this computer. Install or update it, then press Continue."
-    binary = binary or (a.get("detect") or {}).get("binary")
-    path = shutil.which(binary) if binary else None
-    v = _binary_version(path) if path else None
-    found = re.findall(r"\d+", v)[:3] if v else []
-    if len(found) < 2:  # _version only returns dotted numbers, so this is "nothing readable"
-        raise Refused(cannot)
-    if tuple(int(x) for x in found) + (0,) * (3 - len(found)) < DENY_MIN_VERSION:
-        raise Refused(
-            f"{tool} is too old on this computer ({v}; needs "
-            f"{'.'.join(map(str, DENY_MIN_VERSION))} or newer). Update it, then press Continue."
-        )
-
-
-_deny_version_ok = deny_version_check  # render calls this name (tests that fake a tool replace it)
 
 
 @functools.cache
@@ -483,17 +448,6 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
 
 
 _COLLECTORS = {"claude-stream-json/1": "orch.collect_claude"}  # oneshot.events format -> its collector
-
-
-def can_deny(name: str, root: Path | None = None) -> bool | None:
-    """Whether orch can give this agent tool deny rules (its adapter's `deny.format` is not `none`): the
-    records of a run by a tool that cannot (codex, generic) can be forged by code the agent runs, so they
-    are marked "can't be fully checked" (record.UNPROTECTED_TEXT). None: no such adapter."""
-    try:
-        a = load(name, root)
-    except (KeyError, ValueError, OSError):
-        return None
-    return (a.get("deny") or {}).get("format", "none") != "none"
 
 
 def collector(name: str, root: Path | None = None):

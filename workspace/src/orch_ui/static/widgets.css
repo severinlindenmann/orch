@@ -481,6 +481,31 @@ body.mobile-mode-on{--mm-page-start:#102925;--mm-page-end:var(--bg);--mm-banner:
 dialog.report-dialog{display:grid;gap:12px;width:min(520px,calc(100% - 32px))}
 dialog.report-dialog:not([open]){display:none}
 dialog.report-dialog .actions{margin-top:12px}
+/* Reference list (15 Nov, linked work): one dense 32 px row per link. [16px tool mark] [key + title, one line, ellipsis]
+   [state slot: 6px dot + sentence-case word]. Only the title shrinks; key and state never do. Full text (tool, key, title,
+   state) in the native title tooltip and aria-label. Underline on hover only. Add row is a quiet row in the same list.
+   Order: issues, their pull requests, tickets, then other links (a hairline before other links). */
+.ref-head{display:flex;gap:var(--s1);margin:var(--s5) 0 var(--s1);font-size:var(--fs-meta);line-height:16px;font-weight:500;color:var(--text-muted)}
+.ref-list{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;margin:0;padding:0;list-style:none;container-type:inline-size}
+.ref-list>li{min-width:0;position:relative}
+.ref-list>li.ref-sep{border-top:1px solid var(--border);margin-top:var(--s1);padding-top:var(--s1)}
+.ref-row{display:flex;align-items:center;gap:var(--s2);height:var(--s6);padding:0 var(--s2);margin:0 calc(-1 * var(--s2));border-radius:var(--r1);color:var(--text);text-decoration:none;font-size:var(--fs-2);line-height:20px;min-width:0}
+.ref-row:hover{background:var(--surface-2)}
+.ref-row:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}
+.ref-row:hover .ref-text,.ref-row:focus-visible .ref-text{text-decoration:underline;text-underline-offset:2px}
+.ref-row .ic{flex:none;width:16px;height:16px;color:var(--text-muted)}
+.ref-key{flex:none;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.ref-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ref-state{flex:none;min-width:64px;display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap}
+.ref-state:empty{min-width:64px}
+.ref-state:not(:empty):before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--text-faint)}
+.ref-state.active:before{background:var(--working)}.ref-state.done:before{background:var(--done)}.ref-state.bad:before{background:var(--failed)}
+.ref-x{position:absolute;right:calc(-1 * var(--s2));top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:var(--r1);background:var(--surface-2);color:var(--text-muted);cursor:pointer;opacity:0}
+.ref-x .ic{width:14px;height:14px}.ref-list>li:hover .ref-x,.ref-x:focus-visible{opacity:1}.ref-x:hover{color:var(--text)}
+@media(hover:none){.ref-x{opacity:1;background:none}}
+.ref-add{color:var(--text-muted);background:none;border:0;width:calc(100% + 2 * var(--s2));text-align:left;cursor:pointer;font:inherit}
+.ref-add:hover{color:var(--text)}
+@container (max-width: 240px){.ref-state{min-width:0;font-size:0;gap:0}.ref-state:empty{min-width:0}}
 
 /* from dashboard style.css (#795 A2a): add-on page blocks (contract addon-view.schema.json), schedule table, schedule dialog, week strip */
 .status-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0}

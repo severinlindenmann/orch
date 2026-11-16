@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-# above humanproof.UPDATE_TIMEOUT (1800 s): a long reinstall stays protected; a dead owner clears it sooner
+# above pagelaunch.UPDATE_TIMEOUT (1800 s): a long reinstall stays protected; a dead owner clears it sooner
 MAX_AGE = 2100
 
 

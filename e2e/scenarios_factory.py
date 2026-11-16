@@ -50,7 +50,7 @@ class F:
         old = record.read_bytes() if record.exists() else None
         self._restore = lambda: record.write_bytes(old) if old is not None else record.unlink(missing_ok=True)
         e.cleanup.append(self._restore)
-        rc, out, err = e.sh([self.py, "-c", "import sys; from pathlib import Path; from orch import humanproof as h; "
+        rc, out, err = e.sh([self.py, "-c", "import sys; from pathlib import Path; from orch import home as h; "
                              "h.write_install_record(Path(sys.prefix), 'test')"], env=env)
         check(rc == 0, f"install record: {(err or out)[-200:]}")
         self.w = W(e, sid, root=self.base / "ws", env=env)
@@ -541,7 +541,7 @@ def a23(e):
     record = prefix / "orch-install.json"
     was = record.read_bytes() if record.exists() else None
     e.cleanup.append(lambda: record.write_bytes(was) if was is not None else record.unlink(missing_ok=True))
-    rc, out, err = e.sh([py, "-c", "import sys; from pathlib import Path; from orch import humanproof as h; "
+    rc, out, err = e.sh([py, "-c", "import sys; from pathlib import Path; from orch import home as h; "
                          "h.write_install_record(Path(sys.prefix), 'test')"])
     check(rc == 0, f"install record: {(err or out)[-200:]}")
     e.cleanup.append(lambda: (setattr(e, "env", old_env), setattr(e, "ws_dir", old_dir)))

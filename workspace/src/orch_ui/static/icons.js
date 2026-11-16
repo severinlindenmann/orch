@@ -1,4 +1,5 @@
-/* One icon set (24px grid, 1.75 stroke, currentColor), replaces the mixed unicode glyphs. Usage: icon('check', 16). */
+/* One icon set (24px grid, 1.75 stroke, currentColor), replaces the mixed unicode glyphs. Usage: icon('check', 16).
+   The github and gitlab paths come from Lucide (https://lucide.dev, ISC licence). */
 (function () {
   const P = {
     check: '<path d="M20 6 9 17l-5-5"/>',
@@ -45,6 +46,10 @@
     hammer: '<path d="m14 7 3-3 3 3-3 3M14 7l-9 9a1.5 1.5 0 0 0 0 2l1 1a1.5 1.5 0 0 0 2 0l9-9M11 10l3 3"/>',
     cloud: '<path d="M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9.5a4 4 0 0 1-.5 8.5z"/>',
     share: '<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="m8.2 10.8 7.6-3.6M8.2 13.2l7.6 3.6"/>',
+    github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>',
+    gitlab: '<path d="m22 13.3-3.3-10a.4.4 0 0 0-.8 0l-2.3 6.7H8.3L6.1 3.3a.4.4 0 0 0-.8 0L2 13.3a.7.7 0 0 0 .3.8L12 21l9.7-6.9a.7.7 0 0 0 .3-.8z"/>',
+    jira: '<path d="M12 2.5 21.5 12 12 21.5 2.5 12z"/><path d="m12 8 4 4-4 4-4-4z"/>',
+    ticket: '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a3 3 0 0 0 0 6v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a3 3 0 0 0 0-6z"/><path d="M10 9h4m-4 3h4m-4 3h2"/>',
     users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5 6.5-5s5.7 1.5 6.5 5M16 4.7a3.5 3.5 0 0 1 0 6.6M18 15.3c1.8.7 3 2.3 3.5 4.7"/>',
   };
   window.iconNames = () => Object.keys(P);

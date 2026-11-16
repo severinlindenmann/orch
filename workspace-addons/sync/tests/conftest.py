@@ -16,14 +16,15 @@ REAL_ENSURE_RUNNING = service.ensure_running  # tests of the auto-start put it b
 def isolated_git(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    from orch import addons, humanproof
+    from orch import addons
+    from orch import home as orch_home
 
     # The suite runs as a TEST install (the same core check the guarded home uses): local bare remotes are
     # allowed there, inspected before every push/fetch. Tests of a normal install use `normal_install`.
-    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    monkeypatch.setattr(orch_home, "install_kind", lambda: "test")
     # Turning sync on records it (and signs this machine's own person fields) in the guarded orch home: the
     # tests' workspaces live in the temp folder, so a private home next to them, never a real one.
-    monkeypatch.setattr(humanproof, "guarded_home", lambda root: Path(root).parent / "proof-home")
+    monkeypatch.setattr(orch_home, "guarded_home", lambda root: Path(root).parent / "proof-home")
     monkeypatch.setattr(addons, "real_home", lambda: home)
     monkeypatch.setattr(addons, "discover", dict)
     for key, value in [
@@ -40,9 +41,9 @@ def isolated_git(tmp_path, monkeypatch):
 @pytest.fixture
 def normal_install(monkeypatch):
     """A real (normal) install: sync accepts only https and ssh remotes."""
-    from orch import humanproof
+    from orch import home as orch_home
 
-    monkeypatch.setattr(humanproof, "install_kind", lambda: "normal")
+    monkeypatch.setattr(orch_home, "install_kind", lambda: "normal")
 
 
 @pytest.fixture

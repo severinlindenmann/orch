@@ -75,7 +75,7 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 ## Notes
 - Autopilot grants are workspace-wide: a valid grant covers the routine/taste stops of any person-started run order here.
 - Owner-visible text fields are refused at freeze time when longer than the render cap (120 characters; stop `before` /
-  `after` 80, `recommend` 40), so what the owner reads is never cut.
+  `after` 80, `recommend` 40), so what the owner reads is never cut. A stop item may carry an optional `preview` (an http or https address, at most 300 characters) of the app running for the test; the page shows it as a link and it is never sent to other workspaces.
 
 ## Authority (what counts, phase 1)
 1. **Only a person's answer counts**: `answered_by` starts with `human:` (the answer a person gives in the dashboard,

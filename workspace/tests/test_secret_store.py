@@ -11,11 +11,11 @@ import stat
 from pathlib import Path
 
 import pytest
-from conftest import seed_profiles, turn_on
+from conftest import key_file, seed_profiles, turn_on
 from fakes import WS
 
 from orch import addons, keystore
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch.errors import Refused
 
 TOKEN = "tok-Q7xP2mK9vL4zR8"  # a made-up value, long enough to be stored
@@ -28,7 +28,7 @@ def acct(tmp_path, monkeypatch):
     a = tmp_path / "acct"
     (a / ".orch-test").mkdir(parents=True)
     monkeypatch.setattr(addons, "real_home", lambda: a)
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    monkeypatch.setattr(orch_home, "install_kind", lambda: "test")
     monkeypatch.delenv("ORCH_HOME", raising=False)
     return a
 
@@ -76,7 +76,7 @@ def test_create_read_list_and_remove(tws):
     ]
     assert TOKEN not in json.dumps(items)
     keystore.remove(tws, "deploy-key")
-    assert not (hp.key_dir(tws) / "files" / "deploy-key").exists()
+    assert not (orch_home.key_dir(tws) / "files" / "deploy-key").exists()
     with pytest.raises(Refused, match="no such key"):
         keystore.get_value(tws, "deploy-key")
 
@@ -88,7 +88,7 @@ def test_keys_file_matches_the_contract_schema(tws):
     keystore.set_admin(tws, {"adm": TOKEN2, "sa": {"type": "service_account", "k": "abcdefghij"}})
     schema = json.loads((Path(__file__).parents[2] / "contracts" / "secrets.schema.json").read_text())
     for f in ("keys.json", "admin-keys.json"):
-        doc = json.loads((hp.key_dir(tws) / f).read_text())
+        doc = json.loads((orch_home.key_dir(tws) / f).read_text())
         jsonschema.validate(doc, {"$ref": "#/$defs/keys_file", "$defs": schema["$defs"]})
 
 
@@ -142,7 +142,7 @@ def test_admin_keys_are_read_only_and_a_workspace_key_shadows_the_admin_one(tws)
 def test_a_type_change_leaves_no_stale_key_file(tws):
     keystore.add(tws, "k", "key-file", b"filebytes")
     keystore.add(tws, "k", "token", TOKEN)
-    assert not (hp.key_dir(tws) / "files" / "k").exists()
+    assert not (orch_home.key_dir(tws) / "files" / "k").exists()
 
 
 def test_records_are_an_allowlist(tws):
@@ -182,7 +182,7 @@ def test_every_key_store_write_sets_the_windows_rights_before_the_secret(tws, mo
 def test_a_set_aside_file_keeps_names_only_and_the_original_is_gone(tws):
     keystore.add(tws, "k1", "token", SENTINEL)
     keystore.add(tws, "kf", "key-file", SENTINEL.encode())
-    d = hp.key_dir(tws)
+    d = orch_home.key_dir(tws)
     os.chmod(d / "files" / "kf", 0o644)
     keystore.list_keys(tws)
     os.chmod(d / "keys.json", 0o644)
@@ -198,7 +198,7 @@ def test_a_set_aside_file_keeps_names_only_and_the_original_is_gone(tws):
 def test_preflight_with_empty_credentials_still_refuses_a_bad_key_store(tws, monkeypatch):
     relay = _refresh_fixture(tws, monkeypatch)
     keystore.add(tws, "mine", "token", TOKEN)
-    hp._write_private(hp.key_dir(tws) / "keys.json", "{broken")
+    orch_home._write_private(orch_home.key_dir(tws) / "keys.json", "{broken")
     snap = relay._api(None, None, None)[1]
     snap["credentials"] = {}
     with pytest.raises(Refused, match="damaged"):
@@ -230,7 +230,7 @@ def test_profiles_round_trip_names_only(tws):
     keystore.add(tws, "databricks-token", "token", TOKEN)
     seed_profiles(tws, PROFILES)
     assert keystore.read_profiles(tws) == PROFILES
-    text = (hp.key_dir(tws) / "profiles.toml").read_text()
+    text = (orch_home.key_dir(tws) / "profiles.toml").read_text()
     assert TOKEN not in text and 'schema = "orch.secret-profiles/1"' in text
 
 
@@ -249,18 +249,18 @@ def test_profiles_never_hold_a_key_value_or_a_loader_variable(tws):
         seed_profiles(tws, {"p": {"set": {"X_HOST": "h"}, "extra": ["X_HOST"]}})
     with pytest.raises(Refused, match="does not know"):
         seed_profiles(tws, {"p": {"env": {"A": "k"}, "value": TOKEN}})
-    assert not (hp.key_dir(tws) / "profiles.toml").exists()
+    assert not (orch_home.key_dir(tws) / "profiles.toml").exists()
 
 
 def test_a_planted_profile_file_with_a_loader_variable_is_refused_on_read(tws):
-    d = hp.key_dir(tws)
-    hp._write_private(
+    d = orch_home.key_dir(tws)
+    orch_home._write_private(
         d / "profiles.toml",
         'schema = "orch.secret-profiles/1"\n[profile.p]\nenv = { LD_PRELOAD = "k1" }\n',
     )
     with pytest.raises(Refused, match="may not set"):
         keystore.read_profiles(tws)
-    hp._write_private(d / "profiles.toml", "this is [not toml")
+    orch_home._write_private(d / "profiles.toml", "this is [not toml")
     with pytest.raises(Refused, match="damaged"):
         keystore.read_profiles(tws)
 
@@ -285,7 +285,7 @@ def test_folders_are_0700_and_files_0600(tws):
     keystore.add(tws, "k", "token", TOKEN)
     keystore.add(tws, "f", "key-file", b"filebytes")
     seed_profiles(tws, {"p": {"env": {"A": "k"}}})
-    d = hp.key_dir(tws)
+    d = orch_home.key_dir(tws)
     for p in (d, d / "files", d.parent):
         assert _mode(p) == 0o700, p
     for p in ("keys.json", "profiles.toml", "binding.json", "files/f"):
@@ -296,7 +296,7 @@ def test_folders_are_0700_and_files_0600(tws):
 @posix_only
 def test_a_loose_folder_is_tightened_and_a_link_refuses_every_read(tws):
     keystore.add(tws, "k", "token", TOKEN)
-    d = hp.key_dir(tws)
+    d = orch_home.key_dir(tws)
     os.chmod(d, 0o755)
     assert [i["name"] for i in keystore.list_keys(tws)] == ["k"]  # folders may be tightened
     assert _mode(d) == 0o700
@@ -328,7 +328,7 @@ def _failing_replace(monkeypatch, only_name: str):
 def test_a_failed_add_keeps_the_old_state(tws, monkeypatch):
     keystore.add(tws, "k", "token", TOKEN)
     keystore.add(tws, "f", "key-file", b"old file bytes")
-    d = hp.key_dir(tws)
+    d = orch_home.key_dir(tws)
     before = (d / "keys.json").read_bytes()
     with _failing_replace(monkeypatch, "keys.json"):
         with pytest.raises(OSError):
@@ -351,18 +351,22 @@ def test_an_interrupted_admin_write_keeps_the_old_admin_keys(tws, monkeypatch):
             keystore.set_admin(tws, {"new-key": TOKEN2})
     assert keystore.get_value(tws, "old-key") == TOKEN
     assert keystore.admin_names(tws) == ["old-key"]
-    assert not list(hp.key_dir(tws).rglob("*.tmp"))
+    assert not list(orch_home.key_dir(tws).rglob("*.tmp"))
 
 
 def test_a_damaged_key_file_refuses_and_does_not_leak(tws):
     keystore.add(tws, "k", "token", TOKEN)
-    d = hp.key_dir(tws)
-    hp._write_private(d / "keys.json", '{"schema": "orch.keys/1", "keys": {"k": {"value": "' + TOKEN + '"')
+    d = orch_home.key_dir(tws)
+    orch_home._write_private(
+        d / "keys.json", '{"schema": "orch.keys/1", "keys": {"k": {"value": "' + TOKEN + '"'
+    )
     for call in (lambda: keystore.get_value(tws, "k"), lambda: keystore.list_keys(tws)):
         with pytest.raises(Refused, match="damaged") as e:
             call()
         assert TOKEN not in str(e.value) and TOKEN not in repr(e.value.__cause__)
-    hp._write_private(d / "keys.json", json.dumps({"schema": "orch.keys/1", "keys": {"k": {"type": "x"}}}))
+    orch_home._write_private(
+        d / "keys.json", json.dumps({"schema": "orch.keys/1", "keys": {"k": {"type": "x"}}})
+    )
     with pytest.raises(Refused, match="damaged"):  # a wrong shape never writes over it silently
         keystore.add(tws, "other", "token", TOKEN2)
 
@@ -372,7 +376,7 @@ def test_a_damaged_key_file_refuses_and_does_not_leak(tws):
 
 def test_the_local_id_is_bound_to_the_workspace_path(tws, acct):
     keystore.add(tws, "k", "token", TOKEN)
-    b = json.loads((hp.key_dir(tws) / "binding.json").read_text())
+    b = json.loads((orch_home.key_dir(tws) / "binding.json").read_text())
     assert b["realpath"] == os.path.realpath(tws)
     # a copy has the same .local-id and another path: refused, and it can neither read nor write keys
     copy = acct / ".orch-test" / "copy"
@@ -382,7 +386,7 @@ def test_the_local_id_is_bound_to_the_workspace_path(tws, acct):
         lambda: keystore.list_keys(copy),
         lambda: keystore.add(copy, "x", "token", TOKEN2),
         lambda: keystore.set_admin(copy, {"a": TOKEN2}),
-        lambda: hp.human_key(copy),
+        lambda: key_file(copy),
     ):
         with pytest.raises(Refused, match="copied or moved"):
             call()
@@ -413,8 +417,8 @@ def test_a_moved_workspace_is_refused_and_a_link_to_the_same_folder_is_not(tws, 
 
 def test_a_missing_or_damaged_binding_refuses_instead_of_rebinding(tws):
     keystore.add(tws, "k", "token", TOKEN)
-    b = hp.key_dir(tws) / "binding.json"
-    hp._write_private(b, "{broken")
+    b = orch_home.key_dir(tws) / "binding.json"
+    orch_home._write_private(b, "{broken")
     with pytest.raises(Refused, match="unreadable"):
         keystore.get_value(tws, "k")
     b.unlink()
@@ -431,12 +435,12 @@ def test_a_real_workspace_with_another_orch_home_is_refused(acct, monkeypatch, t
     other = tmp_path / "elsewhere"
     other.mkdir()
     monkeypatch.setenv("ORCH_HOME", str(other))
-    with pytest.raises(hp.HomeRefused):
+    with pytest.raises(orch_home.HomeRefused):
         keystore.add(ws, "k", "token", TOKEN)
-    with pytest.raises(hp.HomeRefused):
+    with pytest.raises(orch_home.HomeRefused):
         keystore.set_admin(ws, {"a": TOKEN})
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))  # a test home is no fallback either
-    with pytest.raises(hp.HomeRefused):
+    with pytest.raises(orch_home.HomeRefused):
         keystore.add(ws, "k", "token", TOKEN)
     assert not any(other.iterdir()) and not (acct / ".orch-tool").exists()
     assert not (acct / ".orch-test" / "home").exists()
@@ -444,7 +448,9 @@ def test_a_real_workspace_with_another_orch_home_is_refused(acct, monkeypatch, t
 
 
 def test_a_real_workspace_uses_the_default_home_in_the_account_not_a_real_one(acct, monkeypatch):
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")  # a test install never pairs a real workspace
+    monkeypatch.setattr(
+        orch_home, "install_kind", lambda: "normal"
+    )  # a test install never pairs a real workspace
     ws = acct / "projects" / "real"
     (ws / ".orch").mkdir(parents=True)
     monkeypatch.delenv("ORCH_HOME", raising=False)
@@ -457,7 +463,7 @@ def test_a_real_workspace_uses_the_default_home_in_the_account_not_a_real_one(ac
 
 def test_a_test_workspace_with_the_default_home_is_refused(tws, acct, monkeypatch):
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-tool"))
-    with pytest.raises(hp.HomeRefused):
+    with pytest.raises(orch_home.HomeRefused):
         keystore.add(tws, "k", "token", TOKEN)
     assert not (acct / ".orch-tool").exists()
 
@@ -465,7 +471,7 @@ def test_a_test_workspace_with_the_default_home_is_refused(tws, acct, monkeypatc
 def test_tests_never_wrote_into_the_real_account_home(tws):
     keystore.add(tws, "k", "token", TOKEN)
     real = Path(os.path.expanduser("~"))
-    assert not str(hp.key_dir(tws)).startswith(str(real / ".orch-tool"))
+    assert not str(orch_home.key_dir(tws)).startswith(str(real / ".orch-tool"))
 
 
 # ------------------------------------------------------------------------------ no value in messages
@@ -519,8 +525,8 @@ def test_relay_refresh_writes_the_keys_into_the_guarded_home_not_the_workspace(r
     assert json.loads(keystore.get_value(tws, "SVC")) == {"type": "service_account", "k": "abcdefghij"}
     assert keystore.admin_names(tws) == ["DB_URL", "SVC"]
     assert "tiny" in out and "too short" in out and "abc" not in out.replace("tiny", "")
-    gh = hp.guarded_home(tws)
-    assert (gh / "keys").is_dir() and str(hp.key_dir(tws)).startswith(str(gh))
+    gh = orch_home.guarded_home(tws)
+    assert (gh / "keys").is_dir() and str(orch_home.key_dir(tws)).startswith(str(gh))
     # the workspace holds no key after a refresh: no credentials.json, and no value anywhere under .orch/
     assert not legacy.exists()
     text = _tree_text(tws / ".orch")
@@ -545,7 +551,7 @@ def test_admin_keys_are_refused_when_the_home_does_not_pair_and_empty_is_a_no_op
     monkeypatch.setenv("ORCH_HOME", str(elsewhere))
     skipped: list[str] = []
     relay._admin_keys(ws, {}, skipped)  # nothing to store, nothing refused
-    with pytest.raises(hp.HomeRefused) as e:
+    with pytest.raises(orch_home.HomeRefused) as e:
         relay._admin_keys(ws, {"DB_URL": "pg://db.example/prod"}, skipped)
     assert "pg://db.example/prod" not in str(e.value)
     assert not any(elsewhere.iterdir()) and not (acct / ".orch-tool").exists()
@@ -575,7 +581,7 @@ def test_a_refresh_with_keys_and_an_unpaired_home_changes_nothing(acct, monkeypa
         "workspaces": {"workspaces": [{"id": "ws_x", "name": "X"}], "phones": []},
     }
     monkeypatch.setattr(relay, "_api", lambda *a, **k: (200, snap))
-    with pytest.raises(hp.HomeRefused):
+    with pytest.raises(orch_home.HomeRefused):
         relay.refresh(ws)
     assert not (ws / ".agents").exists()  # no skill, no workspaces.json
     sec = ws / ".orch" / "secrets"
@@ -629,25 +635,25 @@ def test_a_damaged_key_file_stops_the_whole_refresh(tws, monkeypatch):
     relay = _refresh_fixture(tws, monkeypatch)
     keystore.add(tws, "mine", "token", TOKEN)
     for name in ("keys.json", "admin-keys.json"):
-        path = hp.key_dir(tws) / name
+        path = orch_home.key_dir(tws) / name
         before = path.read_bytes() if path.exists() else None
-        hp._write_private(path, "{broken")
+        orch_home._write_private(path, "{broken")
         with pytest.raises(Refused, match="damaged"):
             relay.refresh(tws)
         _nothing_replaced(tws)
         if before is None:
             path.unlink()
         else:
-            hp._write_private(path, before.decode())
+            orch_home._write_private(path, before.decode())
 
 
 def test_an_existing_key_folder_without_a_binding_is_refused_and_not_written(tws):
     from orch import addons
 
     ws_id = addons.workspace_id(tws, create=True)
-    home = hp.guarded_home(tws)
+    home = orch_home.guarded_home(tws)
     d = home / "keys" / ws_id  # pre-created, e.g. by something that knows the id
-    hp._private_dir(d, home)
+    orch_home._private_dir(d, home)
     (d / "human.key").write_text("x")
     before = sorted(p.name for p in d.iterdir())
     for call in (
@@ -655,7 +661,7 @@ def test_an_existing_key_folder_without_a_binding_is_refused_and_not_written(tws
         lambda: keystore.set_admin(tws, {"a": TOKEN}),
         lambda: keystore.record_write(tws, "dev", {}),
         lambda: keystore.get_value(tws, "k"),
-        lambda: hp.human_key(tws),
+        lambda: key_file(tws),
     ):
         with pytest.raises(Refused, match="copied or moved"):
             call()
@@ -664,11 +670,11 @@ def test_an_existing_key_folder_without_a_binding_is_refused_and_not_written(tws
 
 def test_an_empty_new_key_folder_is_bound_once_and_the_first_binding_wins(tws, acct):
     keystore.add(tws, "k", "token", TOKEN)
-    d = hp.key_dir(tws)
+    d = orch_home.key_dir(tws)
     first = (d / "binding.json").read_text()
     other = acct / ".orch-test" / "other"
     other.mkdir()
-    hp._bind_new(other, d)  # a later binding attempt never overwrites
+    orch_home._bind_new(other, d)  # a later binding attempt never overwrites
     assert (d / "binding.json").read_text() == first
     assert not list(d.glob(".binding.*"))
 
@@ -681,7 +687,7 @@ SENTINEL = "sentinel-VALUE-never-used-0042"
 def _loose_setup(tws):
     keystore.add(tws, "k1", "token", SENTINEL)
     keystore.add(tws, "k2", "password", TOKEN2)
-    return hp.key_dir(tws)
+    return orch_home.key_dir(tws)
 
 
 @posix_only
@@ -762,7 +768,7 @@ def test_another_owner_counts_as_loose(tws, monkeypatch):
 @posix_only
 def test_a_loose_admin_file_is_set_aside_and_the_next_refresh_restores_it(tws):
     keystore.set_admin(tws, {"adm1": SENTINEL, "adm2": TOKEN2})
-    d = hp.key_dir(tws)
+    d = orch_home.key_dir(tws)
     os.chmod(d / "admin-keys.json", 0o640)
     with pytest.raises(Refused, match="must be entered again"):
         keystore.get_value(tws, "adm1")
@@ -781,7 +787,7 @@ def test_a_loose_admin_file_is_set_aside_and_the_next_refresh_restores_it(tws):
 def test_a_loose_key_file_value_is_set_aside_and_never_read(tws):
     keystore.add(tws, "kf", "key-file", SENTINEL.encode())
     keystore.add(tws, "k", "token", TOKEN)
-    d = hp.key_dir(tws)
+    d = orch_home.key_dir(tws)
     os.chmod(d / "files" / "kf", 0o644)
     with pytest.raises(Refused, match="must be entered again") as e:
         keystore.get_value(tws, "kf")
@@ -799,7 +805,7 @@ def test_a_loose_key_file_value_is_set_aside_and_never_read(tws):
 @posix_only
 def test_a_loose_key_file_is_found_when_listing_and_when_removing(tws):
     keystore.add(tws, "kf", "key-file", SENTINEL.encode())
-    d = hp.key_dir(tws)
+    d = orch_home.key_dir(tws)
     os.chmod(d / "files" / "kf", 0o666)
     assert [(i["name"], i["state"]) for i in keystore.list_keys(tws)] == [("kf", "needs-reentry")]
     keystore.remove(tws, "kf")
@@ -820,10 +826,10 @@ def test_an_unknown_file_check_refuses_the_call_and_sets_nothing_aside(tws, monk
 
     keystore.add(tws, "k", "token", TOKEN)
     keystore.add(tws, "kf", "key-file", b"filebytes")
-    d = hp.key_dir(tws)
+    d = orch_home.key_dir(tws)
     before = sorted(p.name for p in d.rglob("*"))
     with monkeypatch.context() as m:
-        m.setattr(hp, "FILE_CHECKS", [lambda p: "unknown"])  # a transient Windows error
+        m.setattr(orch_home, "FILE_CHECKS", [lambda p: "unknown"])  # a transient Windows error
         for call in (
             lambda: keystore.get_value(tws, "k"),
             lambda: keystore.list_keys(tws),
@@ -840,7 +846,7 @@ def test_an_unknown_file_check_refuses_the_call_and_sets_nothing_aside(tws, monk
 
 def test_an_unreadable_profiles_file_refuses_the_save(tws):
     keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}})
-    (hp.key_dir(tws) / "profiles.toml").write_text("not [ toml")
+    (orch_home.key_dir(tws) / "profiles.toml").write_text("not [ toml")
     with pytest.raises(Refused):
         keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}})
 

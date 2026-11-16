@@ -92,7 +92,7 @@ def test_urls(url):
 @pytest.mark.parametrize("url", ["https://host/repo", "ssh://git@host/repo", "git@host:path"])
 @pytest.mark.parametrize("kind", ["normal", "test"])
 def test_good_urls(url, kind, monkeypatch):
-    monkeypatch.setattr(repo.humanproof, "install_kind", lambda: kind)
+    monkeypatch.setattr(repo.orch_home, "install_kind", lambda: kind)
     repo.validate_url(url)
 
 
@@ -104,7 +104,7 @@ NEEDS = re.escape(repo.NEEDS_NETWORK)
 def test_local_urls_only_on_a_test_install(url, monkeypatch):
     repo.validate_url(url)  # the suite is a test install
     for kind in ("normal", "dev"):
-        monkeypatch.setattr(repo.humanproof, "install_kind", lambda k=kind: k)
+        monkeypatch.setattr(repo.orch_home, "install_kind", lambda k=kind: k)
         with pytest.raises(repo.RemoteRefused, match=NEEDS):
             repo.validate_url(url)
 
@@ -114,7 +114,7 @@ def test_local_urls_only_on_a_test_install(url, monkeypatch):
 def test_refused_transports_never_reach_git(ready, tmp_path, url, kind, monkeypatch):
     # Fable B1: refused for the configured remote and for an address given directly to push/fetch/ls-remote,
     # on a real install and on a test install alike.
-    monkeypatch.setattr(repo.humanproof, "install_kind", lambda: kind)
+    monkeypatch.setattr(repo.orch_home, "install_kind", lambda: kind)
     monkeypatch.chdir(tmp_path)
     with pytest.raises(repo.Refused, match=NEEDS):
         repo.set_remote(ready, url)
@@ -409,7 +409,7 @@ def test_normal_install_step_reports_a_stored_local_remote(root, tmp_path, monke
     bare, canary = hostile_config_remote(tmp_path)
 
     assert set_remote(root, bare) == 0  # test install
-    monkeypatch.setattr(repo.humanproof, "install_kind", lambda: "normal")  # then a real install reads it
+    monkeypatch.setattr(repo.orch_home, "install_kind", lambda: "normal")  # then a real install reads it
     calls = recorded(monkeypatch, fake_network=False)
     state = step.run_once(root, "test")
     assert state["last_error"] == repo.NEEDS_NETWORK

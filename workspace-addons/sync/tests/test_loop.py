@@ -154,9 +154,7 @@ def test_paused_tick_does_nothing(on, monkeypatch):
 
 def test_planted_pause_does_not_stop_the_loop(on, monkeypatch):
     settings(on, mode="local")
-    (on / ".orch/run/sync/state.json").write_text(
-        json.dumps({"paused": {"files": [], "reason": "x", "mac": "0"}})
-    )
+    (on / ".orch/run/sync/state.json").write_text(json.dumps({"paused": {"files": "none", "reason": "x"}}))
     calls = results(monkeypatch)
     loop.Loop(on).run_forever(once=True)
     assert calls == ["timer"]

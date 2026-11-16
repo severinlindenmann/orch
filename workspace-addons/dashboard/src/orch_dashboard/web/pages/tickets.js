@@ -225,6 +225,8 @@ const movePending = new Map();
 // Optimistic: the card moves and the notice (with Undo) shows at once; a failed save puts the card back.
 // `extra`: more arguments of the change (Accept on a ticket in Review sends the review tip it showed).
 function moveTicket(id, status, undoing = false, extra = {}) {
+  const quiet = extra.quiet === true;  // the caller shows one toast for a whole batch
+  if ('quiet' in extra) { extra = {...extra}; delete extra.quiet; }
   if (status === 'done' && !extra.review_tip) extra = {...extra, review_tip:'none'}; // this view showed no review tip
   const t = ticketOf(id), lock = 'status-' + id;
   if (!t || t.status === status || snapshot || locks.has(lock) || changeUnavailable()) return Promise.resolve();
@@ -236,7 +238,7 @@ function moveTicket(id, status, undoing = false, extra = {}) {
   const unfade = () => document.querySelectorAll('.status-leaving').forEach(n => n.classList.remove('status-leaving'));
   const fade = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160)).then(() => { unfade(); render(); });
   const label = STATUS_CHOICES.find(([value]) => value === status)?.[1] || status;
-  const toast = window.orch.toast(undoing ? 'Moved back' : 'Moved to ' + label, 'ok');
+  const toast = quiet ? null : window.orch.toast(undoing ? 'Moved back' : 'Moved to ' + label, 'ok');
   if (!undoing && toast?.querySelector) {
     const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
     undo.addEventListener('click', async () => { toast.remove(); await movePending.get(id); moveTicket(id, previous, true); });

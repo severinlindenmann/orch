@@ -5,7 +5,7 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from test_step import proof, set_remote
+from test_step import set_remote
 
 from orch_sync import cli, repo
 
@@ -77,10 +77,6 @@ def test_run_symlink(root, tmp_path):
 
 
 def test_off_does_not_call_git(root, monkeypatch):
-    from orch import humanproof
-
-    humanproof.human_key(root)  # a real workspace has its key folder (an unreadable pin refuses: N-1)
-
     def forbidden(*args, **kwargs):
         raise AssertionError("off must not execute git")
 
@@ -206,7 +202,7 @@ def test_status_fields(root, monkeypatch, capsys):
                 "ahead": 2,
                 "behind": 0,
                 "last_error": None,
-                "paused": {"files": [], "reason": "planted", "mac": "0"},
+                "paused": {"files": "none", "reason": "planted"},
             }
         )
     )
@@ -220,7 +216,7 @@ def test_status_fields(root, monkeypatch, capsys):
     data = json.loads(capsys.readouterr().out)
     assert keys <= data.keys()
     assert data["interval"] == 5 and data["running"] is False and data["next_run"] is None
-    assert data["paused"] is False  # a planted (unsigned) pause is no pause
+    assert data["paused"] is False  # a planted pause without the shape of one is no pause
     assert (data["last_ok"], data["last_try"], data["last_error"], data["ahead"]) == (
         "2026-11-12T10:00:00Z",
         "2026-11-12T10:05:00Z",
@@ -296,10 +292,7 @@ def test_set_summary_never_shows_credentials(root, monkeypatch, capsys):
     (root / ".orch/run/sync/settings.json").write_text(
         json.dumps({"mode": "local", "remote": "https://me:pw@host/repo", "interval": 15, "kind": "private"})
     )
-    proof(
-        root, cli.remote_target("https://me:pw@host/repo"), monkeypatch
-    )  # turning remote on chooses that address
-    assert cli.main(["--dir", str(root), "set", "--mode", "remote", "--proof-stdin"]) == 0
+    assert cli.main(["--dir", str(root), "set", "--mode", "remote"]) == 0
     out = capsys.readouterr()
     assert out.out.strip() == "Sync: remote, every 15 minutes, to https://host/repo"
     assert "me:pw" not in out.out + out.err
@@ -339,10 +332,9 @@ def test_local_remote_requires_preview(root, monkeypatch, capsys):
 
 def test_set_plain_words(root, monkeypatch, capsys):
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    proof(root, cli.remote_target("https://host/repo"), monkeypatch)
     for args, expected in (
         (
-            ["--mode", "remote", "--remote", "https://host/repo", "--proof-stdin"],
+            ["--mode", "remote", "--remote", "https://host/repo"],
             "Sync: remote, every 15 minutes, to https://host/repo",
         ),
         (["--mode", "local"], "Sync: local, every 5 minutes"),

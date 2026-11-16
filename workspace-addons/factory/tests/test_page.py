@@ -873,3 +873,19 @@ def test_no_eta_or_due_line_without_a_time():
 def test_a_missing_picture_says_so_in_plain_words():
     js = _page_js()
     assert "'No picture for this one yet.'" in js and "No image supplied" not in js
+
+
+def test_stop_page_carries_and_links_the_preview(ws, run, srv):
+    order, _ = waiting_stop(ws, run, {"title": "Typo", "tag": "routine", "preview": "http://127.0.0.1:5173/"})
+    item = get(srv, f"/api/order/{order}")[1]["stops"][0]["data"]["items"][0]
+    assert item["preview"] == "http://127.0.0.1:5173/"
+    js = _page_js()
+    assert "'Open the preview'" in js and "noopener noreferrer" in js and "/^https?:\\/\\/\\S+$/" in js
+
+
+def test_looks_good_all_button_only_with_two_results_inside_the_dashboard():
+    js = _page_js()
+    assert "if (rows.length > 1 && embedded())" in js and "'Looks good, all'" in js
+    assert "askDashboard({type: 'orch.looksgood', tickets: rows.map(r => r.ticket)})" in js
+    assert "d.type === 'orch.looksgood.done'" in js and "d.type === 'orch.looksgood.failed'" in js
+    assert "problem.setAttribute('role', 'alert')" in js
