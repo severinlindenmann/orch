@@ -69,5 +69,6 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ## Owner feedback 14 Nov (lane owner-fb-v2)
 New ticket: 560 px, the box starts at 3 rows and grows, Start opens the new ticket, Save stays on the list (`../sweep/d-new-ticket.html`). Files tab: `../sweep/d-files.html`.
 
+- A Working ticket with no news for 6 hours shows "No news since 09:20" (day first when not today) on its card and in the list, on its ticket page ("Your helper is working. No news since 09:20."), and as a quiet row on Home that is not counted as needing you. Open the ticket with `?quiet=1` to see it.
 ## Fix wave 15 Nov (b4)
 Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy local link" with the hint "Works only on this computer". Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).

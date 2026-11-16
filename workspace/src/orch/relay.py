@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import contextvars
 import hashlib
 import hmac
 import json
@@ -461,7 +462,25 @@ def _own_key(root: Path, tid: str) -> str | None:
         return None
 
 
-def _message(
+_DRY_RUN: contextvars.ContextVar[bool] = contextvars.ContextVar("orch_relay_dry_run", default=False)
+
+
+@contextlib.contextmanager
+def dry_run():
+    """Inside: every send builds its message the normal way and returns it with dry_run=True. Nothing is
+    written (no outbox file, no history record, no ticket change) and nothing goes over the network."""
+    tok = _DRY_RUN.set(True)
+    try:
+        yield
+    finally:
+        _DRY_RUN.reset(tok)
+
+
+def is_dry_run() -> bool:
+    return _DRY_RUN.get()
+
+
+def _build_message(
     root: Path,
     to: str,
     type_: str,
@@ -471,8 +490,7 @@ def _message(
     mid: str | None = None,
     created_at: str | None = None,
 ) -> dict:
-    """Save the exact bytes first, then post. When the relay can't be reached the file stays in
-    .orch/outbox/ and the result carries sent=False: the next orch relay command sends the same bytes."""
+    """The one place a message is made (a real send and --dry-run share it)."""
     msg = {
         "schema": "orch.msg/1",
         "id": mid or new_id(),
@@ -489,7 +507,25 @@ def _message(
             msg["key"] = key  # display key next to the id (relay-api.md): phones show it
     if reply_to:
         msg["reply_to"] = reply_to
+    return msg
+
+
+def _message(
+    root: Path,
+    to: str,
+    type_: str,
+    body: dict,
+    ticket: str | None = None,
+    reply_to: str | None = None,
+    mid: str | None = None,
+    created_at: str | None = None,
+) -> dict:
+    """Save the exact bytes first, then post. When the relay can't be reached the file stays in
+    .orch/outbox/ and the result carries sent=False: the next orch relay command sends the same bytes."""
+    msg = _build_message(root, to, type_, body, ticket, reply_to, mid, created_at)
     scan_outgoing(root, body)  # before the outbox: a secret is never even kept on disk for a retry
+    if _DRY_RUN.get():
+        return {**msg, "dry_run": True}
     raw = json.dumps(msg).encode("utf-8")
     path = _write_outbox(root, msg["id"], raw)
     from orch import relay_view
@@ -770,9 +806,13 @@ def send_text(
             body["update"]["title"] = title
     to_phone = to == "phones" or to.startswith("ph_")
     if general and not update and sender != "you" and to_phone:
-        if proposal := next((r for r in chat.clean_refs(root, refs or []) if r["kind"] == "proposal"), None):
+        if not _DRY_RUN.get() and (
+            proposal := next((r for r in chat.clean_refs(root, refs or []) if r["kind"] == "proposal"), None)
+        ):
             return _send_proposal(root, to, text, proposal, body, reply_to, refs)
-    if view is None:
+    if _DRY_RUN.get():
+        view = False  # the phone page of a ticket is built (and uploaded) only for a real send
+    elif view is None:
         view = to_phone and update in phone_view.SEND_KINDS
     if isinstance(view, dict):  # a ready (light) snapshot
         tv = view
@@ -837,6 +877,8 @@ def send_text(
                     }
     else:
         msg = _message(root, to, "text", body, ticket, reply_to, mid)
+    if _DRY_RUN.get():
+        return msg
     if note:
         msg["view_note"] = note
     if update and ticket and to_phone and not isinstance(view, dict):  # a light update follows nothing new
@@ -947,6 +989,11 @@ def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str
         raise Refused("The file is bigger than 100 MB.")
     to = resolve(root, target)
     data = path.read_bytes()
+    if _DRY_RUN.get():  # nothing is uploaded: the body shows the file's name, size and fingerprint
+        body = {"name": path.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        if text:
+            body["text"] = text
+        return _message(root, to, "file", body, ticket)
     blob = _api(root, "POST", "/v1/blobs", data, 300)[1]
     body = {"blob_id": blob["blob_id"], "name": path.name, "size": len(data), "sha256": blob["sha256"]}
     if blob["sha256"] != hashlib.sha256(data).hexdigest() or blob["size"] != len(data):
@@ -964,8 +1011,15 @@ def send_delegate(
     checklist: list[str],
     ticket: str | None,
     group: bool = False,
+    full: bool = False,
 ) -> dict:
+    if full and not ticket:
+        raise Refused("--full needs --ticket <id>.")
+    if full and group:
+        raise Refused("--full and --group do not go together. Use one.")
     to = resolve(root, target)
+    if group and ticket and _DRY_RUN.get():
+        raise Refused("--dry-run does not preview --group (the group card). Preview without --group.")
     if group and ticket and to.startswith("ws_") and not tickets.is_general(root, ticket):
         # only when asked for (--group): the ticket's group opens and its card is shared with the workspace
         # (chat-groups.md); a workspace that can't join gets the plain delegate, and is not left a member
@@ -978,10 +1032,37 @@ def send_delegate(
     body: dict = {"title": title, "text": text}
     if checklist:
         body["checklist"] = checklist
+    if full and ticket:
+        # opt-in per send (R3.3): the whole ticket as the same card the group shares, never more
+        from orch import chat_groups
+
+        card = chat_groups.card_of_ticket(root, ticket)
+        if card is None:
+            raise Refused(f"Ticket {ticket} could not be read. Nothing was sent.")
+        body["ticket_card"] = chat_groups.fit_card(card)
     tok = _received_token(root, to, "delegate", None)
     if tok:
         body["allow_token"] = tok
-    return _message(root, to, "delegate", body, ticket)
+    m = _message(root, to, "delegate", body, ticket)
+    if ticket and not _DRY_RUN.get():
+        _note_delegated(root, ticket, to, m)
+    return m
+
+
+def _note_delegated(root: Path, tid: str, to: str, m: dict) -> None:
+    """The sender's ticket stays the owner: it records who holds a linked copy (ext.relay.delegated) and one
+    history line. Bookkeeping: the message goes either way, so an unwritable ticket never fails it."""
+    who = clean_untrusted(name_of(root, to), 60) or to
+
+    def op(tk):
+        r = tk.setdefault("ext", {}).setdefault("relay", {})
+        done = r.get("delegated") if isinstance(r.get("delegated"), list) else []
+        done.append({"to": to, "message": m["id"], "at": m["created_at"]})
+        r["delegated"] = done[-20:]
+        tickets.add_history(tk, tickets.current_actor(), f"Handed to {who}", "relay")
+
+    with contextlib.suppress(Refused, OSError):
+        tickets.apply_op(root, tid, op, by=tickets.current_actor())
 
 
 def send_start(root: Path, target: str, key: str, text: str, ticket: str | None) -> dict:
@@ -3004,6 +3085,25 @@ def _ticket_for(root: Path, msg: dict) -> str:
                 return t["id"]
         title = f"Relay task {b['key']}"
     else:
+        if copy := _linked_copy(root, msg):
+            # the sender's ticket was handed over before: this ticket is the copy, its title, checklist and
+            # status are not touched. The message is remembered and said once in the history.
+            r = copy.get("ext", {}).get("relay", {})
+            if (atid := _allow_ticket(root, msg["id"])) is not None and atid != copy["id"]:
+                _merge_allow(root, atid, copy["id"], by)
+            more = [*r.get("messages", []), msg["id"]]
+            tickets.apply_op(
+                root,
+                copy["id"],
+                lambda tk: tickets.add_history(tk, by, f"{peer} handed this task over again", "relay"),
+                by=by,
+            )
+            upd: dict = {"messages": more[-20:]}
+            if card := _shared_card(msg):
+                upd["shared_card"] = card
+                _note_shared(root, copy["id"], by)
+            tickets.ext_set(root, copy["id"], "relay", json.dumps(upd), by)
+            return copy["id"]
         # outside text is data: cleaned, one line, framed with who sent it, never longer than a title
         peer = clean_untrusted(name_of(root, msg["from"]), 60) or msg["from"]
         said = " ".join(clean_untrusted(b["title"], 200).split()) or "a task"
@@ -3034,12 +3134,81 @@ def _ticket_for(root: Path, msg: dict) -> str:
     if msg["type"] == "start":
         ext["start_key"] = b["key"]
     if msg["type"] == "delegate":
+        if pt := _peer_ticket(msg):
+            ext["peer_ticket"], ext["peer_key"] = pt  # the sender owns the original; this one is the copy
         from orch import chat_groups
 
         if link := chat_groups.task_link(root, msg):
             ext["group_task"] = link  # sync reports its status to the group's host
+        if card := _shared_card(msg):
+            ext["shared_card"] = card  # the sender's whole ticket, kept as data (never an instruction)
+            _note_shared(root, tid, by)
     tickets.ext_set(root, tid, "relay", json.dumps(ext), by)  # last: `done` finds the ticket by this
     return tid
+
+
+def _shared_card(msg: dict) -> dict | None:
+    """body.ticket_card of a delegate (`--full`), cleaned text by text and capped: outside text is data. It is
+    only kept in ext.relay.shared_card; the copy's title and checklist still come from title and checklist."""
+    c = msg.get("body", {}).get("ticket_card")
+    if not isinstance(c, dict):
+        return None
+
+    def txt(v, n: int) -> str:
+        return " ".join(clean_untrusted(str(v or ""), n).split())[:n]
+
+    q = c.get("question")
+    items = c.get("checklist")
+    card = {
+        "title": txt(c.get("title"), 200),
+        "status": txt(c.get("status"), 20),
+        "summary": txt(c.get("summary"), 280),
+        "checklist": [
+            {"text": txt(i.get("text"), 200), "done": i.get("done") is True}
+            for i in (items if isinstance(items, list) else [])[:20]
+            if isinstance(i, dict)
+        ],
+    }
+    if key := txt(c.get("key"), 20):
+        card["key"] = key
+    if isinstance(q, dict) and (qt := txt(q.get("text"), 500)):
+        card["question"] = qt
+    card["done"] = sum(1 for i in card["checklist"] if i["done"])
+    card["total"] = len(card["checklist"])
+    return card
+
+
+def _note_shared(root: Path, tid: str, by: str) -> None:
+    """One history line; bookkeeping, so an unwritable ticket never fails the receive."""
+    with contextlib.suppress(Refused, OSError):
+        tickets.apply_op(
+            root, tid, lambda tk: tickets.add_history(tk, by, "Shared the whole ticket", "relay"), by=by
+        )
+
+
+def _peer_ticket(msg: dict) -> tuple[str, str | None] | None:
+    """The sender's ticket id (and key) of a message, cleaned: outside text is data."""
+    tid = clean_untrusted(str(msg.get("ticket") or ""), 64).strip()
+    if not tid:
+        return None
+    key = clean_untrusted(str(msg.get("key") or ""), 64).strip()
+    return tid, key or None
+
+
+def _linked_copy(root: Path, msg: dict) -> dict | None:
+    """An open ticket here that already is the copy of the sender's ticket named by this delegate."""
+    pt = _peer_ticket(msg)
+    if pt is None:
+        return None
+    for t in tickets.list_all(root):
+        r = t.get("ext", {}).get("relay", {})
+        if (
+            r.get("peer_ticket") == pt[0]
+            and r.get("from") == msg["from"]
+            and t.get("status") in ("open", "active", "waiting")
+        ):
+            return t
+    return None
 
 
 def _merge_allow(root: Path, atid: str, into: str, by: str) -> None:

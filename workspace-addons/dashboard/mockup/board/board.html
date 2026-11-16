@@ -6,149 +6,9 @@
 <meta name="color-scheme" content="dark">
 <title>Tickets · orch</title>
 <link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/preview.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/gallery.css">
-<style>
-:root{--surface-raised:#1b1f26;--surface-hover:#20252d;--border-card:#3a414b;--border-card-hover:#56606c;--lane:#14171c}
-/* top bar carries the page title, count, what waits on you */
-.tb-title{display:flex;align-items:center;gap:12px;min-width:0}
-.tb-title h1{font-size:20px;line-height:28px;letter-spacing:-.015em}
-.count-n{display:inline-grid;place-items:center;min-width:24px;height:20px;padding:0 8px;border-radius:99px;background:var(--surface-3);color:var(--text-muted);font:500 12px/16px var(--font-mono);font-variant-numeric:tabular-nums}
-.wait-link{display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:99px;background:var(--warning-soft);color:var(--warning);font-size:12px;line-height:16px;font-weight:500;text-decoration:none}
-.wait-link:hover{text-decoration:underline}
-.updated{font-size:12px;color:var(--text-faint);margin-right:4px}
-.loadbar{position:absolute;left:0;right:0;bottom:-1px;height:2px;overflow:hidden;opacity:0}
-.loadbar:after{content:'';position:absolute;inset:0;width:30%;background:var(--brand);animation:lb 1100ms var(--ease-move) infinite}
-html[data-state=loading] .loadbar{animation:lb-show 1ms linear 80ms forwards}
-@keyframes lb{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@keyframes lb-show{to{opacity:1}}
-
-/* page */
-.board-page{max-width:none;padding:32px var(--page-gutter) 24px;gap:24px}
-.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:40px}
-.toolbar .segmented{padding:2px}
-.toolbar .segmented .btn{min-height:30px;gap:6px}
-.jump{display:flex;gap:4px;flex-wrap:wrap}
-.jchip{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:4px 10px;border:1px solid var(--border);border-radius:99px;background:transparent;color:var(--text-muted);font-size:12px;line-height:16px;font-weight:500;transition:background-color var(--dur-fast) var(--ease-move),color var(--dur-fast) var(--ease-move),border-color var(--dur-fast) var(--ease-move)}
-.jchip:hover{background:var(--surface-2);color:var(--text);border-color:var(--border-strong)}
-.jchip b{font:500 12px/16px var(--font-mono);color:var(--text)}
-.jchip.attn{border-color:#5a4a2c}
-.sdot{width:8px;height:8px;border-radius:50%;background:var(--c,var(--text-faint))}
-.filter{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)}
-.filter select{width:auto;min-height:32px;padding:4px 28px 4px 10px;background:var(--surface);border-color:var(--border);font-size:14px}
-.search{position:relative;display:flex;align-items:center;width:224px}
-.search svg{position:absolute;left:10px;color:var(--text-faint)}
-.search input{min-height:32px;padding:4px 36px 4px 32px;background:var(--surface);border-color:var(--border)}
-.search input:focus{border-color:var(--border-strong)}
-.search kbd{position:absolute;right:6px;min-width:20px;padding:0 4px;font-size:12px}
-#clear{min-height:32px}
-
-/* board: columns breathe instead of squeezing; Done is a rail on small screens */
-.board{display:grid;gap:12px;grid-template-columns:repeat(4,minmax(208px,1fr)) 56px;align-items:stretch}
-.board.done-open{grid-template-columns:repeat(5,minmax(224px,1fr));overflow-x:auto;padding-bottom:8px}
-.col{--c:var(--text-faint);display:flex;flex-direction:column;min-height:calc(100dvh - 160px);background:var(--lane);border:1px solid #1f242b;border-top:2px solid var(--c);border-radius:10px}
-.col[data-col=working]{--c:var(--working)}.col[data-col=needs],.col[data-col=check]{--c:var(--warning)}.col[data-col=done]{--c:var(--success)}
-.col-h{display:flex;align-items:center;gap:8px;min-height:44px;padding:8px 8px 8px 12px;border-radius:8px 8px 0 0}
-.col-h h2{display:flex;align-items:center;gap:8px;font-size:14px;line-height:20px;letter-spacing:0}
-.col-h h2 svg{width:16px;height:16px;color:var(--c)}
-.col-h .add{margin-left:auto;opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
-.col:hover .add,.col-h .add:focus-visible{opacity:1}
-.col-body{display:flex;flex-direction:column;gap:8px;padding:0 8px 8px}
-.col-empty{display:none;padding:16px 8px;text-align:center;font-size:12px;color:var(--text-faint);border:1px dashed var(--border);border-radius:8px}
-.col.is-empty .col-empty{display:block}
-.col-h.status-change{animation:head-pulse 200ms var(--ease-enter)}
-@keyframes head-pulse{50%{background:var(--surface-2)}}
-.rail{display:none}
-.board:not(.done-open) .col[data-col=done]>.col-h,.board:not(.done-open) .col[data-col=done]>.col-body{display:none}
-.board:not(.done-open) .rail{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;flex:1;padding:12px 0;border:0;background:transparent;color:var(--text-muted);border-radius:8px}
-.rail:hover{background:var(--surface);color:var(--text)}
-.rail .v{writing-mode:vertical-rl;font-size:14px;font-weight:600;color:var(--text)}
-.rail svg{width:16px;height:16px;color:var(--success)}
-.collapse-done{display:none}
-.board.done-open .collapse-done{display:inline-flex}
-@media(min-width:1600px){
- .board,.board.done-open{grid-template-columns:repeat(5,minmax(0,1fr));overflow:visible}
- .board .col[data-col=done]>.col-h,.board .col[data-col=done]>.col-body{display:flex!important}
- .board .rail,.board .collapse-done{display:none!important}
- .col{min-height:calc(100dvh - 176px)}
-}
-
-/* ticket card: information first, actions on hover */
-.tcard{--a:transparent;position:relative;display:grid;gap:8px;padding:10px 12px 10px 14px;background:var(--surface-raised);border:1px solid var(--border-card);border-radius:8px;transition:border-color var(--dur-fast) var(--ease-move),background-color var(--dur-fast) var(--ease-move)}
-.tcard:before{content:'';position:absolute;left:-1px;top:8px;bottom:8px;width:2px;border-radius:2px;background:var(--a)}
-.tcard[data-state=working]{--a:var(--working)}.tcard[data-state=needs],.tcard[data-state=check]{--a:var(--warning)}.tcard[data-state=done]{--a:#98cda399}
-.tcard:hover,.tcard:focus-within{border-color:var(--border-card-hover);background:var(--surface-hover)}
-.tc-title{font-size:14px;line-height:20px;font-weight:500;color:var(--text);text-decoration:none;padding-right:24px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.tc-title:after{content:'';position:absolute;inset:0;border-radius:8px}
-.tc-title:focus-visible{outline:none}.tc-title:focus-visible:after{outline:2px solid var(--brand);outline-offset:2px}
-.tcard[data-state=done] .tc-title{color:var(--text-muted)}
-.tc-line{display:flex;align-items:center;gap:8px;font-size:12px;line-height:16px;color:var(--text-muted);min-width:0}
-.tc-line svg{width:14px;height:14px}
-.tc-line.working{color:var(--working)}
-.tc-line.needs{color:var(--warning);font-weight:500}
-.tc-line.done{color:var(--success)}
-.live{width:6px;height:6px;border-radius:50%;background:var(--working);animation:live 2s ease-in-out infinite}
-@keyframes live{50%{opacity:.35}}
-.bar{flex:1;height:3px;min-width:32px;background:var(--surface-3);border-radius:3px;overflow:hidden}
-.bar i{display:block;height:100%;width:var(--v);background:var(--working);border-radius:3px;transition:width var(--dur-base) var(--ease-move)}
-.tc-line .n{font-family:var(--font-mono);color:var(--text-muted)}
-.tc-meta{display:flex;align-items:center;gap:8px;min-height:24px;font-size:12px;line-height:16px;color:var(--text-muted)}
-.who{display:inline-flex;align-items:center;gap:6px;color:var(--text-muted)}
-.who .avatar{width:20px;height:20px;font-size:12px}
-.when{margin-left:auto;color:var(--text-faint);white-space:nowrap;transition:opacity var(--dur-fast) var(--ease-move)}
-.tc-act{position:relative;z-index:1;margin-left:auto}
-.tc-act.hover{position:absolute;right:8px;bottom:8px;opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
-.tcard:hover .tc-act.hover,.tcard:focus-within .tc-act.hover{opacity:1}
-.tcard:hover .when:has(+.tc-act.hover),.tcard:focus-within .when:has(+.tc-act.hover){opacity:0}
-.tc-act.attn{border-color:#6b5730;color:var(--warning);background:var(--warning-soft)}
-.tc-act.attn:hover{background:#4a3d27}
-.tcard:not([data-state=todo]) [data-act=start]{display:none}
-.tc-more{position:absolute;z-index:1;top:6px;right:6px;opacity:0;color:var(--text-muted);transition:opacity var(--dur-fast) var(--ease-move)}
-.tcard:hover .tc-more,.tcard:focus-within .tc-more,.tc-more[aria-expanded=true]{opacity:1}
-.tcard.landed{animation:land 200ms var(--ease-enter)}
-@keyframes land{from{opacity:0;transform:translateY(-4px);box-shadow:0 0 0 2px var(--brand)}to{opacity:1;transform:none;box-shadow:0 0 0 0 transparent}}
-
-/* shared card menu (one floating menu, never clipped) */
-#card-menu{position:fixed;z-index:60;width:216px}
-#card-menu[data-open]{animation:page-in var(--dur-base) var(--ease-enter)}
-#card-menu .sep{height:1px;margin:4px 0;background:var(--border)}
-#card-menu .eyebrow{padding:4px 12px}
-#card-menu [aria-checked=true]:after{content:'✓';margin-left:auto;color:var(--brand)}
-#card-menu details summary{padding:8px 12px;min-height:36px;font-size:14px;color:var(--text)}
-#card-menu details p{padding:0 12px 8px;font-size:12px;color:var(--text-faint)}
-
-/* entry animation */
-.enter .col{animation:page-in 160ms var(--ease-enter) both;animation-delay:calc(var(--ci,0)*30ms)}
-.enter .tcard{animation:card-in 160ms var(--ease-enter) both;animation-delay:calc(var(--ci,0)*30ms + 40ms + var(--i,0)*25ms)}
-.enter .toolbar,.enter #empty{animation:page-in 160ms var(--ease-enter) both}
-@keyframes card-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-
-/* states */
-#skel,#empty{display:none}
-html[data-state=loading] #board,html[data-state=empty] #board{display:none}
-html[data-state=loading] #skel{display:grid}
-html[data-state=empty] #empty{display:grid}
-html[data-state=loading] .tb-dyn,html[data-state=empty] #wait{display:none!important}
-html[data-state=loading] .toolbar .jump,html[data-state=empty] .toolbar .jump{opacity:.5;pointer-events:none}
-.sk-col{display:flex;flex-direction:column;gap:8px;padding:12px 8px;min-height:calc(100dvh - 160px);background:var(--lane);border:1px solid #1f242b;border-top:2px solid var(--surface-3);border-radius:10px}
-.sk-card{display:grid;gap:8px;padding:12px;height:84px;background:var(--surface-raised);border:1px solid var(--border-card);border-radius:8px}
-@media(max-width:1599px){.sk-col.sk-done .sk-card,.sk-col.sk-done .skeleton.line{display:none}.sk-col.sk-done{align-items:center}}
-@media(min-width:1600px){#skel{grid-template-columns:repeat(5,minmax(0,1fr))}}
-#empty{place-items:center;align-content:center;gap:16px;min-height:calc(100dvh - 160px);padding:48px 24px;background:var(--lane);border:1px dashed var(--border-strong);border-radius:12px;text-align:center}
-#empty h2{font-size:20px}
-#empty p{max-width:52ch;color:var(--text-muted)}
-#empty .ex{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
-#empty .flow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;font-size:12px;color:var(--text-faint)}
-
-/* preview controls + toasts */
-.pc{position:fixed;right:12px;bottom:12px;z-index:90;display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;font-size:12px;line-height:16px;box-shadow:var(--lift-shadow)}
-.pc span{color:var(--text-faint);padding:0 4px}
-.pc a{padding:4px 8px;border-radius:4px;color:var(--text-muted);text-decoration:none}
-.pc a:hover{background:var(--surface-3);color:var(--text)}
-.pc a[aria-current]{background:var(--brand-soft);color:var(--brand)}
-.toasts{bottom:64px}
-
-.board-page .board{grid-template-columns:repeat(5,minmax(200px,1fr))!important;overflow-x:auto;padding-bottom:16px}.board-page .col[data-col=done] .col-h,.board-page .col[data-col=done] .col-body{display:flex!important;visibility:visible!important}.board-page .col[data-col=done] .col-body{display:block!important}.board-page .col[data-col=done]{width:auto!important;min-width:200px}.rail,.collapse-done{display:none!important}.toolbar{flex-wrap:nowrap!important}.toolbar .search{width:220px;min-width:140px}.tc-line{flex-wrap:wrap}.n{white-space:nowrap}
-.result-snippet{display:flex;gap:8px;align-items:center;font-size:12px;text-decoration:none}.result-snippet>span:last-child{line-height:18px}.board .tc-title{-webkit-line-clamp:3}.board .tc-meta{flex-wrap:wrap}</style>
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/mockup.css">
 <link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/interaction.css"><script src="../../../../workspace/src/orch_ui/static/overlay.js"></script><script src="../../../../workspace/src/orch_ui/static/select.js"></script><script src="../../../../workspace/src/orch_ui/static/date.js"></script><script src="../../../../workspace/src/orch_ui/static/components.js"></script></head>
-<body class="has-shell">
+<body class="mk-board-board-html has-shell">
 <a class="skip-link btn primary" href="#content">Skip to content</a>
 <div class="shell">
 <aside class="sidebar" aria-label="Workspace navigation">
@@ -221,9 +81,9 @@ html[data-state=loading] .toolbar .jump,html[data-state=empty] .toolbar .jump{op
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Plan the autumn newsletter"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="working" data-person="Ben" data-ref="t_0qu0pr">
-     <a class="tc-title" href="../ticket/ticket-working.html">Book the spring workshop room</a>
+     <a class="tc-title" href="../ticket/ticket-working.html?quiet=1">Book the spring workshop room</a>
      <div class="tc-line working"><span class="live" aria-hidden="true"></span><span>Helper working</span><span class="bar" role="img" aria-label="1 of 3 steps"><i style="--v:33%"></i></span><span class="n">1 of 3 steps</span></div>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">24 min ago</span><a class="btn xs outline tc-act hover" href="../focus/focus.html">Watch live</a></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">No news since 09:20</span><a class="btn xs outline tc-act hover" href="../focus/focus.html">Watch live</a></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Book the spring workshop room"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="working" data-person="Anna" data-ref="t_fswaap">

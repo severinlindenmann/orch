@@ -1,9 +1,8 @@
 /* Home cards share the shell's dark theme tokens. */
-.home-columns{grid-template-columns:minmax(0,1fr) 280px;align-items:start}
+.home-columns{align-items:start}
 .home-need,.home-work,.home-message,.home-ticket{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:16px}
 .home-columns .ticket-title h3{margin:0;line-height:1.5}
 .home-columns p{margin:0}
-.home-columns .ticket-title a{text-decoration:none}
 .home-columns summary,#connection .btn,#connection summary{min-height:44px}
 .home-columns .row{flex-wrap:wrap}
 .home-columns .home-message .btn{align-self:flex-start}
@@ -15,14 +14,11 @@
 .skeleton-card.question{min-height:230px}.skeleton-line{height:18px}.skeleton-line.short{width:60%}
 #connection{flex-wrap:wrap}#connection details{max-width:100%}#connection summary{display:flex;align-items:center;cursor:pointer}
 @keyframes home-shimmer{50%{opacity:.45}}
-@media(prefers-reduced-motion:reduce){.skeleton-heading,.skeleton-line{animation:none}}
-@media(max-width:900px){.home-columns{grid-template-columns:minmax(0,1fr)}}
 .home-section>h2{font-size:14px;margin:0 0 12px}
-.home-columns .ticket-title a{display:inline-flex;align-items:center;min-height:44px;gap:6px}
+.home-columns .ticket-title a{text-decoration:none;display:inline-flex;align-items:center;min-height:44px;gap:6px}
 .home-columns .home-need>p a{display:inline-flex;align-items:center;min-height:44px}
 
-.ticket-title .mono{white-space:nowrap}
-.ticket-title .mono{flex:none}
+.ticket-title .mono{white-space:nowrap;flex:none}
 .chip.attn{background:var(--warning-soft);border-color:var(--warning);color:var(--warning)}
 /* An add-on row with its own buttons (sync, draft sync-card.html): text and source on the left, the buttons right;
    a signed choice says "Needs your signature" next to them. Stacked on a narrow screen. */
@@ -34,16 +30,13 @@
 .home-need .sig .ic-wrap svg{width:12px;height:12px}
 @media(max-width:600px){.home-need.need-acts .acts{justify-content:flex-start}}
 .status-leaving{opacity:0;transition:opacity 160ms ease-out}
-@media(prefers-reduced-motion:reduce){.status-leaving{transition:none}}
 /* A result row is one link with a chevron; signing off happens in the result view. */
 .home-columns .see-all{display:inline-flex;align-items:center;min-height:44px;color:var(--text)}
 /* Home draft (mockup/home): Question, Check and Changes cards, then Working now; Finished today on the right. */
 .home-columns{grid-template-columns:minmax(0,1fr) 296px;gap:24px}
-.home-card>.card-h{display:flex;align-items:center;gap:8px;padding:12px 16px 0}
-.home-need .question-title{font-size:20px;line-height:28px;margin:0}
-.home-need .answer-options{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.home-card>.card-h{display:flex;align-items:center;gap:8px}
+.home-need .question-title{margin:0}
 .answer-option{display:flex;flex-direction:column;gap:8px;text-align:left;min-height:44px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;padding:12px;color:var(--text);cursor:pointer;transition:border-color 100ms ease,background 100ms ease}
-.answer-option>span:first-child{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .answer-option small{color:var(--text-muted);font-size:12px;line-height:16px}
 .answer-option.suggested{border-color:var(--brand);background:var(--brand-soft)}
 .answer-option:hover{background:var(--surface-3)}
@@ -60,19 +53,17 @@
 .home-columns .quiet-note a{color:var(--text-muted)}
 .empty-workspace{min-height:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center}
 .empty-workspace p{color:var(--text-muted)}
-@media(max-width:1100px){.home-columns{grid-template-columns:minmax(0,1fr) 256px;gap:16px}.home-need .answer-options{grid-template-columns:1fr}}
+@media(max-width:1100px){.home-columns{grid-template-columns:minmax(0,1fr) 256px;gap:16px}}
 @media(max-width:900px){.home-columns{grid-template-columns:minmax(0,1fr)}}
-@media(prefers-reduced-motion:reduce){.answer-option{transition:none}}
 /* Second pass: tiles for the answers, header meta, Check result button, Working now header (accepted Home draft) */
 .home-need .answer-options{display:flex;flex-wrap:wrap;gap:8px}
 .answer-option{flex:0 1 auto;min-width:150px;max-width:100%}
-.answer-option>span:first-child{flex-direction:column;align-items:flex-start;gap:6px}
+.answer-option>span:first-child{display:flex;flex-wrap:wrap;flex-direction:column;align-items:flex-start;gap:6px}
 .home-need .choose-line{margin-top:4px}
 .home-card>.card-h{padding:12px 16px}
 .home-card>.card-h+.card-row{border-top:1px solid var(--border)}
 .home-section-head{align-items:center;justify-content:space-between;margin-bottom:12px}.home-section-head h2{margin:0}
 .home-section>.home-section-head+.card{margin:0}
-.home-section>h2{margin:0 0 12px}
 .home-section-head h2{font-size:14px;line-height:20px}
 /* Owner feedback 14 Nov: the question is body text, not a heading. */
 .home-need .question-title{font-size:14px;line-height:20px;font-weight:600}

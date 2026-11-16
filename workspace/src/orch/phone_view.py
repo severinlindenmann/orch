@@ -1283,6 +1283,9 @@ def _view_step(c: dict, h) -> dict:
     return step
 
 
+_DUE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?")
+
+
 def _status(ticket: dict) -> str:
     s = ticket.get("status", "open")
     return s if s in STATUSES else "open"
@@ -1348,6 +1351,8 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
         view["agent"] = agent
     if summary := shown_summary(ticket, h):
         view["summary"] = summary
+    if _DUE.fullmatch(str(ticket.get("due") or "")):  # YYYY-MM-DD or YYYY-MM-DDTHH:MM, as the schema says
+        view["due"] = ticket["due"]  # full snapshots only: light_view never has it
     try:
         results = phone_results.prepare(root, result_candidates(root, ticket), h)
     except Exception:  # whatever is wrong with a result: the snapshot goes without results
