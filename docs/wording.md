@@ -26,6 +26,17 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | stop all automation | Pause automation / Paused | `orch pause`, `orch resume` | Stop all, Kill switch, Disable |
 | outside item | its tool's name + its own word ("GitHub issue", "Jira issue") | web reference | "Issue" alone |
 | something a helper learned here | Lesson (list: Lessons) | `orch lessons`, `l_...` | Memory, Tip |
+| a tool's way in that a helper needs (owner, ORCH-43) | Login / Connection / Key (caption under each name) | - | Token, Credential |
+| list of every login, connection and key (Settings, Helper tab; owner, ORCH-43) | What helpers need | - | Logins and keys, Helper access |
+| a login, connection or key that is fine | Works | - | Working well |
+| a login that ends in a few days | Runs out soon · <date> | - | Expires, Ends in |
+| a login that stopped working | Needs renewing | - | Expired, Login ended |
+| a connection that does not answer | Cannot be reached | - | Offline, Not answering |
+| start a new login for a tool | Renew (button) | - | Re-authenticate, Log in again |
+| swap a key for a new one | Replace (button) | - | Renew key, Rotate |
+| look at a connection or login again | Try again (connection) / Check again (after a renew done by hand) | - | Retry |
+| Home warning when several stopped | <n> things stopped working · See what to fix | - | <n> problems |
+| the place a key is typed in | Key entry | - | Safe key entry, Vault |
 | private network | private network (VPN) | - | NetBird (any product name) |
 
 Rules
