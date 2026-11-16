@@ -1536,3 +1536,34 @@ def test_ticket_new_reply_names_the_new_ticket(ws, act_orch):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_addon_act_allow_script_takes_only_the_shown_key(act_orch, ws):
+    """automation's allow-script: the value is the 64-hex key of the script entry the page showed, nothing else."""
+    import threading
+
+    from orch_dashboard.server import make_server
+
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}]))\n    sys.exit(0)\n'
+        'if a[:2] in (["addon", "list"]',
+    )
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        args = {"addon": "alpha", "verb": "allow-script", "target": "t_abcdef"}
+        key = "ab" * 32
+        code, text, _ = post(base, {"op": "addon.act", "args": {**args, "value": key}})
+        assert code == 200, text
+        assert acts(act_orch)[-1][:4] == ["alpha", "act", "allow-script", f"--value={key}"]
+        assert acts(act_orch)[-1][-2:] == ["--", "t_abcdef"]
+        n = len(acts(act_orch))
+        for bad in ("", "AB" * 32, "ab" * 31, "ab" * 33, key + "\n", "rm -rf /", 5, None):
+            assert post(base, {"op": "addon.act", "args": {**args, "value": bad}})[0] == 400, bad
+        assert len(acts(act_orch)) == n
+    finally:
+        srv.shutdown()
+        srv.server_close()

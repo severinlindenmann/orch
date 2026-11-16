@@ -279,3 +279,72 @@ def test_the_background_runner_command(ws):
     argv = scripts.runner_argv(ws, "t_scr00010")
     assert argv[0] == sys.executable and argv[1:4] == ["-P", "-m", "orch_automation"]
     assert argv[4:] == ["--dir", str(ws), "script", "run", "t_scr00010"]
+
+
+# ---- the dashboard's Allow on this computer -----------------------------------------------------------------
+
+
+def test_review_shows_the_command_and_binds_the_key(ws, agent):
+    scripts.add(ws, "watch", ["echo", "hi there"])
+    repeat_ticket(ws, "t_scr00011", "watch")
+    r = actions.review(ws, "allow-script", "t_scr00011")
+    k = scripts.key(ws, "watch", ["echo", "hi there"])
+    assert r["target"] == f"automation:t_scr00011:{k}"
+    assert r["review"]["value"] == "echo hi there" and "without a helper" in r["review"]["body"]
+    assert actions.review(ws, "run", "t_scr00011") == {"target": None, "review": None}
+
+
+def test_allow_script_from_the_dashboard_allows_only_what_was_shown(ws, agent, monkeypatch):
+    scripts.add(ws, "watch", ["true"])
+    repeat_ticket(ws, "t_scr00012", "watch")
+    k = scripts.key(ws, "watch", ["true"])
+    with pytest.raises(actions.Bad, match="Only a person"):  # an agent calling act itself
+        actions.act(ws, "allow-script", "t_scr00012", value=k)
+    monkeypatch.setattr(
+        scripts, "an_agent", lambda: None
+    )  # the dashboard runs it without the agent's variables
+    with pytest.raises(actions.Bad, match="Look at the command again"):
+        actions.act(ws, "allow-script", "t_scr00012", value="bad")
+    with pytest.raises(actions.Bad, match="changed"):
+        actions.act(ws, "allow-script", "t_scr00012", value="0" * 64)
+    assert actions.act(ws, "allow-script", "t_scr00012", value=k)["allowed"] is True
+    assert scripts.command(ws, "watch") == ["true"]
+    with pytest.raises(actions.Bad, match="already allowed"):
+        actions.review(ws, "allow-script", "t_scr00012")
+
+
+def test_the_automation_tab_offers_allow_until_the_script_is_allowed(ws, agent, monkeypatch):
+    from orch_automation.view import build
+
+    scripts.add(ws, "watch", ["true"])
+    repeat_ticket(ws, "t_scr00013", "watch")
+
+    from test_view import check
+
+    def row():
+        v = build(ws, T(8))
+        check(v)  # the view still matches the dashboard's block schema
+        (table,) = [b for b in v["blocks"] if b.get("type") == "table"]
+        (r,) = table["rows"]
+        return r
+
+    r = row()
+    assert r["subtitle"] == "Runs watch"
+    assert r["actions"][0] == {
+        "label": "Allow on this computer",
+        "action": {
+            "op": "addon.act",
+            "args": {"verb": "allow-script", "target": "t_scr00013", "review": True},
+        },
+    }
+    monkeypatch.setattr(scripts, "an_agent", lambda: None)
+    actions.act(ws, "allow-script", "t_scr00013", value=scripts.key(ws, "watch", ["true"]))
+    assert row()["actions"][0]["label"] == "Start now"
+
+
+def test_cli_act_proof_target_prints_the_review(ws, agent, capsys):
+    scripts.add(ws, "watch", ["true"])
+    repeat_ticket(ws, "t_scr00014", "watch")
+    assert cli.main(["--dir", str(ws), "act", "allow-script", "t_scr00014", "--proof-target"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["target"].endswith(scripts.key(ws, "watch", ["true"])) and out["review"]["title"]

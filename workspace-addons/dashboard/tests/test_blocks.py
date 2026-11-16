@@ -524,3 +524,28 @@ def test_the_edit_prompt_is_not_drawn_for_unsafe_arguments(tmp_path):
         ]
         nodes = list(walk(run(tmp_path, v)))
         assert not [n for n in nodes if n["data"].get("addonPrompt")], args
+
+
+@node
+def test_a_button_that_asks_for_a_review_carries_the_flag(tmp_path):
+    """Allow on this computer for a script: the page asks the add-on what to show before the click (data-review)."""
+    import copy
+
+    view = copy.deepcopy(ACCORDION)
+    item = view["blocks"][0]["items"][0]
+    item["actions"] = [
+        {
+            "label": "Allow on this computer",
+            "action": {
+                "op": "addon.act",
+                "args": {"verb": "allow-script", "target": "t_mec009", "review": True},
+            },
+        },
+        {"label": "Run now", "action": {"op": "addon.act", "args": {"verb": "run", "target": "t_mec009"}}},
+    ]
+    tree = run(tmp_path, view)
+    btns = [x for x in walk(tree) if x["data"].get("addonAct") and x["data"]["verb"] != "toggle"]
+    assert [(x["data"]["verb"], x["data"].get("review")) for x in btns] == [
+        ("allow-script", "true"),
+        ("run", None),
+    ]

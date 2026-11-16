@@ -739,6 +739,10 @@ def _addon_act(a):
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
                 raise BadRequest("Set takes a whole number.")
             value = a["value"]
+        elif verb == "allow-script":  # the key (hash) of the script entry the person was shown
+            if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9a-f]{64}", a["value"])):
+                raise BadRequest("Look at the command again.")
+            value = a["value"]
         elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
             value = _text(a["value"], "text").strip()
             if HIDDEN_CHARS.search(value):

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from croniter import croniter
 
-from . import listen, needs, orchcli, service
+from . import listen, needs, orchcli, scripts, service
 from .cron import fmt, next_after, parse
 from .loop import scheduled
 from .plain import zone
@@ -269,6 +269,15 @@ _STATUS = {
 }
 
 
+def _script_waits(root: Path, sched: dict) -> bool:
+    """The repeat names a script that is set up here but not allowed on this computer yet."""
+    name = sched.get("script")
+    if not isinstance(name, str) or not scripts.NAME_RE.match(name):
+        return False
+    argv = scripts.load(root).get(name)
+    return bool(argv) and not scripts.approved(root, name, argv)
+
+
 def _act(verb: str, tid: str) -> dict:
     return {"op": "addon.act", "args": {"verb": verb, "target": tid}}
 
@@ -312,10 +321,12 @@ def _schedules(
     running: bool = True,
     runs: list[dict] | None = None,
     waiting: frozenset = frozenset(),
+    scripts_waiting: frozenset = frozenset(),
 ) -> list[dict]:
     """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown.
     `waiting`: ids of schedules that arrived by sync and are not allowed on this computer yet: they offer
-    "Allow on this computer" (the person signs it) instead of Start now."""
+    "Allow on this computer" (the person signs it) instead of Start now. `scripts_waiting`: ids of repeats whose
+    script is set up here but not allowed yet: "Allow on this computer" shows its command first."""
     rows = []
     for t in tickets:
         if not scheduled(t) or not (cron := _repeats(t, True)):
@@ -358,6 +369,14 @@ def _schedules(
                             "action": {"op": "addon.allow", "args": {"target": t["id"]}},
                         }
                         if t["id"] in waiting
+                        else {  # a script nobody allowed here yet: the page shows its command before the click
+                            "label": "Allow on this computer",
+                            "action": {
+                                "op": "addon.act",
+                                "args": {"verb": "allow-script", "target": t["id"], "review": True},
+                            },
+                        }
+                        if t["id"] in scripts_waiting
                         else {"label": "Start now", "action": _act("run", t["id"])},
                         {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": t["id"]}}},
                     ],
@@ -438,7 +457,12 @@ def build(root: Path, now: datetime | None = None) -> dict:
     blocks: list[dict] = []
 
     waiting = frozenset(t["id"] for t in tickets if scheduled(t) and not allowed(root, t))
-    sched_rows = _schedules(tickets, now, bool(pid), runs, waiting)
+    scripts_waiting = frozenset(
+        t["id"]
+        for t in tickets
+        if scheduled(t) and _script_waits(root, (t.get("ext") or {}).get("automation") or {})
+    )
+    sched_rows = _schedules(tickets, now, bool(pid), runs, waiting, scripts_waiting)
     if sched_rows:
         table = {
             "type": "table",
