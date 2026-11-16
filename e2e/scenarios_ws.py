@@ -120,7 +120,8 @@ def w3(e):
 
 @scenario("W4")
 def w4(e):
-    """ticket status done is refused while a checked item lacks evidence."""
+    """ticket status done by an agent is refused while a checked item lacks evidence (a person's Done is a plain
+    action since #799 P4, so the scenario acts as the agent)."""
     ws = e.ws("Pilatus")
     t = e.orchj(ws, "ticket", "new", "W4 status")["id"]
     e.orch(ws, "check", "add", t, "Item A")
@@ -128,15 +129,15 @@ def w4(e):
     d = json.loads(p.read_text())
     d["checklist"][0]["done"] = True  # hand-edited: checked, no evidence
     p.write_text(json.dumps(d))
-    rc, _, err = e.orch(ws, "ticket", "status", t, "done", ok=False)
+    rc, _, err = e.orch(ws, "ticket", "status", t, "done", ok=False, by="agent:e2e")
     check(rc == 2 and "evidence" in err.lower(), f"expected refusal, got rc={rc} {err!r}")
     d["checklist"][0]["evidence"] = [{"type": "note", "ref": "checked by hand"}]
     p.write_text(json.dumps(d))
-    e.orch(ws, "ticket", "status", t, "done")
+    e.orch(ws, "ticket", "status", t, "done", by="agent:e2e")
     # an UNCHECKED item blocks done too; a dropped ticket is not affected
     t2 = e.orchj(ws, "ticket", "new", "W4 unchecked")["id"]
     e.orch(ws, "check", "add", t2, "never done")
-    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False)
+    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False, by="agent:e2e")
     check(rc == 2 and "not checked" in err.lower(), f"unchecked item must refuse done, got rc={rc} {err!r}")
     e.orch(ws, "ticket", "status", t2, "dropped")
     return "refusal ok (checked without evidence, and unchecked)"

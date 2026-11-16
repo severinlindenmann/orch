@@ -523,19 +523,40 @@ def a23(e):
     delegate and the listed file (and a planted password sends nothing); the other side allows it once and finishes;
     the result is evidence and the crew ticket is done. Test 4: taking a waiting task back with a person's Accept tells
     the other side once ("No longer needed") and never sends a second copy."""
-    from lib import Skip
-
-    host, member = "Pilatus", "Reports"
     # a TEST install: the core keystore (and so `orch secret scan`) only works for workspaces and an ORCH_HOME under
-    # <real home>/.orch-test, like F above; the run's workspaces and tool home are moved there for this scenario
+    # <real home>/.orch-test, like F above; the run's workspaces and tool home are moved there for this scenario only.
+    # The run's own state (which workspaces exist, what is connected) is put aside and comes back when the scenario
+    # ends, pass or fail: in a full run Pilatus already exists elsewhere, and the scenarios after this one use it.
+    mark = len(e.cleanup)
+    kept = (dict(e.env), e.ws_dir, set(e._inited), dict(e.creds), e._rules_done, e._addons)
+
+    def back():
+        e.env, e.ws_dir, e._inited, e.creds, e._rules_done, e._addons = kept
+
     real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
     base = real / ".orch-test" / f"e2e-a23-{os.getpid()}"
     (base / "home").mkdir(parents=True)
     e.cleanup.append(lambda: shutil.rmtree(base, ignore_errors=True))
-    old_env, old_dir = dict(e.env), e.ws_dir
+    e.cleanup.append(back)
     e.env = {**e.env, "ORCH_HOME": str(base / "home"), "ORCH_HOME_STRICT": "1"}
     e.ws_dir = base / "ws"
     e.ws_dir.mkdir()
+    e._inited, e.creds, e._rules_done, e._addons = set(), {}, False, False
+    try:
+        return _a23_body(e)
+    finally:  # this scenario's own clean-up runs now (newest first), not at the end of the whole run
+        for fn in reversed(e.cleanup[mark:]):
+            try:
+                fn()
+            except Exception:  # noqa: BLE001
+                pass
+        del e.cleanup[mark:]
+
+
+def _a23_body(e):
+    from lib import Skip
+
+    host, member = "Pilatus", "Reports"
     py = _tool_python(e)
     prefix = Path(e.sh([py, "-c", "import os, sys; print(os.path.realpath(sys.prefix))"])[1].strip())
     record = prefix / "orch-install.json"
@@ -544,7 +565,6 @@ def a23(e):
     rc, out, err = e.sh([py, "-c", "import sys; from pathlib import Path; from orch import home as h; "
                          "h.write_install_record(Path(sys.prefix), 'test')"])
     check(rc == 0, f"install record: {(err or out)[-200:]}")
-    e.cleanup.append(lambda: (setattr(e, "env", old_env), setattr(e, "ws_dir", old_dir)))
     try:
         ids = e.relay_all()
     except Fail as error:  # core still asks for a person's proof to connect a workspace to the relay
