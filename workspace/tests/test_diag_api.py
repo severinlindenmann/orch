@@ -334,3 +334,21 @@ def test_share_without_a_relay_keeps_the_report_and_says_why(live):
     code, _, out = post(port, "/api/diag/share", {"ref": r["ref"]}, {"Cookie": ck})
     assert code == 422 and b"not connected" in out
     assert post(port, "/api/diag/share", {"ref": "../x"}, {"Cookie": ck})[0] == 400
+
+
+def test_report_dialog_makes_a_feature_wish(live):
+    root, port = live
+    ck = session(root, port)
+    body = {"note": "a dark look", "expected": "easier at night", "about": "feature", "content": False}
+    code, _, out = post(port, "/api/diag/report", body, {"Cookie": ck})
+    assert code == 200, out
+    r = json.loads(out)
+    folder = Path(r["path"])
+    assert (
+        r["about"] == "feature" and json.loads((folder / "manifest.json").read_text())["about"] == "feature"
+    )
+    assert (folder / "SUMMARY.md").read_text().startswith("# Feature wish ")
+    code, _, out = post(port, "/api/diag/report", {"note": "x"}, {"Cookie": ck})
+    assert code == 200 and json.loads(out)["about"] == "problem"  # no kind: a problem, as before
+    for bad in ({"about": "bug"}, {"about": 1}, {"about": ["feature"]}):
+        assert post(port, "/api/diag/report", bad, {"Cookie": ck})[0] == 400, bad

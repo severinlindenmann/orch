@@ -196,6 +196,16 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
 
     orch copy update <id>        # run it inside your copy, resolve any conflicts there, then commit
 
+**orch itself got in your way, or lacks something** (report it, then go on with your work)
+
+    orch report problem "<what happened>" --expected "<what you expected>" [--file <picture or log>] [--ticket <id>]
+    orch report feature "<what you want>" --why "<why it would help>" [--file <picture>]
+
+Report a problem when an orch command fails, refuses something it should allow, loses or mixes up work, or a page
+shows something wrong; report a feature wish when you or the person keep missing something in orch. One report per
+thing, in plain words, never a secret. It is saved here and, when this workspace is set up to share reports, sent on
+by itself. It is not your ticket's work: do not stop to wait for it, and do not report the person's own project bugs.
+
 **End of every run**
 
     orch ticket summary <id> "<what was done and what is left>"      # at most 200 characters

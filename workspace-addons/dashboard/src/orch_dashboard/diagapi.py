@@ -118,6 +118,7 @@ def make_report(root: Path, body) -> tuple[int, dict | str]:
         "more",
         "files",
         "share",
+        "about",
     }:
         return 400, "That request could not be read."
     ticket, addon = body.get("ticket"), body.get("addon")
@@ -147,6 +148,9 @@ def make_report(root: Path, body) -> tuple[int, dict | str]:
             return 400, "An added file could not be read."
     if body.get("share") not in (None, True, False):
         return 400, "That request could not be read."
+    about = body.get("about") or "problem"  # a problem, or a feature wish
+    if about not in ("problem", "feature"):
+        return 400, "That request could not be read."
     content = body.get("content") is not False
     page = body.get("page")
     if page is not None and not isinstance(page, str):
@@ -165,6 +169,7 @@ def make_report(root: Path, body) -> tuple[int, dict | str]:
             page=page if page and content else None,
             more=more,
             files=files,
+            about=about,
         )
     except Refused as e:
         return 422, str(e)[:300]
@@ -179,12 +184,19 @@ def make_report(root: Path, body) -> tuple[int, dict | str]:
         scope="ticket" if ticket else "add-on" if addon else "workspace",
         content=content,
         page=bool(page and content),
+        about=about,
     )
     rows = [
         {"verdict": c["verdict"], "name": str(c["name"])[:60], "fact": str(c["fact"])[:300]}
         for c in made["checks"]
     ]
-    out = {"ref": made["ref"], "path": made["path"], "problems": made["problems"], "checks": rows}
+    out = {
+        "ref": made["ref"],
+        "about": about,
+        "path": made["path"],
+        "problems": made["problems"],
+        "checks": rows,
+    }
     if body.get("share") is True:  # the person ticked it in the same dialog; the report stays here either way
         code, res = share_report(root, {"ref": made["ref"]})
         out.update(res if code == 200 else {"share_error": res})

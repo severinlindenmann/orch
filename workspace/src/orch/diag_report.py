@@ -37,6 +37,7 @@ ATTACH_BYTES = 25 * 1024 * 1024
 INCIDENT_MAX = 20
 INCIDENT_BYTES = 50 * 1024 * 1024
 REPORTS = "reports"
+ABOUT = ("problem", "feature")  # what a report is about: something went wrong, or a feature wish
 _SCOPE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
@@ -231,13 +232,21 @@ def summary(
     content: bool,
     more=None,
     attachments=(),
+    about="problem",
 ) -> str:
+    wish = about == "feature"
+
     def build(n_timeline: int, n_errors: int) -> str:
-        out = [f"# Diagnostic report {ref}", ""]
+        out = [f"# {'Feature wish' if wish else 'Diagnostic report'} {ref}", ""]
+        if wish:
+            out += [
+                "This is a feature wish, not a problem: sort it first, do not start building it blindly.",
+                "",
+            ]
         if note:
-            out += ["## What the person said", note[:600], ""]
+            out += ["## What the person wants" if wish else "## What the person said", note[:600], ""]
         if expected:
-            out += ["## What they expected", expected[:600], ""]
+            out += ["## Why it would help" if wish else "## What they expected", expected[:600], ""]
         if more:
             out += ["## More details from the person", more[:MORE_MAX], ""]
         if attachments:
@@ -321,6 +330,7 @@ def make(
     page=None,
     more=None,
     files=None,
+    about="problem",
 ) -> dict:
     """Make a report (`kind` r) or an incident (`kind` i, structure only, a short window). Returns {ref,
     path, ...}."""
@@ -328,6 +338,8 @@ def make(
     hide = hide or diag._hider(root)
     if hide is None:
         raise Refused("Secrets cannot be hidden here, so no report was made.")
+    if about not in ABOUT:
+        raise Refused("A report is about a problem or a feature.")
     scope = {"ticket": ticket, "run": run, "addon": addon}
     added = check_attachments(files) if kind == "r" else []
     more = (str(more).strip()[:MORE_MAX] or None) if more and kind == "r" else None
@@ -387,6 +399,7 @@ def make(
                 bool(content),
                 more,
                 [n for n, _ in added],
+                about if kind == "r" else "problem",
             ),
         )
         for name, data in added:
@@ -427,6 +440,7 @@ def make(
                 "schema": SCHEMA,
                 "ref": ref,
                 "kind": "report" if kind == "r" else "incident",
+                "about": about if kind == "r" else "problem",
                 "created_at": _iso(now),
                 "scope": scope,
                 "window": {"from": _iso(lo), "to": _iso(hi), "why": why},
@@ -450,6 +464,7 @@ def make(
     prune(root)
     return {
         "ref": ref,
+        "about": about if kind == "r" else "problem",
         "path": str(folder),
         "problems": [c["name"] for c in checks if c["verdict"] == "problem"],
         "checks": checks,

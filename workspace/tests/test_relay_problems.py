@@ -389,3 +389,89 @@ def test_a_fetched_report_cannot_claim_to_be_shared_from_here(proj, run, srv, na
     (folder / "from.json").write_text(json.dumps({"id": PID}))
     (folder / "shared.json").write_text(json.dumps({"id": "pb_" + "b" * 16}))
     assert relay_problems.shared_here(proj) == {}
+
+
+# ------------------------------------------------------- a kind: a problem or a feature wish (ORCH-81)
+
+
+def test_a_report_says_whether_it_is_a_problem_or_a_feature_wish(proj):
+    wish = diag_report.make(
+        proj, note="a dark look", expected="easier at night", about="feature", content=False
+    )
+    f = Path(wish["path"])
+    man = json.loads((f / "manifest.json").read_text())
+    assert (wish["about"], man["about"], man["kind"]) == ("feature", "feature", "report")
+    text = (f / "SUMMARY.md").read_text()
+    assert text.startswith("# Feature wish ") and "sort it first" in text
+    assert "## What the person wants\na dark look" in text and "## Why it would help\neasier at night" in text
+    assert json.loads((Path(make(proj)["path"]) / "manifest.json").read_text())["about"] == "problem"
+    # an incident is always a problem; a made-up kind is refused before anything is written
+    assert diag_report.make(proj, kind="i", window_s=900, about="feature")["about"] == "problem"
+    with pytest.raises(Refused, match="problem or a feature"):
+        diag_report.make(proj, about="bug")
+
+
+def test_report_command_without_a_relay_keeps_both_kinds_here(proj, run):
+    (proj / "shot.png").write_bytes(b"\x89PNG")
+    code, out, err = run(
+        "report", "problem", "the board froze", "--expected", "it updates", "--file", "shot.png"
+    )
+    assert code == 0, err
+    assert out.startswith("Problem report r-") and "Sent" not in out and "Not sent" not in out
+    code, out, err = run("report", "feature", "a dark look", "--why", "easier at night", "--json")
+    assert code == 0, err
+    res = json.loads(out)
+    assert res["about"] == "feature" and "shared" not in res and "share_error" not in res
+    man = json.loads((Path(res["path"]) / "manifest.json").read_text())
+    assert man["about"] == "feature" and man["note"] == "a dark look" and man["content"] is False
+    assert run("report", "feature", "  ")[0] == 2  # no words: refused, nothing written
+    with pytest.raises(SystemExit):  # only problem or feature
+        run("report", "bug", "x")
+
+
+def test_report_command_takes_the_ticket_key(proj, run):
+    tid = stuck(proj, title="Send the newsletter")
+    key = tickets.load(proj, tid)["key"]
+    code, out, err = run("report", "problem", "stuck", "--ticket", key, "--json")
+    assert code == 0, err
+    assert json.loads((Path(json.loads(out)["path"]) / "manifest.json").read_text())["scope"]["ticket"] == tid
+
+
+def test_report_command_sends_to_the_connected_relay_with_its_kind(proj, run, srv, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {"relay": {}})
+    code, out, err = run("report", "feature", "a dark look", "--json")
+    assert code == 0, err
+    res = json.loads(out)
+    assert res["shared"]["id"] == srv.problems[0]["id"]
+    assert srv.problems[0]["about"] == "feature" and srv.problems[0]["note"] == "a dark look"
+    code, out, err = run("report", "problem", "the board froze")
+    assert code == 0, err
+    assert "Sent to the admin of" in out and "about" not in srv.problems[1]  # a problem sends no field
+    code, out, err = run("report", "problem", "kept here", "--no-send")
+    assert code == 0 and len(srv.problems) == 2
+    # the list says which shared report is a wish
+    srv.problems[0]["about"] = "feature"
+    code, out, err = run("relay", "problem", "list")
+    assert code == 0 and "feature wish: a dark look" in out
+
+
+def test_report_command_keeps_the_report_when_the_send_fails(proj, run, srv, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {"relay": {}})
+    key = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    (proj / "notes.txt").write_text(f"token {key}\n")
+    code, out, err = run("report", "problem", "it broke", "--file", "notes.txt")
+    assert code == 0, err
+    assert "Not sent:" in out and "orch relay problem share r-" in out and key not in out
+    assert not srv.problems and len(list(diag_report.reports_dir(proj).glob("r-*"))) == 1
+
+
+def test_report_command_sends_nothing_while_the_relay_is_turned_off(proj, run, srv, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {})
+    code, out, err = run("report", "problem", "the board froze")
+    assert code == 0 and "Sent" not in out and not srv.problems
