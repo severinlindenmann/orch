@@ -91,3 +91,21 @@ def test_update_info_carries_the_switch(monkeypatch):
 
     monkeypatch.setattr(updateinfo, "info", lambda use_cache=True: {"installed": {}, "newest": None})
     assert update.update_info()["auto"]["on"] is False
+
+
+def test_a_note_written_while_the_page_is_open_shows_without_a_workspace_change(ws):
+    """The note lives in the orch home: the cached state must not hide it until a ticket changes."""
+    import time
+
+    from orch import autoupdate
+
+    from orch_dashboard.state_cache import StateCache
+
+    cache = StateCache(ws, None)
+    cache._store({"rev": "r1", "auto_update_note": None}, None)
+    assert cache._served()[0]["auto_update_note"] is None
+    autoupdate._write("auto-update-note.json", {"state": "updated", "at": time.time(), "to": "orch 17"})
+    served = cache._served()[0]
+    assert served["auto_update_note"]["to"] == "orch 17" and served["rev"] != "r1"  # the page renders again
+    cache._store({"rev": "r2"}, None)  # a snapshot: no note key, none added
+    assert "auto_update_note" not in cache._served()[0]
