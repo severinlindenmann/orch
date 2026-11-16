@@ -5,7 +5,9 @@
        o: {nav (element that receives the Waiting / Answered buttons, else they sit above the deck),
            meta (element whose text becomes "Review · <workspace>" once api.workspace is known),
            poll (ms, default 5000, 0 = off), now (Date, tests),
-           onChange (deck: called when the deck is built and after every move or answer; the dashboard's "All cards" list)}
+           onChange (deck: called when the deck is built and after every move or answer; the dashboard's "All cards" list),
+           startId (open at this card first, e.g. core:q:t_x:q2)}
+   UI.cardShown(card, o)       the pictures of a card as small tiles (the ticket page shows them with the question). o: {fileUrl}
    UI.answerRecord(entry, o)   one answer record (under the ticket questions and the Answered list). o: {fileUrl, now}
    UI.appliesNow(entries, o)   the "What applies now" block (null when nothing was answered yet)
    UI.reviewFetchApi(base, f)    the api for pages served by orch itself: same-origin /api/stack, /api/answered,
@@ -14,7 +16,8 @@
 
    api (what the page needs; the dashboard passes its own):
      stack()    -> Promise<[card]>      card = one row of `orch review list --json`:
-                  {id, ticket, key, card:{kind,title,why,need,then,ok_label,open,preview}, digest, since}
+                  {id, ticket, key, card:{kind,title,why,need,then,ok_label,open,preview}, digest, since,
+                   text (the question, shown on the card), group (cards that belong together), recommended}
                   preview refs are "reviewed/<sha12>/<name>" files; the page asks api.fileUrl for them
      answered() -> Promise<[entry]>     entry = {id, ticket, key, card, shown:{digest,copy,files}, at, by, via,
                   decision:{action:approve|use|use_with_changes|send_back|dont|none_of_these, picked, allows,
@@ -41,12 +44,13 @@ const refOf=p=>p&&(p.src||p.ref||p.file);
 const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};const q=Object.assign({},p);
  if(q.type==='page'||q.type==='img'){const r=refOf(p);q.src=r?api.fileUrl(c,r):'';delete q.ref;delete q.file}
  if(q.type==='compare'){q.before=mapPreview(p.before,c,api);q.after=mapPreview(p.after,c,api)}
- if(q.type==='options')q.options=(p.options||[]).map(op=>Object.assign({},op,{preview:op.preview?mapPreview(op.preview,c,api):undefined}));
+ if(q.type==='options'){q.options=(p.options||[]).map(op=>Object.assign({},op,{preview:op.preview?mapPreview(op.preview,c,api):undefined,suggested:!!(op.suggested||(c&&c.recommended&&c.recommended===op.id))}));if(p.before)q.before=mapPreview(p.before,c,api)}
  return q};
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
-  why:k.why,okLabel:k.ok_label,then:k.then,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c}};
+  why:k.why,okLabel:k.ok_label,then:k.then,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
+  text:typeof c.text==='string'?c.text:'',group:typeof c.group==='string'?c.group:'',suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
 
 /* ---------- Answers: words, pill, record ---------- */
 const verdictWord=e=>{const d=e.decision||{},k=e.card||{},n=(d.changes||[]).length;
@@ -71,6 +75,7 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
   return w};
  const shot=(label,pv,on,taken,dim)=>{const b=el('button','decision-shot'+(taken?' taken':'')+(dim?' dim':''));b.type='button';b.dataset.on=on;
   const w=content(pv),cap=el('span');cap.append(el('b','',label));b.append(w,cap);out.push({b,w,on,taken:!!taken});return b};
+ if(p.type==='options'&&p.before)shot('Today',p.before,'before');
  if(p.type==='options')(p.options||[]).forEach(op=>shot(op.id+' · '+op.title+(op.suggested?' (suggested)':''),op.preview,'option '+op.id,d.picked===op.id,d.picked&&d.picked!==op.id));
  else if(p.type==='compare'){shot('Before',p.before,'before');shot('After',p.after,'after')}
  else shot(k.title||'Reviewed',p,'');
@@ -79,6 +84,7 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
   if(!t)return;const s=el('span','swipe-pin');s.style.left=pn.x+'%';s.style.top=pn.y+'%';s.title=pn.text||'';s.append(el('span','',String(pn.n||i+1)));t.w.append(s)});
  return out.map(x=>x.b)};
 
+UI.cardShown=(c,o)=>{o=o||{};const th=thumbs({card:c.card||{},decision:{},ticket:c.ticket},o);if(!th.length)return null;const g=el('div','decision-shown');th.forEach(x=>g.append(x));return g};
 UI.answerRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('article','decision');c.dataset.id=e.id||'';
  const h=el('div','decision-h'),v=el('span','decision-verdict '+verdictClass(e),verdictWord(e));
  h.append(el('h3','',k.title||'Answered'),v);
@@ -158,7 +164,8 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   dirty=false;const cur=deck&&deck.items[deck.index],at=cur?items.findIndex(i=>i.id===cur.id):-1;
   const keep=new Set(deck?deck.items.map(sig):[]),pins={};if(deck)Object.keys(deck.pins).forEach(id=>{const n=items.find(i=>i.id===id);if(n&&keep.has(sig(n)))pins[id]=deck.pins[id]});
   const later=deck?[...deck.later].filter(id=>items.some(i=>i.id===id)):[];
-  build(items,at>0?at:0,later,pins)};
+  let first=-1;if(!deck&&o.startId){first=items.findIndex(i=>i.id===o.startId);o.startId=null}/* opened for one card (the ticket page's Look and answer) */
+  build(items,at>0?at:first>0?first:0,later,pins)};
  const load=async force=>{if(loading||!alive)return;loading=true;try{const cards=await api.stack();touchMeta();apply(cards,!!force)}catch(e){if(!deck||isAuth(e))err(e)}finally{loading=false}};
  const drawAnswered=async()=>{try{const list=await api.answered();if(!alive)return;ansEl.replaceChildren();
    if(!list.length){ansEl.append(UI.state({kind:'empty',title:'No answers yet',text:'Your answers appear here and on each ticket.'}));return}

@@ -427,6 +427,31 @@ iframe.loading{opacity:0}
  .swipe-actions{gap:var(--s5)}
  .swipe-act kbd{display:none}
 }
+/* A design review on cards (16 Nov, ORCH-65): the question text on the card, a marked suggestion, pictures that fill
+   their pane on a dark ground with a zoom per side, a Today tile on a choice, groups in the list beside the deck. */
+.swipe-desk{--swipe-card-h:clamp(560px,calc(100vh - 300px),1000px)}
+.swipe-head{max-height:45%;overflow:auto}
+.swipe-head .swipe-text{color:var(--text);white-space:pre-line}
+.swipe-sug{font-size:12px;line-height:16px;font-weight:500;color:var(--brand);border:1px solid var(--brand);border-radius:999px;padding:0 6px;white-space:nowrap}
+.swipe-act .act-sug{justify-self:center;margin-top:-2px}
+.swipe-act.suggested .ring{box-shadow:0 0 0 3px var(--bg),0 0 0 5px var(--brand)}
+.swipe-preview{background:var(--ink)}
+.swipe-preview>img{background:var(--ink)}
+.swipe-compare{background:var(--border-strong)}
+.swipe-compare .cmp-pane{background:var(--ink)}
+.cmp-pane>img{background:var(--ink)}
+.swipe-zoomed .cmp-pane>img,.swipe-zoomed>img{background:var(--ink)}
+.swipe-preview:has(.swipe-compare)>.swipe-expand{display:none}
+.cmp-zoom{position:absolute;right:8px;bottom:8px;z-index:3;background:var(--surface-2)!important;border-color:var(--border)!important}
+.opt-thumb>img{display:block;width:100%;height:100%;object-fit:contain;background:var(--ink)}
+.swipe-opt.today{cursor:default;border-style:dashed;background:var(--bg)}
+.swipe-opt.today .opt-letter{display:grid;place-items:center;color:var(--text-muted)}
+.review-group{display:grid;gap:2px}
+.review-group+.review-group{margin-top:var(--s3)}
+.review-group-head{display:flex;align-items:baseline;gap:var(--s2);margin:0;padding:0 var(--s2);font-size:13px;line-height:18px;font-weight:600;color:var(--text)}
+.review-group-head>span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.review-group-head .meta{font-weight:400}
+.swipe-group{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
 /* Review page served by orch itself (no dashboard): one bar, the deck centred, Answered list. */
 .review-solo-bar{display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap;padding:var(--s3) var(--s5);border-bottom:1px solid var(--border);background:var(--sidebar)}
 .review-solo-brand{display:flex;align-items:center;gap:var(--s2)}.review-solo-note{margin-left:auto}

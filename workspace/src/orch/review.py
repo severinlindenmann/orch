@@ -88,7 +88,7 @@ _PV_KEYS = {
     "doc": {"type", "heading", "paras", "steps"},
     "table": {"type", "cols", "rows"},
     "compare": {"type", "note", "before", "after"},
-    "options": {"type", "options"},
+    "options": {"type", "options", "before"},
 }
 _OPT_KEYS = {"id", "title", "text", "preview"}
 
@@ -175,6 +175,8 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
             _text(o.get("text"), "option text", 500)
             if o.get("preview") is not None:
                 _walk_preview(o["preview"], f"{where}.options[{i}].preview", refs, depth + 1)
+        if pv.get("before") is not None:  # how it is today, shown beside the options (not one to pick)
+            _walk_preview(pv["before"], f"{where}.before", refs, depth + 1)
     return pv
 
 
@@ -351,7 +353,10 @@ def card_files_of(card: dict) -> list[str]:
     """The stored file references of a card (reviewed/<sha12>/<name>), each once, in the order they appear."""
     refs: list[tuple[dict, str]] = []
     if isinstance(card.get("preview"), dict):
-        _walk_preview(json.loads(json.dumps(card["preview"])), "preview", refs)
+        pv = json.loads(json.dumps(card["preview"]))
+        if pv.get("type") == "options":
+            pv.pop("before", None)  # not on the phone's card (wire_card)
+        _walk_preview(pv, "preview", refs)
     out: list[str] = []
     for d, k in refs:
         if d[k] not in out:
@@ -395,8 +400,8 @@ def wire_card(card: dict, refs: dict) -> dict:
     def pv(p):
         o = {}
         for k, v in p.items():
-            if v is None or v == "":
-                continue
+            if v is None or v == "" or (k == "before" and p.get("type") == "options"):
+                continue  # the phone shows a choice's options only (its card has no Today picture yet)
             if k == "src":
                 o[k] = src(v)
             elif k in ("before", "after"):
@@ -924,6 +929,8 @@ def stack(root: Path) -> list[dict]:
                         "since": needs._asked_at(root, t, q["id"]),
                         "options": list(q.get("options") or []),
                         "recommended": q.get("recommended"),
+                        "text": q.get("text") or "",
+                        **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
                     }
                 )
         if t.get("status") == "review":

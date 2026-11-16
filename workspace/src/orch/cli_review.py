@@ -14,6 +14,7 @@ from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link")
 CARD_KINDS = ("draft", "link", "plan", "choose")
+SUGGEST_VERDICTS = ("ok", "no")  # what a card without options can suggest: approve or don't do
 KEY_RE = re.compile(r"review|q[0-9]+")
 
 
@@ -131,7 +132,11 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
         opts = [_option(root, o) for o in args.option]
         if len(opts) < 2:
             raise Refused('A choice needs at least two --option "ID=Title[:file]".')
+        if args.after or args.file:
+            raise Refused("A choice shows its options; add how it is today with --before FILE.")
         card["preview"] = {"type": "options", "options": opts}
+        if args.before:  # how it is today, beside the options (the person compares, then picks one)
+            card["preview"]["before"] = _file_preview(root, args.before, "before")
         options = [o["id"] for o in opts]
     elif args.option:
         raise Refused("A card takes --option only with --choose.")
@@ -165,8 +170,10 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
         }
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
         card.setdefault("why", "Your click merges it on GitHub with your own GitHub login.")
-    if args.suggest is not None and args.suggest not in options:
+    if args.suggest is not None and kind == "choice" and args.suggest not in options:
         raise Refused("--suggest must be one of the --option ids.")
+    if args.suggest is not None and kind != "choice" and args.suggest not in SUGGEST_VERDICTS:
+        raise Refused("On this card --suggest is ok (approve) or no (don't do).")
     return card, options, args.suggest, title
 
 
@@ -194,6 +201,7 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         action=action,
         card=card,
         shown=shown,
+        group=getattr(args, "group", None),
     )
 
 
