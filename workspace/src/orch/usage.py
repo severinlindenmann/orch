@@ -13,12 +13,11 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import adapters, tickets
+from orch import adapters, modelpick, tickets
 from orch.session_ids import valid_session_id
 
 SCHEMA = "orch.usage/1"
 FAMILIES = ("opus", "sonnet", "haiku")
-MOVED_UP = "Model moved up to Opus"
 CACHE_NAME = "usage-cache.json"
 
 
@@ -170,10 +169,8 @@ def ticket_usage(root: Path, ticket: dict, environ: Mapping[str, str] | None = N
 
 
 def _moved_up(ticket: dict) -> bool:
-    return any(
-        isinstance(h, dict) and str(h.get("text") or "").startswith(MOVED_UP)
-        for h in ticket.get("history") or []
-    )
+    """orch or the helper moved this ticket up to Opus (the stored model choice says so, not the history)."""
+    return modelpick.moved_up(ticket)
 
 
 def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | None = None) -> dict:

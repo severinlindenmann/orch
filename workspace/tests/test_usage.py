@@ -26,14 +26,14 @@ def write(path, *lines):
     return path
 
 
-def make(proj, title, sids, history=(), model=None):
+def make(proj, title, sids, up=False, model=None):
     t = tickets.create(proj, title, "human:t")
     raw = tickets.load(proj, t["id"])
     raw["sessions"] = [{"agent": "claude", "id": s} for s in sids]
-    for text in history:
-        tickets.add_history(raw, "orch", text)
     if model:
         raw["model"] = {"name": model, "by": "orch"}
+    if up:  # as tickets.move_up stores it
+        raw["model"]["up"] = {"from": "sonnet", "at": tickets.now(), "by": "agent:claude"}
     tickets._write(proj, raw)
     return tickets.load(proj, t["id"])
 
@@ -95,7 +95,7 @@ def test_cache_used_until_file_changes(proj, env, monkeypatch):
 
 
 def test_workspace_usage(proj, env):
-    a = make(proj, "Big", [SID], history=["Model moved up to Opus: hard"], model="opus")
+    a = make(proj, "Big", [SID], up=True, model="opus")
     b = make(proj, "Small", [SID2], model="sonnet")
     make(proj, "Quiet", [], model="sonnet")
     write(
