@@ -1,1 +1,14 @@
-{}
+{
+ "workspace-addons/automation/src/orch_automation/cli.py": {
+  "Scheduler": 3
+ },
+ "workspace-addons/sync/src/orch_sync/step.py": {
+  "Artifact": 1
+ },
+ "workspace/src/orch/jobs.py": {
+  "Job": 1
+ },
+ "workspace/src/orch/record.py": {
+  "proof": 2
+ }
+}

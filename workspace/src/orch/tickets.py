@@ -1688,14 +1688,14 @@ def parse_evidence(raw: str) -> dict:
     if not isinstance(ev.get("ref"), str) or not ev["ref"].strip():
         raise Refused("Evidence needs a ref (PR, commit, file, URL, command or note text).")
     if "role" in ev and ev["role"] not in ROLES:
-        raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
+        raise Refused(f"An evidence role is one of: {', '.join(ROLES)}.")
     if "text" in ev and not isinstance(ev["text"], str):
         raise Refused("Evidence text must be a string.")
     if "summary" in ev:
         raw = ev["summary"]
         line = " ".join(raw.split()) if isinstance(raw, str) else ""
         if not 1 <= len(line) <= 200 or not line.isprintable():
-            raise Refused("A proof summary is one line of 1 to 200 printable characters.")
+            raise Refused("An evidence summary is one line of 1 to 200 printable characters.")
         ev["summary"] = line
     _check_record_fields(ev)
     return ev
@@ -1814,7 +1814,7 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
         raise Refused(
-            "A check is done only with proof. Say what shows it, for example "
+            "A check is done only with evidence. Say what shows it, for example "
             f'`orch check done {tid} {cid} --command "pytest -q"` or `--note "what you saw"` '
             "(also --pr, --commit, --file, --url)."
         )
@@ -2003,7 +2003,7 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
         add_history(
-            t, by, f"Removed step {cid} '{item['text']}' ({state}" + (f"; proof: {proof})" if proof else ")")
+            t, by, f"Removed step {cid} '{item['text']}' ({state}" + (f"; evidence: {proof})" if proof else ")")
         )
         return item
 
@@ -2028,7 +2028,7 @@ def check_reopen(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         item["done"] = False
         item["evidence"] = []
         _clear_doing(item)
-        add_history(t, by, f"Reopened {cid}" + (f" (old proof: {proof})" if proof else ""))
+        add_history(t, by, f"Reopened {cid}" + (f" (old evidence: {proof})" if proof else ""))
         return item
 
     return apply_op(root, tid, op, by=by)
@@ -2995,7 +2995,7 @@ def _size_text(n: int) -> str:
 
 
 def _too_big(name: str) -> str:
-    return f"{name} is too big. A proof file can be at most 25 MB. Use --url or --note."
+    return f"{name} is too big. An evidence file can be at most 25 MB. Use --url or --note."
 
 
 def attach_file(
@@ -3037,9 +3037,9 @@ def _attach_file(
     Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
     load(root, tid)
     if role is not None and role not in ROLES:
-        raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
+        raise Refused(f"An evidence role is one of: {', '.join(ROLES)}.")
     if title is not None and not 1 <= len(title.strip()) <= 120:
-        raise Refused("A proof title needs 1 to 120 characters.")
+        raise Refused("An evidence title needs 1 to 120 characters.")
     refuse_secret_in_evidence(
         root,
         [{"type": "file", "ref": os.path.basename(path), "title": title or "", "summary": summary or ""}],
@@ -3065,14 +3065,14 @@ def _attach_file(
                     break
                 except ValueError:
                     continue
-    inside = Refused("proof files must be inside this workspace or this ticket's own working copy.")
+    inside = Refused("evidence files must be inside this workspace or this ticket's own working copy.")
     if rel is None or ".." in rel.parts:
         raise inside
     cur = src_base
     for part in rel.parts:
         cur = cur / part
         if cur.is_symlink():
-            raise Refused("proof files cannot be refs. Give the real file.")
+            raise Refused("evidence files cannot be refs. Give the real file.")
     low = tuple(x.lower() for x in rel.parts)
     if low[:2] == (".orch", "secrets") or ".git" in low:
         raise inside
@@ -3084,21 +3084,21 @@ def _attach_file(
     size = cur_src.stat().st_size
     if size > MAX_PROOF_BYTES:
         raise Refused(
-            f"{cur_src.name} is {_size_text(size)}. A proof file can be at most 25 MB. Use --url or --note."
+            f"{cur_src.name} is {_size_text(size)}. An evidence file can be at most 25 MB. Use --url or --note."
         )
     dest_dir = base / ".orch" / "tickets" / tid / "evidence"
     cur = base
     for part in (".orch", "tickets", tid, "evidence"):
         cur = cur / part
         if cur.is_symlink():
-            raise Refused("The proof folder of this ticket is a link. orch will not copy into it.")
+            raise Refused("The evidence folder of this ticket is a link. orch will not copy into it.")
         if cur.exists() and not cur.is_dir():
-            raise Refused("The proof folder of this ticket is blocked by a file. Move that file away.")
+            raise Refused("The evidence folder of this ticket is blocked by a file. Move that file away.")
         if not cur.exists():
             cur.mkdir()
     real_dir = Path(os.path.realpath(dest_dir))
     if real_dir != dest_dir or not str(real_dir).startswith(str(base / ".orch" / "tickets") + os.sep):
-        raise Refused("The proof folder of this ticket is not inside this workspace.")
+        raise Refused("The evidence folder of this ticket is not inside this workspace.")
     name = _proof_name(cur_src.name)
     dest, n = dest_dir / name, 1
     while True:
@@ -3114,7 +3114,7 @@ def _attach_file(
     except OSError:
         os.close(fd)
         os.unlink(dest)
-        raise Refused("proof files cannot be refs. Give the real file.") from None
+        raise Refused("evidence files cannot be refs. Give the real file.") from None
     try:
         with os.fdopen(src_fd, "rb") as src, os.fdopen(fd, "wb") as out:
             if os.fstat(src.fileno()).st_size > MAX_PROOF_BYTES:

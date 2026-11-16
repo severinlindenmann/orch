@@ -1184,7 +1184,7 @@ function ticketOutcomeCard(t) {
 }
 // One honest line about the proof (computed by the core as t.proof): a mark, the line, and one plain row per task.
 const PROOF_MARK = {passed:['ok', '✓'], failed:['bad', '×'], changed:['warn', '!'], note:['none', 'i'], missing:['none', '–']};
-const PROOF_WORD = {passed:'Check passed', failed:'Check failed', changed:'Changed since the check', note:'Note only', missing:'No proof yet'};
+const PROOF_WORD = {passed:'Check passed', failed:'Check failed', changed:'Changed since the check', note:'Note only', missing:'No evidence yet'};
 const RECHECK_TEXT = 'Please run the checks again and record them with orch check record.';
 function ticketProofLine(t) {
   const p = t.proof;

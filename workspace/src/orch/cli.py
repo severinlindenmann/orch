@@ -216,7 +216,7 @@ def _show(t: dict, root: Path) -> str:
             if tickets.checks_split(t)[1] == 0
             else f"✓ All resolved · {_progress(t)}"
         )
-    out.append(f"Proof: {tickets.proof_state(t, root)['line']}")
+    out.append(f"Evidence: {tickets.proof_state(t, root)['line']}")
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
@@ -587,8 +587,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("check")
     x.add_argument("--evidence", action="append", default=[], metavar="JSON", help=argparse.SUPPRESS)
     for k in ("command", "note", "pr", "commit", "file", "url"):
-        x.add_argument(f"--{k}", metavar="TEXT", help=f"proof: a {k}")
-    x.add_argument("--title", help="short name of the proof")
+        x.add_argument(f"--{k}", metavar="TEXT", help=f"evidence: a {k}")
+    x.add_argument("--title", help="short name of the evidence")
     x.add_argument("--role", help="result, check or support")
     x.add_argument("--summary", help="one line: what came out of this step (shown on the task)")
 
@@ -1066,10 +1066,10 @@ def run(args: argparse.Namespace) -> None:
             msg = f"{c['id']} now follows {args.after}."
         elif sub == "remove":
             t, c = tickets.check_remove(root, args.id, args.check, who)
-            msg = f"{c['id']} removed. It and its proof are kept in the history."
+            msg = f"{c['id']} removed. It and its evidence are kept in the history."
         elif sub == "reopen":
             t, c = tickets.check_reopen(root, args.id, args.check, who)
-            msg = f"{c['id']} is open again. Its proof stays in the history."
+            msg = f"{c['id']} is open again. Its evidence stays in the history."
         elif sub == "start":
             t, c = tickets.check_start(root, args.id, args.check, who)
             msg = f"{c['id']}: {who} is on it."
@@ -1097,8 +1097,8 @@ def run(args: argparse.Namespace) -> None:
         _out(
             args,
             history.shown_item(root, t, "checklist", c),
-            f"Done: {c['text']} (proof: {ev['ref']})"
-            + (f"\nProof copied: {ev['ref']} ({ev['text']})" if copied else ""),
+            f"Done: {c['text']} (evidence: {ev['ref']})"
+            + (f"\nEvidence copied: {ev['ref']} ({ev['text']})" if copied else ""),
         )
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())

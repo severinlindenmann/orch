@@ -1,9 +1,14 @@
-"""Fail when a "never use" word (docs/wording.md) is added to a UI string file.
+"""Fail when a "never use" word (docs/wording.md) is added to a UI string file or to text in orch's Python code.
+
+Python files (the CLI and the add-ons print what they hold) count every string literal except docstrings and
+lowercase keys, flags and patterns kept for data compatibility (`"proof"`, `"--proof-target"`, `"a|b|proof"`).
+"proof" is also caught in lowercase ("No proof yet"); the screen word is Evidence.
 
 Today's hits are listed in wording_allowlist.json (file -> word -> count), so the test is green now and every new hit fails.
 `python brand/tests/test_wording.py` prints the todo list (all current hits) for the lanes that own those files.
 """
 
+import ast
 import json
 import re
 import sys
@@ -26,6 +31,11 @@ WORD = re.compile(
     + "|".join(sorted((_ISSUE if w == "Issue" else re.escape(w) for w in NEVER), key=len, reverse=True))
     + r")(?![A-Za-z])"
 )
+# lowercase never-words that are only ever the screen word in a sentence; a key-like neighbour (proof-chip,
+# task_proof, proof.js) is code, not text
+LOWER = re.compile(r"(?<![A-Za-z_.-])(proofs?)(?![A-Za-z_-]|\.\w)")
+# a string with no space made of lowercase key characters is a data key, flag, class or pattern, not text
+KEYLIKE = re.compile(r"[a-z0-9_.:/|\\-]*")
 
 UI_GLOBS = [
     "workspace-addons/*/src/**/web/*.js",
@@ -38,6 +48,7 @@ UI_GLOBS = [
     "relay/web/*.html",
     "publish/web/*.html",
 ]
+PY_GLOBS = ["workspace/src/**/*.py", "workspace-addons/*/src/**/*.py"]
 # "quoted string" or >tag text<. Comments and identifiers are not UI text.
 STRING = re.compile(r"\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`|>([^<>]+)<")
 # code that is not shown: skip files that only hold kit internals
@@ -54,6 +65,39 @@ def ui_files():
                 yield rel, p
 
 
+def py_files():
+    seen = set()
+    for g in PY_GLOBS:
+        for p in sorted(ROOT.glob(g)):
+            rel = p.relative_to(ROOT).as_posix()
+            if p.is_file() and rel not in seen:
+                seen.add(rel)
+                yield rel, p
+
+
+def never_words(text: str) -> list[str]:
+    """The never-words in one piece of shown text (a string's content, quotes allowed around it)."""
+    if KEYLIKE.fullmatch(text.strip("\"'`")):
+        return []
+    return WORD.findall(text) + LOWER.findall(text)
+
+
+def py_strings(source: str) -> list[str]:
+    """Every string literal of a Python file (f-string parts too), docstrings left out."""
+    tree = ast.parse(source)
+    docs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docs.add(id(first.value))
+    return [
+        n.value
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs
+    ]
+
+
 def hits() -> dict[str, Counter]:
     out: dict[str, Counter] = {}
     for rel, p in ui_files():
@@ -62,8 +106,11 @@ def hits() -> dict[str, Counter]:
             if line.lstrip().startswith(("//", "/*", "*", "<!--")):
                 continue
             for m in STRING.finditer(line):
-                for w in WORD.findall(m.group(0)):
-                    c[w] += 1
+                c.update(never_words(m.group(1) if m.group(1) is not None else m.group(0)))
+        if c:
+            out[rel] = c
+    for rel, p in py_files():
+        c = Counter(w for text in py_strings(p.read_text(errors="ignore")) for w in never_words(text))
         if c:
             out[rel] = c
     return out
@@ -106,3 +153,14 @@ if __name__ == "__main__":
 def test_issue_is_allowed_only_with_a_tool_name_in_front():
     assert WORD.findall('"GitHub Issue" "Jira Issue 4"') == []
     assert WORD.findall('"Issue" "New Issue"') == ["Issue", "Issue"]
+
+
+def test_python_text_is_checked_but_keys_and_docstrings_are_not():
+    src = '"""Proof files: the docstring is not shown."""\nKEY = "proof"\nFLAG = "--proof-target"\n'
+    src += 'def f(n):\n    """No proof here either."""\n    return f"Proof: {n}" + "A proof file is too big."\n'
+    assert sorted(w for t in py_strings(src) for w in never_words(t)) == ["Proof", "proof"]
+
+
+def test_lowercase_proof_only_as_a_word():
+    assert never_words("No proof yet") == ["proof"] and never_words("done only with proof.") == ["proof"]
+    assert never_words("chip proof-chip") == [] and never_words("task_proof") == [] and never_words("proof.js") == []
