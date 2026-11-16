@@ -100,11 +100,13 @@ function reviewAcceptedRow(a) {
   const host = h('div', {'data-key':key});
   const sent = a.sent_back === true || reviewSentBack.has(a.ticket);
   const open = sent || snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-send'}, 'Send back');
+  // The reason takes the full card width under the title; Send back sits on its own line below it (the side
+  // column is narrow at 1280).
   const head = h('div', {className:'card-row'},
     h('div', {className:'grow'},
       h('a', {href:'#ticket/' + encodeURIComponent(a.ticket)}, clean([a.key, a.title].filter(Boolean).join(' · '))),
-      a.why ? h('p', {className:'meta'}, clean(a.why)) : null),
-    sent ? h('span', {className:'meta'}, 'Sent back') : open);
+      a.why ? h('p', {className:'meta'}, clean(a.why)) : null,
+      sent ? h('p', {className:'meta'}, 'Sent back') : open ? h('div', {}, open) : null));
   host.append(head);
   if (open) open.onclick = () => {
     locks.add(key);
