@@ -125,14 +125,14 @@ test('the owner row shows the chosen person, stays local and is plain text', () 
   assert.ok(s.includes('ownerRow(),'));
 });
 
-function cardEnv(lookExtra, settings) {
+function cardEnv(lookExtra, settings, answer) {
   let clicks = null, stateListener = null, inputs = null;
   const acts = [];
   const c = {TextEncoder, Array, Math, JSON, Object, String, encodeURIComponent, console, Set, CustomEvent: class { constructor(n) { this.type = n; } },
     localStorage: {getItem: () => null, setItem() {}},
     document: {querySelector: () => null, addEventListener: (n, f) => { if (n === 'click') clicks = f; if (n === 'input') inputs = f; }, title: ''},
     window: {addEventListener: (n, f) => { if (n === 'orch:state') stateListener = f; }, dispatchEvent() {},
-      orchAct: async (op, args) => { acts.push([op, args]); return {ok: true}; }}};
+      orchAct: async (op, args) => { acts.push([op, args]); return answer && answer[op] ? answer[op] : {ok: true}; }}};
   c.window.window = c.window;
   fakeDom(c);
   vm.createContext(c);
@@ -191,6 +191,48 @@ test('without a relay Save changes only the local description', async () => {
   await click('pf-save');
   await new Promise(r => setTimeout(r, 10));
   assert.deepEqual(JSON.parse(JSON.stringify(acts)), [['workspace.set', {field: 'description', text: 'New'}]]);
+});
+
+const PROPOSAL = {'workspace.propose': {ok: true, state: {proposal: {name: 'Home Money', description: 'Bills and taxes at home.', tags: ['bills', 'Taxes'], icon: 'receipt'}}}};
+
+test('Suggest fills the edit fields with the proposal and saves nothing by itself', async () => {
+  const {L, click, acts} = cardEnv({icon: null, color: null, set_by: null}, {ws_name: '', ws_description: ''}, PROPOSAL);
+  assert.ok(all(L.profileCard()).some(x => x.attrs['data-lk'] === 'pf-suggest'), 'the button is in the card');
+  await click('pf-suggest');
+  assert.deepEqual(JSON.parse(JSON.stringify(acts)), [['workspace.propose', {}]], 'only the read-only proposal ran');
+  const tree = all(L.profileCard());
+  assert.equal(tree.find(x => x.attrs['data-key'] === 'pf-name').attrs.value, 'Home Money');
+  assert.equal(tree.find(x => x.attrs['data-key'] === 'pf-description').attrs.value, 'Bills and taxes at home.');
+  assert.match(textOf(tree.find(x => x.attrs['data-key'] === 'pf-tags')), /bills.*taxes/);
+  assert.match(textOf(L.profileCard()), /Suggested: Receipt/);
+  assert.match(textOf(L.profileCard()), /Nothing is saved until then/);
+  click('pf-cancel');
+  assert.deepEqual(JSON.parse(JSON.stringify(acts)).map(a => a[0]), ['workspace.propose'], 'Cancel saves nothing');
+});
+
+test('Save after Suggest saves the fields as edited, and the suggested icon', async () => {
+  const {click, type, acts} = cardEnv({icon: null, color: 'amber', set_by: null}, {ws_name: '', ws_description: ''}, PROPOSAL);
+  await click('pf-suggest');
+  type('name', 'Our Money');
+  await click('pf-save');
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(JSON.stringify(acts)), [
+    ['workspace.propose', {}],
+    ['workspace.set', {field: 'name', text: 'Our Money'}],
+    ['workspace.set', {field: 'description', text: 'Bills and taxes at home.'}],
+    ['workspace.set', {field: 'tags', text: 'bills,taxes'}],
+    ['look.set', {icon: 'receipt', color: 'amber'}],
+  ]);
+});
+
+test('Keep current drops the suggested icon; an icon the person picked is never replaced', async () => {
+  let env = cardEnv({icon: null, color: null, set_by: null}, {ws_name: '', ws_description: ''}, PROPOSAL);
+  await env.click('pf-suggest'); env.click('pf-icon-keep'); await env.click('pf-save');
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(JSON.parse(JSON.stringify(env.acts)).some(a => a[0] === 'look.set'), false);
+  env = cardEnv({icon: 'wallet', color: 'amber', set_by: 'human'}, {ws_name: '', ws_description: ''}, PROPOSAL);
+  await env.click('pf-suggest');
+  assert.doesNotMatch(textOf(env.L.profileCard()), /Suggested:/);
 });
 
 test('a second Save while the first is still sending does nothing', async () => {

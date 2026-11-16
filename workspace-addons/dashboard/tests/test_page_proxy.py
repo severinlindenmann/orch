@@ -242,6 +242,44 @@ def test_agent_test_op_argv_and_reply(act_orch, ws):
         srv.server_close()
 
 
+def test_workspace_propose_op_is_read_only_and_answers_the_proposal(act_orch, ws):
+    """Settings > Workspace profile > Suggest: no --by (nothing is saved), the answer comes back trimmed."""
+    import json as _json
+    import threading
+
+    from orch_dashboard import actions
+
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["config", "propose"]:\n    print(json.dumps({"name": "N" * 99, "description": "One line.", '
+        '"tags": ["a", 7, "b", "c", "d", "e"], "icon": "code", "from": ["x"]}))\n    sys.exit(0)\n'
+        'if a[:2] in (["addon", "list"]',
+        1,
+    )
+    act_orch.write_text(src)
+    assert actions.build_argv("workspace.propose", {}) == ["config", "propose", "--json"]
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("workspace.propose", {"x": 1})
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        h = {"Content-Type": "application/json", "Origin": base}
+        code, body, _ = call(
+            base + "/api/act", "POST", h, _json.dumps({"op": "workspace.propose", "args": {}}).encode()
+        )
+        assert code == 200
+        assert _json.loads(body)["proposal"] == {
+            "name": "N" * 60,
+            "description": "One line.",
+            "tags": ["a", "b", "c", "d"],
+            "icon": "code",
+        }
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_focus_page_files_load_cross_site_with_their_own_sandbox_csp(stack):
     """A sandboxed frame (opaque origin) loads its css/js cross-site: only Focus's GET /page/<ticket>/<file>."""
     base, _ = stack
