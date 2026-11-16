@@ -224,3 +224,25 @@ def test_no_review_when_none_is_required(tk, run, gh):
     gh.review = "APPROVED"
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
     assert ["pr", "review"] not in [c[:2] for c in gh.calls]
+
+
+def test_a_hand_made_merge_action_never_merges(tk, run, gh):
+    root, tid = tk
+    code, out, err = run("ask", tid, "Ok?", "--action", json.dumps({"merge": PR}), "--by", "agent:x")
+    assert code == 2 and "A merge goes with a link card" in out + err
+    # a card whose shown address differs from the merged one is no merge card
+    assert _ask(run, tid)[0] == 0
+    q = _q(root, tid)
+    assert (
+        review.merge_url({**q, "card": {**q["card"], "open": "https://github.com/acme/app/pull/99"}}) is None
+    )
+    assert review.merge_url({**q, "card": {**q["card"], "ok_label": "Looks good"}}) is None
+    assert review.merge_url({**q, "card": {**q["card"], "kind": "draft"}}) is None
+    assert review.merge_url({**q, "card": None}) is None and review.merge_url(q) == PR
+
+
+def test_merge_button_always_says_merge(tk, run):
+    root, tid = tk
+    assert _ask(run, tid, "--ok", "Ship it")[0] == 0
+    q = _q(root, tid)
+    assert q["card"]["ok_label"] == "Merge" and review.merge_url(q) == PR

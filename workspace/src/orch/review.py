@@ -762,9 +762,14 @@ def decide(
 
 def merge_url(q: dict) -> str | None:
     """The pull request a merge card merges on the Merge click (`orch ask ... --merge`), else None."""
-    act = q.get("action")
+    act, card = q.get("action"), q.get("card")
     url = act.get("merge") if isinstance(act, dict) else None
-    return url if isinstance(url, str) else None
+    if not isinstance(url, str) or not isinstance(card, dict):
+        return None
+    # only the card --merge built: a link card that shows exactly this address on a Merge button
+    if card.get("kind") != "link" or card.get("open") != url or card.get("ok_label") != "Merge":
+        return None
+    return url
 
 
 def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> None:

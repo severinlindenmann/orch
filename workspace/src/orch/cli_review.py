@@ -157,7 +157,7 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
                 "--merge goes with --link and --open <GitHub pull request address>, "
                 "e.g. --open https://github.com/owner/repo/pull/12."
             )
-        card.setdefault("ok_label", "Merge")
+        card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
         card.setdefault("why", "Your click merges it on GitHub with your own GitHub login.")
     if args.suggest is not None and args.suggest not in options:
         raise Refused("--suggest must be one of the --option ids.")
