@@ -781,13 +781,13 @@ def _decide_check(
     n = _note_bv(note)
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
-        tickets.accept_review(root, tid, by, via, proven=True)
+        tickets.accept_review(root, tid, by, via)
     else:
         changes = _what_changes(n)
         if not changes:
             raise BadVerdict("Say what should change.")
         d = _bare("send_back", None, changes, n)
-        tickets.ask_for_changes(root, tid, "; ".join(changes), by, via=via, proven=True, phone=phone, pid=pid)
+        tickets.ask_for_changes(root, tid, "; ".join(changes), by, via=via, phone=phone, pid=pid)
     d["summary"] = summary(d, card)
     entry = {
         "text": _clip("Check: " + ticket.get("title", tid), 300),

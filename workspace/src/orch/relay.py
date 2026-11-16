@@ -1663,7 +1663,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
         return f"not applied to {tid}: not the current review", None
     try:
         if ans.casefold() == "accept":
-            tickets.accept_review(root, tid, by, via, proven=True)  # the relay channel is the phone's proof
+            tickets.accept_review(root, tid, by, via)
             return f"accepted {tid} (via {via})", tid
         tickets.ask_for_changes(root, tid, ans, by, via=via, phone=frm, pid="p_" + str(msg["id"])[2:])
         return f"asked for changes on {tid} (via {via})", tid
@@ -1920,7 +1920,7 @@ def _to_waiting_agent(root: Path, tid: str, q: dict, by: str) -> None:
 
     with contextlib.suppress(Refused, OSError):
         if by.startswith("human:"):
-            runs_live.pass_answer(root, tid, q, by, proven=True)
+            runs_live.pass_answer(root, tid, q, by)
         elif (rec := runs.read(root, tid)) and runs.state(rec) == "alive":
             runs_live.send(
                 root, tid, by, f"Answer to your question {q['id']} ({q['text']}): {q['answer']}", "answer"
@@ -2437,19 +2437,6 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     an ack (reply_to = its id) and later a "working" update. Idempotent by message id.
     Returns (note, ticket id)."""
     mid, frm = msg["id"], msg["from"]
-    try:
-        runs.require_signing(root)  # FIRST: nothing is written when the person's input cannot be signed
-    except runs.Unsigned:
-        if not final:
-            raise Transient("The protected folder is not usable.") from None  # tried again on the next pulls
-        with contextlib.suppress(Refused, OSError, ValueError, KeyError, TypeError):
-            send_text(
-                root,
-                frm,
-                "Not saved on the computer: its protected folder can't be used right now. Try again shortly.",
-                reply_to=mid,
-            )
-        return "not saved: the protected folder is not usable (the phone was told)", ""
     body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
     who = _line(name_of(root, frm), 100) or _line(frm, 100)
     by = _by_relay(frm)
