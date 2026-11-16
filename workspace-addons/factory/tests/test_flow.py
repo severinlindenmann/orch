@@ -972,15 +972,16 @@ def test_per_day_limit_only_warns_and_never_blocks(ws, run):
 
     from orch_factory import autopilot, orchcli, pageapi, view
 
+    now = datetime.now(UTC)
+    if (now - timedelta(minutes=15)).astimezone().date() != now.astimezone().date():
+        pytest.skip("the 15-minute window crosses local midnight; 'today' would cut it")
     a, _ = autopilot_order(ws, run, active_min_per_day=10)
-    store, now = Store(ws), datetime.now(UTC)
+    store = Store(ws)
     at = lambda m: (now - timedelta(minutes=m)).isoformat().replace("+00:00", "Z")
     (ws / "record.json").write_text(
         json.dumps({a: [{"at": at(8), "run": "r_a"}, {"at": at(4), "run": "r_a"}]})
     )
     status = autopilot.day_status(ws, store, orchcli.tickets(ws))
-    if status["used"] != 4:  # local midnight fell inside the window: skip the exact count
-        return
     assert (
         status == {"limit": 10, "used": 4, "reached": False} and "keeps going" not in view.view(ws)["notice"]
     )

@@ -837,6 +837,8 @@ def test_agent_line_shows_the_core_hold_reason_and_drops_it_when_absent():
 
 
 def test_table_cells_and_button_labels_do_not_wrap():
-    css = (WEB / "style.css").read_text()
+    css = (
+        WEB.parents[4] / "workspace/src/orch_ui/static/widgets.css"
+    ).read_text()  # moved to the master (#795 A2a)
     assert ".blk-table td:not(:first-child),.blk-table td .btn{white-space:nowrap}" in css
     assert ".blk-table td:has(.row){width:1%}" in css

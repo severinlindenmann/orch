@@ -219,6 +219,11 @@ struct ProposalResult: Codable, Sendable, Equatable {
     var reason: String? = nil
 }
 
+/// A workspace took one of its questions back (relay-api.md "Question taken back"); `reason` is one plain line.
+struct TakenBack: Codable, Sendable, Equatable {
+    let reason: String
+}
+
 /// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction).
 struct TextBody: Codable, Sendable, Equatable {
     var proposalResult: ProposalResult? = nil
@@ -226,6 +231,11 @@ struct TextBody: Codable, Sendable, Equatable {
     /// The workspace's result for a phone verdict (reply_to = the question): never chat, never unread.
     var reviewResult: ReviewResult? = nil
     var isReviewResult: Bool { reviewResult != nil }
+    /// "Question taken back" (reply_to = the question): closes its card; never a bubble, never unread.
+    var takenBack: TakenBack? = nil
+    var isTakenBack: Bool { takenBack != nil }
+    /// Workspace texts that only update a card and never show as a chat bubble.
+    var isSilentResult: Bool { isProposalResult || isReviewResult || isTakenBack }
     /// Empty when the text only carries attachments, a voice memo, a location or feedback.
     var text: String = ""
     /// Work update about the message's ticket; nil on a plain text.
@@ -257,15 +267,15 @@ struct TextBody: Codable, Sendable, Equatable {
          attachments: [MessageAttachment] = [], voice: VoiceMemo? = nil, location: LocationShare? = nil, feedback: Feedback? = nil,
          ticketView: TicketSnapshot? = nil,
          group: GroupInfo? = nil, groupEvent: GroupEvent? = nil, by: String? = nil, via: String? = nil, phone: String? = nil,
-         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil, reviewResult: ReviewResult? = nil) {
-        self.proposalResult = proposalResult; self.reviewResult = reviewResult
+         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil, reviewResult: ReviewResult? = nil, takenBack: TakenBack? = nil) {
+        self.proposalResult = proposalResult; self.reviewResult = reviewResult; self.takenBack = takenBack
         self.text = text; self.update = update; self.clientId = clientId; self.general = general; self.speak = speak
         self.attachments = attachments; self.voice = voice; self.location = location; self.feedback = feedback; self.ticketView = ticketView
         self.group = group; self.groupEvent = groupEvent; self.by = by; self.via = via; self.phone = phone
         self.origin = origin; self.echoOf = echoOf; self.toPerson = toPerson; self.task = task; self.sharedFiles = sharedFiles
     }
     private enum CodingKeys: String, CodingKey {
-        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult, reviewResult
+        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult, reviewResult, takenBack
         case group, groupEvent, by, via, phone, day, origin, echoOf, toPerson, task, sharedFiles
     }
     init(from d: Decoder) throws {
@@ -274,6 +284,8 @@ struct TextBody: Codable, Sendable, Equatable {
         if let result = proposalResult, !["made", "refused", "decided"].contains(result.result) { proposalResult = nil }
         reviewResult = try? c.decodeIfPresent(ReviewResult.self, forKey: .reviewResult)
         if let r = reviewResult, !ReviewResult.known.contains(r.result) { reviewResult = nil }
+        takenBack = try? c.decodeIfPresent(TakenBack.self, forKey: .takenBack)
+        if let t = takenBack, t.reason.isEmpty { takenBack = nil }
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         update = try? c.decodeIfPresent(TextUpdate.self, forKey: .update)
         clientId = try? c.decodeIfPresent(String.self, forKey: .clientId)
@@ -300,6 +312,7 @@ struct TextBody: Codable, Sendable, Equatable {
         var c = e.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(proposalResult, forKey: .proposalResult)
         try c.encodeIfPresent(reviewResult, forKey: .reviewResult)
+        try c.encodeIfPresent(takenBack, forKey: .takenBack)
         if !text.isEmpty { try c.encode(text, forKey: .text) }
         try c.encodeIfPresent(update, forKey: .update); try c.encodeIfPresent(clientId, forKey: .clientId)
         try c.encodeIfPresent(general, forKey: .general); try c.encodeIfPresent(speak, forKey: .speak)

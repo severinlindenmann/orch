@@ -311,7 +311,20 @@ actor MockRelay: RelayAPI {
     func questions() async throws -> [Question] {
         try await check()
         if empty { return [] }
-        return all.filter { answered[$0.id] == nil }
+        return all.filter { answered[$0.id] == nil && takenBack[$0.id] == nil }
+    }
+    /// Questions their workspace took back (id -> reason). Same rules as the relay: no more answers (409 taken_back).
+    private var takenBack: [String: String] = [:]
+    /// Test / evidence hook: the workspace takes the question back. `text` = false only closes it on the relay (the phone has not
+    /// seen the text yet), so the next answer meets `409 taken_back`.
+    func takeBack(_ questionId: String, reason: String, sendText: Bool = true) {
+        guard let q = all.first(where: { $0.id == questionId }), takenBack[questionId] == nil else { return }
+        takenBack[questionId] = reason
+        guard sendText else { return }
+        counter += 1
+        received.append(PhoneMessage(message: TextMessage(id: String(format: "m_tbmock%011d", counter), from: q.message.from, to: "phones", type: "text",
+            createdAt: Self.now(), ticket: q.message.ticket, body: TextBody(text: "Taken back: \(reason)", takenBack: TakenBack(reason: reason)),
+            key: q.message.key, replyTo: q.id), workspaceName: q.workspaceName))
     }
     func messages(after: String?, limit: Int?) async throws -> ListResponse<PhoneMessage> {
         try await check()
@@ -349,6 +362,9 @@ actor MockRelay: RelayAPI {
         guard all.contains(where: { $0.id == r.questionMessageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Question not found.") }
         // Simulator evidence hook `-mockRace YES`: another phone answered "DATE" a moment before this one.
         if UserDefaults.standard.bool(forKey: "mockRace"), answered[r.questionMessageId] == nil { answered[r.questionMessageId] = "DATE" }
+        if let reason = takenBack[r.questionMessageId] {
+            throw RelayError.api(status: 409, code: "taken_back", message: "This question was taken back: \(reason)")
+        }
         if let a = answered[r.questionMessageId] {
             throw RelayError.api(status: 409, code: "already_answered", message: "This question was already answered: \(a).")
         }
