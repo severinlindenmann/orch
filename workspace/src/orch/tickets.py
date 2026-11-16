@@ -2469,6 +2469,10 @@ def ask(
             act = None
         if not isinstance(act, dict):
             raise Refused("--action must be a JSON object.")
+        if "merge" in act and card is None:  # a merge is only ever the --merge link card's
+            raise Refused(
+                "A merge goes with a link card: orch ask --link TITLE --open <pull request> --merge."
+            )
 
     for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
         if _asks_for_secret(part):
@@ -2640,6 +2644,8 @@ def answer(
             raise Refused(
                 "This card waits for the owner. Ask with orch review add and wait with orch review wait."
             )
+        if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
+            raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
         if expected_question_digest is not None and (
             expected_question_digest == QUESTION_UNENCODABLE or question_digest(q) != expected_question_digest
         ):

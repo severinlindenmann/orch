@@ -135,6 +135,8 @@ Write the question for a person who has not seen your work, in plain words:
 
 Other cards: `--draft`, `--plan`, `--link` (with `--open <address>`), `--before F --after F`. The answer may carry changes: do exactly those, nothing more.
 
+A GitHub pull request only the person may merge: `orch ask <id> "Merge release 3?" --link "Release 3" --open <pull request address> --merge --then "<what follows>"`. The person's Merge click merges it with their own GitHub login; never merge it yourself.
+
 The ticket now waits for the answer (Waiting). Keep working on the steps that do not depend on it; stop only when
 nothing is left that you can do without the answer. Do not treat silence as an answer. On your next run, when the
 answer is in `orch ticket show <id>`, set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
