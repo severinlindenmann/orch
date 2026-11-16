@@ -131,8 +131,8 @@ class _KV:
         pos = 0
         while (head := _KV_HEAD.search(text, pos)) is not None:
             pos = head.end()
-            if not secret_name(head.group(1)):
-                continue
+            if not secret_name(head.group(1)) or own_id_before_prose(head.group(1), text, pos):
+                continue  # not a secret name, or orch's own id before prose (#1015)
             if head.group("sep") == ":" or _TO_EOL.search(head.group(1)):
                 end = _line_end(text, pos)  # the rest of the line, scanned once: the scan goes on after it
                 if _PLACEHOLDER.fullmatch(text, pos, end):  # the value IS the placeholder: nothing to hide
@@ -329,11 +329,23 @@ PNG_MAX_CHUNKS = 10000  # a bounded walk: more chunks than this = can not be che
 # the critical chunks and a few harmless ancillary ones; any other (tEXt, zTXt, iTXt, eXIf, iCCP, unknown)
 # could carry text the scan can not read
 PNG_CHUNKS = {b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"gAMA", b"cHRM", b"sRGB", b"pHYs"}
+# the lengths the PNG spec gives them: a longer one is no such chunk (it could carry any text)
+_PNG_LENGTH_OK = {
+    b"IHDR": lambda n: n == 13,
+    b"IEND": lambda n: n == 0,
+    b"gAMA": lambda n: n == 4,
+    b"cHRM": lambda n: n == 32,
+    b"sRGB": lambda n: n == 1,
+    b"pHYs": lambda n: n == 9,
+    b"PLTE": lambda n: 0 < n <= 768 and n % 3 == 0,
+    b"tRNS": lambda n: 0 < n <= 256,
+}
 
 
 def _image_clean(data: bytes) -> bool:
     """True when an image has nowhere to hide text the scan can not read. Only a PNG can be: its chunks are
-    walked (bounded), only those in PNG_CHUNKS pass, and nothing may follow IEND. Every other image type,
+    walked (bounded), only those in PNG_CHUNKS pass, each with the length the spec gives it, and nothing may
+    follow IEND. Every other image type,
     and anything odd, is False (fail closed)."""
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         pos = 8
@@ -344,6 +356,8 @@ def _image_clean(data: bytes) -> bool:
             kind = data[pos + 4 : pos + 8]
             end = pos + 12 + length  # length, type, data, crc
             if end > len(data) or kind not in PNG_CHUNKS:  # text, exif, profiles, unknown: unreadable
+                return False
+            if kind in _PNG_LENGTH_OK and not _PNG_LENGTH_OK[kind](length):
                 return False
             if kind == b"IEND":
                 return end == len(data)
@@ -369,6 +383,39 @@ def _has_secret(data: bytes) -> bool:
     cleaned = _clean_full(text)
     forms = (text, cleaned, unicodedata.normalize("NFKC", text), unicodedata.normalize("NFKC", cleaned))
     return any(_scrub_text(t) != t for t in dict.fromkeys(forms))
+
+
+def _has_token(data: bytes) -> bool:
+    """The token patterns only (secretscan.find_tokens) over picture data, in every form _has_secret reads."""
+    text = data.decode(errors="ignore")
+    cleaned = _clean_full(text)
+    forms = (text, cleaned, unicodedata.normalize("NFKC", text), unicodedata.normalize("NFKC", cleaned))
+    return any(secretscan.find_tokens(t) for t in dict.fromkeys(forms))
+
+
+PICTURE_RUN = 8  # the shortest readable run in picture data that is read as text
+_ASCII_RUN = re.compile(rb"[\x20-\x7e\t]{%d,}" % PICTURE_RUN)
+_UTF16_RUN = re.compile(
+    rb"(?:[\x20-\x7e\t]\x00){%d,}|(?:\x00[\x20-\x7e\t]){%d,}" % (PICTURE_RUN, PICTURE_RUN)
+)
+
+
+def picture_text(data: bytes) -> str:
+    """The readable text in picture data: every run of at least PICTURE_RUN printable ASCII characters, and of
+    UTF-16 ones (either byte order), one per line. Text put into a picture as it is (a stored deflate block,
+    an oversized small chunk, ASCII as JPEG scan data) is such a run and gets the full label rules; the
+    compressed bytes around it only spell a label and a value by chance in shorter runs (#1022: none of 219
+    real screenshots and 100 random pictures has a hit at 8, 6 of 219 at 6)."""
+    runs = [m.group(0).decode("ascii") for m in _ASCII_RUN.finditer(data)]
+    for m in _UTF16_RUN.finditer(data):
+        run = m.group(0)
+        runs.append(run[0::2].decode("ascii") if run[1] == 0 else run[1::2].decode("ascii"))
+    return "\n".join(runs)
+
+
+def _picture_secret(data: bytes) -> bool:
+    """Picture data: the token patterns over all of it, the full rules over its readable runs."""
+    return _has_token(data) or _has_secret(picture_text(data).encode())
 
 
 def _holds_stored_value(root: Path, data: bytes, texts: list[str]) -> bool:
@@ -400,8 +447,9 @@ def _scan(data: bytes, name: str) -> str:
 def _scan_texts(data: bytes, name: str) -> tuple[str, list[str]]:
     """(verdict, texts). The verdict is one of ok, secret (looks like a password or key) or unknown (can not
     be checked: a PDF, zip, docx, xlsx or any other packed or binary file, or text with NULs; such a file is
-    not sent, fail closed). Text (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type
-    matches its extension is scanned as its raw bytes (text in metadata or after the image is still caught).
+    not sent, fail closed). Text (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; a PNG whose type
+    matches its extension and that holds only pixel chunks (_image_clean) has no text to scan and is ok;
+    any other image can not be checked here (text chunks, data after the end, JPEG: unknown).
     `texts` are exactly the texts the verdict was read from (the BOM-decoded text of a UTF-16/32 file, else
     the lenient UTF-8 text), so every other check of the same file (the stored-value needle check) reads
     it the same way."""
@@ -422,13 +470,17 @@ def _scan_texts(data: bytes, name: str) -> tuple[str, list[str]]:
     if _is_image(data, name):
         if not _image_clean(data):  # compressed text chunks or data after the end: can not be checked
             return "unknown", []
-    else:
-        try:
-            data.decode("utf-8")
-        except UnicodeDecodeError:
-            return "unknown", []
-        if b"\x00" in data:
-            return "unknown", []
+        # only pixel chunks are left. Compressed pixel data read as one text regularly spells a label and a
+        # value (P, W and `=`), so 15 of 28 plain screenshots were held back (#1022): the token patterns read
+        # all of it, the label rules its readable runs (picture_text); the caller's stored-value check still
+        # reads the whole file.
+        return ("secret" if _picture_secret(data) else "ok"), [data.decode(errors="ignore")]
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return "unknown", []
+    if b"\x00" in data:
+        return "unknown", []
     return ("secret" if _has_secret(data) else "ok"), [data.decode(errors="ignore")]
 
 
@@ -507,9 +559,10 @@ _SPACED_VALUES = (
 # - tokens in URL paths other than Slack, Discord and Telegram webhooks (a token as a path segment);
 # - a stored value in fullwidth/NFKC form, split over table cells, in base32, or as a host whose case
 #   differs (value hider);
-# - text drawn in pixels (a terminal screenshot) and bytes inside compressed image data (IDAT): only the raw
-#   bytes of an image are scanned; JPEG, GIF and WebP get no structural walk (_image_clean): they are
-#   "unknown" and not sent, never checked as clean;
+# - text drawn in pixels (a terminal screenshot), compressed text inside image data, and a labelled value
+#   in picture data shorter than PICTURE_RUN readable characters: picture data gets the label rules only on
+#   its readable runs (its compressed bytes spell labels by chance, #1022); JPEG, GIF and WebP get no
+#   structural walk (_image_clean): they are "unknown" and not sent, never checked as clean;
 # - HTML and SVG artifacts are active content: entities (`&#112;assword=`) or script (atob) can build any
 #   text when the file is shown; the scan sees the source only;
 # - past TEXT_CUT redact shows nothing (the text ends in [hidden]); a file is scanned whole;
@@ -590,6 +643,41 @@ _NAME_TAIL = re.compile(
     r"(?:pwd|pw|pswd)(?![a-z])|(?:master|encryption|enc|signing|sign|hmac|jwt|license|licence|app|db|crypt"
     r"|priv|aes|rsa|ssh|gpg|pgp)keys?(?![a-z])"
 )
+
+
+# orch's own ids: a ticket id (t_ and 6), a run id (r_ and 8), both random lowercase letters and digits, and
+# a report folder name (r-MMDD-HHMM-<ticket or run id>, -2 when the minute was taken). Random letters spell
+# pw, pin, key, sid or otp often enough (about 1 in 600 ticket ids) that a ticket id before a colon read as a
+# password label and a clean report was refused (#1015). In the name: value scan (_KV) such a name is passed
+# over only when its value is prose (_PROSE: "Working for 1800 s", "the ticket I meant"), never before a
+# token, a number or one word (t_pw1234: hunter2), and never when the name holds a whole long secret word
+# (t_secret, r_password, t_dbpass, t_apikey; a random id does that about once in ten million). Only the
+# exact shape counts. secret_name() itself does not know them (no value to look at: over-hiding is safe).
+_OWN_ID = re.compile(r"(?:[ri]-\d{4}-\d{4}-)?(?:t_[a-z0-9]{6}|r_[a-z0-9]{8})(?:-\d{1,2})?")
+_OWN_ID_SECRET = re.compile(
+    "|".join(
+        dict.fromkeys(
+            w.replace(" ", "")
+            for w in (*SECRET_NAME_WORDS, *SECRET_LABEL_WORDS)
+            if len(w.replace(" ", "")) >= 5
+        )
+    )
+)
+
+
+# a plain word, a space and the start of a second word: bounded (at most 44 characters looked at per name,
+# never the rest of the line), so a line full of id-shaped names stays linear
+_PROSE = re.compile(r"[A-Za-z][a-z]{2,40}[ \t]{1,2}[^\s]")
+
+
+def own_id_before_prose(name: str, text: str, pos: int) -> bool:
+    """True for an own id (_OWN_ID, no long secret word) whose value at `pos` is prose: two or more words, the
+    first one at least three letters (a capital first letter at most)."""
+    return (
+        _OWN_ID.fullmatch(name) is not None
+        and not _OWN_ID_SECRET.search(name)
+        and _PROSE.match(text, pos) is not None
+    )
 
 
 def secret_name(name: str) -> bool:
@@ -840,13 +928,14 @@ JPEG_META_MAX = 128 * 1024  # all metadata segments together
 JPEG_PLAIN_MAX = 8 * 1024  # all table/frame segments together (real files use ~1 KB): no payload room
 
 
-def _jpeg_walk(data: bytes) -> list[bytes] | None:
-    """The metadata segments of a JPEG that is structurally plain, else None: only known segments, then the
-    entropy data up to one EOI that ends the file (NUL padding allowed). Nothing may follow (no archive behind
-    the picture), no COM / APP3+ segment, bounded metadata."""
+def _jpeg_walk(data: bytes) -> bytes | None:
+    """Every byte before the picture data (all segments up to and with the scan header) of a JPEG that is
+    structurally plain, else None: only known segments, then the entropy data up to one EOI that ends the
+    file (NUL padding allowed). Nothing may follow (no archive behind the picture), no COM / APP3+ segment,
+    bounded metadata."""
     if not data.startswith(b"\xff\xd8"):
         return None
-    pos, meta, size, plain = 2, [], 0, 0
+    pos, size, plain = 2, 0, 0
     while pos + 4 <= len(data):
         if data[pos] != 0xFF:
             return None
@@ -856,7 +945,6 @@ def _jpeg_walk(data: bytes) -> list[bytes] | None:
             return None
         if m in _JPEG_META_OK:
             size += n
-            meta.append(data[pos + 4 : pos + 2 + n])
             if size > JPEG_META_MAX:
                 return None
         elif m not in _JPEG_PLAIN:
@@ -867,27 +955,30 @@ def _jpeg_walk(data: bytes) -> list[bytes] | None:
                 return None
         pos += 2 + n
         if m == 0xDA:  # entropy-coded data: FF00 and RSTn are data, any other marker ends it
+            head = data[:pos]
             while pos + 1 < len(data):
                 if data[pos] == 0xFF and data[pos + 1] not in (0x00, *range(0xD0, 0xD8)):
                     break
                 pos += 1
             if data[pos : pos + 2] != b"\xff\xd9":
                 return None
-            return meta if not data[pos + 2 :].strip(b"\x00") else None
+            return head if not data[pos + 2 :].strip(b"\x00") else None
     return None
 
 
 def _photo_verdict(data: bytes) -> str:
     """ok / secret / unknown for an evidence JPEG `_scan` could not fully check: it must be structurally plain
-    (_jpeg_walk) and neither its bytes nor the UTF-16 readings of its metadata may hold a secret. Any other
-    format is unknown (fail closed)."""
-    meta = _jpeg_walk(data)
-    if meta is None:
+    (_jpeg_walk) and neither the bytes nor the UTF-16 readings of everything before its picture data
+    (metadata and tables) may hold a secret. The picture data gets _picture_secret (the label rules only on
+    its readable runs: read as one text it spells a label and a value by chance, #1022); the caller's
+    stored-value check still reads the whole file. Any other format is unknown (fail closed)."""
+    head = _jpeg_walk(data)
+    if head is None:
         return "unknown"
-    texts = [data]
-    for codec in ("utf-16-le", "utf-16-be"):  # both byte orders, both alignments, over the whole file
-        texts += [data[k:].decode(codec, "ignore").encode() for k in (0, 1)]
-    return "secret" if any(_has_secret(t) for t in texts) else "ok"
+    texts = [head]
+    for codec in ("utf-16-le", "utf-16-be"):  # both byte orders, both alignments
+        texts += [head[k:].decode(codec, "ignore").encode() for k in (0, 1)]
+    return "secret" if any(_has_secret(t) for t in texts) or _picture_secret(data) else "ok"
 
 
 def _scan(root: Path, tid: str, data: bytes, name: str, state: dict | None, photo_ok: bool = False) -> bool:

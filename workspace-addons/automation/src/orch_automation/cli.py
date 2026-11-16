@@ -14,7 +14,7 @@ from pathlib import Path
 from . import actions, orchcli, plain, scripts, service
 from .cron import fmt, next_after, valid
 from .listen import NOT_LISTENING
-from .loop import OPEN, Scheduler
+from .loop import Scheduler, scheduled
 from .runner import load_state
 from .view import cron_human
 
@@ -48,11 +48,11 @@ def list_line(x: dict) -> str:
 
 
 def describe(root: Path) -> list[dict]:
-    """Next wake-ups and repeats, soonest first."""
+    """Next wake-ups and repeats, soonest first: the tickets the scheduler plans (a repeat survives Done)."""
     state = load_state(root)
     rows = []
     for t in orchcli.tickets(root):
-        if t["status"] not in OPEN:
+        if not scheduled(t):
             continue
         w = t.get("waiting_on") or {}
         if w.get("kind") == "time" and w.get("until"):

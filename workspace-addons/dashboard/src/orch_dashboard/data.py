@@ -103,10 +103,40 @@ def _child_env(env, orch_bin):
     return child_env(env, orch_bin)
 
 
+SELF = "orch:self"  # orch.pagesession.SELF: the real server, which runs in the core's own interpreter
+_MISS = object()
+READS = {"process": 0, "here": 0}  # how each read was answered (the timing test counts the processes)
+
+
+def _read_here(orch_bin: str, args: list[str], root: Path):
+    """The real server only: the hot reads (ticket list, run status, review list) are answered by the core in
+    this process (orch.reads), the same JSON as the command, without a new Python process each (ORCH-102: a
+    dozen processes per build made one build take seconds while helpers ran). _MISS = start the command."""
+    if orch_bin != SELF:
+        return _MISS
+    try:
+        from orch import reads
+        from orch.errors import Refused
+    except ImportError:  # an older core without orch.reads
+        return _MISS
+    try:
+        return reads.answer(root, args)
+    except reads.NotHere:
+        return _MISS
+    except Refused:  # the command would refuse (exit 2): the same None as a failed command
+        return None
+    except Exception:  # noqa: BLE001 - anything unexpected: the command gets its chance
+        return _MISS
+
+
 def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float = 5.0):
     """Run `$ORCH_BIN <args>` in the workspace and return its parsed stdout JSON, or None on any failure."""
     if not orch_bin:
         return None
+    here = _read_here(orch_bin, args, root)
+    if here is not _MISS:
+        READS["here"] += 1
+        return here
     if any(tuple(args[: len(c)]) == c for c in _STATIC_CMDS):
         key = (orch_bin, str(root), tuple(args))
         hit = _STATIC.get(key)
@@ -120,6 +150,7 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
 
 
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
+    READS["process"] += 1
     try:
         r = _run(
             [*_argv0(orch_bin), *args],
@@ -392,26 +423,8 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         if not _valid_ticket(t, stem):
             skipped += 1
             continue
-        t = shown(root, t)  # the CLI listing is shown already; the file fallback is not (idempotent)
-        for k in ("checklist", "refs", "questions", "history"):
-            if not isinstance(t.get(k), list):
-                t[k] = []
-        _add_question_digests(t)
-        t.pop("review_tip", None)  # only ever from the core's signed record (the ticket file is not)
-        if t["status"] == "review":
-            tip = _review_tip(root, t["id"], branch_cache)
-            if tip:
-                t["review_tip"] = tip
-        back = (t.get("work") or {}).get("bring_back") or {}
-        if back.get("state") == "waiting":
-            t["bring_back"] = _bring_back_view(back, _copy_review(orch_bin, root, t["id"]))
-        _mark_missing_proofs(root, t)
-        mobile.mark_chat_history(t)
-        tickets.append(t)
-    phone_delivery.mark(root, tickets)
-    add_proof_state(tickets, root)
-    add_artifact_marks(tickets)
-    add_quiet(tickets)
+        tickets.append(_shape_ticket(root, orch_bin, t, branch_cache))
+    _mark_tickets(root, tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     by_id = {t["id"]: t for t in tickets}
     for t in tickets:
@@ -424,6 +437,33 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
             p["parts_total"] += 1
             p["parts_done"] += int(t["status"] == "done")
     return tickets, skipped
+
+
+def _shape_ticket(root: Path, orch_bin: str | None, t: dict, branch_cache: dict) -> dict:
+    """One ticket as the page reads it (a full build does this for every ticket, a click for its own)."""
+    t = shown(root, t)  # the CLI listing is shown already; the file fallback is not (idempotent)
+    for k in ("checklist", "refs", "questions", "history"):
+        if not isinstance(t.get(k), list):
+            t[k] = []
+    _add_question_digests(t)
+    t.pop("review_tip", None)  # only ever from the core's signed record (the ticket file is not)
+    if t["status"] == "review":
+        tip = _review_tip(root, t["id"], branch_cache)
+        if tip:
+            t["review_tip"] = tip
+    back = (t.get("work") or {}).get("bring_back") or {}
+    if back.get("state") == "waiting":
+        t["bring_back"] = _bring_back_view(back, _copy_review(orch_bin, root, t["id"]))
+    _mark_missing_proofs(root, t)
+    mobile.mark_chat_history(t)
+    return t
+
+
+def _mark_tickets(root: Path, tickets: list[dict]) -> None:
+    phone_delivery.mark(root, tickets)
+    add_proof_state(tickets, root)
+    add_artifact_marks(tickets)
+    add_quiet(tickets)
 
 
 def add_proof_state(tickets: list[dict], root: Path | None = None) -> None:
@@ -996,17 +1036,21 @@ RUNS_TTL = 30.0  # as the state cache's safety refresh: changes of the run files
 RUNS_MAX = 30
 
 
-def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool = False) -> dict[str, dict]:
+def load_runs(
+    root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool = False, some: bool = False
+) -> dict[str, dict]:
     """Run status for tickets that can have a run (not done or dropped, or with a claim file), from `orch run status <id> --json`.
-    Cached for a few seconds so the 3 s page poll costs nothing; an action's reply passes fresh=True."""
+    Cached for a few seconds so the 3 s page poll costs nothing; an action's reply passes fresh=True.
+    some=True: only these tickets (a click's answer); the next full build still sees the files as changed."""
     if not orch_bin:
         return {}
     from .events import Revisions
 
-    signature = Revisions(root).signature()
-    if _RUN_SIGNATURES.get(str(root)) != signature:
-        fresh = True
-        _RUN_SIGNATURES[str(root)] = signature
+    if not some:
+        signature = Revisions(root).signature()
+        if _RUN_SIGNATURES.get(str(root)) != signature:
+            fresh = True
+            _RUN_SIGNATURES[str(root)] = signature
     claims = root / ".orch" / "run" / "tickets"  # a done ticket can still have its live session open
     ids = [t["id"] for t in tickets if t["status"] not in ("done", "dropped")][:RUNS_MAX]
     ids += [
@@ -1084,6 +1128,86 @@ def load_review(root: Path, orch_bin: str | None) -> dict:
     }
 
 
+_KINDS: dict[str, list] = {}  # the link kinds of the last full build, per workspace
+
+
+def _shape_refs(root: Path, tickets: list[dict], with_settings: bool) -> None:
+    try:
+        from orch.refs import local_refs
+    except ImportError:  # the core is not importable here: no local references
+        local_refs = None
+    for t in tickets:
+        stored = t.get("refs", [])
+        for n, r in enumerate(stored, 1):  # the stored number: what `orch ref list` and `orch ref rm` use
+            if isinstance(r, dict):
+                r["n"] = n
+        t["refs"] = [r for r in stored if not (isinstance(r, dict) and r.get("local"))]
+        if (
+            with_settings and local_refs
+        ):  # only the live local server: a snapshot is shared and must not carry local paths
+            try:
+                more = local_refs(root, t["id"])
+            except (ValueError, TypeError, OSError):
+                more = []
+            more = [r for r in more if isinstance(r, dict)] if isinstance(more, list) else []
+            t["refs"] += [{**r, "n": len(stored) + i} for i, r in enumerate(more, 1)]
+
+
+def state_rev(state: dict) -> str:
+    return hashlib.sha1(
+        json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
+    ).hexdigest()[:12]
+
+
+def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dict | None:
+    """A click's answer (ORCH-102): the last full state with the clicked ticket read again, its run and the
+    review cards fresh; everything else stays as it was until the background build replaces it. Before, every
+    click waited for a full build (seconds with helpers running). None when the ticket cannot be read (the
+    caller builds in full)."""
+    raw = run_orch(orch_bin, ["ticket", "show", tid, "--json"], root)
+    if not orch_bin:  # standalone: the file itself
+        raw = _load(root / ".orch" / "tickets" / f"{tid}.json")
+        if isinstance(raw, dict) and raw.get("status") == "done":
+            raw["status"], raw["verdict_needed"] = "review", True
+    if not (isinstance(raw, dict) and raw.get("general") is not True and _valid_ticket(raw)):
+        return None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_review = pool.submit(load_review, root, orch_bin)
+        t = _shape_ticket(root, orch_bin, raw, {})
+        _mark_tickets(root, [t])
+        _shape_refs(root, [t], True)
+        add_link_views([t], _KINDS.get(str(root), []))
+        runs = load_runs(root, orch_bin, [t], fresh=True, some=True)
+        review = f_review.result()
+    out = dict(state)
+    old = {x["id"]: x for x in state.get("tickets") or []}
+    before = old.get(tid) or {}
+    t.update(
+        children=list(before.get("children") or []),
+        parts_done=before.get("parts_done", 0),
+        parts_total=before.get("parts_total", 0),
+    )
+    tickets = [t if x["id"] == tid else x for x in state.get("tickets") or []]
+    if tid not in old:
+        tickets.insert(0, t)
+    parent = t.get("parent")
+    if isinstance(parent, str) and parent in old:  # its parent counts done parts
+        kids = [x for x in tickets if x.get("parent") == parent]
+        tickets = [
+            {**x, "parts_done": sum(int(k["status"] == "done") for k in kids)} if x["id"] == parent else x
+            for x in tickets
+        ]
+    out["tickets"] = tickets
+    out["runs"] = {k: v for k, v in (state.get("runs") or {}).items() if k != tid}
+    if runs.get(tid):
+        out["runs"][tid] = runs[tid]
+    add_warmth(root, [t], out["runs"])
+    out["review"] = review
+    out["now"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out["rev"] = state_rev(out)
+    return out
+
+
 def load_state(
     root: Path,
     orch_bin: str | None = None,
@@ -1114,29 +1238,11 @@ def load_state(
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
-    try:
-        from orch.refs import local_refs
-    except ImportError:  # the core is not importable here: no local references
-        local_refs = None
-
-    for t in tickets:
-        stored = t.get("refs", [])
-        for n, r in enumerate(stored, 1):  # the stored number: what `orch ref list` and `orch ref rm` use
-            if isinstance(r, dict):
-                r["n"] = n
-        t["refs"] = [r for r in stored if not (isinstance(r, dict) and r.get("local"))]
-        if (
-            with_settings and local_refs
-        ):  # only the live local server: a snapshot is shared and must not carry local paths
-            try:
-                more = local_refs(root, t["id"])
-            except (ValueError, TypeError, OSError):
-                more = []
-            more = [r for r in more if isinstance(r, dict)] if isinstance(more, list) else []
-            t["refs"] += [{**r, "n": len(stored) + i} for i, r in enumerate(more, 1)]
-    add_link_views(
-        tickets, link_kinds(raw) if with_addons else []
-    )  # snapshots: known sites only, no add-on names
+    _shape_refs(root, tickets, with_settings)
+    kinds = link_kinds(raw) if with_addons else []
+    if with_settings:
+        _KINDS[str(root)] = kinds  # a click's answer shapes its ticket's links the same way
+    add_link_views(tickets, kinds)  # snapshots: known sites only, no add-on names
     needs = f_needs.result() if f_needs else None
     general = f_general.result() if f_general else None
     chat = f_chat.result() if f_chat else None
@@ -1172,9 +1278,7 @@ def load_state(
         "auto_update_note": _auto_update_note() if with_settings else None,
     }
     add_warmth(root, tickets, state["runs"])
-    state["rev"] = hashlib.sha1(
-        json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
-    ).hexdigest()[:12]
+    state["rev"] = state_rev(state)
     return state
 
 

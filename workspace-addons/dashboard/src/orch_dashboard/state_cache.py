@@ -133,6 +133,12 @@ class StateCache:
             with self.lock:
                 self.busy = False
 
+    def quick(self, state: dict):
+        """A click's answer (the last copy with the clicked ticket read again) is served at once, and a full build
+        follows in the background: it replaces this copy, and the pages are told when it is stored."""
+        self._store(dict(state), None)  # stored as changed: it counts as old until the build has run
+        self.kick()
+
     def invalidate(self, state: dict):
         """After a change: `state` (the fresh answer of that change) replaces the copy; a rebuild already running
         cannot overwrite it with older data. A shallow copy: the caller may add its own keys to its dict."""

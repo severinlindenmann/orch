@@ -480,6 +480,21 @@ def _agent_actor(by: str) -> bool:
     return by.startswith("agent:") or (by.startswith("human:") and bool(agent_tool()))
 
 
+def _addon_keeps_its_ticket(root: Path, ticket: dict, by: str) -> bool:
+    """An add-on's work can go on after its ticket is Done (a repeat survives Done, #194): an ACTIVE add-on,
+    writing as agent:<its name>, still keeps up a done ticket that carries its own ext block (its record, a
+    history line, opening it again for the next run). Never from inside an agent run (a run sets ORCH_AGENT),
+    never on a dropped ticket, never on a ticket the add-on has no data on."""
+    name = by.removeprefix("agent:")
+    if by == name or ticket.get("status") != "done" or agent_tool():
+        return False
+    if not isinstance((ticket.get("ext") or {}).get(name), dict):
+        return False
+    from orch import addons  # addons is a leaf here; imported late like the other helpers
+
+    return name in addons.active(root)
+
+
 def _refuse_closed_agent(root: Path, tid: str, by: str) -> None:
     """The closed-ticket guard for a write that happens outside apply_op (a file copy): same rule, checked
     under the caller's ticket lock BEFORE anything is written."""
@@ -545,7 +560,7 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         ticket = _load_raw(root, tid)
         eff_status = ticket.get("status")
         info.update(status=eff_status, revision=revision(ticket))
-        if eff_status in CLOSED and _agent_actor(by):
+        if eff_status in CLOSED and _agent_actor(by) and not _addon_keeps_its_ticket(root, ticket, by):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})

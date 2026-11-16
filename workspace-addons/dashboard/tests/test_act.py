@@ -45,6 +45,7 @@ def acts(act_orch):
         not in (
             ["run", "status"],
             ["ticket", "list"],
+            ["ticket", "show"],  # a click's answer reads its ticket again
             ["config", "get"],
             ["look", "show"],
             ["review", "list"],
@@ -571,7 +572,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             last = [
                 c
                 for c in calls(act_orch)
-                if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
+                if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"], ["ticket", "show"])
                 and c[0] not in ("needs", "status", "agents")
                 and c[:2]
                 not in (["config", "get"], ["chat", "status"], ["review", "list"], ["review", "accepted"])

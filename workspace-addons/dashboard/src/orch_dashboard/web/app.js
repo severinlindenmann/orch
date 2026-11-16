@@ -326,7 +326,8 @@ function render(arrived = new Set()) {
   if (r.kind === 'ticket') {
     const tk = ticketOf(r.id);
     title = clean(tk?.title) || 'Ticket';
-    crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' › ', title);
+    crumb.replaceChildren(...[h('a', {href:'#tickets'}, 'Tickets'), ' › ', ...(window.DashHelpers.keyTag(tk, h) || []), title]);
+    if (window.DashHelpers.ticketKey(tk)) title = window.DashHelpers.ticketKey(tk) + ' ' + title;
   } else if (r.kind === 'page') {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
     title = clean(tk?.title) || last || pageName;
@@ -465,8 +466,30 @@ async function addonUninstall(name, tries = 20, pause = 1500) {
   }
   return result;
 }
+// The button a person just pressed shows the kit's busy state at once (aria-busy + aria-disabled), before the
+// answer comes, and until it came (ORCH-102: a click showed nothing for seconds while helpers ran).
+let pressed = null;
+document.addEventListener('click', event => {
+  const control = event.target.closest?.('button, .btn');
+  pressed = control ? {control, at:Date.now()} : null;
+}, true);
+function busyOn() {
+  const p = pressed;
+  pressed = null;
+  if (!p || Date.now() - p.at > 1500 || !p.control.isConnected || p.control.getAttribute('aria-busy') === 'true') return null;
+  const was = p.control.getAttribute('aria-disabled');
+  p.control.setAttribute('aria-busy', 'true');
+  p.control.setAttribute('aria-disabled', 'true');
+  return {control:p.control, was};
+}
+function busyOff(busy) {
+  if (!busy) return;
+  busy.control.removeAttribute('aria-busy');
+  if (busy.was === null) busy.control.removeAttribute('aria-disabled'); else busy.control.setAttribute('aria-disabled', busy.was);
+}
 async function act(op, args) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
+  const busy = busyOn();
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
   let succeeded = false;
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
@@ -483,6 +506,7 @@ async function act(op, args) {
     return {ok:true, status:200, state:next};
   } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.'}; }
   finally {
+    busyOff(busy);
     writing--;
     if (!writing && refreshAgain) refresh();  // a change notice that came during the write
     if (before) {
@@ -849,15 +873,48 @@ else {
   const cadence = up => { clearInterval(poll); poll = setInterval(whenShown(refresh), up ? 20000 : 3000); };
   document.addEventListener('visibilitychange', whenShown(refresh));
   if (typeof EventSource !== 'undefined') {
+    const onRev = () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); };
+    sharedEvents(window, onRev, cadence);
+  }
+}
+// One event stream per browser, not one per tab (ORCH-102): a browser opens at most 6 connections to this server,
+// and every open tab held one for good, so a new tab or a cold load waited behind them. The tab that holds the
+// lock opens the stream and tells the other tabs; when it closes, the next tab takes the lock and the stream.
+// Without locks or BroadcastChannel (an old browser) each tab keeps its own stream, as before.
+function sharedEvents(win, onRev, onUp) {
+  const own = () => {
     let stream;
     const connect = () => {
-      stream = new EventSource('/api/events');
-      stream.onopen = () => cadence(true);
-      stream.onerror = () => cadence(false);
-      stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); });
+      stream = new win.EventSource('/api/events');
+      stream.onopen = () => onUp(true);
+      stream.onerror = () => onUp(false);
+      stream.addEventListener('rev', onRev);
     };
     connect();
-    window.addEventListener('pagehide', () => { stream.close(); cadence(false); });
-    window.addEventListener('pageshow', event => { if (event.persisted) connect(); });
-  }
+    win.addEventListener('pagehide', () => { stream.close(); onUp(false); });
+    win.addEventListener('pageshow', event => { if (event.persisted) connect(); });
+  };
+  if (!win.navigator?.locks || typeof win.BroadcastChannel === 'undefined') return own();
+  const channel = new win.BroadcastChannel('orch-events');
+  let up = false, leading = null;
+  const say = what => { try { channel.postMessage(what); } catch (_) { /* the other tabs poll */ } };
+  channel.onmessage = event => {
+    if (event.data === 'rev') onRev();
+    else if (event.data === 'up' || event.data === 'down') onUp(event.data === 'up');
+    else if (event.data === 'hello' && leading) say(up ? 'up' : 'down');  // a new tab asks how the stream is
+  };
+  const lead = () => win.navigator.locks.request('orch-events', () => new Promise(release => {
+    const stream = new win.EventSource('/api/events');
+    leading = {stream, release};
+    stream.onopen = () => { up = true; onUp(true); say('up'); };
+    stream.onerror = () => { up = false; onUp(false); say('down'); };
+    stream.addEventListener('rev', () => { onRev(); say('rev'); });
+  })).catch(() => {});
+  win.addEventListener('pagehide', () => {
+    if (leading) { leading.stream.close(); leading.release(); leading = null; say('down'); }
+    onUp(false);
+  });
+  win.addEventListener('pageshow', event => { if (event.persisted) lead(); });
+  lead();
+  say('hello');
 }
