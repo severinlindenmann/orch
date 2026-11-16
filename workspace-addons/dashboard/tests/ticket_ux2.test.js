@@ -29,11 +29,13 @@ test('Dash 21: no chip when it matches the section; Done shows the finish day; n
   assert.doesNotMatch(text(c.ticketNext({id:'r', status:'review'})), /Next step|Read the result/);
   assert.equal(c.ticketNext({id:'a', status:'active', checklist:[{text:'Draft it'}]}), null);
 });
-test('Dash 23: a ticket a helper worked on that is not running offers Resume with a Paused line', () => {
+test('ORCH-69: board and list cards carry no Start helper or Resume button; a paused ticket keeps its Paused line', () => {
   const c = listCtx();
-  assert.match(text(c.ticketNext({id:'p', status:'open', sessions:[{id:'s1'}], updated_at:'2026-11-12T10:00:00Z'})), /^Paused .*Resume$/);
-  assert.equal(text(c.ticketNext({id:'n', status:'open'})), 'Start helper');
-  assert.equal(text(c.ticketNext({id:'t', status:'open', checklist:[{text:'typed by me'}]})), 'Start helper', 'typed tasks alone are not paused');
+  const paused = c.ticketNext({id:'p', status:'open', sessions:[{id:'s1'}], updated_at:'2026-11-12T10:00:00Z'});
+  assert.match(text(paused), /^Paused /);
+  assert.doesNotMatch(text(paused), /Resume|Start helper/);
+  assert.equal(c.ticketNext({id:'n', status:'open'}), null, 'a To do card has no button');
+  assert.equal(c.ticketNext({id:'t', status:'open', checklist:[{text:'typed by me'}]}), null, 'typed tasks alone: no button');
 });
 test('the list takes the finish day from the done history entry, like the ticket page', () => {
   const c = listCtx();

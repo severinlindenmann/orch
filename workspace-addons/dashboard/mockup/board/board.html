@@ -48,23 +48,23 @@
     <article class="tcard" data-state="todo" data-person="Anna" data-ref="t_ceu9qj">
      <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-18</span> Set up the weekly sales report</a>
      <div class="tc-line">2 steps planned</div>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">Added yesterday</span><span class="when">Due 18:30</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">Added yesterday</span><span class="when">Due 18:30</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Set up the weekly sales report"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_05uo1r">
      <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-19</span> Redesign the logo</a>
      <div class="tc-line"><span>Paused</span><span class="bar"><i style="--v:50%"></i></span><span class="n">1 of 2 steps</span></div>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">2 days ago</span><span class="when warn">Late since 09:00</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">2 days ago</span><span class="when warn">Late since 09:00</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Redesign the logo"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_3lhp1y">
      <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-20</span> Thank-you notes for our top customers</a>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Thank-you notes for our top customers"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_8yfw3d">
      <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-21</span> Answer customer emails from last week</a>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Answer customer emails from last week"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <p class="col-empty" data-empty="Nothing to start. Add a ticket with +">Nothing to start. Add a ticket with +</p>
@@ -181,6 +181,6 @@
 root.dataset.state=new URLSearchParams(location.search).get('state')||'loaded';
 const params=new URLSearchParams(location.search);q.value=params.get('q')||'';person.value=params.get('person')||'';const view=params.get('view');const filter=()=>{document.querySelectorAll('.tcard').forEach(c=>c.hidden=!(c.textContent.toLowerCase().includes(q.value.toLowerCase())&&(!person.value||c.dataset.person===person.value)&&(!view||view==='working'&&c.dataset.state==='working'||view==='done-week'&&c.dataset.state==='done'||view==='needs-you'&&(c.dataset.state==='needs'||c.dataset.state==='check'||c.dataset.ref==='t_4ksrp6'))));document.querySelectorAll('.col').forEach(c=>{const n=c.querySelectorAll('.tcard:not([hidden])').length;c.querySelector('.count-n').textContent=n;c.classList.toggle('is-empty',!n)});document.querySelector('#clear').hidden=!q.value&&!person.value};q.oninput=person.onchange=filter;document.querySelector('#clear').onclick=()=>{q.value=person.value='';filter()};
 document.querySelector('#skel').innerHTML=Array.from({length:5},()=>'<div class="sk-col"><div class="sk-card skeleton"></div><div class="sk-card skeleton"></div></div>').join('');
-document.querySelectorAll('.tc-more').forEach(b=>b.remove());document.querySelectorAll('[data-act="start"]').forEach(b=>b.onclick=()=>location.href='../ticket/ticket-copy.html');
+document.querySelectorAll('.tc-more').forEach(b=>b.remove());
 filter();document.querySelector('#waitn').textContent='3';document.querySelector('#nav-count').textContent='3';
 })();</script><script src="../home/demo-data.js"></script><script src="../../../../workspace/src/orch_ui/static/state-controls.js"></script></body></html>
