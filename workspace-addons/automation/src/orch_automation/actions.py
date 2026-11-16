@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import orchcli
-from .loop import record_last_run
+from .loop import record_last_run, script_of, start_script
 
 VERBS = ("on", "off", "toggle", "run", "delete", "repeat", "copy")
 TID = re.compile(r"t_[a-z0-9]{6,16}")
@@ -58,7 +58,8 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         return {"ticket": new["id"], "text": "Copy created."}
     sched = (t.get("ext") or {}).get("automation") or {}
     if verb == "run":
-        r = orchcli.run_start(root, target, by=by)
+        name = script_of(t)
+        r = start_script(root, t, name) if name else orchcli.run_start(root, target, by=by)
         if r["result"] == "failed":
             raise Bad(r["reason"])
         if sched:  # a manual run counts as the last run (same writer as the schedule); re-read: the run bumped the revision
@@ -69,6 +70,8 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
             "result": r["result"],
             "text": "Run started."
             if r["result"] == "started"
+            else "It is still running from before."
+            if name
             else "The ticket is busy: your request waits for the current run.",
         }
     if not sched:

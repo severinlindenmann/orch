@@ -119,6 +119,12 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
   ask = the tool's default mode (it asks), auto = `--permission-mode auto` when the installed tool's `--help` lists it, else
   `--permission-mode acceptEdits`, full = `--dangerously-skip-permissions`. The orch `--allowedTools` list stays in every mode.
   An agent without that data (generic, Codex) ignores the setting. Applies to oneshot and live starts. `orch init` prints the mode.
+- **Automation scripts** (`[automation.scripts.<name>] command = ["prog", "arg", ...]`, automation add-on): a repeat
+  that names a script (`ext.automation.script`, a name, never a command) runs that argv without a shell instead of an
+  agent. Same trust rule as agent commands: it runs only if a person approved exactly that entry (workspace path, name,
+  argv) on this machine; approvals are hashes in the orch home (`automation-script-approvals.json`). `orch automation
+  script add` by a person approves what was typed; an agent's entry waits for `orch automation script allow <name> --key <key>`
+  (a person only). An argv that cannot be shown in full (over 500 characters, control or odd characters) cannot be approved.
 - Shape: `agent-adapter.schema.json` `$defs/user_config`. Only `adapter`, `command`, `interactive` and `prompt`; nothing else.
 - `orch init` asks once which agent works here (found adapters + Other). Add-ons never ask.
 - **Invariant (9 Nov, git step 1): a settings-supplied agent command (`[agents.*]` with `command` or `interactive`) runs only if

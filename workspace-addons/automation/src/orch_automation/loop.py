@@ -1,6 +1,7 @@
 """One scheduler pass: waiting_on time, cron, relay inbox. Time is passed in, so tests use a fake clock.
 
-The scheduler never runs an agent itself: every run is `orch run start` (core decides resume / fresh / busy)."""
+The scheduler never runs an agent itself: every run is `orch run start` (core decides resume / fresh / busy). A repeat
+that names a script (scripts.py) runs that command from this computer's config instead, through `orch automation script run`."""
 
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import orchcli
+from . import orchcli, scripts
 from .cron import fmt, is_due, last_due, next_after, parse
 from .orchcli import tickets as read_tickets
 from .plain import daily_or_slower, workspace_tz, zone
@@ -59,6 +60,29 @@ def outside_prompt(what: str, text: str) -> str:
 def others(t: dict | None) -> int:
     """History entries on a ticket not written by the scheduler itself (only those show real work)."""
     return sum(h.get("by") != orchcli.BY for h in (t or {}).get("history") or [])
+
+
+def ask_failure(root: Path, tid: str, text: str) -> None:
+    """A run that did not work becomes one question (kind automation:failure), asked once."""
+    t = orchcli.ticket(root, tid)
+    if t is None or any(q.get("kind") in KINDS and q.get("answer") is None for q in t.get("questions") or []):
+        return
+    orchcli.call(root, "ask", tid, text, "--kind", KIND, "--option", TRY_AGAIN, "--option", LEAVE)
+
+
+def script_of(t: dict | None) -> str | None:
+    """The script a repeat runs instead of an agent: a name only (ext.automation.script), never a command."""
+    name = (((t or {}).get("ext") or {}).get("automation") or {}).get("script")
+    return name if isinstance(name, str) and scripts.NAME_RE.match(name) else None
+
+
+def start_script(root: Path, t: dict, name: str) -> dict:
+    """{"result": "started"|"pending"|"failed", "reason"?}: the same gates as an agent start (sync approval)."""
+    refused = orchcli.sync_refusal(root, t["id"])
+    if refused:
+        return {"result": "failed", "reason": refused}
+    res, reason = scripts.launch(root, t["id"], name)
+    return {"result": res, "reason": reason} if reason else {"result": res}
 
 
 def record_last_run(root: Path, t: dict, now: datetime, by: str | None = None) -> None:
@@ -138,23 +162,18 @@ class Scheduler:
 
     def fail(self, tid: str, reason: str) -> None:
         """A run that did not work becomes one question (kind automation:failure), asked once."""
+        ask_failure(self.root, tid, f"The agent run did not work: {reason}")
+
+    def start_due(self, tid: str, reason: str, now: datetime) -> str:
+        """A planned start (wait over, cron due, Try again): the ticket's script when it names one, else an agent."""
         t = orchcli.ticket(self.root, tid)
-        if t is None or any(
-            q.get("kind") in KINDS and q.get("answer") is None for q in t.get("questions") or []
-        ):
-            return
-        orchcli.call(
-            self.root,
-            "ask",
-            tid,
-            f"The agent run did not work: {reason}",
-            "--kind",
-            KIND,
-            "--option",
-            TRY_AGAIN,
-            "--option",
-            LEAVE,
-        )
+        name = script_of(t)
+        if not name:
+            return self.start_run(tid, reason, now)
+        res = start_script(self.root, t, name)
+        if res["result"] == "failed":
+            ask_failure(self.root, tid, f"The script did not run: {res['reason']}")
+        return res["result"]
 
     def check_watch(self) -> None:
         """Fast fail: a run that ended within 10 s without anything written on the ticket is not retried."""
@@ -195,7 +214,7 @@ class Scheduler:
                 if (
                     q["answer"] == TRY_AGAIN
                     and t["status"] in OPEN
-                    and self.start_run(t["id"], "you chose Try again", now) != "failed"
+                    and self.start_due(t["id"], "you chose Try again", now) != "failed"
                 ):
                     started.append(t["id"])
                     w = t.get("waiting_on") or {}
@@ -346,13 +365,13 @@ class Scheduler:
             w = t.get("waiting_on") or {}
             until = parse(w.get("until")) if w.get("kind") == "time" else None
             if until and until <= now and state.get(tid, {}).get("last_wake") != w.get("until"):
-                res = self.start_run(tid, "wait time reached", now)
+                res = self.start_due(tid, "wait time reached", now)
                 update_state(
                     self.root, tid, last_wake=w.get("until")
                 )  # also after a failure: only "Try again" retries
                 if res != "failed":  # clear the wait only after core took the run (SA-15)
                     orchcli.call(self.root, "wait", tid, "--clear")
-                    if t["status"] != "active":
+                    if t["status"] != "active" and not script_of(t):  # a script leaves the status alone
                         orchcli.call(self.root, "ticket", "status", tid, "active")
                     if res == "started":
                         started.append(tid)
@@ -377,11 +396,11 @@ class Scheduler:
                     if sched.get("each_run") == "sub-ticket" and daily_or_slower(cron):
                         run_tid = self.occurrence(t, last_due(cron, now, tz), tz)
                     if (
-                        run_tid == tid and t["status"] == "done"
-                    ):  # the agent finished the last one: open it again
+                        run_tid == tid and t["status"] == "done" and not script_of(t)
+                    ):  # the agent finished the last one: open it again (a script never closes it)
                         orchcli.call(self.root, "ticket", "status", tid, "open")
                         orchcli.log(self.root, tid, "Opened again for the next run of this repeat.")
-                    res = self.start_run(run_tid, f"cron {cron}", now) if run_tid else "failed"
+                    res = self.start_due(run_tid, f"cron {cron}", now) if run_tid else "failed"
                     if run_tid:  # a sub-ticket that could not be made is tried again next pass
                         record_last_run(
                             self.root, t, now

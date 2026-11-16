@@ -1,0 +1,1 @@
+{ "recurring": true, "cron": "*/5 * * * *", "tz": "Europe/Zurich", "script": "report-watch" }
