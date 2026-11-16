@@ -136,6 +136,12 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ## Owner feedback 14 Nov (lane owner-fb-v2)
 The current ticket header is the strip in `../sweep/d-ticket-states.html` (all five states) and `../proposals/f-ticket-check.html` (Check: Looks good / Send back, Result, What the helper did). The product matches them; the older pages here keep their 13 Nov look until they are replaced.
 
+## Working ticket header (ORCH-70, 17 Nov 2026)
+Owner accepted on 16 Nov (ORCH-64 card): while a helper works the header has no box, one line above the title (ticket
+number, state, helper, minutes), one Watch live, and Stop plus the two terminal commands in the ⋯ menu. No helper bar,
+no Live session card, no empty Owner row; the top bar shows only "Tickets › ORCH-n". Pages: `ticket-working.html`,
+the Working strip in `../sweep/d-ticket-states.html`; master: `.strip-plain`, `.strip-kicker` in widgets.css.
+
 ## Review stack (15 Nov 2026)
 
 ### ticket-answers.html

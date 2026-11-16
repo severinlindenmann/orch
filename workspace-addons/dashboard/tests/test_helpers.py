@@ -702,7 +702,7 @@ def test_review_ticket_without_run_offers_no_start():
     src = webjs.all_js()
     assert "line.primary && !['answer', 'open'].includes(line.primary.op)" in src
     # the helper bar only shows while the ticket is being worked on (never on review/done)
-    assert "!['done', 'review'].includes(t.status)" in src and "working ? agentBar(t) : null" in src
+    assert "!['done', 'review'].includes(t.status)" in src and "working && !helperLive ? agentBar(t) : null" in src
 
 
 def test_ui2_small_bugs_in_markup_and_css():

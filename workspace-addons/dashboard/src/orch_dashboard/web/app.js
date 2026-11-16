@@ -326,7 +326,9 @@ function render(arrived = new Set()) {
   if (r.kind === 'ticket') {
     const tk = ticketOf(r.id);
     title = clean(tk?.title) || 'Ticket';
-    crumb.replaceChildren(...[h('a', {href:'#tickets'}, 'Tickets'), ' › ', ...(window.DashHelpers.keyTag(tk, h) || []), title]);
+    // ORCH-70: the ticket number alone (the page's own title says the rest), so the top bar stays one row
+    const key = window.DashHelpers.ticketKey(tk);
+    crumb.replaceChildren(...[h('a', {href:'#tickets'}, 'Tickets'), ' › ', key ? h('span', {className:'key', title}, key) : title]);
     if (window.DashHelpers.ticketKey(tk)) title = window.DashHelpers.ticketKey(tk) + ' ' + title;
   } else if (r.kind === 'page') {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
