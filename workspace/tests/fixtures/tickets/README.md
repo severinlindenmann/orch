@@ -7,7 +7,7 @@ automatically): list, show, edit, save, evidence write, and checks that no field
 Contents of a folder: `.orch/tickets/*.json` (4 tickets: checklist with evidence of types command, note, url, pr,
 file; a question with options and an answer slot; a done-when part; waiting until a time and on an external
 reference; a sub-ticket; a ticket in Review; `ext` data of an add-on), `.orch/ticket-counter.json`,
-`.orch/config.toml`, and the copied evidence file. Only test data. Proof or signature fields of the old
+`.orch/config.toml`, and the copied evidence file. Only test data. Proof fields of the old
 human-proof code are added by the test itself (`_plant_unknown`), because the CLI of these versions cannot
 produce a finished (done) ticket without a person.
 

@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from conftest import ensure_signing
+from conftest import ensure_keys
 
 from orch import history, review, tickets
 from orch.errors import Refused
@@ -17,7 +17,7 @@ def _raw(root, tid):
 
 @pytest.fixture
 def tk(proj):
-    ensure_signing(proj)
+    ensure_keys(proj)
     t = tickets.create(proj, "Home layout", ME)
     return proj, t["id"]
 

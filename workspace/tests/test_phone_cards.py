@@ -10,7 +10,7 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from conftest import ensure_signing
+from conftest import ensure_keys
 from fakes import WS
 from test_relay_client import msg
 
@@ -27,7 +27,7 @@ MSG_V = jsonschema.Draft202012Validator(SCHEMA)
 
 @pytest.fixture
 def conn(proj, run, rel):
-    ensure_signing(proj)
+    ensure_keys(proj)
     rel.snapshot["workspaces"]["phones"] = [
         {"id": PHONE, "name": "iPhone", "online": True, "last_seen": None}
     ]
@@ -235,7 +235,7 @@ def _chunk(kind: bytes, body: bytes) -> bytes:
 
 
 def png(n=1):
-    """A well-formed PNG (the secret gate reads anything else as unknown); n varies the bytes."""
+    """A well-formed PNG (the secret check reads anything else as unknown); n varies the bytes."""
     ihdr = _chunk(b"IHDR", (n).to_bytes(4, "big") * 2 + bytes([8, 2, 0, 0, 0]))
     return b"\x89PNG\r\n\x1a\n" + ihdr + _chunk(b"IEND", b"")
 
@@ -279,7 +279,7 @@ def test_sync_cards_sends_once_with_files_and_digest(proj, new_ticket, conn):
 
 
 def test_sync_cards_needs_a_phone(proj, run, new_ticket, rel):
-    ensure_signing(proj)
+    ensure_keys(proj)
     assert run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)[0] == 0
     tid = new_ticket()
     add_card(proj, tid, img_card("invoice.png"), {"invoice.png": png()})
@@ -293,7 +293,7 @@ def test_sync_cards_skips_a_question_already_asked_of_the_phones(proj, new_ticke
     assert phone_view.sync_cards(proj) == [] and not card_questions(conn)
 
 
-def test_gate_refusal_holds_the_file_back(proj, new_ticket, conn):
+def test_check_refusal_holds_the_file_back(proj, new_ticket, conn):
     tid = new_ticket()
     secret = b"password = hunter2hunter2hunter2\nAKIAIOSFODNN7EXAMPLE\n-----BEGIN PRIVATE KEY-----\nabc\n"
     q = add_card(
