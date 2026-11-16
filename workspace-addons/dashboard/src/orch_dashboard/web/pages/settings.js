@@ -1056,6 +1056,7 @@ function startAddon(id) {
 async function addonAct(control) {
   const id = shownAddon();
   if (!id || control.disabled || locks.has('addon-act')) return;
+  if (control.dataset.review) return addonReview(id, control);
   const send = async () => {
     locks.add('addon-act'); control.disabled = true;
     const result = await act('addon.act', {addon:id, verb:control.dataset.verb, target:control.dataset.target});
@@ -1068,6 +1069,28 @@ async function addonAct(control) {
   actions.append(button('Yes', 'primary', async () => { await window.orch.close(d); send(); }));
   d.append(actions);
   window.orch.open(d);
+}
+// "Allow on this computer" on a repeat whose script is not allowed here yet: the add-on answers what the person reads
+// (the command in full, never behind Details) and a target that ends in the entry's key; the click sends that key back,
+// so only what was shown is allowed (as Settings > Allow this command).
+async function addonReview(id, control) {
+  if (snapshot) return;
+  const args = {addon:id, verb:control.dataset.verb, target:control.dataset.target};
+  const asked = await act('addon.act', {...args, review:true});
+  const got = asked.ok && asked.state?.act_answer?.addon === id ? asked.state.act_answer.answer : null;
+  const key = typeof got?.target === 'string' ? (/:([0-9a-f]{64})$/.exec(got.target) || [])[1] : null;
+  if (!got?.review || typeof got.review.title !== 'string' || !key) {
+    window.orch.toast(asked.text || 'This can\u2019t be allowed right now. Nothing was changed.', 'error');
+    return;
+  }
+  const text = [got.review.value, got.review.body].filter(x => typeof x === 'string' && x).join('\n\n');
+  settingsConfirm(String(got.review.title), text, 'scroll-all', 'Allow', async () => {
+    locks.add('addon-act');
+    const result = await act('addon.act', {...args, value:key});
+    locks.delete('addon-act');
+    window.orch.toast(result.ok ? 'Allowed on this computer.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    await loadAddon(id);
+  });
 }
 // "Allow on this computer" on a schedule that came by sync: the person signs sync's own Allow for that ticket's
 // block (the sign step shows exactly the block); afterwards the page reads the add-on again.
