@@ -1050,7 +1050,7 @@ def test_start_text_keeps_the_shape_the_home_card_reads():
 
     p = json.loads((CONTRACTS / "examples/factory-proposal/valid-run.json").read_text())
     text = render.start_text(p, 1)
-    m = re.match(r"^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: ", text, re.S)
+    m = re.match(r"^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: ", text, re.DOTALL)
     assert m, text[:200]
     assert m.group(1) == render.clean(p["title"])
     assert m.group(3) == render.clean(p["goal"]).rstrip(". ")
