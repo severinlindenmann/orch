@@ -58,9 +58,20 @@ pub fn purge(c: &Connection, data_dir: &FsPath, cutoff: i64) -> rusqlite::Result
 }
 
 fn drop_row(c: &Connection, data_dir: &FsPath, id: &str, blob: &str) -> rusqlite::Result<()> {
-    let _ = std::fs::remove_file(data_dir.join("blobs").join(blob));
-    c.execute("DELETE FROM blobs WHERE id=?1", [blob])?;
     c.execute("DELETE FROM problems WHERE id=?1", [id])?;
+    // The sharer may have named the same upload elsewhere (a file message, another problem): keep it then.
+    let used: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM problems WHERE blob_id=?1)
+         OR EXISTS(SELECT 1 FROM messages WHERE blob_id=?1)
+         OR EXISTS(SELECT 1 FROM view_blobs WHERE blob_id=?1)
+         OR EXISTS(SELECT 1 FROM phone_blobs WHERE blob_id=?1)",
+        [blob],
+        |r| r.get(0),
+    )?;
+    if !used {
+        let _ = std::fs::remove_file(data_dir.join("blobs").join(blob));
+        c.execute("DELETE FROM blobs WHERE id=?1", [blob])?;
+    }
     Ok(())
 }
 
@@ -184,9 +195,10 @@ async fn share(
     h: HeaderMap,
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
-    let v = parse_body(&body)?;
+    // Authenticate before reading the body.
     let c = app.db.lock().unwrap();
     let me = auth::workspace(&c, &h)?;
+    let v = parse_body(&body)?;
     let rf = v["ref"].as_str().unwrap_or("");
     if !valid_ref(rf) {
         return Err(invalid(
@@ -370,11 +382,11 @@ async fn set_status(
     Path(id): Path<String>,
     body: Bytes,
 ) -> Res<Json<Value>> {
-    let v = parse_body(&body)?;
-    let want = status_arg(&v)?;
     let mut c = app.db.lock().unwrap();
     let me = auth::workspace(&c, &h)?;
     require_reader(&c, &me)?;
+    let v = parse_body(&body)?;
+    let want = status_arg(&v)?;
     let tx = c.transaction()?;
     let holder: Option<String> = tx
         .query_row("SELECT taken_by FROM problems WHERE id=?1", [&id], |r| {

@@ -28,6 +28,7 @@ MAX_UNPACKED = 100 * 1024 * 1024
 SHARED = "shared.json"  # in the report folder: where it was shared (never part of the archive)
 FROM = "from.json"  # in a fetched report folder: who shared it
 STATES = ("new", "taken", "done")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 # module:function:line as the debug log writes it: two Python names and a line number, standing alone
 _CODE_PLACE = re.compile(r"(?<![\w:./-])[A-Za-z_][\w.]{0,80}:[A-Za-z_<][\w<>.]{0,80}:\d{1,6}(?![\w:./-])")
 
@@ -216,7 +217,10 @@ def _unpack(data: bytes, ref: str, dest: Path) -> int:
                 not m.isfile()
                 or len(parts) < 2
                 or parts[0] != ref
-                or any(p in ("", ".", "..") or "\\" in p or ":" in p or p != p.strip() for p in parts)
+                or any(
+                    p in ("", ".", "..") or "\\" in p or ":" in p or p != p.strip(" .") or _CONTROL.search(p)
+                    for p in parts
+                )
                 or m.name.startswith("/")
             ):
                 raise Refused(
@@ -279,7 +283,7 @@ def fetch(root: Path, pid: str) -> dict:
     try:
         try:
             n = _unpack(data, ref, folder)
-        except tarfile.TarError:
+        except (tarfile.TarError, ValueError, OSError):
             raise Refused("That shared problem could not be read. Nothing was kept.") from None
         keep = ("id", "ref", "from", "from_name", "shared_at", "created_at")
         (folder / FROM).write_text(

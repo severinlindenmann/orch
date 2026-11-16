@@ -221,7 +221,7 @@ def bad_tar(members) -> bytes:
     return buf.getvalue()
 
 
-@pytest.mark.parametrize("kind", ["escape", "other-top", "link", "absolute"])
+@pytest.mark.parametrize("kind", ["escape", "other-top", "link", "absolute", "newline", "dot-end"])
 def test_fetch_keeps_nothing_of_an_archive_that_is_not_plain_files(proj, run, srv, kind):
     ref = "r-1116-1200-ws"
     ok = tarfile.TarInfo(f"{ref}/SUMMARY.md")
@@ -231,7 +231,13 @@ def test_fetch_keeps_nothing_of_an_archive_that_is_not_plain_files(proj, run, sr
         bad.type, bad.linkname = tarfile.SYMTYPE, "/etc/passwd"
         members = [(ok, b"hi"), (bad, None)]
     else:
-        name = {"escape": f"{ref}/../../evil", "other-top": "other/evil", "absolute": "/tmp/evil"}[kind]
+        name = {
+            "escape": f"{ref}/../../evil",
+            "other-top": "other/evil",
+            "absolute": "/tmp/evil",
+            "newline": f"{ref}/a\nb",
+            "dot-end": f"{ref}/con.",
+        }[kind]
         bad = tarfile.TarInfo(name)
         bad.size = 1
         members = [(ok, b"hi"), (bad, b"x")]
