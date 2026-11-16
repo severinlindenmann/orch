@@ -456,7 +456,7 @@ checked address; redirects are never followed; connect timeout 5 s, total 10 s; 
 ## Problems (shared problem reports)
 
 A workspace may share one problem report (diag.md, `.orch/diag/reports/r-…`) with its relay, as an explicit step of the
-person or a helper. The relay keeps it for the admin (page **Problems**) and for the workspaces the admin lets pick problems
+person or a helper. The relay keeps it for the admin (page **Report a problem**, the same name as the dashboard button) and for the workspaces the admin lets pick problems
 up. Nothing is shared by itself; incidents (`i-…`) are never shared.
 
 **The archive** is one blob (`POST /v1/blobs`): a plain `.tar` (not compressed, so the secret scan of the upload reads every

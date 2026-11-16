@@ -11,7 +11,7 @@
 <script>
 'use strict';
 // The visible name of the problems page lives only here; rename it in this one line.
-const PROBLEMS_LABEL='Problems';
+const PROBLEMS_LABEL='Report a problem';
 const screens=[['overview','Overview'],['add','Add workspace'],['groups','Groups'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['subscribers','Subscribers'],['phones','Phones'],['problems',PROBLEMS_LABEL]];
 function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',groups:'group',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',subscribers:'antenna',phones:'phone',problems:'file'})[k]||k,16);return span.firstElementChild}
 const $=s=>document.querySelector(s), app=$('#app'), enc=encodeURIComponent;
