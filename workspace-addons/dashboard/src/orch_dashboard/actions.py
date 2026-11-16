@@ -267,6 +267,7 @@ def _ticket_new(a):
             "files",
             "title_auto",
             "plan_first",
+            "epic",
         ),
     )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
@@ -274,6 +275,10 @@ def _ticket_new(a):
         flags.append("--title-auto")
     if _flag(a.get("plan_first")):
         flags.append("--plan-first")
+    if _flag(
+        a.get("epic")
+    ):  # several tickets at once: this one holds them (they come as ticket.new with parent)
+        flags.append("--epic")
     long_text = a.get("long_text")
     if long_text is not None:
         _text(long_text, "text", limit=MAX_LONG)

@@ -1327,6 +1327,15 @@ def test_ticket_new_plan_first_requires_boolean(value):
         actions._ticket_new({"title": "Plan", "plan_first": value})
 
 
+@pytest.mark.parametrize("value", [True, False, None])
+def test_ticket_new_epic(value):
+    # ORCH-14: New ticket makes an epic; the tickets inside it come as ticket.new with parent
+    _, flags, _ = actions._ticket_new({"title": "Dashboard fixes", "epic": value})
+    assert ("--epic" in flags) is (value is True)
+    with pytest.raises(actions.BadRequest):
+        actions._ticket_new({"title": "Dashboard fixes", "epic": "true"})
+
+
 def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
     from orch_dashboard.actions import BadRequest, build_argv
 

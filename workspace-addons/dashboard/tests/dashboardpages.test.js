@@ -91,6 +91,13 @@ test('home: Needs you counts a failed start on the page', () => {
 });
 
 // Real /api/state shape from the test network (sanitized): `children` is a list of ids, `parent` an id.
+test('ORCH-14: an epic says Epic on its board card; a ticket inside it says Part of the epic', () => {
+  const items = [{id:'e',key:'ORCH-20',title:'Dashboard fixes',status:'open',epic:true}, {id:'x',key:'ORCH-21',title:'Fix the header',parent:'e',status:'done'}, {id:'y',key:'ORCH-22',title:'Larger buttons',parent:'e',status:'open'}];
+  const c = context(items);
+  assert.match(JSON.stringify(c.boardCard(items[0])), /Epic · 1 of 2 done/);
+  assert.match(JSON.stringify(c.boardCard(items[2])), /Part of the epic Dashboard fixes/);
+  assert.doesNotMatch(JSON.stringify(c.boardCard(items[2])), /Step of/);
+});
 test('parts on the real /api/state shape: list nests parts under the parent whatever their status', () => {
   const real = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/state-pilatus-parts.json'), 'utf8'));
   const items = real.tickets, [parent] = items.filter(t => t.key === 'PIL-2');

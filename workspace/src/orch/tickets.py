@@ -847,6 +847,7 @@ def create(
     tid: str | None = None,
     title_auto: bool = False,
     plan_first: bool = False,
+    epic: bool = False,
     start_requires: str | None = None,
 ) -> dict:
     """`start_requires` ("<ticket>:<question>=<answer>", set at creation only): no run starts on this ticket
@@ -885,6 +886,8 @@ def create(
         ticket["title_auto"] = True
     if plan_first:  # "Show plan first": the agent plans, asks "Plan ready", waits (set at creation only)
         ticket["plan_first"] = True
+    if epic:  # several tickets made at once: its sub-tickets are the work, one run goes through them in order
+        ticket["epic"] = True
     if (
         start_requires is not None
     ):  # a gate an add-on sets (Factory: a crew task waits for the person's Start)
@@ -1295,7 +1298,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
-PROTECTED_FIELDS = ("title_auto", "plan_first", "description", "description_by")  # orch writes these itself
+# orch writes these itself
+PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by")
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
