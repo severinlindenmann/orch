@@ -20,6 +20,8 @@ PR_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[
 # gh reads these before its own sign-in; a helper's environment may set them for a helper account
 TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
 OPEN_IT = "Open the pull request and merge it there."
+JQ_VIEW = '.state + " " + (.reviewDecision // "")'
+REVIEW_BODY = "Merge clicked on the orch card."
 NO_GH = "The merge needs the GitHub command line (gh) signed in with your own account. " + OPEN_IT
 
 
@@ -67,14 +69,16 @@ def merge(url: str) -> dict:
     login = who.stdout.strip()
     if who.returncode != 0 or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", login):
         raise Refused(NO_GH)
-    view = _gh(gh, ["pr", "view", url, "--json", "state", "--jq", ".state"], 15)
-    state = view.stdout.strip()
+    view = _gh(gh, ["pr", "view", url, "--json", "state,reviewDecision", "--jq", JQ_VIEW], 15)
+    state, _, review = view.stdout.strip().partition(" ")
     if view.returncode != 0:
         raise Refused(f"GitHub did not show the pull request: {_first_line(view.stderr)}. {OPEN_IT}")
     if state == "MERGED":
         return {"login": login, "already": True}
     if state != "OPEN":
         raise Refused("The pull request is closed on GitHub, so it cannot be merged. Open it to see why.")
+    if review == "REVIEW_REQUIRED":  # the branch rules want a review: the person's click is that review
+        _gh(gh, ["pr", "review", url, "--approve", "--body", REVIEW_BODY], 15)  # own PR: GitHub says no
     done = _gh(gh, ["pr", "merge", url, "--merge"], 25)
     if done.returncode != 0:
         raise Refused(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")

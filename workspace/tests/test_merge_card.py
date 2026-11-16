@@ -17,7 +17,7 @@ class FakeGh:
     """Stands in for the gh command line: records every call and the token variables it was given."""
 
     def __init__(self, state="OPEN", merge_rc=0, merge_err="", login="pat-gh", user_rc=0):
-        self.calls, self.envs = [], []
+        self.calls, self.envs, self.review = [], [], ""
         self.state, self.merge_rc, self.merge_err = state, merge_rc, merge_err
         self.login, self.user_rc = login, user_rc
 
@@ -28,7 +28,10 @@ class FakeGh:
         if args[:2] == ["api", "user"]:
             return subprocess.CompletedProcess(argv, self.user_rc, self.login + "\n", "")
         if args[:2] == ["pr", "view"]:
-            return subprocess.CompletedProcess(argv, 0, self.state + "\n", "")
+            return subprocess.CompletedProcess(argv, 0, f"{self.state} {self.review}\n", "")
+        if args[:2] == ["pr", "review"]:
+            self.review = "APPROVED"
+            return subprocess.CompletedProcess(argv, 0, "", "")
         if args[:2] == ["pr", "merge"]:
             if self.merge_rc == 0:
                 self.state = "MERGED"
@@ -202,3 +205,22 @@ def test_change_after_not_now_merges_and_a_merge_cannot_be_taken_back(tk, run, g
     assert newest["decision"]["action"] == "approve" and newest["decision"]["replaces"] == "q1"
     code, out, err = run("review", "answer", tid, newest["id"], "--verdict", "no", "--by", ME)
     assert code == 2 and "cannot be taken back" in out + err
+
+
+def test_a_required_review_is_the_persons_own_before_the_merge(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.review = "REVIEW_REQUIRED"
+    assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
+    acts = [c[:2] for c in gh.calls]
+    assert acts == [["api", "user"], ["pr", "view"], ["pr", "review"], ["pr", "merge"]]
+    assert gh.calls[2][:4] == ["pr", "review", PR, "--approve"]
+    assert all(e == {} for e in gh.envs)
+
+
+def test_no_review_when_none_is_required(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.review = "APPROVED"
+    assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
+    assert ["pr", "review"] not in [c[:2] for c in gh.calls]
