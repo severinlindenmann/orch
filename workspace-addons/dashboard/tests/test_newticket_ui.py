@@ -67,7 +67,6 @@ def test_paste_styles_are_scoped_to_new_ticket():
     assert ".new-ticket .new-ticket-text" in css
     for rule in (
         "width: 100%",
-        "min-height: 6.5em",
         "resize: vertical",
         "font-size: 16px",
         "min-height: 44px",

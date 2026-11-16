@@ -439,8 +439,13 @@ function previewText(t, kind, file, text) {
   return h('pre', {}, text.split('\n').slice(0, 8).join('\n'));
 }
 function ticketPreviewTile(t, file, kind = 'artifacts') {
-  const title = window.DashHelpers.plainFileName(file.name) || 'Result';
+  const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
+  if (!snapshot && /\.pdf$/i.test(file.name)) {  // the browser's own PDF view, from the same-origin file endpoint
+    tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+      h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.')));
+    return tile;
+  }
   const html = /\.html?$/i.test(file.name), picture = /\.(png|jpe?g|webp)$/i.test(file.name);
   if (snapshot || html || (!picture && !PREVIEW_EXT.text.test(file.name))) {
     tile.append(h('p', {className:'meta'}, html ? title : 'Preview available when opened'));
@@ -482,7 +487,9 @@ const evidenceFile = (t, ev) => {
   if ((ev.type || ev.kind) !== 'file' || ev.missing || !ref.startsWith(prefix)) return null;
   const name = ref.slice(prefix.length);  // the server checks again; a path that climbs or is not plain never gets a chip
   if (!name || /[\\\0:]/.test(name) || name.startsWith('/') || name.split('/').some(part => ['', '.', '..'].includes(part))) return null;
-  return Number.isFinite(ev.size) && ev.size >= 0 ? {name, mtime:ev.at, size:ev.size} : {name, mtime:ev.at};
+  const file = Number.isFinite(ev.size) && ev.size >= 0 ? {name, mtime:ev.at, size:ev.size} : {name, mtime:ev.at};
+  if (typeof ev.title === 'string' && ev.title.trim()) file.title = ev.title;  // the title given when the file was attached
+  return file;
 };
 // One file = one entry: lists keep the first item per key; items without a key (notes) all stay.
 const uniqueBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
@@ -526,6 +533,10 @@ function ticketShareButton(t, file) {
 // and the opening control gets the cursor back.
 const fileUrl = (tid, kind, fileName, dl = false) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName) + (dl ? '&dl=1' : '');
 const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) || String(fileName).split('/').pop());
+// The title given when the file was attached; else the file name made readable.
+const oneLineTitle = value => typeof value === 'string' ? clean(value).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+const titleOf = file => oneLineTitle(file.title) || fileTitle(file.name);
+const shortName = file => String(file.name).split('/').pop();
 const fileBadge = fileName => (/\.([^./]+)$/.exec(fileName)?.[1] || 'file').slice(0, 4).toUpperCase();
 const fileMeta = file => [kindWord(file.name), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', file.mtime ? localStamp(file.mtime) : ''].filter(Boolean).join(' · ');
 async function copyFileLink(url) {
@@ -560,7 +571,7 @@ function fileEntry(t, group, file) {
   const role = group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
   const at = file.mtime ? createdText(file.mtime) : '';
   return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, created:at,
-    title:fileTitle(file.name),
+    title:titleOf(file), named:!!oneLineTitle(file.title),
     meta:[viewerWord(kind), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', at, task ? 'Task: ' + task : '', role].filter(Boolean).join(' · ')};
 }
 function createdText(at) {
@@ -576,7 +587,9 @@ function previewFile(tid, kind, fileName) {
     const known = array(artifactData.get(tid)?.data?.files).find(f => f.name === fileName) || {name:fileName};
     files = [fileEntry(t || {id:tid}, {kind}, known)]; index = 0;
   }
-  window.FileViewer.open({files, index, context:t ? clean(t.title || '') : ''});
+  // "Share by link…" only when the sharing add-on is on (no hint otherwise); it opens the same Share a file window for this file.
+  const share = addons().some(a => a.active !== false && isPublish(a.name)) ? f => shareDialog({name:f.name.split('/').pop(), url:window.FileViewer.urlOf(f)}) : null;
+  window.FileViewer.open({files, index, context:t ? clean(t.title || '') : '', share});
 }
 // One compact file row: type badge, name, meta, Open / Download / Copy link.
 function ticketFileActions(t, kind, file) {
@@ -585,19 +598,19 @@ function ticketFileActions(t, kind, file) {
   return h('div', {className:'file-actions'},
     ticketButton('Open', 'ghost sm', () => previewFile(t.id, kind, file.name), {'data-key':'file-open-' + k}),
     h('a', {className:'btn ghost sm', href:fileUrl(t.id, kind, file.name, true), download:file.name.split('/').pop()}, 'Download'),
-    ticketButton('Copy link', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}));
+    ticketButton('Copy local link', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k, title:'Works only on this computer'}));
 }
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
     h('span', {className:'file-type' + (shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), shownThumb(t, kind, file)),
-    h('div', {className:'grow'}, h('p', {className:'file-name'}, fileTitle(file.name)), h('p', {className:'meta'}, fileMeta(file))),
+    h('div', {className:'grow'}, h('p', {className:'file-name'}, titleOf(file)), oneLineTitle(file.title) ? h('p', {className:'meta file-real-name'}, shortName(file)) : null, h('p', {className:'meta'}, fileMeta(file))),
     ticketFileActions(t, kind, file));
 }
 // The result frame: the file heading, then a bounded preview with Expand (the shared viewer).
 // A PDF shows as the PDF and a web page as the page (in a frame that cannot reach this app); other files as a short excerpt.
 function ticketLivePreview(t, file, kind) {
   if (snapshot) return null;
-  const type = viewerKind(file.name), title = fileTitle(file.name);
+  const type = viewerKind(file.name), title = titleOf(file);
   if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
     h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.'));
   if (type === 'page') return h('iframe', {className:'preview-live', sandbox:'allow-scripts', referrerpolicy:'no-referrer', title, loading:'lazy',
@@ -649,7 +662,7 @@ function fileTile(t, f) {
   const open = () => previewFile(t.id, f.kind, f.name);
   const meta = [viewerWord(f.fileKind), Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', f.mtime ? localStamp(f.mtime) : ''].filter(Boolean).join(' · ');
   const link = h('button', {type:'button', className:'file-preview-link', 'aria-label':'Preview ' + f.title + ' · ' + meta, 'data-key':'file-open-' + f.kind + '-' + f.name},
-    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), h('span', {className:'meta'}, meta)));
+    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
   link.onclick = open;
   return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }
@@ -1299,6 +1312,8 @@ function missingTicket(id) {
 // The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [];
+  const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
+  if (quiet) m.sentence = (/^Updated /.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: No news since replaces Updated
   if (!snapshot) {
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'active'), {'data-key':'ticket-reopen'}));
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
@@ -1668,6 +1683,34 @@ async function fileEmbedIdea(req) {
   } finally { embedIdeaBusy = false; }
 }
 addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });
+
+// Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
+// target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this
+// page's session) and tells the page whether it went out. Same origin and shipped-frame fences as orch.idea.
+const EMBED_ASK_TARGET = /^t_[a-z0-9]{6,16}:s[1-9][0-9]{0,3}:ws_[a-z0-9]{6,32}:(-|[0-9]{1,2}(,[0-9]{1,2}){0,11})$/;
+function embedAskRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.ask') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.target !== 'string' || !EMBED_ASK_TARGET.test(data.target)) return null;
+  return {...shown, id:data.id, target:data.target};
+}
+let embedAskBusy = false;  // one ask at a time: a second click while sending is dropped
+async function fileEmbedAsk(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (embedAskBusy) return;
+  embedAskBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:'ask', target:req.target});
+    const answer = result.ok ? result.state?.act_answer : null;
+    const state = answer && answer.addon === req.addon ? answer.answer?.state : null;
+    if (state === 'delivered' || state === 'queued') reply({type:'orch.ask.done', state});
+    else if (state === 'partial') reply({type:'orch.ask.done', state, said:String(answer.answer?.said || '').slice(0, 300)});
+    else reply({type:'orch.ask.failed', error:result.ok ? 'orch did not confirm that it was sent.' : String(result.text || '').slice(0, 300)});
+  } finally { embedAskBusy = false; }
+}
+addEventListener('message', e => { const req = embedAskRequest(e); if (req) fileEmbedAsk(req); });
 
 // Plan the run / Ask for changes on a Factory draft: the shown shipped add-on page names a ticket of ITS OWN (one that
 // carries that add-on's data) and the words. The dashboard sends them as the person's message with its own proven op

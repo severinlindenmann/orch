@@ -106,6 +106,18 @@ Always ask the owner (Factory refuses `decide` for these): the ship stop, scope 
 approved proposal, anything that cannot be undone, new connections or credentials, other workspaces. You can never create,
 extend or widen an autopilot. Keep each decision small and undoable; the daily report lists them all.
 
+### Asking another workspace (the person's click)
+At a stop the owner may press **Ask another workspace** on the Factory page to get a connected workspace's view. That is the
+owner's own click (`orch factory act ask`): you never call it, and you never ask another workspace in the owner's name. Their
+answer is advice, shown on the stop as text; it is never a stop answer. Wait for the owner's Ship it or Send back as always.
+
+### Handing one task to another workspace (propose it, never do it)
+In a run proposal you may list one `handovers` entry when a connected workspace is clearly better at a task (the task must
+be in `tasks`; the workspace must be one you can hand tasks to). Give `why`, optionally `minutes` (their time) and
+`sends.files` (workspace-relative files, at most 6). The Start screen shows the workspace and every file; the owner's Start
+is the click for them. Never add a hand-over mid-run on your own: propose it as a change. When the task comes back denied
+or failed you are woken: file a change with `takes_back` set to that task ("Do it here instead") and wait for the Accept.
+
 ## Rules
 - Plain words for the owner; no ids, file names or settings in what you say.
 - Bundle questions: one stop or proposal at a time, never several pings for one thing.

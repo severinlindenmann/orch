@@ -24,6 +24,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
 | `question-card*.js`, `composer.*` | Question card, chat composer. |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
+| `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
 | `COMPONENT-QA.md` | The 13 Nov component audit (QA-01..30). |
 | `demo.html` | Older question-card and proof demo. |
 

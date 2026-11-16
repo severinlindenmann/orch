@@ -40,8 +40,37 @@ On the Factory tab a decision (Start, Ship it and the other stops) opens the das
 you answer without leaving the page; the page refreshes when you have answered. The Factory page itself never answers: you
 press the option in the card, where orch confirms it is you. Outside the dashboard the button links to the ticket.
 
+## Ask another workspace
+At a stop you can ask a connected workspace for its view first: press **Ask another workspace** on the stop (the button
+only shows when another workspace is connected to yours). You pick who, and the dialog shows exactly what leaves this
+computer: one line about the stop, the items you tick and their pictures. Nothing else goes: no other orders, no crew logs,
+no budget, no chat. orch checks the pictures for passwords and keys when the dialog opens; a picture with a hit stays
+unticked and nothing is sent until you remove it.
+
+Their answer shows on the stop as "Design says: ..." (or "Design's helper says: ..."). **Add to my comments** copies it,
+quoted, so you can paste it into your own comments; it is never sent by itself. An answer is advice: **Ship it** and
+**Send back** are always yours, also while you wait, and a late answer is kept as a note. Autopilot never decides a stop you
+asked about. If the other workspace is offline the row says Queued and the question goes out when it is back; if it could
+not be delivered the row says Failed, with **Send again**. When you answer the stop, the ask is closed.
+
+On the command line: `orch factory ask <order> <stop> <workspace> --item 0 --by human:<name>`.
+
+## Hand one task to another workspace
+Now and then another connected workspace is clearly better at one task (for example Design makes the pictures). Then the
+proposal says so in one line: "Design makes the header picture · about 40 min", what they get (the brief and the files
+listed, each one named) and "Design's time is not counted here". Everything else stays in your workspace. Pressing **Start**
+is your click for those files too, so what you see on the proposal is exactly what leaves this computer; a file added later
+is not sent. Before anything goes, every file is checked for passwords and keys and nothing is sent if one is found.
+
+On the order page the task shows in plain words: Waiting for Design to start, Waiting for Design to allow, Queued at Design,
+Working at Design, Ready for review at Design, Done, Design said no, Failed at Design. Design's person has to allow the task
+on their side. When Design says it is done, the result is added to the task and the crew carries on; look at the result before
+you rely on it. If nobody picks it up for a day the row offers **Ask Helper to do it here**. If Design says no or fails, your
+helper is woken once and proposes **Do it here instead**; only your **Accept** takes the task back, and Design is told "No
+longer needed". There is never a second copy without your Accept.
+
 ## What protects your decisions
-Only your own answers count (the core records a person's answer only with proof from your dashboard, Focus or phone), and
+Only your own answers count (the ones you give in the dashboard, Focus, the CLI or on your phone), and
 only for questions Factory itself asked about a frozen proposal. A proposal cannot change after Start; more scope is always
 a new question. In phase 1 this is enforced by Factory's own commands: an agent running as your user could still start a
 ticket directly with `orch run start`. A core check for that is planned.

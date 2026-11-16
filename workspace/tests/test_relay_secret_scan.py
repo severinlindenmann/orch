@@ -186,3 +186,119 @@ def test_a_value_that_is_the_placeholder_passes_everything_else_is_scanned(proj,
         with pytest.raises(Refused) as e:
             relay.scan_outgoing(proj, {"text": bad})
         assert real not in str(e.value) and TOKEN not in str(e.value), bad
+
+
+def _ticket_with_planted_token(proj, run):
+    """A ticket whose summary holds a token (planted by hand, as a person or agent could edit the file)."""
+    code, out, _ = run("ticket", "new", "Rename the field", "--json")
+    tid = json.loads(out)["id"]
+    f = next((proj / ".orch" / "tickets").glob(f"{tid}*.json"))
+    t = json.loads(f.read_text(encoding="utf-8"))
+    t["summary"] = f"half done, deploy key {TOKEN}"
+    f.write_text(json.dumps(t), encoding="utf-8")
+    return tid
+
+
+def test_delegate_full_never_sends_a_planted_token(proj, run, on):
+    """R3.3 + R5.2 (owner 15 Nov): --full shares the whole ticket card. A token planted in the ticket
+    never leaves: the ticket is read with stored secrets hidden, and the card is scanned like any body."""
+    tid = _ticket_with_planted_token(proj, run)
+    code, out, err = run("relay", "delegate", PEER, "Rename", "--text", "x", "--ticket", tid, "--full")
+    sent = json.dumps(on.sent)
+    assert TOKEN not in sent + out + err
+    if code == 0:  # sent with the value hidden
+        assert on.sent[-1]["body"]["ticket_card"]["summary"].startswith("half done")
+    else:
+        _clean(proj, on, code, out, err)
+
+
+def test_delegate_full_card_is_scanned(proj, monkeypatch, on):
+    """A card that still held a token (a reader that did not hide it) is refused by the scan."""
+    from orch import chat_groups, relay
+
+    tid = tickets_new(proj)
+    real = chat_groups.card_of_ticket
+    monkeypatch.setattr(
+        chat_groups, "card_of_ticket", lambda root, t: {**(real(root, t) or {}), "summary": f"key {TOKEN}"}
+    )
+    with pytest.raises(Refused) as e:
+        relay.send_delegate(proj, PEER, "Rename", "x", [], tid, full=True)
+    assert TOKEN not in str(e.value) and "nothing was sent" in str(e.value) and not on.sent
+
+
+def test_delegate_full_dry_run_never_shows_a_planted_token(proj, run, on):
+    """The preview runs the same path: a secret is never shown as what would leave."""
+    tid = _ticket_with_planted_token(proj, run)
+    code, out, err = run(
+        "relay", "delegate", PEER, "Rename", "--text", "x", "--ticket", tid, "--full", "--dry-run"
+    )
+    assert TOKEN not in out + err and not on.sent
+
+
+def test_delegate_without_full_does_not_send_the_planted_summary(proj, run, on):
+    """The default share (summary + picked items) never carries the card: the planted summary stays home."""
+    tid = _ticket_with_planted_token(proj, run)
+    assert run("relay", "delegate", PEER, "Rename", "--text", "x", "--ticket", tid)[0] == 0
+    assert on.sent and TOKEN not in json.dumps(on.sent) and "ticket_card" not in on.sent[-1]["body"]
+
+
+def tickets_new(proj) -> str:
+    from orch import tickets
+
+    return tickets.create(proj, "Rename the field", "human:test")["id"]
+
+
+def test_resend_scans_an_old_outbox_entry(proj, run, on):
+    """#900: an entry written before the send-time scan is checked again on resend: not sent, marked failed
+    with one sentence, removed from disk, value never printed."""
+    from orch import relay
+
+    ob = proj / ".orch" / "outbox"
+    ob.mkdir(parents=True, exist_ok=True)
+    mid = "m_" + "a" * 16
+    msg = {
+        "id": mid,
+        "from": relay._cfg(proj)["workspace"],
+        "to": PEER,
+        "type": "text",
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+    (ob / f"{mid}.json").write_bytes(json.dumps({**msg, "body": {"text": f"key {TOKEN}"}}).encode())
+    good = "m_" + "b" * 16
+    (ob / f"{good}.json").write_bytes(json.dumps({**msg, "id": good, "body": {"text": "fine"}}).encode())
+    res = relay.resend_outbox(proj)
+    assert [f["id"] for f in res["failed"]] == [mid], res
+    assert res["sent"] == [good], res
+    assert TOKEN not in json.dumps(res) and "GitHub token" in res["failed"][0]["reason"]
+    assert [s["id"] for s in on.sent] == [good]
+    assert not (ob / f"{mid}.json").exists()
+    # the CLI says it in words, without the value
+    (ob / f"{mid}.json").write_bytes(json.dumps({**msg, "body": {"text": f"key {TOKEN}"}}).encode())
+    code, out, err = run("relay", "outbox", "--resend")
+    assert TOKEN not in out + err and "Not sent" in out and mid in out
+
+
+def test_resend_scans_every_field_and_odd_files(proj, run, on):
+    from orch import relay
+
+    ob = proj / ".orch" / "outbox"
+    ob.mkdir(parents=True, exist_ok=True)
+    me = relay._cfg(proj)["workspace"]
+    base = {
+        "from": me,
+        "to": PEER,
+        "type": "text",
+        "created_at": "2026-01-01T00:00:00Z",
+        "body": {"text": "x"},
+    }
+    cases = {
+        "a": {**base, "reply_to": TOKEN},
+        "b": {**base, "body": TOKEN},
+        "c": {**base, "body": {"text": TOKEN.replace("_", "\u005f")}},
+    }
+    for k, v in cases.items():
+        mid = "m_" + k * 16
+        (ob / f"{mid}.json").write_bytes(json.dumps({**v, "id": mid}).encode())
+    res = relay.resend_outbox(proj)
+    assert len(res["failed"]) == 3 and not res["sent"] and not on.sent, res
+    assert TOKEN not in json.dumps(res) and not list(ob.glob("m_*.json"))

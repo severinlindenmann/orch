@@ -37,6 +37,20 @@ def run_proposal(**changes):
     return json.dumps(p).encode()
 
 
+def connect_design(ws, *files):
+    """The relay's workspace list (Design, delegate allowed) and these files, for proposals with a hand-over (#816 B)."""
+    folder = ws / ".agents" / "skills" / "orch-relay"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "workspaces.json").write_text(
+        json.dumps(
+            {"workspaces": [{"id": "ws_design0001", "name": "Design", "can_send": {"delegate": True}}]}
+        )
+    )
+    for f in files:
+        (ws / f).parent.mkdir(parents=True, exist_ok=True)
+        (ws / f).write_text("x")
+
+
 def stop_file(stage, *items):
     items = items or ({"title": "Button colour", "tag": "taste"},)
     return json.dumps(
@@ -602,7 +616,9 @@ def test_reconcile_reports(ws, run):
 
 def test_start_text_shows_what_matters(ws, run):
     p = json.loads(run_proposal())
-    p["handovers"] = [{"task": "photos", "workspace": "design", "why": "They own the brand."}]
+    connect_design(ws)
+    p["tasks"].append({"slug": "photos", "title": "Photos", "role": "builder", "stage": "build"})
+    p["handovers"] = [{"task": "photos", "workspace": "ws_design0001", "why": "They own the brand."}]
     p["budget"]["active_min_cap"] = 150
     order, _ = started(ws, run, data=json.dumps(p).encode())
     text = core(ws, "ticket", "show", order)["questions"][0]["text"]
@@ -611,11 +627,108 @@ def test_start_text_shows_what_matters(ws, run):
         "Crew: manager claude, builder codex, reviewer claude",
         "Cap: 2 h 30 min active",
         "Ship: Merges the reviewed page into develop. (undo: A revert task.)",
-        "Handover: photos → design",
+        "Handover: photos → ws_design0001",
         "Unsure: Bookings go to Anna's calendar",
     ):
         assert part in text, part
     assert text.endswith("(Proposal 1)") and ".." not in text
+
+
+def test_start_text_shows_what_leaves_with_a_handover(ws, run):
+    """R7.3: Start counts as the click for the hand-over files (owner Q6), so the Start text names the receiving
+    workspace and every file, uncut."""
+    p = json.loads(run_proposal())
+    files = ["brief/header.md", "brief/a long folder name/old header picture final.png"]
+    connect_design(ws, *files)
+    p["handovers"] = [
+        {
+            "task": "booking-form",
+            "workspace": "ws_design0001",
+            "why": "Design makes our pictures.",
+            "minutes": 40,
+            "sends": {"files": files},
+        }
+    ]
+    order, _ = started(ws, run, data=json.dumps(p).encode())
+    text = core(ws, "ticket", "show", order)["questions"][0]["text"]
+    assert "Handover: booking-form → ws_design0001 (they get: " + ", ".join(files) + ")" in text
+
+
+def test_files_added_after_start_are_refused(ws, run):
+    """The Start answer is bound to the frozen proposal: a file added to it later breaks the hash."""
+    p = json.loads(run_proposal())
+    p["handovers"] = [
+        {
+            "task": "booking-form",
+            "workspace": "ws_design0001",
+            "why": "Design makes our pictures.",
+            "sends": {"files": ["brief/header.md"]},
+        }
+    ]
+    connect_design(ws, "brief/header.md")
+    order, _ = started(ws, run, data=json.dumps(p).encode())
+    assert authority.started(order, ws)
+    frozen = ws / ".orch/addons/factory/proposals" / order / "p1.json"
+    data = json.loads(frozen.read_bytes())
+    data["handovers"][0]["sends"]["files"].append("brief/extra.png")
+    frozen.write_text(json.dumps(data))
+    assert run("show", order, code=2)["code"] == "tampered"
+
+
+@pytest.mark.parametrize(
+    "bad", ["../x.png", "/etc/passwd", "~/x", "brief/.env", ".git/config", "a\\b", "C:/x"]
+)
+def test_handover_file_paths_must_stay_relative(ws, run, bad):
+    p = json.loads(run_proposal())
+    p["handovers"] = [
+        {"task": "booking-form", "workspace": "ws_design0001", "why": "Pictures.", "sends": {"files": [bad]}}
+    ]
+    order = run("idea", "Booking page")["order"]
+    assert run("propose", order, "--file", "-", data=json.dumps(p).encode(), code=2)["code"] == "invalid"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "brief/x.png\n",
+        "brief/x.png ",
+        " brief/x.png",
+        "brief/a  b.png",
+        "brief /x.png",
+        "brief/a,b.png",
+        "brief/a;b.png",
+        "brief/a\u202eb.png",
+        "brief/a\u200bb.png",
+        "a/./b.png",
+    ],
+)
+def test_handover_file_strict_check_beyond_the_schema(ws, run, bad):
+    """A JSON-schema `$` can match before a trailing newline; the Python allowlist check refuses at freeze."""
+    p = json.loads(run_proposal())
+    p["handovers"] = [
+        {"task": "booking-form", "workspace": "ws_design0001", "why": "Pictures.", "sends": {"files": [bad]}}
+    ]
+    order = run("idea", "Booking page")["order"]
+    assert run("propose", order, "--file", "-", data=json.dumps(p).encode(), code=2)["code"] == "invalid"
+
+
+def test_handover_file_ok_allows_plain_names():
+    from orch_factory.store import handover_file_ok
+
+    for good in ("brief/header.md", "Bilder/Übersicht (alt)-v2_final.png", "a b/c.d"):
+        assert handover_file_ok(good), good
+
+
+def test_start_text_never_shows_a_changed_path():
+    """What Start shows must equal what is shared: a path the render would clean is refused, never shown altered."""
+    from orch_factory import render
+    from orch_factory.store import Refused
+
+    h = {"task": "t", "workspace": "ws_design0001", "why": "x", "sends": {"files": ["brief/x.png\n"]}}
+    with pytest.raises(Refused):
+        render.handover_line(h)
+    h["sends"]["files"] = ["brief/x.png"]
+    assert render.handover_line(h).endswith("(they get: brief/x.png)")
 
 
 def test_agent_strings_are_cleaned(ws, run):
@@ -859,15 +972,16 @@ def test_per_day_limit_only_warns_and_never_blocks(ws, run):
 
     from orch_factory import autopilot, orchcli, pageapi, view
 
+    now = datetime.now(UTC)
+    if (now - timedelta(minutes=15)).astimezone().date() != now.astimezone().date():
+        pytest.skip("the 15-minute window crosses local midnight; 'today' would cut it")
     a, _ = autopilot_order(ws, run, active_min_per_day=10)
-    store, now = Store(ws), datetime.now(UTC)
+    store = Store(ws)
     at = lambda m: (now - timedelta(minutes=m)).isoformat().replace("+00:00", "Z")
     (ws / "record.json").write_text(
         json.dumps({a: [{"at": at(8), "run": "r_a"}, {"at": at(4), "run": "r_a"}]})
     )
     status = autopilot.day_status(ws, store, orchcli.tickets(ws))
-    if status["used"] != 4:  # local midnight fell inside the window: skip the exact count
-        return
     assert (
         status == {"limit": 10, "used": 4, "reached": False} and "keeps going" not in view.view(ws)["notice"]
     )

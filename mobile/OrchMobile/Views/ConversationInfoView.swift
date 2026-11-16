@@ -167,6 +167,9 @@ struct ConversationInfoView: View {
                         .foregroundStyle(Theme.muted)
                 }.themeFont(13)
                 TicketStatusChip(status: TopicStatus(ticket)).accessibilityIdentifier("info-summary")
+                if let due = TicketDue.words(ticket.view?.due, status: ticket.view?.status) {
+                    Text(due).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("info-due")
+                }
                 if let description = ticket.view?.summary, !description.isEmpty {
                     Text(ArtifactMentions.attributed(description, attachments: ticket.view?.attachments ?? []))
                         .themeFont(13).foregroundStyle(Theme.muted)
