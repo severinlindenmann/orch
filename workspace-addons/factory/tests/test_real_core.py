@@ -98,12 +98,7 @@ def test_real_core_person_clicks_plan_send_and_start(ws, real_orch, proposal):
     person("answer", {"ticket": order, "question": q["id"], "answer": "Start", "digest": digest})
     assert commands.show(ws, order)["started"] is True
 
-    # After the person's Start, core lets a run start on the crew ticket Factory makes next (#777).
-    crew = flow.crew_add(ws, order, "booking-form")["ticket"]
-    blocked = core_py(
-        "import sys; from pathlib import Path; from orch import tickets; r = Path(sys.argv[1]); "
-        "print(tickets.start_blocked(r, tickets.load(r, sys.argv[2])))",
-        str(ws),
-        crew,
-    )
-    assert blocked == "None"
+    # Start only tells the manager agent to go: the crew ticket Factory makes next is a plain sub-ticket (ORCH-29).
+    crew = flow.crew_add(ws, order, "booking-form")
+    assert crew["created"] is True
+    assert flow.crew_add(ws, order, "booking-form") == {**crew, "created": False}

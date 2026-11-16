@@ -72,7 +72,8 @@ longer needed". There is never a second copy without your Accept.
 ## What protects your decisions
 Only your own answers count (the ones you give in the dashboard, Focus, the CLI or on your phone), and
 only for questions Factory itself asked about a frozen proposal. A proposal cannot change after Start; more scope is always
-a new question. In phase 1 this is enforced by Factory's own commands: an agent running as your user could still start a
-ticket directly with `orch run start`. A core check for that is planned.
+a new question. Your Start tells the manager agent to go, and Factory's own commands (`crew start`, `next`) wait for it.
+Core does not hold a run back: an agent running as your user could still start a ticket directly with `orch run start`
+(an owner choice, ORCH-29).
 
 Contract: `contracts/addons/factory/README.md`. Mockup: the Factory pages of the dashboard mockup (Preview).

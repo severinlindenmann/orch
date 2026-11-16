@@ -3,6 +3,8 @@
 One line per decision, newest first. Agents never reopen a decision without the owner (AGENTS.md R9.5).
 Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 
+- 2026-11-16 (ORCH-29): No core start check on tickets: `start_requires` (#777) is removed. The person's Factory Start
+  only tells the manager agent to go; an agent can start a crew ticket itself.
 - 2026-11-16: `orch uninstall` has no option to delete tickets: it always keeps `.orch/tickets`, `.orch/config.toml`
   and `.orch/secrets`.
 - 2026-11-16: The person's own "when to ask" list is the file `.orch/ask-when.md`.

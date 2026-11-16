@@ -89,8 +89,8 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
    is a cache for the dashboard; when it disagrees, the add-on refuses and logs it.
 4. **Frozen after Start**: `propose` refuses on a started order; any new scope is a change proposal with its own answer.
 5. **Start is advisory against the core run command**: an agent can still call `orch run start` on any ticket (Level 1,
-   same OS user). Factory's own commands (`crew start`, `next`) enforce Start; a generic core hook (`start_requires`) is a
-   later hardening issue. `docs/factory.md` says so.
+   same OS user). Factory's own commands (`crew start`, `next`) wait for Start; core holds no run back (owner choice,
+   ORCH-29: the person's Start only tells the manager agent to go). `docs/factory.md` says so.
 6. **One answer, one action**: `next` consumes each answered question once (journal `consumed`), so two wake-ups never start
    two manager steps; `crew add` is idempotent per order + task.
 
@@ -124,15 +124,12 @@ can't be read the cache stays for the page, but `crew start` refuses (time used 
 proposal. `api_usd_target` stays a target, not a cap (no usage-event contract for money yet), and the autopilot's
 per-day limits stay targets too.
 
-## Start gate (core `start_requires`, #681)
-`crew add` makes each crew ticket with `orch ticket new … --start-requires <order>:<question>=<answer>`: the order's
-`factory:start` question with `Start`, or, for a task an accepted change added, that `factory:change` question with
-`Accept`. Core then refuses `orch run start` and `orch run claim` on the crew ticket (any caller, an agent's own direct
-call too) until that question carries that answer from a person (`answered_by: human:…`). The field is set at creation
-only (not patchable); core knows nothing about Factory. Factory counts a sub-ticket as crew only when its gate is exactly the
-one its task needs (a sub-ticket an agent made with Factory's crew data but no gate is ignored). Known limit (light,
-inside the workspace): tickets are synced, and core trusts a synced ticket's `answered_by` and fields like any other
-reader (core-wide note, not Factory's).
+## Crew tickets
+`crew add` makes each crew ticket as a plain sub-ticket of the order (`orch ticket new … --parent <order>`) with
+`ext.factory` `{role: crew, order, task, crew_role, agent}`. Factory counts a sub-ticket as crew when its order, parent
+and task match a task of the started proposal or of an accepted change. Core holds no run back on it: an earlier core
+start check (`start_requires`, #777) was dropped by the owner (ORCH-29). Old tickets may still carry that field; nothing
+reads it.
 
 ## Page (phase 2a, read only)
 The watcher process also serves the Factory page on `127.0.0.1:<port>` (`orch factory status --json` gives `url`;
