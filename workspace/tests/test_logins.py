@@ -11,7 +11,7 @@ from orch import adapters, cli_config, logins, runs
 
 NOW = datetime(2026, 11, 16, 12, 0, tzinfo=UTC)
 SPEC = {"status": ["auth", "status", "--json"], "logged_in": "loggedIn", "ends": "loginExpiresAt"}
-HIDDEN = "sk-test-NOT-A-REAL-KEY-0000"
+HIDDEN = "other-text-of-the-answer-that-must-not-appear"
 
 
 def _answers(monkeypatch, stdout, seen=None):
@@ -66,7 +66,7 @@ def test_ask_keeps_two_facts_and_runs_the_fixed_command(monkeypatch):
         "loggedIn": True,
         "loginExpiresAt": "2026-11-17T21:24:57.990Z",
         "email": "a@b.example",
-        "key": HIDDEN,
+        "other": HIDDEN,
     }
     _answers(monkeypatch, json.dumps(doc), seen)
     assert logins.ask("/bin/tool", SPEC) == (True, "2026-11-17T21:24:57Z")
@@ -97,7 +97,7 @@ def test_tool_without_end_field(monkeypatch):
 @pytest.fixture
 def tool(monkeypatch):
     """The claude adapter looks installed and answers `doc` (set by the test)."""
-    box = {"doc": {"loggedIn": True, "loginExpiresAt": "2026-11-17T21:24:57.990Z", "token": HIDDEN}}
+    box = {"doc": {"loggedIn": True, "loginExpiresAt": "2026-11-17T21:24:57.990Z", "other": HIDDEN}}
     monkeypatch.setattr(logins.shutil, "which", lambda b: f"/bin/{b}" if b == "claude" else None)
     monkeypatch.setattr(
         logins.subprocess,
@@ -129,7 +129,7 @@ def test_overview_skips_tools_that_are_not_installed(proj, monkeypatch):
 def test_command_text_and_json(proj, run, new_ticket, tool):
     tid = new_ticket("Plan the newsletter")
     runs.claim(proj, tid, "agent:scheduler", "claude", pid=os.getpid())
-    tool["doc"] = {"loggedIn": False, "token": HIDDEN}
+    tool["doc"] = {"loggedIn": False, "other": HIDDEN}
     code, out, err = run("agents", "login")
     assert code == 0, err
     label = adapters.load("claude")["label"]
