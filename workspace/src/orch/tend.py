@@ -25,7 +25,7 @@ import json
 import time
 from pathlib import Path
 
-from orch import brake, runs, runs_live, runwatch, stuck, tickets
+from orch import brake, history, runs, runs_live, runwatch, stuck, tickets
 
 BY = "agent:helper-watcher"
 VIA = "watcher"
@@ -87,7 +87,7 @@ def _what_changed(root: Path, t: dict, since: str | None) -> str:
     s = _ts(since) or 0
     lines = [
         f"- {_clock(h.get('at'))} {h.get('by')}: {' '.join(str(h.get('text') or '').split())[:160]}"
-        for h in t.get("history") or []
+        for h in history.lines(root, t)
         if (_ts(h.get("at")) or 0) > s and h.get("by") != BY
     ][-5:]
     out = ["What changed on the ticket since you went quiet:"]
@@ -185,8 +185,8 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
         helper = f"agent:{rec.get('agent')}"
         moved = any(
             (_ts(h.get("at")) or 0) > nudged
-            and (h.get("by") == helper or str(h.get("by")).startswith("human:"))
-            for h in t.get("history") or []
+            and (h.get("by") == helper or history.is_person_line(h))
+            for h in history.lines(root, t)
         )
         if moved:
             out.append({**row, "action": "forget"})  # it did something after the reminder: a new chance
