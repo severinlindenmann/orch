@@ -29,6 +29,7 @@ def facts(monkeypatch):
             "green": True,
             "checks": 17,
             "failed": 0,
+            "merged_at": "2999-01-01T00:00:00Z",  # after the ticket was made
             "files": [
                 {"path": "workspace/src/orch/runs.py", "additions": 20, "deletions": 4},
                 {"path": "workspace/tests/test_runs.py", "additions": 80, "deletions": 0},
@@ -144,6 +145,19 @@ def test_an_open_pull_request_goes_back_to_the_helper_once(proj, run, new_ticket
     assert _lines(proj, tid)[-1].startswith("Left for you by the Reviewer: sent back once already and still:")
 
 
+def test_a_pull_request_merged_before_the_ticket_is_left_for_the_owner(proj, run, new_ticket, facts, on):
+    facts["facts"]["merged_at"] = "2020-01-01T00:00:00Z"
+    tid = _finished(proj, run, new_ticket)
+    reviewer.run(proj)
+    assert tickets.load(proj, tid)["status"] == "review"
+    assert _lines(proj, tid)[-1].endswith("was merged before this ticket was made.")
+
+
+def test_code_that_is_not_python_is_left_for_the_owner():
+    files = [{"path": "scripts/local-gate.sh", "additions": 2, "deletions": 0}]
+    assert "cannot read" in reviewer.size_reasons(files, {})[0][0]
+
+
 def test_red_checks_on_the_merge_go_back(proj, run, new_ticket, facts, on):
     facts["facts"].update(green=False, failed=2)
     tid = _finished(proj, run, new_ticket)
@@ -241,6 +255,8 @@ def test_morning_list_without_relay_says_not_sent(proj, run, new_ticket, facts, 
         ("contracts/history.md", "structure"),
         ("AGENTS.md", "structure"),
         ("workspace/src/orch/relay.py", "structure"),
+        ("workspace/src/orch/fixtures/evil.py", "code"),
+        ("workspace/src/orch/tests_helper.py", "code"),
     ],
 )
 def test_kind_of_a_file(path, kind):

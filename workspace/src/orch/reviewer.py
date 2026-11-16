@@ -36,7 +36,8 @@ STATE_MAX = 256 * 1024
 DIFF_MAX = 2 * 1024 * 1024
 
 # What a changed file is, by its path (the first match wins in this order: a test is never "look").
-TEST = re.compile(r"(^|/)(tests?|e2e|fixtures?)/|(^|/)test_[^/]*\.py$|\.test\.[cm]?js$|_test\.(py|go|rs)$")
+# Tests: only real test folders (at the top or right under a package) and test file names.
+TEST = re.compile(r"^(e2e|tests?|[^/]+/tests?|[^/]+/[^/]+/tests?)/|(^|/)test_[^/]*\.py$|\.test\.[cm]?js$")
 STRUCTURE = re.compile(
     r"^\.github/|(^|/)(AGENTS|CLAUDE)\.md$|^contracts/|\.schema\.json$|^(relay|publish)/"
     r"|(^|/)(relay|publish)[^/]*\.py$|(^|/)install\.(sh|ps1)$|(^|/)(pyproject\.toml|uv\.lock|Cargo\.(toml|lock)"
@@ -55,6 +56,7 @@ KIND_TEXT = {
     "look": "changes how a page looks",
     "words": "changes words people read",
     "concept": "adds a command or a setting",
+    "other": "changes code the Reviewer cannot read (not Python)",
 }
 
 
@@ -90,7 +92,7 @@ def size_reasons(files: list[dict], added: dict[str, list[str]] | None = None) -
     """Why a change is NOT small ([] = small), and the counts {files, lines} without tests. files: [{path,
     additions, deletions}]; added: the added lines per file (from the diff), for words and new commands in
     code."""
-    counts = {"look": 0, "words": 0, "structure": 0, "concept": 0}
+    counts = {"look": 0, "words": 0, "structure": 0, "concept": 0, "other": 0}
     n_files = n_lines = 0
     for f in files:
         path = str(f.get("path") or "")
@@ -101,7 +103,9 @@ def size_reasons(files: list[dict], added: dict[str, list[str]] | None = None) -
         n_lines += int(f.get("additions") or 0) + int(f.get("deletions") or 0)
         if kind in counts:
             counts[kind] += 1
-        elif path.endswith(".py") and added:
+        elif not path.endswith(".py"):
+            counts["other"] += 1  # only Python is read line by line; anything else waits for the owner
+        elif added is not None:
             lines = added.get(path, [])
             if any(NEW_CONCEPT.search(x) for x in lines):
                 counts["concept"] += 1
@@ -144,7 +148,9 @@ def pr_facts(url: str) -> dict | None:
     if gh is None:
         return None
     try:
-        v = ghmerge._gh_plain(gh, ["pr", "view", url, "--json", "number,state,statusCheckRollup,files"], 30)
+        v = ghmerge._gh_plain(
+            gh, ["pr", "view", url, "--json", "number,state,statusCheckRollup,files,mergedAt"], 30
+        )
         data = json.loads(v.stdout) if v.returncode == 0 else None
     except (Refused, ValueError):
         return None
@@ -161,6 +167,7 @@ def pr_facts(url: str) -> dict | None:
         "checks": len(newest),
         "failed": sum(1 for c in newest if not ghmerge.passed([c])),
         "files": files,
+        "merged_at": data.get("mergedAt") if isinstance(data.get("mergedAt"), str) else None,
         "added": None,
     }
     code = [f for f in files if str(f.get("path", "")).endswith(".py") and kind_of(str(f["path"])) == "code"]
@@ -205,6 +212,9 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         return {"verdict": "wait", "why": "GitHub could not be read; looked at again next time."}
     for f in facts:
         num = f"#{f['number']}"
+        made, merged = _at(ticket.get("created_at")), _at(f.get("merged_at"))
+        if f["state"] == "MERGED" and made is not None and (merged is None or merged < made):
+            return {"verdict": "leave", "why": f"pull request {num} was merged before this ticket was made."}
         if f["state"] == "CLOSED":
             return {"verdict": "leave", "why": f"pull request {num} was closed without merging."}
         if f["state"] != "MERGED":
