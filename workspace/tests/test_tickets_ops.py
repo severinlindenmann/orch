@@ -999,3 +999,17 @@ def test_cli_list_shows_no_news_since_for_a_quiet_working_ticket(proj, run, new_
     assert code == 0 and "No news since" in out
     rows = json.loads(run("ticket", "list", "--json")[1])
     assert [r["quiet_since"] for r in rows if r["id"] == tid] == ["2020-01-01T09:20:00Z"]
+
+
+def test_ticket_new_epic_flag(proj, run):
+    # ORCH-14: New ticket makes an epic with several tickets inside it at once
+    code, out, _ = run("ticket", "new", "Dashboard fixes", "--epic", "--json", "--by", "human:tester")
+    assert code == 0
+    epic = json.loads(out)
+    assert epic["epic"] is True and read(proj, epic["id"])["epic"] is True
+    child = json.loads(
+        run("ticket", "new", "Fix the header", "--parent", epic["id"], "--json", "--by", "human:tester")[1]
+    )
+    assert child["parent"] == epic["id"] and "epic" not in child
+    with pytest.raises(tickets.Refused):
+        tickets.clean_field("epic", "true")  # set at creation only
