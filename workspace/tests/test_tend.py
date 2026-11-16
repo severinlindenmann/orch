@@ -145,6 +145,28 @@ def test_an_idle_helper_is_reminded_once_with_what_changed(proj, run, new_ticket
     assert tend.run(proj)["actions"] == []  # once
 
 
+def test_waiting_on_something_outside_is_reminded_not_ended(proj, run, new_ticket, child):
+    tid = new_ticket()
+    assert run("wait", tid, "--on", "external:release 28")[0] == 0
+    _live(proj, tid, child(), idle_for=21 * 60)
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
+    assert runs.read(proj, tid) is not None
+
+
+def test_a_ticket_waiting_on_a_finished_ticket_is_started_again_once(proj, run, new_ticket, starts):
+    other, tid = new_ticket("crew"), new_ticket("lead")
+    assert run("wait", tid, "--on", f"ticket:{other}")[0] == 0
+    assert tend.run(proj)["actions"] == []  # the other one is not finished yet
+    _status(proj, other, "review")
+    res = tend.run(proj)
+    assert [a["action"] for a in res["actions"]] == ["wake"]
+    assert starts == [(tid, runs_live.AUTOMATION_BY, {})]
+    assert any("is in Review now" in i["text"] for i in runs.undelivered(proj, tid))
+    assert tickets.load(proj, tid)["status"] == "active"
+    assert "Started the helper again" in _history(proj, tid)[-1]
+    assert tend.run(proj)["actions"] == []  # never twice
+
+
 def test_an_idle_helper_under_twenty_minutes_is_not_reminded(proj, new_ticket, child):
     tid = new_ticket()
     _status(proj, tid, "active")

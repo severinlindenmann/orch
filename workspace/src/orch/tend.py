@@ -1,8 +1,10 @@
 """One pass of the helper watcher (`orch run tend`, ORCH-78): what a person watching the helpers did by hand.
 
 - A live session at its prompt whose ticket is finished (Review, Done, Dropped) or only waits (on a person's
-  answer, a time, another ticket or something outside) is ended. Its conversation stays on the ticket, so the
-  answer, the time or a person's Continue resumes it, and the slot is free for the next ticket meanwhile.
+  answer, a time or another ticket) is ended. Its conversation stays on the ticket, so the answer, the time or
+  a person's Continue resumes it, and the slot is free for the next ticket meanwhile. A ticket waiting on
+  another ticket is started again here once that one is finished (nothing else promises that wake-up).
+  Waiting on something outside (a release, a CI run) is no reason to end: such a helper gets the reminder.
 - A live session idle at its prompt with nothing running for IDLE_MINUTES, on a ticket still being worked on,
   gets one message with what changed since it went quiet (ticket history, its pull request's last look, the
   open steps).
@@ -33,7 +35,7 @@ END_WAITING_MINUTES = 5  # quiet this long while the ticket only waits: the sess
 END_FINISHED_MINUTES = 10  # quiet this long on a finished ticket (runs_live.FINISHED_IDLE_SECONDS)
 RESTART_EVERY = 6 * 3600  # at most one fresh start per ticket in this time
 FINISHED = runs_live.FINISHED
-WAIT_KINDS = ("person", "time", "ticket", "external")
+WAIT_KINDS = ("person", "time", "ticket")  # something wakes these; "external" gets the reminder instead
 STATE_MAX = 256 * 1024
 
 
@@ -197,7 +199,36 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
                 out.append({**row, "action": "leave"})
             continue
         out.append({**row, "action": "restart"})
+    return out + _wakes(root)
+
+
+def _wakes(root: Path) -> list[dict]:
+    """Tickets waiting on another ticket that is finished now, with no run: start them again."""
+    out = []
+    for t in tickets.list_all(root):
+        w = t.get("waiting_on") if t.get("status") == "waiting" else None
+        if not isinstance(w, dict) or w.get("kind") != "ticket" or runs.read(root, t["id"]):
+            continue
+        try:
+            other = tickets.load(root, tickets.resolve(root, str(w.get("ref") or "")))
+        except Exception:  # noqa: BLE001, S112 - an unknown ticket wakes nothing
+            continue
+        if other.get("status") in FINISHED:
+            out.append(
+                {
+                    "ticket": t["id"], "key": _key(t), "action": "wake", "t": t,
+                    "other": _key(other), "other_status": other.get("status"),
+                }
+            )  # fmt: skip
     return out
+
+
+def wake_text(row: dict) -> str:
+    word = {"review": "in Review", "done": "Done", "dropped": "Dropped"}.get(row["other_status"], "finished")
+    return (
+        f"The helper watcher: {row['other']}, the ticket you waited on, is {word} now. "
+        f"Go on with {row['key']}."
+    )
 
 
 def _end(root: Path, row: dict) -> bool:
@@ -238,10 +269,10 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
     for row in rows:
         tid, action = row["ticket"], row["action"]
         public = {k: row[k] for k in ("ticket", "key", "action", "idle_seconds") if k in row}
+        quiet = runwatch.span(row.get("idle_seconds"))
         if dry_run:
             done.append({**public, "done": False})
             continue
-        quiet = runwatch.span(row["idle_seconds"])
         line = ""
         if action == "end" and _end(root, row):
             if row["why"] == "finished":
@@ -258,6 +289,17 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
             line = f"Reminded the helper: idle for {quiet} with nothing running."
         elif action == "forget":
             state.pop(tid, None)
+        elif action == "wake":
+            tickets.wait(root, tid, None, None, BY, clear=True)  # it is Working again: never woken twice
+            runs.pending_add(root, tid, BY, "event", wake_text(row), VIA)
+            try:
+                r = runs.start(root, tid, runs_live.AUTOMATION_BY)
+                how = f"run {r['run']}"
+            except runs.Busy:
+                how = "it waits in line for a free slot"
+            except Exception as e:  # noqa: BLE001 - the reason goes into the history
+                how = f"it could not start: {e}"
+            line = f"Started the helper again: {row['other']}, the ticket it waited on, is finished ({how})."
         elif action == "leave":
             state[tid] = {**state.get(tid, {}), "left": True}
             line = (
@@ -305,7 +347,13 @@ def queue(root: Path) -> list[dict]:
     ]
 
 
-WORDS = {"end": "ended", "nudge": "reminded", "restart": "started fresh", "leave": "left for a person"}
+WORDS = {
+    "end": "ended",
+    "nudge": "reminded",
+    "restart": "started fresh",
+    "leave": "left for a person",
+    "wake": "started again (the ticket it waited on is finished)",
+}
 
 
 def text(result: dict, dry_run: bool = False) -> str:
