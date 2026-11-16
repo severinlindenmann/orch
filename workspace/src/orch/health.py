@@ -4,8 +4,9 @@ A recipe says which command to run and how to read its answer:
   - a helper tool (built-in adapter with a `login` part, agents/login.json): the tool's own status
     command, which prints one JSON object. orch keeps exactly two facts from it: works or not, and the
     end time (re-written as a UTC time). The helpers it stops are the live runs on that tool.
-  - a workspace recipe (.orch/local/checks.json, written by a person on this computer; local/ is never
-    committed, so a cloned project cannot bring commands that run by themselves):
+  - a workspace recipe, written by a person on this computer into the guarded orch home (key folder record
+    `checks`, keystore.RECORDS): never in the project folder, so a cloned project cannot bring commands that
+    run by themselves:
     {"checks": {name: {"label", "command", "works"?, "ends"?}}}. Without "works" the exit code alone
     answers: 0 = works, anything else = needs renewing.
 
@@ -104,20 +105,14 @@ def _recipe(name, doc) -> dict | None:
     }
 
 
-def recipes_path(root: Path) -> Path:
-    return Path(root) / ".orch" / "local" / "checks.json"
-
-
 def workspace_recipes(root: Path) -> list[dict]:
-    """The person's own recipes. A file the project's git tracks came from someone else: none of it is run."""
-    path = recipes_path(root)
-    if not path.is_file() or path.is_symlink():
-        return []
-    from orch import harness
+    """The person's own recipes, from the guarded orch home only (never a file of the project)."""
+    from orch import keystore
 
-    if harness._tracked(Path(root), ".orch/local/checks.json"):
+    try:
+        doc = keystore.record_read(Path(root), "checks") or {}
+    except Exception:  # noqa: BLE001  a damaged or unsafe record runs nothing
         return []
-    doc = net.read_json(path, {})
     items = doc.get("checks") if isinstance(doc, dict) else None
     if not isinstance(items, dict):
         return []
