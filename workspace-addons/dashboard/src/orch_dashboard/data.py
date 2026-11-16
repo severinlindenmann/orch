@@ -1228,7 +1228,7 @@ _CHAT: dict[tuple, tuple[float, tuple, object]] = {}
 _CHAT_LOCK = threading.Lock()
 
 
-def _chat_signature(root: Path) -> tuple:
+def _chat_fingerprint(root: Path) -> tuple:
     rows = []
     for folder in (root / ".orch" / "inbox", root / ".orch" / "chat" / "dm"):
         try:
@@ -1243,16 +1243,16 @@ def _chat_signature(root: Path) -> tuple:
 
 
 def _chat_cached(key: tuple, root: Path, build):
-    sig = _chat_signature(root)
+    fp = _chat_fingerprint(root)
     with _CHAT_LOCK:
         hit = _CHAT.get(key)
-    if hit and hit[1] == sig and time.monotonic() - hit[0] < CHAT_TTL:
+    if hit and hit[1] == fp and time.monotonic() - hit[0] < CHAT_TTL:
         return hit[2]
     data = build()
-    # the signature is taken before the read, so a message that lands meanwhile is picked up by the next poll
+    # the fingerprint is taken before the read, so a message that lands meanwhile is picked up by the next poll
     if data is not None:
         with _CHAT_LOCK:
-            _CHAT[key] = (time.monotonic(), sig, data)
+            _CHAT[key] = (time.monotonic(), fp, data)
             while len(_CHAT) > 64:
                 _CHAT.pop(next(iter(_CHAT)))
     return data
