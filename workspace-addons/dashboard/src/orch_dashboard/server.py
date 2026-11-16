@@ -560,6 +560,10 @@ class Handler(BaseHTTPRequestHandler):
             if not any(a["name"] == name and a["dashboard"] for a in load_addons(self.root, self.orch_bin)):
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, json.dumps(self.puller.pull(name)).encode(), "application/json")
+        if path == "/styleguide":  # the style guide's own address; its files sit next to it under /styleguide/
+            return self._send(302, b"", "text/plain", {"Location": "/styleguide/"})
+        if path.startswith("/styleguide/"):  # the same master kit as kit/, with the gallery as its front page
+            path = "/kit/" + (path[len("/styleguide/") :] or "gallery.html")
         name = {"/": "index.html"}.get(path, path.lstrip("/"))
         if name.startswith("kit/"):  # the master kit, served from orch_ui (no copy next to the page)
             got = kit_file(name[4:])
