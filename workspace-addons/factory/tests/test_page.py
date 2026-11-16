@@ -17,6 +17,7 @@ from test_flow import (
     started,
     waiting_stop,
 )
+from test_handover import directory, handed, set_status  # noqa: F401
 
 from orch_factory import pageapi, runfiles, server, service
 from orch_factory.store import Store
@@ -731,3 +732,45 @@ def test_page_has_no_frame_header_and_an_idea_box_with_the_ask_switch(srv):
     assert "Start with this idea" in js and "Ask me at every stop" in js
     assert "setting-row" in js and "'switch'" in js
     assert "Open Chat" not in js
+
+
+# ---- #816 B: hand-over on the order page --------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("directory")
+def test_handover_proposal_lines_carry_name_minutes_files_and_no_percentage(ws, run, srv):
+    order, _tid = handed(ws, run)
+    _, o, _ = get(srv, f"/api/order/{order}")
+    (line,) = o["handover"]
+    assert line["name"] == "Design" and line["workspace"] == "ws_design0001" and line["minutes"] == 40
+    assert line["title"] == "Header picture for the price list"
+    assert line["files"] == ["brief/header.md", "brief/old-header.png"]
+    assert "%" not in json.dumps(o["handover"])
+
+
+@pytest.mark.usefixtures("directory")
+def test_handover_crew_rows_use_one_plain_word_mapping(ws, run, srv):
+    order, tid = handed(ws, run)
+    _, o, _ = get(srv, f"/api/order/{order}")
+    row = next(c for c in o["crew"] if c["ticket"] == tid)
+    assert row["with"]["words"] == "Goes to Design" and row["with"]["state"] is None
+    run("crew", "start", order, "header-picture")
+    expect = {
+        "waiting_start": "Waiting for Design to start",
+        "waiting_allow": "Waiting for Design to allow",
+        "queued": "Queued at Design",
+        "working": "Working at Design",
+        "review": "Ready for review at Design",
+        "done": "Done",
+        "denied": "Design said no",
+        "failed": "Failed at Design",
+    }
+    for state, words in expect.items():
+        set_status(ws, state)
+        run("next", order)
+        _, o, _ = get(srv, f"/api/order/{order}")
+        row = next(c for c in o["crew"] if c["ticket"] == tid)
+        assert (row["with"]["state"], row["with"]["words"]) == (state, words), state
+    assert row["with"]["since"] and not any(
+        c["with"] for c in o["crew"] if c["ticket"] != tid and "with" in c
+    )

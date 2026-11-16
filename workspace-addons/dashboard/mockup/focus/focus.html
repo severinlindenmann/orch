@@ -6,126 +6,9 @@
 <meta name="color-scheme" content="dark">
 <title>Focus · orch</title>
 <link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/preview.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/gallery.css">
-<style>
-/* ---------- Page frame: left-aligned, fills 1920 with a second column instead of air ---------- */
-.focus-page{max-width:1680px;margin:0;gap:24px}
-.fhead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.fhead h1{font-size:20px;line-height:28px;letter-spacing:-.015em}
-.summary{margin-top:4px;color:var(--text-muted)}
-.summary b{color:var(--text);font-weight:600}
-.summary .sep{color:var(--text-faint);padding:0 4px}
-.layout{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;align-items:start}
-.main-col{display:grid;gap:24px;min-width:0}
-.aside{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start}
-@media(min-width:1600px){
-  .layout{grid-template-columns:minmax(0,1fr) 400px}
-  .aside{grid-template-columns:1fr}
-}
-.block{display:grid;gap:8px}
-.block-h{display:flex;align-items:baseline;gap:8px;min-height:28px}
-.block-h h2{font-size:14px;line-height:20px;letter-spacing:0}
-.block-h .n{color:var(--text-muted);font-weight:400}
-.block-h .meta{margin-left:auto}
-.list{list-style:none;margin:0;padding:0}
-.list>li+li{border-top:1px solid var(--border)}
-
-/* ---------- Needs you ---------- */
-.needs-card{border-left:2px solid var(--warning)}
-.nrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px 16px;align-items:center;padding:12px 16px;min-height:64px}
-.kind{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:8px;background:var(--warning-soft);color:var(--warning)}
-.kind .ic{width:16px;height:16px}
-.ntitle{font-weight:600}
-.nwhy{color:var(--text-muted);margin-top:2px}
-.nwhy q{color:var(--text);quotes:"“" "”"}
-.nact{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.mini{width:64px;height:48px;border-radius:4px;border:1px solid var(--border);background:#eef0f2;padding:6px;display:grid;gap:3px;align-content:start;flex:none}
-.mini i{display:block;height:3px;border-radius:2px;background:#9aa3ad}
-.mini i:first-child{height:5px;width:70%;background:#3a4048}
-.mini i:nth-child(3){width:85%}.mini i:nth-child(4){width:60%}
-.calm{display:flex;align-items:center;gap:12px;padding:16px;color:var(--text-muted)}
-.calm .ic{color:var(--success)}
-
-/* Inline result preview (opens in place, one click) */
-.expand{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--dur-settle) var(--ease-move)}
-.expand>div{overflow:hidden;min-height:0}
-.expand.open{grid-template-rows:1fr}
-.pv-panel{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:16px;padding:0 16px 16px 64px}
-.pv-frame{aspect-ratio:16/9;max-height:360px;width:100%;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff}
-.pv-frame iframe{width:100%;height:100%;border:0;display:block}
-.pv-info{display:grid;gap:12px;align-content:start}
-.pv-info ul{margin:0;padding-left:16px;color:var(--text-muted)}
-.pv-info .actions .btn{font-size:12px;min-height:32px;padding:4px 8px}
-.decide{display:flex;gap:8px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border)}
-
-/* ---------- Live now ---------- */
-.lrow{position:relative;display:grid;grid-template-columns:8px minmax(0,1fr) 160px 148px auto;gap:16px;align-items:center;padding:12px 16px;min-height:64px;transition:background-color var(--dur-fast) var(--ease-move)}
-.lrow:hover{background:var(--surface-2)}
-.lrow .ttl{text-decoration:none;font-weight:600}
-.lrow .ttl::after{content:'';position:absolute;inset:0}
-.lrow .ttl:focus-visible{outline:none}
-.lrow:has(.ttl:focus-visible){box-shadow:inset 0 0 0 2px var(--brand)}
-.lrow .lacts,.lrow .chip-st{position:relative;z-index:1}
-.lline{display:flex;align-items:center;gap:8px;min-width:0}
-.lstep{margin-top:2px;color:var(--text-muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.lstep span{color:var(--text)}
-.live-dot{width:8px;height:8px;border-radius:50%;background:var(--working);animation:live 1000ms ease-in-out infinite alternate}
-.paused .live-dot{background:var(--text-muted);animation:none}
-@keyframes live{to{opacity:.4}}
-.lprog{display:grid;gap:6px}
-.lprog .meta{color:var(--text-muted)}
-.ltime{display:grid;gap:2px;font-size:12px;line-height:16px;color:var(--text-muted)}
-.ltime b{font-weight:400;color:var(--text)}
-.lacts{display:flex;gap:4px}
-.lmore{padding:0 16px 0 40px}
-.lmore dl{margin:0 0 12px;display:grid;grid-template-columns:120px minmax(0,1fr);gap:4px 12px;font-size:12px;line-height:16px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px}
-.lmore dd{color:var(--text-muted)}
-.step-new{animation:row-in var(--dur-base) var(--ease-enter)}
-.just{color:var(--brand)!important}
-
-/* ---------- Leaving rows (optimistic) ---------- */
-.leaving{opacity:0;transform:translateX(8px);transition:opacity var(--dur-exit) var(--ease-exit),transform var(--dur-exit) var(--ease-exit)}
-
-/* ---------- Aside lists ---------- */
-.arow{display:flex;align-items:center;gap:12px;min-height:40px;padding:8px 16px}
-.arow .grow p:last-child{color:var(--text-muted);font-size:12px;line-height:16px}
-.arow .ic{width:16px;height:16px;color:var(--text-muted)}
-.arow .ic.ok{color:var(--success)}
-.quote{color:var(--text)}
-.more-link{display:block;padding:8px 16px;font-size:12px;color:var(--text-muted);text-decoration:none;border-top:1px solid var(--border)}
-.more-link:hover{color:var(--text)}
-
-/* ---------- Topbar ---------- */
-.upd{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text-faint)}
-.upd .dot{color:var(--success);width:6px;height:6px}
-
-/* ---------- Entry + state switching ---------- */
-.enter .reveal{animation:page-in var(--dur-base) var(--ease-enter) both;animation-delay:calc(var(--i,0) * 30ms)}
-body:not([data-state=loaded]) .only-loaded{display:none!important}
-body:not([data-state=empty]) .only-empty{display:none!important}
-body:not([data-state=loading]) .only-loading{display:none!important}
-body[data-state=loading] .not-loading{display:none!important}
-
-/* Skeleton rows: same height/columns as real rows (no layout shift) */
-.sk-row{display:grid;grid-template-columns:32px minmax(0,1fr) 160px 120px;gap:16px;align-items:center;padding:12px 16px;min-height:64px}
-.sk-row+.sk-row{border-top:1px solid var(--border)}
-.sk-row .two{display:grid;gap:6px}
-.skeleton.box{width:32px;height:32px;border-radius:8px}
-.skeleton.w30{width:30%}.skeleton.w60{width:60%}.skeleton.bar{height:4px}
-.sk-a{min-height:40px;grid-template-columns:16px minmax(0,1fr)}
-
-/* ---------- Preview controls ---------- */
-.pvbar{position:fixed;right:12px;bottom:12px;z-index:90;display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;box-shadow:var(--lift-shadow);font-size:12px;line-height:16px}
-.pvbar span{color:var(--text-faint);padding:0 4px}
-.pvbar a{padding:4px 8px;border-radius:4px;color:var(--text-muted);text-decoration:none}
-.pvbar a:hover{color:var(--text)}
-.pvbar a[aria-current]{background:var(--surface-3);color:var(--text)}
-.toasts{bottom:64px}
-.toast .grow{font-size:14px}
-
-@media(max-width:1279px){.pv-panel{grid-template-columns:1fr;padding-left:16px}.lrow{grid-template-columns:8px minmax(0,1fr) 140px auto}.lrow .ltime{display:none}}
-#live-h .live-dot{display:inline-block;margin-right:6px}.lrow{cursor:pointer}.nrow{grid-template-columns:auto minmax(240px,1fr) auto}#row-q .nact{max-width:530px;justify-content:flex-start}.lprog .progress>span{transition:width 150ms var(--ease-move)}@media(max-width:900px){.nrow{grid-template-columns:auto 1fr}.nact{grid-column:2}} </style>
-<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/interaction.css"><script src="../../../../workspace/src/orch_ui/static/overlay.js"></script><script src="../../../../workspace/src/orch_ui/static/select.js"></script><script src="../../../../workspace/src/orch_ui/static/date.js"></script><script src="../../../../workspace/src/orch_ui/static/components.js"></script><style>.newsletter-focus{display:grid;gap:12px;margin:16px 0}.newsletter-focus .question-card{padding:16px;border:1px solid var(--warning);border-radius:8px}.newsletter-focus h2{font-size:16px}.newsletter-focus p{margin:6px 0}.newsletter-focus .controls,.newsletter-focus .section-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.newsletter-focus .result-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.newsletter-focus .result-card{padding:12px;border:1px solid var(--border);border-radius:8px}.newsletter-focus h3{font-size:14px}.newsletter-focus .paper-mini{background:#ebe7dc;color:#303a31;padding:8px}.newsletter-focus .paper-mini b{display:block}@media(max-width:700px){.newsletter-focus .result-cards{grid-template-columns:1fr}}</style></head>
-<body class="has-shell">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/mockup.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/interaction.css"><script src="../../../../workspace/src/orch_ui/static/overlay.js"></script><script src="../../../../workspace/src/orch_ui/static/select.js"></script><script src="../../../../workspace/src/orch_ui/static/date.js"></script><script src="../../../../workspace/src/orch_ui/static/components.js"></script></head>
+<body class="mk-focus-focus-html has-shell">
 <script>document.body.dataset.state=(new URLSearchParams(location.search).get('state'))||'loaded';</script>
 <a class="skip-link btn primary" href="#content">Skip to content</a>
 <div class="shell">
@@ -177,7 +60,7 @@ body[data-state=loading] .not-loading{display:none!important}
   </div>
 
   <!-- ===== CONTENT ===== -->
-  <section class="newsletter-focus only-loaded"><div class="block-h"><h2>Plan the autumn newsletter</h2><a href="focus-ticket.html">Work together →</a></div><article class="question-card" id="newsletter-question"><div class="section-title"><span class="eyebrow">Your next move</span><span class="meta" id="question-count">1 open question</span></div><h2>Who should receive the test mail?</h2><p>The test is prepared. Sending waits for your choice; no independent work remains.</p><p class="meta">Anna: anna@example.com · Ben: ben@example.com</p><div class="controls"><button class="btn primary sm" data-answer="Anna and Ben">Send test to Anna and Ben</button><button class="btn sm" data-answer="Anna">Send test only to Anna</button><button class="btn ghost sm" id="newsletter-other">Someone else</button><button class="btn ghost sm" id="newsletter-phone">Answer on phone</button></div><p class="meta">Sends one test mail to the selected addresses. No mail leaves this demo.</p></article>
+  <section class="newsletter-focus only-loaded"><div class="block-h"><h2>Plan the autumn newsletter</h2><a href="focus-ticket.html">Work together →</a></div><article class="question-card" id="newsletter-question"><div class="section-title"><span class="eyebrow">Your next move</span><span class="meta" id="question-count">1 open question</span></div><h2>Who should receive the test mail?</h2><p>The test is prepared. Sending waits for your choice; no independent work remains.</p><p class="meta">Anna: anna@example.com · Ben: ben@example.com</p><div class="controls"><button class="btn primary sm" data-answer="Anna and Ben">Send test to Anna and Ben</button><button class="btn sm" data-answer="Anna">Send test only to Anna</button><button class="btn ghost sm" id="newsletter-other">Someone else</button></div><p class="handoff"><span>Sent to your phone 10:31. Answer here or there, whichever is first.</span></p><p class="meta">Sends one test mail to the selected addresses. No mail leaves this demo.</p></article>
 <aside class="results-rail" id="newsletter-results"><header class="section-title"><h2>Sent back to you</h2><span class="meta">3 items</span></header><div class="result-cards"><article class="result-card"><div class="paper-mini">AUTUMN NEWS <b>A little news from the shop.</b></div><h3>Newsletter preview</h3><p class="meta">Version 3 · All 6 links checked</p><button class="btn sm" data-inspect="preview">Open</button></article><article class="result-card"><span class="eyebrow">Change to review</span><h3>Update opening hours page</h3><p class="meta">Pull request · Version 2 · Checks passed</p><p>Corrects Saturday to 9 am–1 pm.</p><button class="btn sm" data-inspect="change">Review here</button></article><article class="result-card"><span class="eyebrow">Result</span><h3>Test mail report</h3><p class="meta">Version 1 · 6 links passed · Not sent</p><button class="btn sm" data-inspect="report">Open</button></article></div></aside>
 </section><div class="layout not-loading">
     <div class="main-col">

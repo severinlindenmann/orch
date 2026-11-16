@@ -411,6 +411,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
     phone_delivery.mark(root, tickets)
     add_proof_state(tickets, root)
     add_artifact_marks(tickets)
+    add_quiet(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     by_id = {t["id"]: t for t in tickets}
     for t in tickets:
@@ -437,6 +438,23 @@ def add_proof_state(tickets: list[dict], root: Path | None = None) -> None:
             t["proof"] = core.proof_state(t, root, cache=True)
         except (KeyError, TypeError, ValueError):
             t.pop("proof", None)
+
+
+def add_quiet(tickets: list[dict]) -> None:
+    """`quiet_since` on a Working ticket with no news for 6 h (G2): the core's one rule, asked here for the CLI
+    listing and the file fallback alike. Not stored; no field on the ticket file."""
+    try:
+        from orch import tickets as core
+    except ImportError:
+        return
+    for t in tickets:
+        t.pop("quiet_since", None)
+        try:
+            since = core.quiet_since(t)
+        except (TypeError, ValueError, AttributeError):
+            since = None
+        if since:
+            t["quiet_since"] = since
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
@@ -855,6 +873,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copies_mode,
         copy_setup,
         diag_enabled,
+        focus_session_typing,
         workspace_description,
         workspace_name,
     )
@@ -875,6 +894,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "copy_setup": copy_setup(root) or "",
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
+        "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
         "copies_disk": copies_disk(root),
@@ -894,6 +914,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "active": r.get("active") is True,
                 "consent": _consent(r),
                 "detail": _addon_detail(root, r["name"]),
+                "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
             }
             for r in _addon_rows(rows)
             if r.get("installed") is not False
@@ -915,6 +936,16 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     }
 
 
+def _core_addons() -> tuple[str, ...]:
+    """The add-ons that are part of orch (core refuses `orch addon uninstall` for them)."""
+    try:
+        from orch.addons import CORE_ADDONS
+
+        return tuple(CORE_ADDONS)
+    except Exception:  # noqa: BLE001 - without the core list the CLI still refuses, in plain words
+        return ()
+
+
 def _addon_rows(rows) -> list[dict]:
     return [
         r
@@ -926,7 +957,7 @@ def _addon_rows(rows) -> list[dict]:
 def _label(r: dict) -> str:
     d = r.get("dashboard") if isinstance(r.get("dashboard"), dict) else None
     lab = d.get("label") if d else None
-    return lab[:40] if isinstance(lab, str) and lab.strip() else r["name"]
+    return lab[:40] if isinstance(lab, str) and lab.strip() else r["name"].capitalize()
 
 
 def load_services(root: Path, orch_bin: str | None) -> list[dict]:

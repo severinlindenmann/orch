@@ -66,7 +66,7 @@ LONG_NOTE = (
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
 SHA = re.compile(r"[0-9a-f]{40,64}")
-DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
+DAY = re.compile(r"(\d{4}-\d\d-\d\d([T ]\d\d:\d\d)?)?")  # a day, or a day and a time (local)
 ADDON = re.compile(r"[a-z][a-z0-9-]{1,31}")
 VERB = re.compile(r"[a-z][a-z-]{0,20}")
 # A name that is also a core command is never an add-on target, whatever the add-on list says.
@@ -376,7 +376,7 @@ def _ticket_new(a):
         if v:
             v = _text(v, k)
             if k == "due" and not DAY.fullmatch(v):
-                raise BadRequest("The due day must look like 2026-11-30.")
+                raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
             flags.append(f"--{k.replace('_', '-')}={v}")
     return ["ticket", "new"], flags, [_text(a.get("title"), "title")]
 
@@ -455,7 +455,7 @@ def _ticket_patch(a):
         if k == "status" and v not in STATUSES:
             raise BadRequest("That is not a status.")
         if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
-            raise BadRequest("The due day must look like 2026-11-30.")
+            raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
         if k not in ("status", "due"):
             _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
@@ -485,7 +485,7 @@ def _ticket_edit(a):
         if k in a:
             v = _text(a[k], k, empty=k != "title")
             if k == "due" and not DAY.fullmatch(v):
-                raise BadRequest("The due day must look like 2026-11-30.")
+                raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
             flags.append(f"--{k.replace('_', '-')}={v}")
     if not flags:
         raise BadRequest("Nothing to change.")
@@ -618,6 +618,16 @@ def _diag_set(a):
     return ["config", "set", "diag.enabled", "on" if a["on"] else "off"], [], []
 
 
+def _typing_set(a):
+    """Settings > Add-ons: may the person type into the helper's screen, a plain `orch config set` (core names the key)."""
+    from orch.config import SESSION_TYPING_KEY
+
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", SESSION_TYPING_KEY, "on" if a["on"] else "off"], [], []
+
+
 def _diag_delete(what):
     def build(a):
         _only(a, ())
@@ -727,6 +737,14 @@ def _run_start(a):
 def _run_send(a):
     _only(a, ("ticket", "text"))
     return ["run", "send"], [], [_tid(a.get("ticket")), _text(a.get("text"), "message")]
+
+
+def _run_take_back(a):
+    _only(a, ("ticket", "id"))
+    pid = a.get("id")
+    if not isinstance(pid, str) or not re.fullmatch(r"p_[a-z0-9]{6,32}", pid):
+        raise BadRequest("That is not a message id.")
+    return ["run", "take-back", _tid(a.get("ticket")), pid], [], []
 
 
 def _run_stop(a):
@@ -1003,6 +1021,7 @@ OPS = {
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,
+    "run.take_back": _run_take_back,
     "addon.start": _addon_start,
     "addon.act": _addon_act,
     "config.agent": _config_agent,
@@ -1021,6 +1040,7 @@ OPS = {
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
     "diag.set": _diag_set,
+    "typing.set": _typing_set,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,

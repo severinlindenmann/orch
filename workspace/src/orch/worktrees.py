@@ -48,7 +48,19 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from orch import adapters, addons, config, diag, harness, humanproof, runs, safegit, sharedfolder, tickets
+from orch import (
+    adapters,
+    addons,
+    config,
+    diag,
+    harness,
+    history,
+    humanproof,
+    runs,
+    safegit,
+    sharedfolder,
+    tickets,
+)
 from orch.errors import Refused
 
 REGISTRY = Path(".orch") / "run" / "worktrees.json"
@@ -1521,18 +1533,18 @@ def _record_review_locked(root: Path, ticket: str, new_round: bool = True) -> No
     _copy_authority(root, ticket, record)
 
 
+_DONE_LINE = re.compile(r"Status \w+ -> done|Patched .*\(status \w+ -> done\)")
+
+
 def _person_done(root: Path, t: dict, since: str) -> bool:
-    """THIS Done was signed by a person, at or after the review began. A verdict entry is only ever a Done
-    approval ("changes requested" moves the ticket back and signs nothing); the ledger keeps exactly one
-    current entry per ticket and tombstones it whenever the ticket leaves Done, so a current entry is the
-    signature of the transition that made the ticket Done now, never one of an earlier round. An agent's
-    own Done (agents_may_finish) is kind "agent"."""
-    checker = humanproof.VerdictChecker(root)
+    """THIS Done was made by a person, at or after the review began: the latest history line that moved the
+    ticket to Done is a person's (`human:`), not an agent's own Done (agents_may_finish) and not older than
+    the review."""
     start = _parse_at(since)
-    for v in t.get("verdicts") or []:
-        if isinstance(v, dict) and v.get("kind") == "person" and checker.state(v, t) == "current":
-            at = _parse_at(v.get("at"))
-            return start is not None and at is not None and at >= start
+    for h in reversed(history.lines(root, t)):
+        if isinstance(h, dict) and _DONE_LINE.fullmatch(str(h.get("text", ""))):
+            at = _parse_at(h.get("at"))
+            return history.is_person_line(h) and start is not None and at is not None and at >= start
     return False
 
 

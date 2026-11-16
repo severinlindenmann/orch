@@ -166,7 +166,7 @@ function treeBranch(rows, index, section) {
     h('td', {}, statusBadge(t)),
     h('td', {}, name(t.owner) ? h('span', {className:'who'}, h('span', {className:'avatar', 'aria-hidden':'true'}, initials(t.owner)), name(t.owner)) : h('span', {className:'meta'}, '–')),
     h('td', {}, stepsCell(t, row)),
-    h('td', {className:'meta when', title:String(at || '')}, at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
+    h('td', {className:'meta when', title:String(at || '')}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
     h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, nextAction, ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
   node.classList.add('row-click');
@@ -175,6 +175,11 @@ function treeBranch(rows, index, section) {
 }
 const changesLine = t => changesPending(t) ? h('p', {className:'meta changes-pending', 'data-key':'changes-' + t.id}, 'Changes to add') : null;
 // A real relative time: when it finished, or when it last changed.
+// G2: "No news since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
+function quietLine(t) {
+  const text = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';
+  return text ? h('span', {className:'meta quiet', 'data-key':'quiet-' + t.id}, text) : null;
+}
 function whenLine(t) {
   const at = shown(t).status === 'done' ? t.done_at || t.updated_at : t.updated_at;
   const text = at && window.DashHelpers.ago ? window.DashHelpers.ago(at, Date.now()) : '';
@@ -198,7 +203,7 @@ function boardCard(t, nested = false, column = '') {
       parts.map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'part-title'}, clean(part.title)), ticketAttentionChip(part)))) : null,
     changesLine(t),
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Steps done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length))) : null,
-    ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'who'}, h('span', {className:'avatar', 'aria-hidden':'true'}, initials(t.owner)), name(t.owner)) : null, t.due ? h('span', {className:'due'}, date(t.due)) : null, whenLine(t)));
+    ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'who'}, h('span', {className:'avatar', 'aria-hidden':'true'}, initials(t.owner)), name(t.owner)) : null, t.due ? h('span', {className:'due' + (overdue(t) && String(t.due).includes('T') ? ' bad' : '')}, dueText(t)) : null, quietLine(t), whenLine(t)));
 }
 const COLUMN_EMPTY = {open:'Nothing to start', active:'No helper is working right now', waiting:'No questions for you. All clear', review:'Nothing to check', done:'Finished tickets land here'};
 function board() {
