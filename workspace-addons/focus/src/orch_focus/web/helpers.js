@@ -24,7 +24,8 @@
   /* Inside the dashboard the line says the dashboard's own number (the top bar's), in Home's words. */
   const dashCountText = n => !n ? 'Nothing needs you right now.' : n + (n === 1 ? ' thing needs you.' : ' things need you.');
   function attentionText(rows) {
-    const q = rows.filter(needsYou).length, r = rows.filter(t => t.status === 'review' && !needsYou(t)).length;
+    /* the dashboard's one number: each open question plus each result to check (owner, 16 Nov, ORCH-63) */
+    const q = rows.filter(needsYou).reduce((n, t) => n + Number(t.question_count), 0), r = rows.filter(t => t.status === 'review').length;
     if (!q && !r) return 'Nothing needs you right now.';
     const number = n => ['zero', 'one', 'two', 'three', 'four', 'five'][n] || String(n);
     const parts = [];
