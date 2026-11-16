@@ -59,7 +59,7 @@ def scan_blob(data: bytes, root: Path | None = None) -> None:
 
 
 def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
-    if method.upper() != "GET" and body is not None:  # whatever leaves with a body is scanned (R5.2)
+    if body is not None:  # whatever leaves with a body, any method, is scanned (R5.2)
         if isinstance(body, (bytes, bytearray, memoryview)):
             scan_blob(bytes(body), root=root)
         elif isinstance(body, (dict, list)):

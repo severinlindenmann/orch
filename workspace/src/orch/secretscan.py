@@ -121,22 +121,23 @@ def refusal(found: list[dict]) -> str:
 _TOP_SKIP = {"allow_token", "token", "key", "question_id", "mid", "sig", "mac", "digest"}
 
 
-def _leaves(doc, path: str = ""):
+def _leaves(doc, path: str = "", top: bool = True):
     """(field, text) for every string in a message body, nested ones too, and every dict key (named
-    "field name", never by the key itself); the protocol fields above skipped."""
+    "field name", never by the key itself). The protocol fields above are skipped only in the OUTERMOST dict:
+    a dict nested anywhere (also inside a list) is content."""
     if isinstance(doc, str):
         if doc:
             yield path or "text", doc
     elif isinstance(doc, dict):
         for k, v in doc.items():
-            if not path and k in _TOP_SKIP:
+            if top and k in _TOP_SKIP:
                 continue
             if isinstance(k, str) and k:
                 yield f"{path}.field name" if path else "field name", k
-            yield from _leaves(v, f"{path}.{k}" if path else str(k))
+            yield from _leaves(v, f"{path}.{k}" if path else str(k), False)
     elif isinstance(doc, (list, tuple)):
         for v in doc:
-            yield from _leaves(v, path)
+            yield from _leaves(v, path, False)
 
 
 def _stored_root(root: Path | None) -> Path | None:
@@ -181,35 +182,31 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
     )
 
 
-def _file_text(data: bytes) -> tuple[str, bool]:
-    """(text, binary): the encoding is decided ONCE for the whole file (a BOM, or NULs on every other byte
-    = UTF-16), so every window is read the same way; other NUL-holding data is binary (latin-1)."""
-    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        return data.decode("utf-16", "replace"), False
-    head = data[:8192]
-    if b"\0" in head:
-        even, odd = head[0::2].count(0), head[1::2].count(0)
-        if max(even, odd) * 4 > len(head):  # UTF-16 without a BOM (mostly ASCII)
-            return data.decode("utf-16-le" if odd >= even else "utf-16-be", "replace"), False
-        return data.decode("latin-1"), True
-    return data.decode("utf-8", "replace"), False
+def _views(window: bytes):
+    """Every reading of a window of bytes that could show a secret: UTF-8, Latin-1, and UTF-16 (either byte
+    order, either alignment). No guessing which one the file "really" is: all of them are scanned."""
+    yield window.decode("utf-8", "replace")
+    yield window.decode("latin-1")
+    for off in (0, 1):
+        part = window[off : len(window) - ((len(window) - off) % 2)]
+        yield part.decode("utf-16-le", "replace")
+        yield part.decode("utf-16-be", "replace")
 
 
 def refuse_if_secret(data: bytes, what: str = "file", root: Path | None = None) -> None:
-    """The same scanner over a file about to be uploaded (text: all checks; binary: the token patterns).
-    The whole file is read, in overlapping windows, so size is no way past it."""
+    """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
+    read in every encoding (_views) with the full find() including the stored-key check."""
     step, overlap = MAX_BYTES, 65536
+    assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
+    found: list[dict] = []
     try:
-        text, binary = _file_text(data)
         sroot = _stored_root(root)
-        found: list[dict] = []
-        for start in range(0, max(len(text), 1), step - overlap):
-            chunk = text[start : start + step]
-            if binary:
-                found = [{"kind": k, "line": 1} for k, rx in PATTERNS if rx.search(chunk)]
-            else:
-                found = find(chunk, sroot)
-            if found or start + step >= len(text):
+        for start in range(0, max(len(data), 1), step - overlap):
+            for text in _views(data[start : start + step]):
+                found = find(text, sroot)
+                if found:
+                    break
+            if found or start + step >= len(data):
                 break
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(
