@@ -13,7 +13,9 @@
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
     S.views.ticket.renderPhoneLine(v);
-    els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
+    const head = window.FocusHelpers.headerLine(v);
+    els.key.textContent = head.key;  /* the ticket number people use (ORCH-12), never the internal id */
+    els.key.hidden = !head.key;
     document.getElementById('fx-loading')?.remove();  /* the skeleton goes when the first view is there */
     root.dataset.state = v.state;
     if (prev && !root.hasAttribute('data-live')) root.setAttribute('data-live', '');  /* motion only after a live change */
@@ -21,6 +23,7 @@
     /* the helper waits for an answer on its screen: one yellow line there, and here it is your turn */
     const screenAsks = S.state.screenWaiting === true && v.run.running === true;
     const stateText = screenAsks ? 'Needs you' : window.FocusHelpers.sessionState(v).pill || statusWord(t);
+    renderHeadLine(head);
     const shownText = window.FocusHelpers.holdText(v) || stateText;  /* why orch waits, in the core's words; gone when it clears */
     if (els.stateText.textContent !== shownText) els.stateText.textContent = shownText;
     els.live.toggleAttribute('data-hold', shownText !== stateText);
@@ -50,11 +53,6 @@
     els.attachBtn.disabled = !(running && v.live);
     els.interruptBtn.disabled = !running;
     els.sub.textContent = '';
-    /* whose turn it is, and where the work is */
-    const st = window.FocusHelpers.sessionState(v);
-    const turn = v.state === 'done' ? 'Finished' : running && v.run.helper ? st.detail || '' : asking || screenAsks || t.status === 'review' ? 'Your turn' : running ? 'Helper’s turn' : '';
-    const base = els.stateText.textContent.split(' · ')[0];
-    if (turn && !base.startsWith('Finished') && turn !== 'Finished') els.stateText.textContent = base + ' · ' + turn;
     const now = t.checklist.find(c => !c.done && !c.wont_do);
     els.taskLine.textContent = v.total && now ? 'Task ' + (v.done + 1) + ' of ' + v.total + ' · ' + now.text : '';
     if (!S.state.changesRequested) els.msg.placeholder = screenAsks ? 'Answer the helper…' : 'Write a message…';
@@ -77,6 +75,16 @@
     if (root.classList.contains('fx-terminal') && ((S.state.firstRender && (['review', 'done'].includes(t.status) || location.hash === '#results')) || (t.status === 'done' && prev?.ticket.status !== 'done'))) els.tabs[1].click();
     S.state.firstRender = false;
     S.notify(v);
+  }
+
+  /* Inside the dashboard the header says what the ticket page says (ORCH-71): ORCH-n · the state pill · Step 3 of 4 · 52 min */
+  function renderHeadLine(head) {
+    if (!els.headLine || !window.UI || !window.UI.ticketPill) return;
+    const state = head.state;
+    const meta = window.UI.helperMeta ? window.UI.helperMeta(head.row) : '';
+    const sep = () => document.createTextNode(' · ');
+    els.headLine.replaceChildren(...[head.key ? h('span', {class: 'key', text: head.key}) : null, state ? window.UI.ticketPill(state) : null,
+      meta ? document.createTextNode(meta) : null].filter(Boolean).flatMap((n, i) => i ? [sep(), n] : [n]));
   }
 
   /* Compact is the default; Terminal mode adds the task rail and the tabs. The choice is remembered. */

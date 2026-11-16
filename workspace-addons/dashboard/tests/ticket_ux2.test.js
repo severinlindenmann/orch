@@ -14,7 +14,7 @@ const kitWindow = () => { const w = {}; vm.runInContext(fs.readFileSync(path.joi
 const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
 
 function listCtx(extra = {}) {
-  const c = {h, window:{DashHelpers:helpers, UI:kitWindow()}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
+  const c = {h, window:{DashHelpers:helpers, UI:{...kitWindow(), ...require('./kit_state.js')}}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
     shown:t => t, chip:(t, cls) => h('span', {className:'chip ' + cls}, t), statusChip:t => h('span', {className:'chip'}, t.status), state:{runs:{}}, starting:new Set(),
     needsList:() => [], tickets:() => [], name:v => String(v || ''), location:{hash:'#tickets'}, snapshot:false, href:id => '#t/' + id, render(){}, localStorage:{getItem:() => null},
     button:(label, cls, fn) => { const b = h('button', {className:'btn ' + cls}, label); b.onclick = fn; return b; }, ...extra};
@@ -64,7 +64,7 @@ test('Dash 50: a change request task reads as the change, with what you asked be
 });
 test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Details toggles', () => {
   const t = {id:'t1', key:'PIL-54', title:'Report', status:'open', sessions:[{id:'s1', last_used:'2026-11-12T09:00:00Z'}], checklist:[{id:'c1', text:'Change: Please add a rain plan.', done:true}], note:'Remember', created_at:'2026-11-10T09:00:00Z', updated_at:'2026-11-12T09:00:00Z'};
-  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
+  const ctx = {repeatsAddon:() => null, window:{UI:{...require("./kit_state.js")}, DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '', act:async () => ({ok:true}),
     el:(tag, cls, txt) => h(tag, {className:cls}, txt), fragment:(...kids) => h('fragment', {}, kids),
     card:(key, title, suffix, kids) => h('section', {'data-key':key}, title, suffix, kids), emptyRow:x => h('p', {}, x),

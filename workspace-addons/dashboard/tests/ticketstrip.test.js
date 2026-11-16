@@ -13,7 +13,7 @@ const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:ch
 const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
 const text = n => !n ? '' : typeof n === 'string' ? n : (n.children || []).map(text).join('');
 function ctx(extra = {}) {
-  const c = {window:{DashHelpers:helpers, orch:{}, UI:{...kit.UI, statusIcon:name => h('svg', {className:'st ' + name})}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
+  const c = {window:{DashHelpers:helpers, orch:{}, UI:{...kit.UI, ...require('./kit_state.js'), statusIcon:name => h('svg', {className:'st ' + name})}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, t) => h(tag, {className:cls}, t), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:t => h('p', {}, t),

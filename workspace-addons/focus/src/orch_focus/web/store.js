@@ -34,9 +34,9 @@
         ['Write and choose', [['Write a message', '/'], ['Send a message', 'Enter'], ['Choose a button', 'Space'], ['Stop or continue', 'S'], ['Next or previous task', 'J / K']]],
       ]))));
   }
-  // Own copy of the dashboard status words; started + idle is Paused.
-  const STATUS_WORD = {open: 'Not started', ready: 'Not started', active: 'Working', waiting: 'Needs you', review: 'Ready for review', done: 'Done', dropped: 'Dropped'};
-  const statusWord = t => (t.started && ['open', 'ready', 'idle'].includes(t.status)) ? 'Paused' : STATUS_WORD[t.status] || 'Not started';
+  // The ticket page's status words (the history line "Moved to Check"); the state pill itself is the kit rule (ORCH-71).
+  const STATUS_WORD = {open: 'To do', ready: 'To do', active: 'Working', waiting: 'Needs you', review: 'Check', done: 'Done', dropped: 'Dropped'};
+  const statusWord = t => window.UI && window.UI.ticketState ? window.UI.ticketState(t, null).word : STATUS_WORD[t.status] || 'To do';
   const toast = (text, kind) => (window.orch ? window.orch.toast(text, kind) : null);
   const proof = window.FocusProof.create({h, ic, P, TID, toast});
 
@@ -66,7 +66,6 @@
   }
 
   const els = {};
-  const STATE = {needs: 'Needs you', waiting: 'Paused', stopped: 'Paused', done: 'Done'};
 
   const hhmm = at => { try { return new Date(at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: false}); } catch (e) { return ''; } };
   const evText = c => window.FocusHelpers.outcome(c);
@@ -96,7 +95,7 @@
   };
   const subscribers = new Set();
   const store = window.FocusStore = {
-    root, reduce, ic, TID, P, INAPP, h, toast, helpPanel, STATUS_WORD, statusWord, STATE,
+    root, reduce, ic, TID, P, INAPP, h, toast, helpPanel, STATUS_WORD, statusWord,
     hhmm, stamp, keyOf, docName, avatar, plainNames, evText, els, act, proof, state, views: {},
     register(name, def) { store.views[name] = def; },
     subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); },

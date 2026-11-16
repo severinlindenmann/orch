@@ -27,6 +27,22 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
  if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.toLowerCase()].filter(Boolean).join(' · ');
  if(r.state==='waiting'||r.state==='idle'||r.state==='stuck')return d;
  return [r.step?'Step '+r.step.n+' of '+r.step.of:'',helperSpan(r.minutes),d].filter(Boolean).join(' · ')};
+/* The ticket's one state (ORCH-71): the ticket page strip and Focus show the same pill and word for the same ticket.
+   t: {status, questions, bring_back}; helper: the core's helper state {state, word, detail} while a helper runs, else null.
+   UI.ticketState(t, helper) -> {pill, word, helper}; pill is a status icon name (todo, working, needs, check, done).
+   UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
+const TICKET_WORD={open:'To do',ready:'To do',active:'Working',waiting:'Needs you',review:'Check',done:'Done',dropped:'Dropped'};
+const HELPER_WORD={working:'Working',starting:'Starting',you:'Waits for you',waiting:'On hold',idle:'Idle',stuck:'Stuck'};
+const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs'};
+UI.ticketState=(t,helper)=>{t=t||{};
+ if(t.status==='done')return {pill:'done',word:'Done',helper:null};
+ if((t.questions||[]).some(q=>q&&q.answer==null))return {pill:'needs',word:'Needs you',helper:null};
+ if(t.status==='review')return {pill:'check',word:'Check',helper:null};
+ if(t.bring_back&&t.bring_back.state==='waiting')return {pill:'needs',word:'Needs you',helper:null};
+ if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:HELPER_WORD[helper.state],helper};
+ if(helper)return {pill:'working',word:'Working',helper:null};
+ return {pill:'todo',word:TICKET_WORD[t.status]||'To do',helper:null}};
+UI.ticketPill=s=>{s=s||{};if(s.helper)return UI.helperPill(s.helper.state,s.word);const p=el('span','pill'+(['working','needs','done'].includes(s.pill)?' '+s.pill:''));p.dataset.state=s.pill||'';p.append(UI.statusIcon(s.pill),document.createTextNode(s.word||''));return p};
 UI.helperList=(rows,o)=>{o=o||{};rows=rows||[];const box=el('section','card helper-list');if(o.dataKey)box.dataset.key=o.dataKey;
  const head=el('header','card-h');head.append(el('h2','',o.title||'Helpers'));const sum=UI.helperSummary(rows);if(sum)head.append(el('span','meta helper-sum',sum));box.append(head);
  if(!rows.length){box.append(el('p','card-row meta',o.empty||'No helper is running.'));return box}

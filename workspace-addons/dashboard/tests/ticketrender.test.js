@@ -86,7 +86,7 @@ function dom() {
 function page(first) {
   const {Node, doc} = dom();
   const replies = [first];
-  const window = {DashHelpers:helpers, icon:() => '<svg><path d=""/></svg>', scrollX:0, scrollY:0, scrollTo() {}, addEventListener() {}, dispatchEvent() {},
+  const window = {UI:{...require('./kit_state.js')}, DashHelpers:helpers, icon:() => '<svg><path d=""/></svg>', scrollX:0, scrollY:0, scrollTo() {}, addEventListener() {}, dispatchEvent() {},
     orch:{toast() {}, enter() {}, needsIn() {}, close() {}, resolve() {}}};
   const ctx = {window, document:doc, Node, location:{hash:'#ticket/t_x'}, history:{replaceState() {}}, localStorage:{getItem:() => null, setItem() {}},
     CustomEvent:class { constructor(type, init) { this.type = type; this.detail = init?.detail; } }, MutationObserver:class { observe() {} disconnect() {} },
