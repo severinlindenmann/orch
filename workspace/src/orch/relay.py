@@ -59,10 +59,13 @@ def scan_blob(data: bytes, root: Path | None = None) -> None:
 
 
 def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
-    if method.upper() == "POST" and path.split("?")[0].rstrip("/") == "/v1/blobs":
-        if not isinstance(body, (bytes, bytearray)):
-            raise Refused("A file upload has to be plain bytes, so nothing was sent.")
-        scan_blob(bytes(body), root=root)  # every upload to the relay passes the one scanner (R5.2)
+    if method.upper() != "GET" and body is not None:  # whatever leaves with a body is scanned (R5.2)
+        if isinstance(body, (bytes, bytearray, memoryview)):
+            scan_blob(bytes(body), root=root)
+        elif isinstance(body, (dict, list)):
+            scan_outgoing(root, body, "request")
+        else:
+            raise Refused("orch can only send text or a file here, so nothing was sent.")
     cfg = _cfg(root)
     return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)
 

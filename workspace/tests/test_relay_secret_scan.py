@@ -143,7 +143,7 @@ def test_blob_check_big_file_utf16_and_odd_paths(proj, on):
     with pytest.raises(Refused):
         relay._api(proj, "post", "/v1/blobs/?x=1", f"token {TOKEN}".encode("utf-16"), 5)
     with pytest.raises(Refused):
-        relay._api(proj, "POST", "/v1/blobs", memoryview(b"x"), 5)
+        relay._api(proj, "POST", "/v1/blobs", memoryview(f"t {TOKEN}".encode()), 5)
     assert not on.blobs
 
 
@@ -186,3 +186,22 @@ def test_a_value_that_is_the_placeholder_passes_everything_else_is_scanned(proj,
         with pytest.raises(Refused) as e:
             relay.scan_outgoing(proj, {"text": bad})
         assert real not in str(e.value) and TOKEN not in str(e.value), bad
+
+
+def test_utf16_later_windows_dict_keys_ids_and_other_uploads(proj, on):
+    from orch import relay
+
+    pad = "x\n" * 700_000
+    for enc in ("utf-16", "utf-16-le", "utf-16-be"):
+        with pytest.raises(Refused) as e:
+            relay._api(proj, "POST", "/v1/blobs", (pad + f"token={TOKEN}\n").encode(enc), 5)
+        assert TOKEN not in str(e.value), enc
+    for body in ({TOKEN: "x"}, {"items": [{"id": TOKEN}]}, {"a": {"sha256": TOKEN}}):
+        with pytest.raises(Refused) as e:
+            relay.scan_outgoing(proj, body)
+        assert TOKEN not in str(e.value)
+    with pytest.raises(Refused):
+        relay._api(proj, "PUT", "/v1/blobs/x", f"t {TOKEN}".encode(), 5)
+    with pytest.raises(Refused):
+        relay._api(proj, "post", "/v1/webhooks", {"name": f"hook {TOKEN}"}, 5)
+    relay.scan_outgoing(proj, {"id": "m_text000000000001", "sha256": "f" * 64, "text": "hi"})
