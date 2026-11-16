@@ -32,11 +32,11 @@ def _install(proj: Path, folder: Path) -> dict[str, dict]:
 
 
 def _plant_unknown(proj: Path) -> None:
-    """Fields a peer, a newer orch or a removed feature (proof, signature) may have left in a file."""
+    """Fields a peer, a newer orch or a removed feature (proof) may have left in a file."""
     for p in (proj / ".orch" / "tickets").glob("t_*.json"):
         t = json.loads(p.read_text(encoding="utf-8"))
         t["future_field"] = {"kept": [1, 2]}
-        t["signature"] = {"alg": "old", "value": "AAAA"}
+        t["sig_field"] = {"alg": "old", "value": "AAAA"}
         t.setdefault("ext", {})["otheraddon"] = {"k": "v"}
         if t["checklist"]:
             t["checklist"][0]["extra"] = "keep"

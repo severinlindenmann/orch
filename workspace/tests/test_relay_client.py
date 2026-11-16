@@ -486,11 +486,11 @@ def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_tic
 
 
 def test_a_phone_answer_to_a_question_changed_after_it_was_sent_is_not_applied(proj):
-    from conftest import ensure_signing
+    from conftest import ensure_keys
 
     from orch import relay, tickets
 
-    ensure_signing(proj)
+    ensure_keys(proj)
     tid = tickets.create(proj, "Deploy", "human:tester")["id"]
     tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
     shown = tickets.question_digest(tickets.load(proj, tid)["questions"][0])
@@ -1421,7 +1421,7 @@ def test_allow_question_always_and_ignore(proj, run, rel):
 def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
     """Authority: once sync is on, an answered relay:allow question counts only when its answer was made on
     this machine (history.answer_proven); a peer's synced answer allows (and ignores) nothing here."""
-    from conftest import ensure_signing
+    from conftest import ensure_keys
 
     from orch import history, tickets
 
@@ -1430,7 +1430,7 @@ def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
     for mid in (local_mid, peer_mid, deny_mid):
         rel.inbox.append(msg(mid, "delegate", {"title": f"Task {mid[-2:]}", "text": "x"}))
     run("relay", "inbox")
-    ensure_signing(proj)
+    ensure_keys(proj)
     history.enable_sync(proj, adopt=True)  # as the sync add-on does
     by_msg = {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
     run("answer", by_msg[local_mid]["id"], "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
@@ -1476,7 +1476,7 @@ def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
 
 
 def _synced_allow_tickets(proj, run, rel, *mids):
-    from conftest import ensure_signing
+    from conftest import ensure_keys
 
     from orch import history
 
@@ -1484,7 +1484,7 @@ def _synced_allow_tickets(proj, run, rel, *mids):
     for mid in mids:
         rel.inbox.append(msg(mid, "delegate", {"title": f"Task {mid[-2:]}", "text": "x"}))
     run("relay", "inbox")
-    ensure_signing(proj)
+    ensure_keys(proj)
     history.enable_sync(proj, adopt=True)  # as the sync add-on does
     return {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
 

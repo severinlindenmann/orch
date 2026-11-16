@@ -284,7 +284,7 @@ REAL_HOME_MODULES = (
 REAL_PROOF_MODULES = ("test_humanproof",)  # the guarded home itself
 
 
-def ensure_signing(root):
+def ensure_keys(root):
     """TEST HELPER: the workspace's local id and human key exist (a real proof needs both anyway)."""
     from orch import humanproof
     from orch.errors import Refused
@@ -321,7 +321,7 @@ def _legacy_trust(request, monkeypatch):
         who = real_by(args)
         root = getattr(args, "orch_root", None)
         if who.startswith("human:") and root is not None:
-            ensure_signing(
+            ensure_keys(
                 root
             )  # a person's Done is signed: the key and the local id exist, as after a real proof
         return who
