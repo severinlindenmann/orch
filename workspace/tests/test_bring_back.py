@@ -7,9 +7,7 @@ import pytest
 from test_worktrees_cleanup import git, make
 from test_worktrees_cleanup import repo as repo_fixture
 
-from orch import humanproof, tickets, worktrees
-
-_REAL_PERSON_BY = humanproof.person_by
+from orch import tickets, worktrees
 
 repo = repo_fixture
 
@@ -58,7 +56,7 @@ def done_and_sweep(root, tid):
     """Review, a person's Done, then the detached sweep it schedules (run here in the test's own process)."""
     if tickets.load(root, tid)["status"] != "review":
         to_review(root, tid)
-    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    tickets.set_status(root, tid, "done", "human:test")
     worktrees.sweep(root)
 
 
@@ -277,7 +275,7 @@ def test_journal_recovery(done_copy, monkeypatch):
     head = git(root, "rev-parse", "HEAD")
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
-        tickets.set_status(root, tid, "done", "human:test", proven=True)
+        tickets.set_status(root, tid, "done", "human:test")
     worktrees._record_done_tip(root, tid)
     with pytest.raises(RuntimeError):
         worktrees.bring_back(root, tid)
@@ -338,7 +336,7 @@ def test_dropped_waiting_retains_need(done_copy):
     root, tid, copy = done_copy
     (root / "code.py").write_text("personal")
     assert_waiting_unchanged(root, tid, copy, project_hashes(root))
-    tickets.set_status(root, tid, "dropped", "human:test", proven=True)
+    tickets.set_status(root, tid, "dropped", "human:test")
     worktrees.sweep(root)
     assert copy.exists()
     assert not worktrees._delete_branch(root, tid, force=True)
@@ -348,7 +346,7 @@ def test_dropped_waiting_retains_need(done_copy):
 def test_dropped_does_not_merge(done_copy):
     root, tid, copy = done_copy
     before = project_hashes(root)
-    tickets.set_status(root, tid, "dropped", "human:test", proven=True)
+    tickets.set_status(root, tid, "dropped", "human:test")
     assert project_hashes(root) == before
     assert not copy.exists()
     assert git(root, "branch", "--list", f"orch/{tid}")
@@ -357,7 +355,7 @@ def test_dropped_does_not_merge(done_copy):
 def test_dropped_empty_removes(repo):
     copy = make(repo)
     tid = repo.tids[0]
-    tickets.set_status(repo, tid, "dropped", "human:test", proven=True)
+    tickets.set_status(repo, tid, "dropped", "human:test")
     assert not copy.exists()
     assert not git(repo, "branch", "--list", f"orch/{tid}")
 
@@ -413,7 +411,7 @@ def test_small_sweep_budget_never_starts_merge(done_copy, monkeypatch):
     root, tid, copy = done_copy
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
-        tickets.set_status(root, tid, "done", "human:test", proven=True)
+        tickets.set_status(root, tid, "done", "human:test")
     before = project_hashes(root)
     worktrees.sweep(root, budget=20)
     assert project_hashes(root) == before
@@ -439,7 +437,7 @@ def test_branch_only_without_registry(done_copy, monkeypatch):
     to_review(root, tid)  # the branch alone is what the person reviews
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
-        tickets.set_status(root, tid, "done", "human:test", proven=True)
+        tickets.set_status(root, tid, "done", "human:test")
     worktrees._record_done_tip(root, tid)
     worktrees.sweep(root)
     assert (root / "code.py").read_text() == "print(2)\n"
@@ -557,7 +555,7 @@ def test_process_death_recovers_journal(done_copy, monkeypatch):
     to_review(root, tid)
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
-        tickets.set_status(root, tid, "done", "human:test", proven=True)
+        tickets.set_status(root, tid, "done", "human:test")
     before = project_hashes(root)
     head = git(root, "rev-parse", "HEAD")
     worktrees._record_done_tip(root, tid)
@@ -603,7 +601,7 @@ def test_b13e_killed_before_merge_head_keeps_journal_and_says_so(done_copy, monk
     to_review(root, tid)
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
-        tickets.set_status(root, tid, "done", "human:test", proven=True)
+        tickets.set_status(root, tid, "done", "human:test")
     worktrees._record_done_tip(root, tid)
 
     def killed(top, args):
@@ -840,20 +838,13 @@ def test_forged_signed_review_is_refused(done_copy):
     assert copy.exists()
 
 
-def test_person_approves_exact_control_tip(done_copy, run, monkeypatch):
-    monkeypatch.setattr(humanproof, "person_by", _REAL_PERSON_BY)
-    import io
-
+def test_person_approves_exact_control_tip(done_copy, run):
     root, tid, copy = done_copy
     (copy / ".gitignore").write_text("something\n")
     assert finish(root, tid)["state"] == "waiting"
     target, tip, count = worktrees.approval_target(root, tid)
     assert count == 1
-    proof = humanproof.mint(
-        humanproof.human_key(root), humanproof.new_payload("copy.retry", target, "human:pat")
-    )
-    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
-    code, out, err = run("copy", "approve", tid, "--proof-stdin", "--json")
+    code, out, err = run("copy", "approve", tid, "--json")
     assert code == 0, out + err
     assert git(root, "rev-parse", "HEAD^2") == tip
     assert (root / ".gitignore").read_text() == "something\n"
@@ -952,29 +943,6 @@ def test_run_end_only_schedules(done_copy, monkeypatch):
     monkeypatch.setattr(worktrees, "sweep", lambda *a: pytest.fail("synchronous sweep"))
     worktrees.on_run_ended(root, tid)
     assert scheduled == [root]
-
-
-def test_approval_without_proof_has_bound_handoff(done_copy, run, monkeypatch):
-    monkeypatch.setattr(humanproof, "person_by", _REAL_PERSON_BY)
-
-    root, tid, copy = done_copy
-    (root / "code.py").write_text("personal")
-    finish(root, tid)
-    target, tip, count = worktrees.approval_target(root, tid)
-    code, _, _ = run("copy", "approve", tid, "--by", "human:pat")
-    assert code == 2
-    handoff = next(h for h in humanproof.handoffs(root) if h["target"] == target)
-    assert handoff["argv"] == [
-        "copy",
-        "retry",
-        tid,
-        "--approve-tip",
-        tip,
-        "--control-paths",
-        str(count),
-        "--paths-hash",
-        target.rsplit(":", 1)[1],
-    ]
 
 
 @pytest.mark.parametrize("phase", ["before", "after"])
@@ -1113,7 +1081,7 @@ def test_done_without_copy_does_not_need_bring_back(repo):
     from orch import needs
 
     tid = repo.tids[0]
-    tickets.set_status(repo, tid, "done", "human:test", proven=True)
+    tickets.set_status(repo, tid, "done", "human:test")
     assert not tickets.load(repo, tid).get("work", {}).get("bring_back")
     assert not any(row["kind"] == "copies:bring-back" for row in needs.core_rows(repo))
 
@@ -1352,7 +1320,7 @@ def test_b13e_done_only_records_and_schedules(done_copy, monkeypatch):
     monkeypatch.setattr(worktrees, "schedule_sweep", lambda r: scheduled.append(r))
     monkeypatch.setattr(worktrees, "_bring_back_locked", lambda *a: pytest.fail("bring-back inside Done"))
     monkeypatch.setattr(worktrees, "_bb_snapshot", lambda *a: pytest.fail("snapshot inside Done"))
-    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    tickets.set_status(root, tid, "done", "human:test")
     assert scheduled == [root]
     assert (root / "code.py").read_text() == "print(1)\n"
     assert worktrees._copy_authority(root, tid)["reviewed_tip"] == git(copy, "rev-parse", "HEAD")
@@ -1404,7 +1372,7 @@ def test_b13e_looking_at_the_work_is_not_bringing_it_back(done_copy, monkeypatch
     assert worktrees._save_leftovers(copy, tid)[0]
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
-        tickets.set_status(root, tid, "done", "human:test", proven=True)
+        tickets.set_status(root, tid, "done", "human:test")
     own = git(root, "symbolic-ref", "--short", "HEAD")
     tip = git(copy, "rev-parse", "HEAD")
     if how == "detach":
@@ -1592,7 +1560,7 @@ def test_approved_bring_back_of_unshown_done_removes_the_copy(done_copy):
     root, tid, copy = done_copy
     to_review(root, tid)
     worktrees.bind_shown(root, tid, worktrees.NO_TIP)
-    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    tickets.set_status(root, tid, "done", "human:test")
     worktrees.sweep(root)
     assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "waiting"
     assert copy.exists() and tid in worktrees.registry(root)
@@ -1679,27 +1647,6 @@ def test_b13e_cli_approve_compares_what_was_shown(done_copy, run):
     assert git(root, "rev-parse", "HEAD") == head
 
 
-def test_b13e_plain_retry_proof_cannot_approve(done_copy, run, monkeypatch):
-    """Part 2 #7: a proof for a plain "Try again" (target = the ticket) never approves a bring-back."""
-    import io
-
-    monkeypatch.setattr(humanproof, "person_by", _REAL_PERSON_BY)
-    root, tid, copy = done_copy
-    (copy / ".gitignore").write_text("something\n")
-    assert finish(root, tid)["state"] == "waiting"
-    target, tip, count = worktrees.approval_target(root, tid)
-    proof = humanproof.mint(
-        humanproof.human_key(root), humanproof.new_payload("copy.retry", tid, "human:pat")
-    )
-    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
-    head = git(root, "rev-parse", "HEAD")
-    shown = ["--approve-tip", tip, "--control-paths", str(count), "--paths-hash", target.rsplit(":", 1)[1]]
-    code, _, _ = run("copy", "retry", tid, *shown, "--proof-stdin", "--json")
-    assert code != 0
-    assert git(root, "rev-parse", "HEAD") == head
-    assert not worktrees._copy_authority(root, tid).get("controls_tip")
-
-
 def test_b13e_review_paths_are_one_plain_line_each(done_copy, run):
     """Automated finding 1: agent-chosen path names cannot fake the approval text."""
     import json
@@ -1772,7 +1719,7 @@ def test_b13e_agent_identity_comes_from_a_live_run(done_copy, monkeypatch, case)
 
 def done_no_sweep(root, tid):
     """A person's Done; the scheduled sweep does not run (the test runs it, or calls bring_back)."""
-    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    tickets.set_status(root, tid, "done", "human:test")
 
 
 def commit_on_side(root, name, text):
@@ -1847,15 +1794,17 @@ def test_b13f_agent_done_after_review_is_no_approval(done_copy, monkeypatch):
 
 
 def test_b13f_person_done_must_be_this_rounds(done_copy):
-    """Main A: only a current person verdict made at or after the review began counts."""
+    """Main A: only a person's Done made at or after the review began counts (an agent's Done does not)."""
     root, tid, copy = done_copy
     to_review(root, tid)
     done_no_sweep(root, tid)
     t = tickets.load(root, tid)
     assert worktrees._person_done(root, t, "2000-01-01T00:00:00Z")
     assert not worktrees._person_done(root, t, "2999-01-01T00:00:00Z")
-    forged = {**t, "verdicts": [{**t["verdicts"][0], "kind": "agent"}]}
-    assert not worktrees._person_done(root, forged, "2000-01-01T00:00:00Z")
+    hist = t["history"]
+    last = max(i for i, h in enumerate(hist) if worktrees._DONE_LINE.fullmatch(str(h.get("text", ""))))
+    agents = [{**h, "by": "agent:claude"} if i == last else h for i, h in enumerate(t["history"])]
+    assert not worktrees._person_done(root, {**t, "history": agents}, "2000-01-01T00:00:00Z")
 
 
 def test_b13f_reopened_round_forgets_the_old_review(done_copy):
@@ -2481,7 +2430,7 @@ def test_b13h_reopened_while_the_merge_is_prepared_merges_nothing(done_copy, mon
     """A reopen during the preparation withdraws the Done: nothing merges, the next round starts clean."""
     root, tid, copy = done_copy
     to_review(root, tid)
-    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    tickets.set_status(root, tid, "done", "human:test")
     head = git(root, "rev-parse", "HEAD")
     real = worktrees._bb_snapshot
 
@@ -2599,7 +2548,7 @@ def test_b13n_shown_tip_then_status_bounce_approves_nothing_unseen(done_copy):
     tickets.set_status(root, tid, "active", "agent:x")
     agent_commits(copy)
     to_review(root, tid)
-    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    tickets.set_status(root, tid, "done", "human:test")
     worktrees.sweep(root)
     assert not (root / "late.py").exists()
     assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "waiting"
@@ -2610,7 +2559,7 @@ def test_b13n_none_then_status_bounce_approves_nothing_unseen(done_copy):
     assert worktrees._save_leftovers(copy, tid)[0]
     worktrees.bind_shown(root, tid, worktrees.NO_TIP)
     tickets.set_status(root, tid, "review", "agent:x")  # records a tip (no run alive), void gone
-    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    tickets.set_status(root, tid, "done", "human:test")
     worktrees.sweep(root)
     assert (root / "code.py").read_text() != "print(2)\n"
     assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "waiting"
@@ -3013,7 +2962,7 @@ def test_b13w_a_done_judged_while_git_was_unreadable_is_judged_again(done_copy):
     to_review(root, tid)
     shallow = root / ".git" / "shallow"
     shallow.write_text("0" * 40 + "\n")
-    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    tickets.set_status(root, tid, "done", "human:test")
     worktrees.sweep(root)
     assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "waiting"
     shallow.unlink()
@@ -3109,7 +3058,7 @@ def test_b13y_done_reopen_done_by_the_person_during_the_merge_is_a_different_don
     def bounce_then_merge(top, args):
         tickets.set_status(root, tid, "active", "human:test")
         to_review(root, tid)
-        tickets.set_status(root, tid, "done", "human:test", proven=True)
+        tickets.set_status(root, tid, "done", "human:test")
         return real(top, args)
 
     monkeypatch.setattr(worktrees, "_bb_merge", bounce_then_merge)
@@ -3132,7 +3081,7 @@ def test_b13y_the_round_comes_from_the_same_snapshot_as_the_approval(done_copy, 
     to_review(root, tid)
     tip = git(copy, "rev-parse", "HEAD")
     worktrees._copy_authority(root, tid, lambda r: r.update(controls_tip=None, done_round=0))
-    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    tickets.set_status(root, tid, "done", "human:test")
     assert worktrees._still_approved(root, tid, tip, 0) is True
     assert (
         worktrees._still_approved(root, tid, tip, 0, control=True) is False

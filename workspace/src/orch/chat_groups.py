@@ -1527,8 +1527,13 @@ def _by_name(g: dict, ws: str) -> str:
 
 def card_for(root: Path, g: dict) -> dict | None:
     """body.shared_ticket without `rev`: title, status, summary, the open information question, checklist."""
+    return card_of_ticket(root, g["ticket"])
+
+
+def card_of_ticket(root: Path, tid: str) -> dict | None:
+    """The ticket card of one ticket (the group card, and `relay delegate --full`'s body.ticket_card)."""
     try:
-        t = tickets.load(root, g["ticket"])
+        t = tickets.load(root, tid)
     except (Refused, OSError, ValueError):
         return None
     q = next((x for x in t.get("questions", []) if x.get("answer") is None and x.get("kind") is None), None)
@@ -1552,6 +1557,16 @@ def card_for(root: Path, g: dict) -> dict | None:
     return card
 
 
+def fit_card(card: dict) -> dict:
+    """The card within CARD_MAX bytes as compact JSON: the checklist loses items from the end first."""
+    while (
+        len(json.dumps(card, separators=(",", ":"), ensure_ascii=False).encode()) > CARD_MAX
+        and card["checklist"]
+    ):
+        card["checklist"].pop()
+    return card
+
+
 def _send_card(root: Path, g: dict, ws: str, force: bool = False) -> dict | None:
     """The ticket card to one member (rev +1 when the content changed since the last one; `force`: again)."""
     card = card_for(root, g)
@@ -1564,12 +1579,7 @@ def _send_card(root: Path, g: dict, ws: str, force: bool = False) -> dict | None
     sent = g["card"].setdefault("sent", {})
     if sent.get(ws) == rev and not force:
         return None
-    card = {**card, "rev": rev}
-    while (
-        len(json.dumps(card, separators=(",", ":"), ensure_ascii=False).encode()) > CARD_MAX
-        and card["checklist"]
-    ):
-        card["checklist"].pop()
+    card = fit_card({**card, "rev": rev})
     body = {
         "text": f"From {_line(g['members'][g['host']]['name'], 60)} · {card.get('key') or card['ticket']}",
         "group": _wire(g),
@@ -1834,7 +1844,6 @@ def ask(root: Path, tid: str, ws: str, qid: str, by: str = "agent:relay") -> dic
         "group": gid,
         "question_digest": tickets.question_digest(q),  # the question as it was sent
     }
-    relay.sign_asked(root, mid, asked[mid])
     net.write_json(relay._asked_path(root), asked, True)
     _history(root, tid, by, f"Asked {ws} (group): {q['text']}"[:2000])
     return msg
@@ -3060,7 +3069,6 @@ def waiting_approval(root: Path, delegate_msg: dict, allow_tid: str, qid: str) -
                 "to": "phones",
                 "question_digest": tickets.question_digest(q),  # the question as it was sent
             }
-            relay.sign_asked(root, qm["id"], asked[qm["id"]])
             net.write_json(relay._asked_path(root), asked, True)
         _report(
             root,

@@ -32,11 +32,11 @@ def _install(proj: Path, folder: Path) -> dict[str, dict]:
 
 
 def _plant_unknown(proj: Path) -> None:
-    """Fields a peer, a newer orch or a removed feature (proof, signature) may have left in a file."""
+    """Fields a peer, a newer orch or a removed feature (proof) may have left in a file."""
     for p in (proj / ".orch" / "tickets").glob("t_*.json"):
         t = json.loads(p.read_text(encoding="utf-8"))
         t["future_field"] = {"kept": [1, 2]}
-        t["signature"] = {"alg": "old", "value": "AAAA"}
+        t["sig_field"] = {"alg": "old", "value": "AAAA"}
         t.setdefault("ext", {})["otheraddon"] = {"k": "v"}
         if t["checklist"]:
             t["checklist"][0]["extra"] = "keep"
@@ -177,3 +177,114 @@ def test_broken_json_is_refused_and_not_overwritten(one_ticket, proj, run):
             assert "Traceback" not in err + out
         assert p.read_text(encoding="utf-8") == garbage
         assert run("ticket", "list")[0] == 0
+
+
+def test_old_proof_fields_load_show_as_plain_and_are_kept(proj, run):
+    """A ticket written while Done and Won't do carried extra fields (`verdicts[]`, `wont_mac`, `wont_nonce`,
+    `wont_line`, `wont_by`): they stay in the file. Done shows as Done (not Review), the fields are ignored
+    and are kept on every save."""
+    t = tickets.create(proj, "Old proofs", "human:tester")
+    tid = t["id"]
+    tickets.check_add(proj, tid, "Kept step", "agent:claude")
+    tickets.check_add(proj, tid, "Dropped step", "agent:claude")
+    tickets.check_done(proj, tid, "c1", ['{"type":"note","ref":"seen"}'], "agent:claude")
+    p = tickets.ticket_path(proj, tid)
+    raw = json.loads(p.read_text(encoding="utf-8"))
+    raw["status"] = "done"
+    raw["verdicts"] = [
+        {"kind": "person", "nonce": "0" * 16, "mac": "A" * 43, "person": "human:alice", "line": "0" * 64}
+    ]
+    raw["checklist"][1].update(
+        wont_do=True,
+        wont_mac="B" * 43,
+        wont_nonce="1" * 16,
+        wont_by="human:alice",
+        wont_at="2026-11-01T10:00:00Z",
+        wont_line="2" * 64,
+        by="human:alice",
+        at="2026-11-01T10:00:00Z",
+    )
+    p.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+    before = json.loads(p.read_text(encoding="utf-8"))
+
+    assert tickets.load(proj, tid)["status"] == "done"
+    assert "verdict_needed" not in tickets.load(proj, tid)
+    assert next(x for x in tickets.list_all(proj) if x["id"] == tid)["status"] == "done"
+    code, shown, err = run("ticket", "show", tid)
+    assert code == 0 and "Old proofs" in shown, err
+
+    assert run("log", tid, "a note", "--by", "human:tester")[0] == 0
+    assert run("ticket", "edit", tid, "--note", "edited", "--by", "human:tester")[0] == 0
+    after = json.loads(p.read_text(encoding="utf-8"))
+    assert after["status"] == "done"
+    assert after["verdicts"] == before["verdicts"]
+    for key in ("wont_do", "wont_mac", "wont_nonce", "wont_by", "wont_at", "wont_line"):
+        assert after["checklist"][1][key] == before["checklist"][1][key]
+
+
+def test_a_persons_done_and_wont_do_are_plain(proj, run):
+    """A person's Done is a plain status change by human:<name>; Won't do is wont_do + wont_by (no MAC)."""
+    t = tickets.create(proj, "Plain", "human:tester")
+    tid = t["id"]
+    tickets.check_add(proj, tid, "Skip me", "agent:claude")
+    tickets.check_wont_do(proj, tid, "c1", "human:tester", "not needed")
+    step = json.loads(tickets.ticket_path(proj, tid).read_text(encoding="utf-8"))["checklist"][0]
+    assert step["wont_do"] is True and step["wont_by"] == "human:tester" and step["wont_at"]
+    assert not {"wont_mac", "wont_nonce", "wont_line"} & set(step)
+    done = tickets.set_status(proj, tid, "done", "human:tester")
+    assert done["status"] == "done" and "verdicts" not in done and "verdict_needed" not in done
+    assert done["history"][-1]["by"] == "human:tester"
+
+
+def test_fresh_workspace_without_a_key_folder_lets_a_person_finish_from_the_cli(proj):
+    """A fresh process, a fresh orch home (no key folder): a person marks an item Done and the ticket Done
+    from the CLI; both are recorded as human:<name>."""
+    src = Path(__file__).resolve().parents[1] / "src"
+    home = proj.parent / f"{proj.name}_fresh_home" / "orchhome"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX_", "ORCH_"))}
+    env.update(PYTHONPATH=str(src), ORCH_HOME=str(home))
+
+    def orch(*argv):
+        r = subprocess.run(
+            [sys.executable, "-m", "orch", *argv],
+            cwd=proj, env=env, capture_output=True, text=True, timeout=120,
+        )  # fmt: skip
+        assert r.returncode == 0, f"orch {' '.join(argv)}: {r.stderr or r.stdout}"
+        return r.stdout
+
+    assert not home.exists()
+    tid = json.loads(orch("ticket", "new", "Fresh", "--by", "human:pat", "--json"))["id"]
+    orch("check", "add", tid, "One step", "--by", "human:pat")
+    orch("check", "done", tid, "c1", "--note", "seen", "--by", "human:pat")
+    orch("ticket", "status", tid, "done", "--by", "human:pat")
+    t = json.loads((proj / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
+    assert t["status"] == "done" and "verdicts" not in t
+    assert t["checklist"][0]["done"] is True and t["checklist"][0]["evidence"][0]["by"] == "human:pat"
+    assert any(h["by"] == "human:pat" and h["text"] == "Status active -> done" for h in t["history"]) or any(
+        h["by"] == "human:pat" and h["text"].endswith("-> done") for h in t["history"]
+    )
+    assert not (home / "keys").exists()
+
+
+@pytest.mark.parametrize("folder", FOLDERS, ids=lambda p: p.name)
+def test_due_day_only_and_with_time_both_load_show_and_save(folder, proj, run):
+    """G1: a day-only `due` (what every older version wrote) keeps working, and a `due` with a time
+    (YYYY-MM-DDTHH:MM) loads, lists, shows and survives an edit."""
+    before = _install(proj, folder)
+    dated = [tid for tid, raw in before.items() if raw.get("due")]
+    assert dated and all(len(before[t]["due"]) == 10 for t in dated), "fixtures keep a day-only due"
+    other = next(t for t in before if t not in dated)
+    p = proj / ".orch" / "tickets" / f"{other}.json"
+    raw = json.loads(p.read_text(encoding="utf-8"))
+    raw["due"] = "2020-01-01T09:00"  # as `orch ticket edit --due "2020-01-01 09:00"` writes it
+    p.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+    code, out, err = run("ticket", "list", "--all")
+    assert code == 0, err
+    code, shown, err = run("ticket", "show", other)
+    assert code == 0 and ("Late since" in shown or "Due" in shown), err
+    code, shown, _ = run("ticket", "show", dated[0])
+    assert code == 0 and f"Due: {before[dated[0]]['due']}" in shown
+    for tid in (other, dated[0]):
+        assert run("ticket", "edit", tid, "--note", "x", "--by", "human:tester")[0] == 0
+    after = _files(proj)
+    assert after[other]["due"] == "2020-01-01T09:00" and after[dated[0]]["due"] == before[dated[0]]["due"]

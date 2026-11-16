@@ -5,6 +5,8 @@ Every agent-supplied string is cleaned first, so the owner sees one plain line p
 
 import unicodedata
 
+from .store import Refused, handover_file_ok
+
 START_OPTIONS = ("Start", "Edit", "Not now")
 CHANGE_OPTIONS = ("Accept", "Edit", "Save for later")
 SHIP_OPTIONS = ("Ship it", "Send back")
@@ -59,21 +61,55 @@ def start_text(p, n):
     if p.get("wont_do"):
         segments.append("Won't do: " + lines(p["wont_do"]))
     if p.get("handovers"):
-        segments.append(
-            "Handover: "
-            + "; ".join(f"{clean(h['task'], 48)} → {clean(h['workspace'], 64)}" for h in p["handovers"])
-        )
+        segments.append("Handover: " + "; ".join(handover_line(h) for h in p["handovers"]))
     unsure = [a["text"] for a in p.get("assumptions", []) if a.get("uncertain")]
     if unsure:
         segments.append("Unsure: " + lines(unsure))
     return join(segments, f"Proposal {n}")
 
 
+def handover_line(h):
+    """What leaves this computer with a hand-over, in the Start text (R7.3): the receiving workspace and every
+    file, uncut (paths are capped at freeze by the schema), so the person's Start answer, which is bound to the
+    frozen proposal's hash, covers exactly these files and nothing added later."""
+    files = (h.get("sends") or {}).get("files") or []
+    for f in files:
+        # what Start shows must be exactly what is shared: never a cleaned or cut version of the real path
+        if not handover_file_ok(f) or clean(f, None) != f:
+            raise Refused(
+                "A hand-over file path cannot be shown as it is; rename the file or pick another.", "invalid"
+            )
+    gets = ", ".join(files) if files else "only the task's brief"
+    return f"{clean(h['task'], 48)} → {clean(h['workspace'], 64)} (they get: {gets})"
+
+
+HANDOVER_WORDS = {  # the relay task's state, in the plain words of the order page (one mapping)
+    "waiting_start": "Waiting for {n} to start",
+    "waiting_allow": "Waiting for {n} to allow",
+    "queued": "Queued at {n}",
+    "working": "Working at {n}",
+    "review": "Ready for review at {n}",
+    "done": "Done",
+    "denied": "{n} said no",
+    "failed": "Failed at {n}",
+    "not_needed": "Done here instead",
+}
+
+
+def handover_words(name, state):
+    """The state of a handed-over task for the order page; an unknown state reads as waiting."""
+    n = clean(name or "the other workspace", 64)
+    return HANDOVER_WORDS.get(state, "Waiting for {n}").format(n=n)
+
+
 question_text = start_text
 
 
 def change_text(c, n):
-    head = [f"Add '{clean(c['title'])}'? +{c['adds_min']} min"]
+    if c.get("takes_back"):
+        head = [f"Do it here instead: {clean(c['title'])} · +{c['adds_min']} min"]
+    else:
+        head = [f"Add '{clean(c['title'])}'? +{c['adds_min']} min"]
     if "adds_usd" in c:
         head.append(f"+${c['adds_usd']:g}")
     if "new_eta" in c:

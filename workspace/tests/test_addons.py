@@ -1478,3 +1478,11 @@ def test_bundle_matches_the_manifests(tmp_path):
     assert gen.OUT.read_text(encoding="utf-8") == gen.render(), (
         "workspace/src/orch/shipped_addons.json is out of date: run python3 scripts/gen_shipped_addons.py"
     )
+
+
+def test_focus_page_is_the_live_session_page_and_live_session_must_be_a_flag():
+    base = Path(__file__).resolve().parents[2]
+    assert addons.folder_manifest(base / "workspace-addons" / "focus")["page"]["live_session"] is True
+    assert "live_session" not in (addons.folder_manifest(base / "workspace-addons" / "factory")["page"])
+    schema = json.loads((base / "contracts" / "addon-manifest.schema.json").read_text())
+    assert schema["properties"]["page"]["properties"]["live_session"]["type"] == "boolean"

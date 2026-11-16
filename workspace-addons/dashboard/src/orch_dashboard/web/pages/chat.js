@@ -88,7 +88,7 @@ function chatListRow(g) {
   const id = g?.id || 'chat', messages = chatObjects(state?.chat?.messages), last = messages[messages.length - 1];
   return h('button', {type:'button', className:'chat-list-row', 'data-key':'row-' + id, 'data-chat-action':'select', 'data-id':id,
     'aria-current':(chatUi.open === id || (id === 'chat' && chatUi.open !== 'history' && !chatGroup() && !chatDmId(chatUi.open))) ? 'true' : null},
-    g ? h('span', {className:'chat-stack'}, chatObjects(g.members).slice(0, 3).map(m => chatAvatar(m))) : h('span', {className:'chat-avatar chat-helper-mark', 'aria-hidden':'true'}, '✧'),
+    g ? h('span', {className:'chat-stack'}, chatObjects(g.members).slice(0, 3).map(m => chatAvatar(m))) : chatAvatar('Helper'),
     h('span', {className:'chat-row-text'}, chatText('strong', '', g ? g.title : CHAT_HELPER),
       g ? chatText('small', 'chat-row-meta', [chatHelpers(g), g.started ? 'started ' + chatWhen(g.started) : ''].filter(Boolean).join(' · ')) : null,
       chatText('small', '', chatPreview(g ? g.last : last?.text) || (g ? '' : 'No messages yet.'))),
@@ -102,8 +102,16 @@ function chatDmRow(c) {
     h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', '', chatPreview(last?.text))),
     h('span', {className:'chat-row-time'}, time(last?.shown_at || last?.at || c.last_at)));
 }
+const chatGroupTime = g => Date.parse(g.last_at || g.finished || g.started) || 0;
+// Other workspaces keep their place above the groups while the contacts load (or fail), instead of appearing later.
+function chatDmPending() {
+  if (snapshot || chatDm.loaded) return null;
+  return h('div', {className:'chat-dm-pending', 'data-key':'dm-pending'}, h('h2', {}, 'Other workspaces'),
+    chatDm.error ? chatButton('Could not load · Try again', 'retry-dm') : chatText('p', 'chat-muted', 'Loading…'));
+}
 function chatList() {
-  const groups = chatGroups().filter(g => !chatFinished(g)), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
+  // Newest group first, so an old group never sits above a fresh one.
+  const groups = chatGroups().filter(g => !chatFinished(g)).sort((a, b) => chatGroupTime(b) - chatGroupTime(a)), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
   const dms = chatDm.contacts.filter(c => c.count > 0 || chatDmMessages(c.ws).length || chatUi.open === c.ws)
     .sort((a, b) => (Date.parse(b.last_at) || 0) - (Date.parse(a.last_at) || 0));
   const helperRow = chatListRow(null), dmRows = dms.map(chatDmRow), groupRows = groups.map(chatListRow), rows = [helperRow, ...dmRows, ...groupRows];
@@ -111,7 +119,7 @@ function chatList() {
   const heading = (text, list) => list.length && list.some(row => !row.hidden) ? h('h2', {}, text) : null;
   return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'),
     snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), history ? null : chatSearch(),
-    heading('This workspace', [helperRow]), helperRow, heading('Other workspaces', dmRows), dmRows, heading('Groups', groupRows), groupRows,
+    heading('This workspace', [helperRow]), helperRow, heading('Other workspaces', dmRows), dmRows, dmRows.length || history ? null : chatDmPending(), heading('Groups', groupRows), groupRows,
     rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null);
 }
 // The grouped list shows only when there is something besides the helper chat (a live group or a workspace chat); an open
@@ -161,7 +169,7 @@ function chatHeader(g, history) {
   // The helper conversation has no title row of its own: the page heading above says "Chat" and who it is with.
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     plain ? null : h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,
-      helper ? h('span', {className:'chat-avatar chat-helper-mark', 'aria-hidden':'true'}, '✧') : null,
+      helper ? chatAvatar('Helper') : null,
       h('div', {className:'chat-head-text'}, g ? chatText('p', 'chat-eyebrow', 'Group · ' + others + (others === 1 ? ' workspace' : ' workspaces')) : null,
         h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title))),
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null, earlier),
@@ -208,13 +216,14 @@ function chatPlainTitle(title, key = '', due = false) {
   if (due) text = text.replace(CHAT_DAY, '');
   return text.replace(/^[\s,;:·–—-]+|[\s,;:·–—.-]+$/g, '') || clean(title);
 }
-function chatDue(due) {
+function chatDue(due, status = '') {
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(due || ''))) return window.DashHelpers.dueWords(due, status, new Date(state?.now || Date.now()));
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(due || ''))) return '';
   const shift = n => { const d = new Date(state?.now || Date.now()); d.setDate(d.getDate() + n); return chatLocalDay(d); };
   return due === shift(0) ? 'today' : due === shift(1) ? 'tomorrow' : due === shift(-1) ? 'yesterday' : date(due);
 }
 function chatTicketCard(ref, key, readOnly) {
-  const ticket = ticketOf(ref.id), due = chatDue(ticket?.due), title = chatPlainTitle(ref.title || ticket?.title, ref.key || ticket?.key, !!due);
+  const ticket = ticketOf(ref.id), due = chatDue(ticket?.due, ticket?.status), title = chatPlainTitle(ref.title || ticket?.title, ref.key || ticket?.key, !!due);
   const open = chatObjects(ticket?.questions).filter(q => q.answer == null), q = open[0];
   // A person's OK is the one status that gets the accent colour.
   const word = open.length ? 'Needs your OK' : ticket?.status ? window.DashHelpers.statusWord(ticket.status) : '';
@@ -522,6 +531,23 @@ const chatDmContact = ws => chatDm.contacts.find(c => c.ws === ws);
 // "Send a message" on Contacts already knows the name: the thread opens with it, before the contacts have loaded.
 const chatDmNames = new Map();
 const chatDmHint = (ws, name) => { if (chatDmId(ws) && typeof name === 'string' && name.trim()) chatDmNames.set(ws, name.trim().slice(0, 80)); };
+// A contact's name for a raw workspace id ("agent:ws_..." as who answered): known contacts first, read once if none is
+// loaded yet (the next render shows the name), else the plain "Another workspace" - never the id.
+let chatDmNamesAsked = false;
+function chatDmName(id) {
+  const ws = String(id ?? '').replace(/^(agent|human):/, '');
+  if (!chatDmId(ws)) return '';
+  const c = chatDmContact(ws);
+  if (c?.name) return clean(c.name);
+  if (!chatDm.loaded && !chatDmNamesAsked && !snapshot) {
+    chatDmNamesAsked = true;
+    fetch('/api/chat/contacts').then(r => r.ok ? r.json() : null).then(list => {
+      if (!Array.isArray(list) || chatDm.loaded) return;
+      chatDm.contacts = chatObjects(list).filter(x => chatDmId(x.ws)); chatDm.loaded = true; render();
+    }).catch(() => {});
+  }
+  return 'Another workspace';
+}
 function chatDmMessages(ws) {
   const saved = chatObjects(chatDm.threads.get(ws)?.messages), ids = new Set(saved.map(m => m.id));
   return [...saved, ...array(chatDm.pending.get(ws)).filter(m => !ids.has(m.id))];
@@ -650,7 +676,7 @@ function chatDmThread() {
         m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,
         m.by === 'you' ? h('small', {className:'chat-delivery'},
           m.state === 'failed' ? fragment('Not sent · ', chatButton('Try again', 'retry-send', {'data-id':m.id})) :
-          m.state === 'delivered' ? 'Delivered — their helper answers when it runs' : 'Sending…') : null))),
+          m.state === 'delivered' ? 'Delivered' : 'Sending…') : null))),
     !snapshot && c?.can?.chat ? h('form', {className:'chat-compose', 'data-key':'form-' + ws},
       h('textarea', {rows:1, maxLength:2000, className:'chat-draft', 'data-key':'draft-' + ws, 'data-chat-input':'draft', 'data-thread':ws,
         'aria-label':'Message ' + title, placeholder:'Message ' + title}, draft),
@@ -671,7 +697,7 @@ chatClick = async function (event) {
   const action = control.dataset.chatAction;
   if (action === 'contacts') { chatDmContacts(); return chatDmLoad(true); }
   if (action === 'select-dm') return chatDmSelect(control.dataset.id);
-  if (action === 'retry-dm') return chatDmLoad();
+  if (action === 'retry-dm') { chatDm.error = false; return chatDmLoad(true); }
   if (action === 'retry-send') {
     const message = chatDmMessages(chatUi.open).find(m => m.id === control.dataset.id);
     if (message?.state === 'failed') return chatDmSend(message.text, message.id);

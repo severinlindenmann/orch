@@ -201,3 +201,9 @@ test('UX B2: Focus opens on the next ticket that needs you (oldest question, the
   assert.match(src, /all=1/); assert.match(src, /See everything on Home/);
   assert.match(src, /INAPP && \(status === 'waiting' \|\| status === 'review'\)/);
 });
+
+test('Tickets in focus lists running tickets first, then the most recently updated', () => {
+  const rows = [{id: 'old', status: 'open', updated_at: '2026-11-01T10:00:00Z'}, {id: 'new', status: 'review', updated_at: '2026-11-14T10:00:00Z'},
+    {id: 'run-old', status: 'active', updated_at: '2026-11-02T10:00:00Z'}, {id: 'run-new', status: 'active', updated_at: '2026-11-10T10:00:00Z'}];
+  assert.deepEqual(H.listOrder(rows).map(t => t.id), ['run-new', 'run-old', 'new', 'old']);
+});

@@ -996,7 +996,7 @@ def event(
     return result
 
 
-def pass_answer(root: Path, tid: str, q: dict, by: str, proven: bool = False) -> dict | None:
+def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
     """A person answered. An agent works on the ticket: the answer goes to it like a message (live: pasted
     when it is idle). None works on it: the agent that asked is started again on the ticket (its own session
     resumed when there is one) once no question of it is open any more, so nobody has to press Continue.
@@ -1011,7 +1011,6 @@ def pass_answer(root: Path, tid: str, q: dict, by: str, proven: bool = False) ->
             by,
             f"Answer to your question {q['id']} ({q['text']}): {q['answer']}",
             "answer",
-            proven=proven,
         )
         return None
     return resume_after_answer(root, tid, q, by)
@@ -1046,13 +1045,13 @@ def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
         return None
 
 
-def send(root: Path, tid: str, by: str, text: str, kind: str = "message", proven: bool = False) -> dict:
+def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dict:
     """Queue a message for the agent. The words are always put into the ticket's pending input first and never
     typed into the session: only the fixed notice line is, and only when the tool is up and idle at its prompt
     (deliver). Starting up, first-run screens, a busy or waiting session: it stays queued and goes in at
     the next turn end or start. The answer says which: delivered (n > 0, queued False) or queued."""
     tickets.load(root, tid)
-    item = runs.pending_add(root, tid, by, kind, text, proven=proven)
+    item = runs.pending_add(root, tid, by, kind, text)
     rec = runs.read(root, tid)
     if not rec or runs.state(rec) != "alive":
         return {"id": item["id"], "delivered": 0, "queued": True, "state": "none"}

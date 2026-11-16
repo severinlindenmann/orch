@@ -15,17 +15,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 REAL_HOME=$HOME
-mkdir -p "$REAL_HOME/orch-dev"
-TMP=$(mktemp -d "$REAL_HOME/orch-dev/.tf-e2e-XXXX")
-# ORCH_HOME is only trusted under the REAL home with no .git/.orch/.agents above it: ~/orch-dev has a .git, so use a sibling folder
-OHOME=$(mktemp -d "$REAL_HOME/.orch-e2e-XXXX")
+# A TEST network (#815): orch only lets the scripted test human act in workspaces under <real home>/.orch-test, with its
+# own tool folder (ORCH_HOME) there too. Both live under that folder; no .git/.orch/.agents above it.
+mkdir -p "$REAL_HOME/.orch-test"
+chmod 700 "$REAL_HOME/.orch-test"
+TMP=$(mktemp -d "$REAL_HOME/.orch-test/e2e-XXXX")
+OHOME=$(mktemp -d "$REAL_HOME/.orch-test/e2e-home-XXXX")
 trap 'rm -rf "$TMP" "$OHOME"' EXIT INT TERM
 mkdir -p "$TMP/home"
 
 BINS='{}'
 if [ "$MODE" = local ]; then
   case "$WHAT" in
-    all|P*|R*|M*|F*|LOOK*|*,LOOK*|*,P*|*,R*|V2|V3|V3-P*|V3-SIM|V2-P6*|V2-W2*|V2-M1*|*,V3-P*|*,V3-SIM|*,V2-P6*|*,V2-W2*|*,V2-M1*)
+    all|A22|*,A22|A23|*,A23|P*|R*|M*|F*|LOOK*|*,LOOK*|*,P*|*,R*|V2|V3|V3-P*|V3-SIM|V2-P6*|V2-W2*|V2-M1*|*,V3-P*|*,V3-SIM|*,V2-P6*|*,V2-W2*|*,V2-M1*)
       export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
       ( cd "$REPO/publish" && cargo build --release -j 4 -q )
       ( cd "$REPO/relay" && cargo build --release -j 4 -q )

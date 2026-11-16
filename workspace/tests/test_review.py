@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from conftest import ensure_signing
+from conftest import ensure_keys
 
 from orch import history, review, tickets
 from orch.errors import Refused
@@ -17,7 +17,7 @@ def _raw(root, tid):
 
 @pytest.fixture
 def tk(proj):
-    ensure_signing(proj)
+    ensure_keys(proj)
     t = tickets.create(proj, "Home layout", ME)
     return proj, t["id"]
 
@@ -139,7 +139,7 @@ def test_check_approve_makes_ticket_done(tk):
     assert item["id"] == f"core:review:{tid}"
     e = review.decide(root, tid, "review", "ok", by=ME, via="dashboard", digest=item["digest"])
     t = tickets.load(root, tid)
-    assert t["status"] == "done" and t["verdicts"]
+    assert t["status"] == "done" and "verdicts" not in t
     assert (
         e["card"]["kind"] == "check" and e["decision"]["action"] == "approve" and e["answer"] == "Looks good"
     )

@@ -4,6 +4,29 @@
   const S = window.FocusStore;
   const {root, ic, TID, P, INAPP, h, toast, helpPanel, els, act, proof, keyOf, stamp, evText} = S;
 
+  const KIND_LABEL = {image: 'Picture', pdf: 'PDF', table: 'Table', page: 'Page', doc: 'Document', code: 'Code', text: 'Note', command: 'Command', commit: 'Change', link: 'Link', missing: 'File', other: 'File'};
+
+  /* A ticket that waits for review, as a result card (master result-card): preview, result name, ticket name, kind,
+     local time and one button. The preview is a picture or the first lines of a text file; no preview = a kind label. */
+  function resultCard(t) {
+    const r = t.result || null;
+    const kind = KIND_LABEL[r && r.kind] || 'Result';
+    const thumb = h('span', {class: 'thumb', text: kind});
+    if (r && typeof r.preview === 'string' && r.preview.startsWith('/api/file?')) {
+      const src = P + r.preview;
+      if (r.kind === 'image') {
+        const img = h('img', {alt: '', loading: 'lazy'}); img.src = src; thumb.replaceChildren(img);
+      } else {
+        fetch(src).then(x => x.ok && (x.headers.get('Content-Type') || '').startsWith('text/plain') ? x.text() : null)
+          .then(txt => { if (txt) thumb.replaceChildren(h('pre', {text: txt.slice(0, 600).split('\n').slice(0, 8).join('\n')})); }).catch(() => {});
+      }
+    }
+    const when = r && r.at ? stamp(r.at) : '';
+    return h('a', {class: 'result-card', href: P + '/t/' + t.id + '#results'}, thumb,
+      h('span', {class: 'body'}, h('strong', {text: (r && r.name) || t.title}), h('span', {class: 'meta', text: t.title}),
+        h('span', {class: 'row'}, h('span', {class: 'chip', text: kind}), h('span', {class: 'meta grow', text: when}), h('span', {class: 'btn outline sm', text: 'Check result'}))));
+  }
+
   function picker() {
     document.title = 'Focus · orch';
     root.classList.add('fx-picker');
@@ -40,9 +63,11 @@
         const rows = list.filter(t => status === 'waiting' ? needsYou(t) : t.status === status);
         if (!rows.length) continue;
         const {shown, more} = window.FocusHelpers.limitGroup(rows);
-        const card = h('div', {class: 'card'}, shown.map(t => rowFor(t, status, action)));
+        const cards = status === 'review';  /* results are cards, every other group stays a row */
+        const one = t => cards ? resultCard(t) : rowFor(t, status, action);
+        const card = h('div', {class: cards ? 'result-grid' : 'card'}, shown.map(one));
         const all = more ? h('button', {class: 'btn ghost sm fx-show-all', type: 'button', text: 'Show all (' + rows.length + ')'}) : null;
-        if (all) all.addEventListener('click', () => { card.replaceChildren(...rows.map(t => rowFor(t, status, action))); all.remove(); });
+        if (all) all.addEventListener('click', () => { card.replaceChildren(...rows.map(one)); all.remove(); });
         box.append(h('section', {class: 'fx-pick-group fx-group-' + status}, h('h2', {}, label + ' ', h('span', {class: 'meta', text: '(' + rows.length + ')'})), card, all));
       }
       const done = list.filter(t => t.status === 'done').sort((a, b) => String(b.closed_at || '').localeCompare(String(a.closed_at || '')));
@@ -112,7 +137,9 @@
     /* a fixed list: what does not apply now is greyed out, never removed; desktop-only rows hide on a phone */
     const menuRow = (action, icon, label, cls) => h('button', {type: 'button', 'data-act': action, class: cls || null}, h('span', {icon}), h('span', {text: label}));
     els.fresh = menuRow('fresh', 'plus', 'Start fresh instead', 'fx-risky');
-    els.attachBtn = menuRow('attach', 'external', 'Open live session');
+    els.attachBtn = menuRow('attach', 'external', 'Helper’s screen in a terminal');
+    els.interruptBtn = menuRow('interrupt', 'pause', 'Interrupt now');
+    els.interruptBtn.title = 'Stop what the helper is doing and read the message in the box now';
     els.full = menuRow('full', 'expand', 'Full screen', 'fx-desktop');
     els.full.setAttribute('aria-pressed', 'false');
     els.helpBtn = menuRow('help', 'text', 'Keyboard shortcuts', 'fx-desktop');
@@ -121,7 +148,7 @@
     els.copyBtn = h('button', {class: 'btn ghost sm fx-desktop', type: 'button', 'data-act': 'copy', text: 'Copy link'});
     els.moreBtn = h('button', {class: 'btn ghost icon sm', type: 'button', icon: 'more', 'aria-label': 'More actions', 'aria-expanded': 'false', 'aria-controls': 'fx-action-menu'});
     els.menu = h('div', {class: 'fx-popover fx-action-menu', id: 'fx-action-menu', hidden: true}, INAPP ? null : els.full, els.helpBtn,
-      els.attachBtn, h('hr', {class: 'fx-menu-divider'}), els.fresh);
+      els.attachBtn, els.interruptBtn, h('hr', {class: 'fx-menu-divider'}), els.fresh);
     els.more = h('div', {class: 'fx-more'}, els.moreBtn, els.menu);
     els.session = h('section', {class: 'fx-popover fx-session', id: 'fx-session', role: 'dialog', 'aria-labelledby': 'fx-session-title', tabindex: '-1', hidden: true});
     els.liveWrap = h('div', {class: 'fx-live-wrap'}, els.live, els.session);
@@ -150,9 +177,8 @@
     els.sent = h('section', {class: 'fx-sent', 'aria-label': 'Sent back to you', hidden: true});
     /* "Your next move": the open question first, with how many wait and, when a phone is paired, the phone hand-off */
     els.qCount = h('span', {class: 'meta', text: ''});
-    els.phoneBtn = h('button', {class: 'btn ghost sm', type: 'button', 'data-act': 'phone', hidden: true, text: 'Answer on phone'});
-    els.phoneNote = h('p', {class: 'meta fx-phone-note', hidden: true, text: 'Open this ticket on your paired phone. The same question waits there; the helper stays paused until you answer.'});
-    els.next = h('section', {class: 'fx-next', 'aria-label': 'Your next move', hidden: true}, h('div', {class: 'fx-next-h'}, h('span', {class: 'eyebrow', text: 'Your next move'}), els.qCount), els.qs, h('div', {class: 'fx-next-f'}, els.phoneBtn), els.phoneNote);
+    els.phoneLine = h('p', {class: 'handoff', 'aria-live': 'polite', hidden: true});
+    els.next = h('section', {class: 'fx-next', 'aria-label': 'Your next move', hidden: true}, h('div', {class: 'fx-next-h'}, h('span', {class: 'eyebrow', text: 'Your next move'}), els.qCount), els.qs, els.phoneLine);
     /* "With Helper": the ticket's own messages and updates, newest last */
     els.withList = h('div', {class: 'fx-with-list'});
     els.withH = h('section', {class: 'fx-with', 'aria-label': 'With Helper', hidden: true}, h('h2', {text: 'With Helper'}), els.withList);
@@ -175,7 +201,7 @@
     els.review = h('div', {class: 'fx-review', hidden: true}, h('div', {}, h('p', {text: 'Finished. Looks good?'}), h('p', {class: 'meta', text: 'Next step · Check result'})),
       h('button', {class: 'btn', 'data-act': 'changes', text: 'Send back'}), h('button', {class: 'btn primary', 'data-act': 'done', text: 'Looks good'}));
     els.complete = h('div', {class: 'fx-review', hidden: true}, h('p', {text: 'You’re all set here.'}));
-    const stage = h('section', {class: 'fx-stage', 'aria-label': 'Ticket activity'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Focus views'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, els.paneFiles, els.paneUsed, compose, els.review, els.complete, els.help);
+    const stage = els.stage = h('section', {class: 'fx-stage', 'aria-label': 'Ticket activity'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Focus views'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, els.paneFiles, els.paneUsed, compose, els.review, els.complete, els.help);
     if (INAPP) { buildShell(top, stepbar, rail, stage); return; }
     root.replaceChildren(top, stepbar, els.trace, h('div', {class: 'fx-body'}, rail, stage, els.human));
     els.stopIc.innerHTML = ic('pause');
@@ -209,7 +235,7 @@
     listAt = Date.now();
     try {
       const r = await fetch(P + '/api/tickets'); if (!r.ok) return;
-      const list = (await r.json()).tickets.filter(t => t.status !== 'done' || t.id === TID);
+      const list = window.FocusHelpers.listOrder((await r.json()).tickets.filter(t => t.status !== 'done' || t.id === TID));
       els.ticketList.replaceChildren(...list.map(t => h('a', {class: 'list-row' + (t.id === TID ? ' cur' : ''), role: 'listitem', href: P + '/t/' + t.id, 'aria-current': t.id === TID ? 'page' : null},
         h('span', {class: window.FocusHelpers.needsYou(t) ? 'dot-warn' : DOT[t.status] || 'dot-work', 'aria-hidden': 'true'}), h('strong', {class: 'grow', text: t.title}))));
     } catch (e) { /* the list keeps what it had */ }
@@ -309,6 +335,21 @@
       h('div', {class: 'fx-sent-grid'}, cards), ...(review ? [h('p', {class: 'meta', text: 'Checking a result records your feedback. It does not publish anything.'})] : []));
   }
 
+  /* Where a question also waits: one quiet line under the answers, "Sent to your phone 12:31. Answer here or there,
+     whichever is first." The other way round (answered there) is live.js: the card closes into its own line. */
+  function phoneLine(v, now = Date.now()) {
+    const qs = (v.ticket && v.ticket.questions) || [];
+    const open = qs.filter(q => q.answer == null && typeof q.sent_at === 'string');
+    if (open.length) return {text: 'Sent to your phone ' + S.hhmm(open[open.length - 1].sent_at) + '. Answer here or there, whichever is first.', answered: false};
+    return null;
+  }
+  function renderPhoneLine(v) {
+    const line = phoneLine(v);
+    els.phoneLine.hidden = !line;
+    els.phoneLine.classList.toggle('answered', !!(line && line.answered));
+    els.phoneLine.textContent = line ? line.text : '';
+  }
+
   /* an empty tab is hidden; if it was the open one, Live opens instead */
   function showTab(i, on) {
     const tab = els.tabs && els.tabs[i];
@@ -317,5 +358,5 @@
     if (!on && tab.getAttribute('aria-selected') === 'true') els.tabs[0].click();
   }
 
-  S.register('ticket', {showTab, refreshTickets, picker, pickerSub, build, renderTasks, taskTools, renderHelpers, renderProof});
+  S.register('ticket', {resultCard, phoneLine, renderPhoneLine, showTab, refreshTickets, picker, pickerSub, build, renderTasks, taskTools, renderHelpers, renderProof});
 })();

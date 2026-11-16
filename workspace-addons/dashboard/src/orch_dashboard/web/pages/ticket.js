@@ -314,28 +314,35 @@ function cardLinks(t) {
     rows.length > 2 ? h('span', {className:'more'}, '+' + (rows.length - 2)) : null, chips.length ? h('span', {className:'gap'}) : null, chips);
 }
 function liveLinkFor(t) {
-  const a = addons().find(a => a.page && array(state.services).some(s => s.addon === a.name && s.running === true));
+  // the add-on whose page shows a live session (manifest [page] live_session), never just the first add-on with a page
+  const a = addons().find(a => a.page?.live_session === true && array(state.services).some(s => s.addon === a.name && s.running === true));
   if (!a) return null;
   const own = (t.ext || {})[a.name]?.page;
-  return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : a.page.path)};
+  // no page of its own for this ticket: the live-session page opens on this ticket (/t/<ticket>, its Live tab is the default)
+  const id = typeof t.id === 'string' && /^[A-Za-z0-9_.-]+$/.test(t.id) && !t.id.includes('..') ? t.id : '';
+  return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : id ? 't/' + id : a.page.path)};
 }
-// Live session: two commands to copy. Watch cannot type; Take over can (the agent waits while you type).
+// Live session: the main click opens the live screen; the two terminal commands stay behind one small "Copy command".
+// Watch cannot type; Take over can (the agent waits while you type).
 function liveSessionStrip(t) {
   const run = state.runs?.[t.id];
   if (snapshot || !run?.running || run.claim?.mode === 'oneshot') return null;
   const ref = typeof t.key === 'string' && t.key ? t.key : t.id;
+  const liveLink = liveLinkFor(t);
   const copy = (label, command) => {
-    const control = button('', 'outline', async () => {
+    const control = button('', 'menu-item', async () => {
       try { await navigator.clipboard.writeText(command); window.orch.toast('Copied', 'ok'); }
       catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
     });
     control.dataset.key = 'live-copy-' + (command.includes('--watch') ? 'watch' : 'take');
     control.title = command;
-    control.append(iconEl('copy'), label, h('span', {className:'meta'}, 'Copy'));
+    control.append(iconEl('copy'), label);
     return control;
   };
+  const commands = h('details', {className:'menu', 'data-key':'live-commands'}, h('summary', {className:'btn ghost sm'}, 'Copy command'),
+    h('div', {className:'menu-pop', role:'menu'}, copy('Watch (read only)', 'orch run attach ' + ref + ' --watch'), copy('Take over (you can type)', 'orch run attach ' + ref)));
   return h('section', {className:'card live-strip', 'data-key':'live-session'}, h('h2', {}, 'Live session'),
-    copy('Watch (read only)', 'orch run attach ' + ref + ' --watch'), copy('Take over (you can type)', 'orch run attach ' + ref));
+    liveLink ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'live-open'}, 'Watch live') : null, commands);
 }
 function agentBar(t) {
   const liveLink = liveLinkFor(t), run = state.runs?.[t.id], alive = window.DashHelpers.helperAlive(t, run);
@@ -438,8 +445,13 @@ function previewText(t, kind, file, text) {
   return h('pre', {}, text.split('\n').slice(0, 8).join('\n'));
 }
 function ticketPreviewTile(t, file, kind = 'artifacts') {
-  const title = window.DashHelpers.plainFileName(file.name) || 'Result';
+  const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
+  if (!snapshot && /\.pdf$/i.test(file.name)) {  // the browser's own PDF view, from the same-origin file endpoint
+    tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+      h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.')));
+    return tile;
+  }
   const html = /\.html?$/i.test(file.name), picture = /\.(png|jpe?g|webp)$/i.test(file.name);
   if (snapshot || html || (!picture && !PREVIEW_EXT.text.test(file.name))) {
     tile.append(h('p', {className:'meta'}, html ? title : 'Preview available when opened'));
@@ -481,7 +493,9 @@ const evidenceFile = (t, ev) => {
   if ((ev.type || ev.kind) !== 'file' || ev.missing || !ref.startsWith(prefix)) return null;
   const name = ref.slice(prefix.length);  // the server checks again; a path that climbs or is not plain never gets a chip
   if (!name || /[\\\0:]/.test(name) || name.startsWith('/') || name.split('/').some(part => ['', '.', '..'].includes(part))) return null;
-  return Number.isFinite(ev.size) && ev.size >= 0 ? {name, mtime:ev.at, size:ev.size} : {name, mtime:ev.at};
+  const file = Number.isFinite(ev.size) && ev.size >= 0 ? {name, mtime:ev.at, size:ev.size} : {name, mtime:ev.at};
+  if (typeof ev.title === 'string' && ev.title.trim()) file.title = ev.title;  // the title given when the file was attached
+  return file;
 };
 // One file = one entry: lists keep the first item per key; items without a key (notes) all stay.
 const uniqueBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
@@ -525,6 +539,10 @@ function ticketShareButton(t, file) {
 // and the opening control gets the cursor back.
 const fileUrl = (tid, kind, fileName, dl = false) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName) + (dl ? '&dl=1' : '');
 const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) || String(fileName).split('/').pop());
+// The title given when the file was attached; else the file name made readable.
+const oneLineTitle = value => typeof value === 'string' ? clean(value).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+const titleOf = file => oneLineTitle(file.title) || fileTitle(file.name);
+const shortName = file => String(file.name).split('/').pop();
 const fileBadge = fileName => (/\.([^./]+)$/.exec(fileName)?.[1] || 'file').slice(0, 4).toUpperCase();
 const fileMeta = file => [kindWord(file.name), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', file.mtime ? localStamp(file.mtime) : ''].filter(Boolean).join(' · ');
 async function copyFileLink(url) {
@@ -559,7 +577,7 @@ function fileEntry(t, group, file) {
   const role = group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
   const at = file.mtime ? createdText(file.mtime) : '';
   return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, created:at,
-    title:fileTitle(file.name),
+    title:titleOf(file), named:!!oneLineTitle(file.title),
     meta:[viewerWord(kind), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', at, task ? 'Task: ' + task : '', role].filter(Boolean).join(' · ')};
 }
 function createdText(at) {
@@ -575,7 +593,9 @@ function previewFile(tid, kind, fileName) {
     const known = array(artifactData.get(tid)?.data?.files).find(f => f.name === fileName) || {name:fileName};
     files = [fileEntry(t || {id:tid}, {kind}, known)]; index = 0;
   }
-  window.FileViewer.open({files, index, context:t ? clean(t.title || '') : ''});
+  // "Share by link…" only when the sharing add-on is on (no hint otherwise); it opens the same Share a file window for this file.
+  const share = addons().some(a => a.active !== false && isPublish(a.name)) ? f => shareDialog({name:f.name.split('/').pop(), url:window.FileViewer.urlOf(f)}) : null;
+  window.FileViewer.open({files, index, context:t ? clean(t.title || '') : '', share});
 }
 // One compact file row: type badge, name, meta, Open / Download / Copy link.
 function ticketFileActions(t, kind, file) {
@@ -584,19 +604,19 @@ function ticketFileActions(t, kind, file) {
   return h('div', {className:'file-actions'},
     ticketButton('Open', 'ghost sm', () => previewFile(t.id, kind, file.name), {'data-key':'file-open-' + k}),
     h('a', {className:'btn ghost sm', href:fileUrl(t.id, kind, file.name, true), download:file.name.split('/').pop()}, 'Download'),
-    ticketButton('Copy link', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}));
+    ticketButton('Copy local link', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k, title:'Works only on this computer'}));
 }
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
     h('span', {className:'file-type' + (shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), shownThumb(t, kind, file)),
-    h('div', {className:'grow'}, h('p', {className:'file-name'}, fileTitle(file.name)), h('p', {className:'meta'}, fileMeta(file))),
+    h('div', {className:'grow'}, h('p', {className:'file-name'}, titleOf(file)), oneLineTitle(file.title) ? h('p', {className:'meta file-real-name'}, shortName(file)) : null, h('p', {className:'meta'}, fileMeta(file))),
     ticketFileActions(t, kind, file));
 }
 // The result frame: the file heading, then a bounded preview with Expand (the shared viewer).
 // A PDF shows as the PDF and a web page as the page (in a frame that cannot reach this app); other files as a short excerpt.
 function ticketLivePreview(t, file, kind) {
   if (snapshot) return null;
-  const type = viewerKind(file.name), title = fileTitle(file.name);
+  const type = viewerKind(file.name), title = titleOf(file);
   if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
     h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.'));
   if (type === 'page') return h('iframe', {className:'preview-live', sandbox:'allow-scripts', referrerpolicy:'no-referrer', title, loading:'lazy',
@@ -648,7 +668,7 @@ function fileTile(t, f) {
   const open = () => previewFile(t.id, f.kind, f.name);
   const meta = [viewerWord(f.fileKind), Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', f.mtime ? localStamp(f.mtime) : ''].filter(Boolean).join(' · ');
   const link = h('button', {type:'button', className:'file-preview-link', 'aria-label':'Preview ' + f.title + ' · ' + meta, 'data-key':'file-open-' + f.kind + '-' + f.name},
-    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), h('span', {className:'meta'}, meta)));
+    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
   link.onclick = open;
   return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }
@@ -683,6 +703,7 @@ function artifactsPanel(t) {
   return [all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
 function ticketActor(by) {
+  if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(by);
 }
 function ticketTaskOutcome(task) {
@@ -1298,6 +1319,8 @@ function missingTicket(id) {
 // The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [];
+  const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
+  if (quiet) m.sentence = (/^Updated /.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: No news since replaces Updated
   if (!snapshot) {
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'active'), {'data-key':'ticket-reopen'}));
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
@@ -1326,7 +1349,7 @@ function detail(t) {
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const answeredRow = q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
-    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
+    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
   const answered = ticketAnswerNodes(t, answeredRow);
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
   const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
@@ -1371,7 +1394,7 @@ const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', not
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);
-  const shown = field === 'due' ? date(raw) : field === 'owner' ? name(raw) : clean(raw);
+  const shown = field === 'due' ? dueText(t) : field === 'owner' ? name(raw) : clean(raw);
   if (snapshot) return el('span', MULTILINE.includes(field) ? 'ed-ro preserve-lines' : 'ed-ro', shown || (field === 'title' ? '' : FIELD_HINT[field]));
   const host = el('span', 'inline-host');
   host.dataset.key = 'inline-' + field + '-' + t.id;
@@ -1395,7 +1418,7 @@ function startInline(control) {
   const before = field === 'owner' ? name(t.owner) : t[field] == null ? '' : String(t[field]);
   if (field === 'due') {
     locks.add(key);
-    pickDate(control, before, async value => { if (value !== null && value !== before) await saveField(t, 'due', value); locks.delete(key); render(); });
+    pickDate(control, before, async value => { if (value !== null && value !== before) await saveField(t, 'due', value); locks.delete(key); render(); }, true);
     return;
   }
   const input = el(MULTILINE.includes(field) ? 'textarea' : 'input', 'input inline-input');
@@ -1422,13 +1445,17 @@ function startInline(control) {
   input.addEventListener('blur', () => finish(true));
 }
 
-// A small calendar in the orch look instead of the browser's own picker. cb(value) with 'YYYY-MM-DD', '' (clear) or null (closed).
-function pickDate(anchor, current, cb) {
+// A small calendar in the orch look instead of the browser's own picker. cb(value) with 'YYYY-MM-DD' (or 'YYYY-MM-DDTHH:MM' when withTime and a time is set), '' (clear) or null (closed).
+function pickDate(anchor, current, cb, withTime = false) {
   document.querySelectorAll('.cal').forEach(n => n.remove());
   const iso = d => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
   const todayIso = iso(new Date());
   const start = parse(current) || new Date();
   let view = new Date(start.getFullYear(), start.getMonth(), 1), closed = false;
+  const currentDay = String(current || '').slice(0, 10);
+  const timeInput = withTime ? el('input', 'input') : null;
+  if (timeInput) { timeInput.type = 'time'; timeInput.value = String(current || '').slice(11, 16); timeInput.setAttribute('aria-label', 'Time (optional)'); }
+  const withClock = day => day && timeInput && timeInput.value ? day + 'T' + timeInput.value : day;
   const pop = el('div', 'cal');
   pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Choose a day');
   const close = value => {
@@ -1452,14 +1479,16 @@ function pickDate(anchor, current, cb) {
     for (let i = 0; i < lead; i++) grid.append(el('span'));
     for (let n = 1; n <= days; n++) {
       const value = iso(new Date(view.getFullYear(), view.getMonth(), n));
-      const b = el('button', 'cal-x' + (value === todayIso ? ' today' : '') + (value === current ? ' sel' : ''), String(n));
+      const b = el('button', 'cal-x' + (value === todayIso ? ' today' : '') + (value === currentDay ? ' sel' : ''), String(n));
       b.type = 'button'; b.setAttribute('aria-label', value);
-      b.addEventListener('click', () => close(value));
+      b.addEventListener('click', () => close(withClock(value)));
       grid.append(b);
     }
     const foot = el('div', 'cal-f');
-    foot.append(button('Clear', 'ghost sm', () => close('')), button('Today', 'outline sm', () => close(todayIso)));
-    pop.append(head, grid, foot);
+    foot.append(button('Clear', 'ghost sm', () => close('')), button('Today', 'outline sm', () => close(withClock(todayIso))));
+    const clock = timeInput ? el('label', 'row') : null;
+    if (clock) clock.append(el('span', 'meta', 'Time (optional)'), timeInput);
+    pop.append(head, grid, ...(clock ? [clock] : []), foot);
   };
   draw();
   // Inside a dialog the calendar must live in the dialog and in the top layer, or the dialog hides it.
@@ -1661,6 +1690,34 @@ async function fileEmbedIdea(req) {
   } finally { embedIdeaBusy = false; }
 }
 addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });
+
+// Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
+// target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this
+// page's session) and tells the page whether it went out. Same origin and shipped-frame fences as orch.idea.
+const EMBED_ASK_TARGET = /^t_[a-z0-9]{6,16}:s[1-9][0-9]{0,3}:ws_[a-z0-9]{6,32}:(-|[0-9]{1,2}(,[0-9]{1,2}){0,11})$/;
+function embedAskRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.ask') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.target !== 'string' || !EMBED_ASK_TARGET.test(data.target)) return null;
+  return {...shown, id:data.id, target:data.target};
+}
+let embedAskBusy = false;  // one ask at a time: a second click while sending is dropped
+async function fileEmbedAsk(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (embedAskBusy) return;
+  embedAskBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:'ask', target:req.target});
+    const answer = result.ok ? result.state?.act_answer : null;
+    const state = answer && answer.addon === req.addon ? answer.answer?.state : null;
+    if (state === 'delivered' || state === 'queued') reply({type:'orch.ask.done', state});
+    else if (state === 'partial') reply({type:'orch.ask.done', state, said:String(answer.answer?.said || '').slice(0, 300)});
+    else reply({type:'orch.ask.failed', error:result.ok ? 'orch did not confirm that it was sent.' : String(result.text || '').slice(0, 300)});
+  } finally { embedAskBusy = false; }
+}
+addEventListener('message', e => { const req = embedAskRequest(e); if (req) fileEmbedAsk(req); });
 
 // Plan the run / Ask for changes on a Factory draft: the shown shipped add-on page names a ticket of ITS OWN (one that
 // carries that add-on's data) and the words. The dashboard sends them as the person's message with its own proven op

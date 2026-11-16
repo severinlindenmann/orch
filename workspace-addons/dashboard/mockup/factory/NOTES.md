@@ -17,3 +17,6 @@ Decision buttons on the Factory page are one "Answer" button: inside the dashboa
 question card in a dialog (same card and person-proof path as the ticket page; options come from the dashboard's ticket
 data, never from the page). Outside the dashboard it stays a link to the order's ticket. The mockup's in-card Start / Edit /
 Not now buttons stand for that dialog.
+
+## Fix wave b5 (Factory page)
+The Factory page draws its frame and the idea box at once and reads the order list after (skeleton). The draft page opens the newest version by itself, and the draft's open questions are question cards (options, suggestion, one Answer button that opens the dashboard's question card), not a list inside the draft text.

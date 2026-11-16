@@ -17,7 +17,7 @@ function ctx(extra = {}) {
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, t) => h(tag, {className:cls}, t), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:t => h('p', {}, t),
-    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:v => String(v || ''), time:v => kit.UI.stamp(v), ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
+    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:v => String(v || ''), dueText:t => String(t.due || ''), time:v => kit.UI.stamp(v), ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'x'), chip:t => h('span', {}, t), href:id => '#ticket/' + id, MOVE_CHOICES:[], moveTicket(){}, button:label => h('button', {}, label), loadArtifacts(){}, ticketArtifactPreview:() => null, agentBar:() => null,
     surface:v => v, inlineField:(t, f) => h('span', {}, String(t[f] ?? '')), ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false, repeatsAddon:() => null, act:async () => ({ok:true}),
@@ -80,4 +80,12 @@ test('Done: "What the helper did" lists the finished tasks; Properties are compa
   const props = nodes(tree).find(n => n.tag === 'aside' && /properties/.test(n.attrs.className || ''));
   assert.match(text(props), /Finished/);
   assert.doesNotMatch(text(props), /What happens next|Updated/);
+});
+
+test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', () => {
+  const c = ctx({state:{runs:{}}, now:() => new Date('2026-11-14T18:00:00Z')});
+  const tree = c.detail({...base, status:'active', quiet_since:'2026-11-14T10:32:00Z'});
+  const sentence = nodes(tree).find(n => n.attrs?.['data-key'] === 'ticket-sentence');
+  assert.match(text(sentence), /^No news since .+\.$/);
+  assert.doesNotMatch(text(sentence), /Updated/);
 });

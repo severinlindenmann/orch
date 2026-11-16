@@ -63,7 +63,7 @@
     overview.querySelectorAll('[data-copy]').forEach(b=>b.dataset.copy=files[kind]?.path||'');
   };
   const dialog=el('dialog','ticket-file-viewer');dialog.setAttribute('aria-labelledby','ticket-viewer-title');
-  dialog.innerHTML='<header class="ticket-viewer-header"><div><h2 id="ticket-viewer-title"></h2><p class="meta" id="ticket-viewer-meta"></p></div><button class="btn outline sm" data-close-viewer autofocus>× Close <kbd>Esc</kbd></button></header><div class="ticket-viewer-actions"><a class="btn outline sm" data-original target="_blank" rel="noopener">Open in new tab ↗</a><a class="btn ghost sm" data-download download>Download</a><button class="btn ghost sm" data-viewer-copy>Copy link</button><span role="status" data-copy-status></span></div><div class="ticket-viewer-stage"></div>';
+  dialog.innerHTML='<header class="ticket-viewer-header"><div><h2 id="ticket-viewer-title"></h2><p class="meta" id="ticket-viewer-meta"></p></div><button class="btn outline sm" data-close-viewer autofocus>× Close <kbd>Esc</kbd></button></header><div class="ticket-viewer-actions"><a class="btn outline sm" data-original target="_blank" rel="noopener">Open in new tab ↗</a><a class="btn ghost sm" data-download download>Download</a><button class="btn ghost sm" data-viewer-copy title="Works only on this computer">Copy local link</button><span role="status" data-copy-status></span></div><div class="ticket-viewer-stage"></div>';
   document.body.append(dialog);let opener;
   dialog.querySelector('[data-close-viewer]').onclick=()=>dialog.close();
   document.addEventListener('click',async e=>{

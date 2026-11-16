@@ -17,6 +17,7 @@ from test_flow import (
     started,
     waiting_stop,
 )
+from test_handover import directory, handed, set_status  # noqa: F401
 
 from orch_factory import pageapi, runfiles, server, service
 from orch_factory.store import Store
@@ -731,3 +732,144 @@ def test_page_has_no_frame_header_and_an_idea_box_with_the_ask_switch(srv):
     assert "Start with this idea" in js and "Ask me at every stop" in js
     assert "setting-row" in js and "'switch'" in js
     assert "Open Chat" not in js
+
+
+# ---- #816 B: hand-over on the order page --------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("directory")
+def test_handover_proposal_lines_carry_name_minutes_files_and_no_percentage(ws, run, srv):
+    order, _tid = handed(ws, run)
+    _, o, _ = get(srv, f"/api/order/{order}")
+    (line,) = o["handover"]
+    assert line["name"] == "Design" and line["workspace"] == "ws_design0001" and line["minutes"] == 40
+    assert line["title"] == "Header picture for the price list"
+    assert line["files"] == ["brief/header.md", "brief/old-header.png"]
+    assert "%" not in json.dumps(o["handover"])
+
+
+@pytest.mark.usefixtures("directory")
+def test_handover_crew_rows_use_one_plain_word_mapping(ws, run, srv):
+    order, tid = handed(ws, run)
+    _, o, _ = get(srv, f"/api/order/{order}")
+    row = next(c for c in o["crew"] if c["ticket"] == tid)
+    assert row["with"]["words"] == "Goes to Design" and row["with"]["state"] is None
+    run("crew", "start", order, "header-picture")
+    expect = {
+        "waiting_start": "Waiting for Design to start",
+        "waiting_allow": "Waiting for Design to allow",
+        "queued": "Queued at Design",
+        "working": "Working at Design",
+        "review": "Ready for review at Design",
+        "done": "Done",
+        "denied": "Design said no",
+        "failed": "Failed at Design",
+    }
+    for state, words in expect.items():
+        set_status(ws, state)
+        run("next", order)
+        _, o, _ = get(srv, f"/api/order/{order}")
+        row = next(c for c in o["crew"] if c["ticket"] == tid)
+        assert (row["with"]["state"], row["with"]["words"]) == (state, words), state
+    assert row["with"]["since"] and not any(
+        c["with"] for c in o["crew"] if c["ticket"] != tid and "with" in c
+    )
+
+
+# ---- fix wave b5: the page frame first, the newest draft, the draft's questions as cards ----------------------
+
+
+def _page_js():
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
+    js = _page_js()
+    early = js.index("view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea()")
+    assert early < js.index("await read('/api/home', signal)")
+    assert (
+        "view.append(theIdea(), askRow(auto))" in js
+    )  # the same box (and its typed text) stays when the list comes
+
+
+def test_the_newest_draft_opens_without_a_click():
+    js = _page_js()
+    assert "'/draft')" in js and "'/draft/' + order.draft_v" not in js  # "Read draft" always means the newest
+    assert "location.hash = '#/order/' + result.order + '/draft'" in js
+    assert "match[6] || String(newest || 1)" in js
+
+
+def test_draft_questions_are_cards_with_options_and_a_suggestion(ws, run, srv):
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    run("draft", order, "--file", "-", data=b"v2")
+    path = ws / "fake-tickets" / f"{order}.json"
+    t = json.loads(path.read_text())
+    t["questions"] = [
+        {
+            "id": "q1",
+            "text": "Who uses it?",
+            "options": ["Customers", "Staff"],
+            "recommended": "Customers",
+            "answer": None,
+        },
+        {
+            "id": "q2",
+            "text": "Old",
+            "options": [],
+            "recommended": None,
+            "answer": "x",
+            "answered_by": "human:a",
+        },
+        {"id": "q3", "text": "Ship?", "kind": "factory:stop", "options": [], "answer": None},
+    ]
+    path.write_text(json.dumps(t))
+    o = get(srv, f"/api/order/{order}")[1]
+    assert o["questions"] == [
+        {"q": "q1", "text": "Who uses it?", "options": ["Customers", "Staff"], "recommended": "Customers"}
+    ]
+    js = _page_js()
+    assert "...questionCards(order)" in js and "decide(order, 'Answer', true, x.q)" in js
+
+
+def test_results_waiting_for_your_looks_good_are_one_card_on_factory(ws, run, srv):
+    from test_flow import edit
+
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    edit(ws, tid, lambda t: t.update(status="review"))
+    row = _home_row(srv, order)
+    assert row["results"] == [{"ticket": tid, "title": "Booking form"}]
+    js = _page_js()
+    assert (
+        "orders.filter(o => o.open || draftWaiting(o) || results(o).length)" in js
+    )  # not "nothing waits for you"
+    assert "section(primary, 'Results to check'" in js and "resultsCard(o, true)" in js
+
+
+def test_the_next_stage_says_it_is_starting(ws, run, srv):
+    order, _ = started(ws, run)
+    run("next", order)
+    assert _home_row(srv, order)["starting"] is None  # the first stage: nothing was finished yet
+    finish_crew(ws, run, order, "booking-form")
+    q = ask_stop(ws, run, order, "build")
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    run("next", order)
+    row = _home_row(srv, order)
+    assert row["phase"] == "started" and row["stage"] == "ship" and row["starting"] == "ship"
+    assert "'Starting the ' + stageName(order, order.starting) + ' stage…'" in _page_js()
+
+
+def test_no_eta_or_due_line_without_a_time():
+    js = _page_js()
+    assert "...(o.eta ? [meta('ETA ' + when(o.eta))] : [])" in js
+    assert "...(order.due ? [meta('Due ' + when(order.due))] : [])" in js
+
+
+def test_a_missing_picture_says_so_in_plain_words():
+    js = _page_js()
+    assert "'No picture for this one yet.'" in js and "No image supplied" not in js

@@ -20,7 +20,7 @@ import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from orch import addons, agentsdata, humanproof
+from orch import addons, agentsdata, config
 
 ORDER = ["workspace", "admin", "harness"]
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -185,8 +185,8 @@ def harness_servers(root: Path, account_home: Path | None = None) -> dict[str, d
 
 
 def _grants(root: Path, orch_home: Path) -> dict:
-    """conn.allow grants recorded with a proof (the guarded human-settings record), by connection name."""
-    return humanproof.conn_grants(root)
+    """[conn.allow] grants from config.toml, by connection name."""
+    return config.conn_grants(root)
 
 
 def _expand(x, actions: set[str]) -> set[str]:
@@ -209,7 +209,7 @@ def _profile_state(root: Path, orch_home: Path, profile: str | None) -> str:
     wid = addons.workspace_id(root)
     base = orch_home / "keys" / wid if wid else None
     prof = _dig(_read(base / "profiles.toml", "toml"), ["profile", profile]) if base else {}
-    if not prof or not humanproof.profile_verified(root, profile, prof):  # changed outside orch: cannot run
+    if not prof:
         return "missing-key"
     keys = _dig(_read(base / "keys.json"), ["keys"])
     for field in ("env", "files"):

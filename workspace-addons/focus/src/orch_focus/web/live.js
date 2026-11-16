@@ -3,6 +3,8 @@
   'use strict';
   const S = window.FocusStore;
   const {h, TID, toast, els, act, STATUS_WORD, plainNames, keyOf, hhmm, evText} = S;
+  /* the core's "The agent stopped … Continue goes on where it left off" line repeats at every stop: not shown here */
+  const NOISE = /Continue goes on where it left off|^(?:The )?helper started\b|^Updated .+ settings$/i;
 
   // The ticket lines orch writes itself, in the same plain words as the CLI and the dashboard.
   function plainLine(text, checklist) {
@@ -22,18 +24,30 @@
   // agent: only the steps of that agent ('main' or a helper); the ticket's own lines belong to no agent.
   function feedItems(v, agent) {
     const items = [];
-    if (!agent) for (const e of v.ticket.history || []) items.push({at: e.at, icon: /Asked|waiting/.test(e.text) ? 'note' : (/done/.test(e.text) ? 'check' : 'text'), ok: /done/.test(e.text), text: plainLine(String(e.text || ''), v.ticket.checklist), who: e.by, you: /^human:/.test(e.by || '') && e.via !== 'cli'});
+    if (!agent) for (const e of (v.ticket.history || []).filter(e => !NOISE.test(String(e.text || '')))) items.push({at: e.at, icon: /Asked|waiting/.test(e.text) ? 'note' : (/done/.test(e.text) ? 'check' : 'text'), ok: /done/.test(e.text), text: plainLine(String(e.text || ''), v.ticket.checklist), who: e.by, you: /^human:/.test(e.by || '') && e.via !== 'cli'});
     for (const e of v.events) {
       if (agent && (e.agent || 'main') !== agent) continue;
       const used = (e.data && e.data.used) || null, by = e.agent || 'main';
       const unchecked = e.data && e.data.source === 'hook' ? (e.data.before ? 'before' : 'agent') : null;
-      if (e.kind === 'tool.start') items.push({at: e.at, icon: 'text', text: plainNames(e.text), used, agent: by, unchecked});
+      const at = e.data && e.data.id ? items.find(i => i.id === e.data.id && i.agent === by) : null;
+      if (e.kind === 'tool.start') items.push({at: e.at, icon: 'text', text: plainNames(e.text), used, agent: by, unchecked, id: e.data && e.data.id, command: typeof (e.data && e.data.command) === 'string' && e.data.command ? e.data.command : null});
+      else if (e.kind === 'tool.end' && at && at.unchecked === unchecked && (at.command || e.data.command) && (e.data.command || e.data.output || e.data.ok === false)) { at.command = at.command || e.data.command; at.ok = e.data.ok !== false; at.out = e.data.output || ''; at.ms = e.data.ms; at.endAt = e.at; at.fail = at.ok ? '' : e.text; }  // a command's end joins its block
       else if (e.kind === 'tool.end') items.push({at: e.at, icon: e.data.ok === false ? 'x' : 'check', ok: e.data.ok !== false, text: e.text, used, agent: by, unchecked});
       else if (e.kind === 'helper.start') items.push({at: e.at, icon: 'user', text: 'Helper: ' + e.text, agent: by});
       else if (e.kind === 'helper.end') items.push({at: e.at, icon: 'check', ok: true, text: 'Helper done: ' + e.text, agent: by});
     }
     items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-    return items.slice(-80);
+    return foldRetries(items).slice(-80);
+  }
+  /* A failed command followed by the same command that worked is one step: "Fixed on the second try". The failed try sits inside the fold. */
+  function foldRetries(items) {
+    const out = [];
+    for (const it of items) {
+      const k = out.findIndex(p => p.command && p.ok === false && p.agent === it.agent && p.unchecked === it.unchecked && it.command && it.ok !== false && (p.command === it.command || p.text === it.text));
+      if (k >= 0) { it.tries = [...(out[k].tries || []), out[k]]; out.splice(k, 1); }
+      out.push(it);
+    }
+    return out;
   }
   /* Where each task's work sits in the output: the task.start / task.done events carry the task's id (check). */
   function taskRuns(v) {
@@ -97,6 +111,61 @@
     return nodes;
   }
 
+
+  /* ---- a command step as a block (master cmd-block) and "Find in the log" (master log-find) ---- */
+  const took = ms => (typeof ms === 'number' ? (ms < 1000 ? '<1 s' : ms < 60000 ? Math.round(ms / 1000) + ' s' : Math.round(ms / 60000) + ' min') : '');
+  async function copy(text) {
+    const ok = window.UI && window.UI.copyText ? await window.UI.copyText(text) : false;
+    if (ok) toast('Copied', 'ok'); else toast('Could not copy. Select the text and press Ctrl+C.', 'error');
+  }
+  const copyBtn = (label, text) => h('button', {class: 'btn ghost xs', type: 'button', text: label, onclick: e => { e.preventDefault(); e.stopPropagation(); copy(text); }});
+  function cmdBlock(it) {
+    const parts = [], failed = it.ok === false;
+    const part = (tag, attrs, raw) => { const el = h(tag, attrs, h('span', {text: raw})); parts.push({el: el.firstChild, raw}); return el; };
+    const cmd = (c, o) => [h('div', {class: 'cmd-block-cmd'}, part('code', {}, c), copyBtn('Copy', c)), o ? part('pre', {class: 'cmd-block-out'}, o) : null];
+    const tries = it.tries || [];
+    const kids = [h('summary', {},
+      h('span', {class: 'grow'}, h('span', {text: it.text}), uncheckedMark(it.unchecked)), h('time', {datetime: it.at, text: hhmm(it.at)}), it.ms != null ? h('span', {class: 'took', text: took(it.ms)}) : null, h('span', {class: 'chev', icon: 'chevron-down'}))];
+    parts.push({el: kids[0].querySelector('.grow span'), raw: it.text});
+    for (const t of tries) kids.push(h('p', {class: 'meta cmd-block-foot'}, h('span', {class: 'grow', text: 'First try did not work.'})), ...cmd(t.command, t.out));
+    kids.push(...cmd(it.command, it.out));
+    if (tries.length) kids.push(h('div', {class: 'cmd-block-foot'}, h('span', {class: 'grow', text: 'Fixed on the second try.'}), it.out ? copyBtn('Copy output', it.out) : null));
+    else if (it.out) kids.push(h('div', {class: 'cmd-block-foot'}, h('span', {class: 'grow', text: failed ? 'It did not work. The last lines are above.' : ''}), copyBtn('Copy output', it.out)));
+    const key = it.id || it.at;
+    const node = h('details', {class: 'cmd-block' + (failed ? ' failed' : '')}, ...kids);
+    if (S.state.openBlocks && S.state.openBlocks.has(key)) node.open = true;
+    node.addEventListener('toggle', () => { if (node.dataset.auto) return; (S.state.openBlocks = S.state.openBlocks || new Set())[node.open ? 'add' : 'delete'](key); });
+    return {node, parts, block: true};
+  }
+  function marked(el, raw, q) {
+    if (!q) { el.textContent = raw; return 0; }
+    const low = raw.toLowerCase(), kids = []; let i = 0, n = 0, at;
+    while ((at = low.indexOf(q, i)) >= 0) { kids.push(raw.slice(i, at), h('mark', {text: raw.slice(at, at + q.length)})); i = at + q.length; n++; }
+    kids.push(raw.slice(i));
+    el.replaceChildren(...kids.filter(k => k !== ''));
+    return n;
+  }
+  function logFind(rows) {
+    const input = h('input', {class: 'input', type: 'search', placeholder: 'Find in the log', 'aria-label': 'Find in the log'});
+    const count = h('span', {class: 'meta', 'aria-live': 'polite'});
+    const run = () => {
+      const q = input.value.trim().toLowerCase(); S.state.logQuery = input.value; let total = 0;
+      for (const r of rows) {
+        let n = 0;
+        for (const p of r.parts) n += marked(p.el, p.raw, q);
+        total += n;
+        r.node.classList.toggle('dim', !!q && !n);
+        if (r.block && q && n) { r.node.dataset.auto = '1'; r.node.open = true; setTimeout(() => delete r.node.dataset.auto, 0); }
+      }
+      count.textContent = q ? (total ? total + (total === 1 ? ' match' : ' matches') : 'No match') : rows.length + (rows.length === 1 ? ' step' : ' steps');
+    };
+    input.addEventListener('input', run);
+    input.addEventListener('keydown', e => { if (e.key === 'Escape' && input.value) { e.stopPropagation(); input.value = ''; run(); } });
+    input.value = S.state.logQuery || '';
+    run();
+    return {node: h('div', {class: 'log-find'}, input, count)};
+  }
+
   function renderFeed(v) {
     const key = keyOf([v.record_notes, v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.ticket.status, v.ticket.questions, v.board.step, v.events, v.ticket.history, S.state.agentFilter || null, S.state.agentFilter ? [v.board.helper_tree, v.board.agent_now] : null]);
     if (key === S.state.lastFeedKey) return;
@@ -118,7 +187,7 @@
     }
     const story = checks.filter(c => !c.wont_do && (c.done || c.state === 'doing'));
     const st = window.FocusHelpers.sessionState(v), active = st.active;
-    const nodes = [h('h2', {text: st.headline}), ...recordNotes(v)];
+    const nodes = [st.headline ? h('h2', {text: st.headline}) : null, ...recordNotes(v)].filter(Boolean);
     if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
     let now = null;
     const perTask = stepsByTask(v), runs = taskRuns(v);
@@ -139,7 +208,16 @@
     if (!v.run.running && !asking && v.state !== 'done' && v.ticket.status !== 'review' && !v.ticket.started && !v.run.run) nodes.push(h('button', {class: 'btn primary', 'data-act': 'stop', text: 'Start ' + els.agent.textContent}));
     /* Details: the full history, the ticket's own lines included */
     const details = h('section', {class: 'fx-history'}, h('h3', {text: 'Earlier steps'}));  // plain, a quiet section at the bottom
-    for (const it of feedItems(v, null)) details.append(h('div', {class: 'fx-step'}, h('time', {text: hhmm(it.at)}), h('span', {icon: it.icon}), h('span', {class: 'fx-step-t'}, h('span', {text: it.text}), usedChip(it.used), uncheckedMark(it.unchecked))));
+    const rows = [];
+    for (const it of feedItems(v, null)) {
+      if (it.command) { const b = cmdBlock(it); details.append(b.node); rows.push(b); continue; }
+      const t = h('span', {text: it.text});
+      const node = h('div', {class: 'fx-step'}, h('time', {text: hhmm(it.at)}), h('span', {icon: it.icon}), h('span', {class: 'fx-step-t'}, t, usedChip(it.used), uncheckedMark(it.unchecked)));
+      rows.push({node, parts: [{el: t, raw: it.text}]});
+      details.append(node);
+    }
+    const find = logFind(rows);
+    if (rows.length) details.insertBefore(find.node, details.children[1] || null);
     nodes.push(details);
     keepFocus(els.feed, () => els.feed.replaceChildren(...nodes));
   }
@@ -152,11 +230,32 @@
     if (at >= 0) pick()[at]?.focus();
   }
 
+  /* A question answered on the phone while its card is open: with nothing typed the card closes into "Answered on
+     your phone 12:34: <answer>"; with typed text the card stays, the words are kept, and the line says what was
+     answered and offers Change (the words go to the message box as a correction). Anything else just goes. */
+  const phoneClosed = new Set();
+  function closedElsewhere(card, q) {
+    if (!q || q.answer == null || q.via !== 'phone') { card.node.remove(); return; }
+    const typed = (card.node.querySelector('textarea') || {}).value || '';
+    const line = h('p', {class: 'handoff answered', role: 'status'});
+    phoneClosed.add(card.node);
+    const done = () => { phoneClosed.delete(card.node); card.node.remove(); els.next.hidden = !phoneClosed.size && !S.state.view.ticket.questions.some(x => x.answer == null); };
+    if (typed.trim()) {
+      line.append('Answered on your phone: ' + String(q.answer).slice(0, 200) + ' · ');
+      line.append(h('button', {class: 'btn ghost sm', type: 'button', text: 'Change', onclick: () => { els.msg.value = typed; els.msg.focus(); done(); }}));
+      card.node.append(line);
+    } else {
+      line.textContent = 'Answered on your phone ' + hhmm(q.answered_at || q.at) + ': ' + String(q.answer).slice(0, 200);
+      card.node.replaceChildren(line);
+      setTimeout(done, 60000);
+    }
+  }
+
   function renderQuestions(v) {
     const open = v.ticket.questions.filter(q => q.answer == null);
     if (S.state.prevQuestionLabel !== v.run.label) { for (const card of S.state.shownQs.values()) card.node.remove(); S.state.shownQs.clear(); S.state.prevQuestionLabel = v.run.label; }
     const ids = new Set(open.map(q => q.id));
-    for (const [id, card] of S.state.shownQs) if (!ids.has(id)) { card.node.remove(); S.state.shownQs.delete(id); }
+    for (const [id, card] of S.state.shownQs) if (!ids.has(id)) { closedElsewhere(card, v.ticket.questions.find(x => x.id === id)); S.state.shownQs.delete(id); }
     for (const q of open) {
       // m1-api question fields: sent_to_phone or delivered, strict booleans only.
       const delivered = q.sent_to_phone === true;
@@ -193,7 +292,7 @@
     return items;
   }
   function renderWith(v) {
-    const msgs = (v.ticket.history || []).filter(e => e.text && !/^(Created|Added check|Check c\d+ done|Marked c\d+|Asked q|Set ext\.|Patched status|Status )/.test(String(e.text)));
+    const msgs = (v.ticket.history || []).filter(e => e.text && !NOISE.test(String(e.text)) && !/^(Created|Added check|Check c\d+ done|Marked c\d+|Asked q|Set ext\.|Patched status|Status )/.test(String(e.text)));
     const key = keyOf(msgs);
     if (key === els.withList.dataset.k) return;
     els.withList.dataset.k = key;
@@ -203,11 +302,8 @@
   }
   function renderNext(v) {
     const open = v.ticket.questions.filter(q => q.answer == null);
-    els.next.hidden = !open.length;
-    els.qCount.textContent = open.length === 1 ? '1 open question' : open.length + ' open questions';
-    const phone = !!(v.capabilities && v.capabilities.phone_mode && v.phone_mode);
-    els.phoneBtn.hidden = !open.length || !phone;
-    if (els.phoneBtn.hidden) els.phoneNote.hidden = true;
+    els.next.hidden = !open.length && !phoneClosed.size;
+    els.qCount.textContent = !open.length ? '' : open.length === 1 ? '1 open question' : open.length + ' open questions';
   }
   const scroller = () => els.paneLive;
   const atBottom = () => { const p = scroller(); return p.scrollHeight - p.scrollTop - p.clientHeight < 48; };
@@ -240,7 +336,7 @@
     const u = v.board.usage, d = v.board.denials;
     const lines = [];
     if (u) lines.push(h('p', {class: 'fx-line ' + (u.status === 'limited' ? 'bad' : 'warn'), text: u.text}));
-    if (v.attention) lines.push(h('p', {class: 'fx-line warn'}, (v.why || 'Waiting for your OK in the live session.') + ' ', h('button', {class: 'btn ghost xs', 'data-act': 'attach', text: 'Open live session'})));
+    if (v.attention) lines.push(h('p', {class: 'fx-line warn'}, (v.why || 'Waiting for your OK on the helper’s screen.') + ' ', h('button', {class: 'btn ghost xs', 'data-act': 'attach', text: 'Show it in a terminal'})));
     if (v.retry_error) lines.push(h('p', {class: 'fx-line bad', text: 'Could not run it again: ' + v.retry_error}));
     if (d.length) lines.push(h('p', {class: 'fx-line warn', text: d[d.length - 1].text + '. It waits for your OK.'}));
     els.line.replaceChildren(...lines);
