@@ -406,7 +406,7 @@
     const usd = head.map(x => /^target \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
     const owner = head.map(x => /^you're needed for ~(.+)$/.exec(x)?.[1]).find(Boolean);
     const meta = ['Runs about ' + head[0], owner ? 'needs you for about ' + owner : '', usd ? 'about $' + usd : '', cap ? 'up to ' + cap + ' of helper time' : ''];
-    return {title: m[1], goal: m[3], meta: meta.filter(Boolean).join(' · ')};
+    return {title: m[1], goal: /[.!?…]$/.test(m[3]) ? m[3] : m[3] + '.', meta: meta.filter(Boolean).join(' · ')};
   }
   /* Its buttons as drawn (owner, 16 Nov): Not now, Change it, Start, Start last; each sends Factory's own option word. */
   const FACTORY_START_ORDER = ['Not now', 'Edit', 'Start'], FACTORY_START_LABEL = {Edit: 'Change it'};

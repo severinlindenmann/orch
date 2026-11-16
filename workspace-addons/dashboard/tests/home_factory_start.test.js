@@ -40,7 +40,7 @@ const factoryQ = {id:'q1', kind:'factory:start', text:TEXT, options:['Start', 'E
 
 test('the proposal text reads as title, goal and one line of time and cost', () => {
   assert.deepEqual(helpers.factoryStart(TEXT), {title:'Services: see and manage background jobs',
-    goal:"See the workspace's background jobs in the dashboard and start, stop or restart each with one click",
+    goal:"See the workspace's background jobs in the dashboard and start, stop or restart each with one click.",
     meta:'Runs about 10 h · needs you for about 15 min · about $4 · up to 13 h of helper time'});
   assert.equal(helpers.factoryStart('Which supplier?'), null);
   assert.equal(helpers.factoryStart(''), null);
