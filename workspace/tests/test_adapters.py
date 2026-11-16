@@ -47,9 +47,10 @@ def test_argv_rule_checker_finds_bad_templates():
 RUN_CMDS = (
     "check", "ask", "log", "ref", "needs", "wait", "ticket show", "ticket list", "ticket tree", "ticket new",
     "ticket summary", "ticket outcome", "ticket status", "ticket artifacts", "ticket artifacts-dir",
-    "ticket wait", "ticket set", "ticket plan", "run done", "run input", "run status",
+    "ticket wait", "ticket set", "ticket plan", "ticket model", "run done", "run input", "run status",
 )  # fmt: skip
 # `ticket plan` writes only the ticket's goal / not-included text: no exec, no config, no network
+# `ticket model` lets a helper only move its ticket up to Opus (a person's choice is refused for an agent)
 # the agent may run the orch commands a run needs (tasks, questions, summary), nothing else
 # (ticket outcome writes only three short ticket texts: no exec, no config, no add-on or run control)
 ORCH_OK = ["--allowedTools", ",".join(f"Bash(orch {c}:*)" for c in RUN_CMDS)]

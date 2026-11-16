@@ -1664,24 +1664,71 @@ def pick_model(root: Path, tid: str, by: str) -> str:
 
     out: dict = {}
 
-    def op(ticket):
+    def keep(ticket) -> str | None:
+        """The model that stays as it is: a person's choice, or Opus once a helper ran on it (never down by
+        itself: a ticket picked or moved up to Opus does not drop to Sonnet in the middle of its work)."""
         cur = modelpick.chosen(ticket)
-        if cur and modelpick.by_person(ticket):
-            out["name"] = cur["name"]
+        if not cur:
+            return None
+        if modelpick.by_person(ticket) or cur["name"] == modelpick.pick(ticket)[0]:
+            return cur["name"]
+        if cur["name"] == "opus" and (cur.get("up") or ticket.get("sessions")):
+            return "opus"
+        return None
+
+    def op(ticket):
+        kept = keep(ticket)
+        if kept:
+            out["name"] = kept
             return
         name, why = modelpick.pick(ticket)
         out["name"] = name
-        if cur and cur["name"] == name:
-            return
         ticket["model"] = {"name": name, "by": modelpick.BY_ORCH, "why": why[:200]}
         add_history(ticket, by, f"Model picked: {modelpick.LABELS[name]} ({why[:200]})")
 
-    t = load(root, tid)
-    cur = modelpick.chosen(t)
-    if cur and (modelpick.by_person(t) or cur["name"] == modelpick.pick(t)[0]):
-        return cur["name"]  # nothing to write
+    kept = keep(load(root, tid))
+    if kept:
+        return kept  # nothing to write
     apply_op(root, tid, op, by=by)
     return out["name"]
+
+
+def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
+    """Move a ticket orch put on Sonnet up to Opus (the helper when its plan shows design, security or
+    several parts; orch after two failed checks on one step). One history line says why. A person's choice
+    is never changed. Returns (ticket, moved): moved False when it already runs on Opus."""
+    from orch import modelpick
+
+    why = " ".join(clean_untrusted(why or "", 200).split())
+    if len(why) < 3:
+        raise Refused('Say why in a few words, e.g. --why "the plan needs a new design".')
+    out = {"moved": False}
+
+    def op(ticket):
+        cur = modelpick.chosen(ticket)
+        if cur and modelpick.by_person(ticket):
+            if cur["name"] == "opus":
+                return
+            raise Refused(
+                f"A person chose {modelpick.LABELS[cur['name']]} for this ticket. Ask instead: "
+                f'orch ask {tid} "Move this ticket up to Opus? {why[:80]}" --option yes --option no'
+            )
+        if cur and cur["name"] == "opus":
+            return
+        ticket["model"] = {
+            "name": "opus",
+            "by": modelpick.BY_ORCH,
+            "why": why,
+            "up": {"from": (cur or {}).get("name") or "sonnet", "at": now(), "by": by[:100]},
+        }
+        add_history(ticket, by, f"{modelpick.UP_PREFIX}: {why}")
+        out["moved"] = True
+
+    t = load(root, tid)
+    if (modelpick.chosen(t) or {}).get("name") == "opus":
+        return t, False  # already on Opus: nothing to write
+    t = apply_op(root, tid, op, by=by)[0]
+    return t, out["moved"]
 
 
 def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
@@ -2058,7 +2105,34 @@ def check_record(
         )
         return item
 
-    return apply_op(root, tid, op, by=by)
+    t, item = apply_op(root, tid, op, by=by)
+    if exit_code and _failed_twice(item):
+        _up_after_failures(root, tid, item)
+    return t, item
+
+
+def _failed_twice(item: dict) -> bool:
+    """The step's last two recorded check runs both failed (a non-zero exit)."""
+    runs_ = [e for e in item.get("evidence") or [] if e.get("type") == "command" and "exit" in e]
+    return len(runs_) >= 2 and all(e.get("exit") not in (0, None) for e in runs_[-2:])
+
+
+def _up_after_failures(root: Path, tid: str, item: dict) -> None:
+    """Two failed checks on one step: a ticket orch put on Sonnet moves up to Opus by itself. Never fails
+    the record (a person's choice stays; a live session switches at its next turn end)."""
+    from orch import modelpick, runs_live
+
+    t = load(root, tid)
+    cur = modelpick.chosen(t)
+    if not cur or cur["name"] != "sonnet" or modelpick.by_person(t):
+        return
+    step = " ".join(str(item.get("text") or "").split())[:80]
+    why = f'two checks failed on the step "{step}"' if step else "two checks failed on one step"
+    with contextlib.suppress(Refused):
+        t, moved = move_up(root, tid, why, "orch")
+        if moved:
+            with contextlib.suppress(Exception):
+                runs_live.switch_model(root, tid, "opus", "orch")
 
 
 def check_exists(root: Path, tid: str, cid: str) -> None:

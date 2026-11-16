@@ -17,6 +17,7 @@ from pathlib import Path
 from . import actions
 from .checkup import build_checkup, build_show
 from .lists import KINDS, build_list
+from .models import build_models
 from .overview import build_overview
 from .settings import build_settings
 
@@ -173,6 +174,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"pid": os.getpid(), "mac": mac})
         if path == "/api/overview":
             return self._json(build_overview(read_counts(self.root, self.orch_bin)))
+        if path == "/api/models":
+            return self._json(build_models(self._read("usage", "--days", "30", "--json")))
         if path.startswith("/api/list/") and path[10:] in KINDS:
             return self._json(build_list(read_counts(self.root, self.orch_bin), path[10:]))
         if path == "/api/checkup":

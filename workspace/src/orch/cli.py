@@ -328,7 +328,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -420,6 +420,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x = sub.add_parser("work-check", parents=[common], help="say so when files changed without a ticket")
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
+    x = sub.add_parser("usage", parents=[common], help="tokens per model and per ticket (read-only)")
+    x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
@@ -518,10 +520,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--done-when", dest="done_when")
     x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
     x = t.add_parser(
-        "model", parents=[common], help="which model this ticket's helper runs on: sonnet, opus or auto"
+        "model",
+        parents=[common],
+        help="the model of this ticket's helper: sonnet, opus or auto (a person); up --why (the helper)",
     )
     x.add_argument("id")
-    x.add_argument("name", choices=("sonnet", "opus", "auto"))
+    x.add_argument("name", choices=("sonnet", "opus", "auto", "up"))
+    x.add_argument("--why", help="with up: why the work needs Opus, in a few plain words")
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
     x.add_argument("--goal", required=True)
@@ -879,6 +884,11 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "work-check":
         workcheck.run(root, args.json)
+    elif cmd == "usage":
+        from orch import usage
+
+        data = usage.workspace_usage(root, max(args.days, 1))
+        _out(args, data, usage.text(data))
     elif cmd == "update":
         if not args.project_only:  # first: with another ORCH_HOME there is nothing to update
             addons.tool_env_change_ok()
@@ -1024,9 +1034,35 @@ def run(args: argparse.Namespace) -> None:
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
         t = tickets.tidy(root, args.id, args.title, by(), fields, args.description)
         _out(args, t, f'Tidied: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "model" and args.name == "up":
+        from orch import runs_live as _live
+
+        tid = tickets.resolve(root, args.id)
+        mine = os.environ.get("ORCH_TICKET")
+        helper = os.environ.get("ORCH_RUN") or tickets.agent_tool()
+        if helper and mine and tickets.resolve(root, mine) != tid:
+            raise Refused(
+                f"This run works on {mine}, not on {args.id}: a helper moves up only its own ticket."
+            )
+        t, moved = tickets.move_up(root, tid, args.why or "", by())
+        live = _live.switch_model(root, t["id"], "opus", by()) if moved else False
+        _out(
+            args,
+            t,
+            "It already runs on Opus."
+            if not moved
+            else "Moved up to Opus. "
+            + (
+                "Finish this reply now: orch switches this conversation to Opus and you go on from there."
+                if live
+                else "The next start runs on Opus."
+            ),
+        )
     elif cmd == "ticket" and sub == "model":
         from orch import modelpick
 
+        if args.why:
+            raise Refused("--why goes with up only.")
         t = tickets.set_model(root, args.id, args.name, by())
         _out(
             args,
