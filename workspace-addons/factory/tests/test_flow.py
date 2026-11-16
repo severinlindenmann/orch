@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 
 import pytest
@@ -1040,3 +1041,17 @@ def test_stop_item_preview_address(ws, run):
         assert refused["code"] == "invalid", bad
     ok = {**base, "preview": "http://127.0.0.1:5173/"}
     assert run("stop", order, "--file", "-", data=stop_file("build", ok))["question"]
+
+
+def test_start_text_keeps_the_shape_the_home_card_reads():
+    """Dashboard Home shows a Factory start question as title, goal, time and cap (ORCH-60) by reading this text
+    (DashHelpers.factoryStart in dashboard/web/helpers.js uses these same patterns): keep both in step."""
+    from orch_factory import render
+
+    p = json.loads((CONTRACTS / "examples/factory-proposal/valid-run.json").read_text())
+    text = render.start_text(p, 1)
+    m = re.match(r"^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: ", text, re.S)
+    assert m, text[:200]
+    assert m.group(1) == render.clean(p["title"])
+    assert m.group(3) == render.clean(p["goal"]).rstrip(". ")
+    assert re.search(r"\. Cap: (.+?) active\. ", text)

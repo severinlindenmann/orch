@@ -881,7 +881,7 @@ function pageStopped(r) {
 function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
-  const src = '/addon/' + r.id + '/' + r.path;
+  const src = '/addon/' + r.id + '/' + r.path + (r.inner ? '#' + r.inner : '');
   const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };

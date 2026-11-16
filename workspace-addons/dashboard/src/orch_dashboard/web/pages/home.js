@@ -36,8 +36,9 @@ function needRow(row, newest, questionCount = 1, same = []) {
   if (needActs(row).length) return needActionsRow(row, key);
   if (!row.ticket && array(row.answer?.options).length) return needNoticeRow(row, key);
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row);
-  const options = array(row.answer?.options);
+  const options = array(row.answer?.options), factory = factoryStartOf(row);
   let actions = null, other = null;
+  if (factory && (snapshot || !options.length)) return factoryStartRow(row, key, t, factory, []);
   if (!snapshot && options.length) {
     // The card leaves at once (master row-out), the badge counts down, the toast offers Undo; the answer is sent
     // when the Undo window ends. Reloading inside the window sends nothing and the question is back.
@@ -71,6 +72,11 @@ function needRow(row, newest, questionCount = 1, same = []) {
         undone = true; clearTimeout(timer); rows.forEach(r => pendingAnswers.delete(r.id)); render();
       });
     };
+    if (factory) return factoryStartRow(row, key, t, factory, window.DashHelpers.factoryStartOptions(options).map(o => {
+      const control = h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-option-' + o.answer}, o.label);
+      control.onclick = event => answer(o.answer, event);
+      return control;
+    }));
     actions = h('div', {className:'answer-options'}, options.map(option => {
       const suggested = option === row.answer.recommended;
       const control = h('button', {type:'button', className:'answer-option' + (suggested ? ' suggested' : ''), 'data-key':key + '-option-' + option},
@@ -94,6 +100,27 @@ function needRow(row, newest, questionCount = 1, same = []) {
     same.length ? h('p', {className:'meta', 'data-key':key + '-same'}, 'Asked on ' + (same.length + 1) + ' tickets – answer once') : null,
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null,
     actions, other, t ? parentLine(t) : null);
+}
+// A Factory start question (ORCH-60, as drawn and accepted on 16 Nov): the whole proposal is hundreds of words, so
+// Home shows its title, goal and time and links to the proposal on the Factory page; the buttons are equal, Start last.
+function factoryStartOf(row) {
+  const q = array(ticketOf(row.ticket)?.questions).find(x => x.id === row.answer?.question);
+  return q && q.kind === 'factory:start' ? window.DashHelpers.factoryStart(q.text) : null;
+}
+function factoryProposalHref(t) {
+  const page = typeof addons === 'function' && addons().some(a => a.name === 'factory' && a.page);
+  return page && /^t_[a-z0-9]{6,16}$/.test(t.id) ? '#addon/factory/#/order/' + t.id + '/proposal' : href(t.id);
+}
+function factoryStartRow(row, key, t, p, buttons) {
+  const when = typeof age === 'function' ? age(row.since) : '';
+  return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-factory-start':''},
+    h('p', {className:'meta'}, 'Factory proposal', typeof t.key === 'string' ? [' · ', h('span', {className:'key'}, t.key)] : null),
+    h('h2', {className:'question-title'}, 'Start “' + clean(p.title) + '”?'),
+    h('p', {className:'muted'}, clean(p.goal)),
+    h('p', {className:'meta'}, p.meta),
+    h('p', {className:'meta question-context'}, whoAsked(t) + ' asked' + (when ? ' ' + when : '') + ' · ',
+      h('a', {href:factoryProposalHref(t), 'data-key':key + '-proposal'}, 'Read the whole proposal')),
+    buttons.length ? h('div', {className:'actions'}, buttons) : null);
 }
 // A row that offers choices but belongs to no ticket cannot be answered as a ticket question (the answer needs a
 // ticket). It shows as a plain notice and can always be put off for the day.
@@ -307,6 +334,10 @@ function needListRow(row, count, same) {
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row), key = 'need-' + row.id;
   const source = !t && row.source ? addonName(row.source) : '', when = typeof age === 'function' ? age(row.since) : '';
   const meta = [t ? clean(t.title) : source, count > 1 ? count + ' questions' : '', same.length ? 'Asked on ' + (same.length + 1) + ' tickets' : '', when].filter(Boolean).join(' · ');
+  // a Factory start question below the first one opens the proposal, never the whole text with Start in a dialog
+  const factory = t && factoryStartOf(row);
+  if (factory) return listRow(key, 'Start “' + clean(factory.title) + '”?', [factory.meta, when].filter(Boolean).join(' · '),
+    h('a', {className:'btn outline sm', href:factoryProposalHref(t), 'data-key':key + '-proposal'}, 'Read proposal'), {'data-need-row':row.id});
   const action = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id, 'data-key':key + '-answer'}, choice.label);
   const question = shortQuestion(needQuestion(row)), title = source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper');
   return listRow(key, clean(title), meta, action, {'data-need-row':row.id});
