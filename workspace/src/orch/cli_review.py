@@ -157,6 +157,12 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
                 "--merge goes with --link and --open <GitHub pull request address>, "
                 "e.g. --open https://github.com/owner/repo/pull/12."
             )
+        head = args.merge_head = ghmerge.head_of(args.open)  # the click merges exactly this commit
+        card["preview"] = {
+            "type": "doc",
+            "heading": "Pull request",
+            "paras": [args.open, f"Commit {head[:7]}"],
+        }
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
         card.setdefault("why", "Your click merges it on GitHub with your own GitHub login.")
     if args.suggest is not None and args.suggest not in options:
@@ -174,7 +180,9 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         raise Refused("A card needs --then: what happens after the answer.")
     card, options, suggest, _title = _guard(build_card, root, args)
     card, shown = _guard(review.prepare_card, root, tid, card)
-    action = json.dumps({"merge": args.open}) if getattr(args, "merge", False) else None
+    action = None
+    if getattr(args, "merge", False):
+        action = json.dumps({"merge": args.open, "head": args.merge_head})
     return _guard(
         tickets.ask,
         root,

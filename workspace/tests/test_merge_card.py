@@ -3,6 +3,7 @@ paired phone, all through review.decide) merges the pull request with the person
 token variables are dropped, and only a person's click merges. A refused merge saves no answer."""
 
 import json
+import os
 import subprocess
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from orch import ghmerge, review, tickets
 
 PR = "https://github.com/acme/app/pull/12"
+HEAD = "a" * 40
 ME = "human:pat"
 
 
@@ -17,21 +19,22 @@ class FakeGh:
     """Stands in for the gh command line: records every call and the token variables it was given."""
 
     def __init__(self, state="OPEN", merge_rc=0, merge_err="", login="pat-gh", user_rc=0):
-        self.calls, self.envs, self.review = [], [], ""
+        self.calls, self.envs, self.review, self.head = [], [], "", HEAD
         self.state, self.merge_rc, self.merge_err = state, merge_rc, merge_err
         self.login, self.user_rc = login, user_rc
 
     def __call__(self, argv, env=None, **kw):
         args = argv[1:]
         self.calls.append(args)
+        env = os.environ if env is None else env  # no env= given: the process environment
         self.envs.append({k: env[k] for k in ghmerge.TOKEN_VARS if k in env})
         if args[:2] == ["api", "user"]:
             return subprocess.CompletedProcess(argv, self.user_rc, self.login + "\n", "")
         if args[:2] == ["pr", "view"]:
-            return subprocess.CompletedProcess(argv, 0, f"{self.state} {self.review}\n", "")
-        if args[:2] == ["pr", "review"]:
+            return subprocess.CompletedProcess(argv, 0, f"{self.state}\t{self.review}\t{self.head}\n", "")
+        if args[:3] == ["api", "-X", "POST"]:
             self.review = "APPROVED"
-            return subprocess.CompletedProcess(argv, 0, "", "")
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
         if args[:2] == ["pr", "merge"]:
             if self.merge_rc == 0:
                 self.state = "MERGED"
@@ -50,17 +53,25 @@ def gh(monkeypatch):
     monkeypatch.setattr(ghmerge.subprocess, "run", fake)
     monkeypatch.setenv("GH_TOKEN", "helper-token-value")
     monkeypatch.setenv("GITHUB_TOKEN", "helper-token-value")
+    FakeGh.current = fake
     return fake
 
 
 @pytest.fixture
-def tk(proj, run):
+def tk(proj, run, gh):
     code, out, _ = run("ticket", "new", "Release 27", "--json", "--by", "agent:x")
     assert code == 0
     return proj, json.loads(out)["id"]
 
 
 def _ask(run, tid, *extra):
+    got = _ask_only(run, tid, *extra)
+    FakeGh.current.calls.clear()  # reading the pull request when the card is made is not the merge
+    FakeGh.current.envs.clear()
+    return got
+
+
+def _ask_only(run, tid, *extra):
     return run(
         "ask", tid, "Merge release 27 into main?", "--link", "Release 27", "--open", PR, "--merge",
         "--then", "Release 27 goes to main.", *extra, "--json", "--by", "agent:x",
@@ -78,7 +89,7 @@ def test_ask_makes_a_link_card_with_merge(tk, run, validate):
     q = _q(root, tid)
     assert q["card"]["kind"] == "link" and q["card"]["ok_label"] == "Merge"
     assert q["card"]["open"] == PR and "own GitHub login" in q["card"]["why"]
-    assert q["action"] == {"merge": PR} and review.merge_url(q) == PR
+    assert q["action"] == {"merge": PR, "head": HEAD} and review.merge_url(q) == PR
     assert q.get("kind") in (None, "plain")  # stays on the person's Review stack
     validate(tickets.load(root, tid))
     code, out, _ = run("review", "list", "--json")
@@ -107,7 +118,7 @@ def test_person_click_merges_with_own_login_and_saves_the_answer(tk, run, gh):
     d = tickets.question_digest(_q(root, tid))
     code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--digest", d, "--by", ME)
     assert code == 0, out + err
-    assert gh.merges == [["pr", "merge", PR, "--merge"]]
+    assert gh.merges == [["pr", "merge", PR, "--merge", "--match-head-commit", HEAD]]
     assert all(e == {} for e in gh.envs)  # the helper's tokens never reach gh: its own sign-in merges
     q = _q(root, tid)
     assert q["answer"] == "Merge" and q["answered_by"] == ME
@@ -184,7 +195,9 @@ def test_a_paired_phone_answer_merges_even_when_a_helper_reads_the_inbox(tk, run
     assert _ask(run, tid)[0] == 0
     monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
     out = review.decide(root, tid, "q1", "ok", by="human:Pat iPhone", via="phone")
-    assert out["answer"] == "Merge" and gh.merges == [["pr", "merge", PR, "--merge"]]
+    assert out["answer"] == "Merge" and gh.merges == [
+        ["pr", "merge", PR, "--merge", "--match-head-commit", HEAD]
+    ]
     assert all(e == {} for e in gh.envs)
 
 
@@ -213,8 +226,9 @@ def test_a_required_review_is_the_persons_own_before_the_merge(tk, run, gh):
     gh.review = "REVIEW_REQUIRED"
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
     acts = [c[:2] for c in gh.calls]
-    assert acts == [["api", "user"], ["pr", "view"], ["pr", "review"], ["pr", "merge"]]
-    assert gh.calls[2][:4] == ["pr", "review", PR, "--approve"]
+    assert acts == [["api", "user"], ["pr", "view"], ["api", "-X"], ["pr", "merge"]]
+    assert gh.calls[2][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
+    assert f"commit_id={HEAD}" in gh.calls[2] and "event=APPROVE" in gh.calls[2]
     assert all(e == {} for e in gh.envs)
 
 
@@ -223,7 +237,7 @@ def test_no_review_when_none_is_required(tk, run, gh):
     assert _ask(run, tid)[0] == 0
     gh.review = "APPROVED"
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
-    assert ["pr", "review"] not in [c[:2] for c in gh.calls]
+    assert ["api", "-X"] not in [c[:2] for c in gh.calls]
 
 
 def test_a_hand_made_merge_action_never_merges(tk, run, gh):
@@ -246,3 +260,29 @@ def test_merge_button_always_says_merge(tk, run):
     assert _ask(run, tid, "--ok", "Ship it")[0] == 0
     q = _q(root, tid)
     assert q["card"]["ok_label"] == "Merge" and review.merge_url(q) == PR
+
+
+def test_card_shows_and_pins_the_newest_commit(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    q = _q(root, tid)
+    assert q["action"] == {"merge": PR, "head": HEAD}
+    assert q["card"]["preview"]["paras"] == [PR, f"Commit {HEAD[:7]}"]
+
+
+def test_a_push_after_the_card_is_never_merged(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.head, gh.review = "b" * 40, "REVIEW_REQUIRED"
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 2 and "changed after the card was made" in out + err
+    assert gh.merges == [] and ["api", "-X"] not in [c[:2] for c in gh.calls]
+    assert _q(root, tid)["answer"] is None
+
+
+def test_card_only_for_an_open_pull_request(tk, run, gh):
+    root, tid = tk
+    gh.state = "MERGED"
+    code, out, err = _ask_only(run, tid)
+    assert code == 2 and "not open on GitHub" in out + err
+    assert tickets.load(root, tid)["questions"] == []

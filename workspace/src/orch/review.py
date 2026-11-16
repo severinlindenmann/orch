@@ -784,7 +784,7 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
         raise Refused("Only a person merges this. Ask the human to click Merge on the card.")
     from orch import ghmerge
 
-    got = ghmerge.merge(url)
+    got = ghmerge.merge(url, q["action"].get("head"))
     line = (
         f"The pull request was merged already on GitHub ({got['login']}): {url}"
         if got["already"]
