@@ -458,3 +458,69 @@ async fn moved_app_answers_missing_even_when_stopped() {
         404
     );
 }
+
+/// The `~cap` an open private-network app currently answers with.
+async fn open_cap(t: &T, name: &str) -> String {
+    let r = pget(&t.private, &format!("/a/{name}/")).await;
+    assert_eq!(r.status, 302);
+    r.headers["location"].to_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn open_cap_rotates_on_reach_auth_change_and_recreate() {
+    let t = setup_private();
+    let ws = t.workspace("A", all_rights()).await;
+    let open = "reach = \"private\"\nauth = false";
+    put(&t, &ws, "rc", open).await;
+    let cap1 = open_cap(&t, "rc").await;
+    // same settings: the address stays
+    put(&t, &ws, "rc", open).await;
+    assert_eq!(open_cap(&t, "rc").await, cap1);
+    assert_eq!(pget(&t.private, &cap1).await.status, 200);
+    // auth change and back: new address, old one is gone
+    put(&t, &ws, "rc", "reach = \"private\"").await;
+    put(&t, &ws, "rc", open).await;
+    let cap2 = open_cap(&t, "rc").await;
+    assert_ne!(cap1, cap2);
+    assert_eq!(pget(&t.private, &cap1).await.status, 404);
+    assert_eq!(pget(&t.private, &cap2).await.status, 200);
+    // reach move and back
+    put(&t, &ws, "rc", "reach = \"public\"\nauth = false").await;
+    put(&t, &ws, "rc", open).await;
+    let cap3 = open_cap(&t, "rc").await;
+    assert_ne!(cap2, cap3);
+    assert_eq!(pget(&t.private, &cap2).await.status, 404);
+    // delete + recreate (even by another workspace): new address
+    let del = t.api(&ws, "DELETE", "/v1/apps/rc", vec![]).await;
+    assert!(del.status.is_success(), "{}", del.status);
+    let ws2 = t.workspace("B", all_rights()).await;
+    put(&t, &ws2, "rc", open).await;
+    let cap4 = open_cap(&t, "rc").await;
+    assert_ne!(cap3, cap4);
+    assert_eq!(pget(&t.private, &cap3).await.status, 404);
+    assert_eq!(pget(&t.private, &cap4).await.status, 200);
+}
+
+#[tokio::test]
+async fn redeploy_writes_the_row_before_the_new_process_is_live() {
+    use orch_publish::db;
+    let t = setup_private();
+    let ws = t.workspace("A", all_rights()).await;
+    put(&t, &ws, "rd", "reach = \"private\"\nauth = false").await;
+    let before = db::get_app(&t.st.db.lock().unwrap(), "rd")
+        .unwrap()
+        .unwrap();
+    put(&t, &ws, "rd", "reach = \"public\"\nauth = false").await;
+    let after = db::get_app(&t.st.db.lock().unwrap(), "rd")
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.reach, "public");
+    assert_ne!(before.cap_nonce, after.cap_nonce);
+    assert!(!after.cap_nonce.is_empty());
+    // the old private address is not served any more, the new reach answers at once
+    assert_eq!(pget(&t.private, "/a/rd/").await.status, 404);
+    assert_eq!(
+        call(&t.public, "GET", "/a/rd/", &[], vec![]).await.status,
+        200
+    );
+}
