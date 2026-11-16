@@ -1032,7 +1032,7 @@ def _plan_first_plan(ticket: dict) -> list[str]:
 
 def _epic_plan(ticket: dict, root: Path) -> list[str]:
     """An epic (several tickets made at once in New ticket): its tickets are the work. One run goes through
-    them in order, each finished with its own proof, so every ticket keeps its own text, files and result."""
+    them in order, each finished with its own evidence, so every ticket keeps its own text, files and result."""
     if not ticket.get("epic"):
         return []
     tid = ticket["id"]
@@ -1054,7 +1054,7 @@ def _epic_plan(ticket: dict, root: Path) -> list[str]:
         "text, screenshots and files. Those tickets are the work. On this epic add one task per ticket. Then "
         "go through them in this order, one at a time: read the ticket (orch ticket show <id>, its files in "
         ".orch/tickets/<id>/artifacts/), set it active, add its own tasks on it, do the work, finish it with "
-        "proof, its summary and orch ticket status <id> done, tick its task on the epic, then take the next. "
+        "evidence, its summary and orch ticket status <id> done, tick its task on the epic, then take the next. "
         "Ask on the ticket a question is about. Tickets still open:\n" + listed
     ]
 

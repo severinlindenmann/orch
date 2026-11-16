@@ -8,7 +8,8 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 |---|---|---|---|
 | one unit of work | Ticket | `ticket`, `t_...` | Request, Job, Issue |
 | checklist item of a ticket | Task | `check`, `c1` | Todo, Subtask |
-| child of a ticket | Sub-ticket | `ticket` (parent) | Epic, Subtask |
+| child of a ticket | Sub-ticket | `ticket` (parent) | Subtask |
+| a ticket made with tickets inside it (owner, ORCH-14) | Epic | `ticket new --epic`, `epic` | Subtask |
 | status of a ticket not started | Backlog (status chip; the button that shows a ticket stays "Open") | `open` | Open (as a status) |
 | list of things for the person | Needs you | `orch needs` | Over to you, Inbox |
 | question with options | Question / Your answer | `question`, `q1` | Approval, Sign-off |
