@@ -7,7 +7,7 @@ import pytest
 from orch.collect_execjson import ExecJsonMapper, detail_name, map_stream
 
 ROOT = Path(__file__).resolve().parents[2]
-VECTORS = json.loads((ROOT / "contracts/vectors/activity-v1.json").read_text())
+VECTORS = json.loads((ROOT / "contracts/vectors/activity-v1.json").read_text(encoding="utf-8"))
 CTX = dict(run="r_cx00001", ticket="t_inv7c2", harness="codex", at="2026-11-16T09:00:00Z")
 
 
@@ -32,7 +32,7 @@ def test_captures(case):
     events = [event for line in path.read_bytes().splitlines() for event in collector.feed(line)]
     assert events == case["events"]
     jsonschema = pytest.importorskip("jsonschema")
-    schema = json.loads((ROOT / "contracts/activity.schema.json").read_text())
+    schema = json.loads((ROOT / "contracts/activity.schema.json").read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
     for event in events:
         validator.validate(event)
@@ -107,7 +107,7 @@ def test_map_stream_takes_the_workspace_from_ctx():
     (event,) = map_stream([line], dict(CTX, workspace="/w/p"))
     assert event["files"] == ["a.py"]
     jsonschema = pytest.importorskip("jsonschema")
-    schema = json.loads((ROOT / "contracts/activity.schema.json").read_text())
+    schema = json.loads((ROOT / "contracts/activity.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(event)
 
 

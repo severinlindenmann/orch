@@ -12,6 +12,46 @@ import pytest
 
 from orch import addons, cli, winfinish
 
+
+def _own_new_files_as_this_user() -> None:
+    """Windows, elevated (the CI runner, an admin SSH session): Windows makes the Administrators group the
+    owner of every new file and folder, and orch rightly refuses an orch folder owned by another account. Make
+    this process (and the children that inherit its token) own what it creates, as in a normal session."""
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.GetCurrentProcess.restype = ctypes.c_void_p
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+    adv.OpenProcessToken.argtypes = [ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p)]
+    adv.GetTokenInformation.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    adv.SetTokenInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    tok = ctypes.c_void_p()
+    # TOKEN_QUERY | TOKEN_ADJUST_DEFAULT
+    if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x8 | 0x80, ctypes.byref(tok)):
+        return
+    try:
+        n = wintypes.DWORD(0)
+        adv.GetTokenInformation(tok, 1, None, 0, ctypes.byref(n))  # TokenUser: ask the size
+        buf = ctypes.create_string_buffer(n.value)
+        if not adv.GetTokenInformation(tok, 1, buf, n, ctypes.byref(n)):
+            return
+        owner = ctypes.c_void_p(ctypes.c_void_p.from_buffer(buf).value)  # TOKEN_OWNER {PSID} = the user's SID
+        adv.SetTokenInformation(tok, 4, ctypes.byref(owner), ctypes.sizeof(owner))  # TokenOwner
+    finally:
+        k32.CloseHandle(tok)
+
+
+_own_new_files_as_this_user()
 _REAL_HOME_FN = addons.real_home  # the true one, before any test fakes it
 _TRACE_LOG = addons._trace_log_path()  # the true fallback trace file (temp folder), before any test fakes it
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -89,6 +129,21 @@ def _no_bundled_catalogue(request, monkeypatch):
     if request.node.get_closest_marker("real_bundle"):
         return
     monkeypatch.setattr(addons, "bundled_manifests", lambda: {})
+
+
+@pytest.fixture(autouse=True)
+def _no_secret_commands_on_windows(monkeypatch):
+    """Windows: orch secret commands that start programs refuse there by design (secretrun.WINDOWS, "not on
+    Windows yet"). A test that reaches that refusal is skipped with that reason instead of failing. A test of
+    the refusal itself sets secretrun._windows on its own and still runs."""
+    if os.name != "nt":
+        return
+    from orch import secretrun
+
+    def _skip():
+        pytest.skip("orch secret commands that start programs are not available on Windows yet")
+
+    monkeypatch.setattr(secretrun, "_windows", _skip)
 
 
 @pytest.fixture(autouse=True)
@@ -330,6 +385,7 @@ def _legacy_trust(request, monkeypatch):
     test workspace must live under ~/.orch-test). Their orch home is the ORCH_HOME the fixture set. The
     pairing check itself is tested by test_home.py."""
     from orch import home as orch_home
+    from orch import winacl
     from orch.errors import Refused
 
     def test_home(root):
@@ -338,6 +394,7 @@ def _legacy_trust(request, monkeypatch):
             raise Refused("no test home")
         home.mkdir(parents=True, exist_ok=True)
         os.chmod(home, 0o700)
+        winacl.allow_home(home)  # Windows: like the real guarded_home, rights may be written inside it
         return home
 
     if not request.module.__name__.split(".")[-1].startswith(REAL_HOME_MODULES):
@@ -348,7 +405,10 @@ _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
 
 
 def stray_tmux(under: str) -> list[str]:
-    """Socket names of orch tmux servers whose working folder is `under` or below (reads `ps` only)."""
+    """Socket names of orch tmux servers whose working folder is `under` or below (reads `ps` only).
+    Windows has neither tmux nor /bin/ps: nothing can be left behind there."""
+    if sys.platform == "win32" or not os.path.exists("/bin/ps"):
+        return []
     out = subprocess.run(["/bin/ps", "-axo", "command="], check=False, capture_output=True, text=True).stdout
     return sorted(
         {

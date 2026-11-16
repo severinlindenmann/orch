@@ -17,7 +17,7 @@ from orch import cli, hider, jobs, record, runs, tickets
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = ROOT / "contracts"
-VECTORS = json.loads((CONTRACTS / "vectors/jobs-v1.json").read_text())
+VECTORS = json.loads((CONTRACTS / "vectors/jobs-v1.json").read_text(encoding="utf-8"))
 SECRET = "KEYVALUE-abc123XYZ-secret"
 SECRETS = {
     SECRET,
@@ -28,12 +28,23 @@ SECRETS = {
 
 
 def _schemas():
-    docs = [json.loads((CONTRACTS / n).read_text()) for n in ("job-event.schema.json", "blocks.schema.json")]
+    names = ("job-event.schema.json", "blocks.schema.json")
+    docs = [json.loads((CONTRACTS / n).read_text(encoding="utf-8")) for n in names]
     return Registry().with_resources([(d["$id"], Resource.from_contents(d)) for d in docs]), docs[0]
 
 
 REG, EVENT_SCHEMA = _schemas()
 STORED = Draft202012Validator(EVENT_SCHEMA, registry=REG)
+
+
+@pytest.fixture(autouse=True)
+def _windows_process_table(monkeypatch):
+    """Windows has no process-tree proof yet (contracts/activity.md: the hook records nothing there), so the
+    ancestors are only this process. The claims here use this process's pid; the proof has its own tests."""
+    if os.name == "nt":
+        from orch import record_hook
+
+        monkeypatch.setattr(record_hook, "_parents", lambda: {})
 
 
 @pytest.fixture

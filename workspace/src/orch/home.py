@@ -62,12 +62,7 @@ def account_home() -> Path:
     test suite fakes, so tests never touch the real orch home."""
     from orch import addons
 
-    if _is_windows():  # the profile folder from the process token (winacl), never the environment
-        try:
-            return Path(winacl.profile_dir())
-        except (ImportError, AttributeError, OSError, Refused):
-            pass
-    return addons.real_home()
+    return addons.real_home()  # Windows: the profile folder from the process token, never the environment
 
 
 def _source_tree() -> bool:

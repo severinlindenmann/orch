@@ -63,7 +63,9 @@ def fake(*args, scenario=None, env=None):
     if scenario:
         e["ORCH_FAKE_SCENARIO"] = scenario
     e.update(env or {})
-    p = subprocess.run([str(FAKES / "orch"), *args], capture_output=True, text=True, env=e, timeout=30)
+    # Windows cannot start the sh shim itself: run the script it points to with this Python
+    argv = [sys.executable, "-I", str(FAKES / "orch_fake.py")] if os.name == "nt" else [str(FAKES / "orch")]
+    p = subprocess.run([*argv, *args], capture_output=True, text=True, encoding="utf-8", env=e, timeout=30)
     lines = [json.loads(x) for x in p.stdout.splitlines()]
     for ln in lines:  # every line is valid against the stream/answer contract shapes
         if "type" in ln:
