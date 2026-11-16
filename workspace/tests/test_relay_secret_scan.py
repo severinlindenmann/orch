@@ -306,6 +306,8 @@ def test_protocol_names_are_skipped_only_in_the_outermost_dict(proj, on):
         {"items": [{"token": TOKEN}]},
         {"items": [{"key": TOKEN}], "text": "x"},
         {"a": {"b": [{"allow_token": TOKEN}]}},
+        {"mid": {"note": TOKEN}},
+        {"digest": [TOKEN]},
     ):
         with pytest.raises(Refused) as e:
             relay.scan_outgoing(proj, body)

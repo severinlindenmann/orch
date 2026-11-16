@@ -130,8 +130,8 @@ def _leaves(doc, path: str = "", top: bool = True):
             yield path or "text", doc
     elif isinstance(doc, dict):
         for k, v in doc.items():
-            if top and k in _TOP_SKIP:
-                continue
+            if top and k in _TOP_SKIP and not isinstance(v, (dict, list, tuple)):
+                continue  # a protocol field holds one plain value; a structure under that name is content
             if isinstance(k, str) and k:
                 yield f"{path}.field name" if path else "field name", k
             yield from _leaves(v, f"{path}.{k}" if path else str(k), False)
