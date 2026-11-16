@@ -189,20 +189,59 @@ def test_share_needs_a_relay(proj, run):
     assert code == 2
 
 
-def test_pick_up_fetches_into_the_reports_folder(proj, run, srv, tmp_path):
+def test_a_workspace_that_shares_and_picks_up_keeps_one_report(proj, run, srv):
+    """ORCH-86: the problem this workspace shared comes back in its own list. It is marked as its own, and
+    picking it up gives the report it already has: no second copy, so no second ticket."""
     made = make(proj, files=[("shot.png", b"\x89PNG")])
     ref = made["ref"]
     assert run("relay", "problem", "share", ref)[0] == 0
     pid = srv.problems[0]["id"]
     code, out, _ = run("relay", "problem", "list")
-    assert code == 0 and pid in out and "stuck since 10:00" in out
+    assert code == 0 and pid in out and "stuck since 10:00" in out and "(shared from here)" in out
+    item = json.loads(run("relay", "problem", "list", "--json")[1])[0]
+    assert item["mine"] is True and item["report"] == ref
+    code, out, err = run("relay", "problem", "get", pid, "--json")
+    assert code == 0, err
+    got = json.loads(out)
+    assert got["ref"] == ref and got["mine"] is True and got["new"] is False
+    assert sorted(p.name for p in diag_report.reports_dir(proj).iterdir()) == [ref]
+    assert not (Path(got["path"]) / "from.json").exists()
+    assert srv.problems[0]["status"] == "taken"  # taken by the workspace that already works on it
+    code, out, _ = run("relay", "problem", "get", pid)
+    assert code == 0 and "shared from here" in out and "another computer" not in out
+    assert run("relay", "problem", "done", pid)[0] == 0 and srv.problems[0]["status"] == "done"
+
+
+def test_own_problem_without_its_report_here_is_fetched_but_marked_mine(proj, run, srv):
+    """The report folder was deleted here (or shared from another computer of this workspace): it is
+    fetched, and still marked as this workspace's own."""
+    made = make(proj)
+    assert run("relay", "problem", "share", made["ref"])[0] == 0
+    pid = srv.problems[0]["id"]
+    (Path(made["path"]) / "shared.json").unlink()
+    item = json.loads(run("relay", "problem", "list", "--json")[1])[0]
+    assert item["mine"] is True and "report" not in item
+    got = json.loads(run("relay", "problem", "get", pid, "--json")[1])
+    assert got["mine"] is True and got["new"] is True and got["ref"] == made["ref"] + "-2"
+
+
+def test_pick_up_fetches_into_the_reports_folder(proj, run, srv, tmp_path):
+    data = make(proj, files=[("shot.png", b"\x89PNG")])
+    ref = data["ref"]
+    assert run("relay", "problem", "share", ref)[0] == 0
+    pid = srv.problems[0]["id"]
+    srv.problems[0]["from"] = "ws_other00001"  # shared by another workspace
+    (Path(data["path"]) / "shared.json").unlink()
+    code, out, _ = run("relay", "problem", "list")
+    assert code == 0 and pid in out and "stuck since 10:00" in out and "shared from here" not in out
     code, out, err = run("relay", "problem", "get", pid, "--json")
     assert code == 0, err
     got = json.loads(out)
     f = Path(got["path"])
     assert (
         f.parent == diag_report.reports_dir(proj) and f.name == f"{ref}-2"
-    )  # the own report keeps its folder
+    )  # a report of the same name here keeps its folder
+    assert got["mine"] is False and "another computer" in run("relay", "problem", "get", pid)[1]
     assert (f / "attachments" / "shot.png").read_bytes() == b"\x89PNG"
     assert json.loads((f / "from.json").read_text())["id"] == pid
     assert srv.problems[0]["status"] == "taken"
