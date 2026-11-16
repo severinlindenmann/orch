@@ -289,3 +289,47 @@ def test_line_ran_out_names_the_time():
     row = {"label": "Tool", "state": "renew", "ends_at": "2020-01-05T10:00:00Z", "stops": [], "chosen": False}
     line = cli_health.line(row)
     assert line.startswith("The Tool login ran out ") and "5 Jan" in line and line.endswith("Renew it.")
+
+
+@pytest.fixture
+def spawned(monkeypatch):
+    """soon() may start a check: record it instead of running the real tools."""
+    calls = []
+    monkeypatch.delenv("ORCH_NO_HEALTH_CHECK", raising=False)
+    monkeypatch.setattr(health.subprocess, "Popen", lambda argv, **kw: calls.append((argv, kw)))
+    return calls
+
+
+def test_soon_checks_again_only_when_stale_and_not_too_often(proj, tools, spawned):
+    t0 = NOW.timestamp()
+    assert health.soon(proj, now=t0) is True  # never checked
+    assert health.soon(proj, now=t0 + 5) is False  # one background check at a time
+    argv, kw = spawned[0]
+    assert argv[-2:] == ["logins", "--json"] and kw["env"]["ORCH_ROOT"] == str(proj)
+    assert kw["stdout"] == subprocess.DEVNULL and kw["stdin"] == subprocess.DEVNULL
+    health.check(proj, NOW)  # the background check wrote its result
+    later = t0 + health.ASK_EVERY + 1
+    assert health.soon(proj, now=later) is False  # fresh result: nothing to do
+    assert health.soon(proj, now=later, force=True) is True  # a helper failed for lack of a login
+    assert health.soon(proj, now=t0 + health.CHECK_EVERY + 200) is True  # stale again
+    assert len(spawned) == 3
+
+
+def test_soon_is_off_in_tests_and_never_raises(proj, monkeypatch):
+    monkeypatch.setenv("ORCH_NO_HEALTH_CHECK", "1")
+    assert health.soon(proj, force=True) is False
+    monkeypatch.delenv("ORCH_NO_HEALTH_CHECK")
+
+    def boom(*a, **kw):
+        raise OSError("no")
+
+    monkeypatch.setattr(health.subprocess, "Popen", boom)
+    assert health.soon(proj, force=True) is False
+
+
+def test_a_failed_start_for_lack_of_a_login_checks_at_once(proj, monkeypatch):
+    seen = []
+    monkeypatch.setattr(health, "soon", lambda root, **kw: seen.append(kw))
+    (proj / "start.log").write_text("Error: not logged in\n", encoding="utf-8")
+    assert runs.start_failure_reason(proj, {"agent": "", "log": "start.log"}) == "no login"
+    assert seen == [{"force": True}]

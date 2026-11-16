@@ -811,6 +811,9 @@ def start_failure_reason(root: Path, rec: dict) -> str:
             lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
             tail = lines[-1] if lines else ""
     if tail and _NO_LOGIN.search(tail):
+        from orch import health
+
+        health.soon(root, force=True)  # ORCH-44: the dashboard and phone learn which login stopped
         return "no login"
     if rec.get("mode") == "live":
         from orch import runs_live
@@ -1318,6 +1321,9 @@ def start(
     if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
         runs_live.clear_held(root, tid)
     worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run; never waits, never raises
+    from orch import health
+
+    health.soon(root)  # ORCH-44: tool logins checked again in the background when the result is stale
     name = agent or adapters.chosen(root)
     adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)

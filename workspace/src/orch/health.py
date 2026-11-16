@@ -18,9 +18,12 @@ is kept in .orch/run/health.json for the dashboard and the phone; it holds the s
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
+import tempfile
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -272,3 +275,55 @@ def last(root: Path) -> dict | None:
 def check(root: Path, now: datetime | None = None) -> dict:
     """Run every check now and keep the result."""
     return save(root, overview(root, now), now)
+
+
+# ------------------------------------------------------------------------------------------------ by itself
+
+CHECK_EVERY = 15 * 60  # seconds a result stays fresh
+ASK_EVERY = 60  # seconds between two background checks
+
+
+def due(root: Path, now: float | None = None) -> bool:
+    """True when there is no result yet or the last one is older than CHECK_EVERY."""
+    doc = last(root)
+    if not doc:
+        return True
+    try:
+        at = datetime.strptime(doc["checked_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    except (KeyError, TypeError, ValueError):
+        return True
+    return (now if now is not None else time.time()) - at >= CHECK_EVERY
+
+
+def soon(root: Path, *, force: bool = False, now: float | None = None) -> bool:
+    """Start one background `orch logins` when the result is stale (or force: a helper just failed for lack
+    of a login), at most once per ASK_EVERY. Never waits, never raises. True when one was started."""
+    try:
+        if os.environ.get("ORCH_NO_HEALTH_CHECK"):  # tests: never the real tools
+            return False
+        now = now if now is not None else time.time()
+        if not (force or due(root, now)):
+            return False
+        mark = runs.run_dir(Path(root)) / "health-asked"
+        try:
+            if now - mark.stat().st_mtime < ASK_EVERY:
+                return False
+        except OSError:
+            pass
+        mark.parent.mkdir(parents=True, exist_ok=True)
+        mark.touch()
+        os.utime(mark, (now, now))
+        from orch import procs
+
+        subprocess.Popen(
+            procs.orch_python_argv("logins", "--json"),
+            cwd=Path(os.path.realpath(tempfile.gettempdir())),
+            env={**os.environ, "ORCH_ROOT": str(root)},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=os.name != "nt",
+        )
+        return True
+    except Exception:  # noqa: BLE001  a check that cannot start never holds up a helper or a page
+        return False
