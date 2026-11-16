@@ -98,6 +98,13 @@ again.
   second "advanced" path, no parallel implementations.
 - **R4.4** Defaults over settings. A new option needs a reason the default can't cover.
 - **R4.5** Reviews never loop. One pass; findings outside relay and publish become issues and never block a merge.
+- **R4.6 Scripts are a first step, not the home** (owner, 16 Nov). A hand-made script outside orch (a helper's own
+  script folder, an automation repeat that calls one, a background loop or launch agent on one machine) may bridge a
+  gap, but it gets a ticket at once that moves its job into orch: a core feature, or an add-on when it is bigger. The
+  ticket ends when the job ships with tests and the script is deleted. Code in orch has tests, reaches every install
+  and is fixed through the report loop; a script on one machine is not. No AI call for work a program can do (checks,
+  counts, waits, switching, cleaning, starting, merging on green); a helper, small model first, only where judgement
+  is needed.
 
 ## 5. Security level (prototype)
 
