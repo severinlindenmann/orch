@@ -259,7 +259,8 @@ def test_typing_is_refused_server_side_when_the_setting_is_off(helper, tmp_path)
         assert code == 403
         assert (
             text.decode()
-            == "Typing into the helper's screen is off. Turn on 'Let me type' in Settings to allow it."
+            == "Typing into the helper's screen is off. Turn on 'Let me type into the helper's screen' in "
+            "Settings \u2192 Add-ons, on the page of the add-on that shows this screen."
         )
         typing_on(tmp_path, False)
         assert post(base, [{"k": "Enter"}])[0] == 403

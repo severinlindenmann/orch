@@ -37,3 +37,5 @@ Round 2 — working shared components.
 - Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+- Save repeat (e2e 15 Nov): the window closes at once; the list shows the repeat as "<ticket> · Saving…" until it is stored (try Save in automation-edit.html).

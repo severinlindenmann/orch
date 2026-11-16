@@ -580,7 +580,8 @@ def test_v1_home_and_ticket_controls():
         assert old not in tickets
     css = (WEBDIR / "pages" / "tickets.css").read_text()
     assert ".board .kanban-col{display:block" in css
-    assert "prefers-reduced-motion:reduce" in (WEBDIR / "pages" / "home.css").read_text()
+    # Reduced motion for Home comes from the kit (motion.css switches every animation and transition off).
+    assert 'href="kit/motion.css"' in (WEBDIR / "index.html").read_text()
 
 
 def test_a_view_that_needs_a_few_seconds_is_not_stale(ws, fake_orch):

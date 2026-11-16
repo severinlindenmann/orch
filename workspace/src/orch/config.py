@@ -450,6 +450,15 @@ def focus_session_typing(root: Path | None) -> bool:
     return _reserved(root, "focus", "session_typing", DEFAULT_FOCUS_SESSION_TYPING)
 
 
+SESSION_TYPING_KEY = "focus.session_typing"  # the `orch config` key of the setting below
+
+
+def set_focus_session_typing(root: Path, value: bool) -> bool:
+    """[focus] session_typing (default off): may the person type into the helper's screen."""
+    set_key(root, "focus", "session_typing", bool(value))
+    return bool(value)
+
+
 def record_keep_days(root: Path | None) -> int:
     """[record] keep_days as the file says it (snapped to the allowed list, default 90)."""
     return file_value(root, "record", "keep_days")
