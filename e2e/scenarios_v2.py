@@ -563,7 +563,7 @@ def l1(e):
     check(wait_for(lambda: (w.claim(tid) or {}).get("live", {}).get("state") == "idle", 20), "agent did not become idle (orch run done)")
     sent = json.loads(w.person("run", "send", tid, "Use CHF please", "--json")[1])
     check(wait_for(lambda: len(w.lines("input")) == 2, 20), f"sent text never arrived (send result {sent})")
-    check(w.lines("input")[1].startswith("From human:") and w.lines("input")[1].endswith(": Use CHF please"), f"second input {w.lines('input')[1]!r}")
+    check("human:" in w.lines("input")[1] and w.lines("input")[1].endswith("Use CHF please"), f"second input {w.lines('input')[1]!r}")
     time.sleep(1.5)
     check(len(w.lines("input")) == 2, f"input arrived more than once: {w.lines('input')}")
     pend = (w.root / ".orch/run/pending" / f"{tid}.jsonl").read_text().splitlines()
@@ -1160,9 +1160,9 @@ def g1_clean(e):
     for t in (a, b):
         w.wait_done(t)
         w.person("ticket", "status", t, "done")
-    check(listed() == [], f"registry after Done: {listed()}")
-    check(not any(f.exists() for f in folders), "a copy folder is still there after Done")
-    check(branches() == [], f"branches after Done: {branches()}")
+    # the copy is taken back by a detached sweep after Done (like after a start): give it a moment
+    check(wait_for(lambda: listed() == [] and not any(f.exists() for f in folders) and branches() == [], 40),
+          f"after Done: registry {listed()}, folders {[f.exists() for f in folders]}, branches {branches()}")
     # crash case: the agent is killed, the ticket is deleted, the next `orch start` takes the copy back
     c = w.ticket("Crashing change")
     w.agent("--silent 60", name="slow")

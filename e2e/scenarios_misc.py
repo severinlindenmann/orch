@@ -127,6 +127,10 @@ def f1(e):
 
 
 
+# a real 1x1 PNG: the phone only takes an image attachment that is one
+PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360f8cfc0f01f0005000201a5f645400000000049454e44ae426082")
+
+
 @scenario("V2-M1")
 def v2_m1(e):
     """Mobile chat (fake phone): a text becomes a ticket; the workspace's result brings the ticket snapshot (tasks,
@@ -141,7 +145,7 @@ def v2_m1(e):
     tid = made[0]["id"]
     ws = e.ws("Pilatus")
     (ws / "out").mkdir(exist_ok=True)
-    (ws / "out" / "q3-chart.png").write_bytes(b"\x89PNG V2-M1 chart")
+    (ws / "out" / "q3-chart.png").write_bytes(PNG)
     (ws / "out" / "scratch.txt").write_text("stays local")
     e.orch("Pilatus", "check", "add", tid, "Read the Q3 sheet")
     e.orch("Pilatus", "check", "add", tid, "Draw the chart")
@@ -157,7 +161,7 @@ def v2_m1(e):
     imgs = [a for a in tv["attachments"] if a["kind"] == "image"]
     check(len(imgs) == 1 and imgs[0]["title"] == "Q3 chart" and not [a for a in tv["attachments"] if a.get("name") == "scratch.txt"], f"attachments: {tv['attachments']}")
     b = phone(e, ph, "GET", f"/v1/phone/blobs/{imgs[0]['blob_id']}")
-    check(b.status == 200 and b.body == b"\x89PNG V2-M1 chart", f"phone blob: {b}")
+    check(b.status == 200 and b.body == PNG, f"phone blob: {b}")
     # a phone that does not follow Pilatus cannot read it
     _, other = pair(e, ["Home"], label="V2-M1 other")
     check(phone(e, other, "GET", f"/v1/phone/blobs/{imgs[0]['blob_id']}").status == 404, "another phone read the blob")

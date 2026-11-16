@@ -357,7 +357,8 @@ def r15(e):
     e.orch("Pilatus", "ask", t, "Ship it?", "--option", "yes", "--option", "no", "--phone")
     got = [x["message"]["body"]["text"] for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"]]
     # ask --phone also sends the ticket snapshot as a quiet note (mobile chat, V2-M1)
-    check(got[:5] == ["Waiting for your answer", "by name too", "yes, I can answer your phone", "Got it: can you answer my phone", "can you answer my phone"], f"phone messages: {got}")
+    check(got[:4] == ["Waiting for your answer", "by name too", "yes, I can answer your phone", "Got it: can you answer my phone"]
+          and any("can you answer my phone" in x for x in got[4:]), f"phone messages: {got}")  # then the quiet ticket notes
     qs = [q for q in phone(e, ph, "GET", "/v1/phone/questions").json()["items"] if q["message"].get("ticket") == t]
     check(len(qs) == 1, f"phone questions: {qs}")
     # Home is not on this phone's list: refused with what to do, and its directory lists no such phone
