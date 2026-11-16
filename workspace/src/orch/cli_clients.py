@@ -570,7 +570,8 @@ def _problem(args, root: Path, out) -> None:
         items = rp.listing(root, args.status)
         lines = [
             f"{line(p.get('id'), 20)}  {line(p.get('status'), 8):<6} {line(p.get('shared_at'), 20)}  "
-            f"{line(p.get('from_name'), 40)}: {line(p.get('note')) or '(no words from the person)'}"
+            f"{line(p.get('from_name'), 40)}: {'feature wish: ' if p.get('about') == 'feature' else ''}"
+            f"{line(p.get('note')) or '(no words from the person)'}"
             for p in items
         ]
         out(args, items, "\n".join(lines) or "No shared problems.")

@@ -24,6 +24,7 @@ from orch import (
     cli_look,
     cli_needs,
     cli_record,
+    cli_report,
     cli_review,
     cli_run,
     cli_screen,
@@ -427,6 +428,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
     cli_diag.add_parsers(sub, common)
+    cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
 
@@ -879,6 +881,7 @@ def run(args: argparse.Namespace) -> None:
         cli_status.dispatch(args, root)
         or cli_addons.dispatch(args, root)
         or cli_diag.dispatch(args, root)
+        or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
         or cli_health.dispatch(args, root)
     ):

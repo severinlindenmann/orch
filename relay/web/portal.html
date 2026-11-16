@@ -412,13 +412,14 @@ async function problemSheet(p){
  const change=async status=>{await api('/problems/'+enc(p.id),'PATCH',{status});orch.close(dlg);toast(status==='done'?'Marked as done':'Moved back to New');await route()};
  dlg=sheet(d.from_name+' · '+time(d.shared_at),
   sub(problemState(d)+' · '+d.files+(d.files===1?' file':' files')+(d.attachments?' · '+d.attachments+(d.attachments===1?' added file':' added files'):'')+(d.orch_version?' · orch '+d.orch_version:'')+(d.os?' · '+d.os:'')),
-  part('What happened',d.note),part('What was expected',d.expected),part('More details',d.more),
+  ...(d.about==='feature'?[part('What they want',d.note),part('Why it would help',d.expected)]:[part('What happened',d.note),part('What was expected',d.expected)]),part('More details',d.more),
   d.problems.length?el('div',{},el('h3',{},'Checks that found a problem'),el('div',{class:'checks'},d.problems.map(n=>el('span',{class:'chip'},n)))):null,
   el('div',{},el('h3',{},'Summary'),el('pre',{class:'copy-box',tabindex:0},d.summary||'')),
   el('div',{class:'actions'},button('Download',()=>downloadProblem(d),'primary'),
    button(d.status==='done'?'Reopen':'Mark done',()=>change(d.status==='done'?'new':'done')),
    button('Delete',async()=>{if(!await confirmDialog('Delete this problem?','The report and its files are removed from the relay.','Delete'))return;await api('/problems/'+enc(p.id),'DELETE');orch.close(dlg);toast('Problem deleted');await route()},'ghost danger')));
 }
+const FEATURE_LABEL='Feature wish';  // a shared report that is a wish, not a problem
 async function problemsPage(v){
  const r=await api('/problems');if(v!==epoch)return;const items=r.items||[],picked=new Set(r.readers||[]);
  const pick=form(async f=>{await api('/problems/readers','PUT',{workspaces:selected(f)});toast('Saved')},
@@ -427,7 +428,7 @@ async function problemsPage(v){
   workspaces.length?submit('Save'):null);
  const rows=items.length?items.map(p=>el('div',{class:'card-row','data-row':''},el('div',{class:'grow'},el('h3',{},p.note||'No description'),
    sub('From '+p.from_name+' · '+time(p.shared_at)+(p.attachments?' · '+p.attachments+(p.attachments===1?' added file':' added files'):''))),
-   el('span',{class:'chip'+(p.status==='new'?' active':'')},problemState(p)),button('Open',()=>problemSheet(p)))):
+   p.about==='feature'?el('span',{class:'chip'},FEATURE_LABEL):null,el('span',{class:'chip'+(p.status==='new'?' active':'')},problemState(p)),button('Open',()=>problemSheet(p)))):
   [empty('No problems shared yet.','A problem gets here when someone presses Report a problem in their dashboard and chooses to share it.')];
  show(...head('',PROBLEMS_LABEL),panel('Who may pick problems up',el('div',{class:'form-body'},pick)),panel('Shared problems · '+items.length,...rows));
 }

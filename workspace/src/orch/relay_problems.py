@@ -185,6 +185,8 @@ def share(root: Path, ref: str) -> dict:
     scope = man.get("scope") if isinstance(man.get("scope"), dict) else {}
     body = {
         "ref": ref,
+        # a feature wish says so; a report from before kinds existed is a problem (and sends no field)
+        "about": "feature" if man.get("about") == "feature" else None,
         "created_at": man.get("created_at"),
         "scope": {"ticket": scope.get("ticket"), "addon": scope.get("addon")},
         "note": man.get("note"),

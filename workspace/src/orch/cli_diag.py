@@ -41,6 +41,12 @@ def add_parsers(sub, common) -> None:
     r.add_argument("--note")
     r.add_argument("--expected")
     r.add_argument("--more", help="further details, up to 4000 characters")
+    r.add_argument(
+        "--about",
+        choices=["problem", "feature"],
+        default="problem",
+        help="a problem (default) or a feature wish",
+    )
     r.add_argument("--file", action="append", default=[], help="add a picture or file (up to 10 times)")
     r.add_argument(
         "--content",
@@ -52,6 +58,22 @@ def add_parsers(sub, common) -> None:
     r.add_argument("--no-content", dest="content", action="store_false")
     x = d.add_parser("delete", parents=[common], help="delete saved reports or the saved debug notes")
     x.add_argument("what", choices=["reports", "notes"])
+
+
+def read_files(paths) -> list[tuple[str, bytes]]:
+    """The pictures and files a person or helper names (`--file`), each checked before it is read."""
+    files = []
+    for raw in list(paths or [])[: diag_report.ATTACH_MAX + 1]:
+        f = Path(raw).expanduser()
+        if not f.is_file():
+            raise Refused(f"{raw} is not a file. Check the path and try again.")
+        if f.stat().st_size > diag_report.ATTACH_FILE_BYTES:  # before reading it
+            raise Refused(
+                f"{f.name} is bigger than {diag_report.ATTACH_FILE_BYTES // 1024 // 1024} MB. "
+                "Leave it out or make it smaller."
+            )
+        files.append((f.name, f.read_bytes()))
+    return files
 
 
 def _check_id(value, what: str, rx) -> None:
@@ -117,17 +139,7 @@ def dispatch(args, root: Path) -> bool:
         text = f"Deleted {gone} {label}{'' if gone == 1 else 's'}."
         print(json.dumps({"deleted": gone, "what": args.what}) if args.json else text)
     else:
-        files = []
-        for raw in args.file[: diag_report.ATTACH_MAX + 1]:
-            f = Path(raw).expanduser()
-            if not f.is_file():
-                raise Refused(f"{raw} is not a file. Check the path and try again.")
-            if f.stat().st_size > diag_report.ATTACH_FILE_BYTES:  # before reading it
-                raise Refused(
-                    f"{f.name} is bigger than {diag_report.ATTACH_FILE_BYTES // 1024 // 1024} MB. "
-                    "Leave it out or make it smaller."
-                )
-            files.append((f.name, f.read_bytes()))
+        files = read_files(args.file)
         made = diag_report.make(
             root,
             ticket=args.ticket,
@@ -139,6 +151,7 @@ def dispatch(args, root: Path) -> bool:
             content=args.content,
             more=args.more,
             files=files,
+            about=args.about,
         )
         if args.json:
             print(

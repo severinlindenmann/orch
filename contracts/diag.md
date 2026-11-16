@@ -92,7 +92,7 @@ of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until
 | `diag.disabled` | `actor` (written just before the log is switched off) |
 | `diag.dropped` | `count`, `n_<reason>` |
 | `diag.report_failed` | (error event; `err` has the class) the dashboard could not make a report |
-| `diag.report_made` | `ref`, `scope` (`ticket`, `add-on` or `workspace`), `content`, `page` (a page snapshot was added); written when the dashboard makes a report |
+| `diag.report_made` | `ref`, `scope` (`ticket`, `add-on` or `workspace`), `content`, `page` (a page snapshot was added), `about` (`problem` or `feature`); written when the dashboard makes a report |
 | `diag.report_shared` | `ref` (the person or a helper sent this report to the connected relay; relay-api.md, Problems) |
 | `diag.reports_deleted` | `count` (Settings > Delete all) |
 | `diag.notes_deleted` | `files` (Settings > Delete notes; the first line of the new log) |
@@ -144,6 +144,15 @@ relay is a separate, explicit step of the relay client (relay-api.md, Problems),
   person picked into `attachments/` (each at most 8 MB, 25 MB together; a cleaned file name, no folders, no leading dot,
   a second file of the same name gets `-2`). They are the person's own files and are stored as they are (a picture cannot
   pass the hider); the manifest lists them in `attachments: [{name, size}]`. Nothing in them is ever run or followed.
+  `--about problem|feature` (default `problem`; the dashboard sends `about`) says what the report is: a problem, or a
+  feature wish. The manifest keeps it as `about` (an incident, or a report from before, is a `problem`), `SUMMARY.md`
+  starts with "Feature wish" and the person's words under "What the person wants" / "Why it would help", and a shared
+  one carries it to the relay (`about`, contracts/relay-api.md "Problems").
+- `orch report problem "<what happened>" [--expected T]` and `orch report feature "<what you want>" [--why T]` (both
+  `[--more T] [--file F]... [--ticket ID] [--content|--no-content] [--no-send]`) are the one-line form for a helper:
+  the same report (`--content` on for a problem, off for a feature wish), then, when the relay is turned on and this
+  workspace is connected, `orch relay problem share` of it (unless `--no-send`). A failed send keeps the report and says
+  why (`share_error`); it never fails the command.
 - Incidents (`reports/i-...`): the same layout, structure only, 15-minute window, frozen BEFORE a recovery runs (in front of
   `settle_orphan` and the start-failure path), on a crash of a command, on a check turning `problem`, and when the same
   delivery failure happens 3 times. One per fingerprint per 15 minutes, at most 20 and 50 MB. Reports and incidents count
