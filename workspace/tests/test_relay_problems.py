@@ -266,9 +266,29 @@ def test_fetch_refuses_bytes_that_changed(proj, run, srv):
 
 
 def test_share_takes_the_page_picture_but_not_a_secret_in_it(proj, run, srv):
-    page = '<html><body><h1 data-key="heading">Ticket</h1><p>all good</p></body></html>'
+    page = "<html><body><h1>Ticket</h1><p>all good</p></body></html>"
     made = make(proj, page=page)
     assert run("relay", "problem", "share", made["ref"])[0] == 0 and len(srv.problems) == 1
-    bad = make(proj, page=page.replace("all good", "password: hunter2-Really-Long-9981"))
-    code, _, err = run("relay", "problem", "share", bad["ref"])
-    assert code == 2 and "screen/page.html" in err and len(srv.problems) == 1
+    # the check reads the very bytes that are sent: text in the page and in any attribute alike
+    for hidden in (
+        "<p>password: hunter2-Really-Long-9981</p>",
+        '<p data-note="password: hunter2-Really-Long-9981"></p>',
+    ):
+        bad = make(proj, page=page.replace("<p>all good</p>", hidden))
+        code, _, err = run("relay", "problem", "share", bad["ref"])
+        assert code == 2 and "screen/page.html" in err and len(srv.problems) == 1, hidden
+
+
+def test_a_refused_send_does_not_block_the_next_report(proj, run, srv):
+    """The refusal is logged with its code place (secretscan:refuse_if_secret:<line>); the next report holds
+    that line and must still be sendable. A real secret next to a code place is still caught."""
+    bad = make(proj, page="<p>password: hunter2-Really-Long-9981</p>")
+    assert run("relay", "problem", "share", bad["ref"])[0] == 2
+    nxt = make(proj)
+    assert "refuse_if_secret" in (Path(nxt["path"]) / "errors.json").read_text()
+    code, _, err = run("relay", "problem", "share", nxt["ref"])
+    assert code == 0, err
+    worse = make(proj)
+    f = Path(worse["path"]) / "errors.json"
+    f.write_text(json.dumps([{"sample_frames": ["a:b:1"], "why": "password: hunter2-Really-Long-9981"}]))
+    assert run("relay", "problem", "share", worse["ref"])[0] == 2

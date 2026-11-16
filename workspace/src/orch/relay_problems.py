@@ -28,7 +28,8 @@ MAX_UNPACKED = 100 * 1024 * 1024
 SHARED = "shared.json"  # in the report folder: where it was shared (never part of the archive)
 FROM = "from.json"  # in a fetched report folder: who shared it
 STATES = ("new", "taken", "done")
-_DATA_ATTR = re.compile(rb'\sdata-[a-z0-9-]+="[^"<>]{0,200}"')
+# module:function:line as the debug log writes it: two Python names and a line number, standing alone
+_CODE_PLACE = re.compile(r"(?<![\w:./-])[A-Za-z_][\w.]{0,80}:[A-Za-z_<][\w<>.]{0,80}:\d{1,6}(?![\w:./-])")
 
 
 def _folder(root: Path, ref: str) -> Path:
@@ -60,27 +61,42 @@ def _members(folder: Path) -> list[Path]:
 def scan(root: Path, folder: Path) -> None:
     """R5.2 for a report: every file is checked before anything leaves. The report's own JSON files are
     read as JSON and every text in them is checked (as for a message: a field that is merely NAMED key,
-    like a ticket's key, is not a secret); everything else, the person's added files included, is checked
-    as a whole file."""
+    like a ticket's key, is not a secret); everything else is checked as a whole file.
+
+    One thing is left out of the check, in the files orch itself wrote (never in the page picture or in a
+    file the person added): a code place `module:function:line` such as `secretscan:refuse_if_secret:241`.
+    The debug log names them in every error, and the check reads "secret:241" as a password; without this,
+    one refused send would make every later report unsendable."""
     for p in _members(folder):
         rel = p.relative_to(folder).as_posix()
         data = p.read_bytes()
         own = not rel.startswith("attachments/")
+        wrote = own and not rel.startswith("screen/")  # orch's own writer made it
         try:
-            if own and p.suffix == ".json":
-                secretscan.refuse_if_secret_in(root, json.loads(data), f"report file {rel}")
-                continue
-            if own and p.suffix == ".jsonl":
-                rows = [json.loads(line) for line in data.decode("utf-8").splitlines() if line.strip()]
-                secretscan.refuse_if_secret_in(root, rows, f"report file {rel}")
+            if own and p.suffix in (".json", ".jsonl"):
+                text = data.decode("utf-8")
+                doc = (
+                    json.loads(text)
+                    if p.suffix == ".json"
+                    else [json.loads(line) for line in text.splitlines() if line.strip()]
+                )
+                secretscan.refuse_if_secret_in(root, _no_code_places(doc), f"report file {rel}")
                 continue
         except ValueError:
             pass  # not what its name says: checked as a plain file
-        if (
-            own and p.suffix == ".html"
-        ):  # the page snapshot: the page's own data-key="..." hooks are not secrets
-            data = _DATA_ATTR.sub(b"", data)
+        if wrote and p.suffix == ".md":
+            data = _CODE_PLACE.sub("", data.decode("utf-8", "replace")).encode()
         secretscan.refuse_if_secret(data, f"report file {rel}" if own else f"added file {p.name}", root)
+
+
+def _no_code_places(doc):
+    if isinstance(doc, str):
+        return _CODE_PLACE.sub("", doc)
+    if isinstance(doc, dict):
+        return {k: _no_code_places(v) for k, v in doc.items()}
+    if isinstance(doc, list):
+        return [_no_code_places(v) for v in doc]
+    return doc
 
 
 def pack(folder: Path) -> tuple[bytes, int]:
