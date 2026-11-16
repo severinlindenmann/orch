@@ -565,6 +565,7 @@ def test_process_death_recovers_journal(done_copy, monkeypatch):
 import os, signal, subprocess, sys
 from pathlib import Path
 from orch import addons, worktrees
+from orch import home as orch_home
 home = Path(os.environ["ORCH_HOME"])
 addons.real_home = lambda: home.parent
 orch_home.guarded_home = lambda root: home
