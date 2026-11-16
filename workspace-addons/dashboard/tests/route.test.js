@@ -65,12 +65,13 @@ test('skeletonFor draws the page shape, busy, with one status text and hidden sh
   assert.equal(ctx.hashKind('#notes'), 'home');
   assert.equal(ctx.hashKind('#note/t_1'), 'home');
 });
-test('the sidebar: Home has the needs badge, Settings is last in the foot', () => {
+test('the sidebar: Review has the needs badge, Settings is last in the foot', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/index.html'), 'utf8');
   const foot = html.slice(html.indexOf('<div class="side-foot">'));
   assert.ok(foot.indexOf('id="mm-toggle"') < foot.indexOf('id="side-settings"'));
   assert.ok(html.indexOf('id="side-settings"') > html.indexOf('id="side-nav"') && html.indexOf('id="side-settings"') > html.indexOf('id="side-addons"'));
-  assert.match(source, /navLink\('#home', 'Home', 'home', needCount \? h\('span', \{className:'count'/);
+  // ORCH-63: the needs-you number sits on the Review entry, right after Tickets; Home has no badge
+  assert.match(source, /navLink\('#home', 'Home', 'home'\), navLink\('#tickets', 'Tickets', 'tickets'\),\n\s*snapshot \? null : navLink\('#review', 'Review', 'review', needCount \? h\('span', \{className:'count'/);
   assert.doesNotMatch(source, /nav-helper/);
 });
 test('one needs-you count: every reader calls needsYouTotal', () => {

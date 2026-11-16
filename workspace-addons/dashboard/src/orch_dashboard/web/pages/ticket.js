@@ -380,13 +380,13 @@ function liveLinkFor(t) {
   const id = typeof t.id === 'string' && /^[A-Za-z0-9_.-]+$/.test(t.id) && !t.id.includes('..') ? t.id : '';
   return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : id ? 't/' + id : a.page.path)};
 }
-// Live session: the main click opens the live screen; the two terminal commands stay behind one small "Copy command".
-// Watch cannot type; Take over can (the agent waits while you type).
+// Live session: the two terminal commands stay behind one small "Copy command". Watch live sits in the helper bar
+// (one Stop / Watch live pair); the card shows it only when the bar does not. Watch cannot type; Take over can.
 function liveSessionStrip(t) {
   const run = state.runs?.[t.id];
   if (snapshot || !run?.running || run.claim?.mode === 'oneshot') return null;
   const ref = typeof t.key === 'string' && t.key ? t.key : t.id;
-  const liveLink = liveLinkFor(t);
+  const liveLink = liveLinkFor(t), inBar = Boolean(liveLink && window.DashHelpers?.helperAlive?.(t, run));
   const copy = (label, command) => {
     const control = button('', 'menu-item', async () => {
       try { await navigator.clipboard.writeText(command); window.orch.toast('Copied', 'ok'); }
@@ -400,7 +400,7 @@ function liveSessionStrip(t) {
   const commands = h('details', {className:'menu', 'data-key':'live-commands'}, h('summary', {className:'btn ghost sm'}, 'Copy command'),
     h('div', {className:'menu-pop', role:'menu'}, copy('Watch (read only)', 'orch run attach ' + ref + ' --watch'), copy('Take over (you can type)', 'orch run attach ' + ref)));
   return h('section', {className:'card live-strip', 'data-key':'live-session'}, h('h2', {}, 'Live session'),
-    liveLink ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'live-open'}, 'Watch live') : null, commands);
+    liveLink && !inBar ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'live-open'}, 'Watch live') : null, commands);
 }
 function agentBar(t) {
   const liveLink = liveLinkFor(t), run = state.runs?.[t.id], alive = window.DashHelpers.helperAlive(t, run);

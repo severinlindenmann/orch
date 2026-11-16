@@ -212,14 +212,49 @@ def share(root: Path, ref: str) -> dict:
     return {"id": pid, "ref": ref, "files": n, "size": len(data), "to": host}
 
 
+def shared_here(root: Path) -> dict[str, str]:
+    """problem id -> name of the report folder here that was shared as it (its shared.json)."""
+    rdir = diag_report.reports_dir(root)
+    if any(p.is_symlink() for p in (root / ".orch", root / ".orch" / "diag", rdir)) or not rdir.is_dir():
+        return {}
+    out = {}
+    for f in sorted(rdir.glob("r-*/" + SHARED)):
+        if f.is_symlink() or f.parent.is_symlink() or (f.parent / FROM).exists():
+            continue  # a fetched report is never "shared from here", whatever files it holds
+        got = net.read_json(f, None)
+        if isinstance(got, dict) and PID.fullmatch(str(got.get("id"))):
+            out.setdefault(got["id"], f.parent.name)
+    return out
+
+
+def _own_workspace(root: Path) -> str | None:
+    try:
+        return net.load_service(root, "relay").get("workspace")
+    except Refused:
+        return None
+
+
+def _mark(p: dict, here: dict[str, str], own: str | None) -> dict:
+    """A problem this workspace shared itself is no new work for it (ORCH-86): `mine`, and `report` = the
+    report folder here it came from, when that is still here."""
+    ref = here.get(p.get("id"))
+    return {
+        **p,
+        "mine": bool(ref) or (own is not None and p.get("from") == own),
+        **({"report": ref} if ref else {}),
+    }
+
+
 def listing(root: Path, status: str = "new") -> list[dict]:
     if status not in (*STATES, "all"):
         raise Refused("Use new, taken, done or all.")
-    return [
+    items = [
         p
         for p in net.items(relay._api(root, "GET", f"/v1/problems?status={status}")[1])
         if isinstance(p, dict)
     ]
+    here, own = shared_here(root), _own_workspace(root)
+    return [_mark(p, here, own) for p in items]
 
 
 def _pid(pid: str) -> str:
@@ -248,6 +283,7 @@ def _unpack(data: bytes, ref: str, dest: Path) -> int:
                     for p in parts
                 )
                 or m.name.startswith("/")
+                or (len(parts) == 2 and parts[1] in (SHARED, FROM))  # only orch writes these, never a sender
             ):
                 raise Refused(
                     "That shared problem holds something that is not a plain file. Nothing was kept."
@@ -273,7 +309,8 @@ def _unpack(data: bytes, ref: str, dest: Path) -> int:
 
 
 def fetch(root: Path, pid: str) -> dict:
-    """Fetch a shared problem into this workspace's reports folder. Returns {ref, path, problem}."""
+    """Fetch a shared problem into this workspace's reports folder. Returns {ref, path, problem, new, mine}.
+    A problem shared from this workspace gives its own report folder back: nothing is fetched again."""
     meta = relay._api(root, "GET", f"/v1/problems/{_pid(pid)}")[1]
     ref = meta.get("ref") if isinstance(meta, dict) else None
     if not isinstance(ref, str) or not REF.fullmatch(ref):
@@ -282,10 +319,20 @@ def fetch(root: Path, pid: str) -> dict:
     for part in (root / ".orch", root / ".orch" / "diag", rdir):
         if part.is_symlink():
             raise Refused(f"{part} is a link. Nothing was fetched.")
+    mine = _mark({**meta, "id": pid}, shared_here(root), _own_workspace(root))
+    if mine.get("report"):  # shared from here: the report is here already, no second copy (ORCH-86)
+        folder = rdir / mine["report"]
+        return {"ref": folder.name, "path": str(folder), "problem": meta, "new": False, "mine": True}
     for old in rdir.glob("r-*/" + FROM) if rdir.is_dir() else ():
         got = net.read_json(old, None)
         if isinstance(got, dict) and got.get("id") == pid:  # fetched before: the same folder again
-            return {"ref": old.parent.name, "path": str(old.parent), "problem": meta, "new": False}
+            return {
+                "ref": old.parent.name,
+                "path": str(old.parent),
+                "problem": meta,
+                "new": False,
+                "mine": mine["mine"],
+            }
     cfg = net.load_service(root, "relay")
     _, data = net.call(
         "GET", f"{cfg['url']}/v1/problems/{pid}/file", net.auth_headers(cfg), timeout=300, limit=MAX_ARCHIVE
@@ -318,4 +365,11 @@ def fetch(root: Path, pid: str) -> dict:
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)  # exactly the folder this call made
         raise
-    return {"ref": folder.name, "path": str(folder), "problem": meta, "files": n, "new": True}
+    return {
+        "ref": folder.name,
+        "path": str(folder),
+        "problem": meta,
+        "files": n,
+        "new": True,
+        "mine": mine["mine"],
+    }

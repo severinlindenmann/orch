@@ -579,22 +579,26 @@ test('the Changes to add card offers Review changes and Keep as is; a kept copy 
 test('Watch live opens the live-session add-on, not the first add-on with a running page', () => {
   const rows = [{name:'factory', page:{path:'/'}}, {name:'focus', page:{path:'/', live_session:true}}];
   const c = context({addons:() => rows, state:{services:[{addon:'factory', running:true}, {addon:'focus', running:true}]}, addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
-  vm.runInContext(source.slice(source.indexOf('function liveLinkFor'), source.indexOf('// Live session: the main click')), c);
+  vm.runInContext(source.slice(source.indexOf('function liveLinkFor'), source.indexOf('function liveSessionStrip')), c);
   assert.equal(c.liveLinkFor({id:'t-42', ext:{}}).url, '#addon/focus/t/t-42', 'Watch live opens Focus on this ticket');
   assert.equal(c.liveLinkFor({ext:{}}).url, '#addon/focus//');
   c.state.services = [{addon:'factory', running:true}, {addon:'focus', running:false}];
   assert.equal(c.liveLinkFor({ext:{}}), null, 'no live-session page is running: no Watch live');
 });
 
-test('Live session card: the main click opens the live screen, the commands sit behind one small Copy command', () => {
+test('Live session card: one Watch live on the page (the helper bar has it), the commands sit behind one small Copy command', () => {
   const rows = [{name:'focus', page:{path:'/', live_session:true}}];
   const c = context({addons:() => rows, state:{runs:{t1:{running:true, claim:{mode:'live'}}}, services:[{addon:'focus', running:true}]}, snapshot:false, button:() => ({tag:'button', attrs:{}, dataset:{}, children:[], append(...k) { this.children.push(...k); }}), addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
   vm.runInContext(source.slice(source.indexOf('function liveLinkFor'), source.indexOf('function agentBar(t)')), c);
-  const json = JSON.stringify(c.liveSessionStrip({id:'t1', key:'DEMO-1'}));
-  assert.match(json, /live-open[\s\S]*Watch live/);
-  assert.match(json, /#addon\/focus\/t\/t1/);
-  assert.match(json, /Copy command/);
-  assert.doesNotMatch(json, /"Copy"/);
+  // report r-1116-1748: a working ticket showed Watch live twice (helper bar and this card), two filled buttons
+  const working = JSON.stringify(c.liveSessionStrip({id:'t1', key:'DEMO-1', status:'active'}));
+  assert.doesNotMatch(working, /Watch live/, 'the helper bar already shows Watch live');
+  assert.match(working, /Copy command/);
+  assert.doesNotMatch(working, /"Copy"/);
+  // the bar shows no Watch live (ticket already in Review): the card keeps it, so it is never lost
+  const review = JSON.stringify(c.liveSessionStrip({id:'t1', key:'DEMO-1', status:'review'}));
+  assert.match(review, /live-open[\s\S]*Watch live/);
+  assert.match(review, /#addon\/focus\/t\/t1/);
 });
 test('Looks good says when part of Done when has no task; nothing when all is covered', () => {
   const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});

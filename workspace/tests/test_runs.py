@@ -527,7 +527,7 @@ def test_shared_folder_several_others_are_counted(proj, new_ticket):
     a, _ = _two_runs(proj, new_ticket)
     runs.claim(proj, new_ticket("Third"), "agent:z", "claude", pid=os.getpid())
     assert sharedfolder.line(sharedfolder.others_in_folder(proj, a)) == (
-        "2 other agents are also changing this folder."
+        "2 other helpers are also changing this folder."
     )
 
 

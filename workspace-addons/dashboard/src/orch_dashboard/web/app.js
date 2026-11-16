@@ -42,7 +42,8 @@ function h(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
     if (value == null) continue;
-    if (key === 'href' && !/^(#|https?:)/i.test(String(value))) continue;
+    // a route (#), a web address, or a path on this site (/x; never //x or /\x, which leave the site)
+    if (key === 'href' && !/^(#|https?:|\/(?![\/\\]))/i.test(String(value))) continue;
     if (key.startsWith('data-')) node.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = String(value);
     else if (['className', 'hidden', 'disabled'].includes(key)) node[key] = value;
     else node.setAttribute(key, String(value));
@@ -176,6 +177,7 @@ function notFoundPage() {
 const NAV_ICON = {
   home:'<path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/>',
   tickets:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/>',
+  review:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m8 12 3 3 5-6"/>',
   notes:'<path d="M5 3h14v18H5zM8 8h8m-8 4h8m-8 4h5"/>',
   chat:'<path d="M4 4h16v12H9l-5 4z"/><path d="M8 8h8m-8 4h5"/>',
   addons:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
@@ -336,15 +338,19 @@ function render(arrived = new Set()) {
     const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
   }
-  // On Review the decision is the one primary action: New ticket steps back to an outline
-  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn ' + (r.kind === 'review' ? 'outline' : 'primary') + ' sm';
+  // On Review and on a ticket the page has its own primary action (decision, Watch live, Start): New ticket steps back
+  // to an outline, so the screen keeps one filled button (report r-1116-1748)
+  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn ' + (['review', 'ticket'].includes(r.kind) ? 'outline' : 'primary') + ' sm';
   if (newTicket && newTicket.className !== newCls) newTicket.className = newCls;
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
   const needsWords = window.DashHelpers.needsYou(needCount), contactsAddon = addons().find(a => a.dashboard?.panel === 'phone' && a.dashboard);
-  reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
+  // The needs-you number sits on Review (the page that lists exactly those questions and results), not on Home (ORCH-63)
+  reconcile(nav, fragment(navLink('#home', 'Home', 'home'), navLink('#tickets', 'Tickets', 'tickets'),
+    snapshot ? null : navLink('#review', 'Review', 'review', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null),
+    state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
     // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
   const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
