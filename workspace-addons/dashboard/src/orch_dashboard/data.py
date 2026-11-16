@@ -890,6 +890,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         diag_enabled,
         focus_session_typing,
         live_max,
+        reviewer_on,
         workspace_description,
         workspace_name,
     )
@@ -905,6 +906,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         share = False
     return {
         "agents_may_finish": agents_may_finish(root),
+        "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
         "live_max": live_max(root),  # Settings > Helper > Helpers at once: None = no limit (the default)
@@ -1064,10 +1066,12 @@ def add_warmth(root: Path, tickets: list[dict], statuses: dict) -> None:
 def load_review(root: Path, orch_bin: str | None) -> dict:
     """The Review page's data: what waits (`orch review list --json`) and what was decided
     (`orch review list --answered --json`). Empty lists when orch cannot say."""
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         f_cards = pool.submit(run_orch, orch_bin, ["review", "list", "--json"], root)
         f_done = pool.submit(run_orch, orch_bin, ["review", "list", "--answered", "--json"], root)
-    cards, done = f_cards.result(), f_done.result()
+        f_acc = pool.submit(run_orch, orch_bin, ["review", "accepted", "--json"], root)
+    cards, done, acc = f_cards.result(), f_done.result(), f_acc.result()
+    acc = acc.get("accepted") if isinstance(acc, dict) else None
     if isinstance(cards, dict):  # {workspace, cards}
         cards = cards.get("cards")
     if isinstance(done, dict):
@@ -1075,6 +1079,8 @@ def load_review(root: Path, orch_bin: str | None) -> dict:
     return {
         "cards": [c for c in cards if isinstance(c, dict)] if isinstance(cards, list) else [],
         "answered": [c for c in done if isinstance(c, dict)] if isinstance(done, list) else [],
+        # Tickets the Reviewer accepted for the owner today (`orch review accepted --json`); [] when off or none.
+        "accepted": [c for c in acc if isinstance(c, dict)] if isinstance(acc, list) else [],
     }
 
 
@@ -1155,7 +1161,7 @@ def load_state(
         # Chat (former General): helper name, today's texts with cards, the strip counts, the History list.
         "chat": chat,
         "needs": needs if isinstance(needs, list) else [],
-        "review": f_review.result() if f_review else {"cards": [], "answered": []},
+        "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,
         "groups": groups,  # group chats; snapshots carry none

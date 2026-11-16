@@ -154,7 +154,7 @@ def test_a_pull_request_merged_before_the_ticket_is_left_for_the_owner(proj, run
 
 
 def test_code_that_is_not_python_is_left_for_the_owner():
-    files = [{"path": "scripts/local-gate.sh", "additions": 2, "deletions": 0}]
+    files = [{"path": "scripts/tidy.sh", "additions": 2, "deletions": 0}]
     assert "cannot read" in reviewer.size_reasons(files, {})[0][0]
 
 

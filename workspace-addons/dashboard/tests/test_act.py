@@ -48,6 +48,7 @@ def acts(act_orch):
             ["config", "get"],
             ["look", "show"],
             ["review", "list"],
+            ["review", "accepted"],
             ["chat", "status"],
         )
         and c[:2] != ["private", "--json"]
@@ -572,7 +573,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 for c in calls(act_orch)
                 if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
                 and c[0] not in ("needs", "status", "agents")
-                and c[:2] not in (["config", "get"], ["chat", "status"], ["review", "list"])
+                and c[:2] not in (["config", "get"], ["chat", "status"], ["review", "list"], ["review", "accepted"])
                 and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"])
                 and c[0] != "look"
                 and c[:2] != ["private", "--json"]
@@ -885,6 +886,17 @@ def test_workflow_and_review_actions_use_human_actor():
         assert argv[argv.index("--by") + 1].startswith("human:")
 
 
+def test_reviewer_switch_is_one_config_set_by_a_human():
+    from orch_dashboard.actions import build_argv
+
+    for on in (True, False):
+        argv = build_argv("reviewer.set", {"on": on})
+        assert argv[:4] == ["config", "set", "workflow.reviewer", "on" if on else "off"]
+        assert argv[argv.index("--by") + 1].startswith("human:")
+    with pytest.raises(actions.BadRequest):
+        build_argv("reviewer.set", {"on": "yes"})
+
+
 def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypatch):
     from orch.adapters import detect_env
 
@@ -926,6 +938,7 @@ def test_workflow_state_defaults_off_and_reads_core_config(tmp_path, monkeypatch
     assert load_settings(ws, None)["agents_may_finish"] is False
     config.set_agents_may_finish(ws, True, "human:tester")
     assert load_settings(ws, None)["agents_may_finish"] is True
+    assert load_settings(ws, None)["reviewer_on"] is False
 
 
 def test_human_review_done_is_refused_without_a_proof_and_workflow_reaches_core_when_server_was_started_by_agent(

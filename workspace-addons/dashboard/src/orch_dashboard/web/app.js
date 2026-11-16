@@ -684,6 +684,7 @@ main.addEventListener('click', async event => {
   // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
+  if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }

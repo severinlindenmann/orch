@@ -603,3 +603,23 @@ test('home: a long add-on question is one short title in its row', () => {
   const row = nodes(context(items, {needsList:() => needs, snapshot:false, button:label => ({tag:'button', children:[label]})}).home(), n => n.attrs?.['data-key'] === 'need-f1')[0];
   assert.ok(row); assert.match(JSON.stringify(row), /Start 'Loyalty card'\?/); assert.doesNotMatch(JSON.stringify(row), /Regular customers/);
 });
+
+test('Settings: "Accept small finished work for me" is one switch that saves at once through reviewer.set (ORCH-77)', async () => {
+  const calls = [];
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null},
+    act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
+  c.window.orch = {toast() {}};
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  c.state.settings = {reviewer_on:false};
+  const text = n => typeof n === 'string' ? n : n.textContent != null ? String(n.textContent) : (n.children || []).map(text).join(' ');
+  const card = c.reviewerCard(c.state.settings), sw = nodes(card, n => n.attrs?.role === 'switch')[0];
+  assert.equal(sw.attrs['aria-label'], 'Accept small finished work for me'); assert.equal(sw.attrs['aria-checked'], false);
+  assert.equal(sw.attrs['data-action'], 'reviewer-set');
+  assert.match(text(card), /Merged bug fixes with green checks and no change to looks, words or rules are marked Done for you\. You see them on Review and can send any back\./);
+  await c.reviewerSwitch();
+  assert.deepEqual(calls, [JSON.stringify(['reviewer.set', {on:true}])]);
+  c.state.settings.reviewer_on = true;
+  assert.equal(nodes(c.reviewerCard(c.state.settings), n => n.attrs?.role === 'switch')[0].attrs['aria-checked'], true);
+  await c.reviewerSwitch();
+  assert.equal(calls[1], JSON.stringify(['reviewer.set', {on:false}]));
+});
