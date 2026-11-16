@@ -9,7 +9,7 @@ import re
 import time
 from pathlib import Path
 
-from orch import history, nextstep, review, review_server, runs_live, safefile, tickets
+from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link")
@@ -151,6 +151,14 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
         if not args.open:
             raise Refused("A link card needs --open URL (or --file).")
         card["preview"] = {"type": "doc", "heading": "Link", "paras": [args.open]}
+    if getattr(args, "merge", False):
+        if kind != "link" or not ghmerge.is_pr_url(args.open):
+            raise Refused(
+                "--merge goes with --link and --open <GitHub pull request address>, "
+                "e.g. --open https://github.com/owner/repo/pull/12."
+            )
+        card.setdefault("ok_label", "Merge")
+        card.setdefault("why", "Your click merges it on GitHub with your own GitHub login.")
     if args.suggest is not None and args.suggest not in options:
         raise Refused("--suggest must be one of the --option ids.")
     return card, options, args.suggest, title
@@ -166,8 +174,18 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         raise Refused("A card needs --then: what happens after the answer.")
     card, options, suggest, _title = _guard(build_card, root, args)
     card, shown = _guard(review.prepare_card, root, tid, card)
+    action = json.dumps({"merge": args.open}) if getattr(args, "merge", False) else None
     return _guard(
-        tickets.ask, root, tid, args.text, options, suggest or args.recommend, by, card=card, shown=shown
+        tickets.ask,
+        root,
+        tid,
+        args.text,
+        options,
+        suggest or args.recommend,
+        by,
+        action=action,
+        card=card,
+        shown=shown,
     )
 
 

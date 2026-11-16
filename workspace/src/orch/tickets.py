@@ -2640,6 +2640,8 @@ def answer(
             raise Refused(
                 "This card waits for the owner. Ask with orch review add and wait with orch review wait."
             )
+        if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
+            raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
         if expected_question_digest is not None and (
             expected_question_digest == QUESTION_UNENCODABLE or question_digest(q) != expected_question_digest
         ):

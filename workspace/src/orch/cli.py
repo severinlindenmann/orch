@@ -635,6 +635,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     g.add_argument("--after", metavar="FILE", help="the file as it would become")
     g.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
     g.add_argument("--open", metavar="URL", help="an http(s) address to look at")
+    g.add_argument(
+        "--merge",
+        action="store_true",
+        help="with --link and a GitHub pull request in --open: the person's Merge click merges it "
+        "with their own GitHub login",
+    )
     x = sub.add_parser("answer", parents=[common], help="answer a question")
     x.add_argument("id")
     x.add_argument("question")
@@ -1111,6 +1117,8 @@ def run(args: argparse.Namespace) -> None:
         card = cli_review.has_card_flags(args)
         if card and (args.phone or args.kind or args.action or args.check):
             raise Refused("A card does not go with --phone, --kind, --action or --check.")
+        if args.merge and not card:
+            raise Refused("--merge goes with a link card: --link TITLE --open <pull request address>.")
         if card:  # the card goes where every question goes; a phone shows it from the stack
             t, q = cli_review.ask_card(
                 args, root, tickets.resolve_cli(root, args.id, json_output=args.json), by()
