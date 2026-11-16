@@ -890,7 +890,7 @@ def _photo_verdict(data: bytes) -> str:
     return "secret" if any(_has_secret(t) for t in texts) else "ok"
 
 
-def _secret_check(root: Path, tid: str, data: bytes, name: str, state: dict | None, photo_ok: bool = False) -> bool:
+def _scan(root: Path, tid: str, data: bytes, name: str, state: dict | None, photo_ok: bool = False) -> bool:
     """The one secret check in front of every phone upload (proof files and named artifacts alike): True when
     `data` may be sent. A file that looks like a password or key, or can't be checked, is not sent and is
     marked once in the ticket log and in state["secret_skipped"] (fail closed). `photo_ok` (evidence only): a
@@ -1041,7 +1041,7 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
             f = _proof_file(root, tid, ev)
             b = (
                 _upload(root, f[1], state)
-                if (f and upload and state is not None and _secret_check(root, tid, f[1], f[0], state, photo_ok=True))
+                if (f and upload and state is not None and _scan(root, tid, f[1], f[0], state, photo_ok=True))
                 else None
             )
             if not b:
@@ -1118,7 +1118,7 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         if data is None:
             continue
         sha = hashlib.sha256(data).hexdigest()
-        if not _secret_check(root, tid, data, name, state):
+        if not _scan(root, tid, data, name, state):
             continue
         if sha in evidence_hashes:  # the same content is already in the view (evidence or an artifact)
             continue
@@ -1840,7 +1840,7 @@ _CARD_NAME = re.compile(
 
 def _card_files(root: Path, tid: str, card: dict, shown: dict, state: dict) -> tuple[dict, list[dict]]:
     """(refs, card_files) for the reviewed files of a card (relay-api.md 'Review cards on the phone'): every
-    file goes through the secret check (_secret_check) and the 20 MB card budget, then is uploaded once (_upload).
+    file goes through the secret check (_scan) and the 20 MB card budget, then is uploaded once (_upload).
     refs maps a stored src to its card_files index, or to "held_back" (not a sendable type or name, changed
     since it was reviewed, a secret) / "too_large" (over the budget): never uploaded, the phone says
     "Open on the computer". Raises Refused when an upload fails (the relay is away: the card is retried)."""
@@ -1860,7 +1860,7 @@ def _card_files(root: Path, tid: str, card: dict, shown: dict, state: dict) -> t
             refs[src] = "held_back"
         elif len(files) >= 20 or total + len(data) > review.MAX_PHONE_CARD:
             refs[src] = "too_large"
-        elif not _secret_check(root, tid, data, name, state):
+        elif not _scan(root, tid, data, name, state):
             refs[src] = "held_back"
         elif (blob := _upload(root, data, state)) is None:
             raise Refused("A card file could not be uploaded.")

@@ -249,7 +249,7 @@ question (above) may carry the Check card of its ticket. Nothing changes for a q
   level; the workspace sends only the listed keys and leaves out null or empty optional values; the relay refuses any other
   key). Kind `check` only on a review question, never on `q<n>`. File references become `{"file": i}` (= `card_files[i]`) or
   `{"file": null, "why": "too_large"|"held_back"}` (not sent: over the phone budget, or kept back by the secret scan
-  (`phone_view._secret_check`) or because the reviewed copy's bytes no longer hash to `shown.files[name]`; the workspace never uploads
+  (`phone_view._scan`) or because the reviewed copy's bytes no longer hash to `shown.files[name]`; the workspace never uploads
   such a file). At most **65536 bytes** as compact UTF-8 JSON (`review.MAX_CARD_JSON`, so every valid card fits).
   The wire card is stricter than `review.validate_card` today in three places, and review.py must align (until then the
   workspace checks the wire card against `$defs/review_card` before it sends, and sends the question without `card` when it
