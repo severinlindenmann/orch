@@ -72,8 +72,8 @@ test('DM refresh reads contacts and only the open thread (the server imports fir
   for (let i = 0; i < 20; i++) c.chatDmRoute();
   assert.equal(calls.length, 2);
   assert.equal(timers.length, 1);
-  assert.equal(timers[0].delay, 5000);
-  now += 5000;
+  assert.equal(timers[0].delay, 2000);
+  now += 2000;
   timers[0].fn();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls.length, 4);
@@ -212,6 +212,18 @@ test('an accepted send shows Delivered at once and refreshes in the background',
   assert.equal(vm.runInContext(`chatUi.sending.has('${WS}')`, c), false);
   assert.match(JSON.stringify(c.chatDmThread()), /Delivered/);
   finishReload();
+});
+
+// Issue 865 (c): Contacts -> Send a message opens the conversation with the name, never an empty "Workspace" pane.
+test('opening a workspace before the contacts load shows its name and a loading line', () => {
+  const c = context();
+  vm.runInContext(`chatDm.contacts = []; chatDm.loaded = false; chatUi.open = '${WS}'; chatDmHint('${WS}', 'Pilatus');`, c);
+  let view = JSON.stringify(c.chatDmThread());
+  assert.match(view, /Pilatus/); assert.match(view, /Loading…/); assert.doesNotMatch(view, /"Workspace"/);
+  vm.runInContext("chatDm.loaded = true", c);
+  assert.match(JSON.stringify(c.chatDmThread()), /not in your contacts/);
+  vm.runInContext(`chatDm.contacts = [{ws:'${WS}',name:'Pilatus',can:{chat:true}}]`, c);
+  assert.doesNotMatch(JSON.stringify(c.chatDmThread()), /not in your contacts|Loading…/);
 });
 
 // Issue 865 (b): Other workspaces keep their place above the groups, also while the contacts load; newest group first.
