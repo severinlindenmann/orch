@@ -331,7 +331,7 @@ def test_evidence_check_record_command_and_output(proj, run, step, planted):
 
 
 def test_evidence_clean_file_with_secret_note_copies_nothing(proj, run, step):
-    """The proof is scanned before a --file is copied: a secret in the note leaves no stray copy behind."""
+    """The evidence is scanned before a --file is copied: a secret in the note leaves no stray copy behind."""
     value = SAMPLES["github-token"]
     (proj / "clean.txt").write_text("all good\n", encoding="utf-8")
     _evidence_refused(
@@ -344,7 +344,7 @@ def test_evidence_clean_file_with_secret_note_copies_nothing(proj, run, step):
     code, out, err = run(
         "check", "done", step, "c1", "--file", "clean.txt", "--note", "ok", "--summary", "fine"
     )
-    assert code == 0, err  # a clean proof still goes through
+    assert code == 0, err  # clean evidence still goes through
 
 
 @pytest.mark.parametrize(
@@ -352,7 +352,7 @@ def test_evidence_clean_file_with_secret_note_copies_nothing(proj, run, step):
     [{"by": "{v}"}, {"at": "{v}"}, {"note ": "{v}", "note": "b"}, {"output": "{v}", "output_tail": "b"}],
 )
 def test_evidence_raw_json_fields_are_scanned(proj, run, step, extra):
-    """Every free-text field of a raw --evidence proof is scanned, also `by`/`at` and fields whose plain name
+    """Every free-text field of raw --evidence JSON is scanned, also `by`/`at` and fields whose plain name
     collides with another one (#942)."""
     value = SAMPLES["github-token"]
     ev = {"type": "note", "ref": "ok", **{k: v.replace("{v}", value) for k, v in extra.items()}}
