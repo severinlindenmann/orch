@@ -43,3 +43,5 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-16 (ORCH-34): A problem report can be shared with the relay, only by an explicit tick in Report a problem
   (or `orch relay problem share`). New relay admin page "Report a problem" (owner: the same name as the button). Only workspaces
   the admin ticks there may pick problems up. Replaces "problem reports never go via the relay".
+- 2026-11-16 (ORCH-99): Hand-made scripts are a first step only (R4.6). Each gets a ticket that moves its job into orch
+  (core or add-on) with tests, then the script is deleted. No AI call for work a program can do.
