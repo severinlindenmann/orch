@@ -180,16 +180,18 @@ function reportReady(d, actions, body, result) {
     window.orch.toast(ok ? 'Copied. Paste it to a helper.' : 'Could not copy. Select the line and copy it.', ok ? undefined : 'error');
   });
   if (result.about === 'feature') {  // a wish: saved (and maybe sent); nobody starts on it from here
-    body.replaceChildren(...[h('p', {role:'status', 'data-key':'report-wish-saved'}, h('span', {className:'dot-ok'}), ' Your feature wish is saved on this computer.'),
+    body.replaceChildren(...[h('p', {role:'status', 'data-key':'report-wish-saved'}, h('span', {className:'dot-ok'}), ' Your feature wish is saved on this computer as ', h('strong', {}, String(result.ref || '')), '.'),
       reportShared(result), h('p', {className:'meta'}, folder)].filter(Boolean));  // replaceChildren writes a null as the word
     actions.replaceChildren(button('Close', 'primary', () => window.orch.close(d)));
     actions.querySelector('.btn.primary')?.focus();
     return;
   }
-  body.replaceChildren(...[reportChecks(array(result.checks)), reportShared(result),
+  // Say plainly that it is saved and under which name, first (ORCH-89: a quick look only saw "Collecting…").
+  const saved = h('p', {role:'status', 'data-key':'report-saved'}, h('span', {className:'dot-ok'}), ' Saved on this computer as ', h('strong', {}, String(result.ref || '')), '.');  // not clean(): it drops the ticket id inside a ref
+  body.replaceChildren(...[saved, reportChecks(array(result.checks)), reportShared(result),
     h('p', {className:'report-sub'}, h('strong', {}, 'Give it to a helper')), h('p', {className:'muted'}, 'Paste this into a helper chat:'),
     h('div', {className:'row'}, h('input', {type:'text', className:'input grow', readOnly:true, value:line, 'aria-label':'Line for a helper', 'data-key':'report-line'}), copy),
-    h('p', {className:'meta'}, folder)].filter(Boolean));
+    h('p', {className:'meta'}, folder)].filter(Boolean));  // replaceChildren writes a null as the word
   actions.replaceChildren(button('Close', 'outline', () => window.orch.close(d)),
     button('Ask a helper to investigate', 'primary', async () => { await window.orch.close(d); chatPrefill(line); }));
   actions.querySelector('.btn.primary')?.focus();
