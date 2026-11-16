@@ -235,7 +235,7 @@
     listAt = Date.now();
     try {
       const r = await fetch(P + '/api/tickets'); if (!r.ok) return;
-      const list = (await r.json()).tickets.filter(t => t.status !== 'done' || t.id === TID);
+      const list = window.FocusHelpers.listOrder((await r.json()).tickets.filter(t => t.status !== 'done' || t.id === TID));
       els.ticketList.replaceChildren(...list.map(t => h('a', {class: 'list-row' + (t.id === TID ? ' cur' : ''), role: 'listitem', href: P + '/t/' + t.id, 'aria-current': t.id === TID ? 'page' : null},
         h('span', {class: window.FocusHelpers.needsYou(t) ? 'dot-warn' : DOT[t.status] || 'dot-work', 'aria-hidden': 'true'}), h('strong', {class: 'grow', text: t.title}))));
     } catch (e) { /* the list keeps what it had */ }

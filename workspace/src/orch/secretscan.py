@@ -115,25 +115,30 @@ def refusal(found: list[dict]) -> str:
     )
 
 
-# Protocol fields that are ids, hashes or tokens the wire needs: not content. Top-level only, so a nested
-# field called "token" or "key" is still scanned. _ID_FIELDS are ids/hashes, skipped at any depth.
-_TOP_SKIP = {"allow_token", "token", "key", "question_id", "mid", "sig", "mac", "digest"}
-_ID_FIELDS = {"blob_id", "sha256", "id"}
+# Protocol fields that the wire needs and that are no content: only these top-level names are skipped, so a
+# nested field called "token" or "key" is still scanned. Ids and hashes are NOT skipped (a secret put into an
+# "id" is still a secret); they never look like one. Dict keys are scanned too.
+_ALLOW_TOKEN = re.compile(r"ora_[A-Za-z0-9_-]{22}")  # the one-time allow token a delegate/start/allow carries
+_ALLOW_FIELDS = {"allow_token", "token"}
 
 
-def _leaves(doc, path: str = ""):
-    """(field, text) for every string in a message body, nested ones too; protocol fields skipped."""
+def _leaves(doc, path: str = "", top: bool = True):
+    """(field, text) for every string in a message body, nested ones too, and every dict key (named
+    "field name", never by the key itself). The protocol fields above are skipped only in the OUTERMOST dict:
+    a dict nested anywhere (also inside a list) is content."""
     if isinstance(doc, str):
         if doc:
             yield path or "text", doc
     elif isinstance(doc, dict):
         for k, v in doc.items():
-            if k in _ID_FIELDS or (not path and k in _TOP_SKIP):
-                continue
-            yield from _leaves(v, f"{path}.{k}" if path else str(k))
+            if top and k in _ALLOW_FIELDS and isinstance(v, str) and _ALLOW_TOKEN.fullmatch(v):
+                continue  # the allow token sent on purpose; all else is scanned
+            if isinstance(k, str) and k:
+                yield f"{path}.field name" if path else "field name", k
+            yield from _leaves(v, f"{path}.{k}" if path else str(k), False)
     elif isinstance(doc, (list, tuple)):
         for v in doc:
-            yield from _leaves(v, path)
+            yield from _leaves(v, path, False)
 
 
 def _stored_root(root: Path | None) -> Path | None:
@@ -178,26 +183,30 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
     )
 
 
+def _views(window: bytes):
+    """Every reading of a window of bytes that could show a secret: UTF-8, Latin-1, and UTF-16 (either byte
+    order, either alignment). No guessing which one the file "really" is: all of them are scanned."""
+    yield window.decode("utf-8", "replace")
+    yield window.decode("latin-1")
+    for off in (0, 1):
+        part = window[off : len(window) - ((len(window) - off) % 2)]
+        yield part.decode("utf-16-le", "replace")
+        yield part.decode("utf-16-be", "replace")
+
+
 def refuse_if_secret(data: bytes, what: str = "file", root: Path | None = None) -> None:
-    """The same scanner over a file about to be uploaded (text: all checks; binary: the token patterns). The
-    whole file is read, in windows of MAX_BYTES that overlap, so size is no way past it."""
-    step, overlap = MAX_BYTES, 4096
+    """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
+    read in every encoding (_views) with the full find() including the stored-key check."""
+    step, overlap = MAX_BYTES, 65536
+    assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
+    found: list[dict] = []
     try:
-        found: list[dict] = []
         sroot = _stored_root(root)
         for start in range(0, max(len(data), 1), step - overlap):
-            chunk = data[start : start + step]
-            if chunk[:2] in (b"\xff\xfe", b"\xfe\xff"):
-                text = chunk.decode("utf-16", "replace")
-            elif b"\0" in chunk[:8192]:
-                text = chunk.decode("latin-1")
-                found = [{"kind": k, "line": 1} for k, rx in PATTERNS if rx.search(text)]
+            for text in _views(data[start : start + step]):
+                found = find(text, sroot)
                 if found:
                     break
-                continue
-            else:
-                text = chunk.decode("utf-8", "replace")
-            found = find(text, sroot)
             if found or start + step >= len(data):
                 break
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass

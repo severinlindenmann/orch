@@ -128,7 +128,7 @@ def test_protocol_fields_are_not_content(proj, on):
 
     relay.scan_outgoing(
         proj,
-        {"allow_token": "orn_" + "A" * 24, "blob_id": "b_" + "0" * 16, "sha256": "f" * 64, "text": "hello"},
+        {"allow_token": "ora_" + "A" * 22, "blob_id": "b_" + "0" * 16, "sha256": "f" * 64, "text": "hello"},
     )
     json.dumps({})  # (no secret: no refusal)
 
@@ -143,14 +143,14 @@ def test_blob_check_big_file_utf16_and_odd_paths(proj, on):
     with pytest.raises(Refused):
         relay._api(proj, "post", "/v1/blobs/?x=1", f"token {TOKEN}".encode("utf-16"), 5)
     with pytest.raises(Refused):
-        relay._api(proj, "POST", "/v1/blobs", memoryview(b"x"), 5)
+        relay._api(proj, "POST", "/v1/blobs", memoryview(f"t {TOKEN}".encode()), 5)
     assert not on.blobs
 
 
 def test_nested_token_field_is_scanned_top_level_one_is_not(proj, on):
     from orch import relay
 
-    relay.scan_outgoing(proj, {"text": "hi", "token": TOKEN})  # the protocol's own field
+    relay.scan_outgoing(proj, {"text": "hi", "token": "ora_" + "A" * 22})  # the protocol's own field
     with pytest.raises(Refused):
         relay.scan_outgoing(proj, {"text": "hi", "meta": {"token": TOKEN}})
 
@@ -186,6 +186,25 @@ def test_a_value_that_is_the_placeholder_passes_everything_else_is_scanned(proj,
         with pytest.raises(Refused) as e:
             relay.scan_outgoing(proj, {"text": bad})
         assert real not in str(e.value) and TOKEN not in str(e.value), bad
+
+
+def test_utf16_later_windows_dict_keys_ids_and_other_uploads(proj, on):
+    from orch import relay
+
+    pad = "x\n" * 700_000
+    for enc in ("utf-16", "utf-16-le", "utf-16-be"):
+        with pytest.raises(Refused) as e:
+            relay._api(proj, "POST", "/v1/blobs", (pad + f"token={TOKEN}\n").encode(enc), 5)
+        assert TOKEN not in str(e.value), enc
+    for body in ({TOKEN: "x"}, {"items": [{"id": TOKEN}]}, {"a": {"sha256": TOKEN}}):
+        with pytest.raises(Refused) as e:
+            relay.scan_outgoing(proj, body)
+        assert TOKEN not in str(e.value)
+    with pytest.raises(Refused):
+        relay._api(proj, "PUT", "/v1/blobs/x", f"t {TOKEN}".encode(), 5)
+    with pytest.raises(Refused):
+        relay._api(proj, "post", "/v1/webhooks", {"name": f"hook {TOKEN}"}, 5)
+    relay.scan_outgoing(proj, {"id": "m_text000000000001", "sha256": "f" * 64, "text": "hi"})
 
 
 def _ticket_with_planted_token(proj, run):
@@ -302,3 +321,73 @@ def test_resend_scans_every_field_and_odd_files(proj, run, on):
     res = relay.resend_outbox(proj)
     assert len(res["failed"]) == 3 and not res["sent"] and not on.sent, res
     assert TOKEN not in json.dumps(res) and not list(ob.glob("m_*.json"))
+
+
+def test_utf16_after_a_utf8_head_and_protocol_bodies_stay_clean(proj, on):
+    from orch import relay
+
+    data = ("a" * 9000).encode() + b"\xff\xfe" + f"token={TOKEN}".encode("utf-16-le")
+    with pytest.raises(Refused) as e:
+        relay._api(proj, "POST", "/v1/blobs", data, 5)
+    assert TOKEN not in str(e.value)
+    with pytest.raises(Refused):
+        relay._api(proj, "GET", "/v1/whoami", {"x": f"t {TOKEN}"}, 5)
+    uuid = "123e4567-e89b-12d3-a456-426614174000"
+    relay.scan_outgoing(
+        proj, {"ids": ["m_text000000000001", uuid], "sha256": "ab" * 32, "blob_id": "b_" + "0" * 16}
+    )
+    relay.scan_outgoing(proj, {"mobile_mode": {"state": "on", "since": "2026-11-15T10:00:00Z"}})
+
+
+def test_every_encoding_is_scanned_whatever_the_head_looks_like(proj, on):
+    from orch import relay
+
+    cases = {
+        "utf16 after an ascii head": ("a" * 9000).encode()
+        + b"\xff\xfe"
+        + f"token={TOKEN}".encode("utf-16-le"),
+        "utf16 odd alignment": b"x" * 9001 + f"token={TOKEN}".encode("utf-16-le"),
+        "utf16be no bom": ("token=" + TOKEN).encode("utf-16-be") + b"tail",
+        "binary head, token past 8 KB": b"\x00\x01" * 5000 + f"\ntoken={TOKEN}\n".encode(),
+        "utf16 past the first window": b"y\n" * 600_000 + f"token={TOKEN}".encode("utf-16-le"),
+    }
+    for name, data in cases.items():
+        with pytest.raises(Refused) as e:
+            relay._api(proj, "POST", "/v1/blobs", data, 5)
+        assert TOKEN not in str(e.value) and "nothing was sent" in str(e.value), name
+    assert not on.blobs
+
+
+def test_protocol_names_are_skipped_only_in_the_outermost_dict(proj, on):
+    from orch import relay
+
+    relay.scan_outgoing(proj, {"token": "ora_" + "A" * 22, "text": "hi"})  # the allow token, outermost
+    for body in (
+        {"items": [{"token": TOKEN}]},
+        {"items": [{"key": TOKEN}], "text": "x"},
+        {"a": {"b": [{"allow_token": TOKEN}]}},
+        {"mid": {"note": TOKEN}},
+        {"digest": [TOKEN]},
+    ):
+        with pytest.raises(Refused) as e:
+            relay.scan_outgoing(proj, body)
+        assert TOKEN not in str(e.value), body
+
+
+def test_only_an_allow_token_shape_is_skipped_everything_else_under_protocol_names_is_scanned(proj, on):
+    from orch import relay
+
+    relay.scan_outgoing(proj, {"token": "ora_" + "A" * 22, "text": "hi"})
+    relay.scan_outgoing(
+        proj, {"allow_token": "ora_" + "b1" * 11, "mid": "m_text000000000001", "digest": "f" * 64}
+    )
+    for body in (
+        {"mid": TOKEN},
+        {"question_id": f"pw is hunter2, key {TOKEN}"},
+        {"sig": TOKEN},
+        {"token": TOKEN},
+        {"token": "ora_" + "A" * 22 + " " + TOKEN},
+    ):
+        with pytest.raises(Refused) as e:
+            relay.scan_outgoing(proj, body)
+        assert TOKEN not in str(e.value), body

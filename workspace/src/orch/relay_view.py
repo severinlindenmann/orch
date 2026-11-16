@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import json
+import re
 from pathlib import Path
 
 from orch import net, relay
@@ -49,6 +50,21 @@ def preview(type_: str, body: dict) -> tuple[str, str]:
     return plain(body.get("text") or "-"), ""
 
 
+AUTO_TEXTS = (
+    "Tasks:",
+    "Status:",
+    "Ticket on your workspace",
+    "Seen",
+)  # sent logs from before `update` was kept
+
+
+def is_update(type_: str, line: str, kind) -> bool:
+    """True for automatic traffic (a status note, task progress, "Seen"), false for what a person wrote."""
+    if type_ != "text":
+        return False
+    return bool(kind) or any(line == t or (t.endswith(":") and line.startswith(t)) for t in AUTO_TEXTS)
+
+
 def _sent_path(root: Path) -> Path | None:
     """.orch/run/relay/sent.jsonl, or None when .orch, run or relay (or the file) is a link."""
     p = root / ".orch"
@@ -67,6 +83,9 @@ def record_sent(root: Path, msg: dict) -> None:
     entry = {"id": msg["id"], "to": msg["to"], "type": msg["type"], "at": msg["created_at"], "preview": line}
     if extra:
         entry["extra"] = extra
+    upd = (msg.get("body") or {}).get("update")
+    if isinstance(upd, dict) and isinstance(upd.get("kind"), str):
+        entry["update"] = upd["kind"][:20]  # an automatic status note, not something a person wrote
     path = _sent_path(root)
     if path is None:
         return
@@ -232,9 +251,20 @@ def view(root: Path) -> dict:
         out["header"] = {"status": {"label": "Connected", "tone": "good"}}
     rows: list[tuple[str, dict]] = []
 
+    updates: list[tuple[str, dict]] = []
+
     def row(
-        at: str, who: str, arrow: str, type_: str, line: str, extra: str, to_phones: bool = False
+        at: str,
+        who: str,
+        arrow: str,
+        type_: str,
+        line: str,
+        extra: str,
+        to_phones: bool = False,
+        auto: bool = False,
     ) -> tuple[str, dict]:
+        if auto and re.fullmatch(r"Tasks:\s*-?", line):
+            line = "No tasks yet"  # an empty task list is said in words, never as a bare "Tasks:"
         if arrow == "in":
             title = f"{who} → you"
         elif (
@@ -255,28 +285,59 @@ def view(root: Path) -> dict:
 
     for m in _received(root):
         line, extra = preview(m["type"], m.get("body"))
-        rows.append(
-            row(str(m.get("created_at") or ""), relay.name_of(root, m["from"]), "in", m["type"], line, extra)
+        upd = (m.get("body") or {}).get("update") if isinstance(m.get("body"), dict) else None
+        auto = is_update(m["type"], line, upd)
+        (updates if auto else rows).append(
+            row(
+                str(m.get("created_at") or ""),
+                relay.name_of(root, m["from"]),
+                "in",
+                m["type"],
+                line,
+                extra,
+                auto=auto,
+            )
         )
     for e in _sent(root):
-        rows.append(
+        line = plain(e.get("preview") or "-")
+        auto = is_update(e["type"], line, e.get("update"))
+        (updates if auto else rows).append(
             row(
                 str(e.get("at") or ""),
                 relay.name_of(root, e["to"]),
                 "out",
                 e["type"],
-                plain(e.get("preview") or "-"),
+                line,
                 str(e.get("extra") or ""),
                 e["to"] == "phones",
+                auto,
             )
         )
     rows.sort(key=lambda r: r[0], reverse=True)
+    updates.sort(key=lambda r: r[0], reverse=True)
+    shown = [r for _, r in rows[:20]]
+    if updates:  # one quiet row at the end: the automatic notes stay behind a click
+        shown.append(
+            {
+                "title": plain(f"Show updates ({len(updates)})", 60),
+                "subtitle": "Status changes and progress notes",
+                "detail": [
+                    {"label": plain(it.get("subtitle", "-").split(" · ")[0], 30), "value": it["title"]}
+                    if " · " not in it.get("subtitle", "")
+                    else {
+                        "label": plain(it["subtitle"].split(" · ", 1)[0], 30),
+                        "value": plain(f"{it['title']}: {it['subtitle'].split(' · ', 1)[1]}", 200),
+                    }
+                    for _, it in updates[:12]
+                ],
+            }
+        )
     out["blocks"] += [
         {
             "type": "list",
             "title": "Recent messages",
             "span": "half",
-            "items": [r for _, r in rows[:20]],
+            "items": shown,
             "more": max(0, len(rows) - 20),
             "empty": {
                 "title": "No messages yet",
