@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .. import events as ev
+from ..cmdout import CMD_CHARS, OUT_CHARS, output_tail
 
 HELPER_TOOLS = ("Task", "Agent")
 _WORDS = {
@@ -70,12 +71,12 @@ def _secs(a: str, b: str) -> float | None:
 
 # make() is the only place that clips (after redacting); these are the limits it gets.
 TEXT_MAX = {"tool.start": 120, "helper.start": 120, "tool.end": 200, "helper.end": 200}
-LIMITS = {"window": 32, "tool": 64, "id": 100}
+LIMITS = {"window": 32, "tool": 64, "id": 100, "command": CMD_CHARS, "output": OUT_CHARS}
 
 
 class ClaudeMapper:
-    def __init__(self, run: str, ticket: str):
-        self.run, self.tid = run, ticket
+    def __init__(self, run: str, ticket: str, root=None):
+        self.run, self.tid, self.root = run, ticket, root  # root: the workspace, for its stored keys
         self._open: dict[str, dict] = {}  # tool_use id -> {kind, agent, at}
         self._helper_of: dict[str, str] = {}  # helper tool_use id -> h_<n>
         self._n = 0
@@ -127,7 +128,7 @@ class ClaudeMapper:
                 self._open[tid] = {"kind": "helper", "at": at}
                 out.append(self._e(h, "helper.start", text, at, id=tid))
             else:
-                self._open[tid] = {"kind": "tool", "at": at, "agent": agent}
+                self._open[tid] = {"kind": "tool", "at": at, "agent": agent, "bash": name == "Bash"}
                 cmd = str(inp["command"]) if name == "Bash" and "command" in inp else None
                 out.append(
                     self._e(agent, "tool.start", _step_text(name, inp), at, id=tid, tool=name, command=cmd)
@@ -176,6 +177,7 @@ class ClaudeMapper:
                     self._e(self._helper_of[tid], "helper.end", text or "Done", at, id=tid, ok=ok, ms=ms)
                 )
             else:
+                shown = output_tail(b.get("content"), self.root) if start.get("bash") else None
                 out.append(
                     self._e(
                         start["agent"],
@@ -185,6 +187,7 @@ class ClaudeMapper:
                         id=tid,
                         ok=ok,
                         ms=ms,
+                        output=shown,
                     )
                 )
         return out
@@ -223,5 +226,5 @@ class ClaudeMapper:
         return out
 
 
-def make(run: str, ticket: str) -> ClaudeMapper:
-    return ClaudeMapper(run, ticket)
+def make(run: str, ticket: str, root=None) -> ClaudeMapper:
+    return ClaudeMapper(run, ticket, root)

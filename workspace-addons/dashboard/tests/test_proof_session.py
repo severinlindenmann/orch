@@ -408,6 +408,7 @@ ACT_ARGS = {
     "run.start": {"ticket": TID},
     "run.stop": {"ticket": TID},
     "run.send": {"ticket": TID, "text": "x"},
+    "run.take_back": {"ticket": TID, "id": "p_abcdef12"},
     "addon.start": {},
     "addon.act": {"addon": "scheduler", "verb": "pause", "target": TID},
     "config.agent": {"name": "claude"},

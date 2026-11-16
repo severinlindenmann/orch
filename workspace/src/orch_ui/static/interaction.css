@@ -30,6 +30,8 @@ dialog.ui-closing::backdrop{animation:ui-fade var(--ui-exit) reverse forwards}
 .ui-toast .btn{flex:none;white-space:nowrap}
 .ui-calendar{width:360px}
 .ui-quick{margin-top:12px;gap:8px;flex-wrap:wrap}
+.ui-time{margin-top:12px;gap:8px;align-items:center}
+.ui-time[hidden]{display:none}
 .ui-week,.ui-days{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
 .ui-week{font-size:11px;text-align:center;margin:16px 0 6px;color:var(--text-muted,#666)}
 .ui-days .btn{padding:8px;min-width:0}
