@@ -51,7 +51,9 @@ def add_parsers(sub, common) -> None:
         if name in cli_screen.SUBCOMMANDS:
             continue
         x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
-        x.add_argument("ticket", nargs="?" if name in ("event", "done", "input") else None)
+        x.add_argument(
+            "ticket", nargs="?" if name in ("event", "done", "input") else "+" if name == "status" else None
+        )
         if name in ("claim", "argv"):
             x.add_argument("--mode", choices=("oneshot", "live"), default="oneshot")
         if name == "start":
@@ -193,7 +195,25 @@ def _waiting_input(root: Path, tid: str) -> list[dict]:
 
 
 def _status(args, root: Path) -> None:
-    tid = args.ticket
+    ids = args.ticket if isinstance(args.ticket, list) else [args.ticket]
+    if len(ids) == 1:  # the one-ticket answer is unchanged
+        data, text = _status_of(root, ids[0])
+        _out(args, data, text)
+        return
+    # Several tickets in one process (the dashboard asks for all runs at once): the same answer per ticket,
+    # one ticket that cannot be read does not spoil the others.
+    out: dict[str, dict] = {}
+    lines = []
+    for tid in dict.fromkeys(ids):
+        try:
+            out[tid], text = _status_of(root, tid)
+        except Refused as e:
+            out[tid], text = {"ticket": tid, "error": str(e)}, str(e)
+        lines.append(text)
+    _out(args, {"runs": out}, "\n".join(lines))
+
+
+def _status_of(root: Path, tid: str) -> tuple[dict, str]:
     tickets.load(root, tid)
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
     runs.check_start_timeout(root, tid)  # a start that never got an agent says why
@@ -213,8 +233,7 @@ def _status(args, root: Path) -> None:
             )
         else:
             text = f"No run is active for this ticket. Start one: orch run start {tid}"
-        _out(args, data, text)
-        return
+        return data, text
     st = runs.state(rec)
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
     data["waiting_input"] = _waiting_input(root, tid)
@@ -241,7 +260,7 @@ def _status(args, root: Path) -> None:
             text += " " + runs_live.line(rec, root)
     if shared := (data.get("shared_folder") or {}).get("line"):
         text += "\n" + shared  # one quiet line, as `orch ticket show` has it
-    _out(args, data, text)
+    return data, text
 
 
 HOOK_INPUT_SECONDS = 2.0  # a tool writes its hook input at once and closes the pipe; nobody else gets more

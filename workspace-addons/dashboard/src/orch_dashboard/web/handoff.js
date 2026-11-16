@@ -286,5 +286,8 @@
       poll();  // an update request that waited no longer applies: it is gone from the list now
     }).catch(function () { tell("unreachable"); updateOverdue(true); });
   }
-  notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
+  // A hidden tab does not poll (nobody sees the answer); it asks once when it is shown again.
+  function whenShown(fn) { return function () { if (document.visibilityState !== "hidden") fn(); }; }
+  notices(); poll(); updateStatus(); setInterval(whenShown(poll), 4000); setInterval(whenShown(updateStatus), 4000);
+  document.addEventListener("visibilitychange", whenShown(function () { poll(); updateStatus(); }));
 })();

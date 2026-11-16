@@ -401,7 +401,13 @@ def test_a_done_ticket_with_an_open_live_session_gets_its_run_status(tmp_path, m
     from orch_dashboard import data
 
     asked = []
-    monkeypatch.setattr(data, "run_orch", lambda b, args, root: asked.append(args[2]) or {"running": True})
+    monkeypatch.setattr(
+        data,
+        "run_orch",
+        lambda b, args, root, **kw: (
+            asked.extend(args[2:-1]) or {"runs": {i: {"running": True} for i in args[2:-1]}}
+        ),
+    )
     (tmp_path / ".orch" / "run" / "tickets").mkdir(parents=True)
     (tmp_path / ".orch" / "run" / "tickets" / "t_done0001.json").write_text("{}")
     tickets = [
@@ -427,7 +433,11 @@ def test_the_shared_folder_line_passes_as_short_plain_text_only(tmp_path, monkey
         "t_b000001": {"running": True, "shared_folder": "junk"},
         "t_c000001": {"running": True},
     }
-    monkeypatch.setattr(data, "run_orch", lambda b, args, root: dict(replies[args[2]]))
+    monkeypatch.setattr(
+        data,
+        "run_orch",
+        lambda b, args, root, **kw: {"runs": {i: dict(replies[i]) for i in args[2:-1]}},
+    )
     tickets = [{"id": i, "status": "open"} for i in replies]
     got = data.load_runs(tmp_path, "orch", tickets, fresh=True)
     assert list(got["t_a000001"]["shared_folder"]) == ["line"]
