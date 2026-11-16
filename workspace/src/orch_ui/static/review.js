@@ -76,7 +76,8 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
  const shot=(label,pv,on,taken,dim)=>{const b=el('button','decision-shot'+(taken?' taken':'')+(dim?' dim':''));b.type='button';b.dataset.on=on;
   const w=content(pv),cap=el('span');cap.append(el('b','',label));b.append(w,cap);out.push({b,w,on,taken:!!taken});return b};
  if(p.type==='options'&&p.before)shot('Today',p.before,'before');
- if(p.type==='options')(p.options||[]).forEach(op=>shot(op.id+' · '+op.title+(op.suggested?' (suggested)':''),op.preview,'option '+op.id,d.picked===op.id,d.picked&&d.picked!==op.id));
+ /* options with no picture (a plain question): no empty tiles, the verdict already names the pick */
+ if(p.type==='options'){if(p.before||(p.options||[]).some(op=>op.preview))(p.options||[]).forEach(op=>shot((op.id&&op.id!==op.title?op.id+' · ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''),op.preview,'option '+op.id,d.picked===op.id,d.picked&&d.picked!==op.id))}
  else if(p.type==='compare'){shot('Before',p.before,'before');shot('After',p.after,'after')}
  else shot(k.title||'Reviewed',p,'');
  /* pins sit on the thumbnail they were set on (else the taken one, else the first) */
