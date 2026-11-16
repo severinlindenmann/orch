@@ -577,7 +577,14 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },
                     "ticket_view": tv,
-                    "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
+                    # live_session: this add-on's page shows a ticket's live session (Focus); the ticket's
+                    # "Watch live" button looks for it, so it must reach the page (ORCH-15)
+                    "page": pg
+                    and {
+                        "path": pg["path"],
+                        "label": str(pg.get("label") or "")[:40],
+                        **({"live_session": True} if pg.get("live_session") is True else {}),
+                    },
                     "ticket_fields": tf,
                     "acts": acts,
                     "link_kinds": kinds,
