@@ -25,6 +25,7 @@ HUMAN_ONLY = {
     "run take-back",  # a person takes back a waiting message (agents are refused)
     "ref merge",  # a person's Merge on a pull request a helper left open (agents are refused)
     "check wont-do",  # a person decides a step will not be done (agents ask with orch ask)
+    "ticket model",  # a person's choice of model (agents are refused; orch picks by itself)
     "chat",  # the dashboard and the Chat helper (its prompt names the commands)
     "copy clean",  # a person's call (the dashboard's "Clean up now"); `orch copy` is hidden from help
     "copy retry",  # a person's "Try again" (agents are refused)

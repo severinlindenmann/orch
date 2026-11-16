@@ -6,6 +6,7 @@
       "label": "Claude",
       "detect": { "binary": "claude", "env_any": ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] },
       "prompt_via": "arg",
+      "model_args": ["--model", "{model}"],
       "oneshot": {
         "fresh": ["claude", "-p", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
         "resume": ["claude", "-p", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],

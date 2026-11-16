@@ -198,6 +198,7 @@ HINTS = {
     "check start": _start_task,
     "check stop": _on_ticket,
     "check wont-do": _on_ticket,
+    "ticket model": _on_ticket,
     "check record": _record,
     "check done": _on_ticket,
     "log": _on_ticket,

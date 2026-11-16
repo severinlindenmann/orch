@@ -1299,7 +1299,7 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by")
+PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by", "model")
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1530,13 +1530,19 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
-def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) -> dict:
+def tidy(
+    root: Path, tid: str, title: str, by: str, fields: dict | None = None, description: str | None = None
+) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
-    filled only where still empty. Once."""
+    filled only where still empty, and the agent's description (what and why, its own field, never the
+    person's note) when there is none yet. Once."""
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
+    description = (description or "").strip() or None
+    if description is not None:
+        clean_field("note", description)  # the same plain-text rules and 2000 characters
     fields = {k: v for k, v in (fields or {}).items() if k in ("owner", "due", "done_when") and v}
     for k, v in fields.items():
         clean_field(k, v)
@@ -1558,10 +1564,66 @@ def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) 
             _set_field(ticket, k, fields[k])
         if filled:
             add_history(ticket, by, "Details filled in: " + ", ".join(filled))
-        if (title == old or edited) and not filled:
+        wrote = bool(description and not ticket.get("description"))
+        if wrote:
+            ticket["description"] = description
+            ticket["description_by"] = by[:100]
+            add_history(ticket, by, f"Description written by {by[:100]}")
+        if (title == old or edited) and not filled and not wrote:
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]
+
+
+def set_model(root: Path, tid: str, name: str, by: str) -> dict:
+    """A person's model for this ticket's helper (sonnet or opus), or auto: orch picks again next start."""
+    from orch import modelpick
+
+    name = (name or "").strip().lower()
+    if name not in (*modelpick.MODELS, "auto"):
+        raise Refused("Pick sonnet, opus or auto.")
+    if not _is_person(by):
+        raise Refused(
+            f'Only a person picks the model. Ask instead: orch ask {tid} "Run this ticket on Opus?" '
+            "--option yes --option no"
+        )
+
+    def op(ticket):
+        if name == "auto":
+            ticket.pop("model", None)
+            add_history(ticket, by, "Model: orch picks it again on the next start")
+        else:
+            ticket["model"] = {"name": name, "by": by[:100]}
+            add_history(ticket, by, f"Model set to {modelpick.LABELS[name]}")
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
+def pick_model(root: Path, tid: str, by: str) -> str:
+    """Before a start: keep a person's choice, else let orch pick from the ticket as it is now (a history line
+    only when the pick changes). Returns the model name."""
+    from orch import modelpick
+
+    out: dict = {}
+
+    def op(ticket):
+        cur = modelpick.chosen(ticket)
+        if cur and modelpick.by_person(ticket):
+            out["name"] = cur["name"]
+            return
+        name, why = modelpick.pick(ticket)
+        out["name"] = name
+        if cur and cur["name"] == name:
+            return
+        ticket["model"] = {"name": name, "by": modelpick.BY_ORCH, "why": why[:200]}
+        add_history(ticket, by, f"Model picked: {modelpick.LABELS[name]} ({why[:200]})")
+
+    t = load(root, tid)
+    cur = modelpick.chosen(t)
+    if cur and (modelpick.by_person(t) or cur["name"] == modelpick.pick(t)[0]):
+        return cur["name"]  # nothing to write
+    apply_op(root, tid, op, by=by)
+    return out["name"]
 
 
 def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:

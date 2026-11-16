@@ -221,6 +221,10 @@ def _show(t: dict, root: Path) -> str:
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
+    from orch import modelpick
+
+    if modelpick.label(t):
+        extra.append(f"Model: {modelpick.label(t)}")
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
@@ -515,6 +519,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--owner")
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
+    x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
+    x = t.add_parser(
+        "model", parents=[common], help="which model this ticket's helper runs on: sonnet, opus or auto"
+    )
+    x.add_argument("id")
+    x.add_argument("name", choices=("sonnet", "opus", "auto"))
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
     x.add_argument("--goal", required=True)
@@ -1000,8 +1010,19 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, f'Title written: "{t["title"]}"')
     elif cmd == "ticket" and sub == "tidy":
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
-        t = tickets.tidy(root, args.id, args.title, by(), fields)
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description)
         _out(args, t, f'Tidied: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "model":
+        from orch import modelpick
+
+        t = tickets.set_model(root, args.id, args.name, by())
+        _out(
+            args,
+            t,
+            f"Model: {modelpick.label(t)}. It applies from the next start."
+            if modelpick.label(t)
+            else "orch picks the model again on the next start.",
+        )
     elif cmd == "ticket" and sub == "plan":
         t = tickets.set_plan(root, args.id, args.goal, args.not_included, by())
         _out(args, t, "Plan written.")
