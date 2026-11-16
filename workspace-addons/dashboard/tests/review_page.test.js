@@ -98,7 +98,7 @@ test('"Review all" is a link to #review with the card count, and never changes t
   assert.equal(withCards.reviewCount(), 1);
   assert.equal(withCards.needsToday().count, without.needsToday().count, 'cards are the questions and results Home already counts');
 });
-test('ORCH-63: the Review subtitle says the top bar number; a Factory start question is a card like any question', () => {
+test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say one number: the cards (questions + results)', () => {
   const base = {settings:{}, runs:{}, services:[]};
   const t1 = {id:'t_abcdef', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]};
   const t2 = {id:'t_fffaaa', title:'Services', status:'waiting', questions:[{id:'q1', text:"Start 'Services'?", kind:'factory:start'}]};
@@ -109,13 +109,15 @@ test('ORCH-63: the Review subtitle says the top bar number; a Factory start ques
   const c = home({...base, review:{cards:[CARD, factory], answered:[]}}, [t1, t2], rows);
   assert.equal(c.needsToday().count, 2);
   assert.equal(c.reviewSubtitle(), '2 things wait on you, most urgent first.');
-  // a row with no card (a helper idle at its prompt on a third ticket) is counted once and named as on Home
+  // owner 16 Nov: the number is open questions plus results to check, so it equals the cards here. A helper idle at its
+  // prompt, or a ticket that only waits for another ticket, has no card and is not counted.
   const idle = {id:'core:stuck:t_ccccdd', source:'core', kind:'stuck:idle', ticket:'t_ccccdd', since:'2026-11-15T11:00:00Z', title:'Docs', text:'The helper waits at its prompt', tone:'warn'};
-  const more = home({...base, review:{cards:[CARD, factory], answered:[]}}, [t1, t2, {id:'t_ccccdd', title:'Docs', status:'active', questions:[]}], [...rows, idle]);
-  assert.equal(more.needsToday().count, 3);
-  assert.equal(more.reviewSubtitle(), '3 things wait on you: 2 here, 1 more on Home.');
-  const onlyHome = home({...base, review:{cards:[], answered:[]}}, [t1], [rows[0]]);
-  assert.equal(onlyHome.reviewSubtitle(), '1 thing waits on you, all on Home.');
+  const waits = {id:'t_ddddee', title:'Later', status:'waiting', waiting_on:{kind:'ticket', ref:'t_abcdef'}, questions:[]};
+  const check = {...CARD, id:'core:review:t_eeeeff', ticket:'t_eeeeff', key:'review', kind:'check', card:{kind:'check', title:'Report'}};
+  const cards = [CARD, factory, check];
+  const more = home({...base, review:{cards, answered:[]}}, [t1, t2, {id:'t_ccccdd', title:'Docs', status:'active', questions:[]}, waits, {id:'t_eeeeff', title:'Report', status:'review', questions:[]}], [...rows, idle]);
+  assert.equal(more.needsToday().count, 3); assert.equal(more.needsToday().count, more.reviewCount());
+  assert.equal(more.reviewSubtitle(), '3 things wait on you, most urgent first.');
   assert.equal(home({...base, review:{cards:[], answered:[]}}, [], []).reviewSubtitle(), 'Nothing waits for you.');
 });
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {

@@ -372,10 +372,10 @@ function needsToday() {
   const groups = homeNeeds(needs), all = tickets();
   const review = all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id));
   const changes = all.filter(t => t.bring_back?.state === 'waiting');
-  const asked = groups.length + failed.length;
-  return {needs, notices, failed, groups, review, changes, asked, count:window.DashHelpers.needsYouCount(groups.map(g => g.row), failed, review, changes)};
+  const asked = groups.length + failed.length, results = all.filter(t => t.status === 'review');
+  return {needs, notices, failed, groups, review, changes, asked, count:window.DashHelpers.needsYouCount(needs, results)};
 }
-// The one needs-you number: sidebar badge, Menu, Home and Tickets headers all read it.
+// The one needs-you number: the Review menu entry, Menu, top bar, Home, Review and Tickets headers all read it.
 function needsYouTotal() { return state ? needsToday().count : 0; }
 // Services that should run but do not (one that is off on purpose, like Sync before it is turned on, is not one).
 function stoppedServices() { return array(state.services).filter(s => s.running === false && !s.idle); }
@@ -439,12 +439,15 @@ function home() {
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
   const banner = [backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
-  const title = needCount ? needCount + (needCount === 1 ? ' thing needs you' : ' things need you') : 'Nothing needs you';
+  // The number counts open questions and results to check only (ORCH-63); the list below also holds failed starts,
+  // changes to add and add-on rows, so it shows whenever it has anything, with or without a number.
+  const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length > 0;
+  const title = needCount ? needCount + (needCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds ? 'Things to look at' : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length);
   const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
   const notes = notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : [];
-  if (!needCount && !working.length) {
+  if (!anyNeeds && !working.length) {
     return fragment(head, banner, h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
       h('p', {}, 'Questions and results to check will appear here.'), typeof newButton === 'function' ? newButton() : null),
       notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
@@ -458,7 +461,7 @@ function home() {
   const finishedBody = finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      needCount ? attentionCard('needs-you', 'Needs you · ' + needCount, 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', [clearOldButton(), reviewAllButton()]) : null),
+      anyNeeds ? attentionCard('needs-you', needCount ? 'Needs you · ' + needCount : 'Needs you', 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', [clearOldButton(), reviewAllButton()]) : null),
     h('aside', {className:'stack', 'data-key':'right'},
       working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
       quiet.length ? card('quiet-now', 'No news', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,

@@ -103,6 +103,6 @@ test('a shared read-only copy shows the rows without buttons; other rows are not
   const isHelperRow = vm.runInContext('isHelperRow', c);
   assert.equal(isHelperRow({...IDLE, source:'sync'}), false);
   assert.equal(isHelperRow({...IDLE, kind:'overdue-wait'}), false);
-  assert.equal(helpers.needsYouCount([UNMERGED], []), 1);  // counted in the Needs you number
+  assert.equal(helpers.needsYouCount([UNMERGED], []), 0);  // listed on Home, not in the number (no question, ORCH-63)
   assert.equal(helpers.isNotice(IDLE), false);
 });
