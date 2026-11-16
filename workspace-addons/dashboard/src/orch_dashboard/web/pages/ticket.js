@@ -318,7 +318,7 @@ function liveLinkFor(t) {
   const a = addons().find(a => a.page?.live_session === true && array(state.services).some(s => s.addon === a.name && s.running === true));
   if (!a) return null;
   const own = (t.ext || {})[a.name]?.page;
-  // no page of its own for this ticket: the live-session page opens on this ticket (Focus: /t/<ticket>, the Live tab is its default)
+  // no page of its own for this ticket: the live-session page opens on this ticket (/t/<ticket>, its Live tab is the default)
   const id = typeof t.id === 'string' && /^[A-Za-z0-9_.-]+$/.test(t.id) && !t.id.includes('..') ? t.id : '';
   return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : id ? 't/' + id : a.page.path)};
 }
