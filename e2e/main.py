@@ -218,6 +218,7 @@ class E:
 KNOWN = [
     ("record of your Done decisions is damaged", "https://github.com/severinlindenmann/orch/issues/921"),
     ("stored keys on line", "https://github.com/severinlindenmann/orch/issues/922"),
+    ("has a password or secret value on line", "https://github.com/severinlindenmann/orch/issues/922"),
     ("second start made another ticket", "https://github.com/severinlindenmann/orch/issues/931"),
     ("attachments: []", "https://github.com/severinlindenmann/orch/issues/926"),
     ("from this computer", "https://github.com/severinlindenmann/orch/issues/924"),
