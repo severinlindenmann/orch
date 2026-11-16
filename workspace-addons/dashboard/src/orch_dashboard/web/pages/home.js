@@ -244,6 +244,45 @@ function reviewAllButton() {
   const n = typeof reviewCount === 'function' ? reviewCount() : 0;
   return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all', h('span', {className:'count'}, String(n))) : null;
 }
+// "Clear old": the questions that have waited more than a week go in one click. Same path as a one-click answer:
+// the rows leave at once, the toast offers Undo, and only when the Undo window ends is each one answered.
+const OLD_QUESTION_MS = 7 * 24 * 3600 * 1000, OLD_QUESTION_ANSWER = 'Dismissed: older than a week';
+function oldQuestions() {
+  const cutoff = now().getTime() - OLD_QUESTION_MS;
+  return needsToday().needs.filter(r => r.ticket && r.answer?.question && r.answer?.digest && !needActs(r).length && Date.parse(r.since) < cutoff);
+}
+function clearOldButton() {
+  const old = snapshot ? [] : oldQuestions();
+  if (!old.length) return null;
+  const label = 'Dismiss the ' + old.length + (old.length === 1 ? ' question' : ' questions') + ' older than a week';
+  const b = h('button', {type:'button', className:'btn quiet sm', title:label, 'aria-label':label, 'data-key':'clear-old'}, 'Clear old');
+  b.onclick = () => {
+    if (changeUnavailable()) return;
+    const rows = oldQuestions();
+    if (!rows.length) return;
+    rows.forEach(r => pendingAnswers.set(r.id, true));
+    let undone = false;
+    const timer = setTimeout(async () => {
+      if (undone) return;
+      let answered = 0, failed = null;
+      try {
+        for (const r of rows) {
+          const result = await act('answer', {ticket:r.ticket, question:r.answer.question, digest:r.answer.digest, answer:OLD_QUESTION_ANSWER});
+          if (result.ok) answered++; else failed = failed || result;
+        }
+        if (failed) window.orch.toast('Cleared ' + answered + ' of ' + rows.length + ' old questions. ' + changeError(failed), 'error');
+      } finally {
+        rows.forEach(r => pendingAnswers.delete(r.id));
+        render();
+      }
+    }, ANSWER_UNDO_MS);
+    window.orch.toast('Cleared ' + rows.length + ' old ' + (rows.length === 1 ? 'question' : 'questions'), 'ok', () => {
+      undone = true; clearTimeout(timer); rows.forEach(r => pendingAnswers.delete(r.id)); render();
+    });
+    render();
+  };
+  return b;
+}
 function attentionSummary(groups, failed, results, changes) {
   const questionsAsked = groups.filter(g => g.row.answer?.question).length, other = groups.length - questionsAsked + failed.length;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
@@ -359,7 +398,7 @@ function home() {
   const finishedBody = finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      needCount ? attentionCard('needs-you', 'Needs you · ' + needCount, 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', reviewAllButton()) : null),
+      needCount ? attentionCard('needs-you', 'Needs you · ' + needCount, 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', [clearOldButton(), reviewAllButton()]) : null),
     h('aside', {className:'stack', 'data-key':'right'},
       working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
       quiet.length ? card('quiet-now', 'No news', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
