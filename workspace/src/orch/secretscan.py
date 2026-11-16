@@ -237,9 +237,10 @@ def refuse_if_secret(
 ) -> None:
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
     read in every encoding (_views) with the full find() including the stored-key check. A PNG that holds
-    only pixel chunks (phone_view._image_clean: no text chunk, nothing after its end) has no text: its
-    compressed data spells a label and a value by chance (#1022), so it gets the token patterns
-    (find_tokens) and the stored-key check, not the label rules."""
+    only pixel chunks (phone_view._image_clean: no text chunk, nothing after its end, spec lengths) gets the
+    token patterns (find_tokens) and the stored-key check over every window, and the full find() over its
+    readable runs (phone_view.picture_text): its compressed data read as one text spells a label and a value
+    by chance (#1022)."""
     from orch import phone_view
 
     step, overlap = MAX_BYTES, 65536
@@ -247,7 +248,9 @@ def refuse_if_secret(
     found: list[dict] = []
     try:
         pixels_only = phone_view._image_clean(data) and not any(m in data for m in phone_view._PACKED_MAGIC)
-        for start in range(0, max(len(data), 1), step - overlap):
+        if pixels_only:
+            found = find(phone_view.picture_text(data), root, strict=False)
+        for start in range(0, 0 if found else max(len(data), 1), step - overlap):
             for text in _views(data[start : start + step]):
                 if pixels_only:
                     hits: dict[tuple[int, str], None] = {
