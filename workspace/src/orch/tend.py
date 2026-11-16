@@ -184,8 +184,7 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
             continue
         helper = f"agent:{rec.get('agent')}"
         moved = any(
-            (_ts(h.get("at")) or 0) > nudged
-            and (h.get("by") == helper or history.is_person_line(h))
+            (_ts(h.get("at")) or 0) > nudged and (h.get("by") == helper or history.is_person_line(h))
             for h in history.lines(root, t)
         )
         if moved:
