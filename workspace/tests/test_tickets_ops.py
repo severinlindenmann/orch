@@ -931,3 +931,71 @@ def test_due_words_far_day():
     now = datetime(2026, 11, 15, 12, 0)
     assert tickets.due_label("2026-12-01T09:05", "open", now) == "Due 1 Dec 2026, 09:05"
     assert tickets.due_label("2026-10-01T09:05", "open", now) == "Late since 1 Oct 2026, 09:05"
+
+
+def _quiet_ticket(status, hours_ago, now, history=True):
+    from datetime import timedelta
+
+    at = (now - timedelta(hours=hours_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    t = {
+        "status": status,
+        "created_at": at,
+        "updated_at": at,
+        "history": [{"at": at, "text": "x"}] if history else [],
+    }
+    return t, at
+
+
+def test_quiet_since_only_a_working_ticket_older_than_six_hours():
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 11, 15, 20, 0, tzinfo=UTC)
+    t, at = _quiet_ticket("active", 7, now)
+    assert tickets.quiet_since(t, now) == at
+    assert tickets.quiet_since(_quiet_ticket("active", 1, now)[0], now) is None
+    assert tickets.quiet_since(_quiet_ticket("active", 6, now)[0], now) is None
+    for status in ("waiting", "done", "open", "review", "dropped"):
+        assert tickets.quiet_since(_quiet_ticket(status, 7, now)[0], now) is None, status
+
+
+def test_quiet_since_uses_the_newest_history_line_then_updated_time():
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 11, 15, 20, 0, tzinfo=UTC)
+    t, _ = _quiet_ticket("active", 9, now)
+    t["history"].append({"at": "2026-11-15T12:00:00Z", "text": "newer"})
+    t["history"].append({"at": "2026-11-15T01:00:00Z", "text": "older, listed last"})
+    assert tickets.quiet_since(t, now) == "2026-11-15T12:00:00Z"
+    t["history"].append({"at": "2026-11-15T18:00:00Z", "text": "news"})
+    assert tickets.quiet_since(t, now) is None
+    none, at = _quiet_ticket("active", 8, now, history=False)  # no history: the updated time
+    assert tickets.quiet_since(none, now) == at
+    assert tickets.quiet_since({"status": "active", "history": [{"at": "junk"}]}, now) is None
+
+
+def test_quiet_label_words():
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 11, 15, 20, 0)
+    at = datetime(2026, 11, 15, 9, 20).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert tickets.quiet_label(at, now) == "No news since 09:20"
+    day = datetime(2026, 11, 13, 9, 20).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert tickets.quiet_label(day, now) == "No news since Fri 09:20"
+    assert tickets.quiet_label(None, now) is None and tickets.quiet_label("junk", now) is None
+
+
+def test_cli_list_shows_no_news_since_for_a_quiet_working_ticket(proj, run, new_ticket):
+    import json
+
+    tid = new_ticket()
+    assert run("ticket", "status", tid, "active")[0] == 0
+    assert "No news since" not in run("ticket", "list")[1]
+    path = proj / ".orch" / "tickets" / f"{tid}.json"
+    data = json.loads(path.read_text())
+    for h in data["history"]:
+        h["at"] = "2020-01-01T09:20:00Z"
+    path.write_text(json.dumps(data))
+    code, out = run("ticket", "list")[:2]
+    assert code == 0 and "No news since" in out
+    rows = json.loads(run("ticket", "list", "--json")[1])
+    assert [r["quiet_since"] for r in rows if r["id"] == tid] == ["2020-01-01T09:20:00Z"]

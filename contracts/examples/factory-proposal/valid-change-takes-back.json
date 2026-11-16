@@ -1,0 +1,3 @@
+{"schema": "orch.factory.proposal/1", "kind": "change", "title": "Header picture for the price list",
+ "what": "Design said no, so the header picture is made here.", "asked_by_owner": "Do it here instead.",
+ "adds_min": 40, "lands_in": "build", "takes_back": "header-picture"}

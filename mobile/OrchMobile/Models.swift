@@ -523,9 +523,13 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var refs: [TicketRef] = []
     var results: [TicketResult] = []
     var light: Bool? = nil
+    /// The ticket's due, `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM` (workspace local time); full snapshots only. Words: `TicketDue.words`.
+    var due: String? = nil
 
     init(title: String? = nil, status: String? = nil, agent: String? = nil, summary: String? = nil, checklist: [Task] = [],
-         running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = [], results: [TicketResult] = [], light: Bool? = nil) {
+         running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = [], results: [TicketResult] = [], light: Bool? = nil,
+         due: String? = nil) {
+        self.due = due
         self.refs = refs; self.results = light == true ? [] : results; self.light = light
         self.title = title; self.status = status; self.agent = agent; self.summary = summary; self.checklist = checklist
         self.done = checklist.filter(\.done).count; self.total = checklist.count
@@ -548,9 +552,10 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         historyTail = (try? c.decodeIfPresent([Line].self, forKey: .historyTail)) ?? []
         refs = TicketRef.decodeList(c, forKey: .refs)
         light = try? c.decodeIfPresent(Bool.self, forKey: .light)
+        due = try? c.decodeIfPresent(String.self, forKey: .due)
         results = light == true ? [] : TicketResult.decodeList(c, forKey: .results)
     }
-    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, results, light }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, results, light, due }
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(title, forKey: .title)
@@ -563,6 +568,7 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         try c.encodeIfPresent(running, forKey: .running)
         try c.encodeIfPresent(started, forKey: .started)
         try c.encodeIfPresent(light, forKey: .light)
+        try c.encodeIfPresent(due, forKey: .due)
         try c.encode(checklist, forKey: .checklist)
         try c.encode(attachments, forKey: .attachments)
         try c.encode(historyTail, forKey: .historyTail)
@@ -590,6 +596,48 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var doneCount: Int { done ?? checklist.filter(\.done).count }
     var wontDoCount: Int { wontDo ?? checklist.filter(\.wontDo).count }
     var totalCount: Int { total ?? checklist.count }
+}
+
+/// The plain words for a ticket's due, the same rules as the dashboard and the CLI: with a time "Due 18:30" (today),
+/// "Due Mon 18:30" (within a week), "Due 14 Nov 2026, 18:30" (further), "Late since ..." once it has passed on a ticket
+/// that is not done or dropped; a day only reads "Due today" / "Due Mon 16 Nov" / "Late since Sat 14 Nov".
+/// Pure: the clock and calendar come in, so tests fix them. A value that is not a due gives nil.
+enum TicketDue {
+    private static let days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    private static let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    private static func number(_ text: Substring, digits: Int) -> Int? {
+        guard text.count == digits, text.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return Int(text)
+    }
+
+    static func words(_ due: String?, status: String?, now: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard let due, due.count == 10 || due.count == 16 else { return nil }
+        let day = due.prefix(10).split(separator: "-", omittingEmptySubsequences: false)
+        guard day.count == 3, let y = number(day[0], digits: 4), let m = number(day[1], digits: 2), let d = number(day[2], digits: 2) else { return nil }
+        var clock: (hour: Int, minute: Int)?
+        if due.count == 16 {
+            let rest = due.dropFirst(10)
+            let hm = rest.dropFirst().split(separator: ":", omittingEmptySubsequences: false)
+            guard rest.first == "T", hm.count == 2, let h = number(hm[0], digits: 2), let mi = number(hm[1], digits: 2), h < 24, mi < 60 else { return nil }
+            clock = (h, mi)
+        }
+        guard let at = calendar.date(from: DateComponents(year: y, month: m, day: d, hour: clock?.hour ?? 0, minute: clock?.minute ?? 0)) else { return nil }
+        let parts = calendar.dateComponents([.year, .month, .day], from: at)
+        guard parts.year == y, parts.month == m, parts.day == d else { return nil }  // 2026-02-31 is no day
+        let gap = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: at)).day ?? 0
+        let closed = status == "done" || status == "dropped"
+        let weekday = days[max(0, min(6, calendar.component(.weekday, from: at) - 1))]
+        let month = months[max(0, min(11, m - 1))]
+        guard let clock else {
+            let late = gap < 0 && !closed
+            if gap == 0 { return "Due today" }
+            return (late ? "Late since " : "Due ") + "\(weekday) \(d) \(month)"
+        }
+        let hm = String(format: "%02d:%02d", clock.hour, clock.minute)
+        let when = gap == 0 ? hm : abs(gap) < 7 ? "\(weekday) \(hm)" : "\(d) \(month) \(y), \(hm)"
+        return (at < now && !closed ? "Late since " : "Due ") + when
+    }
 }
 
 struct IdResponse: Decodable, Sendable { let id: String }
