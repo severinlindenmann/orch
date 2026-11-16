@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from test_fakeorch import FAKES, check, validator
 
-from orch import cli, cli_record, hider, record
+from orch import cli, cli_record, hider
 from orch.record import RecordWriter, record_dir
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -608,9 +608,7 @@ def test_marker_state_follows_the_run(ws):
 
 
 def prune(ws, run):
-    """What retention does: the tombstone in the head first, then the run file goes (a file that is gone
-    without it is `removed`)."""
-    record._tombstone(ws, run, "2026-11-16T10:00:00Z")
+    """What retention does: the run file goes."""
     run_file(ws, run).unlink(missing_ok=True)
 
 
@@ -720,11 +718,8 @@ def test_high3_a_rewritten_run_is_marked_and_resent(ws, capsys):
     path.write_text(raw_line(ws, RUN_B, 0) + "\n")  # shorter than the cursor
     _, rest = cli_lines(capsys, "tail", "--since", last)
     marks = [ln for ln in rest if ln["type"] == "unavailable"]
-    # a shortened run file is a truncation: the lines that are gone are `removed`, and the steps are resent
-    assert sorted((m["run"], m["status"], m["reason"]) for m in marks) == [
-        (RUN_B, "ok", "removed"),
-        (RUN_B, "ok", "rewound"),
-    ]
+    # a shortened run file is a truncation: the steps are resent
+    assert sorted((m["run"], m["status"], m["reason"]) for m in marks) == [(RUN_B, "ok", "rewound")]
     check(validator("cli-answer", "stream_line"), marks[0], "marker")
     assert [ln["event"]["seq"] for ln in rest if ln["type"] == "event"] == [1]
 
@@ -735,7 +730,6 @@ def test_med_vanish_and_return_is_missing_then_recovered(ws):
 
     def between(n):
         if n == 1:
-            record._tombstone(ws, RUN_B, "2026-11-16T10:00:00Z")  # pruned on purpose (retention does this)
             path.rename(away)
         elif n == 2:
             away.rename(path)
@@ -797,7 +791,7 @@ def test_med_a_trimmed_run_rewritten_shorter_is_rewound(ws, monkeypatch):
     path.write_text(raw_line(ws, RUN_B, 0) + "\n")
     out = follow(ws, 1, since="rc1.x")
     marks = sorted((m["run"], m["reason"]) for m in out if m["type"] == "unavailable")
-    assert marks == [(RUN_B, "removed"), (RUN_B, "rewound")]
+    assert marks == [(RUN_B, "rewound")]
     assert [ln["event"]["seq"] for ln in out if ln["type"] == "event"] == [1]
 
 
@@ -832,20 +826,6 @@ def _plant(ws, run, **changes):
     line = json.dumps(example(run=run, id="toolu_planted", at=at(50), **changes))
     with open(path, "a") as f:
         f.write(line + "\n")
-
-
-def test_planted_huge_seq_does_not_freeze_the_tail_cursor(ws, capsys):
-    _plant(ws, RUN_A, seq=10**18)
-    _, before = cli_lines(capsys, "tail", "--run", RUN_A)
-    assert any(ln["type"] == "unavailable" and ln["reason"] == "content" for ln in before)
-    before = [ln for ln in before if ln["type"] == "event"]
-    assert [ln["event"]["seq"] for ln in before] == [1, 2, 3, 4]  # the planted line is skipped
-    w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
-    w.append(example(run=RUN_A, id="toolu_a9", at=at(55)))
-    _, rest = cli_lines(capsys, "tail", "--run", RUN_A, "--since", before[-1]["cursor"])
-    rest = [ln for ln in rest if ln["type"] == "event"]
-    assert [ln["event"]["id"] for ln in rest] == ["toolu_a9"]
-    assert rest[0]["event"]["seq"] == 5  # seq is the chain's: the planted line shifts nothing
 
 
 def test_duplicate_seq_does_not_break_query_paging(ws, capsys):

@@ -421,6 +421,10 @@ are not hidden. File identity checks (above) do not authenticate content; the re
 
 ## Authenticated record (Gate G1 H1, issue #563)
 
+> **Superseded by #833 (15 Nov 2026).** The record chain is plain: run lines are written as plain JSON, `seq` is
+> the last line's `seq` + 1, there is no MAC, no record key, no head, cutover or reject counter. A line an older orch
+> wrote with an `auth` suffix still loads: the field is ignored and dropped. The text below is history.
+
 Slice S1 defined the contract and the pure core (`workspace/src/orch/record_auth.py`, independent reference in
 `validate.py`, vectors `record_auth` in `vectors/activity-v1.json`). Slice S2 adopts it in the writer
 (`record.RecordWriter._commit`, the only place that seals a run line) and in the one read path

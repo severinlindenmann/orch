@@ -335,12 +335,3 @@ def test_action_mac_uses_the_healed_id_not_a_forged_one(proj):
     mac = hp.action_sign(proj, "t_1", rec)
     assert mac == hp.action_mac(hp.human_key(proj, create=False), d.name, "t_1", rec)
     assert _id(proj) == d.name and hp.action_is_human(proj, "t_1", rec, mac)
-
-
-def test_record_key_survives_a_stale_local_id(proj):
-    d = hp.key_dir(proj)
-    before = hp.record_key(proj, create=True)
-    assert before is not None and before[0] == d.name
-    _forge(proj)  # a stale id must not derive another subkey (every sealed record would stop verifying)
-    assert hp.record_key(proj) == before
-    assert _id(proj) == d.name
