@@ -618,8 +618,9 @@ def build(root: Path, now: datetime | None = None) -> dict:
         }
     )
 
-    today = now.strftime("%Y-%m-%d")
-    ran = sum(r["at"].startswith(today) for r in runs)
+    # "today" is the person's day on this computer, not the UTC date (ORCH-89: 00:00-01:00 counted yesterday's runs)
+    today = now.astimezone().date()
+    ran = sum(parse(r["at"]).astimezone().date() == today for r in runs)
     view = {"schema": "orch.addon-view/1", "generated_at": fmt(now), "blocks": blocks}
     if pid:
         nxt = events[0][0] if events else None
