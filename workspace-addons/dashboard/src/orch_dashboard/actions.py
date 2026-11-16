@@ -877,6 +877,13 @@ def _workspace_set(a):
     return ["config", "set", f"workspace.{field}"], [], [v.strip()]
 
 
+def _workspace_propose(a):
+    """Settings > Workspace profile > Suggest: `orch config propose --json` answers {name, description, tags,
+    icon, from}. Read-only: nothing is saved until the person presses Save, so no --by."""
+    _only(a, ())
+    return ["config", "propose"], [], []
+
+
 def _share_set(a):
     """Share with team: `orch share on|off` (AGENTS.md entry + merge=union; off removes both)."""
     _only(a, ("on",))
@@ -998,6 +1005,7 @@ OPS = {
     "config.agent.test": _config_agent_test,
     "config.permissions": _config_permissions,
     "workspace.set": _workspace_set,
+    "workspace.propose": _workspace_propose,
     "addon.set": _addon_set,
     "addon.uninstall": _addon_uninstall,
     "share.set": _share_set,
@@ -1044,7 +1052,7 @@ def build_argv(op, args, root: Path | None = None) -> list[str]:
     if not isinstance(args, dict):
         raise BadRequest("The arguments must be an object.")
     words, flags, tail = fn(args)
-    if op == "config.agent.test":
+    if op in ("config.agent.test", "workspace.propose"):  # read-only answers: nothing to sign
         return [*words, "--json"]
     if op == "review.answer":  # a card answer is the current person's plain answer: no proof, no --by
         return [*words, *flags, "--json"]
