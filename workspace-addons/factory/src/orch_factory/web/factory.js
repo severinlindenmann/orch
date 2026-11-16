@@ -502,7 +502,7 @@
     if (validId(order.id) && imageName(value)) {
       const img = node('img'); img.alt = label + ' review image'; img.src = prefix + '/api/order/' + order.id + '/file/' + value.split('/').map(encodeURIComponent).join('/');
       img.addEventListener('error', () => img.replaceWith(meta(label + ' image unavailable.')), {once:true}); figure.append(img);
-    } else figure.append(p(value || 'No image supplied.'));
+    } else figure.append(meta(value ? 'Picture unavailable.' : 'No picture for this one yet.'));
     return figure;
   }
   const picturesOf = item => [item.before, item.after].filter(imageName);

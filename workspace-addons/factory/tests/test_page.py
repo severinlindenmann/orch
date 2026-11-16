@@ -868,3 +868,8 @@ def test_no_eta_or_due_line_without_a_time():
     js = _page_js()
     assert "...(o.eta ? [meta('ETA ' + when(o.eta))] : [])" in js
     assert "...(order.due ? [meta('Due ' + when(order.due))] : [])" in js
+
+
+def test_a_missing_picture_says_so_in_plain_words():
+    js = _page_js()
+    assert "'No picture for this one yet.'" in js and "No image supplied" not in js

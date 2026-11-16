@@ -82,6 +82,9 @@ Each time you are woken, ask Factory what to do next and follow it:
 - Check the crew's results against the done-means points (evidence on the checks), then move on.
 - Words that people read in a built app use the right singular and plural ("1 point", "2 points", never "1 pts"): tell
   the builders in their task text, and look for it when you check the results.
+- Pictures at a stop: for every taste item copy the tester's screenshots of that screen (phone width and desktop) to
+  `.orch/addons/factory/stops/<order>/s<round>/` and name them in the item (`"after": "s1/make-poll.png"`, the earlier
+  look in `before`). Without a picture the owner cannot judge a look: say in `not_checked` that there is none.
 - At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo` (anything that
   sends, publishes, deploys, deletes, pays or touches main/production is `cant-undo`: Factory refuses it otherwise); a recommended
   answer only on routine items; list what was checked AND what was not checked, and every small change made during the run.

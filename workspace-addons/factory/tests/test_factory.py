@@ -453,3 +453,10 @@ def test_skill_asks_routine_choices_with_options_and_cleans_up_its_own_checks():
     assert '"1 point", "2 points", never "1 pts"' in text
     # 43: draft questions are asked as ticket questions, not listed in the draft
     assert "Open questions do NOT go into the draft as a list" in text
+
+
+def test_skill_tells_the_manager_to_file_the_testers_pictures_with_the_stop():
+    import orch_factory
+
+    text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
+    assert ".orch/addons/factory/stops/<order>/s<round>/" in text and '"after": "s1/make-poll.png"' in text
