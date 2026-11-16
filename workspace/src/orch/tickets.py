@@ -1762,6 +1762,54 @@ def _clear_doing(item: dict) -> None:
         item.pop(k, None)
 
 
+# how an evidence field reads in a refusal; `ref` reads by the evidence type
+_EVIDENCE_REF_WORDS = {
+    "note": "note",
+    "command": "command",
+    "url": "link",
+    "pr": "pull request",
+    "commit": "commit",
+    "file": "file name",
+}
+_EVIDENCE_FIELD_WORDS = {"output_tail": "output", "summary": "summary", "title": "title", "text": "text"}
+# fields parse_evidence checks against a fixed shape (a list, an int, a time, hex), so they hold no free text.
+# `by` and `at` are NOT here: a caller can set them (--evidence JSON) and nothing checks their shape.
+_EVIDENCE_NOT_SCANNED = {"type", "role", "exit", "ran_at", "files_sig"}
+
+
+def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
+    """R5.2 (#942): evidence can leave this computer later (sync, the relay, a phone, a share), so every
+    evidence write runs the one scanner first. `evidence`: evidence objects or their JSON text (anything else
+    is left to parse_evidence). A hit refuses with the kind and the field, never the value; nothing is
+    written."""
+    from orch import secretscan
+
+    for raw in evidence:
+        ev = raw
+        if isinstance(raw, str):
+            try:
+                ev = json.loads(raw)
+            except ValueError:
+                ev = raw  # not JSON: still scanned as text, parse_evidence refuses it afterwards
+        if not isinstance(ev, dict):
+            secretscan.refuse_if_secret_in(root, {"evidence": str(ev)}, "evidence", verb="saved")
+            continue
+        body = {}
+        for k, v in ev.items():
+            if k in _EVIDENCE_NOT_SCANNED and not isinstance(v, (dict, list)):
+                continue
+            word = (
+                _EVIDENCE_REF_WORDS.get(str(ev.get("type")), "text")
+                if k == "ref"
+                else _EVIDENCE_FIELD_WORDS.get(k, k)
+            )
+            key = word
+            while key in body:  # never overwrite a field already in the body: every value is scanned
+                key += " "
+            body[key] = v
+        secretscan.refuse_if_secret_in(root, body, "evidence", verb="saved")
+
+
 def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> tuple[dict, dict]:
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
@@ -1770,6 +1818,7 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
             f'`orch check done {tid} {cid} --command "pytest -q"` or `--note "what you saw"` '
             "(also --pr, --commit, --file, --url)."
         )
+    refuse_secret_in_evidence(root, evidence)
     evs = [parse_evidence(e) for e in evidence]
     _item(ticket, cid)
 
@@ -1875,6 +1924,7 @@ def check_record(
     tail = _output_tail(root, output)
     if tail:
         ev["output_tail"] = tail
+    refuse_secret_in_evidence(root, [{"type": "command", "ref": cmd}, ev])  # as given and as it would be kept
     parse_evidence(json.dumps(ev))  # same checks as every proof
     ev["by"], ev["at"] = by, now()
 
@@ -2984,6 +3034,10 @@ def _attach_file(
         raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
     if title is not None and not 1 <= len(title.strip()) <= 120:
         raise Refused("A proof title needs 1 to 120 characters.")
+    refuse_secret_in_evidence(
+        root,
+        [{"type": "file", "ref": os.path.basename(path), "title": title or "", "summary": summary or ""}],
+    )
     if summary:  # checked before anything is copied
         summary = parse_evidence(json.dumps({"type": "file", "ref": "x", "summary": summary}))["summary"]
     base = Path(os.path.realpath(root))
@@ -3062,6 +3116,9 @@ def _attach_file(
             data = src.read(MAX_PROOF_BYTES + 1)  # bounded: a file that grows while we copy is refused too
             if len(data) > MAX_PROOF_BYTES:
                 raise Refused(_too_big(cur_src.name))
+            from orch import secretscan
+
+            secretscan.refuse_if_secret(data, "evidence file", root, verb="saved")  # R5.2 (#942)
             out.write(data)
     except BaseException:
         with contextlib.suppress(OSError):

@@ -78,9 +78,6 @@ def test_the_samples_are_real_kinds_of_the_scanner(proj):
     assert [f["kind"] for f in secretscan.find(f"x {STORED}", proj)] == ["stored-key"]
 
 
-EVIDENCE_ISSUE = "#942"
-
-
 # ---- relay doors -----------------------------------------------------------------------------------------
 
 
@@ -307,7 +304,6 @@ EVIDENCE_DOORS = {
 }
 
 
-@pytest.mark.xfail(strict=True, reason=EVIDENCE_ISSUE)
 @pytest.mark.parametrize("door", EVIDENCE_DOORS)
 def test_evidence_check_done(proj, run, step, planted, door):
     kind, value = planted
@@ -316,7 +312,6 @@ def test_evidence_check_done(proj, run, step, planted, door):
     _evidence_refused(proj, run, step, planted, ("check", "done", step, "c1", *extra))
 
 
-@pytest.mark.xfail(strict=True, reason=EVIDENCE_ISSUE)
 def test_evidence_check_record_command_and_output(proj, run, step, planted):
     kind, value = planted
     (proj / "out.txt").write_text(f"ran\n{value}\n", encoding="utf-8")
@@ -325,6 +320,37 @@ def test_evidence_check_record_command_and_output(proj, run, step, planted):
     )
     _evidence_refused(
         proj, run, step, planted, ("check", "record", step, "c1", "--cmd", "pytest", "--output", "out.txt")
+    )
+
+
+def test_evidence_clean_file_with_secret_note_copies_nothing(proj, run, step):
+    """The evidence is scanned before a --file is copied: a secret in the note leaves no stray copy behind."""
+    value = SAMPLES["github-token"]
+    (proj / "clean.txt").write_text("all good\n", encoding="utf-8")
+    _evidence_refused(
+        proj,
+        run,
+        step,
+        ("github-token", value),
+        ("check", "done", step, "c1", "--file", "clean.txt", "--note", value),
+    )
+    code, out, err = run(
+        "check", "done", step, "c1", "--file", "clean.txt", "--note", "ok", "--summary", "fine"
+    )
+    assert code == 0, err  # clean evidence still goes through
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"by": "{v}"}, {"at": "{v}"}, {"note ": "{v}", "note": "b"}, {"output": "{v}", "output_tail": "b"}],
+)
+def test_evidence_raw_json_fields_are_scanned(proj, run, step, extra):
+    """Every free-text field of raw --evidence JSON is scanned, also `by`/`at` and fields whose plain name
+    collides with another one (#942)."""
+    value = SAMPLES["github-token"]
+    ev = {"type": "note", "ref": "ok", **{k: v.replace("{v}", value) for k, v in extra.items()}}
+    _evidence_refused(
+        proj, run, step, ("github-token", value), ("check", "done", step, "c1", "--evidence", json.dumps(ev))
     )
 
 
