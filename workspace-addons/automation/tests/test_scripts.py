@@ -290,7 +290,7 @@ def test_review_shows_the_command_and_binds_the_key(ws, agent):
     r = actions.review(ws, "allow-script", "t_scr00011")
     k = scripts.key(ws, "watch", ["echo", "hi there"])
     assert r["target"] == f"automation:t_scr00011:{k}"
-    assert r["review"]["value"] == "echo hi there" and "without a helper" in r["review"]["body"]
+    assert r["review"]["value"] == "echo 'hi there'" and "without a helper" in r["review"]["body"]
     assert actions.review(ws, "run", "t_scr00011") == {"target": None, "review": None}
 
 
@@ -348,3 +348,11 @@ def test_cli_act_proof_target_prints_the_review(ws, agent, capsys):
     assert cli.main(["--dir", str(ws), "act", "allow-script", "t_scr00014", "--proof-target"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["target"].endswith(scripts.key(ws, "watch", ["true"])) and out["review"]["title"]
+
+
+def test_the_shown_command_maps_back_to_one_argv():
+    assert scripts.shown(["rm -rf ~"]) != scripts.shown(["rm", "-rf", "~"])
+    import shlex
+
+    for argv in (["rm -rf ~"], ["a", "b c", "it's"], ["python3", "-c", "print(1)"]):
+        assert shlex.split(scripts.shown(argv)) == argv

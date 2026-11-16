@@ -381,7 +381,7 @@ def _script(args, root: Path, out) -> int:
         out(
             rows,
             "\n".join(
-                f"{r['script']}  {' '.join(r['command'])}"
+                f"{r['script']}  {scripts.shown(r['command'])}"
                 + (
                     ""
                     if r["allowed"]

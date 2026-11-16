@@ -121,7 +121,7 @@ def review(root: Path, verb: str, target: str) -> dict:
         "target": f"automation:{target}:{scripts.key(root, name, argv)}",
         "review": {
             "title": "Allow this script on this computer?",
-            "value": " ".join(argv),
+            "value": scripts.shown(argv),
             "body": f"Each time the repeat is due, orch runs this command here, without a helper ({name}). "
             "If it changes, orch asks again.",
         },
