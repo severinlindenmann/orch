@@ -556,6 +556,17 @@ def test_preview_never_points_outside_the_list(monkeypatch):
     assert out == [page] and "preview" not in page
 
 
+def _done_before_the_write_scan(monkeypatch, run, *argv):
+    """`orch check done` as it ran before evidence writes were scanned (#942): a ticket written then can still
+    hold a secret, so the phone gate below must keep stopping it."""
+    from orch import secretscan
+
+    with monkeypatch.context() as m:
+        m.setattr(tickets, "refuse_secret_in_evidence", lambda *a, **k: None)
+        m.setattr(secretscan, "refuse_if_secret", lambda *a, **k: None)
+        return run(*argv)
+
+
 @pytest.mark.parametrize(
     ("name", "data", "sent"),
     [
@@ -581,14 +592,29 @@ def test_preview_never_points_outside_the_list(monkeypatch):
         ("x.jpg", jpeg(APP0, tail=b"\x00\x00"), True),  # camera NUL padding is fine
     ],
 )
-def test_evidence_files_go_through_the_same_secret_gate(proj, run, new_ticket, conn, name, data, sent):  # noqa: F811
-    """A proof file (evidence, type file) is scanned like a named artifact: a token in it is never uploaded
-    and is marked once in the ticket log and in state; a clean file still goes."""
-    tid = new_ticket("Proof with a secret")
-    run("check", "add", tid, "Attach the proof")
+def test_evidence_files_go_through_the_same_secret_gate(
+    proj,
+    run,
+    new_ticket,
+    conn,  # noqa: F811
+    name,
+    data,
+    sent,
+    monkeypatch,
+):
+    """An evidence file (type file) is scanned like a named artifact: a token in it is never uploaded and is
+    marked once in the ticket log and in state; a clean file still goes. Since #942 a readable secret is
+    already refused when the evidence is written; one written before that still never reaches the phone."""
+    tid = new_ticket("Evidence with a secret")
+    run("check", "add", tid, "Attach the evidence")
     src = proj / name
     src.write_bytes(data)
-    code, _, err = run("check", "done", tid, "c1", "--file", str(src), "--role", "result")
+    argv = ("check", "done", tid, "c1", "--file", str(src), "--role", "result")
+    code, _, err = run(*argv)
+    if code != 0:
+        assert not sent and "nothing was saved" in err, err  # a clean file is never refused
+        assert not (proj / ".orch" / "tickets" / tid / "evidence" / name).exists()
+        code, _, err = _done_before_the_write_scan(monkeypatch, run, *argv)
     assert code == 0, err
     for _ in range(2):
         atts = phone_view.view_for(proj, tid)["attachments"]
@@ -617,7 +643,14 @@ def test_no_upload_without_the_gate(proj, run, new_ticket, conn, monkeypatch):  
 
 
 @pytest.mark.parametrize("how", ["artifact", "evidence"])
-def test_a_stored_key_value_is_never_uploaded_whatever_the_label(proj, run, new_ticket, conn, how):  # noqa: F811
+def test_a_stored_key_value_is_never_uploaded_whatever_the_label(
+    proj,
+    run,
+    new_ticket,
+    conn,  # noqa: F811
+    how,
+    monkeypatch,
+):
     """Needle check: a file that holds the exact value of a key saved in the keystore (no label, no pattern)
     is not sent and is marked, as named artifact and as proof file alike."""
     value = "Xk93-pq7Lm-aa21-zQ"
@@ -631,7 +664,10 @@ def test_a_stored_key_value_is_never_uploaded_whatever_the_label(proj, run, new_
         run("check", "add", tid, "Attach")
         src = proj / "notes.txt"
         src.write_bytes(body)
-        assert run("check", "done", tid, "c1", "--file", str(src), "--role", "result")[0] == 0
+        argv = ("check", "done", tid, "c1", "--file", str(src), "--role", "result")
+        code, _, err = run(*argv)
+        assert code != 0 and "stored keys" in err, err  # refused when written (#942)
+        assert _done_before_the_write_scan(monkeypatch, run, *argv)[0] == 0  # written before #942
     assert phone_view.view_for(proj, tid)["attachments"] == []
     assert not conn.blobs
     assert [h for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]]
