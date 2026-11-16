@@ -252,7 +252,13 @@ def test_morning_list_without_relay_says_not_sent(proj, run, new_ticket, facts, 
         ("workspace-addons/dashboard/src/orch_dashboard/web/app.js", "look"),
         ("workspace/src/orch_ui/static/kit.css", "look"),
         ("docs/wording.md", "words"),
-        ("contracts/history.md", "structure"),
+        ("contracts/history.md", "security"),
+        ("workspace/src/orch/secretscan.py", "security"),
+        ("workspace/src/orch/phone_view.py", "security"),
+        ("workspace/src/orch/pagesession.py", "security"),
+        ("workspace/src/orch/syncgate.py", "security"),
+        ("workspace-addons/sync/src/orch_sync/push.py", "security"),
+        ("workspace/tests/test_secretscan.py", "test"),
         ("AGENTS.md", "structure"),
         ("workspace/src/orch/relay.py", "structure"),
         ("workspace/src/orch/fixtures/evil.py", "code"),
@@ -273,3 +279,12 @@ def test_docstrings_and_comments_are_not_words():
         ]
     }
     assert reviewer.size_reasons(files, added)[0] == []
+
+
+def test_what_may_leave_the_machine_stays_for_the_owner(proj, run, new_ticket, facts, on):
+    facts["facts"]["files"] = [{"path": "workspace/src/orch/secretscan.py", "additions": 2, "deletions": 1}]
+    facts["facts"]["added"] = {"workspace/src/orch/secretscan.py": ["    x = 1"]}
+    tid = _finished(proj, run, new_ticket)
+    reviewer.run(proj)
+    assert tickets.load(proj, tid)["status"] == "review"
+    assert _lines(proj, tid)[-1] == "Left for you by the Reviewer: security: needs a second look (1 file)."

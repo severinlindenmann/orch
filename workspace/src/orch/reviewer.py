@@ -38,8 +38,15 @@ DIFF_MAX = 2 * 1024 * 1024
 # What a changed file is, by its path (the first match wins in this order: a test is never "look").
 # Tests: only real test folders (at the top or right under a package) and test file names.
 TEST = re.compile(r"^(e2e|tests?|[^/]+/tests?|[^/]+/[^/]+/tests?)/|(^|/)test_[^/]*\.py$|\.test\.[cm]?js$")
+# What may leave the machine (manager, 16 Nov: a green PR still let a password in a picture through): the
+# secret check and scan and what they read with, sign-in and session code, sync, the contracts. Never small.
+SECURITY = re.compile(
+    r"^contracts/|(^|/)(secretscan|secretrun|cli_secret|keystore|phone_view|phone_results|pagelaunch)\.py$"
+    r"|(^|/)[^/]*(session|signin|sign_in|login|auth)[^/]*\.py$|(^|/)orch_ui/origin\.py$"
+    r"|(^|/)sync[^/]*\.py$|^workspace-addons/sync/"
+)
 STRUCTURE = re.compile(
-    r"^\.github/|(^|/)(AGENTS|CLAUDE)\.md$|^contracts/|\.schema\.json$|^(relay|publish)/"
+    r"^\.github/|(^|/)(AGENTS|CLAUDE)\.md$|\.schema\.json$|^(relay|publish)/"
     r"|(^|/)(relay|publish)[^/]*\.py$|(^|/)install\.(sh|ps1)$|(^|/)(pyproject\.toml|uv\.lock|Cargo\.(toml|lock)"
     r"|package(-lock)?\.json|Dockerfile)$|\.ya?ml$"
 )
@@ -52,6 +59,7 @@ WORDS = re.compile(r"\.(md|txt|rst)$|(^|/)(skills|docs)/|wording")
 NEW_CONCEPT = re.compile(r"\b(add_parser|add_argument|set_key|file_switch)\(")
 WORDS_IN_CODE = re.compile(r"""(["'])(?=[^"'\n]*[A-Za-z]+ [A-Za-z]+ [A-Za-z]+)[^"'\n]*\1""")
 KIND_TEXT = {
+    "security": "security: needs a second look",
     "structure": "changes rules, checks, relay, publish or how orch is installed",
     "look": "changes how a page looks",
     "words": "changes words people read",
@@ -61,8 +69,14 @@ KIND_TEXT = {
 
 
 def kind_of(path: str) -> str:
-    """test | structure | look | words | code."""
-    for name, rx in (("test", TEST), ("structure", STRUCTURE), ("look", LOOK), ("words", WORDS)):
+    """test | security | structure | look | words | code."""
+    for name, rx in (
+        ("test", TEST),
+        ("security", SECURITY),
+        ("structure", STRUCTURE),
+        ("look", LOOK),
+        ("words", WORDS),
+    ):
         if rx.search(path):
             return name
     return "code"
@@ -92,7 +106,7 @@ def size_reasons(files: list[dict], added: dict[str, list[str]] | None = None) -
     """Why a change is NOT small ([] = small), and the counts {files, lines} without tests. files: [{path,
     additions, deletions}]; added: the added lines per file (from the diff), for words and new commands in
     code."""
-    counts = {"look": 0, "words": 0, "structure": 0, "concept": 0, "other": 0}
+    counts = {"security": 0, "look": 0, "words": 0, "structure": 0, "concept": 0, "other": 0}
     n_files = n_lines = 0
     for f in files:
         path = str(f.get("path") or "")
