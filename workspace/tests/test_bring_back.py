@@ -1794,15 +1794,17 @@ def test_b13f_agent_done_after_review_is_no_approval(done_copy, monkeypatch):
 
 
 def test_b13f_person_done_must_be_this_rounds(done_copy):
-    """Main A: only a current person verdict made at or after the review began counts."""
+    """Main A: only a person's Done made at or after the review began counts (an agent's Done does not)."""
     root, tid, copy = done_copy
     to_review(root, tid)
     done_no_sweep(root, tid)
     t = tickets.load(root, tid)
     assert worktrees._person_done(root, t, "2000-01-01T00:00:00Z")
     assert not worktrees._person_done(root, t, "2999-01-01T00:00:00Z")
-    forged = {**t, "verdicts": [{**t["verdicts"][0], "kind": "agent"}]}
-    assert not worktrees._person_done(root, forged, "2000-01-01T00:00:00Z")
+    hist = t["history"]
+    last = max(i for i, h in enumerate(hist) if worktrees._DONE_LINE.fullmatch(str(h.get("text", ""))))
+    agents = [{**h, "by": "agent:claude"} if i == last else h for i, h in enumerate(t["history"])]
+    assert not worktrees._person_done(root, {**t, "history": agents}, "2000-01-01T00:00:00Z")
 
 
 def test_b13f_reopened_round_forgets_the_old_review(done_copy):
