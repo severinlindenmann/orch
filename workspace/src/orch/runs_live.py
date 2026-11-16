@@ -182,19 +182,48 @@ def busy_words(n: int, ticket: str) -> str:
 # ---------------------------------------------------------------- start
 
 
-def _queue_for_slot(root: Path, tid: str, by: str, text: str) -> None:
+PRIORITIES = ("high", "normal", "low")  # the order tickets waiting in line start in (then oldest first)
+
+
+def _queue_for_slot(root: Path, tid: str, by: str, text: str, priority: str = "normal") -> None:
+    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority."""
     with runs.locked(root, tid):
-        runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
+        items = runs._pending_read(root, tid)
+        mine = [i for i in items if i.get("via") == "slots" and not i.get("delivered_at")]
+        want = PRIORITIES.index(priority)
+        if mine:
+            want = min([_rank(i) for i in mine] + [want])  # queued again: never lower
+        else:
+            item = runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
+            items = runs._pending_read(root, tid)
+            mine = [i for i in items if i["id"] == item["id"]]
+        if any(_rank(i) != want or (want != 1 and "priority" not in i) for i in mine):
+            for i in mine:
+                i["priority"] = PRIORITIES[want]
+            runs._pending_write(root, tid, items)
+
+
+def _rank(item: dict) -> int:
+    p = item.get("priority")
+    return PRIORITIES.index(p) if p in PRIORITIES else PRIORITIES.index("normal")
 
 
 def start_live(
-    root: Path, tid: str, by: str, name: str, *, fresh: bool, take_over: bool, busy_text: str
+    root: Path,
+    tid: str,
+    by: str,
+    name: str,
+    *,
+    fresh: bool,
+    take_over: bool,
+    busy_text: str,
+    priority: str = "normal",
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
     hit = None if mine else _full(root)
     if hit:
-        _queue_for_slot(root, tid, by, busy_text)
+        _queue_for_slot(root, tid, by, busy_text, priority)
         extra = {"pending": True, "limit": hit, "change": WHERE_TO_CHANGE}
         raise runs.Busy(busy_words(hit, ref(root, tid)), extra)
     if not mine and session_exists(root, tid):
@@ -1552,10 +1581,9 @@ def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
     return result
 
 
-def start_waiting(root: Path) -> None:
-    """A slot opened: start the oldest ticket whose live start was queued for lack of one."""
-    if _full(root):
-        return
+def waiting_line(root: Path) -> list[tuple[str, str]]:
+    """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
+    low), then the oldest first. [(ticket id, priority)]"""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -1564,10 +1592,25 @@ def start_waiting(root: Path) -> None:
             continue
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
         if items:
-            waiting.append((items[0]["at"], tid, items[0]["by"]))
-    for _, tid, by in sorted(waiting)[:1]:
+            rank = min(_rank(i) for i in items)
+            with contextlib.suppress(OSError):
+                waiting.append((rank, items[0]["at"], f.stat().st_mtime_ns, tid))
+    return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
+
+
+def start_waiting(root: Path) -> list[str]:
+    """Slots opened: start the tickets waiting in line, in priority order, while slots are free."""
+    started: list[str] = []
+    for tid, _ in waiting_line(root):
+        if _full(root):
+            break
+        items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
+        if not items or runs.read(root, tid):
+            continue
         with contextlib.suppress(Exception):
-            runs.start(root, tid, by, mode="live")
+            runs.start(root, tid, items[0]["by"], mode="live")
+            started.append(tid)
+    return started
 
 
 def hold_text(rec: dict) -> str | None:

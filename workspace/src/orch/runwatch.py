@@ -170,7 +170,7 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
         out.append({"kind": "person", "what": "an answer from the person", "ref": open_q[0]})
     w = t.get("waiting_on") if t.get("status") == "waiting" else None
     if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "external"):
-        ref = str(w.get("ref") or "")
+        ref = str((w.get("until") if w["kind"] == "time" else None) or w.get("ref") or "")  # time: "until"
         if w["kind"] == "time":
             from orch import net
 
