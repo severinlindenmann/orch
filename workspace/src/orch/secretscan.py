@@ -119,7 +119,7 @@ def refusal(found: list[dict]) -> str:
 # nested field called "token" or "key" is still scanned. Ids and hashes are NOT skipped (a secret put into an
 # "id" is still a secret); they never look like one. Dict keys are scanned too.
 _ALLOW_TOKEN = re.compile(
-    r"ora_[A-Za-z0-9_-]{16,64}"
+    r"ora_[A-Za-z0-9_-]{22}"
 )  # the one-time allow token a delegate/start/allow carries
 _ALLOW_FIELDS = {"allow_token", "token"}
 
