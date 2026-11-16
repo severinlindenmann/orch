@@ -1069,6 +1069,8 @@ function ticketChangesEditor(t) {
   const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
   const done = ticketButton('Looks good', 'primary sm', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}), {'data-key':'ticket-button-Accept-' + (tip ? tip.slice(0, 20) : 'none')}); // keyed by the tip: a refresh never keeps a handler with a stale one
   const row = h('div', {className:'row ticket-review-actions'});
+  const open_parts = array(t.proof?.uncovered).length;
+  const uncovered = open_parts ? h('span', {className:'meta warn', 'data-key':'ticket-review-uncovered'}, '! ' + (open_parts === 1 ? '1 part' : open_parts + ' parts') + ' of “Done when” ' + (open_parts === 1 ? 'has' : 'have') + ' no task') : null;
   const shown = tip ? h('span', {className:'meta', 'data-key':'ticket-review-tip'}, 'Changes up to ', h('code', {}, tip.slice(0, 12))) : null;
   const open = ticketButton('Send back', 'outline sm', () => {
     locks.add(key);
@@ -1092,7 +1094,7 @@ function ticketChangesEditor(t) {
     };
     host.replaceChildren(h('label', {className:'ticket-ask-label'}, 'What should change?'), h('div', {className:'ticket-ask-line'}, input, send, cancel)); input.focus();
   });
-  row.append(...[done, open, shown].filter(Boolean)); host.append(row); return host;
+  row.append(...[done, open, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
   return h('section', {className:next ? 'card next-step next-question' : 'ticket-question'},
@@ -1186,6 +1188,57 @@ function ticketOutcomeCard(t) {
 const PROOF_MARK = {passed:['ok', '✓'], failed:['bad', '×'], changed:['warn', '!'], note:['none', 'i'], missing:['none', '–']};
 const PROOF_WORD = {passed:'Check passed', failed:'Check failed', changed:'Changed since the check', note:'Note only', missing:'No evidence yet'};
 const RECHECK_TEXT = 'Please run the checks again and record them with orch check record.';
+// "#123" in plain text links to that issue or pull request on GitHub. The address comes from the ticket's own GitHub
+// links (references, evidence) with that number, else the repository of any GitHub link of this ticket or of another
+// ticket here; with no GitHub link anywhere the text stays plain.
+const GH_LINK = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:issues|pull)\/(\d+)(?:[/?#]|$)/;
+const ghUrls = t => [...array(t?.refs).map(r => r && (r.url || r.ref)), ...array(t?.checklist).flatMap(c => array(c?.evidence).map(e => e && e.ref))]
+  .map(u => GH_LINK.exec(String(u || ''))).filter(Boolean);
+function ghRepo(t) {
+  const own = ghUrls(t)[0];
+  if (own) return own[1];
+  const others = typeof tickets === 'function' ? array(tickets()) : [];
+  for (const other of others) { const m = ghUrls(other)[0]; if (m) return m[1]; }
+  return null;
+}
+function linkRefs(t, value) {
+  const s = clean(value);
+  if (!/(^|[^\w&/])#\d/.test(s)) return s;
+  const repo = ghRepo(t);
+  if (!repo) return s;
+  const exact = new Map(ghUrls(t).map(m => [m[2], m[0].replace(/[/?#]$/, '')]));
+  const out = [];
+  let last = 0;
+  for (const m of s.matchAll(/(^|[^\w&/])#(\d{1,7})\b/g)) {
+    const at = m.index + m[1].length, n = m[2];
+    out.push(s.slice(last, at), h('a', {href:exact.get(n) || 'https://github.com/' + repo + '/issues/' + n, target:'_blank', rel:'noopener noreferrer'}, '#' + n));
+    last = at + 1 + n.length;
+  }
+  out.push(s.slice(last));
+  return out.filter(x => x !== '');
+}
+// What a finished step's evidence says, under its row while the ticket waits for a check: the completion note, what
+// was run (and a failed exit), and the pull request, web address or file it points at.
+function stepEvidence(t, task) {
+  const said = [], ran = [], links = [];
+  array(task.evidence).forEach(ev => {
+    if (!ev || typeof ev !== 'object') return;
+    const kind = ev.type || ev.kind, ref = String(ev.ref || ev.text || '').trim(), sum = String(ev.summary || '').trim();
+    const say = x => { if (x && !said.includes(x)) said.push(x); };
+    say(sum);
+    if (kind === 'note') say(ref);
+    else if (kind === 'command' && ref) ran.push(ref + (Number.isInteger(ev.exit) && ev.exit !== 0 ? ' (failed, exit ' + ev.exit + ')' : ''));
+    else if (['pr', 'url'].includes(kind) && /^https?:\/\/\S+$/i.test(ref)) {
+      const num = GH_LINK.exec(ref)?.[2];
+      links.push(h('a', {className:'chip proof-chip', href:ref, target:'_blank', rel:'noopener noreferrer'}, clean(ev.title || (num ? (kind === 'pr' ? 'PR #' : '#') + num : ref.replace(/^https?:\/\//i, '').slice(0, 60)))));
+    } else if (kind === 'file' && ref) links.push(h('span', {className:'chip proof-chip'}, clean(ev.title || ref.split(/[\\/]/).pop())));
+  });
+  if (!said.length && !ran.length && !links.length) return null;
+  return h('div', {className:'proof-evidence', 'data-key':'proof-evidence-' + task.id},
+    said.map(x => h('p', {className:'muted preserve-lines'}, linkRefs(t, x))),
+    ran.map(x => h('p', {className:'meta mono'}, 'Ran: ' + clean(x))),
+    links.length ? h('div', {className:'task-proofs row'}, links) : null);
+}
 function ticketProofLine(t) {
   const p = t.proof;
   if (!p || typeof p.line !== 'string' || !p.line) return null;
@@ -1193,11 +1246,12 @@ function ticketProofLine(t) {
   const level = ({ok:'ok', note:'none', warn:'warn', fail:'bad'})[p.level] || 'none';
   const mark = {ok:'✓', bad:'×', warn:'!', none:'–'}[level];
   const rows = array(t.checklist).map(task => { const [cls, glyph] = PROOF_MARK[per[task.id]] || PROOF_MARK.missing;
-    return h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', clean(task.text), ' ', h('span', {className:'meta'}, PROOF_WORD[per[task.id]] || PROOF_WORD.missing)); });
+    return h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', clean(task.text), ' ', h('span', {className:'meta'}, PROOF_WORD[per[task.id]] || PROOF_WORD.missing),
+      t.status === 'review' ? stepEvidence(t, task) : null); });
   return h('div', {className:'ticket-proof', 'data-key':'ticket-proof-' + t.id},
     h('p', {className:'ticket-proof-line'}, h('span', {className:'proof-mark proof-' + level}, mark), ' ', h('span', {className:'grow'}, p.line)),
     Object.values(per).includes('changed') && t.status === 'review' && !snapshot ? ticketButton('Ask the helper to check again', 'outline sm', () => ticketSendChanges(t, RECHECK_TEXT), {'data-key':'ticket-recheck-' + t.id}) : null,
-    rows.length || array(p.uncovered).length ? h('ul', {className:'ticket-proof-rows'}, rows, array(p.uncovered).map(part => h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-warn'}, '!'), ' “' + clean(part) + '” ', h('span', {className:'meta'}, 'No task covers this')))) : null);
+    rows.length || array(p.uncovered).length ? h('ul', {className:'ticket-proof-rows'}, rows, array(p.uncovered).map(part => h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-warn'}, '!'), ' “', linkRefs(t, part), '” ', h('span', {className:'meta'}, 'No task covers this')))) : null);
 }
 
 // Header line: only in review (the card shows it there) and done, only with tasks; never a warning on a finished ticket.
@@ -1270,10 +1324,10 @@ function ticketReviewCard(t) {
   const file = reviewFile(t), count = artifactFiles(t).length;
   return h('section', {className:'card attention decision review-card', 'data-key':'review-card-' + t.id},
     h('div', {className:'section-head'}, h('h2', {}, 'Result'), count ? h('span', {className:'meta'}, count + (count === 1 ? ' file' : ' files')) : null),
-    t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), clean(t.summary)) : null,
+    t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)) : null,
     t.verdict_needed ? h('p', {className:'meta', 'data-key':'ticket-verdict-needed'}, 'Marked done without your OK. Check the work, then click Looks good.') : null,
-    file ? ticketResultFrame(t, 'artifacts', file) : h('p', {className:'meta'}, 'No result file is attached. The list below shows what was done.'),
-    t.done_when ? h('p', {className:'review-check'}, 'Does this match “' + clean(t.done_when) + '”?') : null,
+    file ? ticketResultFrame(t, 'artifacts', file) : h('p', {className:'meta'}, array(t.checklist).length ? 'No result file is attached. Each step below shows what was done and how it was checked.' : 'No result file and no steps are attached.'),
+    t.done_when ? h('p', {className:'review-check'}, 'Does this match “', linkRefs(t, t.done_when), '”?') : null,
     ticketProofLine(t));
 }
 // "What the helper did": the finished tasks as a short plain list (Check and Done); the full list is on the Tasks tab.
@@ -1297,16 +1351,16 @@ function completionNotes(t) {
   notes.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
   return notes.slice(0, 3);
 }
-function ticketCompletionNote(n) {
+function ticketCompletionNote(n, t) {
   return h('article', {className:'completion-note', 'data-key':'completion-note'}, h('p', {className:'meta eyebrow'}, 'Completion note' + (n.at ? ' · ' + time(n.at) : '')),
-    h('h2', {}, n.head), n.body ? h('p', {className:'muted preserve-lines'}, n.body) : null);
+    h('h2', {}, linkRefs(t, n.head)), n.body ? h('p', {className:'muted preserve-lines'}, linkRefs(t, n.body)) : null);
 }
 function ticketResultsCard(t) {
   const files = artifactFiles(t), notes = completionNotes(t);
   if (!files.length && !notes.length) return null;
   const count = [notes.length ? notes.length + (notes.length === 1 ? ' note' : ' notes') : '', files.length ? files.length + (files.length === 1 ? ' file' : ' files') : ''].filter(Boolean).join(' · ');
   return h('section', {className:'card results', 'data-key':'results'}, h('div', {className:'section-head'}, h('h2', {}, 'Result'), h('span', {className:'meta'}, count)),
-    notes.map(ticketCompletionNote),
+    notes.map(n => ticketCompletionNote(n, t)),
     files.length ? (t.status === 'done' ? ticketResultFrame(t, 'artifacts', files[0]) : ticketFileRow(t, 'artifacts', files[0])) : null, files.slice(1, 4).map(f => ticketFileRow(t, 'artifacts', f)), files.length ? headerProof(t) : null);
 }
 // A change you asked for: what you asked, and that new changes wait for your approval.
@@ -1423,8 +1477,8 @@ function detail(t) {
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
     working ? agentBar(t) : null, working ? sharedFolderLine(t) : null, working ? liveSessionStrip(t) : null,
-    t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, clean(t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
-    t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ' + clean(t.summary)) : null,
+    t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
+    t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
     note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note) : null,
     t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
