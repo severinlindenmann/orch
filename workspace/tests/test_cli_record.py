@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import zlib
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -255,7 +256,9 @@ def test_counts_valid_and_denominators(ws, capsys):
     assert read["runs"] == {"used": 2, "of": 2, "unseen": 0}
 
 
-def test_counts_window_nothing_and_errors(ws, capsys):
+def test_counts_window_nothing_and_errors(ws, capsys, monkeypatch):
+    # the fixture's runs are on 2026-11-16: pin "today" far from them so the default window never reaches them
+    monkeypatch.setattr(cli_record, "_today", lambda: datetime(2026, 6, 30, tzinfo=UTC))
     code, (ans,) = cli_lines(capsys, "counts", "--from", "2025-01-01", "--to", "2025-01-31")
     assert code == 0 and ans["runs"] == 0 and ans["items"] == []
     check(validator("counts", "answer"), ans, "counts")

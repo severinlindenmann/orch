@@ -2,7 +2,9 @@
 """R4.1 banned-word diff check (stdlib only).
 
 Fails when a line ADDED by the PR contains sign/signing/signature, certificate, keypair, approval or gate
-(whole words, case-insensitive). Deleted lines never count. Passes when the PR has the label `owner-approved`.
+(whole words, case-insensitive). Deleted lines never count, and a word the same file loses on a deleted line
+cancels one re-added copy (one-line mockup pages re-add every word when a link changes). Passes when the PR has
+the label `owner-approved`.
 Real necessary hits go in scripts/banned_words_allowlist.txt (one path glob per line, `#` comments).
 
 Usage: check_banned_words.py --base origin/develop [--labels "a,b"] [--repo DIR]
@@ -30,29 +32,56 @@ def allow_patterns(path: Path = ALLOWLIST) -> list[str]:
     return [ln for ln in lines if ln]
 
 
-def added_lines(diff: str):
-    """Yield (file, line number, text) for every added line of a unified diff."""
-    name, lineno = None, 0
+def changed_lines(diff: str):
+    """Yield (sign, file, line number, text) for every added (+) and deleted (-) line of a unified diff.
+
+    The file is the new path; deleted files (+++ /dev/null) are skipped. Header lines are only read before
+    the first hunk of each file, so a deleted line whose text starts with "--" is not taken for a header.
+    """
+    name, lineno, in_header = None, 0, False
     for raw in diff.splitlines():
-        if raw.startswith("+++ "):
+        if raw.startswith("diff "):
+            name, in_header = None, True
+        elif in_header and raw.startswith("+++ "):
             name = raw[6:] if raw.startswith("+++ b/") else None
         elif raw.startswith("@@"):
+            in_header = False
             m = HUNK.match(raw)
             lineno = int(m.group(1)) if m else 0
-        elif raw.startswith("+") and name:
-            yield name, lineno, raw[1:]
+        elif in_header or not name:
+            continue
+        elif raw.startswith("+"):
+            yield "+", name, lineno, raw[1:]
             lineno += 1
-        elif raw.startswith(" ") and name:
+        elif raw.startswith("-"):
+            yield "-", name, lineno, raw[1:]
+        elif raw.startswith(" "):
             lineno += 1
+
+
+def words(text: str) -> list[str]:
+    return [m.group(1).lower() for m in BANNED.finditer(LOGIN.sub(" ", text))]
 
 
 def find_hits(diff: str, allow: list[str]) -> list[tuple[str, int, str]]:
-    hits = []
-    for name, lineno, text in added_lines(diff):
+    if not diff.startswith("diff "):
+        diff = "diff --git\n" + diff  # bare hunks (tests) start with the file header
+    removed: dict[tuple[str, str], int] = {}
+    added = []
+    for sign, name, lineno, text in changed_lines(diff):
         if any(fnmatch.fnmatch(name, p) for p in allow):
             continue
-        for m in BANNED.finditer(LOGIN.sub(" ", text)):
-            hits.append((name, lineno, m.group(1).lower()))
+        for word in words(text):
+            if sign == "-":
+                removed[(name, word)] = removed.get((name, word), 0) + 1
+            else:
+                added.append((name, lineno, word))
+    hits = []
+    for name, lineno, word in added:
+        if removed.get((name, word), 0) > 0:
+            removed[(name, word)] -= 1
+        else:
+            hits.append((name, lineno, word))
     return hits
 
 

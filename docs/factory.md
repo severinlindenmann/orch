@@ -41,7 +41,7 @@ you answer without leaving the page; the page refreshes when you have answered. 
 press the option in the card, where orch confirms it is you. Outside the dashboard the button links to the ticket.
 
 ## What protects your decisions
-Only your own answers count (the core records a person's answer only with proof from your dashboard, Focus or phone), and
+Only your own answers count (the ones you give in the dashboard, Focus, the CLI or on your phone), and
 only for questions Factory itself asked about a frozen proposal. A proposal cannot change after Start; more scope is always
 a new question. In phase 1 this is enforced by Factory's own commands: an agent running as your user could still start a
 ticket directly with `orch run start`. A core check for that is planned.
