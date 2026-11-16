@@ -1,6 +1,6 @@
 # orch design system: the one master
 
-This folder (`workspace/src/orch_ui/static/`) is the single component library and style guide for the dashboard, every add-on page and every mockup page. Open `gallery.html` (served at `/kit/gallery.html` by the dashboard and linked from Settings, About) to see every component in every state with motion Replay.
+This folder (`workspace/src/orch_ui/static/`) is the single component library and style guide for the dashboard, every add-on page and every mockup page. Open `gallery.html` (served at `/styleguide` by the dashboard, also at `/kit/gallery.html`, and opened from Settings, About) to see every component in every state with motion Replay.
 
 ## The rules (owner, 14 Nov 2026)
 

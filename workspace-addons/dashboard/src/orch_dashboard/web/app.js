@@ -42,7 +42,8 @@ function h(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
     if (value == null) continue;
-    if (key === 'href' && !/^(#|https?:)/i.test(String(value))) continue;
+    // a route (#), a web address, or a path on this site (/x; never //x or /\x, which leave the site)
+    if (key === 'href' && !/^(#|https?:|\/(?![\/\\]))/i.test(String(value))) continue;
     if (key.startsWith('data-')) node.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = String(value);
     else if (['className', 'hidden', 'disabled'].includes(key)) node[key] = value;
     else node.setAttribute(key, String(value));
