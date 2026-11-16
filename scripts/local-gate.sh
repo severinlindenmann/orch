@@ -30,7 +30,7 @@ has '^contracts/' && contracts=1
 { has '^workspace/' || [ $contracts = 1 ]; } && workspace=1
 { has '^workspace-addons/' || [ $workspace = 1 ]; } && addons=1
 
-[ $contracts = 1 ] && step direct contracts . uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
+[ $contracts = 1 ] && step direct contracts . uv run --python '>=3.11' --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 if [ $workspace = 1 ]; then
   step light workspace workspace sh -c 'uv sync -q && uv run ruff check . && uv run ruff format --check . && uv run pytest -q -n 4 -m "not slow"'
 fi
