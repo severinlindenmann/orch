@@ -1314,6 +1314,7 @@ def start(
     mode: str | None = None,
     text: str | None = None,
     agent: str | None = None,
+    priority: str = "normal",
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
@@ -1357,6 +1358,7 @@ def start(
             fresh=fresh,
             take_over=take_over,
             busy_text=text or f"{by} asked for more work on this ticket.",
+            priority=priority,
         )
         r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
         return r

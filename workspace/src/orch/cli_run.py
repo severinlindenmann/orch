@@ -21,6 +21,7 @@ from orch import (
     runs_live,
     runwatch,
     sharedfolder,
+    tend,
     term,
     tickets,
 )
@@ -43,6 +44,7 @@ SUBCOMMANDS = (
     "input",
     "list",
     "screen",
+    "tend",
     *cli_screen.SUBCOMMANDS,
 )
 
@@ -56,6 +58,9 @@ def add_parsers(sub, common) -> None:
         x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
         if name == "list":
             continue  # every run; no ticket
+        if name == "tend":  # every live run; no ticket
+            x.add_argument("--dry-run", action="store_true", help="only say what it would do")
+            continue
         x.add_argument(
             "ticket", nargs="?" if name in ("event", "done", "input") else "+" if name == "status" else None
         )
@@ -92,6 +97,12 @@ def add_parsers(sub, common) -> None:
         if name == "start":
             x.add_argument("--take-over", action="store_true", help="take over a claim nobody has written to")
             x.add_argument("--text", help="what to queue when the ticket is busy")
+            x.add_argument(
+                "--priority",
+                choices=runs_live.PRIORITIES,
+                default="normal",
+                help="when every slot is taken: where it waits in line (default normal)",
+            )
         if name == "screen":
             x.add_argument(
                 "--lines",
@@ -394,6 +405,13 @@ def dispatch(args, root: Path) -> bool:
         rows = runwatch.list_runs(root)
         _out(args, {"runs": rows}, runwatch.list_text(rows))
         return True
+    if sub == "tend":  # the helper watcher's pass (ORCH-78): end, remind, start fresh, start the line
+        if not args.dry_run:
+            with contextlib.suppress(Exception):
+                runs_live.cleanup(root)
+        res = tend.run(root, dry_run=args.dry_run)
+        _out(args, res, tend.text(res, args.dry_run))
+        return True
     if sub == "screen":  # read-only: nothing is typed into the session
         if not args.ticket:
             raise Refused("Say which ticket: orch run screen <ticket>")
@@ -492,6 +510,7 @@ def dispatch(args, root: Path) -> bool:
             mode=args.mode,
             text=args.text,
             agent=args.agent,
+            priority=args.priority,
         )
         for note in r["notes"]:
             print(note, file=sys.stderr)
