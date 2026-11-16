@@ -6,6 +6,7 @@ thing. Only states, end times and ticket names are printed; never anything a too
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -22,7 +23,8 @@ def _out(args, data, text: str) -> None:
 
 
 def add_parsers(sub, common) -> None:
-    sub.add_parser("logins", parents=[common], help="check that every tool login a helper needs still works")
+    # hidden from help until the owner has chosen the words (ORCH-43); the dashboard and phone use it
+    sub.add_parser("logins", parents=[common], help=argparse.SUPPRESS)
 
 
 def line(r: dict) -> str:
