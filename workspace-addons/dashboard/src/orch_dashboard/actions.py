@@ -1052,7 +1052,7 @@ def build_argv(op, args, root: Path | None = None) -> list[str]:
     if not isinstance(args, dict):
         raise BadRequest("The arguments must be an object.")
     words, flags, tail = fn(args)
-    if op in ("config.agent.test", "workspace.propose"):  # read-only answers: nothing to sign
+    if op in ("config.agent.test", "workspace.propose"):  # read-only answers: nothing changes, so no --by
         return [*words, "--json"]
     if op == "review.answer":  # a card answer is the current person's plain answer: no proof, no --by
         return [*words, *flags, "--json"]
