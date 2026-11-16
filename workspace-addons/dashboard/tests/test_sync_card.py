@@ -210,7 +210,10 @@ def test_a_confirming_click_runs_the_verb_plainly(live, monkeypatch):
         "seen": None,
     }
     assert post(port, "/api/act", {"op": "addon.act", "args": args}, {"Cookie": ck})[0] == 200
-    assert [c[c.index("act") + 1] for c in calls] == ["keep-mine"] and "--proof-target" not in calls[0]
+    assert (
+        "keep-mine" in calls[-1] and "--proof-target" not in calls[-1]
+    )  # the check ran first, then the verb
+    assert sum("--proof-target" not in c for c in calls) == 1
 
 
 def test_an_unsigned_sync_click_never_asks_for_a_target(live, monkeypatch):
@@ -240,3 +243,22 @@ def test_sync_clicks_are_watch_only_without_a_session(live, monkeypatch):
         {"addon": "sync", "verb": "leave-out", "target": "tickets/t_abc123/artifacts/a.txt", "review": True},
     ):
         assert post(port, "/api/act", {"op": "addon.act", "args": args})[0] == 403
+
+
+def test_a_confirming_click_with_a_stale_seen_is_refused_and_a_matching_one_runs(tmp_path, monkeypatch):
+    from orch.pagesession import SELF
+
+    calls, run = _answer({"target": "sync:keep-mine:" + "a" * 64})
+    monkeypatch.setattr(actions, "_run", run)
+    monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
+    args = {"addon": "sync", "verb": "keep-mine", "target": "tickets/t_abc123.json", "sign": True}
+    with pytest.raises(actions.BadRequest, match="This changed after you opened it"):
+        actions.run_op(
+            tmp_path, SELF, "addon.act", {**args, "seen": "sync:keep-mine:" + "b" * 64}, session=True
+        )
+    assert all("--proof-target" in c for c in calls)  # only the comparison ran, the verb did not
+    calls.clear()
+    st, _, _ = actions.run_op(
+        tmp_path, SELF, "addon.act", {**args, "seen": "sync:keep-mine:" + "a" * 64}, session=True
+    )
+    assert st == 200 and "keep-mine" in calls[-1] and "--proof-target" not in calls[-1]

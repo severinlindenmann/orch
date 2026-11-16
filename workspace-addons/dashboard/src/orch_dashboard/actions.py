@@ -731,7 +731,7 @@ def _review(v) -> dict | None:
     return out if out.get("title") else None
 
 
-def addon_proof_target(
+def addon_review_target(
     root: Path, orch_bin: str, argv: list[str], addon: str
 ) -> tuple[str | None, dict | None]:
     """Which proof a signed add-on click needs and what the person is shown: `orch <addon> act <verb> --proof-target
@@ -1224,10 +1224,15 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         )
     if op == "addon.act" and args.get("review") is True:
         # phase 1: what the person will confirm; nothing runs (with any orch, a test fake too)
-        target, review = addon_proof_target(root, orch_bin, argv, args["addon"])
+        target, review = addon_review_target(root, orch_bin, argv, args["addon"])
         if review is None:
             raise BadRequest("This can't be confirmed right now. Nothing was changed.")
         return 200, "", {"target": target, "review": review}
+    if op == "addon.act" and args.get("sign") is True and orch_bin == SELF:
+        # phase 2: the click must still match what the page showed
+        target, _ = addon_review_target(root, orch_bin, argv, args["addon"])
+        if target != args.get("seen"):
+            raise BadRequest("This changed after you opened it. Nothing was changed; open it again.")
     try:
         r = _run(
             [*argv0(orch_bin), *argv],
