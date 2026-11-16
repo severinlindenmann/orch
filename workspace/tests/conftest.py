@@ -382,19 +382,15 @@ _RECORD_MODULES = re.compile(
 
 @pytest.fixture(autouse=True)
 def _record_keys(request, monkeypatch, tmp_path_factory, _legacy_trust):
-    """The record writer is fail closed: no human key, no recording (record_auth, activity.md). The record
-    test modules write in plain tmp folders that are no guarded workspace, so for them the guarded home falls
-    back to a test folder and the record key is made on first use. This is this test package's fixture only:
-    no product code has a switch for it. A test of the missing key (or of a real guarded home) opts out with
-    `@pytest.mark.no_record_key`."""
-    if request.node.get_closest_marker("no_record_key") or not _RECORD_MODULES.search(
-        request.module.__name__
-    ):
+    """The record test modules write in plain tmp folders that are no guarded workspace, so for them the
+    guarded home (other stores they touch, e.g. the key store) falls back to a test folder. The record itself
+    needs no key. This is this test package's fixture only: no product code has a switch for it."""
+    if not _RECORD_MODULES.search(request.module.__name__):
         yield
         return
     from orch import humanproof as hp
 
-    orig_home, orig_key = hp.guarded_home, hp.record_key
+    orig_home = hp.guarded_home
     fallback = tmp_path_factory.mktemp("recordhome")
 
     def home(root):
@@ -406,45 +402,28 @@ def _record_keys(request, monkeypatch, tmp_path_factory, _legacy_trust):
     # the shared monkeypatch, set up after `_legacy_trust` (so undone before it): every patch of
     # humanproof.guarded_home is undone in the reverse order, none leaks into the next test (test_winacl)
     monkeypatch.setattr(hp, "guarded_home", home)
-    monkeypatch.setattr(hp, "record_key", lambda root, create=False: orig_key(root, create=True))
     yield
 
 
 def seal_lines(root, run, events, *, start=1, link=None):
-    """Raw bytes of sealed lines for `events` (the writer's own seal, for tests that write run files by hand):
-    seq `start`.. in order, chained from `link` (genesis for seq 1). The events are used as given (write
-    them as the writer would: compact JSON, no `auth`)."""
-    from orch import humanproof as hp
-    from orch import record_auth as ra
-
-    ws, kid, rk = hp.record_key(root)
-    prev = link or ra.genesis(rk, ws, run)
+    """Raw bytes of run lines for `events` (for tests that write run files by hand): seq `start`.. in order,
+    one compact JSON line each. `root` and `link` are kept for the callers' sake and unused."""
     out = b""
     for n, ev in enumerate(events, start):
-        body = json.dumps(dict(ev, seq=n), separators=(",", ":"), ensure_ascii=False).encode()
-        line = ra.seal(rk, kid, ws, run, n, prev, body)
-        out += line
-        prev = ra.split(line)[3]
+        out += json.dumps(dict(ev, seq=n), separators=(",", ":"), ensure_ascii=False).encode() + b"\n"
     return out
 
 
 def seal_append(root, run, event):
-    """Append ONE sealed line to the run file as code that holds orch's key could (the Level 1 residual of the
-    record MAC): the next seq after the file's last sealed line, chained to it. For tests of what the readers
-    do with a line that verifies but is wrong in content (a pointer to another ticket's detail file, ...)."""
+    """Append ONE line to the run file by hand: the next seq after the file's last line."""
     from orch import record
-    from orch import record_auth as ra
 
     path = record.record_dir(root) / "runs" / f"{run}.jsonl"
     raw = path.read_bytes() if path.exists() else b""
     last = [x for x in raw.splitlines() if x][-1:]
-    if last:
-        body, _kid, _p, mac = ra.split(last[0])
-        seq, link = json.loads(body)["seq"] + 1, mac
-    else:
-        seq, link = 1, None
+    seq = json.loads(last[0])["seq"] + 1 if last else 1
     with path.open("ab") as f:
-        f.write(seal_lines(root, run, [event], start=seq, link=link))
+        f.write(seal_lines(root, run, [event], start=seq))
 
 
 @pytest.fixture(autouse=True)
