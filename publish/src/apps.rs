@@ -484,14 +484,24 @@ async fn deploy_inner(
         updated_at: util::now(),
         cap_nonce,
     };
-    // the row (reach, auth, token) goes in BEFORE the new process becomes reachable, so no request
-    // is ever served new content under the old access setting
-    db::put_app(&st.db.lock().unwrap(), &row, &util::now())?;
-    st.runner.stop(name).await;
+    // The old process leaves the table first (requests get the offline page while it stops), then the row
+    // (reach, auth, token) is written, then the new process takes the name: no request is ever served
+    // old content under new access, nor new content under old access.
+    let old_proc = st.runner.take(name);
+    let put = db::put_app(&st.db.lock().unwrap(), &row, &util::now());
+    if let Err(e) = put {
+        if let Some(o) = old_proc {
+            st.runner.stop_taken(o).await;
+        }
+        return Err(e.into());
+    }
     st.runner.rename(&format!("{name}~new"), name);
     st.sleep.sleeping.lock().unwrap().remove(name);
     st.sleep.cooldown.lock().unwrap().remove(name);
     touch(st, name);
+    if let Some(o) = old_proc {
+        st.runner.stop_taken(o).await;
+    }
     if let Some(old) = existing {
         let root = st.cfg.app_root(name);
         if let Some(v) = version_root(&root, FsPath::new(&old.code_dir)) {
@@ -1135,6 +1145,15 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
     let Some(port) = st.runner.live_port(&app.name) else {
         return offline_page();
     };
+    // the row may have changed between the caller's read and now (a redeploy swaps the process)
+    match db::get_app(&st.db.lock().unwrap(), &app.name) {
+        Ok(Some(fresh)) => {
+            if let Some(r) = access_changed(app, &fresh) {
+                return r;
+            }
+        }
+        _ => return notice_gone(),
+    }
     let uri = format!(
         "http://127.0.0.1:{}/{}{}",
         port,

@@ -501,6 +501,56 @@ async fn open_cap_rotates_on_reach_auth_change_and_recreate() {
     assert_eq!(pget(&t.private, &cap4).await.status, 200);
 }
 
+/// A python app that answers every request with `word`.
+fn word_app(word: &str) -> String {
+    format!(
+        "import os\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\nclass H(BaseHTTPRequestHandler):\n    def do_GET(self):\n        self.send_response(200)\n        self.end_headers()\n        self.wfile.write(b\"{word}\")\n    def log_message(self, *a):\n        pass\nHTTPServer((\"127.0.0.1\", int(os.environ[\"PORT\"])), H).serve_forever()\n"
+    )
+}
+
+async fn put_py(t: &T, ws: &(String, String), name: &str, extra: &str, word: &str) -> Resp {
+    let toml = py_toml(name, extra);
+    t.api(
+        ws,
+        "PUT",
+        &format!("/v1/apps/{name}?days=7"),
+        bundle(&[("app.toml", &toml), ("main.py", &word_app(word))]),
+    )
+    .await
+}
+
+/// Redeploy private-open -> public: the OLD process (private-only content) is never served on the
+/// public listener, at any moment of the swap.
+#[tokio::test]
+async fn redeploy_never_serves_old_process_under_new_access() {
+    let t = setup_private();
+    let ws = t.workspace("A", all_rights()).await;
+    let r = put_py(&t, &ws, "rr", "reach = \"private\"\nauth = false", "old").await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (pub_r, flag) = (t.public.clone(), done.clone());
+    let poller = tokio::spawn(async move {
+        let mut seen = vec![];
+        while !flag.load(std::sync::atomic::Ordering::SeqCst) {
+            let g = call(&pub_r, "GET", "/a/rr/", &[], vec![]).await;
+            seen.push((g.status.as_u16(), g.text()));
+            tokio::task::yield_now().await;
+        }
+        seen
+    });
+    let r = put_py(&t, &ws, "rr", "reach = \"public\"\nauth = false", "new").await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    done.store(true, std::sync::atomic::Ordering::SeqCst);
+    for (status, body) in poller.await.unwrap() {
+        assert!(
+            !(status == 200 && body == "old"),
+            "old process served under the new access"
+        );
+    }
+    let g = call(&t.public, "GET", "/a/rr/", &[], vec![]).await;
+    assert_eq!((g.status.as_u16(), g.text()), (200, "new".to_string()));
+}
+
 #[tokio::test]
 async fn redeploy_writes_the_row_before_the_new_process_is_live() {
     use orch_publish::db;
