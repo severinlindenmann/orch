@@ -76,6 +76,29 @@ def _plain_questions(ticket):
     return out[:10]
 
 
+def _results(d):
+    """The crew's results that wait for your Looks good (core: the ticket is in Check), one row each."""
+    out = []
+    for slug, t in (d.get("crew") or {}).items():
+        if t.get("status") == "review" and slug in d["tasks"]:
+            out.append({"ticket": t["id"], "title": _text(d["tasks"][slug]["title"])})
+    return out[:10]
+
+
+def _starting(d):
+    """The stage the run is about to start: nothing waits for you and none of its crew tickets has been started yet."""
+    if d.get("open") or d.get("shipped") or not d.get("stage"):
+        return None
+    mine = [slug for slug, t in d["tasks"].items() if t["stage"] == d["stage"]]
+    if not mine:
+        return None
+    started = [d["crew"][slug] for slug in mine if slug in d["crew"]]
+    if any(t.get("status") not in (None, "open") for t in started):
+        return None
+    done_before = any(x["state"] == "done" for x in d["line"])
+    return d["stage"] if done_before else None
+
+
 def _labelled(line, proposal):
     """Stage items with the proposal's own `label` when it gave one (a short, plain name for the owner)."""
     labels = {x["stage"]: x["label"] for x in (proposal or {}).get("line", []) if x.get("label")}
@@ -146,6 +169,8 @@ def _summary(ticket, d, root=None):
         "agent_draft": _agent_draft(ticket),
         "draft_v": _draft_v(ticket),
         "questions": _plain_questions(ticket),
+        "results": _results(d) if started_run else [],
+        "starting": _starting(d) if started_run else None,
     }
 
 
@@ -202,6 +227,8 @@ def _broken(ticket, error):
         "agent_draft": False,
         "draft_v": None,
         "questions": [],
+        "results": [],
+        "starting": None,
         "problem": _text(str(error), 200),
     }
 

@@ -833,3 +833,32 @@ def test_draft_questions_are_cards_with_options_and_a_suggestion(ws, run, srv):
     ]
     js = _page_js()
     assert "...questionCards(order)" in js and "decide(order, 'Answer', true, x.q)" in js
+
+
+def test_results_waiting_for_your_looks_good_are_one_card_on_factory(ws, run, srv):
+    from test_flow import edit
+
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    edit(ws, tid, lambda t: t.update(status="review"))
+    row = _home_row(srv, order)
+    assert row["results"] == [{"ticket": tid, "title": "Booking form"}]
+    js = _page_js()
+    assert (
+        "orders.filter(o => o.open || draftWaiting(o) || results(o).length)" in js
+    )  # not "nothing waits for you"
+    assert "section(primary, 'Results to check'" in js and "resultsCard(o, true)" in js
+
+
+def test_the_next_stage_says_it_is_starting(ws, run, srv):
+    order, _ = started(ws, run)
+    run("next", order)
+    assert _home_row(srv, order)["starting"] is None  # the first stage: nothing was finished yet
+    finish_crew(ws, run, order, "booking-form")
+    q = ask_stop(ws, run, order, "build")
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    run("next", order)
+    row = _home_row(srv, order)
+    assert row["phase"] == "started" and row["stage"] == "ship" and row["starting"] == "ship"
+    assert "'Starting the ' + stageName(order, order.starting) + ' stage…'" in _page_js()

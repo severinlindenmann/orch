@@ -124,6 +124,18 @@
       c.classList.add('f-attention'); return c;
     });
   }
+  // The crew's results that wait for your Looks good: one card, one link per result (each opens its own ticket, where
+  // the check is your own click). Nothing is checked from here.
+  const results = order => array(order.results).filter(r => validId(r?.ticket));
+  function resultsCard(order, withOrder) {
+    const rows = results(order);
+    const c = card(order.title, node('h3', plural(rows.length, 'result', 'results') + ' built, waiting for your Looks good'),
+      group('stack', ...rows.map((r, i) => link((rows.length > 1 ? 'Look at ' : 'Look at the result: ') + text(r.title), '/#ticket/' + r.ticket, i === 0))),
+      ...(withOrder ? [tail(orderLink(order, 'Review order'))] : []));
+    c.classList.add('f-attention'); return c;
+  }
+  // The run goes on by itself; until its next step has started, say so instead of showing nothing.
+  const startingNote = order => order.starting ? [meta('Starting the ' + stageName(order, order.starting) + ' stage…')] : [];
   function answer(order) {
     return group('stack', group('actions', decide(order)), meta(embedded() && order.open ? 'Your answer opens in a card here, where orch confirms it\'s you.' : "You answer on the order's ticket, where orch confirms it's you."));
   }
@@ -298,7 +310,7 @@
   }
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
-    const needing = orders.filter(o => o.open || draftWaiting(o));
+    const needing = orders.filter(o => o.open || draftWaiting(o) || results(o).length);
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
     view.append(heading('Factory', needing.length
       ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
@@ -333,9 +345,10 @@
         tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
       c.classList.add('f-attention'); return c;
     }, 'No stops waiting for you.');
+    section(primary, 'Results to check', orders.filter(o => results(o).length), o => resultsCard(o, true), 'No results waiting for you.');
     section(primary, 'Running', orders.filter(o => o.phase === 'started'), o => o.kind === 'autopilot'
       ? card(o.title, meta('Autopilot order'), p('Routine stops answered by your agent · Ship still asks you'), tail(link('What it decided', '#/autopilot')))
-      : card(o.title, stages(o), budget(o), meta('ETA ' + when(o.eta)), tail(orderLink(o))), 'No running orders.');
+      : card(o.title, stages(o), ...startingNote(o), budget(o), meta('ETA ' + when(o.eta)), tail(orderLink(o))), 'No running orders.');
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     section(secondary, 'Shipped', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))), 'No shipped work recorded.');
     secondary.append(meta('Shipped orders are listed from the workspace record; shipment dates are not available yet.'));
@@ -436,7 +449,7 @@
       view.append(card('Autopilot order', p('Routine stops answered by your agent · Ship still asks you'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
     }
-    const lineCard = card('The line', stages(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
+    const lineCard = card('The line', stages(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
     const main = group('stack', lineCard, card('Time + budget', budget(order), meta('Due ' + when(order.due))));
     const crew = card('Crew now');
     for (const c of array(order.crew)) {
@@ -465,6 +478,7 @@
       const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
     }
+    if (results(order).length) aside.append(resultsCard(order, false));
     aside.append(...questionCards(order));
     if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
     const changes = card('Changes');
