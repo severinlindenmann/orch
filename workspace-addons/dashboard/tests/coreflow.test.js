@@ -101,6 +101,16 @@ test('ticket search matches title, key, owner and note; Mine excludes agents', (
   assert.equal(linked[1].parent, undefined); assert.equal(linked[2].parent, 'other');
 });
 
+// ORCH-58: typing the number (58, ORCH-58, #58) finds that ticket and only that one; 58 is not ORCH-158.
+test('ticket search finds a ticket by its number', () => {
+  const ctx = vm.createContext({});
+  vm.runInContext(ticketsSource.slice(ticketsSource.indexOf('function filterTickets'), ticketsSource.indexOf('function filteredTickets')), ctx);
+  const items = [{id:'a', key:'ORCH-58', title:'Numbers on rows'}, {id:'b', key:'ORCH-158', title:'Other'}, {id:'c', key:'ORCH-5', title:'Five'}, {id:'d', key:'ORCH-7', title:'Port 58 is busy'}];
+  for (const [query, ids] of [['58', ['a', 'd']], ['ORCH-58', ['a']], ['orch-58', ['a']], ['#58', ['a']], ['058', ['a']], ['5', ['c', 'd']], ['orch-5', ['a', 'c']], ['numbers', ['a']]]) {
+    assert.deepEqual(Array.from(ctx.filterTickets(items, query, false), t => t.id), ids, query);
+  }
+});
+
 // A small DOM double exercises the page controls without a browser dependency.
 function pageContext(snapshot = false) {
   class Element {
@@ -113,7 +123,7 @@ function pageContext(snapshot = false) {
   const ctx = {snapshot, state:{runs:{}}, locks:new Set(), document:{getElementById:() => connection},
     h:(...args) => new Element(...args), button:(label, cls, click) => Object.assign(new Element('button', {}, label), {click}),
     array:v => Array.isArray(v) ? v : [], clean:x => x, href:id => '#ticket/' + id, ticketOf:() => t, ticketTitle:() => new Element('h3'), parentLine:() => null,
-    setTimeout, clearTimeout, window:{DashHelpers:{needAction:() => ({label:'Answer'}), plainWhy:text => text}, orch:{toast:text => toasts.push(text)}}, render:() => calls.push('render'), refresh:() => calls.push('refresh')};
+    setTimeout, clearTimeout, window:{DashHelpers:{needAction:() => ({label:'Answer'}), plainWhy:text => text, ticketKey:t => (t && t.key) || ''}, orch:{toast:text => toasts.push(text)}}, render:() => calls.push('render'), refresh:() => calls.push('refresh')};
   vm.createContext(ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('function ticketTitle')), ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('// Answered on Home but not sent yet'), homeSource.indexOf('function workingRow')), ctx);

@@ -44,6 +44,10 @@ window.SWIPE_ITEMS=[
    {id:'A',title:'Plain',preview:{type:'doc',heading:'November news from the café',paras:['Short and safe.']}},
    {id:'B',title:'Question',suggested:true,preview:{type:'doc',heading:'Sunday coffee? You asked, we listened',paras:['Picks up the survey result.']}},
    {id:'C',title:'Offer',preview:{type:'doc',heading:'Free oat milk all November ☕',paras:['Promises an offer. Picking C asks you about the offer itself first.']}}]}},
+ /* a plain question with no pictures (orch ask --option ...): plain rows, whole titles (ORCH-110) */
+ {id:'o3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-48',ticketId:'DT-48',ticketTitle:'Export button',task:'o3',when:'today 10:40',title:'Which name for the export button?',
+  then:'The helper uses the name you pick.',
+  preview:{type:'options',options:[{id:'Export',title:'Export',suggested:true},{id:'Download',title:'Download',text:'Says what happens on a phone.'}]}},
  {id:'d4',kind:'question',kindLabel:'Plan',icon:'note',ticket:'DT-44',ticketId:'DT-44',ticketTitle:'Invoice reminders',when:'today 10:02',need:'7 invoices are overdue',title:'Send invoice reminders every Monday',
   why:'The helper wants to start a schedule.',okLabel:'Start reminders',signs:true,
   then:'Every Monday 08:00 to customers with invoices older than 30 days (7 today). First one Mon 17 Nov. Nothing is sent before.',

@@ -575,6 +575,10 @@
   const helperAlive = (ticket, run) => !!run && run.running === true && !['review', 'done'].includes(ticket && ticket.status);
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
+  // ORCH-58: the short ticket number people talk in (ORCH-58) goes before the title wherever a ticket shows.
+  // `make` is the page's element maker h(); the result is [<span class="key">ORCH-58</span>, ' '] or null.
+  const ticketKey = t => t && typeof t.key === 'string' ? t.key.trim() : '';
+  const keyTag = (t, make) => { const k = ticketKey(t); return k ? [make('span', {className:'key'}, k), ' '] : null; };
   // "x of y steps": one pattern for every step counter (always "steps").
   const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + (Number(total) === 1 ? ' step' : ' steps');
   // Topbar freshness: when /api/state last answered. Under a minute is "just now".
@@ -588,5 +592,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });
