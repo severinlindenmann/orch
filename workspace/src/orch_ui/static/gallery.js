@@ -18,6 +18,9 @@ q('#w-loading').append(UI.state({kind:'loading'}));
   {id:'g0b',kind:'choice',kindLabel:'Choose',icon:'cards',group:'Home look',ticket:'DT-50',ticketId:'t_look',ticketTitle:'Home look',when:'today 11:03',title:'Home: where the sets go',
   text:'Which place for a set of cards on Home?',then:'The helper builds the one you pick.',
   preview:{type:'options',before:pg('Today','As it is.'),options:[{id:'A',title:'Top of Home',suggested:true,preview:pg('A','On top.')},{id:'B',title:'Inside Needs you',preview:pg('B','In the list.')}]}});
+ /* a plain question (orch ask --option Export --option Download): no pictures, so plain rows (ORCH-110) */
+ items.push({id:'g3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'WS-4',ticketId:'t_name',ticketTitle:'Export button',when:'today 22:51',title:'Which name for the export?',then:'The helper uses the name you pick.',
+  preview:{type:'options',options:[{id:'Export',title:'Export',suggested:true},{id:'Download',title:'Download',text:'Says what happens on a phone.'}]}});
  UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true});
  const e={id:'core:q:T-1:q4',ticket:'T-1',by:'Severin',via:'phone',at:Date.now()-36e5,card:{kind:'choice',title:'Home: which layout?',preview:{type:'options',options:[{id:'A',title:'As today',preview:pg('A','Cards.')},{id:'B',title:'Recent changes first',preview:pg('B','Changes.')}]}},
   decision:{action:'use_with_changes',picked:'B',changes:['Dates on the left'],summary:'Use B with 1 change',words:{text:'Take B, but dates on the left.'},pins:[{n:1,on:'option B',x:40,y:55,text:'Dates here'}]}};
