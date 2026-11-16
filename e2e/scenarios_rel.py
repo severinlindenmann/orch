@@ -195,6 +195,8 @@ def r7(e):
     _automation_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
+    _sched_once(e, "Reports")  # work an earlier scenario left (R6 delegates a ticket) runs now, not inside the count below
+    time.sleep(4)
     base = _agent_runs(log)
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "run the weekly report")
     st = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"]["key"] == "weekly-report"]
