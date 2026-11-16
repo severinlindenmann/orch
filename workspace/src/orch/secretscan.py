@@ -171,10 +171,14 @@ def _leaves(doc, path: str = "", top: bool = True):
             yield from _leaves(v, path, False)
 
 
-def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
+def _after(verb: str) -> str:
+    return "Remove it and send again." if verb == "sent" else "Remove it and try again."
+
+
+def refuse_if_secret_in(root: Path | None, body, what: str = "message", *, verb: str = "sent") -> None:
     """R5.2: nothing leaves this machine (relay, publish) with a secret in it. The one scanner, run on every
     string of the body. A hit raises Refused with one sentence naming the kind and the field, never the value.
-    Fails closed when the scan itself breaks."""
+    Fails closed when the scan itself breaks. verb: what did not happen ("sent"; "saved" for evidence)."""
     leaves = list(_leaves(body))
     if not leaves:
         return
@@ -189,7 +193,7 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
         found = find("\n".join(parts), root, strict=False)
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(
-            f"orch could not check the {what} for secrets, so nothing was sent. Try again."
+            f"orch could not check the {what} for secrets, so nothing was {verb}. Try again."
         ) from None
     if not found:
         return
@@ -198,8 +202,7 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
     more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
     kind = WORDS.get(first["kind"], "a secret")
     raise Refused(
-        f"The {what} has {kind} in its {field.split('.')[-1]}{more}, so nothing was sent. "
-        "Remove it and send again."
+        f"The {what} has {kind} in its {field.split('.')[-1]}{more}, so nothing was {verb}. " + _after(verb)
     )
 
 
@@ -214,7 +217,9 @@ def _views(window: bytes):
         yield part.decode("utf-16-be", "replace")
 
 
-def refuse_if_secret(data: bytes, what: str = "file", root: Path | None = None) -> None:
+def refuse_if_secret(
+    data: bytes, what: str = "file", root: Path | None = None, *, verb: str = "sent"
+) -> None:
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
     read in every encoding (_views) with the full find() including the stored-key check."""
     step, overlap = MAX_BYTES, 65536
@@ -230,10 +235,10 @@ def refuse_if_secret(data: bytes, what: str = "file", root: Path | None = None) 
                 break
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(
-            f"orch could not check the {what} for secrets, so nothing was sent. Try again."
+            f"orch could not check the {what} for secrets, so nothing was {verb}. Try again."
         ) from None
     if found:
         raise Refused(
-            f"The {what} has {WORDS.get(found[0]['kind'], 'a secret')}, so nothing was sent. "
-            "Remove it and send again."
+            f"The {what} has {WORDS.get(found[0]['kind'], 'a secret')}, so nothing was {verb}. "
+            + _after(verb)
         )

@@ -1038,6 +1038,7 @@ def run(args: argparse.Namespace) -> None:
         shorthand = [json.dumps({"type": k, "ref": getattr(args, k), **extra}) for k in kinds]
         if args.summary and shorthand and not args.file:
             shorthand[0] = json.dumps({**json.loads(shorthand[0]), "summary": args.summary})
+        tickets.refuse_secret_in_proof(root, args.evidence + shorthand)  # before a file is copied (R5.2)
         if args.file:
             tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id
             attached = tickets.attach_file(
