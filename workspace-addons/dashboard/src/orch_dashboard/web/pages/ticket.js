@@ -1110,7 +1110,8 @@ function ticketCardShown(t, q, card) {
   const sug = q.recommended === 'ok' ? 'Suggested: ' + (card.ok_label || 'Looks good') : q.recommended === 'no' ? "Suggested: Don't do" : '';
   const go = snapshot ? h('p', {className:'meta'}, 'Waiting for an answer')
     : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + t.id + ':' + q.id), 'data-key':'card-go-' + q.id}, 'Look and answer');
-  return h('div', {className:'stack', 'data-key':'card-shown-' + q.id}, tiles, card.why ? h('p', {className:'meta'}, clean(card.why)) : null, h('div', {className:'row'}, go, sug ? h('span', {className:'swipe-sug'}, sug) : null));
+  return h('div', {className:'stack', 'data-key':'card-shown-' + q.id}, tiles, card.why ? h('p', {className:'meta'}, clean(card.why)) : null, h('div', {className:'row'}, go, sug ? h('span', {className:'swipe-sug'}, sug) : null,
+    array(q.links).filter(l => l && /^https?:\/\//i.test(String(l.url || ''))).slice(0, 5).map((l, i) => h('a', {className:'btn ghost sm', href:String(l.url), target:'_blank', rel:'noopener', 'data-key':'card-link-' + q.id + '-' + i}, iconEl('link'), clean(l.label)))));
 }
 // A step is named by its title only; the ticket key is a quiet line under Properties.
 const partName = p => clean(p.title);

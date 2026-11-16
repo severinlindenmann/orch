@@ -179,10 +179,9 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .swipe:focus,.swipe:focus-visible{outline:none;box-shadow:none}
 .swipe-top{display:flex;align-items:center;gap:var(--s3);font-size:13px;line-height:18px;color:var(--text-muted)}
 .swipe-top .progress{flex:1;height:4px}
-.swipe-stage{position:relative;flex:1;min-height:var(--swipe-card-h);touch-action:none}
-.swipe-card{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;cursor:grab;user-select:none;will-change:transform;transition:transform var(--dur-slow) var(--ease-move),opacity var(--dur-slow) var(--ease-move);box-shadow:var(--lift-shadow)}
-.swipe-card.dragging{transition:none;cursor:grabbing}
-.swipe-card.leaving{transition:transform var(--dur-slow) var(--ease-exit),opacity var(--dur-slow) var(--ease-exit);opacity:0}
+.swipe-stage{position:relative;flex:1;min-height:var(--swipe-card-h);touch-action:pan-y}
+.swipe-card{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;cursor:default;user-select:none;transition:opacity var(--dur-base) var(--ease-out);box-shadow:var(--lift-shadow)}
+.swipe-card.leaving{transition:opacity var(--dur-exit) var(--ease-exit);opacity:0}
 .swipe-card.under{transform:scale(.96) translateY(10px);box-shadow:none;pointer-events:none}
 .swipe-card.under2{transform:scale(.92) translateY(20px);opacity:.6;box-shadow:none;pointer-events:none}
 .swipe-head{display:grid;gap:var(--s1);padding:var(--s4) var(--s4) var(--s3)}
@@ -394,7 +393,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .swipe{container-type:inline-size}
 .swipe-need{color:var(--warning);font-weight:500}
 .swipe-foot{flex-direction:column;align-items:stretch;gap:6px}
-.swipe-foot-row{display:flex;align-items:center;gap:var(--s2)}
+.swipe-foot-row{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
 .swipe-then{font-size:13px;line-height:18px;color:var(--text)}.swipe-then b{font-weight:600}
 .swipe-was{display:flex;align-items:center;gap:6px;font-size:13px;line-height:18px;color:var(--brand)}
 .swipe-later-row{display:flex;justify-content:center;margin-top:calc(var(--s2)*-1)}

@@ -8,6 +8,7 @@ window.SWIPE_ITEMS=[
  {id:'g1',kind:'draft',kindLabel:'Draft',icon:'page',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:02',title:'Home: one list of what needs you',
   text:'Now: Home shows questions, results to check and a factory start in three places, and the count on top does not match the list. Proposal: one list, most urgent first, each row with its picture and one button. The count on top is the length of this list.',
   why:'Found in the dashboard look review.',okLabel:'Build it',suggest:'ok',
+  links:[{label:'Mockup',url:'../proposals/fb23-home-what-changed.html'},{label:'Issue 1290',url:'https://github.com/'}],
   then:'The helper builds it. You check it again before anyone sees it.',
   preview:{type:'compare',before:{type:'img',src:'assets/home-today.jpg',alt:'Home today'},after:{type:'img',src:'assets/home-proposal.jpg',alt:'Home as proposed'}}},
  {id:'g2',kind:'choice',kindLabel:'Choose',icon:'cards',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:03',title:'Home: where the review sets go',

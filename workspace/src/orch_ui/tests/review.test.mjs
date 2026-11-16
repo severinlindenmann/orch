@@ -88,6 +88,8 @@ test('mapCard carries the question text, the set, the suggestion and a choice\'s
   assert.equal(it.text, 'Now: three counts. Proposal: one.'); assert.equal(it.group, 'Home look');
   assert.equal(it.preview.options[1].suggested, true); assert.equal(it.preview.options[0].suggested, false);
   assert.equal(it.preview.before.src, '/f/T-1/reviewed/aa/t.png'); assert.equal(it.suggest, undefined);
+  const l = card('l'); l.links = [{label: 'Mockup', url: 'http://127.0.0.1:8780/a.html'}, {label: 'Bad', url: 'javascript:x'}]; l.card = {kind: 'draft', title: 'B'};
+  assert.equal(JSON.stringify(UI.review.mapCard(l, fakeApi([[]]), NOW).links), JSON.stringify([{label: 'Mockup', url: 'http://127.0.0.1:8780/a.html'}]));
   const d = card('d'); d.recommended = 'ok'; d.card = {kind: 'draft', title: 'Block'};
   assert.equal(UI.review.mapCard(d, fakeApi([[]]), NOW).suggest, 'ok');
 });

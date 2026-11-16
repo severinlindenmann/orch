@@ -180,6 +180,11 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
     return pv
 
 
+def is_plain_url(url) -> bool:
+    """A plain http(s) address (the same rule as a card's open)."""
+    return isinstance(url, str) and len(url) <= 500 and bool(_OPEN.fullmatch(url))
+
+
 def validate_card(card) -> dict:
     """The card as stored (a copy), or Refused with a plain reason. File references stay sources here
     (prepare_card turns them into reviewed copies)."""
@@ -930,6 +935,7 @@ def stack(root: Path) -> list[dict]:
                         "options": list(q.get("options") or []),
                         "recommended": q.get("recommended"),
                         "text": q.get("text") or "",
+                        **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
                     }
                 )

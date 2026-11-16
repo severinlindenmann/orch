@@ -327,7 +327,7 @@ def test_the_question_text_and_group_reach_the_review_list(tk, run):
 def test_group_goes_only_with_a_card_and_is_short(tk, run):
     _, tid = tk
     code, out, err = run("ask", tid, "Plain?", "--group", "Set", "--by", "agent:x")
-    assert code == 2 and "--group goes with a card" in out + err
+    assert code == 2 and "go with a card" in out + err
     code, out, err = _add(run, tid, "--draft", "T", "--then", "x", "--group", "x" * 81)
     assert code == 2 and "at most 80" in out + err
 
@@ -404,3 +404,42 @@ def test_a_typed_comment_from_the_page_is_kept_with_the_answer(tk, run):
     assert saved["decision"]["action"] == "send_back" and saved["via"] == "dashboard"
     assert saved["decision"]["words"]["text"] == "Make the rows taller."
     assert "Make the rows taller." in saved["answer"]
+
+
+def test_a_card_carries_links_and_option_descriptions(tk, run):
+    root, tid = tk
+    code, out, err = _add(
+        run, tid, "--choose", "Which?", "--option", "A=One", "--option", "B=Two",
+        "--describe", "A=Keeps the menu as it is", "--ref", "Mockup=http://127.0.0.1:8780/home.html",
+        "--ref", "Issue=https://example.com/issues/12", "--then", "x",
+    )  # fmt: skip
+    assert code == 0, out + err
+    q = json.loads(out)
+    assert q["card"]["preview"]["options"][0]["text"] == "Keeps the menu as it is"
+    assert "text" not in q["card"]["preview"]["options"][1]
+    assert q["links"] == [
+        {"label": "Mockup", "url": "http://127.0.0.1:8780/home.html"},
+        {"label": "Issue", "url": "https://example.com/issues/12"},
+    ]
+    (c,) = [c for c in json.loads(run("review", "list", "--json")[1])["cards"] if c["ticket"] == tid]
+    assert c["links"] == q["links"] and c["digest"] == _digest(root, tid, "q1")
+    saved = tickets.load(root, tid)["questions"][0]
+    assert tickets.question_digest(saved) != tickets.question_digest(
+        {**saved, "links": []}
+    )  # links are shown
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--draft", "T", "--then", "x", "--ref", "Mockup=javascript:alert(1)"],
+        ["--draft", "T", "--then", "x", "--ref", "no-equals"],
+        ["--draft", "T", "--then", "x", *sum([["--ref", f"L{i}=https://e.com/{i}"] for i in range(6)], [])],
+        ["--draft", "T", "--then", "x", "--describe", "A=x"],
+        ["--choose", "T", "--option", "A=One", "--option", "B=Two", "--describe", "Z=x", "--then", "x"],
+    ],
+)
+def test_links_and_descriptions_are_checked(tk, run, extra):
+    _, tid = tk
+    code, out, err = _add(run, tid, *extra)
+    assert code == 2, out + err

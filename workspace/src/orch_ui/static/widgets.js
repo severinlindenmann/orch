@@ -37,11 +37,12 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
  thead.append(tr);table.append(thead,tbody);wrap.append(table);draw();return wrap};
 /* Swipe review deck (draft 15 Nov, revised after the Codex challenge): UI.swipeDeck(host, items, o)
    o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), onUndo(item), onChange()}
-   Moves: right = approve (button names the action: it.okLabel, "Use C"), left = Don't do / Send back / None of these,
-   down = comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
-   up = Later (stays unanswered, goes to the end). Buttons and keys (→ ← ↓ ↑, Space bigger, B before/after, O all, Z undo)
-   do the same. A swipe needs real distance (no flick-only approve); a drag from the phone's left edge is left to the
-   system back gesture; a second finger cancels. Every card says what happens when you approve (it.then).
+   Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
+   → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
+   ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
+   ↑ Later (stays unanswered, goes to the end); Space bigger, B before/after, O all, Z undo. A tap on an option picks
+   it, a tap on the picture opens it bigger. The answered card fades; nothing flies. Every card says what happens
+   when you approve (it.then). Item extras: text (the question), group, suggest ('ok'|'no'), links [{label,url}].
    verdicts: ok | no | talk | later. note: {picked, changes:{text, clips, pins:[{n,on,x,y,text}]}, about} */
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
  let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
@@ -126,9 +127,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
+  (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   ft.append(row);
-  [['right',okWord(it)==='Pick one'?'Pick one first':okWord(it)],['left',noWord(it)],['down','Comment'],['up','Later']].forEach(([d,t])=>{c.append(el('div','swipe-edge '+d),el('div','swipe-stamp '+d,t))});
   c.append(h,pv,ft);return c};
  /* order: waiting cards first (Later ones at the end), then answered */
  const waiting=()=>{const w=items.map((_,i)=>i).filter(i=>!ans[items[i].id]);return w.filter(i=>!later.has(items[i].id)).concat(w.filter(i=>later.has(items[i].id)))};
@@ -154,23 +155,19 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const wire=c=>{let sx=0,sy=0,t0=0,id=null,dx=0,dy=0,start=null;const pts=new Set();
   c.addEventListener('pointerdown',e=>{pts.add(e.pointerId);if(pts.size>1){id=null;c.classList.remove('dragging');reset(c);return}/* a second finger cancels */
    if(overlay||busy||e.button>0)return;const hb=host.getBoundingClientRect();if(mode==='phone'&&e.clientX-hb.left<16)return;/* leave the left edge to the system back gesture */
-   id=e.pointerId;sx=e.clientX;sy=e.clientY;t0=performance.now();dx=dy=0;start=e.target;c.setPointerCapture(id);c.classList.add('dragging')});
-  c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy;show(c,dx,dy)});
+   id=e.pointerId;sx=e.clientX;sy=e.clientY;t0=performance.now();dx=dy=0;start=e.target;c.setPointerCapture(id)});
+  c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy});/* the card does not move: answers are buttons and keys (owner 16 Nov) */
   const end=e=>{pts.delete(e.pointerId);if(e.pointerId!==id)return;id=null;c.classList.remove('dragging');const dt=performance.now()-t0,dist=Math.hypot(dx,dy);
    if(dist<8&&dt<400){reset(c);const opt=start&&start.closest&&start.closest('.swipe-opt');if(opt){pick(items[idx],picked[items[idx].id]===opt.dataset.opt?null:opt.dataset.opt);return}
     if(start&&start.closest&&start.closest('.swipe-preview')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
-   const w=stage.clientWidth,h=stage.clientHeight,dir=dirOf(dx,dy),v=dist/Math.max(dt,1);
-   /* real distance needed: 30 % of the width (or 22 % of the height), or a quick move of at least 20 % / 15 % */
-   const go=(dir==='down'||dir==='up')?(Math.abs(dy)>h*.22||(v>.6&&Math.abs(dy)>h*.15)):(Math.abs(dx)>w*.3||(v>.6&&Math.abs(dx)>w*.2));
-   if(!go)return reset(c);fly({right:'ok',left:'no',down:'talk',up:'later'}[dir],dx,dy)};
+   reset(c)};
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(UI.toast&&!o.quiet)UI.toast(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
-  if(verdict==='talk'){show(c,dx||0,Math.max(dy||0,h*.12));return openComment()}
+  if(verdict==='talk')return openComment();
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
-  busy=true;const tx=verdict==='ok'?w*1.4:verdict==='no'?-w*1.4:0,ty=verdict==='later'?-h*1.2:(dy||0)+40;
-  show(c,dx||tx*.1,dy||0);requestAnimationFrame(()=>{c.classList.add('leaving');show(c,tx,ty)});
-  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},220)};
+  busy=true;c.classList.add('leaving');/* a short fade, no swipe */
+  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
  const defer=it=>{later.add(it.id);done.push({item:it,verdict:'later',idx,laterOnly:true});const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length;
   live.textContent='Later: '+it.title;render();if(UI.toast&&!o.quiet)UI.toast('Later: '+it.title+'. It stays at the end.',()=>undo())};
  const commit=(verdict,note)=>{const it=items[idx];done.push({item:it,verdict,note,idx,prev:ans[it.id],prevPick:ans[it.id]&&ans[it.id].note?ans[it.id].note.picked:undefined});ans[it.id]={verdict,note,item:it};later.delete(it.id);
@@ -234,7 +231,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):'The helper gets your words and makes a new version. Nothing is approved.'};
   ta.addEventListener('input',sync);
   const close=()=>{closeOverlay();reset(cur)};cancel.onclick=close;
-  const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');show(c,verdict==='ok'?stage.clientWidth*1.4:0,verdict==='ok'?0:stage.clientHeight*1.2);
+  const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');
    setTimeout(()=>{busy=false;delete drafts[it.id];commit(verdict,note)},220)};
   const words=()=>({text:ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice()});
   back.onclick=()=>leave('talk',{changes:words(),about:about?about.v:null});
