@@ -882,6 +882,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copy_setup,
         diag_enabled,
         focus_session_typing,
+        live_max,
         workspace_description,
         workspace_name,
     )
@@ -899,6 +900,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "agents_may_finish": agents_may_finish(root),
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
+        "live_max": live_max(root),  # Settings > Helper > Helpers at once: None = no limit (the default)
         "copy_setup": copy_setup(root) or "",
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",

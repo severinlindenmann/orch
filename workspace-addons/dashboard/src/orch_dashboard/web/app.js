@@ -563,6 +563,14 @@ main.addEventListener('drop', event => {
 main.addEventListener('change', async event => {
   const cap = event.target.closest('[data-key="settings-copies-max"]');
   if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
+  const most = event.target.closest('[data-key="settings-live-max"]');
+  if (most) {
+    if (snapshot || settingsBusy.has('live')) return;
+    const v = most.value === 'none' ? null : Number(most.value);
+    const result = await settingsSend('live.set', {max:v}, 'live');
+    if (result.ok) window.orch.toast(v ? 'Up to ' + v + ' helpers at once.' : 'No limit: any number of helpers at once.', 'ok');
+    return;
+  }
   const perm = event.target.closest('[data-settings-permissions]');
   if (perm) {
     if (snapshot || settingsBusy.has('permissions')) return;

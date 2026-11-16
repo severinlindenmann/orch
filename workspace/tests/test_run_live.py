@@ -361,21 +361,30 @@ def test_stop_ends_the_session_and_the_agent_but_keeps_the_work(proj, run, lab):
 
 
 @needs_tmux
-def test_at_most_four_live_sessions_and_the_fifth_starts_when_one_closes(
-    proj, run, lab, tmp_path, monkeypatch
-):
+def test_a_set_limit_of_four_and_the_fifth_starts_when_one_closes(proj, run, lab, tmp_path, monkeypatch):
     _fake_claude(tmp_path, monkeypatch)
     _claude_live(proj)
+    config.set_live_max(proj, "4")  # Settings > Helper > Helpers at once
     ids = [_ticket(run, f"T{i}") for i in range(5)]
     for tid in ids[:4]:
         assert run("run", "start", tid)[0] == 0
     code, out, err = run("run", "start", ids[4], "--json")
-    assert code == 2 and json.loads(out)["pending"] is True and "4 live sessions" in err
+    assert code == 2 and json.loads(out)["pending"] is True and "4 helpers are working at once" in err
+    assert "Settings > Helper > Helpers at once" in err and "orch run stop" not in err
     assert runs.read(proj, ids[4]) is None
     assert [i["via"] for i in runs.undelivered(proj, ids[4])] == ["slots"]
     assert run("run", "stop", ids[0])[0] == 0  # a slot opens: the waiting ticket starts
     rec = _until(lambda: runs.read(proj, ids[4]), what="fifth started")
     assert rec["mode"] == "live" and len(runs_live.live_alive(proj)) == 4
+
+
+def test_no_limit_by_default_the_fifth_starts_at_once(proj, run, lab, tmp_path, monkeypatch):
+    _fake_claude(tmp_path, monkeypatch)
+    _claude_live(proj)
+    ids = [_ticket(run, f"T{i}") for i in range(5)]
+    for tid in ids:
+        assert run("run", "start", tid)[0] == 0
+    assert len(runs_live.live_alive(proj)) == 5
 
 
 @needs_tmux

@@ -367,6 +367,21 @@ def live_idle_minutes(root: Path | None) -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else DEFAULT_LIVE_IDLE_MINUTES
 
 
+LIVE_MAX_CHOICES = range(2, 11)  # Settings > Helper > Helpers at once: No limit, or 2 to 10
+
+
+def live_max(root: Path | None) -> int | None:
+    """[workspace] live_max: how many helpers may work at once in this workspace. None (the default, also 0 or
+    any value outside 2..10) is no limit; a number makes the next start wait in line until one closes."""
+    if root is None:
+        return None
+    try:
+        v = (read(root).get("workspace") or {}).get("live_max")
+    except Refused:
+        return None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v in LIVE_MAX_CHOICES else None
+
+
 DEFAULT_FOCUS_LIVE_SESSION = True
 DEFAULT_FOCUS_SESSION_TYPING = False
 DEFAULT_RECORD_KEEP_DAYS = 90
@@ -628,6 +643,18 @@ def set_live_idle_minutes(root: Path, value: str) -> int:
         raise Refused("Give a whole number of minutes, from 1 to 10080 (one week).")
     set_key(root, "workspace", "live_idle_minutes", int(value))
     return int(value)
+
+
+def set_live_max(root: Path, value: str) -> int | None:
+    """`none` (also off, 0) = no limit; 2 to 10 = that many helpers at once."""
+    v = value.strip().lower()
+    if v in ("none", "off", "0", "no limit", "unlimited"):
+        set_key(root, "workspace", "live_max", None)  # no limit is the default: no line in the file
+        return None
+    if not v.isdigit() or int(v) not in LIVE_MAX_CHOICES:
+        raise Refused("Give none (no limit) or a number from 2 to 10.")
+    set_key(root, "workspace", "live_max", int(v))
+    return int(v)
 
 
 CODE_RE = re.compile(r"^[A-Z0-9]{2,4}$")

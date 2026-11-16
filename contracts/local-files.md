@@ -106,6 +106,7 @@ People read a short key, e.g. `DM1-12`; the id (`t_…`) stays the identity ever
 agent = "my-agent"          # who does the work here: a built-in adapter (agents.json) or an [agents.<name>] entry
 code = "MEC"                # ticket keys MEC-1, MEC-2, … (Ticket keys, above)
 live_idle_minutes = 60      # default 60: a live session idle this long, or on a ticket Done this long, is closed (Continue resumes)
+live_max = 4                # default: no line = no limit; 2 to 10 = that many helpers at once, the next waits in line (Settings > Helper)
 
 [agents.my-agent]
 adapter = "generic"         # whose rules apply (agent-adapter.schema.json)

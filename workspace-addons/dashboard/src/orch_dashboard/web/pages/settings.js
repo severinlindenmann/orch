@@ -56,6 +56,20 @@ function permissionsCard(settings) {
       current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
 }
 // Share with team: off by default; on writes one short entry into the team's AGENTS.md (the orch files stay local).
+// Helpers at once (ORCH-16): no limit by default; a number makes the next helper wait in line until one is
+// finished. Saved on change, like the copies cap (a select, no typed words).
+const LIVE_MAX_CHOICES = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+function helpersAtOnceCard(settings) {
+  const n = LIVE_MAX_CHOICES.includes(settings.live_max) ? settings.live_max : null;
+  const pick = h('select', {className:'input copies-max', 'aria-label':'Helpers at once', 'data-key':'settings-live-max', disabled:snapshot || settingsBusy.has('live')},
+    h('option', {value:'none'}, 'No limit'), LIVE_MAX_CHOICES.map(v => h('option', {value:String(v)}, String(v))));
+  pick.value = n ? String(n) : 'none';
+  return h('div', {className:'stack', 'data-key':'settings-live'}, h('div', {className:'card'}, h('div', {className:'card-row'},
+    h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers at once'),
+      settingsText('p', {}, n ? 'When ' + n + ' helpers are working, the next one waits in line and starts when one is finished.' : 'Any number of helpers can work at the same time.'),
+      settingsText('p', {className:'meta'}, 'Pick a number if your computer gets slow with many helpers.')),
+    pick)));
+}
 function shareCard(settings) {
   const on = settings.share === true;
   return h('div', {className:'stack', 'data-key':'settings-share'},
@@ -595,7 +609,7 @@ function settingsPage() {
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
-      permissionsCard(settings)]),
+      permissionsCard(settings), helpersAtOnceCard(settings)]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
     panel('addons', addonsPanel),
     panel('about', aboutPanel())))
