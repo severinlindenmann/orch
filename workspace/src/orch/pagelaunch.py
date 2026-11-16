@@ -55,7 +55,7 @@ def is_test_workspace(root: Path) -> bool:
 
 
 def printable_launch_url(root: Path, server: str, base_url: str) -> str:
-    """TEST-ONLY exception to "the launch token is never printed" (human-proof.md): `orch start --no-open
+    """TEST-ONLY exception to "the launch token is never printed": `orch start --no-open
     --print-launch-url`, on a test install and a test workspace only, so the Playwright lane can open a page
     session. Refused everywhere else."""
     if not is_test_workspace(root):
