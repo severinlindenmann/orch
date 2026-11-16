@@ -2137,13 +2137,48 @@ def test_view_names_the_real_sender_of_phone_messages(proj, run, rel):
             "to": "phones",
             "type": "text",
             "created_at": "2026-11-04T10:00:00Z",
-            "body": {"text": "Tasks: 3 of 3 done"},
+            "body": {"text": "All three tasks are done"},
         },
     )
     v = json.loads(run("relay", "view", "--json")[1])
     titles = {i["title"] for i in v["blocks"][0]["items"]}
     assert "Helper → your phone" in titles
     assert not any("the phones" in t or t.startswith("you →") for t in titles)
+
+
+def test_view_folds_automatic_updates_behind_one_row(proj, run, rel):
+    """F30/F27: people's messages stay in the list; status notes sit behind "Show updates (n)"; a bare
+    "Tasks:" is said in words."""
+    from orch import relay_view
+
+    connect(run, rel)
+    for i, (text, upd) in enumerate(
+        [
+            ("Lunch at noon?", None),
+            ("Tasks: 1 of 3 done", {"kind": "note"}),
+            ("Tasks:", {"kind": "note"}),
+            ("Seen", None),
+        ]
+    ):
+        body = {"text": text} | ({"update": upd} if upd else {})
+        relay_view.record_sent(
+            proj,
+            {
+                "id": f"m_fold00000000{i}",
+                "to": "phones",
+                "type": "text",
+                "created_at": f"2026-11-04T10:0{i}:00Z",
+                "body": body,
+            },
+        )
+    items = json.loads(run("relay", "view", "--json")[1])["blocks"][0]["items"]
+    assert [i["title"] for i in items[:1]] == ["Helper → your phone"] and "Lunch at noon?" in items[0][
+        "subtitle"
+    ]
+    assert len(items) == 2 and items[1]["title"] == "Show updates (3)"
+    values = " ".join(d["value"] for d in items[1]["detail"])
+    assert "No tasks yet" in values and "1 of 3 done" in values
+    assert not any(d["value"].rstrip().endswith("Tasks:") for d in items[1]["detail"])
 
 
 def _dry_state(proj):
