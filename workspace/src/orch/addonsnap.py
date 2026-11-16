@@ -1,4 +1,4 @@
-"""Snapshots of folder add-ons (human-proof.md, `addon.add_local`): what a person allows is the folder's
+"""Snapshots of folder add-ons (`addon.add_local`): what a person allows is the folder's
 CONTENT at the moment of the request, not its path. The folder is copied into a private folder of the guarded
 orch home (<guarded home>/keys/<ws>/addon-snapshots/<tree hash>/), the proof binds to the tree hash, and the
 install and every later reinstall use the snapshot, after checking its hash again."""

@@ -1,5 +1,4 @@
-"""Who a ticket's person fields show as: ONE rule for every reader (contracts/history.md, human-proof.md
-"What a machine shows as the person").
+"""Who a ticket's person fields show as: ONE rule for every reader (contracts/history.md).
 
 A ticket can hold person attribution in several fields: history[].by, checklist[].evidence[].by,
 checklist[].by and wont_by, questions[].answered_by, refs[].by, plan.by and
