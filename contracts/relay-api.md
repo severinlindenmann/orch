@@ -279,7 +279,7 @@ stored it; until then it sits in the phone's Outbox and may be changed there (M4
 
 *Workspace rules* (vectors/review-card-v1.json `workspace`, review-question-v1.json `verdict_cases`). It acts on a verdict only
 as for every phone answer (human-proof.md "Phone actions"): fetched itself, `from` a phone of its `phones` list, not
-group-routed (`body.group`), `reply_to` a question it sent (its MAC'd asked record), never from a subscriber or a workspace;
+group-routed (`body.group`), `reply_to` a question it sent (its asked record), never from a subscriber or a workspace;
 otherwise nothing at all (no result). Ticket, question and card come only from its own record and ticket, never from the answer.
 Then, in this order:
 1. Already answered on the workspace (the computer first), a review question no longer in Review or not the current round →
@@ -361,10 +361,10 @@ WHATWG-compatible URL parser: it shows the host of THAT parse, and opens the par
 string) in the system browser; a string that does not parse, or parses to another scheme, is not offered. Card text is plain text, never markup.
 
 **RULE A (old messages stay byte-identical).** A question without `digest`, `card` and `card_files`, an answer without
-`verdict`, and their asked records are exactly as before: same bytes, same MACs, same digests (`tickets.question_digest` adds
-`card`/`shown` only when present). The workspace's signed asked record (`relay._asked_signed_fields`) gets `review_digest` (the
-`check_digest` a review question was sent with) appended as a 12th element **only when the record has it**; records without it
-sign the same 11 elements as today. A card question needs no new field: its `question_digest` already binds the card.
+`verdict`, and their asked records are exactly as before: same bytes, same digests (`tickets.question_digest` adds
+`card`/`shown` only when present). The workspace's asked record keeps `review_digest` (the `check_digest` a review question
+was sent with) **only when the record has it**. A card question needs no new field: its `question_digest` already binds the
+card. Asked records carry no MAC; an old record that still has a `question_mac` field loads and the field is ignored.
 
 Push for a new question (APNs): `{"aps": {"alert": {"title": "<workspace name>", "body": "<question text, max 120 chars>"}, "sound": "default"}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
 Push for a new text to a phone (`ph_…` or `phones`): same `aps`, plus `"type": "text", "text_id": "m_…", "workspace": "ws_…"` (no `message_id`); tapping opens the messages with that workspace.

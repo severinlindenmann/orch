@@ -243,3 +243,10 @@ def kill_group(p: subprocess.Popen) -> None:
 
 def strip_ansi(s: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", s)
+
+
+def tool_python(bin_dir: Path) -> str:
+    shim = (bin_dir / "orch").resolve()
+    first = shim.read_text(errors="replace").splitlines()[0]
+    check(first.startswith("#!"), f"orch shim has no shebang: {first[:80]!r}")
+    return first[2:].strip().split()[0]

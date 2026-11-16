@@ -17,7 +17,7 @@ from lib import Fail, Skip, check, scenario
 def snapshot(d: Path) -> dict:
     out = {}
     for p in sorted(d.rglob("*")):
-        if ".git" in p.parts:
+        if ".git" in p.parts or "diag" in p.relative_to(d).parts[:2]:  # .orch/diag is the debug log: it grows with every command
             continue
         if p.is_symlink():
             out[str(p.relative_to(d))] = "link:" + os.readlink(p)
@@ -128,15 +128,15 @@ def w4(e):
     d = json.loads(p.read_text())
     d["checklist"][0]["done"] = True  # hand-edited: checked, no evidence
     p.write_text(json.dumps(d))
-    rc, _, err = e.orch(ws, "ticket", "status", t, "done", ok=False, by="agent:e2e")
+    rc, _, err = e.orch(ws, "ticket", "status", t, "done", ok=False)
     check(rc == 2 and "evidence" in err.lower(), f"expected refusal, got rc={rc} {err!r}")
     d["checklist"][0]["evidence"] = [{"type": "note", "ref": "checked by hand"}]
     p.write_text(json.dumps(d))
-    e.orch(ws, "ticket", "status", t, "done", by="agent:e2e")
+    e.orch(ws, "ticket", "status", t, "done")
     # an UNCHECKED item blocks done too; a dropped ticket is not affected
     t2 = e.orchj(ws, "ticket", "new", "W4 unchecked")["id"]
     e.orch(ws, "check", "add", t2, "never done")
-    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False, by="agent:e2e")
+    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False)
     check(rc == 2 and "not checked" in err.lower(), f"unchecked item must refuse done, got rc={rc} {err!r}")
     e.orch(ws, "ticket", "status", t2, "dropped")
     return "refusal ok (checked without evidence, and unchecked)"
@@ -151,9 +151,9 @@ def w5(e):
     d = tload(ws, t)
     check(d["status"] == "waiting" and d["waiting_on"] == {"kind": "question", "ref": "q1"}, f"not waiting: {d['status']}")
     # an option matches case-insensitively and is stored in its own spelling; other text is a free answer (#21)
-    e.orch(ws, "answer", t, "q1", "BLUE", by="human:sev")
+    e.person(ws, "answer", t, "q1", "BLUE")
     q = tload(ws, t)["questions"][0]
-    check(q["answer"] == "blue" and q["answered_by"] == "human:sev" and q["via"] == "cli", f"answer fields {q}")
+    check(q["answer"] == "blue" and q["answered_by"].startswith("human:") and q["via"] == "cli", f"answer fields {q}")
     check(tload(ws, t)["status"] == "active", "ticket did not resume")
 
 
@@ -205,19 +205,28 @@ def w7(e):
     t = e.orchj(home, "ticket", "new", "W7 home")["id"]
     e.orch(home, "check", "add", t, "x")
     e.orch(home, "check", "done", t, "c1", "--evidence", EVID)
-    e.orch(home, "ticket", "status", t, "done")
-    check(tload(home, t)["status"] == "done", "Home flow failed")
     rep = e.ws("Reports")
     t2 = e.orchj(rep, "ticket", "new", "W7 reports")["id"]
+    # tickets are personal by default (9 Nov): they stay out of the team repo and `git status` stays clean
+    check(e.sh(["git", "status", "--porcelain"], cwd=rep)[1].strip() == "", "orch left files in `git status`")
+    (rep / "README.md").write_text("team file\n")
     e.sh(["git", "add", "-A"], cwd=rep, check_rc=True)
-    e.sh(["git", "commit", "-qm", "ticket"], cwd=rep, check_rc=True)
+    e.sh(["git", "commit", "-qm", "team file"], cwd=rep, check_rc=True)
     e.sh(["git", "push", "-q", "origin", "main"], cwd=rep, check_rc=True)
     clone = e.tmp / "reports-clone"
     e.sh(["git", "clone", "-q", str(e.tmp / "reports-remote.git"), str(clone)], check_rc=True)
+    check(not (clone / ".orch").exists(), "a personal orch file reached the team remote")
+    # a team that wants shared tickets opts in with git itself: the ticket file travels like any file
+    e.sh(["git", "add", "-f", f".orch/tickets/{t2}.json"], cwd=rep, check_rc=True)
+    e.sh(["git", "commit", "-qm", "ticket"], cwd=rep, check_rc=True)
+    e.sh(["git", "push", "-q", "origin", "main"], cwd=rep, check_rc=True)
+    e.sh(["git", "pull", "-q", "origin", "main"], cwd=clone, check_rc=True)
     got = json.loads((clone / ".orch/tickets" / f"{t2}.json").read_text())
     check(got["title"] == "W7 reports", "ticket not in the remote")
-    st = e.sh(["git", "status", "--porcelain"], cwd=rep)[1]
+    st = e.sh(["git", "ls-files"], cwd=rep)[1]
     check(".orch/secrets" not in st, "secrets would be committed")
+    e.person(home, "ticket", "status", t, "done")
+    check(tload(home, t)["status"] == "done", "Home flow failed")
     return "codex exec part not run (agent)"
 
 
@@ -313,6 +322,7 @@ def a4(e):
         started = _wait(lambda: "start" in log.read_text(), 40)
         check(started, "agent was not started within 40 s")
         _wait(lambda: "end" in log.read_text(), 15)
+        _wait(lambda: not tload(ws, t).get("waiting_on"), 40)  # the automation reaps the finished run a moment later
         d = tload(ws, t)
         check(not d.get("waiting_on"), f"waiting_on not cleared: {d.get('waiting_on')}")
         check(any("Automation started an agent run" in h["text"] for h in d["history"]), "no automation history entry")
@@ -339,7 +349,12 @@ def a5(e):
     rc, out, err = _sched(e, ws, "start")
     check(rc == 0, f"automation start: {err or out}")
     try:
-        ok = _wait(lambda: log.read_text().count("start") >= 2 and log.read_text().count("end") >= 2, 170, 2)
+        def finished():  # the prompt spans lines and may hold the words: count only the fake agent's own lines
+            ls = log.read_text().split("\n")
+            return (sum(1 for l in ls if l.startswith("start ")) >= 2
+                    and sum(1 for l in ls if l.startswith("end ") and l[4:].isdigit()) >= 2)
+
+        ok = _wait(finished, 170, 2)
         check(ok, f"fewer than 2 finished runs in 170 s: {log.read_text()!r}")
         time.sleep(5)  # let the automation reap the finished runs (log footer)
     finally:
@@ -351,7 +366,7 @@ def a5(e):
     kinds = [l.split()[0] for l in lines if l.startswith("start ") or (l.startswith("end ") and l[4:].isdigit())]  # the prompt spans lines
     check(all(kinds[i] != kinds[i + 1] for i in range(len(kinds) - 1)), f"runs overlapped: {kinds}")
     logs = sorted((ws / ".orch/run/logs").glob(f"{t}-*.log"))
-    ends = [l for l in lines if l.startswith("end ")]  # the fake agent writes one end line per finished run
+    ends = [l for l in lines if l.startswith("end ") and l[4:].isdigit()]  # the fake agent writes one end line per finished run
     check(len(logs) >= 2 and len(ends) >= 2, f"run logs missing or unfinished: {len(logs)} logs, {len(ends)} ends")
     st = json.loads((ws / ".orch/addons/automation/state.json").read_text())
     check(st[t].get("next_run"), "state.json has no next_run")

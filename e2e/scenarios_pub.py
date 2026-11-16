@@ -98,6 +98,9 @@ def app_get(e, name: str, token: str | None, path="/", retries=20) -> lib.Resp:
         r = http("GET", f"{base}/?token={token}")
         if r.status == 302 and r.headers.get("set-cookie"):
             h["Cookie"] = r.headers["set-cookie"].split(";")[0]
+        if r.status == 302 and r.headers.get("location", "").startswith(f"/a/{name}/~"):
+            # a private app now hands out a capability path (/a/<name>/~<cap>/): the page loads under it without a cookie
+            base = e.pub.url + r.headers["location"].split("?")[0].rstrip("/")
     for _ in range(retries):
         r = http("GET", base + path, h)
         if r.status not in (502, 503):

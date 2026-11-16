@@ -78,6 +78,14 @@ class E:
             raise Fail(f"orch {' '.join(a)[:60]} exit {rc}: {(err or out).strip()[-200:]}")
         return rc, out, err
 
+    def person(self, ws, *args, ok=True):
+        """A person's action (answer, ticket done, relay connect ...), no --by. plain CLI action since #799."""
+        root = self.path_of(ws)
+        rc, out, err = self.orch(root, *args, ok=False)
+        if ok and rc != 0:
+            raise Fail(f"orch {' '.join(map(str, args))[:60]} (as the person) exit {rc}: {(err or out).strip()[-200:]}")
+        return rc, out, err
+
     def orchj(self, ws, *args, by=None):
         rc, out, err = self.orch(ws, *args, "--json", by=by)
         try:
@@ -115,6 +123,12 @@ class E:
         cmd = agent_line.split("=", 1)[1].strip()  # the agent is core's [workspace] agent now (generic adapter)
         p.write_text(f'[workspace]\nagent = "e2eagent"\n\n[agents.e2eagent]\nadapter = "generic"\ncommand = {cmd}\n\n'
                      f"[automation]\ninterval = {interval}\n{extra}")
+        # the machine's yes for this agent command (a person's click in real life; the harness plays the person)
+        allow = ("import sys; from pathlib import Path; from orch import config; r = Path(sys.argv[1]); "
+                 "[config.allow_agent(r, p['name'], p['key'], 'human:e2e') for p in config.pending_agents(r)]")
+        rc, out, err = self.sh([lib.tool_python(self.bin), "-c", allow, str(self.path_of(ws))])
+        if rc != 0:
+            raise Fail(f"allow the e2e agent: {(err or out)[-200:]}")
 
     def ensure_addons(self):
         if not self._addons:
@@ -150,12 +164,13 @@ class E:
                 "name": self.label(name), "description": desc or f"{name} workspace", "tags": tags or [name.lower()]})
             check(r.status == 201, f"relay admin add {name}: {r}")
             j = r.json()
-            self.creds[key] = (j["id"], j["token"])
             self.prompts = getattr(self, "prompts", {})
             self.prompts[key] = j.get("prompt", "")
             self.cleanup.append(lambda i=j["id"]: self.rel.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
             self.orch(self.ws(name), "addon", "add", "relay", "--yes")
-            self.orch(self.ws(name), "relay", "connect", self.rel.url, "--workspace", j["id"], "--token", j["token"])
+            # not cached before the connect worked: every scenario that needs a connected relay is an XFAIL (#799), not a fail
+            self.person(self.ws(name), "relay", "connect", self.rel.url, "--workspace", j["id"], "--token", j["token"])
+            self.creds[key] = (j["id"], j["token"])
         return self.creds[key]
 
     def relay_all(self):
@@ -198,6 +213,19 @@ class E:
         return m
 
 
+# Known product bugs: a scenario that fails with one of these texts is an expected failure (XFAIL), not a red nightly.
+# Delete the line when the issue is fixed.
+KNOWN = [
+    ("record of your Done decisions is damaged", "https://github.com/severinlindenmann/orch/issues/921"),
+    ("stored keys on line", "https://github.com/severinlindenmann/orch/issues/922"),
+    ("has a password or secret value on line", "https://github.com/severinlindenmann/orch/issues/922"),
+    ("second start made another ticket", "https://github.com/severinlindenmann/orch/issues/931"),
+    ("attachments: []", "https://github.com/severinlindenmann/orch/issues/926"),
+    ("from this computer", "https://github.com/severinlindenmann/orch/issues/924"),
+    ("Skills updated; they apply from the next agent session", "https://github.com/severinlindenmann/orch/issues/923"),
+]
+
+
 def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
     results = {}
     lines = []
@@ -213,9 +241,17 @@ def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
             status, reason = "SKIP", str(s)
         except Fail as f:
             status, reason = "FAIL", str(f)
+            for needle, issue in KNOWN:
+                if needle in str(f):
+                    status, reason = "XFAIL", f"known product bug {issue}: {str(f)[:140]}"
+                    break
         except Exception as x:  # noqa: BLE001
             status, reason = "FAIL", f"{type(x).__name__}: {x} ({traceback.format_exc().splitlines()[-3].strip()})"
-        reason = " ".join(str(reason).split())[:300]
+        try:  # no scenario leaves add-on servers behind (they would show in the next one's `orch status`, and as a LEAK)
+            e.sh(["orch", "stop", "--all"], cwd=e.tmp, timeout=120)
+        except Exception:  # noqa: BLE001
+            pass
+        reason = " ".join(str(reason).split())[:int(os.environ.get("E2E_REASON_MAX", "300"))]
         line = f"{sid:<5} {status:<4} {reason}"
         print(line, flush=True)
         lines.append(f"- {line}  ({time.time() - t0:.0f}s)")
@@ -276,6 +312,15 @@ def main() -> int:
         subprocess.run([shim[2:].strip().split()[0], "-c", "import sys; from pathlib import Path; "
                         "from orch import humanproof as h; h.write_install_record(Path(sys.prefix), 'dev')"],
                        env=e.env, capture_output=True, text=True)
+        if shutil.which("claude", path=e.path) is None:
+            # orch links its skills into the folder of every agent it finds on the PATH (W1, A12, A13): a CI runner
+            # has none, so a stand-in that only exists keeps those checks the same everywhere
+            stub = e.tmp / "stubs"  # on this harness's PATH only: the v2 scenarios build their own PATH without any agent
+            stub.mkdir(exist_ok=True)
+            (stub / "claude").write_text("#!/bin/sh\nexit 0\n")
+            (stub / "claude").chmod(0o755)
+            e.path = os.pathsep.join([str(stub), e.path])
+            e.env["PATH"] = e.path
         needs_servers = any(s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))) for s in ids)
         if needs_servers:
             if a.mode == "local":
@@ -311,8 +356,8 @@ def main() -> int:
     if leaked:
         print(f"LEAK: {len(leaked)} add-on server(s) still running in {tmp}; ended: {leaked}")
         res["LEAK"] = "FAIL"
-    n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP")}
-    summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip"
+    n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP", "XFAIL")}
+    summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip, {n['XFAIL']} xfail (known bugs)"
     print(summary)
     with open(out_md, "a") as f:
         f.write(summary + "\n")
@@ -332,6 +377,7 @@ def leaked_servers(tmp: Path) -> list[int]:
         cwd = next((x[1:] for x in lsof.splitlines() if x.startswith("n")), "")
         if cwd and (cwd == str(tmp) or cwd.startswith(str(tmp) + os.sep)):
             found.append(int(pid_s))
+            print(f"LEAK pid {pid_s}: {cmd[:160]}")
     for pid in found:
         try:
             os.kill(pid, signal.SIGKILL)

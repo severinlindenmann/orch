@@ -14,7 +14,6 @@ OWNER = "workspace/src/orch/history.py"
 ALLOW = {
     # writers: core's append points and the one write path
     ("workspace/src/orch/tickets.py", "add_history"): "THE history-append point",
-    ("workspace/src/orch/tickets.py", "_sign_done"): "signs the line its own op just appended",
     ("workspace/src/orch/chat.py", "copy_history"): "writer: sets the time of the line add_history just made",
     # readers that read no author
     ("workspace/src/orch/tickets.py", "attach"): "writer: is the line already there (its text only)",
