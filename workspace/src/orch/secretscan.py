@@ -92,6 +92,16 @@ def stored_keys_readable(root: Path) -> bool:
     return phone_results.value_hider(root) is not None
 
 
+def find_tokens(text: str) -> list[dict]:
+    """[{kind, line}] of the token patterns only (PATTERNS: private keys, known token shapes, URL passwords),
+    without the label=value, spaced-value and flag rules. For picture data: those rules read chance bytes as a
+    label and a value (#1022); a token shape practically never appears by chance."""
+    found = {
+        (text.count("\n", 0, m.start()) + 1, kind): None for kind, rx in PATTERNS for m in rx.finditer(text)
+    }
+    return [{"kind": k, "line": ln} for (ln, k) in sorted(found)]
+
+
 def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[dict]:
     """[{kind, line}] (line from 1, one entry per kind and line), in text order. Pattern kinds first, then any
     other line the phone view's scrub would change (key=value, spaced values, flag values), then lines that
@@ -228,7 +238,8 @@ def refuse_if_secret(
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
     read in every encoding (_views) with the full find() including the stored-key check. A PNG that holds
     only pixel chunks (phone_view._image_clean: no text chunk, nothing after its end) has no text: its
-    compressed data spells a label and a value by chance (#1022), so only the stored-key check reads it."""
+    compressed data spells a label and a value by chance (#1022), so it gets the token patterns
+    (find_tokens) and the stored-key check, not the label rules."""
     from orch import phone_view
 
     step, overlap = MAX_BYTES, 65536
@@ -239,7 +250,9 @@ def refuse_if_secret(
         for start in range(0, max(len(data), 1), step - overlap):
             for text in _views(data[start : start + step]):
                 if pixels_only:
-                    hits: dict[tuple[int, str], None] = {}
+                    hits: dict[tuple[int, str], None] = {
+                        (f["line"], f["kind"]): None for f in find_tokens(text)
+                    }
                     _stored_keys(text, root, False, hits)
                     found = [{"kind": k, "line": ln} for (ln, k) in sorted(hits)]
                 else:

@@ -371,6 +371,14 @@ def _has_secret(data: bytes) -> bool:
     return any(_scrub_text(t) != t for t in dict.fromkeys(forms))
 
 
+def _has_token(data: bytes) -> bool:
+    """_has_secret for picture data: the token patterns only (secretscan.find_tokens), no label rules."""
+    text = data.decode(errors="ignore")
+    cleaned = _clean_full(text)
+    forms = (text, cleaned, unicodedata.normalize("NFKC", text), unicodedata.normalize("NFKC", cleaned))
+    return any(secretscan.find_tokens(t) for t in dict.fromkeys(forms))
+
+
 def _holds_stored_value(root: Path, data: bytes, texts: list[str]) -> bool:
     """True when the file holds a stored key value of the keystore (the value hider: exact needles in all the
     forms it knows). Read as _scan read it (`texts`: the BOM-decoded text of a UTF-16/32 file, else the UTF-8
@@ -423,10 +431,10 @@ def _scan_texts(data: bytes, name: str) -> tuple[str, list[str]]:
     if _is_image(data, name):
         if not _image_clean(data):  # compressed text chunks or data after the end: can not be checked
             return "unknown", []
-        # only pixel chunks are left: no text to read. Compressed pixel data read as text regularly spells a
-        # label and a value (P, W and `=`), so 15 of 28 plain screenshots were held back (#1022). The
-        # caller's stored-value check still reads the whole file.
-        return "ok", [data.decode(errors="ignore")]
+        # only pixel chunks are left. Compressed pixel data read as text regularly spells a label and a value
+        # (P, W and `=`), so 15 of 28 plain screenshots were held back (#1022): it gets the token patterns
+        # only, in every form _has_secret reads; the caller's stored-value check still reads the whole file.
+        return ("secret" if _has_token(data) else "ok"), [data.decode(errors="ignore")]
     try:
         data.decode("utf-8")
     except UnicodeDecodeError:
@@ -511,10 +519,10 @@ _SPACED_VALUES = (
 # - tokens in URL paths other than Slack, Discord and Telegram webhooks (a token as a path segment);
 # - a stored value in fullwidth/NFKC form, split over table cells, in base32, or as a host whose case
 #   differs (value hider);
-# - text drawn in pixels (a terminal screenshot) and bytes inside image data (IDAT): a PNG with only pixel
-#   chunks is not read as text (its compressed data spells labels by chance, #1022), only the stored-value
-#   check reads it; JPEG, GIF and WebP get no structural walk (_image_clean): they are
-#   "unknown" and not sent, never checked as clean;
+# - text drawn in pixels (a terminal screenshot) and a labelled value inside image data (IDAT, JPEG scan
+#   data): picture data gets only the token patterns and the stored-value check, not the label rules (its
+#   compressed bytes spell labels by chance, #1022); JPEG, GIF and WebP get no structural walk
+#   (_image_clean): they are "unknown" and not sent, never checked as clean;
 # - HTML and SVG artifacts are active content: entities (`&#112;assword=`) or script (atob) can build any
 #   text when the file is shown; the scan sees the source only;
 # - past TEXT_CUT redact shows nothing (the text ends in [hidden]); a file is scanned whole;
@@ -907,16 +915,16 @@ def _jpeg_walk(data: bytes) -> bytes | None:
 def _photo_verdict(data: bytes) -> str:
     """ok / secret / unknown for an evidence JPEG `_scan` could not fully check: it must be structurally plain
     (_jpeg_walk) and neither the bytes nor the UTF-16 readings of everything before its picture data
-    (metadata and tables) may hold a secret. The compressed picture data itself is not read as text: it
-    spells a label and a value by chance (#1022); the caller's stored-value check still reads the whole
-    file. Any other format is unknown (fail closed)."""
+    (metadata and tables) may hold a secret. The compressed picture data gets the token patterns only: the
+    label rules read it as a label and a value by chance (#1022); the caller's stored-value check still
+    reads the whole file. Any other format is unknown (fail closed)."""
     head = _jpeg_walk(data)
     if head is None:
         return "unknown"
     texts = [head]
     for codec in ("utf-16-le", "utf-16-be"):  # both byte orders, both alignments
         texts += [head[k:].decode(codec, "ignore").encode() for k in (0, 1)]
-    return "secret" if any(_has_secret(t) for t in texts) else "ok"
+    return "secret" if any(_has_secret(t) for t in texts) or _has_token(data) else "ok"
 
 
 def _scan(root: Path, tid: str, data: bytes, name: str, state: dict | None, photo_ok: bool = False) -> bool:

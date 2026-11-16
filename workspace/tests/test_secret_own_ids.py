@@ -119,6 +119,15 @@ def test_picture_data_is_not_read_as_text(tmp_path):
     secretscan.refuse_if_secret(pic, "report file screen/page.png", tmp_path)
 
 
+def test_a_token_in_picture_data_is_still_caught(tmp_path):
+    pic = _png(_chunk(b"IDAT", PIXELS + b" " + TOKEN.encode() + b" " + PIXELS))
+    assert phone_view._scan_texts(pic, "shot.png")[0] == "secret"
+    with pytest.raises(Refused, match="GitHub token"):
+        secretscan.refuse_if_secret(pic, "added file shot.png", tmp_path)
+    entropy = (b"\x12 " + TOKEN.encode() + b" \x34") * 2
+    assert phone_view._photo_verdict(_jpeg(APP0, entropy=entropy)) == "secret"
+
+
 def test_text_in_a_picture_is_still_caught(tmp_path):
     text_chunk = _png(_chunk(b"IDAT", PIXELS), _chunk(b"tEXt", b"Comment\x00" + TOKEN.encode()))
     assert phone_view._scan_texts(text_chunk, "shot.png")[0] == "unknown"  # not sent to the phone
