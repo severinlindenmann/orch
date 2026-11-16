@@ -530,6 +530,9 @@ const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false
 const CHAT_DM_POLL = 2000;
 const chatDmId = id => typeof id === 'string' && /^ws_[a-z0-9]{10}$/.test(id);
 const chatDmContact = ws => chatDm.contacts.find(c => c.ws === ws);
+// "Send a message" on Contacts already knows the name: the thread opens with it, before the contacts have loaded.
+const chatDmNames = new Map();
+const chatDmHint = (ws, name) => { if (chatDmId(ws) && typeof name === 'string' && name.trim()) chatDmNames.set(ws, name.trim().slice(0, 80)); };
 // A contact's name for a raw workspace id ("agent:ws_..." as who answered): known contacts first, read once if none is
 // loaded yet (the next render shows the name), else the plain "Another workspace" - never the id.
 let chatDmNamesAsked = false;
@@ -660,7 +663,7 @@ function chatDmSelect(ws) {
   chatFocus('[data-key="chat-title"]');
 }
 function chatDmThread() {
-  const ws = chatUi.open, c = chatDmContact(ws), title = c?.name || 'Workspace', messages = chatDmMessages(ws);
+  const ws = chatUi.open, c = chatDmContact(ws), title = c?.name || chatDmNames.get(ws) || 'Workspace', messages = chatDmMessages(ws);
   const draft = chatUi.drafts[ws] || '';
   return h('div', {className:'chat-main', 'data-key':'dm-' + ws},
     h('header', {className:'chat-thread-head'}, h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}), chatAvatar(c || title),
@@ -669,7 +672,8 @@ function chatDmThread() {
         c?.description ? chatText('p', 'chat-muted chat-head-meta chat-desc', clean(c.description)) : null,
         array(c?.tags).length ? h('p', {className:'chat-member-chips chat-tags'}, array(c.tags).slice(0, 6).map(t => chatText('small', 'chat-member-chip', clean(t)))) : null))),
     chatDm.error ? chatButton('Could not load messages · Try again', 'retry-dm') : null,
-    h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, messages.map(m =>
+    h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, !c && !messages.length && !chatDm.error ?
+      chatText('p', 'chat-muted', chatDm.loaded ? 'This workspace is not in your contacts.' : 'Loading…') : null, messages.map(m =>
       h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
         chatText('div', 'chat-bubble chat-message-text', m.text),
         m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,
