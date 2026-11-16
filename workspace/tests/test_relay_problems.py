@@ -298,3 +298,18 @@ def test_a_refused_send_does_not_block_the_next_report(proj, run, srv):
     f = Path(worse["path"]) / "errors.json"
     f.write_text(json.dumps([{"sample_frames": ["a:b:1"], "why": "password: hunter2-Really-Long-9981"}]))
     assert run("relay", "problem", "share", worse["ref"])[0] == 2
+    # a value that is labelled as a password stays caught even when it is shaped like a code place
+    for text in (
+        '{"why": "password: admin:hunter:1234"}',
+        '[{"sample_frames": ["password=admin:hunter:1234"]}]',
+    ):
+        shaped = make(proj)
+        (Path(shaped["path"]) / "errors.json").write_text(text)
+        assert run("relay", "problem", "share", shaped["ref"])[0] == 2, text
+    md = make(proj)
+    (Path(md["path"]) / "SUMMARY.md").write_text("# x\n- at secretscan:refuse_if_secret:241\n")
+    res = run("relay", "problem", "share", md["ref"])
+    assert res[0] == 0, res
+    (Path(md["path"]) / "SUMMARY.md").write_text("# x\npassword: admin:hunter:1234\n")
+    (Path(md["path"]) / "shared.json").unlink()
+    assert run("relay", "problem", "share", md["ref"])[0] == 2

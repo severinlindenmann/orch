@@ -28,6 +28,7 @@ MAX_UNPACKED = 100 * 1024 * 1024
 SHARED = "shared.json"  # in the report folder: where it was shared (never part of the archive)
 FROM = "from.json"  # in a fetched report folder: who shared it
 STATES = ("new", "taken", "done")
+_PLACE = "code-place"  # stands in for a code place while checking: what it was a value of is still checked
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 # module:function:line as the debug log writes it: two Python names and a line number, standing alone
 _CODE_PLACE = re.compile(r"(?<![\w:./-])[A-Za-z_][\w.]{0,80}:[A-Za-z_<][\w<>.]{0,80}:\d{1,6}(?![\w:./-])")
@@ -64,10 +65,11 @@ def scan(root: Path, folder: Path) -> None:
     read as JSON and every text in them is checked (as for a message: a field that is merely NAMED key,
     like a ticket's key, is not a secret); everything else is checked as a whole file.
 
-    One thing is left out of the check, in the files orch itself wrote (never in the page picture or in a
-    file the person added): a code place `module:function:line` such as `secretscan:refuse_if_secret:241`.
-    The debug log names them in every error, and the check reads "secret:241" as a password; without this,
-    one refused send would make every later report unsendable."""
+    One thing is read differently, in the files orch itself wrote (never in the page picture or in a file
+    the person added): a code place `module:function:line` such as `secretscan:refuse_if_secret:241` is
+    checked as the plain word "code-place". The debug log names code places in every error and the check
+    reads "secret:241" as a password; without this, one refused send would make every later report
+    unsendable. The text around it is checked unchanged, so `password: a:b:1` is still refused."""
     for p in _members(folder):
         rel = p.relative_to(folder).as_posix()
         data = p.read_bytes()
@@ -86,13 +88,13 @@ def scan(root: Path, folder: Path) -> None:
         except ValueError:
             pass  # not what its name says: checked as a plain file
         if wrote and p.suffix == ".md":
-            data = _CODE_PLACE.sub("", data.decode("utf-8", "replace")).encode()
+            data = _CODE_PLACE.sub(_PLACE, data.decode("utf-8", "replace")).encode()
         secretscan.refuse_if_secret(data, f"report file {rel}" if own else f"added file {p.name}", root)
 
 
 def _no_code_places(doc):
     if isinstance(doc, str):
-        return _CODE_PLACE.sub("", doc)
+        return _CODE_PLACE.sub(_PLACE, doc)
     if isinstance(doc, dict):
         return {k: _no_code_places(v) for k, v in doc.items()}
     if isinstance(doc, list):
@@ -177,7 +179,12 @@ def share(root: Path, ref: str) -> dict:
         "orch_version": str(man.get("orch_version") or "")[:40] or None,
         "os": str(man.get("os") or "")[:80] or None,
     }
-    got = relay._api(root, "POST", "/v1/problems", {k: v for k, v in body.items() if v is not None}, 60)[1]
+    body = {k: v for k, v in body.items() if v is not None}
+    # The summary is SUMMARY.md again: checked like the file (scan), the person's own words unchanged.
+    secretscan.refuse_if_secret_in(
+        root, {**body, "summary": _CODE_PLACE.sub(_PLACE, body["summary"])}, "report"
+    )
+    got = net.call_json("POST", cfg["url"] + "/v1/problems", net.auth_headers(cfg), body, 60)[1]
     pid = got.get("id") if isinstance(got, dict) else None
     if not PID.fullmatch(str(pid)):
         raise Refused("The relay did not confirm the report. Try again.")
