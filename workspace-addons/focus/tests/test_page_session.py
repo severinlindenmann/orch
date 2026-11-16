@@ -94,11 +94,45 @@ def test_launch_token_bootstraps_the_cookie_once(live):
     assert post(port, "/session", {"token": "x" * 30})[0] == 403
 
 
-def test_session_refused_through_a_proxy_or_foreign_host(live):
+def test_sign_in_and_click_through_a_proxy_from_another_computer(live, monkeypatch):
+    """Owner rule (16 Nov): the sign-in is the ONLY check, wherever the browser is."""
     root, port = live
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: ran.append(argv) or R())
+    host = "focus.example.org"
+    proxy = {
+        "Host": host,
+        "Origin": f"https://{host}",
+        "X-Forwarded-For": "203.0.113.7",
+        "Forwarded": "for=x",
+    }
     tok = pagelaunch.write_launch_token(root, "focus")
-    assert post(port, "/session", {"token": tok}, {"X-Forwarded-For": "1.2.3.4"})[0] == 403
-    assert post(port, "/session", {"token": tok}, {"Forwarded": "for=1.2.3.4"})[0] == 403
+    st, ck, body = post(port, "/session", {"token": tok}, proxy)
+    assert st == 200, body
+    cookie, secret = ck.split(";")[0], json.loads(body)["secret"]
+    st, _, body = post(port, "/api/act", ANSWER, {**proxy, "Cookie": cookie, "X-Orch-Page": secret})
+    assert st == 200 and ran, body
+
+
+def test_the_dashboard_in_front_vouches_for_the_person(live, monkeypatch):
+    """Behind the dashboard's add-on proxy this page has no sign-in of its own: the dashboard's word (the
+    workspace's private vouch key) counts; a wrong or missing key does not."""
+    root, port = live
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: ran.append(argv) or R())
+    key = pagesession.vouch_key(root, create=True)
+    via = {"X-Forwarded-Prefix": "/addon/focus", "X-Orch-Page": None}
+    assert post(port, "/api/act", ANSWER, {**via, pagesession.VOUCH_HEADER: "z" * 43})[0] == 403
+    assert post(port, "/api/act", ANSWER, via)[0] == 403 and not ran
+    assert post(port, "/api/act", ANSWER, {**via, pagesession.VOUCH_HEADER: key})[0] == 200 and ran
 
 
 def test_click_without_a_session_is_watch_only(live, monkeypatch):
@@ -137,18 +171,6 @@ def test_click_with_session_runs_core_as_the_person_with_no_proof(live, monkeypa
     assert "--proof-stdin" not in seen["argv"] and "x" in seen["argv"]  # a plain person action
     assert "input" not in seen["kw"]  # nothing on stdin
     assert "ORCH_BIN" not in seen["kw"]["env"]
-
-
-def test_click_with_session_but_forwarded_is_refused(live):
-    root, port = live
-    ck = session(root, port)
-    st, _, _ = post(
-        port,
-        "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
-        {"Cookie": ck, "X-Forwarded-Host": "evil"},
-    )
-    assert st == 403
 
 
 def test_orch_bin_from_the_environment_is_ignored():
@@ -246,7 +268,6 @@ def _raw(port, method, path, body=None, headers=None):
         {"Host": "evil.example:{PORT}"},  # DNS rebinding
         {"Host": "127.0.0.1:1"},  # wrong port in Host
         {"Sec-Fetch-Site": "cross-site"},
-        {"X-Forwarded-For": "1.2.3.4"},
     ],
     ids=lambda e: ",".join(f"{k}={v}" for k, v in e.items()),
 )

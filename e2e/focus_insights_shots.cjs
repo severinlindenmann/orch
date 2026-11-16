@@ -80,7 +80,7 @@ const insTab = tab => async p => { await settle(p, 800); await p.click(`#tab-${t
 // Since the Focus redesign the ticket tabs and the task/helper rail only show in Terminal mode; the plain view is the feed.
 const terminal = async p => { await settle(p); await p.click('button[data-act=mode]'); await p.waitForSelector('.fx-tab', { timeout: 20000 }); };
 const SCREENS = [
-  { name: 'start', url: '/', wait: '.fx-ln-card', setup: p => settle(p) }, // strip + Live now + same-file line
+  { name: 'start', url: '/', wait: '.fx-livenow .helper-row', setup: p => settle(p) }, // strip + Helpers list (ORCH-61) + same-file line
   { name: 'start-areas', url: '/', wait: '.fx-areas button', async setup(p) {
     await settle(p);
     await p.click('.fx-areas button');

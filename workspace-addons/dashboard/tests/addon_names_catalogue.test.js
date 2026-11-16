@@ -130,7 +130,7 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
   });
   vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
   const removable = ctx.page({name: 'factory', active: false, description: 'd', removable: true});
-  assert.equal(text(find(removable, byKey('addon-detail-remove'))), 'Remove from this computer');
+  assert.equal(text(find(removable, byKey('addon-detail-remove'))), 'Uninstall');
   const core = ctx.page({name: 'relay', active: false, description: 'd', removable: false});
   assert.equal(find(core, byKey('addon-detail-remove')), null);
   assert.match(text(find(core, byKey('addon-detail-core'))), /Relay is part of orch\. You can turn it off, but not remove it\./);

@@ -11,7 +11,12 @@ $ orch status
 $ orch stop
 ```
 
-`orch status` prints the address (this computer only, usually `http://127.0.0.1:8420`).
+`orch status` prints the address (usually `http://127.0.0.1:8420`).
+
+**From another computer** (a team workspace, a headless server, a proxy in front): run `orch start --print-launch-url`
+in your own terminal. It prints a one-time sign-in link (10 minutes). Open it through your proxy's address, keeping the
+part from `/#launch=` on. After that the browser stays signed in (30 days, also across restarts and updates), and every
+action works there exactly as on the computer orch runs on.
 
 - **Home:** Needs you first (questions, failed runs), then your tickets, then which agents are working.
 - **Ticket page:** tasks with proof, questions, history, owner and due day, and a Continue or Start button for the agent.

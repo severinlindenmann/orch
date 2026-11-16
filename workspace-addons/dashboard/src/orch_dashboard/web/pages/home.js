@@ -228,6 +228,28 @@ function workingRow(t) {
     h('span', {className:'avatar', 'aria-hidden':'true'}, String(who || 'H').slice(0, 1).toUpperCase()),
     h('span', {className:'grow'}, h('strong', {}, clean(t.title)), task ? h('span', {className:'meta'}, clean(task.text || task.title)) : null));
 }
+// Helpers (ORCH-61, owner pick A on ORCH-64): one row per running helper with ORCH-n, step, minutes and the core's
+// state word (Working, Waits for you, Waiting, Idle, Stuck); Nudge on an idle or stuck row, Stop on one whose ticket
+// is finished. The same kit widget (UI.helperList) draws the live list of the other add-on page.
+function helpersCard(rows) {
+  const key = 'helpers';
+  const action = (r, label, run, done) => ({label, key:key + '-' + r.ticket.id + '-' + label.toLowerCase(), run:async () => {
+    const lock = key + '-' + r.ticket.id;
+    if (changeUnavailable() || locks.has(lock)) return;
+    locks.add(lock);
+    try {
+      const result = await run();
+      window.orch.toast(result.ok ? done : changeError(result), result.ok ? 'ok' : 'error');
+    } finally { locks.delete(lock); render(); }
+  }});
+  return window.UI.helperList(rows.map(r => ({
+    key:typeof r.ticket.key === 'string' ? r.ticket.key : '', title:clean(r.ticket.title), href:href(r.ticket.id),
+    state:r.state, word:r.word, meta:window.UI.helperMeta(r), dataKey:key + '-' + r.ticket.id,
+    actions:snapshot || !['idle', 'stuck'].includes(r.state) ? [] : r.finished
+      ? [action(r, 'Stop', () => act('run.stop', {ticket:r.ticket.id}), 'Helper stopped')]
+      : [action(r, 'Nudge', () => nudgeHelper(r.ticket.id, NUDGE), 'Message sent')],
+  })), {dataKey:'helpers'});
+}
 // G2: a Working ticket with no news for 6 h is one quiet line ("No news since 09:20: title"), never a need.
 function quietRow(t) {
   return h('a', {className:'card-row working-row quiet-row', href:href(t.id), 'data-key':'quiet-' + t.id},
@@ -459,6 +481,7 @@ function lastFinished(all) {
 function home() {
   const {needs, notices, failed, groups:groupedNeeds, review, changes, count:needCount} = needsToday(), all = tickets();
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
+  const helpers = window.DashHelpers.helperRows(all, state.runs);
   const quiet = working.filter(t => t.quiet_since);
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
@@ -472,7 +495,7 @@ function home() {
   const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
   const notes = notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : [];
-  if (!anyNeeds && !working.length) {
+  if (!anyNeeds && !working.length && !helpers.length) {
     return fragment(head, banner, h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
       h('p', {}, 'Questions and results to check will appear here.'), typeof newButton === 'function' ? newButton() : null),
       notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
@@ -488,7 +511,7 @@ function home() {
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
       anyNeeds ? attentionCard('needs-you', needCount ? 'Needs you · ' + needCount : 'Needs you', 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', [clearOldButton(), reviewAllButton()]) : null),
     h('aside', {className:'stack', 'data-key':'right'},
-      working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
+      helpers.length && window.UI?.helperList ? helpersCard(helpers) : snapshot && working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
       quiet.length ? card('quiet-now', 'No news', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
       card('finished-today', 'Finished', '', finishedBody))),
     changedCard);

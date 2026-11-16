@@ -210,7 +210,7 @@
     const schedule = () => { if (!timer) timer = setTimeout(() => { timer = null; chain = chain.then(flush, flush); }, 25); };
     async function flush() {
       const all = merge(queue.splice(0, queue.length));
-      let secret = ''; try { secret = sessionStorage.getItem('orch_page_secret') || ''; } catch (e) { /* none */ }
+      let secret = ''; try { secret = localStorage.getItem('orch_page_secret') || sessionStorage.getItem('orch_page_secret') || ''; } catch (e) { /* none */ }
       while (all.length) {
         const items = []; let size = 0;
         while (all.length && items.length < 40 && size + (all[0].t || '').length <= 12000) { size += (all[0].t || '').length; items.push(all.shift()); }
@@ -220,7 +220,7 @@
           if (r.status === 403) {
             const text = (await r.text()).slice(0, 200);
             if (/is off/.test(text)) typingAllowed = false; else canType = false;
-            setTyping(false); show(status); S.toast(text || 'Open the dashboard from this computer to type here.', 'error'); return;
+            setTyping(false); show(status); S.toast(text || 'Sign in to type here: open the dashboard with a sign-in link from orch.', 'error'); return;
           }
           if (r.status === 409) { S.toast('The helper’s screen has closed; those keys were not sent.', 'error'); return; }
           if (!r.ok) { S.toast((await r.text()).slice(0, 120) || 'The screen did not take that. Try again.', 'error'); return; }

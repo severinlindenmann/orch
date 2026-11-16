@@ -98,11 +98,55 @@ def test_launch_token_bootstraps_the_cookie_once(live):
     assert post(port, "/session", {"token": "x" * 30})[0] == 403
 
 
-def test_session_refused_through_a_proxy_or_foreign_host(live):
+REMOTE = "dash.example.org:8791"  # a proxy in front, reached from another computer
+
+
+def remote(cookie=None, **extra):
+    """The headers a browser on another computer sends through a proxy that keeps the host name."""
+    h = {
+        "Host": REMOTE,
+        "Origin": f"https://{REMOTE}",
+        "X-Forwarded-For": "203.0.113.7",
+        "X-Forwarded-Proto": "https",
+        "X-Forwarded-Host": REMOTE,
+        "Forwarded": "for=203.0.113.7;proto=https",
+        **extra,
+    }
+    if cookie:
+        h["Cookie"] = cookie
+    return h
+
+
+def test_sign_in_and_every_click_work_through_a_proxy_from_another_computer(live, monkeypatch):
+    """Owner rule (16 Nov): the sign-in is the ONLY check. Through a proxy, under a host name that is not this
+    computer's, with proxy headers: the sign-in works, a person's click runs, reads work."""
     root, port = live
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: ran.append(argv) or R())
     tok = pagelaunch.write_launch_token(root, "dashboard")
-    assert post(port, "/session", {"token": tok}, {"X-Forwarded-For": "1.2.3.4"})[0] == 403
-    assert post(port, "/session", {"token": tok}, {"Forwarded": "for=1.2.3.4"})[0] == 403
+    st, ck, body = post(port, "/session", {"token": tok}, remote())
+    assert st == 200, body
+    cookie = ck.split(";")[0]
+    secret = json.loads(body)["secret"]
+    st, _, body = post(
+        port, "/api/act", {"op": "answer", "args": ANS}, remote(cookie, **{"X-Orch-Page": secret})
+    )
+    assert st == 200 and ran, body
+    st, _, body = post(
+        port, "/api/act", {"op": "answer", "args": ANS}, remote(cookie, **{"X-Orch-Page": None})
+    )
+    assert st == 403 and body.decode().startswith("Sign in to ")  # the cookie alone is still no session
+    # reads under the proxy's host name: with the cookie yes, without it only the page shell (no data)
+    get = lambda path, h: _raw(port, "GET", path, None, h)[0]
+    assert get("/api/state", {"Host": REMOTE, "Cookie": cookie, "Sec-Fetch-Site": "same-origin"}) == 200
+    assert get("/api/state", {"Host": REMOTE}) == 421
+    assert get("/", {"Host": REMOTE}) == 200
+    assert get("/session.js", {"Host": REMOTE}) == 200
+    assert get("/api/state", {"Host": "evil example"}) == 421
 
 
 def test_click_without_a_session_is_watch_only(live, monkeypatch):
@@ -197,16 +241,56 @@ def test_two_loopback_servers_keep_independent_sessions(live, monkeypatch):
         srv2.server_close()
 
 
-def test_click_with_session_but_forwarded_is_refused(live):
+def test_two_people_signed_in_through_the_proxy_both_keep_working_across_a_restart(live, monkeypatch):
+    """The live case of 16 Nov (ORCH-59/ORCH-39): the owner's browser and a second browser (the manager's tool,
+    another device) sign in through the same proxy, the second one many times. Every sign-in hands out the SAME
+    session, so none ends the other; a restart of the server (an update) keeps it, so no tab is told "orch
+    restarted" and nobody has to sign in again. Only a sign-in link used twice ends the session."""
     root, port = live
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: ran.append(argv) or R())
+
+    def sign_in():
+        tok = pagelaunch.write_launch_token(root, "dashboard")
+        st, ck, body = post(port, "/session", {"token": tok}, remote())
+        assert st == 200, body
+        return remote(ck.split(";")[0], **{"X-Orch-Page": json.loads(body)["secret"]})
+
+    owner = sign_in()
+    others = [sign_in() for _ in range(5)]  # the second browser signs in again and again
+    for who in (owner, *others):
+        st, _, body = post(port, "/api/act", {"op": "answer", "args": ANS}, who)
+        assert st == 200, body
+    old = SERVERS[port]
+    old.shutdown()
+    old.server_close()
+    new = _restart(port, root)  # e.g. `orch update` from a terminal: nobody clicked, nothing was handed over
+    try:
+        for who in (owner, others[-1]):
+            st, _, body = post(port, "/api/act", {"op": "answer", "args": ANS}, who)
+            assert st == 200 and b"restarted" not in body, body
+    finally:
+        new.shutdown()
+        new.server_close()
+
+
+def test_click_with_session_and_proxy_headers_acts(live, monkeypatch):
+    root, port = live
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: ran.append(argv) or R())
     ck = session(root, port)
     st, _, _ = post(
-        port,
-        "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
-        {"Cookie": ck, "X-Forwarded-Host": "evil"},
+        port, "/api/act", {"op": "answer", "args": ANS}, {"Cookie": ck, "X-Forwarded-Host": "proxy"}
     )
-    assert st == 403
+    assert st == 200 and ran
 
 
 def test_orch_bin_from_the_environment_is_ignored():
@@ -401,6 +485,35 @@ def test_every_person_op_is_refused_without_a_session_and_starts_no_child(live, 
     assert calls == []  # nothing was run for any of them
 
 
+def test_every_person_op_runs_after_sign_in_through_a_proxy_from_another_computer(live, monkeypatch):
+    """Owner rule (16 Nov): after the sign-in, NO action is limited to the computer orch runs on. Every person
+    op of the table, sent through a proxy (a host name that is not this computer's, proxy headers), passes the
+    check: none is refused for the session or for where the browser is."""
+    import subprocess
+
+    from orch_dashboard import actions as acts
+    from orch_dashboard import data as dash_data
+
+    root, port = live
+
+    class R:
+        returncode, stdout, stderr, pid = 0, "{}", "", 4242
+
+        def wait(self, *a, **k):
+            return 0
+
+    monkeypatch.setattr(acts, "_run", lambda *a, **k: R())
+    monkeypatch.setattr(dash_data, "_run", lambda *a, **k: R())
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: R())
+    tok = pagelaunch.write_launch_token(root, "dashboard")
+    st, ck, body = post(port, "/session", {"token": tok}, remote())
+    assert st == 200, body
+    person = remote(ck.split(";")[0], **{"X-Orch-Page": json.loads(body)["secret"]})
+    for op, args in ACT_ARGS.items():
+        st, _, body = post(port, "/api/act", {"op": op, "args": args}, person)
+        assert st != 403 and not body.decode(errors="replace").startswith("Sign in to "), (op, st, body)
+
+
 def test_the_free_ops_stay_free(live):
     from orch_dashboard import actions as acts
 
@@ -524,10 +637,7 @@ def _raw(port, method, path, body=None, headers=None):
         {"Origin": "null"},
         {"Origin": None, "Sec-Fetch-Site": "cross-site"},
         {"Origin": None},  # a non-GET without Origin
-        {"Host": "evil.example:{PORT}"},  # DNS rebinding
-        {"Host": "127.0.0.1:1"},  # wrong port in Host
         {"Sec-Fetch-Site": "cross-site"},
-        {"X-Forwarded-For": "1.2.3.4"},
     ],
     ids=lambda e: ",".join(f"{k}={v}" for k, v in e.items()),
 )
@@ -671,26 +781,6 @@ def test_an_addon_change_without_a_session_arms_nothing(live, monkeypatch):
     assert not list(orch_home.key_dir(root).glob("resume-dashboard.cookie"))
 
 
-def test_reload_of_an_unknown_session_opens_a_fresh_sign_in_window(live, monkeypatch):
-    """Reload when the restarted server did not keep the tab's session: the server opens a fresh launch link in
-    the person's browser (like orch start); the token never travels in the answer. Only for a stale session,
-    at most once per 30 s."""
-    root, port = live
-    ck = session(root, port)
-    opened = []
-    monkeypatch.setattr(pagelaunch, "open_browser", lambda url: opened.append(url) or True)
-    st, _, _ = post(port, "/session/reopen", {}, {"Cookie": ck})  # a known session: nothing to do
-    assert st == 403 and opened == []
-    st, _, _ = post(port, "/session/reopen", {}, {"X-Orch-Page": None})  # never signed in: nothing
-    assert st == 403 and opened == []
-    stale = {"Cookie": ck, "X-Orch-Page": "z" * 43}
-    st, _, body = post(port, "/session/reopen", {}, stale)
-    assert st == 202 and b"launch" not in body and b"new window" in body
-    assert len(opened) == 1 and opened[0].startswith(f"http://127.0.0.1:{port}/#launch=")
-    assert post(port, "/session/reopen", {}, stale)[0] == 429 and len(opened) == 1
-    assert post(port, "/session/reopen", {}, {**stale, "Origin": "http://evil.test"})[0] == 403
-
-
 def test_a_busy_port_does_not_spend_the_resume_file(live):
     root, port = live
     assert pagelaunch.write_resume_cookie(root, "dashboard", "c" * 40, "s" * 40)
@@ -706,16 +796,35 @@ def test_a_busy_port_does_not_spend_the_resume_file(live):
         srv.server_close()
 
 
-def test_a_tab_the_restarted_server_does_not_know_is_told_to_reload(live):
+def test_an_unknown_session_is_asked_to_sign_in_never_told_orch_restarted(live):
+    """ORCH-59/ORCH-39: nothing restarted, so no restart notice: a session this server does not know (another
+    browser, an ended sign-in) is asked to sign in, in the same words as a page that never signed in."""
     root, port = live
     ck = session(root, port)
     stale = {"Cookie": ck, "X-Orch-Page": "z" * 43}  # a session this server never issued
     st, _, body = post(port, "/api/act", {"op": "answer", "args": ANS}, stale)
-    assert st == 403 and body.decode() == pagesession.RESTARTED_MSG
+    assert st == 403 and body.decode() == pagesession.SIGNIN_MSG
     st, _, body = post(port, "/api/act", {"op": "update.start", "args": {}}, stale)
-    assert st == 403 and body.decode() == pagesession.RESTARTED_MSG
+    assert st == 403 and body.decode() == pagesession.SIGNIN_MSG
     st, _, body = post(port, "/api/act", {"op": "answer", "args": ANS}, {"X-Orch-Page": None})
-    assert st == 403 and body.decode() != pagesession.RESTARTED_MSG  # a page that never logged in
+    assert st == 403 and body.decode() == pagesession.SIGNIN_MSG
+
+
+def test_the_session_survives_a_restart_without_a_click(live):
+    """A restart that nobody clicked (orch stop/start, a crash, an automatic update) keeps the sign-in: the
+    restarted server on the same port knows the open tabs' session."""
+    root, port = live
+    ck = session(root, port)
+    old = SERVERS[port]
+    old.shutdown()
+    old.server_close()
+    new = _restart(port, root)
+    try:
+        st, _, body = post(port, "/api/act", {"op": "update.note.dismiss", "args": {}}, {"Cookie": ck})
+        assert st == 200, body
+    finally:
+        new.shutdown()
+        new.server_close()
 
 
 def test_a_transient_read_failure_keeps_the_resume_file(live, monkeypatch):

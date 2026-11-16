@@ -238,7 +238,7 @@ def test_a_change_without_session_is_refused_and_runs_nothing(start_server, fake
     for srv in (start_server(), start_server(session=fake_session)):
         code, _, text = post(srv, body)
         assert code == 403
-        assert text.decode() == "Open Insights from the dashboard on this computer to do this."
+        assert text.decode() == "Sign in to do this: open the dashboard with a sign-in link from orch."
     assert writes(fake_orch) == []
     assert stored(fake_orch) == SETTINGS
 
@@ -285,9 +285,8 @@ def test_delete_detail_ticket_regex(start_server, fake_orch, fake_session, ticke
 @pytest.mark.parametrize(
     "headers",
     [
-        {"X-Forwarded-For": "10.0.0.1"},
-        {"Forwarded": "for=10.0.0.1"},
-        {"Host": "localhost:1", "Origin": "http://localhost:1"},
+        {"Cookie": "orch_page_insights_1=good-cookie-value"},  # another port's cookie
+        {"X-Orch-Page": "wrong-secret-" + "w" * 30},
         {"Cookie": "orch_page=wrong"},
         {"Cookie": ""},
     ],
@@ -510,8 +509,6 @@ def test_session_post(start_server, fake_session):
     assert post(plain, token, path="/session", headers=SAME_SITE)[0] == 403
     srv = start_server(session=fake_session)
     assert post(srv, {"token": "wrong-token-abcdefghijkl"}, path="/session", headers=SAME_SITE)[0] == 403
-    forwarded = {**SAME_SITE, "X-Forwarded-For": "1.2.3.4"}
-    assert post(srv, token, path="/session", headers=forwarded)[0] == 403
     assert srv.page_secret is None  # no secret before a launch token was spent
     code, headers, body = post(srv, token, path="/session", headers=SAME_SITE)
     assert code == 200 and headers["Content-Type"] == "application/json"
@@ -583,7 +580,10 @@ def test_no_insights_page_server_in_core_is_watch_only(start_server, fake_orch, 
     assert srv.session is None
     assert request(srv, "/")[0] == 200
     code, _, text = post(srv, delete(), cookie=True)
-    assert code == 403 and text.decode() == "Open Insights from the dashboard on this computer to do this."
+    assert (
+        code == 403
+        and text.decode() == "Sign in to do this: open the dashboard with a sign-in link from orch."
+    )
     assert seen == []  # no page session: nothing ran
     assert post(srv, {"token": FakeSession.token}, path="/session", headers=SAME_SITE)[0] == 403
     assert calls(fake_orch) == []
@@ -660,10 +660,12 @@ def test_cookie_parsing_matches_the_core(real_session, session_kind):
     for cookie in bad:
         assert not session.can_act(cookie_headers(8431, cookie), 8431), cookie
     good_cookie = f"{name}={value}"
-    assert not session.can_act(cookie_headers(8432, good_cookie), 8431)  # wrong Host port
-    assert not session.can_act({"Host": "evil.example:8431", "Cookie": good_cookie}, 8431)
+    # the sign-in is the ONLY check (owner rule, 16 Nov): any Host, proxy headers or not
+    assert session.can_act(cookie_headers(8432, good_cookie), 8431)
+    assert session.can_act({**cookie_headers(8431, good_cookie), "Host": "insights.example.org"}, 8431)
     for proxy in ({"X-Forwarded-For": "10.0.0.1"}, {"X-Forwarded-Host": "x"}, {"Forwarded": "for=x"}):
-        assert not session.can_act(cookie_headers(8431, good_cookie, **proxy), 8431)
+        assert session.can_act(cookie_headers(8431, good_cookie, **proxy), 8431)
+    assert not session.can_act({"Host": "insights.example.org", "Cookie": good_cookie}, 8431)  # no secret
 
 
 def test_real_session_cookie_alone_cannot_act(start_server, fake_orch, real_session):
@@ -700,13 +702,21 @@ def test_frontend_text_only_and_plain_words():
 def test_page_secret_memory_only_and_unlinked_message():
     js = PACKAGE.joinpath("web", "settings.js").read_text()
     html = PACKAGE.joinpath("web", "index.html").read_text()
-    message = "This page could not be linked to your session. Open Insights again from the dashboard on this computer."
+    message = "This page could not be linked to your session. Open Insights again from the dashboard."
     assert message in js and 'id="session-note"' in html
     assert "note.textContent = UNLINKED" in js and "innerHTML" not in js
     assert "response.status !== 200" in js
-    for store in ("localStorage", "sessionStorage", "document.cookie", "location.hash =", "searchParams"):
+    # this server's own secret is never stored; behind the dashboard the page only READS the dashboard's
+    for store in (
+        "localStorage.setItem",
+        "sessionStorage",
+        "document.cookie",
+        "location.hash =",
+        "searchParams",
+    ):
         assert store not in js
-    assert "'X-Orch-Page': pageSecret" in js
+    assert js.count("localStorage") == 2 and "localStorage.getItem('orch_page_secret')" in js
+    assert "'X-Orch-Page': secret" in js and "let secret = pageSecret;" in js
     # every act and the settings read carry the header; after any refusal the settings are read again
     assert js.count("headers: headers(") == 2
     assert js.count("await load();") >= 3
@@ -818,3 +828,24 @@ def test_session_refused_without_origin_and_never_cors(start_server, fake_sessio
             data = response.read()
             assert secret.encode() not in data and response.getheader("Location") is None
             assert not any(k.lower().startswith("access-control-") for k, _ in response.getheaders())
+
+
+def test_behind_the_dashboard_its_word_counts_from_any_computer(start_server, fake_orch, fake_session):
+    """Owner rule (16 Nov): behind the dashboard's proxy (any computer, any proxy in front of it), the
+    dashboard vouches for the signed-in person; this page needs no sign-in of its own."""
+    srv = start_server(session=fake_session)
+    via = {"X-Forwarded-Prefix": "/addon/insights", "X-Orch-Person": FakeSession.vouch}
+    code, _, text = post(srv, setting("insights.keep_days", "365"), headers=via)
+    assert code != 403, text
+    code, _, text = post(
+        srv, setting("insights.keep_days", "365"), headers={**via, "X-Orch-Person": "x" * 40}
+    )
+    assert code == 403 and text.decode().startswith("Sign in to ")
+
+
+def test_sign_in_through_a_proxy_from_another_computer(start_server, fake_session):
+    srv = start_server(session=fake_session)
+    host = "insights.example.org"
+    proxy = {**SAME_SITE, "Host": host, "Origin": f"https://{host}", "X-Forwarded-For": "203.0.113.7"}
+    code, _, body = post(srv, {"token": FakeSession.token}, path="/session", headers=proxy)
+    assert code == 200 and json.loads(body)["secret"]

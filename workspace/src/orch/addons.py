@@ -559,7 +559,7 @@ def _missing_source(e: dict) -> str | None:
         "dev",
         "test",
     ):  # never because a hand-off is running: it allows one hash
-        return "it comes from a folder, and only you can allow that (in the dashboard on this computer)"
+        return "it comes from a folder, and only you can allow that (in the dashboard)"
     return None if Path(e["source"]).is_dir() else f"its folder {e['source']} is gone"
 
 
@@ -1997,7 +1997,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         if not _local_add_ok():
             raise Refused(
                 "An add-on from a folder runs inside orch itself, so only you can allow it: "
-                "do it in the dashboard on this computer."
+                "do it in the dashboard."
             )
         origin = None
         if _LOCAL_ADD_PROVEN is not None:  # a person's hand-off: install from the snapshot they allowed
@@ -2241,7 +2241,7 @@ def uninstall(root: Path, name: str) -> None:
     if name not in [e["name"] for e in reg]:
         raise Refused(f"The add-on '{name}' is not installed.")
     rest = [e for e in reg if e["name"] != name]
-    _reinstall(rest, save=True, then=[], root=root, done=f"{name} removed from this computer")
+    _reinstall(rest, save=True, then=[], root=root, done=f"{name} uninstalled")
 
 
 # ---------------------------------------------------------------- update

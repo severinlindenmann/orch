@@ -174,6 +174,6 @@ test('a working ticket shows one Watch live and one filled button in the helper 
   assert.equal(p.count('live-session'), 1, 'the Live session card is there for a live run');
   assert.equal(p.count('watch-live') + p.count('live-open'), 1, 'Watch live once on the page');
   assert.equal(p.count('live-open'), 0, 'the helper bar holds it, next to Stop');
-  // the top bar paints outside this fake page: New ticket must step back to an outline on a ticket (B2, one filled button)
-  assert.match(read('app.js'), /newCls = 'btn ' \+ \(\[[^\]]*'ticket'[^\]]*\]\.includes\(r\.kind\) \? 'outline' : 'primary'\)/);
+  // the top bar paints outside this fake page: New ticket is always an outline (B2, one filled button per view)
+  assert.match(read('app.js'), /newCls = 'btn outline sm'/);
 });

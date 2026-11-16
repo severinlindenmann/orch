@@ -51,7 +51,8 @@
     els.interruptBtn.disabled = !running;
     els.sub.textContent = '';
     /* whose turn it is, and where the work is */
-    const turn = v.state === 'done' ? 'Finished' : asking || screenAsks || t.status === 'review' ? 'Your turn' : running ? 'Helper’s turn' : '';
+    const st = window.FocusHelpers.sessionState(v);
+    const turn = v.state === 'done' ? 'Finished' : running && v.run.helper ? st.detail || '' : asking || screenAsks || t.status === 'review' ? 'Your turn' : running ? 'Helper’s turn' : '';
     const base = els.stateText.textContent.split(' · ')[0];
     if (turn && !base.startsWith('Finished') && turn !== 'Finished') els.stateText.textContent = base + ' · ' + turn;
     const now = t.checklist.find(c => !c.done && !c.wont_do);

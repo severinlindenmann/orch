@@ -174,7 +174,7 @@ def calls(fake):
 
 
 class FakeSession:
-    """A page session for tests: the real can_act rules (cookie, loopback Host, no proxy headers)."""
+    """A page session for tests: the real can_act rules (cookie + page secret, or the dashboard's word)."""
 
     cookie = "good-cookie-value"
     token = "launch-token-abcdefghijklmnop"
@@ -201,10 +201,23 @@ class FakeSession:
             sent.encode(), self.secret.encode()
         )
 
-    def can_act(self, headers, port):
-        from orch.pagesession import forwarded, host_ok
+    active = True
+    vouch = "fake-vouch-key-" + "v" * 30  # the dashboard's word for the person (pagesession.vouch_key)
 
-        return host_ok(headers, port) and not forwarded(headers) and self.authed(headers, port)
+    def cookie_ok(self, headers, port):
+        try:
+            c = SimpleCookie(headers.get("Cookie") or "").get(self.cookie_name(port))
+        except Exception:  # noqa: BLE001
+            return False
+        return bool(c and hmac.compare_digest(c.value, self.cookie))
+
+    def vouched(self, headers):
+        sent = headers.get("X-Orch-Person") or ""
+        return bool(sent) and hmac.compare_digest(sent.encode(), self.vouch.encode())
+
+    def can_act(self, headers, port):
+        """Like PageSession.can_act: the session or the dashboard's word, wherever the browser is."""
+        return self.authed(headers, port) or self.vouched(headers)
 
     def launch(self, token):
         return self.cookie if token == self.token else None

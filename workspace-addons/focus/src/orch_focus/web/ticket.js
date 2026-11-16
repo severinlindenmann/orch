@@ -35,13 +35,9 @@
       h('main', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta fx-sub', text: 'Loading your tickets…'}), skeleton()));
     /* the lists wait for the first Live now answer (at most a few seconds), so nothing moves after they show */
     const tickets = fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); });
-    tickets.then(payload => {
-      /* inside the dashboard Focus opens straight on the next ticket that needs the person; Home keeps the whole list.
-         "?all=1" (from the links beside the ticket) shows this start page: Live now, areas and jobs. */
-      const next = INAPP ? window.FocusHelpers.nextNeeding(payload.tickets) : null;
-      if (next && !/[?&]all=1/.test(location.search)) { location.replace(P + '/t/' + next.ticket.id + next.hash); return null; }
-      return S.views.livenow.ready(LIVE_WAIT_MS).then(() => payload);
-    }).then(payload => {
+    /* Focus opens on this start page, the Helpers list first (ORCH-61); the next ticket that needs the person is one
+       button below it, never a jump. */
+    tickets.then(payload => S.views.livenow.ready(LIVE_WAIT_MS).then(() => payload)).then(payload => {
       if (!payload) return;
       const list = payload.tickets;
       const next = INAPP ? window.FocusHelpers.nextNeeding(list) : null;
@@ -244,7 +240,7 @@
     const left = h('aside', {class: 'focus-list fx-left', 'aria-label': 'Tickets in focus'},
       h('div', {class: 'card-h'}, h('h3', {text: 'Tickets in focus'})), els.ticketList,
       h('div', {class: 'row'}, h('a', {class: 'btn ghost sm', href: '/#home', target: '_top', text: 'See everything on Home'}),
-        h('a', {class: 'btn ghost sm', href: P + '/?all=1', text: 'Live now and areas'})), rail);
+        h('a', {class: 'btn ghost sm', href: P + '/', text: 'All helpers'})), rail);
     const head = h('div', {class: 'fx-chead'}, h('div', {class: 'grow'}, h('span', {class: 'eyebrow'}, els.key), h('h1', {}, els.title)),
       els.liveWrap, els.stop, els.more);
     stage.prepend(head);

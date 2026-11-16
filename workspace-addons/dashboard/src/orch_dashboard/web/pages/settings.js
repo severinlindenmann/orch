@@ -547,7 +547,7 @@ function addonDetailPage(addon) {
     heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Installed add-ons')}),
     h('div', {className:'card'}, settingsRows),
     where,
-    snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Remove from this computer')),
+    snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Uninstall')),
     h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
       settingsText('p', {className:'meta'}, connected && d.address ? 'Connection address: ' + d.address : addon.description || 'No connection address.'))));
 }
@@ -1071,13 +1071,17 @@ async function addonAct(control) {
   d.append(actions);
   window.orch.open(d);
 }
-// "Allow on this computer" on a repeat whose script is not allowed here yet: the add-on answers what the person reads
+// "Allow this script" on a repeat whose script is not allowed here yet: the add-on answers what the person reads
 // (the command in full, never behind Details) and a target that ends in the entry's key; the click sends that key back,
 // so only what was shown is allowed (as Settings > Allow this command).
 async function addonReview(id, control) {
   if (snapshot) return;
   const args = {addon:id, verb:control.dataset.verb, target:control.dataset.target};
+  // reading what the add-on would allow takes a few seconds: say so on the button, so the click is seen at once
+  const label = control.textContent;
+  locks.add('addon-act'); control.disabled = true; control.setAttribute('aria-busy', 'true'); control.textContent = 'Checking\u2026';
   const asked = await act('addon.act', {...args, review:true});
+  locks.delete('addon-act'); control.disabled = false; control.removeAttribute('aria-busy'); control.textContent = label;
   const got = asked.ok && asked.state?.act_answer?.addon === id ? asked.state.act_answer.answer : null;
   const key = typeof got?.target === 'string' ? (/:([0-9a-f]{64})$/.exec(got.target) || [])[1] : null;
   if (!got?.review || typeof got.review.title !== 'string' || !key) {
@@ -1089,7 +1093,7 @@ async function addonReview(id, control) {
     locks.add('addon-act');
     const result = await act('addon.act', {...args, value:key});
     locks.delete('addon-act');
-    window.orch.toast(result.ok ? 'Allowed on this computer.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? 'Script allowed.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
     await loadAddon(id);
   });
 }

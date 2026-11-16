@@ -1,6 +1,8 @@
 'use strict';
 // "Report a problem": the button in the top bar of every page, its dialog (what happened, what you expected, a picture
 // of the page, ticket text, more details, added pictures and files) and the "Report ready" answer with the checks.
+// A switch at the top makes the same report a feature wish (owner 16 Nov, ORCH-81): other words, no page picture or
+// ticket text by default, and no hand-off to a helper (a wish is sorted first, never started blindly).
 // Nothing leaves this computer unless the workspace is connected to a relay AND the person ticks "Send this report":
 // then the same report goes to that relay's admin. The hand-off to a helper puts one line into the helper chat's
 // message box; it never sends it by itself.
@@ -103,16 +105,38 @@ function reportOpen() {
   const added = reportFiles(d);
   const relay = reportRelay();
   const share = h('input', {type:'checkbox', 'data-key':'report-share'});
-  const field = (label, input) => h('label', {className:'field'}, h('span', {}, label, ' ', h('span', {className:'meta'}, '(optional)')), input);
-  body.append(
-    h('p', {className:'muted'}, 'orch saves what happened around ', h('strong', {}, scope.label), ' since the helper started, on this computer. ',
-      relay ? 'Nothing is sent unless you tick the last box.' : 'Nothing is sent.'),
-    field('What happened?', happened), field('What did you expect?', expected), field('Anything else?', more), ...added.nodes,
-    h('label', {className:'check-label'}, picture, ' Add a picture of this page'),
-    h('p', {className:'meta'}, 'The picture can show ticket text.'),
-    h('label', {className:'check-label'}, content, ' Include ticket text and helper conversation'),
+  const field = (label, input) => h('label', {className:'field'}, h('span', {}, h('span', {}, label), ' ', h('span', {className:'meta'}, '(optional)')), input);
+  const happenedField = field('What happened?', happened), expectedField = field('What did you expect?', expected);
+  const sent = relay ? 'Nothing is sent unless you tick the last box.' : 'Nothing is sent.';
+  const intro = h('p', {className:'muted', 'data-key':'report-intro'});
+  const pictureRow = h('label', {className:'check-label'}, picture, ' Add a picture of this page');
+  const pictureHint = h('p', {className:'meta'}, 'The picture can show ticket text.');
+  const contentRow = h('label', {className:'check-label'}, content, ' Include ticket text and helper conversation');
+  let about = 'problem';
+  const words = () => {  // the same dialog for both kinds; only the words and the defaults change
+    const wish = about === 'feature';
+    intro.replaceChildren(...(wish ? ['orch saves your wish on this computer. ', sent]
+      : ['orch saves what happened around ', h('strong', {}, scope.label), ' since the helper started, on this computer. ', sent]));
+    happenedField.firstChild.firstChild.textContent = wish ? 'What do you want?' : 'What happened?';
+    expectedField.firstChild.firstChild.textContent = wish ? 'Why would it help?' : 'What did you expect?';
+    happened.placeholder = wish ? 'For example: a dark look for the dashboard' : 'For example: stuck since 10:00, nothing happens';
+    expected.placeholder = wish ? 'For example: easier to read at night' : 'For example: the newsletter is sent';
+    picture.checked = content.checked = !wish;
+    for (const n of [pictureRow, pictureHint, contentRow]) n.hidden = wish;
+  };
+  const kind = h('div', {className:'segmented', role:'radiogroup', 'aria-label':'What is it?', 'data-key':'report-about'},
+    [['problem', 'A problem'], ['feature', 'A feature wish']].map(([value, label]) => {
+      const input = h('input', {type:'radio', name:'report-about', value});
+      input.checked = value === about;
+      input.onchange = () => { about = value; words(); };
+      return h('label', {}, input, h('span', {}, label));
+    }));
+  words();
+  body.append(...[kind, intro,
+    happenedField, expectedField, field('Anything else?', more), ...added.nodes,
+    pictureRow, pictureHint, contentRow,
     relay ? h('label', {className:'check-label'}, share, ' Send this report to the admin of ', h('strong', {}, relay)) : null,
-    relay ? h('p', {className:'meta', 'data-key':'report-share-hint'}, 'Everything in the report goes along, with the files you added. The admin and the workspaces they choose can read it.') : null);
+    relay ? h('p', {className:'meta', 'data-key':'report-share-hint'}, 'Everything in the report goes along, with the files you added. The admin and the workspaces they choose can read it.') : null].filter(Boolean));  // append writes a null as the word
   const create = button('Create report', 'primary', async () => {
     reportUi.busy = true;
     create.disabled = true; actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
@@ -124,7 +148,7 @@ function reportOpen() {
     try {
       const payload = {ticket:scope.ticket, addon:scope.addon, note:happened.value.trim() || undefined, expected:expected.value.trim() || undefined,
         more:more.value.trim() || undefined, files:added.count() ? await added.read() : undefined, share:sharing || undefined,
-        content:content.checked, page:picture.checked && content.checked ? reportPageSnapshot() : undefined};
+        content:content.checked, page:picture.checked && content.checked ? reportPageSnapshot() : undefined, about};
       const res = await fetch('/api/diag/report', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
       if (res.ok) result = await res.json(); else failure = window.DashHelpers.scrubText(await res.text()) || failure;
     } catch (_) { /* the plain failure text stands */ }
@@ -155,6 +179,13 @@ function reportReady(d, actions, body, result) {
     const ok = window.UI?.copyText ? await window.UI.copyText(line) : false;
     window.orch.toast(ok ? 'Copied. Paste it to a helper.' : 'Could not copy. Select the line and copy it.', ok ? undefined : 'error');
   });
+  if (result.about === 'feature') {  // a wish: saved (and maybe sent); nobody starts on it from here
+    body.replaceChildren(...[h('p', {role:'status', 'data-key':'report-wish-saved'}, h('span', {className:'dot-ok'}), ' Your feature wish is saved on this computer as ', h('strong', {}, String(result.ref || '')), '.'),
+      reportShared(result), h('p', {className:'meta'}, folder)].filter(Boolean));  // replaceChildren writes a null as the word
+    actions.replaceChildren(button('Close', 'primary', () => window.orch.close(d)));
+    actions.querySelector('.btn.primary')?.focus();
+    return;
+  }
   // Say plainly that it is saved and under which name, first (ORCH-89: a quick look only saw "Collecting…").
   const saved = h('p', {role:'status', 'data-key':'report-saved'}, h('span', {className:'dot-ok'}), ' Saved on this computer as ', h('strong', {}, String(result.ref || '')), '.');  // not clean(): it drops the ticket id inside a ref
   body.replaceChildren(...[saved, reportChecks(array(result.checks)), reportShared(result),

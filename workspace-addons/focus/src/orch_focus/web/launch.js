@@ -1,11 +1,18 @@
-// Starts the page session (H1/H2): `orch focus open` opens this page with a one-time launch token in the URL fragment.
+// Starts the page session (H1/H2): `orch focus open` opens this page with a one-time sign-in token in the URL fragment.
 // The fragment is never sent in a request; it is posted once and removed from the address bar. The answer carries the
-// page secret: it is kept in sessionStorage (per origin, so a page on another local port never sees it) and sent as
-// X-Orch-Page on every same-origin request. The session cookie alone is never enough (browsers send it to every
-// local port). Then the page reloads.
+// page secret: it is kept in localStorage (per origin, so a page on another port or host never sees it; every tab of
+// this browser shares it) and sent as X-Orch-Page on every same-origin request. The session cookie alone is never
+// enough (browsers send it to every port of the host). Then the page reloads. Behind the dashboard this page shares
+// the dashboard's origin, so the dashboard's sign-in counts here too. Where the browser is does not matter.
 (function () {
   var KEY = "orch_page_secret", HEADER = "X-Orch-Page";
-  function stored() { try { return sessionStorage.getItem(KEY) || ""; } catch (e) { return ""; } }
+  function stored() {
+    var v = "";
+    try { v = localStorage.getItem(KEY) || ""; } catch (e) { v = ""; }
+    if (v) return v;
+    try { v = sessionStorage.getItem(KEY) || ""; if (v) localStorage.setItem(KEY, v); } catch (e) { /* no storage */ }
+    return v;
+  }
   var realFetch = window.fetch;
   window.fetch = function (input, init) {
     var secret = stored();
@@ -35,7 +42,8 @@
   }).then(function (r) {
     if (!r.ok) return;
     return r.json().then(function (j) {
-      try { sessionStorage.setItem(KEY, j.secret || ""); } catch (e) { /* no storage: the page stays watch-only */ }
+      try { localStorage.setItem(KEY, j.secret || ""); } catch (e) { /* no storage: the page stays watch-only */ }
+      try { sessionStorage.removeItem(KEY); } catch (e) { /* none */ }
       location.reload();
     });
   });

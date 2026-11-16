@@ -106,6 +106,12 @@ function activityInfo(t) {
   const run = state.runs?.[t.id], live = run?.claim?.live;
   const agent = window.DashHelpers.agentLabel(state.settings, run?.claim);
   const getting = starting.has(t.id) || live?.state === 'starting';
+  // a running helper shows the core's one state word (ORCH-61), the same as Home and the live page
+  const helper = window.DashHelpers.helperState(run, t);
+  if (helper && !starting.has(t.id)) {
+    const busy = ['working', 'starting'].includes(helper.state);
+    return {run, live, agent, busy, helper, text:helper.word};
+  }
   const busy = getting || (run?.running && !['idle', 'attention'].includes(live?.state));
   const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Needs you' : t.status === 'review' ? window.DashHelpers.statusWord('review') : busy ? agent + ' is working' : '';
   return {run, live, agent, busy, text};
@@ -115,20 +121,21 @@ const needsList = () => window.DashHelpers.uniqueNeeds(state?.needs);
 const questionLine = t => { const q = snapshot || window.DashHelpers.inNeeds(needsList(), t.id) ? '' : window.DashHelpers.questionPreview(t); return q ? h('p', {className:'meta question-line'}, clean(q)) : null; };
 // "why · just now" under a ticket row's title; board and tree rows keep it under the chip
 function activityNote(t) {
-  const {live, agent, text} = activityInfo(t);
+  const {live, agent, helper, text} = activityInfo(t);
+  if (helper && helper.state !== 'working') return helper.detail || '';
   const seconds = live?.since ? Math.max(0, Math.floor((Date.now() - Date.parse(live.since)) / 1000)) : null;
   const why = window.DashHelpers.plainWhy(live?.why, agent);
   return !text ? '' : [why, Number.isFinite(seconds) ? window.DashHelpers.ago(live.since, Date.now()) : ''].filter(Boolean).join(' · ');
 }
 function activity(t, where = '') {
   if (snapshot) return null;
-  const {live, busy, text: full} = activityInfo(t);
+  const {live, busy, helper, text: full} = activityInfo(t);
   if (!full || (where === 'head' && questions(t).length)) return null;  // the banner is the one place for an open question
   if (full === window.DashHelpers.statusWord('review') && ['head', 'board'].includes(where)) return null;  // the status chip / column already says it: one chip
   const text = full;
   const note = where === 'row' ? '' : activityNote(t);  // in a row the chip sits on the Move to line, the note goes under the title
   const open = live?.state === 'attention' ? liveLinkFor(t) : null;
-  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === window.DashHelpers.statusWord('review') ? {title:'Ready for you to check'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
+  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(helper ? (window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : chip(text, busy ? 'active' : '')) : chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === window.DashHelpers.statusWord('review') ? {title:'Ready for you to check'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
     note ? h('p', {className:'meta'}, note) : null,
     open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
 }
@@ -338,9 +345,9 @@ function render(arrived = new Set()) {
     const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
   }
-  // On Review and on a ticket the page has its own primary action (decision, Watch live, Start): New ticket steps back
-  // to an outline, so the screen keeps one filled button (report r-1116-1748)
-  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn ' + (['review', 'ticket'].includes(r.kind) ? 'outline' : 'primary') + ' sm';
+  // New ticket is always an outline (design guide, UX checklist B2): every page keeps its own one filled button, Home's
+  // Review all included (report r-1116-1748, ORCH-61)
+  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn outline sm';
   if (newTicket && newTicket.className !== newCls) newTicket.className = newCls;
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
@@ -435,7 +442,7 @@ async function addonSet(name, on, tries = 20, pause = 1500) {
   }
   return result;
 }
-// Remove an add-on from this computer (`orch addon uninstall`, refused while it is on: turn it off first). The
+// Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The
 // services restart like for the switch, so a lost answer is checked by reading the state again.
 async function addonUninstall(name, tries = 20, pause = 1500) {
   const still = rows => array(rows).some(a => a && a.name === name);

@@ -464,13 +464,13 @@ file, R5.2) of the report folder. Every entry is a regular file `<ref>/<relative
 At most 2000 files and 50 MB. Files the person added sit under `<ref>/attachments/`.
 
 **A problem** = `{id: "pb_…" (16), ref, from: "ws_…", from_name, shared_at, created_at, status: "new"|"taken"|"done", taken_by:
-"ws_…"|null, taken_by_name, scope: {ticket: "t_…"|null, addon: string|null}, note, expected, more, problems: [check name…],
+"ws_…"|null, taken_by_name, scope: {ticket: "t_…"|null, addon: string|null}, about: "problem"|"feature", note, expected, more, problems: [check name…],
 files: n, attachments: n, size, sha256, orch_version, os}`. `created_at` is when the report was made, `shared_at` when the relay
 stored it. The single read adds `summary` (the report's `SUMMARY.md`).
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | `/v1/problems` | `{ref: "r-MMDD-HHMM-<scope>", created_at, scope: {ticket?, addon?}, note?: ≤ 600, expected?: ≤ 600, more?: ≤ 4000, problems?: [≤ 20 × ≤ 60], summary: ≤ 20000 characters, blob_id, size, sha256, files: 1..2000, attachments?: 0..10, orch_version?: ≤ 40, os?: ≤ 80}` | `201 {id}`. The blob was uploaded by the caller with exactly that `size` and `sha256` (`404` otherwise, a wrong size or hash `422`), at most 50 MB (`413`). Every connected workspace may share; no pair rule (the admin reads messages anyway). The same `ref` from the same workspace again answers `200 {id}` of the stored problem and changes nothing (a retried send). At most 20 new problems per workspace in 24 hours (`429 rate_limited`) |
+| POST | `/v1/problems` | `{ref: "r-MMDD-HHMM-<scope>", created_at, scope: {ticket?, addon?}, about?: "problem"|"feature" (a missing one is `problem`; anything else `422`), note?: ≤ 600, expected?: ≤ 600, more?: ≤ 4000, problems?: [≤ 20 × ≤ 60], summary: ≤ 20000 characters, blob_id, size, sha256, files: 1..2000, attachments?: 0..10, orch_version?: ≤ 40, os?: ≤ 80}` | `201 {id}`. The blob was uploaded by the caller with exactly that `size` and `sha256` (`404` otherwise, a wrong size or hash `422`), at most 50 MB (`413`). Every connected workspace may share; no pair rule (the admin reads messages anyway). The same `ref` from the same workspace again answers `200 {id}` of the stored problem and changes nothing (a retried send). At most 20 new problems per workspace in 24 hours (`429 rate_limited`) |
 | GET | `/v1/problems?status=` | – | `{items: [problem…], next: null}`, newest first, at most 100; `status` = `new` (default), `taken`, `done` or `all`. Only for a workspace the admin lets pick problems up, else `403 forbidden`; the same rule for the three routes below. A workspace never needs that right to share |
 | GET | `/v1/problems/<id>` | – | the problem plus `summary`; `404` unknown |
 | GET | `/v1/problems/<id>/file` | – | the archive, raw bytes (`application/octet-stream`, `nosniff`, `attachment`) |

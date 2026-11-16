@@ -1,7 +1,7 @@
 """One scheduler pass: waiting_on time, cron, relay inbox. Time is passed in, so tests use a fake clock.
 
 The scheduler never runs an agent itself: every run is `orch run start` (core decides resume / fresh / busy). A repeat
-that names a script (scripts.py) runs that command from this computer's config instead, through `orch automation script run`."""
+that names a script (scripts.py) runs that command from the local config of the machine orch runs on instead, through `orch automation script run`."""
 
 from __future__ import annotations
 

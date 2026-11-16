@@ -87,12 +87,24 @@ again.
   certificates, key custody in the workspace, planning gates, fixed requirements, approval chains, a required hub, agent
   fences inside the workspace, permission matrices per action. Normal TLS, tokens and the publish link key are not
   banned.
+- **R4.1a No "same computer only"** (owner, 16 Nov): inside a logged-in workspace no action may be limited to the
+  computer orch runs on. the ONLY check is the sign-in (a one-time sign-in link, then the session the browser keeps).
+  No check of a loopback address or Host, of proxy headers, or of a session that only counts on this machine; no
+  text that sends the person to "this computer". A workspace is used from anywhere: another computer, behind a
+  proxy, on a headless server. Relay and publish exposure from outside stay strict (R5).
 - **R4.2** A new noun the user has to learn (new object, state or mode) needs owner approval. Prefer extending tickets,
   checklists, questions or `ext`.
 - **R4.3** One implementation per job, many surfaces: CLI, dashboard and phone all call the same CLI or API path. No
   second "advanced" path, no parallel implementations.
 - **R4.4** Defaults over settings. A new option needs a reason the default can't cover.
 - **R4.5** Reviews never loop. One pass; findings outside relay and publish become issues and never block a merge.
+- **R4.6 Scripts are a first step, not the home** (owner, 16 Nov). A hand-made script outside orch (a helper's own
+  script folder, an automation repeat that calls one, a background loop or launch agent on one machine) may bridge a
+  gap, but it gets a ticket at once that moves its job into orch: a core feature, or an add-on when it is bigger. The
+  ticket ends when the job ships with tests and the script is deleted. Code in orch has tests, reaches every install
+  and is fixed through the report loop; a script on one machine is not. No AI call for work a program can do (checks,
+  counts, waits, switching, cleaning, starting, merging on green); a helper, small model first, only where judgement
+  is needed.
 
 ## 5. Security level (prototype)
 

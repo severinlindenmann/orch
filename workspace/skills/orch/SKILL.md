@@ -55,6 +55,7 @@ Started by hand (not by orch)? Tell orch which ticket you work on so nobody star
 In a live session, when you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready`, run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
+Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, reminds a helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
 
 **Finish a step**
 
@@ -195,6 +196,16 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
 **Asked to update your copy** (you work in a separate copy and the project changed in the same places)
 
     orch copy update <id>        # run it inside your copy, resolve any conflicts there, then commit
+
+**orch itself got in your way, or lacks something** (report it, then go on with your work)
+
+    orch report problem "<what happened>" --expected "<what you expected>" [--file <picture or log>] [--ticket <id>]
+    orch report feature "<what you want>" --why "<why it would help>" [--file <picture>]
+
+Report a problem when an orch command fails, refuses something it should allow, loses or mixes up work, or a page
+shows something wrong; report a feature wish when you or the person keep missing something in orch. One report per
+thing, in plain words, never a secret. It is saved here and, when this workspace is set up to share reports, sent on
+by itself. It is not your ticket's work: do not stop to wait for it, and do not report the person's own project bugs.
 
 **End of every run**
 

@@ -112,7 +112,12 @@ class Unavailable(Exception):
 
 
 class NeedsPerson(Exception):
-    """A human-only click without a page session (HTTP 403): the page is watch-only here."""
+    """A human-only click without a page session (HTTP 403): the browser has not signed in."""
+
+
+# the ONLY check is the sign-in (owner rule, 16 Nov): never a same-computer refusal, never a check of where the
+# browser is. Kept equal to orch.pagesession.SIGNIN_MSG (the page shows the sign-in notice for it).
+SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
 
 
 # Ops any scripted request may do without a page session: they are what an agent can do through the CLI as
@@ -949,7 +954,7 @@ def _addon_set(a):
 
 
 def _addon_uninstall(a):
-    """Remove an add-on from this computer: `orch addon uninstall <name>` (the same CLI path as the terminal)."""
+    """Uninstall an add-on: `orch addon uninstall <name>` (the same CLI path as the terminal)."""
     _only(a, ("name",))
     name = a.get("name")
     if not (isinstance(name, str) and ADDON.fullmatch(name) and name not in RESERVED):
@@ -1212,7 +1217,7 @@ def share_file(root: Path, orch_bin: str | None, args, session: bool = False) ->
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     if orch_bin == SELF and not session:
-        raise NeedsPerson("Open the dashboard from this computer to do this.")
+        raise NeedsPerson(SIGNIN)
     if not publish_connected(root, orch_bin):
         raise BadRequest("Sharing is not set up here.")
     try:  # no link at any level, 0700; anything else fails closed in plain words
@@ -1271,21 +1276,21 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         if not isinstance(args, dict):
             raise BadRequest("The arguments must be an object.")
         if not session:  # watch-only: choosing who you are is the person's click
-            raise NeedsPerson("Open the dashboard from this computer to do this.")
+            raise NeedsPerson(SIGNIN)
         try:
             return 200, "", {"people": people.choose(root, args.get("name"), add=op == "person.add")}
         except people.BadName as e:
             raise BadRequest(str(e)) from None
     if op == "update.note.dismiss":  # Home: "Got it" on the note after an automatic update; nothing runs
         if not session:
-            raise NeedsPerson("Open the dashboard from this computer to do this.")
+            raise NeedsPerson(SIGNIN)
         from . import update
 
         update.dismiss_auto_note()
         return 200, "", None
     argv = build_argv(op, args, root)
     if orch_bin == SELF and needs_session(op) and not session:  # before anything is read or run
-        raise NeedsPerson("Open the dashboard from this computer to do this.")
+        raise NeedsPerson(SIGNIN)
     files = attachments(op, args)
     forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:

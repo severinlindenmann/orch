@@ -44,5 +44,8 @@ def test_a_new_chat_or_inbox_file_is_picked_up_at_once(act_server, act_orch, ws)
     inbox = ws / ".orch" / "inbox"
     inbox.mkdir(parents=True, exist_ok=True)
     (inbox / "m_new0000000000001.json").write_text("{}")
-    _get(act_server)
+    _get(act_server)  # answers with the copy at once and starts the build in the background
+    deadline = time.monotonic() + 5
+    while _calls(act_orch) == first and time.monotonic() < deadline:
+        time.sleep(0.05)
     assert _calls(act_orch) > first
