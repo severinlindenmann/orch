@@ -330,6 +330,7 @@ ACT_ARGS = {
     "chat.make_ticket": {"id": "m_abcdefghijkl"},
     "check.set": {"ticket": TID, "check": "c1", "done": True},
     "check.wont_do": {"ticket": TID, "check": "c1"},
+    "ticket.model": {"ticket": TID, "model": "opus"},
     "check.reopen": {"ticket": TID, "check": "c1"},
     "check.edit": {"ticket": TID, "check": "c1", "text": "x"},
     "check.remove": {"ticket": TID, "check": "c1"},

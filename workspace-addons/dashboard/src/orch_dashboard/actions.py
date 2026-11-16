@@ -408,6 +408,17 @@ def _ticket_edit(a):
     return ["ticket", "edit", _tid(a.get("ticket"))], flags, []
 
 
+MODELS = ("sonnet", "opus", "auto")
+
+
+def _ticket_model(a):
+    """A person picks the helper's model for this ticket (or lets orch pick again): `orch ticket model`."""
+    _only(a, ("ticket", "model"))
+    if a.get("model") not in MODELS:
+        raise BadRequest("Pick Sonnet, Opus or let orch pick.")
+    return ["ticket", "model", _tid(a.get("ticket")), a["model"]], [], []
+
+
 def _check_add(a):
     """Add a task: `orch check add <ticket> --by ... -- <text>` (text up to 500 characters)."""
     _only(a, ("ticket", "text"))
@@ -813,12 +824,12 @@ def addon_review_target(
         out = None
     if not isinstance(out, dict) or r.returncode != 0 or "target" not in out:
         err = out.get("error") if isinstance(out, dict) else None
-        raise BadRequest(str(err or "This can't be signed right now. Nothing was changed.")[:300])
+        raise BadRequest(str(err or "This can't be confirmed right now. Nothing was changed.")[:300])
     target, review = out["target"], _review(out.get("review"))
     if target is None:
         return None, review
     if not (isinstance(target, str) and PROOF_TARGET.fullmatch(target) and target.startswith(addon + ":")):
-        raise BadRequest("This can't be signed right now. Nothing was changed.")
+        raise BadRequest("This can't be confirmed right now. Nothing was changed.")
     return target, review
 
 
@@ -965,6 +976,7 @@ OPS = {
     "ticket.patch": _ticket_patch,
     "ticket.changes": _ticket_changes,
     "ticket.edit": _ticket_edit,
+    "ticket.model": _ticket_model,
     "log": _log,
     "chat.say": _chat_say,
     "chat.make_ticket": _chat_make_ticket,

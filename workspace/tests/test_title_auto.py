@@ -136,6 +136,31 @@ def test_start_prompt_tells_the_agent_to_tidy_a_new_ticket_without_asking(proj):
     assert "orch ticket tidy" not in runs.fresh_prompt(auto, [], proj)  # the title command covers it
 
 
+def test_tidy_writes_the_agents_description_once_never_into_the_note(proj):
+    t = tickets.create(proj, "fix login", "human:t", fields={"note": "login broken on phone"})
+    t = tickets.tidy(
+        proj, t["id"], "Fix the login page", "agent:claude", {"done_when": "Login works on the phone"},
+        "The login page fails on phones; people cannot sign in on the go.",
+    )  # fmt: skip
+    assert t["description"].startswith("The login page fails") and t["description_by"] == "agent:claude"
+    assert t["note"] == "login broken on phone" and t["done_when"] == "Login works on the phone"
+    assert any(h["text"] == "Description written by agent:claude" for h in t["history"])
+
+
+def test_tidy_keeps_an_existing_description(proj):
+    t = tickets.create_from_input(proj, LONG, "human:t")
+    t = tickets.set_auto_title(proj, t["id"], "Trip plan", "agent:claude", "First text.")
+    t = tickets.tidy(proj, t["id"], "Trip plan", "agent:codex", None, "Second text.")
+    assert t["description"] == "First text." and t["description_by"] == "agent:claude"
+
+
+def test_start_prompt_asks_for_a_description_and_a_done_when_line(proj):
+    t = tickets.create(proj, "fix login", "human:t", fields={"note": "login broken on phone"})
+    p = runs.fresh_prompt(t, [], proj)
+    assert '--description "<what and why>"' in p and '--done-when "<one plain line>"' in p
+    assert "so the person does not have to write it" in p
+
+
 def test_cli_ticket_tidy(proj, run):
     t = tickets.create(proj, "fix login", "human:t")
     code, out = run(
@@ -145,11 +170,14 @@ def test_cli_ticket_tidy(proj, run):
         "Fix the login page",
         "--due",
         "2026-12-01",
+        "--description",
+        "People cannot sign in.",
         "--json",
         "--by",
         "agent:claude",
     )[:2]
     assert code == 0 and json.loads(out)["title"] == "Fix the login page"
+    assert json.loads(out)["description"] == "People cannot sign in."
 
 
 def test_tidied_still_counts_when_its_history_line_shows_as_unverified(proj):

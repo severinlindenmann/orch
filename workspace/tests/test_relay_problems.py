@@ -10,7 +10,7 @@ import pytest
 from diag_fixtures import reset_diag, stuck
 from fakes import WS
 
-from orch import diag_report, relay_problems
+from orch import diag_report, relay_problems, tickets
 from orch.errors import Refused
 
 PID = "pb_" + "a" * 16
@@ -20,6 +20,11 @@ PID = "pb_" + "a" * 16
 def proj(proj, monkeypatch):
     (proj / ".orch").mkdir(exist_ok=True)
     reset_diag(monkeypatch)
+    # Fixed ticket ids: a random id such as t_u472pw or t_5y4pin reads as a "pw:"/"pin:" label in the
+    # report's SUMMARY.md line "- t_u472pw: Working for 1800 s", so the share was refused for SUMMARY.md
+    # instead of the file under test (about 1 in 600 ids; ORCH-56, release 27 macOS CI).
+    ids = iter(f"t_r{n:05d}" for n in range(1, 100000))
+    monkeypatch.setattr(tickets, "new_id", lambda root: next(ids))
     return proj
 
 

@@ -91,3 +91,23 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   const fresh = text(ctx.detail(typed));
   assert.ok(/Start helper/.test(fresh) && !/Resume/.test(fresh), 'tasks typed before any helper ran: Start helper, not Resume');
 });
+
+test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch pick, and a change sends ticket.model', async () => {
+  const sent = [];
+  const ctx = {window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : [],
+    clean:v => String(v ?? ''), el:(tag, cls, txt) => h(tag, {className:cls}, txt), act:async (op, a) => { sent.push([op, a]); return {ok:true}; }};
+  vm.createContext(ctx); vm.runInContext(ticketSrc, ctx); ctx.snapshot = false;
+  const picked = ctx.modelField({id:'t1', model:{name:'opus', by:'orch', why:'it mentions design'}});
+  assert.equal(picked.tag, 'select');
+  assert.deepEqual(picked.children.map(o => o.attrs.value), ['auto', 'sonnet', 'opus']);
+  assert.equal(text(picked.children[0]), 'Let orch pick (Opus)');
+  assert.equal(picked.value, 'auto');
+  assert.match(picked.attrs.title, /Opus \(picked by orch: it mentions design\)/);
+  const mine = ctx.modelField({id:'t1', model:{name:'sonnet', by:'human:severin'}});
+  assert.equal(mine.value, 'sonnet');
+  mine.value = 'opus'; await mine.onchange();
+  assert.equal(JSON.stringify(sent.pop()), JSON.stringify(['ticket.model', {ticket:'t1', model:'opus'}]));
+  assert.equal(ctx.modelField({id:'t1', model:{name:'fable', by:'human:x'}}).value, 'auto', 'an unknown model is not shown as chosen');
+  ctx.snapshot = true;
+  assert.equal(text(ctx.modelField({id:'t1'})), 'orch picks it when work starts');
+});

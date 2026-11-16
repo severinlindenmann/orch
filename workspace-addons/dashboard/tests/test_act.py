@@ -1325,6 +1325,18 @@ def test_check_wont_do_refuses_bad_args(extra):
         actions.build_argv("check.wont_do", {"ticket": "t_abcdef", "check": "c1", **extra})
 
 
+def test_ticket_model_argv_and_refusals():
+    common = ["--by", actions.actor(), "--json"]
+    for m in ("sonnet", "opus", "auto"):
+        assert actions.build_argv("ticket.model", {"ticket": "t_abcdef", "model": m}) == [
+            "ticket", "model", "t_abcdef", m, *common,
+        ]  # fmt: skip
+    for bad in ({"model": "fable"}, {"model": "--x"}, {"model": None}, {"model": "opus", "extra": 1}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("ticket.model", {"ticket": "t_abcdef", **bad})
+    assert actions.needs_session("ticket.model")  # a person's choice: never from a script
+
+
 def test_check_reopen_argv_and_refusals():
     common = ["--by", actions.actor(), "--json"]
     assert actions.build_argv("check.reopen", {"ticket": "t_abcdef", "check": "c2"}) == [

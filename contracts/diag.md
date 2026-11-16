@@ -6,7 +6,7 @@ something is stuck or wrong (`orch diag query` and the report, later steps). It 
 numbers, ids and places in the code. Never ticket text, never a conversation, never the value of a key.
 
 Schema: `diag.schema.json` (one event). Examples: `examples/diag/`. Vectors: `vectors/diag-v1.json` (whole events and the
-event-name rule). T0: `uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py diag`.
+event-name rule). T0: `uv run --python ">=3.11" --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py diag`.
 Writer: `workspace/src/orch/diag.py`, the only one. The core names no add-on or agent tool here.
 
 ## Where

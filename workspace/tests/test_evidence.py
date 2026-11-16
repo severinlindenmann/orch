@@ -29,7 +29,7 @@ def test_file_is_copied_with_metadata(proj, run, validate, tid):
         "check", "done", tid, "c1", "--file", "out/q3 invoices.csv", "--title", "Q3 invoices",
         "--role", "result", "--by", "agent:claude-code",
     )  # fmt: skip
-    assert code == 0 and "Proof copied: .orch/tickets/" in text
+    assert code == 0 and "Evidence copied: .orch/tickets/" in text
     t = read(proj, tid)
     validate(t)
     ev = t["checklist"][0]["evidence"][0]
@@ -111,7 +111,7 @@ def test_show_chips_marks_and_finish_line(proj, run, tid):
         "--by", "agent:claude-code")  # fmt: skip
     run("check", "done", tid, "c1", "--command", "pytest -q", "--by", "agent:claude-code")
     text = run("ticket", "show", tid)[1]
-    assert "Q3 invoices (file, 2 KB)" in text and "○ Agent says" in text
+    assert "Q3 invoices (file, 2 KB)" in text and "○ Helper says" in text
     assert "All done" not in text
     run("check", "done", tid, "c2", "--note", "Looks right", "--by", "human:severin")
     text = run("ticket", "show", tid)[1]
@@ -348,7 +348,7 @@ def test_own_copy_file_accepted_other_refused(proj, run, tid, tmp_path, monkeypa
     (copy / ".git" / "config").write_text("x")
     monkeypatch.setattr(tickets, "_own_copy", lambda root, t: Path(os.path.realpath(copy)))
     code, text, _ = run("check", "done", tid, "c1", "--file", str(copy / "result.csv"))
-    assert code == 0 and "Proof copied" in text
+    assert code == 0 and "Evidence copied" in text
     ev = read(proj, tid)["checklist"][0]["evidence"][0]
     assert (proj / ev["ref"]).read_text() == "a,b\n"
     for p in (other / "result.csv", copy / ".git" / "config", copy / ".." / other.name / "result.csv"):

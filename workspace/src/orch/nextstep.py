@@ -144,6 +144,12 @@ def _doctor(data, args) -> str:
     return "orch ticket list"
 
 
+def _logins(data, args) -> str:
+    if any(r.get("state") == "renew" for r in (data or {}).get("items") or []):
+        return "renew it with the tool's own login, then run orch logins again"
+    return "orch ticket list"
+
+
 def _status_cmd(data, args) -> str:
     return "orch stop  (when you are done)" if data else "orch ticket list"
 
@@ -180,6 +186,7 @@ HINTS = {
     "ticket changes": _on_ticket,
     "ticket patch": _on_ticket,
     "doctor": _doctor,
+    "logins": _logins,
     "pause": "turn it back on with: orch resume",
     "resume": "orch needs",
     "wait": "keep working on other tickets: orch ticket list",
@@ -191,6 +198,7 @@ HINTS = {
     "check start": _start_task,
     "check stop": _on_ticket,
     "check wont-do": _on_ticket,
+    "ticket model": _on_ticket,
     "check record": _record,
     "check done": _on_ticket,
     "log": _on_ticket,

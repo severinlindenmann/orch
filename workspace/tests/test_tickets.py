@@ -62,7 +62,7 @@ def test_check_done_needs_evidence(proj, run, new_ticket, validate):
     tid = new_ticket()
     assert run("check", "add", tid, "Implement")[0] == 0
     code, _, err = run("check", "done", tid, "c1")
-    assert code == 2 and "proof" in err
+    assert code == 2 and "evidence" in err
     code, _, err = run("check", "done", tid, "c1", "--evidence", '{"type":"bogus","ref":"x"}')
     assert code == 2
     assert read(proj, tid)["checklist"][0]["done"] is False

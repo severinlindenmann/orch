@@ -55,11 +55,6 @@ if args[:2] == ["ticket", "new"]:
     note = next((a.split("=", 1)[1] for a in args if a.startswith("--note=")), None)
     if note:
         t["note"] = note
-    gate = next((a.split("=", 1)[1] for a in args if a.startswith("--start-requires=")), None)
-    if gate:  # core's start gate: "<ticket>:<question>=<answer>"
-        g_ticket, rest = gate.split(":", 1)
-        g_question, g_answer = rest.split("=", 1)
-        t["start_requires"] = {"ticket": g_ticket, "question": g_question, "answer": g_answer}
     save(t)
     result = t
 elif args[:2] == ["ticket", "show"]:
