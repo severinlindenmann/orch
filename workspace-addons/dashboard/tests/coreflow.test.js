@@ -13,6 +13,7 @@ function context(fetch, snapshot = false) {
   ctx.render = () => ctx.renders.push({status:ctx.state.tickets[0].status, starting:ctx.starting.has('t_abcdef')});
   ctx.accept = next => { ctx.state = next; };
   ctx.window = {orch:{toast:text => ctx.toasts.push(text)}};
+  ctx.busyOn = () => null; ctx.busyOff = () => {};  // the pressed button's busy state (click_speed.test.js)
   vm.createContext(ctx); vm.runInContext(action, ctx); return ctx;
 }
 test('Start moves immediately and reconciles with the server', async () => {
@@ -69,7 +70,7 @@ test('push uses a 50 ms debounce and changes polling only while live', () => {
   let refreshed = 0, nextTimer = 0;
   const ctx = {
     main:{replaceChildren(node) { assert.equal(node, 'loading'); }}, skeletonFor:() => 'loading', hashKind:() => 'home', paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null, addEventListener() {}, visibilityState:'visible'}, navigator:{},
-    snapshot:false, window:{addEventListener() {}}, refresh:() => { refreshed++; },
+    snapshot:false, window:{addEventListener() {}, get EventSource() { return ctx.EventSource; }}, refresh:() => { refreshed++; },
     setInterval:(_, ms) => { intervals.push(ms); return intervals.length; }, clearInterval() {},
     setTimeout:(fn, ms) => { assert.equal(ms, 50); timeouts.set(++nextTimer, fn); return nextTimer; }, clearTimeout:id => timeouts.delete(id),
     EventSource:class { constructor(url) { assert.equal(url, '/api/events'); streams.push(this); } addEventListener(event, fn) { assert.equal(event, 'rev'); this.rev = fn; } },
