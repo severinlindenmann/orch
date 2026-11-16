@@ -1,4 +1,3 @@
-import hashlib
 import json
 import random
 from copy import deepcopy
@@ -15,47 +14,6 @@ SCHEMA = Draft202012Validator(
     json.loads((CONTRACTS / "ticket.schema.json").read_text(encoding="utf-8")), format_checker=FormatChecker()
 )
 NOW = VEC["now"]
-
-
-def vmac(ticket, step, nonce):
-    on = bool(step.get("wont_do"))  # an "on" record binds the step's text and covers; an undo record does not
-    parts = [
-        ticket,
-        str(step["id"]),
-        str(nonce),
-        str(step["text"] if on else ""),
-        str((step.get("covers") or "") if on else ""),
-        str(on),
-        str((step.get("reason") if on else "") or ""),
-    ]
-    if on and "wont_by" in step:  # a NEW decision binds who and when (the real MAC: humanproof.wont_decision)
-        parts += [str(step["wont_by"]), str(step.get("wont_at")), str(step.get("wont_line"))]
-    return "v1-" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:20]
-
-
-def person_for(ledger):
-    """The vectors' stand-in for the receiving core (humanproof.wont_verifier): a MAC valid for the step's text and
-    covers AND the CURRENT ledger entry."""
-
-    def person(step, ticket):
-        m = step.get("wont_mac")
-        ok = m == ledger.get(f"{ticket}:{step.get('id')}") and m == vmac(ticket, step, step.get("wont_nonce"))
-        return isinstance(m, str) and ok
-
-    return person
-
-
-def verdict_for(ledger, own):
-    """The vectors' stand-in for the receiving core (humanproof.verdict_verifier): "current" = the entry's MAC
-    is the ledger's current one, "stale" = it is one of the core's own MACs but not current, else None."""
-
-    def verdict(entry, ticket):
-        m = entry.get("mac")
-        if ledger.get(ticket["id"]) == m:
-            return "current"
-        return "stale" if m in own else None
-
-    return verdict
 
 
 T1, T2, T3 = "2026-11-09T08:00:00Z", "2026-11-09T09:00:00Z", "2026-11-09T10:00:00Z"
@@ -97,17 +55,13 @@ def texts(t):
 @pytest.mark.parametrize("c", VEC["tickets"], ids=lambda c: c["name"])
 def test_vector_ticket(c):
     before = deepcopy((c["base"], c["a"], c["b"]))
-    person = person_for(c.get("ledger", {}))
-    verdict = verdict_for(c.get("ledger", {}), c.get("own", []))
-    assert merge_ticket(c["base"], c["a"], c["b"], NOW, person, verdict) == c["expect"]
-    assert merge_ticket(c["base"], c["b"], c["a"], NOW, person, verdict) == c.get(
-        "expect_reverse", c["expect"]
-    )  # attribution follows the receiving machine
+    assert merge_ticket(c["base"], c["a"], c["b"], NOW) == c["expect"]
+    assert merge_ticket(c["base"], c["b"], c["a"], NOW) == c.get("expect_reverse", c["expect"])
     if c.get("convergence"):
         checked = c["expect"]
-        replay = merge_ticket(c["base"], c["a"], checked, NOW, person, verdict)
+        replay = merge_ticket(c["base"], c["a"], checked, NOW)
         assert replay["history"] == checked["history"]
-        exchanged = merge_ticket(c["base"], checked, checked, NOW, person, verdict)
+        exchanged = merge_ticket(c["base"], checked, checked, NOW)
         assert exchanged["history"] == checked["history"]
     assert (c["base"], c["a"], c["b"]) == before  # pure
     if c["expect"] is not None:
@@ -143,9 +97,6 @@ def test_every_rule_has_a_vector():
         "10",
         "D8",
         "add",
-        "wont",
-        "verdict",
-        "person-history",
     } <= rules
 
 
@@ -244,7 +195,7 @@ def test_history_and_evidence_never_lost():
         up(base, T3, history=base["history"] + [h(T2, "y")]),
         NOW,
     )
-    assert texts(m) == ["created", "y", "(synced, not verified here) x"]
+    assert texts(m) == ["created", "y", "x"]
 
 
 def test_sessions_cap_keeps_newest():
@@ -574,86 +525,12 @@ WONT = {"wont_do": True, "reason": "Not needed", "by": "human:Ann", "at": T2}
 TK = "t_abc123"
 
 
-def signed(step, nonce="n1"):
-    step = {**step, "wont_nonce": nonce}
-    return {**step, "wont_mac": vmac(TK, step, nonce)}
-
-
-def ledger_of(*steps):
-    return {f"{TK}:{x['id']}": x["wont_mac"] for x in steps}
-
-
 DONE = {
     "done": True,
     "evidence": [{"type": "note", "ref": "sent it", "by": "agent:claude", "at": T2}],
     "by": "agent:claude",
     "at": T2,
 }
-
-
-def test_wont_do_from_a_person_syncs():
-    base = tk(checklist=[_step()])
-    on = signed(_step(**WONT))
-    a = up(base, T2, checklist=[on])
-    for x, y in ((a, base), (base, a)):
-        out = merge_ticket(base, x, y, NOW, person_for(ledger_of(on)))
-        assert out["checklist"][0]["wont_do"] is True and out["checklist"][0]["reason"] == "Not needed"
-        assert list(SCHEMA.iter_errors(out)) == []
-
-
-def test_person_wont_do_keeps_attribution_against_newer_agent_rename():
-    base = tk(checklist=[_step()])
-    on = signed(_step(**WONT))
-    a = up(base, T2, checklist=[on], title="Person's ticket title")
-    b = up(
-        base, T3, checklist=[_step(text="Email sales", by="agent:codex", at=T3)], title="Agent's ticket title"
-    )
-    for x, y in ((a, b), (b, a)):
-        out = merge_ticket(base, x, y, NOW, person_for(ledger_of(on)))
-        c = out["checklist"][0]
-        assert {k: c[k] for k in ("wont_do", "reason", "by")} == {
-            k: on[k] for k in ("wont_do", "reason", "by")
-        }
-        assert c["text"] == on["text"]  # the existing signed decision also binds text
-        assert out["title"] == "Agent's ticket title"
-        assert list(SCHEMA.iter_errors(out)) == []
-
-
-def test_two_verified_wont_do_copies_keep_newer_attribution():
-    base = tk(checklist=[_step()])
-    on = signed(_step(**WONT))
-    a = up(base, T2, checklist=[on])
-    b = up(base, T3, checklist=[{**on, "by": "human:Bob", "at": T3}])
-    for x, y in ((a, b), (b, a)):
-        c = merge_ticket(base, x, y, NOW, person_for(ledger_of(on)))["checklist"][0]
-        assert c["wont_do"] is True and c["reason"] == on["reason"] and c["by"] == "human:Bob"
-
-
-def test_wont_do_without_the_cores_say_so_is_dropped_whatever_by_says():
-    base = tk(checklist=[_step()])
-    for by in ("agent:claude", "human:Ann", None):  # `by: human:` alone is NOT the person
-        item = _step(wont_do=True, reason="sneaky", **({"by": by, "at": T2} if by else {}))
-        a = up(base, T2, checklist=[item])
-        for x, y in ((a, base), (base, a)):
-            c = merge_ticket(base, x, y, NOW, person_for({}))["checklist"][0]
-            assert "wont_do" not in c and "reason" not in c
-
-
-def test_done_vs_wont_do_a_verified_decision_wins_and_an_unverified_one_does_not():
-    base = tk(checklist=[_step()])
-    on = signed(_step(**WONT))
-    person = person_for(ledger_of(on))
-    for newer_done in (True, False):
-        a = up(base, T2 if newer_done else T3, checklist=[on])
-        b = up(base, T3 if newer_done else T2, checklist=[_step(**DONE)])
-        for x, y in ((a, b), (b, a)):
-            out = merge_ticket(base, x, y, NOW, person)
-            assert out["checklist"][0]["wont_do"] is True and out["checklist"][0]["done"] is False
-            assert list(SCHEMA.iter_errors(out)) == []
-    forged = _step(**WONT)  # no MAC: the newer done side wins wholesale as before
-    a, b = up(base, T2, checklist=[forged]), up(base, T3, checklist=[_step(**DONE)])
-    for x, y in ((a, b), (b, a)):
-        assert merge_ticket(base, x, y, NOW, person_for({}))["checklist"][0] == _step(**DONE)
 
 
 def test_two_recorded_runs_of_the_same_command_are_both_kept():
@@ -736,16 +613,6 @@ def test_core_and_merge_trim_runs_identically(monkeypatch):
         assert tickets.trim_runs(list(case)) == merge.trim_runs(list(case))
 
 
-def test_one_sided_forged_wont_do_is_dropped():
-    base = tk(checklist=[_step()])
-    forged = _step(wont_do=True, reason="x", by="agent:claude", at=T2)
-    new_item = _step(id="c2", text="New", wont_do=True, by="agent:claude")
-    a = up(base, T2, checklist=[forged, new_item])  # edited-vs-unchanged and a one-sided new item
-    for x, y in ((a, base), (base, a)):
-        for c in merge_ticket(base, x, y, NOW, person_for({}))["checklist"]:
-            assert "wont_do" not in c and "reason" not in c
-
-
 def test_conflict_pick_with_done_and_no_evidence_is_not_done():
     base = tk(checklist=[_step()])
     a = up(base, T2, checklist=[_step(**WONT)])
@@ -755,567 +622,93 @@ def test_conflict_pick_with_done_and_no_evidence_is_not_done():
         assert c["done"] is False
 
 
-# ---- #425: Won't do counts as the person's only by the receiving core's say-so (never by `by: human:`) ----------
-# The core's say-so = a MAC valid for the step's text and covers that is also the CURRENT ledger entry.
-
-
-def test_without_a_verifier_nobody_is_a_person_fail_closed():
-    base = tk(checklist=[_step()])
-    on = signed(_step(**WONT))
-    a = up(base, T2, checklist=[on])
-    for x, y in ((a, base), (base, a)):
-        c = merge_ticket(base, x, y, NOW)["checklist"][0]
-        assert "wont_do" not in c and "reason" not in c
-        c = merge_ticket(base, x, y, NOW, lambda step, ticket: 1 / 0)["checklist"][0]  # a verifier that fails
-        assert "wont_do" not in c
-
-
-def test_a_forged_by_human_is_not_kept_but_the_signed_one_is():
-    base = tk(checklist=[_step(), _step(id="c2", text="Other")])
-    forged = _step(**WONT)
-    good = signed(_step(id="c2", text="Other", **WONT))
-    a = up(base, T2, checklist=[forged, good])
-    for x, y in ((a, base), (base, a)):
-        c1, c2 = merge_ticket(base, x, y, NOW, person_for(ledger_of(good)))["checklist"]
-        assert "wont_do" not in c1 and c2["wont_do"] is True
-
-
-def test_a_decision_copied_onto_another_ticket_or_step_is_not_the_persons():
-    base = tk(checklist=[_step()])
-    on = signed(_step(**WONT))
-    for mac in ("valid:t_other99:c1:n1:Email finance:", "valid:t_abc123:c7:n1:Email finance:"):
-        a = up(base, T2, checklist=[{**on, "wont_mac": mac}])
-        for x, y in ((a, base), (base, a)):
-            assert "wont_do" not in merge_ticket(base, x, y, NOW, person_for(ledger_of(on)))["checklist"][0]
-
-
-# F1: with a base that holds the person's decision, a side that does not verify is "no change from base"
-
-
-@pytest.mark.parametrize(
-    "mutate",
-    [
-        lambda s: {**s, "reason": "agent was here"},  # changed reason, MAC no longer valid
-        lambda s: {**s, "wont_mac": "garbage"},
-        lambda s: {k: v for k, v in s.items() if k != "wont_mac"},
-        lambda s: {k: v for k, v in s.items() if k not in ("wont_do", "reason")},  # dropped, mac left
-        lambda s: {k: v for k, v in s.items() if k not in ("wont_do", "reason", "wont_mac", "wont_nonce")},
-    ],
-)
-def test_an_unverified_side_never_changes_a_held_wont_do_either_argument_order(mutate):
-    on = signed(_step(**WONT))
-    base = tk(checklist=[on])
-    person = person_for(ledger_of(on))
-    agent = up(base, T2, checklist=[mutate(on)])
-    for x, y in ((agent, base), (base, agent)):
-        c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
-        assert c["wont_do"] is True and c["reason"] == "Not needed" and c["wont_mac"] == on["wont_mac"]
-
-
-def test_an_unverified_side_with_a_changed_decision_is_not_newer_wholesale_over_a_done_side():
-    on = signed(_step(**WONT))
-    base = tk(checklist=[on])
-    person = person_for(ledger_of(on))
-    bad = up(base, T3, checklist=[{**on, "reason": "x"}])  # newer, but unverified
-    done = up(base, T2, checklist=[_step(**DONE)])
-    for x, y in ((bad, done), (done, bad)):
-        c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
-        assert c["wont_do"] is True and c["reason"] == "Not needed"  # base's decision stands
-
-
-def test_deleted_on_one_side_and_edited_on_the_other_does_not_bring_back_an_unverified_decision():
-    on = signed(_step(**WONT))
-    base = tk(checklist=[on])
-    person = person_for(ledger_of(on))
-    gone = up(base, T2, checklist=[])
-    edited = up(base, T3, checklist=[{**on, "reason": "x"}])
-    for x, y in ((gone, edited), (edited, gone)):
-        c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
-        assert c["wont_do"] is True and c["reason"] == "Not needed"
-
-
-def test_a_signed_undo_that_is_the_current_ledger_entry_is_accepted():
-    on = signed(_step(**WONT), "n1")
-    undo = signed(_step(), "n2")
-    base = tk(checklist=[on])
-    person = person_for(ledger_of(undo))  # the undo is now the current entry
-    for x, y in ((up(base, T2, checklist=[undo]), base), (base, up(base, T2, checklist=[undo]))):
-        c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
-        assert "wont_do" not in c and "reason" not in c
-
-
-# F2: the ledger holds the CURRENT MAC; an older signed decision replayed later does not verify
-
-
-def test_replaying_an_older_signed_on_over_a_newer_off_is_not_accepted():
-    on1, undo2 = signed(_step(**WONT), "n1"), signed(_step(), "n2")
-    base = tk(checklist=[undo2])
-    person = person_for(ledger_of(undo2))
-    for x, y in ((up(base, T2, checklist=[on1]), base), (base, up(base, T2, checklist=[on1]))):
-        assert "wont_do" not in merge_ticket(base, x, y, NOW, person)["checklist"][0]
-
-
-def test_replaying_an_older_signed_undo_over_a_current_on_is_not_accepted():
-    undo2, on3 = signed(_step(), "n2"), signed(_step(**WONT), "n3")
-    base = tk(checklist=[on3])
-    person = person_for(ledger_of(on3))
-    for x, y in ((up(base, T2, checklist=[undo2]), base), (base, up(base, T2, checklist=[undo2]))):
-        assert merge_ticket(base, x, y, NOW, person)["checklist"][0]["wont_do"] is True
-
-
-def test_a_removed_steps_id_reused_with_the_old_mac_is_not_the_persons():
-    on1 = signed(_step(**WONT))
-    base = tk(checklist=[])
-    person = person_for({f"{TK}:c1": None})  # tombstone: the step was removed
-    new_step_old_mac = up(base, T2, checklist=[on1])
-    for x, y in ((new_step_old_mac, base), (base, new_step_old_mac)):
-        assert "wont_do" not in merge_ticket(base, x, y, NOW, person)["checklist"][0]
-
-
-def test_no_ledger_entry_means_nobody_even_for_a_valid_looking_mac():
-    base = tk(checklist=[_step()])
-    on = signed(_step(**WONT))
-    a = up(base, T2, checklist=[on])
-    for x, y in ((a, base), (base, a)):
-        assert "wont_do" not in merge_ticket(base, x, y, NOW, person_for({}))["checklist"][0]
-
-
-# F3: the decision binds the step's text and covers
-
-
-@pytest.mark.parametrize("edit", [{"text": "Email the auditor instead"}, {"covers": "everything"}])
-def test_rewriting_ONLY_text_or_covers_under_a_persons_wont_do_changes_nothing(edit):
-    """RR1: an agent that changes just the text or covers must not drop the decision (no MAC needed to do so)."""
-    on = signed(_step(**WONT))
-    base = tk(checklist=[on])
-    person = person_for(ledger_of(on))
-    agent = up(base, T2, checklist=[{**on, **edit}])
-    for x, y in ((agent, base), (base, agent)):
-        c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
-        assert c == on  # no change from base: the decision AND the text/covers stay
-
-
-def test_rewriting_text_and_dropping_the_decision_is_all_restored():
-    on = signed(_step(**WONT))
-    base = tk(checklist=[on])
-    stripped = {k: v for k, v in on.items() if k not in ("wont_do", "reason", "wont_mac", "wont_nonce")}
-    agent = up(base, T2, checklist=[{**stripped, "text": "skip the security review"}])
-    for x, y in ((agent, base), (base, agent)):
-        c = merge_ticket(base, x, y, NOW, person_for(ledger_of(on)))["checklist"][0]
-        assert c["wont_do"] is True and c["text"] == "Email finance"
-
-
-def test_an_agent_rename_of_a_reopened_step_cannot_bring_the_old_wont_do_back():
-    on1, undo2 = signed(_step(**WONT), "n1"), signed(_step(), "n2")
-    renamed = {**undo2, "text": "Email finance, renamed"}  # an undo record binds no text: still verifies
-    base = tk(checklist=[renamed])
-    person = person_for(ledger_of(undo2))
-    assert person(renamed, TK)
-    stale = up(base, T2, checklist=[on1])  # a stale peer still has the old "on"
-    for x, y in ((stale, base), (base, stale)):
-        c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
-        assert "wont_do" not in c
-
-
-def test_a_rename_of_a_never_decided_step_is_free():
-    base = tk(checklist=[_step()])
-    agent = up(base, T2, checklist=[_step(text="Email finance and the auditor")])
-    for x, y in ((agent, base), (base, agent)):
-        assert merge_ticket(base, x, y, NOW, person_for({}))["checklist"][0]["text"].endswith("auditor")
-
-
-def test_drop_wont_clears_the_nonce_too():
-    on = signed(_step(**WONT))
-    a = up(tk(checklist=[_step()]), T2, checklist=[on])
-    c = merge_ticket(tk(checklist=[_step()]), a, tk(checklist=[_step()]), NOW)["checklist"][0]  # no verifier
-    assert "wont_do" not in c and "wont_nonce" not in c and "wont_mac" not in c
-
-
-def test_a_proven_edit_re_signs_and_keeps_the_wont_do():
-    on = signed(_step(**WONT), "n1")
-    base = tk(checklist=[on])
-    resigned = signed(_step(**WONT, text="Email finance and the auditor"), "n2")
-    person = person_for(ledger_of(resigned))
-    for x, y in ((up(base, T2, checklist=[resigned]), base), (base, up(base, T2, checklist=[resigned]))):
-        c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
-        assert c["wont_do"] is True and c["text"] == "Email finance and the auditor"
-
-
-def test_a_renumbered_won_t_do_without_a_base_is_dropped_fail_closed():
-    on = signed(_step(**WONT))
-    renumbered = {**on, "id": "c2"}  # _renumber_clashes changed the id: the MAC is for c1
-    a = up(tk(checklist=[]), T2, checklist=[renumbered])
-    base = tk(checklist=[])
-    for x, y in ((a, base), (base, a)):
-        assert "wont_do" not in merge_ticket(None, x, y, NOW, person_for(ledger_of(on)))["checklist"][0]
-
-
-def test_one_side_deleting_a_persons_wont_do_step_does_not_delete_it():
-    on = signed(_step(**WONT))
-    base = tk(checklist=[on])
-    person = person_for(ledger_of(on))
-    gone = up(base, T2, checklist=[])
-    for x, y in ((gone, base), (base, gone)):
-        assert [c["wont_do"] for c in merge_ticket(base, x, y, NOW, person)["checklist"]] == [True]
-    both = merge_ticket(base, gone, up(base, T3, checklist=[]), NOW, person)
-    assert both["checklist"] == []  # both sides deleted it: final
-
-
-# ---- RR2: the ledger's CURRENT entry is the authority, not the base (a stale base proves nothing) -------------
-
-
-def _rename(step, text):
-    return {**step, "text": text}
-
-
-def test_stale_base_with_the_persons_newer_on_and_an_agent_rename_of_the_stale_copy():
-    on1 = signed(_step(**WONT), "n1")
-    on2 = signed(_step(**{**WONT, "reason": "Not needed any more"}), "n2")  # re-signed since the last sync
-    stale = tk(checklist=[on1])
-    person = person_for(ledger_of(on2))
-    newer = up(stale, T3, checklist=[on2])
-    agent = up(stale, T2, checklist=[_rename(on1, "skip security review")])
-    for x, y in ((newer, agent), (agent, newer)):
-        c = merge_ticket(stale, x, y, NOW, person)["checklist"][0]
-        assert c["wont_do"] is True and c["reason"] == "Not needed any more" and c["text"] == "Email finance"
-
-
-def test_stale_base_with_the_persons_newer_on_and_the_agent_dropping_wont_do_on_its_stale_copy():
-    on1 = signed(_step(**WONT), "n1")
-    on2 = signed(_step(**{**WONT, "reason": "Not needed any more"}), "n2")
-    stale = tk(checklist=[on1])
-    person = person_for(ledger_of(on2))
-    newer = up(stale, T3, checklist=[on2])
-    dropper = up(stale, T2, checklist=[_step()])
-    for x, y in ((newer, dropper), (dropper, newer)):
-        c = merge_ticket(stale, x, y, NOW, person)["checklist"][0]
-        assert c["wont_do"] is True and c["reason"] == "Not needed any more"
-
-
-def test_stale_base_on_with_the_current_undo_on_one_side_stays_undone_and_the_rename_is_free():
-    on1, undo2 = signed(_step(**WONT), "n1"), signed(_step(), "n2")
-    stale = tk(checklist=[on1])
-    person = person_for(ledger_of(undo2))
-    undone = up(stale, T3, checklist=[undo2])
-    agent = up(stale, T2, checklist=[_rename(on1, "Email finance, renamed")])
-    for x, y in ((undone, agent), (agent, undone)):
-        c = merge_ticket(stale, x, y, NOW, person)["checklist"][0]
-        assert "wont_do" not in c and c["text"] == "Email finance, renamed"
-
-
-def test_stale_base_undo_with_the_persons_newer_on_and_an_agent_rename_of_the_stale_undo():
-    undo2, on3 = signed(_step(), "n2"), signed(_step(**WONT), "n3")
-    stale = tk(checklist=[undo2])
-    person = person_for(ledger_of(on3))
-    newer = up(stale, T3, checklist=[on3])
-    agent = up(stale, T2, checklist=[_rename(undo2, "skip security review")])
-    for x, y in ((newer, agent), (agent, newer)):
-        c = merge_ticket(stale, x, y, NOW, person)["checklist"][0]
-        assert c["wont_do"] is True and c["text"] == "Email finance"
-
-
-def test_no_authority_means_no_wont_do_even_a_stale_bases():
-    on1 = signed(_step(**WONT))
-    base = tk(checklist=[on1])
-    for x, y in ((up(base, T2, checklist=[on1]), base), (base, up(base, T2, checklist=[on1]))):
-        assert "wont_do" not in merge_ticket(base, x, y, NOW, person_for({}))["checklist"][0]
-
-
-def test_two_different_verifying_decisions_cannot_exist_and_if_a_verifier_said_so_nobody_wins():
-    on1, on2 = signed(_step(**WONT), "n1"), signed(_step(**{**WONT, "reason": "other"}), "n2")
-    ledger = ledger_of(on2)
-    person = person_for(ledger)
-    assert person(on2, TK) and not person(on1, TK)  # one current entry: at most one input can verify
-    base = tk(checklist=[_step()])
-    a, b = up(base, T2, checklist=[on1]), up(base, T3, checklist=[on2])
-    loud = lambda step, ticket: step.get("wont_do") is True  # a (wrong) verifier that vouches for both
-    for x, y in ((a, b), (b, a)):
-        assert "wont_do" not in merge_ticket(base, x, y, NOW, loud)["checklist"][0]  # fail closed
-
-
-# ---- RR3: a renumbering never moves an item the core vouches for (updated_at is peer-controlled) --------------
+# ---- Won't do and Done are plain fields: the normal merge rules decide, nothing is verified --------------------
 
 
 def _by_id(t, i):
     return next(c for c in t["checklist"] if c["id"] == i)
 
 
-@pytest.mark.parametrize("agent_at", [T1, T3])  # the agent copy older, then newer
-def test_a_clash_renumbers_the_agents_item_never_the_persons_signed_one(agent_at):
+def test_wont_do_from_the_other_side_syncs_as_it_is():
     base = tk(checklist=[_step()])
-    mine_c2 = signed(_step(id="c2", text="Call the bank", **WONT))
-    person = person_for(ledger_of(mine_c2))
-    mine = up(base, T2, checklist=[_step(), mine_c2])
-    agent = up(base, agent_at, checklist=[_step(), _step(id="c2", text="Skip the security review")])
-    for x, y in ((mine, agent), (agent, mine)):
-        out = merge_ticket(base, x, y, NOW, person)
-        kept = _by_id(out, "c2")
-        assert kept["wont_do"] is True and kept["text"] == "Call the bank"  # the signed item kept its id
-        moved = [c for c in out["checklist"] if c["text"] == "Skip the security review"]
-        assert len(moved) == 1 and moved[0]["id"] != "c2" and "wont_do" not in moved[0]
+    on = _step(**WONT, wont_by="human:Ann", wont_at=T2)
+    a = up(base, T2, checklist=[on])
+    for x, y in ((a, base), (base, a)):
+        c = merge_ticket(base, x, y, NOW)["checklist"][0]
+        assert c["wont_do"] is True and c["reason"] == "Not needed" and c["wont_by"] == "human:Ann"
+        assert c["done"] is False
 
 
-def test_two_vouched_items_with_one_id_cannot_be_merged_and_the_caller_pauses():
+def test_a_wont_do_with_old_proof_fields_keeps_them():
+    old = _step(**WONT, wont_nonce="n1", wont_mac="v1-" + "a" * 20, wont_by="human:Ann", wont_at=T2)
     base = tk(checklist=[_step()])
-    one = signed(_step(id="c2", text="Call the bank", **WONT), "n1")
-    two = signed(_step(id="c2", text="Another decision", **WONT), "n2")
-    loud = lambda step, ticket: step.get("wont_do") is True  # a (wrong) verifier that vouches for both
-    a, b = up(base, T2, checklist=[_step(), one]), up(base, T3, checklist=[_step(), two])
+    a = up(base, T2, checklist=[old])
+    c = merge_ticket(base, a, base, NOW)["checklist"][0]
+    assert c["wont_nonce"] == "n1" and c["wont_mac"] == old["wont_mac"] and c["wont_do"] is True
+
+
+def test_the_newer_side_wins_when_one_side_is_done_and_the_other_wont_do():
+    base = tk(checklist=[_step()])
+    a = up(base, T2, checklist=[_step(**WONT)])
+    b = up(base, T3, checklist=[_step(**DONE)])
     for x, y in ((a, b), (b, a)):
-        assert merge_ticket(base, x, y, NOW, loud) is None
+        assert merge_ticket(base, x, y, NOW)["checklist"][0]["done"] is True
+    a = up(base, T3, checklist=[_step(**WONT)])
+    b = up(base, T2, checklist=[_step(**DONE)])
+    for x, y in ((a, b), (b, a)):
+        c = merge_ticket(base, x, y, NOW)["checklist"][0]
+        assert c["wont_do"] is True and c["done"] is False
 
 
-def test_without_a_vouched_item_updated_at_still_decides_the_clash():
-    base = tk(checklist=[_step()])
-    old = up(base, T1, checklist=[_step(), _step(id="c2", text="First")])
-    new = up(base, T3, checklist=[_step(), _step(id="c2", text="Second")])
-    for x, y in ((old, new), (new, old)):
-        out = merge_ticket(base, x, y, NOW, person_for({}))
-        assert _by_id(out, "c2")["text"] == "First"  # the older keeps the id (as before)
+def test_a_step_one_side_removed_is_removed_even_if_it_was_wont_do():
+    base = tk(checklist=[_step(**WONT)])
+    gone = up(base, T2, checklist=[])
+    for x, y in ((gone, base), (base, gone)):
+        assert merge_ticket(base, x, y, NOW)["checklist"] == []
 
 
-# ---- signed verdicts (human-proof.md "Done needs a signed verdict") -------------------------------------------
+def test_two_items_added_with_one_id_are_renumbered_by_updated_at():
+    base = tk()
+    x = up(base, T2, checklist=[_step(id="c2", text="First")])
+    y = up(base, T3, checklist=[_step(id="c2", text="Second", **WONT)])
+    for a, b in ((x, y), (y, x)):
+        out = merge_ticket(base, a, b, NOW)
+        assert _by_id(out, "c2")["text"] == "First"  # the older keeps the id
+        assert sorted(c["text"] for c in out["checklist"]) == ["First", "Second"]
 
 
-def test_merge_verdict_fields_and_shape():
-    from orch_sync import merge
-
-    assert merge._VERDICT_FIELDS == ("kind", "nonce", "mac")
-    assert merge._VERDICT_OPTIONAL == ("person", "at", "line")
-    good = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
-    assert merge._verdict_shape(good)
-    for bad in (
-        None,
-        {},
-        {**good, "extra": 1},
-        {**good, "kind": "bot"},
-        {**good, "nonce": "XYZ"},
-        {**good, "mac": "short"},
-        {k: v for k, v in good.items() if k != "mac"},
-    ):
-        assert not merge._verdict_shape(bad)
+# ---- old verdict entries are carried along ---------------------------------------------------------------------
 
 
-def test_a_verdict_is_never_dropped_for_being_ours_without_a_verifier():
+def test_a_verdict_is_never_dropped_from_a_ticket():
     A = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
     base = tk(status="done", verdicts=[A])
     peer = up(base, T3, note="y")
     for x, y in ((base, peer), (peer, base)):
-        assert merge_ticket(base, x, y, NOW)["verdicts"] == [
-            A
-        ]  # verdict=None: nobody verifies, nothing is "stale"
+        assert merge_ticket(base, x, y, NOW)["verdicts"] == [A]
 
 
-def test_a_verdict_verifier_that_fails_vouches_for_nobody():
+def test_verdicts_of_both_sides_are_merged_by_mac_in_either_order():
     A = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
-    base = tk(status="done", verdicts=[A])
-
-    def boom(entry, ticket):
-        raise RuntimeError("no")
-
-    out = merge_ticket(base, up(base, T2, note="x"), up(base, T3, note="y"), NOW, None, boom)
-    assert out["verdicts"] == [A] and out["status"] == "done"
+    B = {"kind": "person", "nonce": "fedcba9876543210", "mac": "B" * 43}
+    base = tk(verdicts=[A])
+    x, y = up(base, T2, verdicts=[A, B]), up(base, T3, verdicts=[A])
+    outs = [merge_ticket(base, p, q, NOW)["verdicts"] for p, q in ((x, y), (y, x))]
+    assert outs[0] == outs[1] == [A, B]
 
 
 def test_the_merge_output_validates_against_the_schema_with_verdicts():
     A = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
     base = tk(status="done", verdicts=[A])
-    out = merge_ticket(
-        base,
-        up(base, T2, note="x"),
-        up(base, T3, note="y"),
-        NOW,
-        None,
-        verdict_for({"t_abc123": "A" * 43}, ["A" * 43]),
-    )
+    out = merge_ticket(base, up(base, T2, note="x"), up(base, T3, note="y"), NOW)
     assert list(SCHEMA.iter_errors(out)) == []
-    assert list(SCHEMA.iter_errors({**out, "verdicts": [{**A, "mac": "bad"}]})) != []
-    assert list(SCHEMA.iter_errors({**out, "verdicts": [A] * 9})) != []
+    assert out["verdicts"] == [A]
 
 
-@pytest.mark.parametrize("decision", ["wont", "verdict"])
-def test_history_verifier_failure_is_closed(decision):
-    line = {"at": T2, "by": "human:A", "text": "Looks good"}
-    peer = tk(status="done", verdicts=[{"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}])
-    if decision == "wont":
-        peer = tk(checklist=[signed(_step(**WONT))])
-        line["text"] = "Marked c1 as won't do"
-    peer["history"] = [line]
-
-    def boom(*args):
-        raise RuntimeError("unavailable")
-
-    out = merge_ticket(tk(), peer, tk(), NOW, boom, boom)
-    assert out["history"] == [
-        {**line, "by": "agent:sync", "text": "(synced, not verified here) " + line["text"]}
-    ]
-    assert list(SCHEMA.iter_errors(out)) == []
-    assert merge_ticket(tk(), tk(), peer, NOW, boom, boom)["history"] == [line]
-
-
-@pytest.mark.parametrize(
-    "by",
-    [
-        "Human:lindenmann",
-        " human:x",
-        "lindenmann",
-        ["human:x"],
-        "agent:relay from ph_abc",
-        "agent:relay",
-        "agent:\u200brelay from ph_abc",
-        "agent:Severin Lindenmann",
-        " Agent:Worker ",
-        "agent:",
-        "agent:" + "a" * 41,
-        "agent:worker\n",
-        "agent:ＲＥＬＡＹ",
-        "ａｇｅｎｔ:ＣＯＤＥＸ",
-        "agent：severin",
-        "agent﹕x",
-        "\u0430gent:x",  # Cyrillic a
-        "agent:\u0445",  # Cyrillic x
-        "\u03b1gent:x",  # Greek alpha
-        "agent:\u200bx",  # zero-width space
-        "agent:\u00a0x",  # no-break space
-        "agent:x\u2010y",  # Unicode hyphen
-        "agent\u02d0x",  # modifier-letter colon
-        None,
-    ],
-)
-def test_remote_person_labels_are_demoted_but_local_lines_are_preserved(by, root, monkeypatch):
-    # this workspace has no test orch folder: the view's stored-value hider (fail closed) is replaced by one
-    # over no values (no keys); what is tested here is the history rendering
-    from orch import hider, phone_results
-
-    monkeypatch.setattr(phone_results, "value_hider", lambda r: hider.Hider({}))
-    line = {"at": T2, "by": by, "text": "Approved"}
-    peer = tk(history=[line])
-    assert merge_ticket(tk(), peer, tk(), NOW)["history"] == [
-        {**line, "by": "agent:sync", "text": "(synced, not verified here) Approved"}
-    ]
-    assert merge_ticket(tk(), tk(), peer, NOW)["history"] == [line]
-    from orch.phone_view import build
-
-    rendered = build(root, merge_ticket(tk(), peer, tk(), NOW), [])["history_tail"]
-    assert rendered[0]["role"] == "agent"
-    assert rendered[0]["text"] == "(synced, not verified here) Approved"
-
-
-@pytest.mark.parametrize("decision", ["wont", "verdict"])
-@pytest.mark.parametrize("known", [None, "base", "local"])
-def test_verified_decision_does_not_authenticate_history_author(decision, known):
-    check = signed(_step(**WONT))
-    entry = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
-    peer = tk(checklist=[check]) if decision == "wont" else tk(status="done", verdicts=[entry])
-    text = "Marked c1 as won't do" if decision == "wont" else "Looks good"
-    base = deepcopy(peer) if known == "base" else tk()
-    local = deepcopy(peer) if known == "local" else tk()
-    peer["history"] = [
-        {"at": at, "by": by, "text": text}
-        for at, by in [(T1, "human:Impostor"), (T2, "human:Ann"), (T3, "human:Ann")]
-    ]
-    out = merge_ticket(
-        base, peer, local, NOW, person_for(ledger_of(check)), verdict_for({TK: entry["mac"]}, [])
-    )
-    human = [h for h in out["history"] if h["by"] != "agent:sync"]
-    assert human == []
-    # Returning the untrusted original cannot resurrect a demoted line.
-    again = merge_ticket(
-        base, peer, out, NOW, person_for(ledger_of(check)), verdict_for({TK: entry["mac"]}, [])
-    )
-    assert again["history"] == out["history"]
-
-
-def test_returned_demotion_cannot_erase_local_unpushed_answer():
-    line = {"at": T2, "by": "human:lindenmann", "text": "Answered q1: yes"}
-    local = tk(history=[line])
-    remote = tk(history=[{**line, "by": "agent:sync", "text": "(synced, not verified here) " + line["text"]}])
-    assert line in merge_ticket(tk(), remote, local, NOW)["history"]
-
-
-@pytest.mark.parametrize(
-    "by",
-    [
-        "agent:worker",
-        "AGENT:worker",
-        "agent:claude",
-        "agent:sync",
-        "agent:codex",
-        "agent:automation",
-        "agent:focus",
-        "agent:my-agent_1.2",
-        "agent:" + "a" * 40,
-    ],
-)
-def test_phone_attribution_and_sync_share_agent_allowlist(by):
-    from orch.phone_view import _who, is_agent_history_author
-
-    assert is_agent_history_author(by)
-    assert _who(by)[1] == "agent"
-    line = {"at": T2, "by": by, "text": "Working"}
-    assert merge_ticket(tk(), tk(history=[line]), tk(), NOW)["history"] == [line]
-
-
-@pytest.mark.parametrize(
-    "malformed",
-    [
-        {"text": 123},
-        {"text": ["bad"]},
-        {"text": None},
-        {"at": 5},
-        {"at": None},
-        {"at": ""},
-        {"at": "not-a-timestamp"},
-        {"at": "2026-02-30T00:00:00Z"},
-        {"at": "2026-11-09T09:00:00+01:00"},
-    ],
-)
-@pytest.mark.parametrize("by", ["human:Ann", "agent:worker", "agent:sync"])
-@pytest.mark.parametrize("has_base", [False, True])
-def test_malformed_remote_history_does_not_stall_merge(malformed, by, has_base):
-    bad = {"at": T2, "by": by, "text": "Malformed", **malformed}
-    good = {"at": T2, "by": "agent:worker", "text": "Working"}
-    local_line = {"at": T1, "by": "human:Ann", "text": "Requested"}
-    base = tk() if has_base else None
-    remote = tk(title="Remote update", history=[bad, good])
-    local = tk(history=[local_line])
-    before = deepcopy((base, remote, local))
-    out = merge_ticket(base, remote, local, NOW)
-    assert out is not None
-    assert out["title"] == "Remote update"
-    assert out["history"][:2] == [local_line, good]
-    assert bad not in out["history"]
-    assert all(isinstance(h["text"], str) for h in out["history"])
-    assert list(SCHEMA.iter_errors(out)) == []
-    assert (base, remote, local) == before
-    assert merge_ticket(base, remote, out, NOW)["history"] == out["history"]
-
-
-@pytest.mark.parametrize("text", [None, 7, ["x"], {"a": 1}])
-def test_a_remote_history_line_with_non_string_text_never_raises(text):
-    peer = tk(history=[{"at": T2, "by": "human:Ann", "text": text}])
-    out = merge_ticket(tk(), peer, tk(), NOW)
-    assert out is not None and out["history"] == []  # discarded, the sync does not get stuck
-
-
-def test_a_person_line_keeps_its_name_only_for_a_new_decision_and_both_orders_agree_elsewhere():
-    from orch_sync.merge import history_digest
-
-    line = {"at": T2, "by": "human:Ann", "via": "cli", "text": "Status review -> done", "chat_message": False}
-    entry = {
-        "kind": "person",
-        "person": "human:Ann",
-        "at": T2,
-        "line": history_digest(line["text"], "cli"),
-        "nonce": "0123456789abcdef",
-        "mac": "A" * 43,
-    }
-    peer = tk(status="done", verdicts=[entry], history=[line])
-    v = verdict_for({TK: entry["mac"]}, [])
-    out = merge_ticket(tk(), peer, tk(), NOW, None, v)
-    assert out["history"] == [line]
-    swapped = merge_ticket(tk(), tk(), peer, NOW, None, v)  # the peer's lines are local there
-    skip = ("revision", "updated_at")
-    assert {k: x for k, x in swapped.items() if k not in skip} == {
-        k: x for k, x in out.items() if k not in skip
-    }
+def test_remote_history_lines_are_kept_as_written():
+    h = lambda by, t: {"at": T2, "by": by, "text": t}
+    base = tk()
+    remote = up(base, T2, history=[h("human:Ann", "Looks good"), h("agent:claude", "done")])
+    out = merge_ticket(base, remote, base, NOW)
+    assert all(line in out["history"] for line in remote["history"])
+    assert not any("not verified" in line["text"] for line in out["history"])
