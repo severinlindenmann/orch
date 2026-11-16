@@ -136,7 +136,7 @@ class StateCache:
     def quick(self, state: dict):
         """A click's answer (the last copy with the clicked ticket read again) is served at once, and a full build
         follows in the background: it replaces this copy, and the pages are told when it is stored."""
-        self._store(dict(state), None)  # no signature: the copy counts as changed until the build has run
+        self._store(dict(state), None)  # stored as changed: it counts as old until the build has run
         self.kick()
 
     def invalidate(self, state: dict):

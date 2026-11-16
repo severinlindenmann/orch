@@ -247,7 +247,7 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
 # ------------------------------------------------------------------ list
 
 
-def answered(root: Path) -> list[dict]:
+def _answered(root: Path) -> list[dict]:
     out = []
     for t in history.shown_json(root, tickets.list_all(root)):
         if t.get("general") is True or not isinstance(t.get("id"), str):
@@ -275,7 +275,7 @@ def answered(root: Path) -> list[dict]:
 
 def _list(args, root: Path) -> None:
     if args.answered:
-        rows = answered(root)
+        rows = _answered(root)
         lines = [
             f"  {e['ticket_key'] or e['ticket']}  {e['key']}  {e['decision'].get('summary', '')}"
             f"  ({re.sub(r'^(human|agent):', '', e['by'] or 'someone')}, {e['via']}, {_when(e['at'])})"

@@ -58,9 +58,9 @@ def review_cards(root: Path) -> dict:
 
 
 def review_answered(root: Path) -> list[dict]:
-    from orch.cli_review import answered
+    from orch.cli_review import _answered
 
-    return answered(root)
+    return _answered(root)
 
 
 def _plain(root: Path, data):

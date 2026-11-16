@@ -244,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"workspace": self.root.name, "cards": cards})
             from orch import cli_review  # late: cli_review imports this module
 
-            return self._json(200, history.shown_json(self.root, cli_review.answered(self.root)))
+            return self._json(200, history.shown_json(self.root, cli_review._answered(self.root)))
         except Exception:  # noqa: BLE001 - nothing of the failure goes to the page
             return self._json(503, _err("refused", "orch could not read the review list just now."))
 
