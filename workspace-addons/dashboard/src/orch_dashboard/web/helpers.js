@@ -270,7 +270,7 @@
     if (!r || (r.running !== true && r.state !== 'maybe-stale')) return null;
     const h = r.helper;
     if (h && typeof h === 'object' && HELPER_WORDS[h.state]) return {state: h.state, word: HELPER_WORDS[h.state], detail: typeof h.detail === 'string' ? h.detail : ''};
-    if (r.state === 'maybe-stale') return {state: 'stuck', word: 'Stuck', detail: 'No sign of life for a while'};
+    if (r.state === 'maybe-stale') return {state: 'stuck', word: 'Stuck', detail: 'No update for a while'};
     const live = (r.claim && r.claim.live) || {}, asks = arr(ticket && ticket.questions).some(q => q && q.answer == null);
     const key = live.state === 'attention' || (asks && live.state !== 'working') ? 'you' : live.state === 'starting' ? 'starting' : live.state === 'idle' ? 'idle' : 'working';
     return {state: key, word: HELPER_WORDS[key], detail: key === 'you' ? (asks ? 'Your answer' : 'Your OK on the screen') : ''};

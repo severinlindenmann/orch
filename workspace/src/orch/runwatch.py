@@ -239,7 +239,7 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
         return None
     detail = ""
     if sig == "stale":
-        key, detail = "stuck", "No sign of life for a while"
+        key, detail = "stuck", "No update for a while"
     elif sig == "idle":
         idle = idle_seconds or 0
         key = "stuck" if idle >= STUCK_MINUTES * 60 else "idle"
