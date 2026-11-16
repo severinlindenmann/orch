@@ -45,7 +45,7 @@
     },
     "model": {
       "type": "object", "required": ["name", "by"],
-      "description": "Optional (ORCH-49). The model this ticket's helper runs on, passed to adapters with model_args (Claude). by 'orch' = orch's pick before a start (why = its reason, picked again on every start); any other by = a person's choice (orch ticket model, person only), kept until set back to auto (field removed). A name orch does not know counts as no choice.",
+      "description": "Optional (ORCH-49). The model this ticket's helper runs on, passed to adapters that declare model_args. by 'orch' = orch's pick before a start (why = its reason, picked again on every start); any other by = a person's choice (orch ticket model, person only), kept until set back to auto (field removed). A name orch does not know counts as no choice.",
       "properties": {
         "name": { "enum": ["sonnet", "opus"] },
         "by": { "type": "string", "minLength": 1, "maxLength": 100 },
