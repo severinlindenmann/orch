@@ -314,7 +314,7 @@ def test_working_is_only_looked_up_for_drafts(ws, run, srv, proposal):
 
 def test_draft_page_and_home_offer_plan_and_changes_inside_the_dashboard_only(srv):
     js = get(srv, "/web/factory.js")[1].decode()
-    assert "section(primary, 'Drafts waiting for you', orders.filter(draftWaiting)" in js
+    assert "['drafts', orders.filter(draftWaiting)" in js and "draftActions(o, render)" in js  # in "Waits for you"
     assert "'Plan the run'" in js and "'Ask for changes'" in js
     assert "...(draftWaiting(order) ? [draftActions(order)]" in js  # the draft page
     assert (
@@ -848,7 +848,7 @@ def test_results_waiting_for_your_looks_good_are_one_card_on_factory(ws, run, sr
     assert (
         "orders.filter(o => o.open || draftWaiting(o) || results(o).length)" in js
     )  # not "nothing waits for you"
-    assert "section(primary, 'Results to check'" in js and "resultsCard(o, true)" in js
+    assert "['results', orders.filter(o => results(o).length), o => resultsCard(o, true)]" in js  # in "Waits for you"
 
 
 def test_the_next_stage_says_it_is_starting(ws, run, srv):
@@ -889,3 +889,26 @@ def test_looks_good_all_button_only_with_two_results_inside_the_dashboard():
     assert "askDashboard({type: 'orch.looksgood', tickets: rows.map(r => r.ticket)})" in js
     assert "d.type === 'orch.looksgood.done'" in js and "d.type === 'orch.looksgood.failed'" in js
     assert "problem.setAttribute('role', 'alert')" in js
+
+
+def test_home_has_no_empty_sections():
+    """ORCH-72 (owner 16 Nov): what waits comes first, an empty kind gets no section of its own; the missing kinds are
+    named once in one quiet line ("Nothing else in Factory right now: no drafts, stops ... They show here when they come")."""
+    import shutil
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(encoding="utf-8")
+    home = js[js.index("function home(data)") : js.index("function line(items)")]
+    for old in ("No drafts waiting", "No proposals waiting", "No stops waiting", "No results waiting",
+                "No running orders", "No shipped work", "No saved ideas", "planned runs are below"):
+        assert old not in home, old
+    assert "if (!rows.length) return;" in home and "badge('Waits for you')" in home
+    assert "'Nothing else in Factory right now: no '" in home and "They show here when they come." in home
+    if not shutil.which("node"):
+        return
+    start = js.index("const listWords")
+    words = subprocess.run(
+        ["node", "-e", js[start : js.index("\n", start)] + "\nconsole.log(JSON.stringify([[], ['drafts'],"
+         " ['drafts', 'stops'], ['drafts', 'stops', 'running orders']].map(listWords)))"],
+        capture_output=True, text=True, check=True).stdout
+    assert json.loads(words) == ["", "drafts", "drafts or stops", "drafts, stops or running orders"]

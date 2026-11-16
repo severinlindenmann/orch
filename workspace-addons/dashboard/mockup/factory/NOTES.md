@@ -23,3 +23,6 @@ The Factory page draws its frame and the idea box at once and reads the order li
 
 ## Fix wave owner decisions (16 Nov)
 The order page's Results to check card has `Looks good, all` (two or more results; one toast with Undo, the same Looks good as on each ticket). A stop item may carry an optional preview address and then shows `Open the preview` (opens the running app in a new tab).
+
+## No empty walls (17 Nov, ORCH-72, owner card on ORCH-64)
+Factory home shows what waits for you first, in one block marked `Waits for you` (drafts, proposals, stops, results). A kind with nothing in it gets no section of its own; the missing kinds are named once in a quiet line at the end: "Nothing else in Factory right now: no drafts, stops, results or running orders. They show here when they come." Running, Shipped and Saved ideas appear only when they hold something. `factory.html` home and `../sweep/d-factory-empty.html` show this.
