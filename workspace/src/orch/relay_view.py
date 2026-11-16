@@ -10,7 +10,7 @@ import json
 import re
 from pathlib import Path
 
-from orch import net, relay
+from orch import net, relay, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -83,6 +83,11 @@ def record_sent(root: Path, msg: dict) -> None:
     entry = {"id": msg["id"], "to": msg["to"], "type": msg["type"], "at": msg["created_at"], "preview": line}
     if extra:
         entry["extra"] = extra
+    if isinstance(msg.get("ticket"), str):
+        entry["ticket"] = msg["ticket"][:40]  # ORCH-62: Contacts names the ticket a message was about
+    about = (msg.get("body") or {}).get("title") if msg["type"] == "question" else None
+    if isinstance(about, str) and about.strip():
+        entry["about"] = plain(about, 80)  # the phone's title of it: already cut and value-hidden
     upd = (msg.get("body") or {}).get("update")
     if isinstance(upd, dict) and isinstance(upd.get("kind"), str):
         entry["update"] = upd["kind"][:20]  # an automatic status note, not something a person wrote
@@ -197,6 +202,34 @@ def _stamp(iso) -> str:
     return net.when(iso) if isinstance(iso, str) else ""
 
 
+def _about(root: Path, ticket, about) -> str:
+    """ORCH-62: what a sent message was about, "ORCH-23 Services: ..." (the key from the local ticket, the
+    title the phone was shown); "" for a message about no ticket (and for old log lines)."""
+    key = ""
+    if isinstance(ticket, str) and ticket:
+        with contextlib.suppress(Refused, ValueError, KeyError, OSError):
+            key = str(tickets.load(root, ticket).get("key") or "")
+    title = plain(about, 80) if isinstance(about, str) and about.strip() else ""
+    return " ".join(x for x in (key, title) if x)
+
+
+def fold(rows: list[tuple[str, dict, tuple]]) -> list[tuple[str, dict]]:
+    """ORCH-62: the same message sent again and again (the same words to the same place) is ONE row, the
+    newest, with "N times" (rows come newest first)."""
+    out: list[tuple[str, dict]] = []
+    seen: dict[tuple, list] = {}
+    for at, item, key in rows:
+        if key in seen:
+            seen[key][1] += 1
+            continue
+        seen[key] = [item, 1]
+        out.append((at, item))
+    for item, n in seen.values():
+        if n > 1:
+            item["subtitle"] = plain(f"{item.get('subtitle', '-')} · {n} times", 200)
+    return out
+
+
 def view(root: Path) -> dict:
     now = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     out: dict = {"schema": "orch.addon-view/1", "generated_at": now, "blocks": []}
@@ -249,9 +282,9 @@ def view(root: Path) -> dict:
         out["notice"] = "Connected. Send messages and files to other workspaces."
         out["notice_tone"] = "good"  # the page shows the pill instead of a banner for this one
         out["header"] = {"status": {"label": "Connected", "tone": "good"}}
-    rows: list[tuple[str, dict]] = []
+    rows: list[tuple[str, dict, tuple]] = []
 
-    updates: list[tuple[str, dict]] = []
+    updates: list[tuple[str, dict, tuple]] = []
 
     def row(
         at: str,
@@ -262,7 +295,8 @@ def view(root: Path) -> dict:
         extra: str,
         to_phones: bool = False,
         auto: bool = False,
-    ) -> tuple[str, dict]:
+        about: str = "",
+    ) -> tuple[str, dict, tuple]:
         if auto and re.fullmatch(r"Tasks:\s*-?", line):
             line = "No tasks yet"  # an empty task list is said in words, never as a bare "Tasks:"
         if arrow == "in":
@@ -273,6 +307,8 @@ def view(root: Path) -> dict:
             title = "Helper → your phone"
         else:
             title = f"you → {who}"
+        if about:
+            line = f"{about}: {line}"
         item: dict = {"title": plain(title, 200)}
         if type_ == "file":
             item["subtitle"] = _stamp(at) or "-"
@@ -281,7 +317,7 @@ def view(root: Path) -> dict:
             item["subtitle"] = plain(" · ".join(x for x in (_stamp(at), line) if x), 200)
             if type_ != "text":
                 item["chips"] = [{"label": KINDS[type_]}]
-        return at, item
+        return at, item, (title, arrow, type_, line, extra)
 
     for m in _received(root):
         line, extra = preview(m["type"], m.get("body"))
@@ -311,10 +347,13 @@ def view(root: Path) -> dict:
                 str(e.get("extra") or ""),
                 e["to"] == "phones",
                 auto,
+                _about(root, e.get("ticket"), e.get("about")),
             )
         )
     rows.sort(key=lambda r: r[0], reverse=True)
     updates.sort(key=lambda r: r[0], reverse=True)
+    rows = fold(rows)
+    updates = [(at, it) for at, it, _ in updates]
     shown = [r for _, r in rows[:20]]
     if updates:  # one quiet row at the end: the automatic notes stay behind a click
         shown.append(

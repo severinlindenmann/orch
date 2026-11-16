@@ -78,3 +78,10 @@ Save without starting shows "Saving…" on the button at once and then opens the
 ### new.html
 
 - Under the files: "＋ Make it an epic with several tickets". Each click adds a "Ticket N" box with its own text, files and Remove; the button then reads "＋ Add another ticket" and a line says the ticket becomes an epic. On Start the epic is made first, then one ticket inside it per box; one helper run goes through them in order. The epic page lists them under "Tickets in this epic"; the board card says "Epic · N of M done"; a ticket inside says "Part of the epic …".
+
+## Revised after the owner's answer (16 Nov, ORCH-62)
+
+### list.html
+
+- Every ticket sits in the group of its own status; a ticket that only waits for another one has its own group "Waiting for another ticket" with "Waits for ORCH-12" under the title.
+- Steps read "3/4" with a bar, on one line. No Status and no Owner column (the group says the status); a chip only for an Idle or Stuck helper, with "Nothing running for 18 min".
