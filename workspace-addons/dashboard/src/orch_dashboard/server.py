@@ -931,6 +931,9 @@ class Handler(BaseHTTPRequestHandler):
                 "delivered": dlv if type(dlv) is int and dlv > 0 else 0,
                 "state": st[:20] if isinstance(st, str) else None,
             }
+        if body.get("op") == "ticket.new" and isinstance(extra, dict) and isinstance(extra.get("id"), str):
+            # the new ticket's id: the New ticket window opens it by id, never by guessing from the title
+            state["created"] = {"id": extra["id"][:40]}
         if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
             att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
             state["attached"] = {
