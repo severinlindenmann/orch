@@ -122,15 +122,73 @@ function linkRow(t, link, removable) {
 }
 // add-ons that are on, have a refresh act and own a link on this ticket
 const refreshers = t => addons().filter(a => array(a.acts).includes('refresh') && webLinks(t).some(l => l.view.addon === a.name));
+// ---- References as the master dense list (.ref-list, one 32 px row per link): tool mark, key + title, state.
+const REF_ICONS = ['github', 'gitlab', 'jira'];
+const REF_DONE = ['done', 'closed', 'merged'], REF_ACTIVE = ['in progress', 'in review', 'review', 'active'];
+const sentence = word => { const w = oneLine(word, 40); return w ? w.charAt(0).toUpperCase() + w.slice(1) : ''; };
+// "#812" from an issue or pull request address, "BILL-207" from a Jira address, else nothing
+function refKey(url) {
+  try {
+    const path = new URL(url).pathname;
+    const n = /\/(?:issues|pull|pulls|merge_requests)\/(\d+)/.exec(path), j = /\/browse\/([A-Za-z][A-Za-z0-9]*-\d+)/.exec(path);
+    return n ? '#' + n[1] : j ? j[1] : '';
+  } catch (_) { return ''; }
+}
+// 0 issue, 1 pull request or Jira issue, 2 ticket, 3 anything else (plain links, files, results)
+function refGroup(link) {
+  if (link.kind === 'ticket') return 2;
+  if (!link.view || typeof link.url !== 'string') return 3;
+  const path = (() => { try { return new URL(link.url).pathname; } catch (_) { return ''; } })();
+  if (/\/(?:pull|pulls|merge_requests)\/\d+/.test(path)) return 1;
+  if (/\/browse\/[A-Za-z][A-Za-z0-9]*-\d+/.test(path)) return 1;  // a Jira issue sits with the pull requests, in the order added
+  return refKey(link.url) ? 0 : 3;
+}
+const refTone = word => REF_DONE.includes(String(word).toLowerCase()) ? 'done' : REF_ACTIVE.includes(String(word).toLowerCase()) ? 'active' : String(word).toLowerCase() === 'not found' ? 'bad' : '';
+function refMark(link, v) {
+  const name = link.kind === 'ticket' ? 'ticket' : REF_ICONS.includes(v?.icon) ? v.icon : 'link';
+  return iconEl(name);
+}
+function refModel(t, link) {
+  const v = link.view || {}, other = link.kind === 'ticket' ? ticketOf(link.ticket) : null;
+  let tool, key = '', title, state = '';
+  if (link.kind === 'ticket') {
+    tool = 'Ticket'; key = clean(other?.key || ''); title = clean(other?.title) || 'Ticket unavailable'; state = other ? statusWord(other) : 'Unavailable';
+  } else if (link.kind === 'artifact' || link.kind === 'file') {
+    tool = link.kind === 'artifact' ? 'Result' : 'File'; title = link.name || (link.path + (link.line ? ':' + link.line : ''));
+  } else {
+    key = refKey(link.url); title = oneLine(clean(v.title), 200) || oneLine(link.url, 200); state = sentence(v.status);
+    const group = refGroup(link), site = clean(v.label || v.type || 'Link');
+    tool = group === 1 ? site + ' pull request' : group === 0 && /^(GitHub|GitLab)$/.test(site) ? site + ' issue' : site;
+  }
+  const text = [tool, [key, title].filter(Boolean).join(' '), state].filter(Boolean).join(' · ');
+  return {tool, key, title, state, text, tone: refTone(state)};
+}
+function refRow(t, link, sep) {
+  const m = refModel(t, link), n = link.n || array(t.refs).indexOf(link) + 1;
+  const attrs = {className:'ref-row', title:m.text, 'aria-label':m.text};
+  let tag = 'span';
+  if (link.kind === 'ticket') { const other = ticketOf(link.ticket); if (other) { tag = 'a'; attrs.href = href(other.id); } }
+  else if (link.kind === 'artifact' || link.kind === 'file') {
+    if (!snapshot && !link.local) { tag = 'button'; Object.assign(attrs, {type:'button', 'data-action':link.kind === 'artifact' ? 'file-preview' : 'ref-preview', 'data-ticket':link.kind === 'artifact' ? link.ticket : t.id, 'data-kind':'artifacts', 'data-name':link.name, 'data-n':n}); }
+  } else { const url = safeHref(link.url); if (url) Object.assign(attrs, {href:url, target:'_blank', rel:'noopener noreferrer'}), tag = 'a'; }
+  const row = h(tag, attrs, refMark(link, link.view), m.key ? h('span', {className:'ref-key'}, m.key) : null, h('span', {className:'ref-text'}, m.title), h('span', {className:'ref-state' + (m.tone ? ' ' + m.tone : '')}, m.state));
+  const x = snapshot ? null : h('button', {type:'button', className:'ref-x', title:'Remove this reference', 'aria-label':'Remove reference ' + m.title, 'data-action':'link-remove', 'data-ticket':t.id, 'data-n':n}, iconEl('x'));
+  return h('li', {className:sep ? 'ref-sep' : '', 'data-key':'ref-' + n}, row, x);
+}
+function refRows(t) {
+  const rows = referenceRows(t).map(l => [refGroup(l), l]).sort((a, b) => a[0] - b[0]);
+  return rows.map(([g, l], i) => refRow(t, l, g === 3 && i > 0 && rows[0][0] < 3 && rows[i - 1][0] < 3));
+}
 function linksCard(t) {
   const rows = referenceRows(t);
   if (snapshot && !rows.length) return null;
   const refresh = snapshot ? [] : refreshers(t);
   return h('section', {className:'links-card', 'data-key':'links-card'},
-    h('div', {className:'card-h'}, h('h2', {className:'grow'}, 'References'), rows.length ? h('span', {className:'meta'}, String(rows.length)) : null,
-      refresh.map(a => h('button', {type:'button', className:'btn ghost xs', title:'Update titles and status (' + addonLabel(a) + ')', 'data-action':'link-refresh', 'data-addon':a.name, 'data-ticket':t.id, 'data-key':'link-refresh-' + a.name}, iconEl('refresh'), refresh.length > 1 ? addonLabel(a) : 'Refresh'))),
-    h('div', {className:'links'}, rows.map(l => linkRow(t, l, true)),
-      snapshot ? null : h('div', {className:'add-link', 'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'link-add', 'data-ticket':t.id}, '＋ Add reference'))));
+    h('h2', {className:'ref-head'}, 'References', rows.length ? h('span', {}, '· ' + rows.length) : null,
+      refresh.map(a => h('button', {type:'button', className:'btn ghost xs', title:'Update titles and state (' + addonLabel(a) + ')', 'data-action':'link-refresh', 'data-addon':a.name, 'data-ticket':t.id, 'data-key':'link-refresh-' + a.name}, iconEl('refresh'), refresh.length > 1 ? addonLabel(a) : 'Refresh'))),
+    rows.length ? null : h('p', {className:'meta'}, 'No links yet.'),
+    h('ul', {className:'ref-list'}, refRows(t),
+      snapshot ? null : h('li', {'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'ref-row ref-add', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), h('span', {className:'ref-text'}, 'Add reference')))));
 }
 function referenceRow(t, ref, removable) {
   const other = ticketOf(ref.ticket), n = ref.n || array(t.refs).indexOf(ref) + 1;
@@ -172,7 +230,7 @@ async function startLinkAdd(control) {
     input.setAttribute('aria-label', label);
     const bar = el('div', 'ref-bar'); bar.append(input); body.append(bar);
     if (label === 'Ticket') {
-      const results = el('div', 'ref-list'), count = el('span', 'meta'); body.append(results);
+      const results = el('div', 'ref-picks'), count = el('span', 'meta'); body.append(results);
       const pick = (x, row) => { target = x.id; results.querySelectorAll('.ref-pick').forEach(b => b.setAttribute('aria-pressed', String(b === row))); addBtn.disabled = false; };
       const search = () => {
         const found = tickets().filter(x => x.id !== t.id && ((x.key || '') + ' ' + x.title).toLowerCase().includes(input.value.toLowerCase()));
@@ -1044,8 +1102,9 @@ function ticketQuestion(t, q, next = false) {
 // A step is named by its title only; the ticket key is a quiet line under Properties.
 const partName = p => clean(p.title);
 function ticketAddStep(t) {
-  const {d, actions} = dialog('What is this step about?');
-  const input = h('input', {className:'input', 'aria-label':'What is this step about?', maxlength:200});
+  const ask = t.epic ? 'What needs doing in this ticket?' : 'What is this step about?';  // an epic holds tickets (ORCH-14)
+  const {d, actions} = dialog(ask);
+  const input = h('input', {className:'input', 'aria-label':ask, maxlength:200});
   const send = ticketButton('Add', 'primary', async () => {
     const title = input.value.trim(); if (!title || send.disabled) return;
     send.disabled = true;
@@ -1056,10 +1115,10 @@ function ticketAddStep(t) {
   actions.append(send); d.append(input, actions); window.orch.open(d); input.focus();
 }
 function ticketParts(t, children) {
-  const add = snapshot ? null : ticketButton('+ Add a step', 'ghost add-row', () => ticketAddStep(t));
+  const add = snapshot ? null : ticketButton(t.epic ? '+ Add a ticket' : '+ Add a step', 'ghost add-row', () => ticketAddStep(t));
   // No steps yet: only the add button, so a top-level ticket can get its first step (a step itself gets none).
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
-  return card('parts', 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  return card('parts', t.epic ? 'Tickets in this epic' : 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
@@ -1289,7 +1348,6 @@ function ticketProperties(t, parent) {
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
     linksCard(t),
-    h('p', {className:'meta ticket-meta-line'}, typeof t.key === 'string' && t.key ? 'Ticket ' + t.key : ''),
     copyLine(t));
 }
 
@@ -1376,7 +1434,7 @@ function detail(t) {
     addonRows(t), ticketLinks(t),
     answered.length ? h('section', {className:'card answered', 'data-key':'answered'}, h('h2', {}, 'Earlier answers'), answered) : null];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
-    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, 'Step of ' + partName(parent)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.epic ? 'Part of the epic ' : 'Step of ') + partName(parent)) : null,
     ticketStrip(t, run, fresh, planQ, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))), selected),
@@ -1690,6 +1748,48 @@ async function fileEmbedIdea(req) {
   } finally { embedIdeaBusy = false; }
 }
 addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });
+
+// "Looks good, all" on the Factory results card: the SAME Looks good as on each ticket page (the status move with the
+// recorded review tip), for the listed tickets that still wait in review. One toast for the batch, with one Undo.
+const EMBED_BATCH_MAX = 10;
+function embedLooksGoodRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.looksgood') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (!Array.isArray(data.tickets) || !data.tickets.length || data.tickets.length > EMBED_BATCH_MAX) return null;
+  if (!data.tickets.every(x => typeof x === 'string' && EMBED_TICKET.test(x))) return null;
+  return {...shown, id:data.id, tickets:[...new Set(data.tickets)]};
+}
+let embedLooksGoodBusy = false;  // one batch at a time
+async function looksGoodAll(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (embedLooksGoodBusy) return;
+  embedLooksGoodBusy = true;
+  try {
+    try {
+      const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+      if (res.ok) { mutation++; accept(await res.json()); }
+    } catch (_) { /* Fall back to what the page already has. */ }
+    const waiting = req.tickets.map(ticketOf).filter(t => t && t.status === 'review');
+    if (!waiting.length) return reply({type:'orch.looksgood.failed', error:'Nothing here is waiting for your Looks good any more.'});
+    await Promise.all(waiting.map(t => {
+      const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
+      return moveTicket(t.id, 'done', false, {quiet:true, ...(tip ? {review_tip:tip} : {})});
+    }));
+    const moved = waiting.filter(t => ticketOf(t.id)?.status === 'done');
+    if (!moved.length) return reply({type:'orch.looksgood.failed', error:'Looks good could not be saved. Try again.'});
+    const toast = window.orch.toast('Looks good on ' + (moved.length === 1 ? '1 result' : moved.length + ' results'), 'ok');
+    if (toast?.querySelector) {
+      const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
+      undo.addEventListener('click', () => { toast.remove(); for (const t of moved) moveTicket(t.id, 'review', true, {quiet:true}); });
+      toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
+    }
+    if (moved.length < waiting.length) window.orch.toast((waiting.length - moved.length) + ' could not be saved. Try those again from their tickets.', 'error');
+    reply({type:'orch.looksgood.done', moved:moved.length});
+  } finally { embedLooksGoodBusy = false; }
+}
+addEventListener('message', e => { const req = embedLooksGoodRequest(e); if (req) looksGoodAll(req); });
 
 // Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
 // target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this

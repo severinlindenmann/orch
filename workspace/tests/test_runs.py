@@ -640,3 +640,21 @@ def test_status_of_several_tickets_is_one_call_with_the_same_answers(proj, new_t
     got = json.loads(out)["runs"]
     assert got[a] == single[a] and got[b] == single[b]
     assert "error" in got["t_nosuchone"]  # one unreadable ticket does not spoil the others
+
+
+def test_epic_prompt_lists_its_open_tickets_in_order(proj):
+    # ORCH-14: one run on the epic goes through the tickets inside it, in the order they were made
+    epic = tickets.create(proj, "Dashboard fixes", "human:me", epic=True)
+    one = tickets.create(proj, "Fix the header", "human:me", epic["id"])
+    two = tickets.create(proj, "Larger buttons", "human:me", epic["id"])
+    prompt = runs.fresh_prompt(epic, [], proj)
+    assert "This ticket is an epic" in prompt and "one task per ticket" in prompt
+    assert prompt.index(f"[{one['id']}]: Fix the header") < prompt.index(f"[{two['id']}]: Larger buttons")
+    plain = tickets.create(proj, "Small fix", "human:me")
+    assert "epic" not in runs.fresh_prompt(plain, [], proj)
+    assert "epic" not in runs.fresh_prompt(one, [], proj)
+
+
+def test_epic_prompt_with_every_ticket_finished_says_finish_the_epic(proj):
+    epic = tickets.create(proj, "Dashboard fixes", "human:me", epic=True)
+    assert "none is left open" in runs.fresh_prompt(epic, [], proj)

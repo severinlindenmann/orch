@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -1244,6 +1245,30 @@ def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
             build_argv("copies.set", bad)
 
 
+def test_live_set_builds_the_helpers_at_once_argv_and_refuses_odd_values():
+    """ORCH-16: Settings > Helper > Helpers at once: null = no limit, 2 to 10 a number."""
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    assert build_argv("live.set", {"max": None})[:4] == ["config", "set", "workspace.live_max", "none"]
+    for n in (2, 5, 10):
+        assert build_argv("live.set", {"max": n})[:4] == ["config", "set", "workspace.live_max", str(n)]
+    for bad in ({"max": 1}, {"max": 11}, {"max": "3"}, {"max": True}, {}, {"max": 3, "extra": 1}):
+        with pytest.raises(BadRequest):
+            build_argv("live.set", bad)
+
+
+def test_helpers_at_once_survives_load_settings(tmp_path):
+    from orch import config
+
+    from orch_dashboard.data import load_settings
+
+    ws = tmp_path / "ws"
+    (ws / ".orch").mkdir(parents=True)
+    assert load_settings(ws, None)["live_max"] is None  # no limit by default
+    config.set_live_max(ws, "3")
+    assert load_settings(ws, None)["live_max"] == 3
+
+
 def test_check_wont_do_argv():
     common = ["--by", actions.actor(), "--json"]
     args = {"ticket": "t_abcdef", "check": "c1"}
@@ -1300,6 +1325,15 @@ def test_ticket_new_plan_first(value):
 def test_ticket_new_plan_first_requires_boolean(value):
     with pytest.raises(actions.BadRequest):
         actions._ticket_new({"title": "Plan", "plan_first": value})
+
+
+@pytest.mark.parametrize("value", [True, False, None])
+def test_ticket_new_epic(value):
+    # ORCH-14: New ticket makes an epic; the tickets inside it come as ticket.new with parent
+    _, flags, _ = actions._ticket_new({"title": "Dashboard fixes", "epic": value})
+    assert ("--epic" in flags) is (value is True)
+    with pytest.raises(actions.BadRequest):
+        actions._ticket_new({"title": "Dashboard fixes", "epic": "true"})
 
 
 def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
@@ -1402,8 +1436,6 @@ def test_review_answer_is_checked(act_server, act_orch, args):
 
 def test_review_answer_has_no_proof_and_no_by():
     q = {"ticket": "t_abcdef", "key": "q3", "verdict": "ok", "digest": D64}
-    assert actions.proof_for("review.answer", q) is None
-    assert actions.proof_for("review.answer", {**q, "key": "review"}) is None
     argv = actions.build_argv("review.answer", q)
     assert "--by" not in argv and "--proof-stdin" not in argv and argv[-1] == "--json"
     assert argv[:4] == ["review", "answer", "t_abcdef", "q3"] and argv[argv.index("--via") + 1] == "dashboard"
@@ -1411,7 +1443,7 @@ def test_review_answer_has_no_proof_and_no_by():
 
 
 def test_review_answer_needs_the_page_session_but_no_proof(ws, monkeypatch):
-    from orch.pageproof import SELF
+    from orch.pagesession import SELF
 
     seen = {}
 
@@ -1421,14 +1453,14 @@ def test_review_answer_needs_the_page_session_but_no_proof(ws, monkeypatch):
     monkeypatch.setattr(actions, "_run", lambda argv, **k: seen.update(argv=argv) or R())
     args = {"ticket": "t_abcdef", "key": "review", "verdict": "ok", "digest": D64}
     with pytest.raises(actions.NeedsPerson):  # watch-only: no page session, nothing runs
-        actions.run_op(ws, SELF, "review.answer", args, mint=None)
+        actions.run_op(ws, SELF, "review.answer", args)
     assert seen == {}
-    code, _, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: pytest.fail("no proof"))
+    code, _, _ = actions.run_op(ws, SELF, "review.answer", args, session=True)
     assert code == 200 and "review" in seen["argv"] and "--by" not in seen["argv"]
 
 
 def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):
-    from orch.pageproof import SELF
+    from orch.pagesession import SELF
 
     for code_in, code_out in (("changed", "changed"), ("needs_person", "needs_person"), ("weird", "refused")):
 
@@ -1439,7 +1471,7 @@ def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):
 
         monkeypatch.setattr(actions, "_run", lambda argv, **k: R())
         args = {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64}
-        status, text, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: "hp1.x")
+        status, text, _ = actions.run_op(ws, SELF, "review.answer", args, session=True)
         assert status == 422
         assert json.loads(text) == {"ok": False, "error": {"code": code_out, "message": "It changed."}}
 
@@ -1461,7 +1493,6 @@ def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():
     argv = actions.build_argv("workspace.set", {"field": "name", "text": " Newsletter "})
     assert argv[:3] == ["config", "set", "workspace.name"] and argv[-2:] == ["--", "Newsletter"]
     assert actions.build_argv("workspace.set", {"field": "description", "text": ""})[-2:] == ["--", ""]
-    assert actions.proof_for("workspace.set", {"field": "name", "text": "x"}) is None
     assert actions.needs_session("workspace.set") and actions.needs_session(
         "look.profile"
     )  # a login, no proof
@@ -1472,6 +1503,36 @@ def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():
         {"field": "description", "text": "x" * 281},
         {"field": "name", "text": 5},
         {"field": "name", "text": "x", "extra": 1},
+        {"field": "tags", "text": "Bad Tag"},
+        {"field": "tags", "text": ["a"]},
     ):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("workspace.set", bad)
+    argv = actions.build_argv("workspace.set", {"field": "tags", "text": "web,shop"})
+    assert argv[:3] == ["config", "set", "workspace.tags"] and argv[-2:] == ["--", "web,shop"]
+
+
+def test_ticket_new_reply_names_the_new_ticket(ws, act_orch):
+    """The New ticket window opens the new ticket by the id in the reply. Matching by title failed when the typed
+    text was cut to 80 characters right after a space: orch keeps the title without it (ORCH-8)."""
+    from orch_dashboard.server import make_server
+
+    act_orch.write_text(
+        act_orch.read_text().replace(
+            'print(json.dumps({"ok": True}))',
+            'print(json.dumps({"id": "t_new123"} if a[:2] == ["ticket", "new"] else {"ok": True}))',
+        )
+    )
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        code, text, _ = post(base, {"op": "ticket.new", "args": {"title": "Work"}})
+        assert code == 200, text
+        assert json.loads(text)["created"] == {"id": "t_new123"}
+        code, text, _ = post(base, {"op": "log", "args": {"ticket": "t_abcdef", "text": "x"}})
+        assert code == 200, text
+        assert "created" not in json.loads(text)
+    finally:
+        srv.shutdown()
+        srv.server_close()

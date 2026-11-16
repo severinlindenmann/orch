@@ -10,9 +10,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from test_humanproof import READERS, _loose_setup, tws  # noqa: F401
+from conftest import key_file
+from test_home import READERS, _loose_setup, tws  # noqa: F401
 
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch import winacl
 from orch.errors import Refused
 
@@ -222,26 +223,26 @@ def test_ensure_private_refuses_when_tightening_fails(win, tmp_path):
         winacl.ensure_private(tmp_path)
 
 
-# ---- humanproof wiring (POSIX modes stay; the Windows check is added)
+# ---- orch_home wiring (POSIX modes stay; the Windows check is added)
 
 
-def test_humanproof_sets_and_checks_acl_on_every_file(win, tws):
+def test_home_sets_and_checks_acl_on_every_file(win, tws):
     win["dacl"] = FILE_OK
-    key = hp.human_key(tws)
+    key = key_file(tws)
     assert len(key) == 32
     sets = [c[1] for c in win["calls"] if c[0] == "write"]
-    assert any(".human.key" in x and x.endswith(".tmp") for x in sets)
+    assert any(".test.key" in x and x.endswith(".tmp") for x in sets)
     assert any(x.endswith("keys") for x in sets)  # the key folders too
     n = len(win["calls"])
-    assert hp.human_key(tws, create=False) == key
+    assert key_file(tws, create=False) == key
     assert len(win["calls"]) > n  # read-back checks the rights again
 
 
-def test_humanproof_tightens_an_old_loose_folder_of_this_user(win, tws):
-    key = hp.human_key(tws)
+def test_home_tightens_an_old_loose_folder_of_this_user(win, tws):
+    key = key_file(tws)
     n = len(win["calls"])
     win["loose"].add("keys")  # made before this check existed: inherited, Administrators on it
-    assert hp.human_key(tws, create=False) == key  # not watch-only: tightened, verified, same key
+    assert key_file(tws, create=False) == key  # not watch-only: tightened, verified, same key
     assert any(c[0] == "write" and c[1].endswith("keys") and c[2] for c in win["calls"][n:])
 
 
@@ -254,12 +255,13 @@ def test_loose_file_on_windows_is_never_tightened_it_resets_protection(win, tws,
         READERS[name](tws)
     # never "tightened and trusted": no ACL write ever hits that file itself
     assert not [c for c in win["calls"][n:] if c[0] == "write" and Path(c[1]).name == name]
-    assert hp.human_key(tws) != key  # human.key rotated
-    assert not (d / "delivered.json").exists()
+    if name == "test.key":
+        assert key_file(tws) != key  # rotated
+    assert "reset" in (home / "protection-reset.log").read_text()
 
 
 def test_file_check_hook_is_registered_and_fails_closed(win, tmp_path):
-    assert winacl.file_check in hp.FILE_CHECKS
+    assert winacl.file_check in orch_home.FILE_CHECKS
     assert winacl.file_check(tmp_path / "k") is None
     win["dacl"] = BAD["admins"]
     assert winacl.file_check(tmp_path / "k") == "acl"
@@ -276,34 +278,34 @@ def test_file_check_is_a_no_op_on_posix(tmp_path):
     assert winacl.file_check(tmp_path) is None
 
 
-def test_humanproof_refuses_a_loose_key_of_another_owner(win, tws):
-    hp.human_key(tws)
+def test_home_refuses_a_loose_key_of_another_owner(win, tws):
+    key_file(tws)
     win["dacl"] = BAD["admins"]
     win["owner"] = OTHER
     with pytest.raises(Refused, match="another account"):
-        hp.human_key(tws, create=False)
+        key_file(tws, create=False)
 
 
-def test_humanproof_refuses_junction_in_home_path(win, tws, monkeypatch):
-    home = hp.guarded_home(tws)
+def test_home_refuses_junction_in_home_path(win, tws, monkeypatch):
+    home = orch_home.guarded_home(tws)
     monkeypatch.setattr(winacl, "_attrs", lambda p: 0x400 if p == home else 0)
     with pytest.raises(Refused, match="link or junction"):
-        hp.human_key(tws)
+        key_file(tws)
 
 
 # ---------------------------------------------------------------- Opus B fixes
 
 
 def test_unknown_is_refused_without_reset_protection(win, tws):
-    key = hp.human_key(tws)
+    key = key_file(tws)
     n = len(win["calls"])
     win["err"] = winacl._cant("Windows would not tell its rights")  # an API error on the file check
     with pytest.raises(Refused) as e:
-        hp.human_key(tws, create=False)
-    assert not isinstance(e.value, hp.LooseFile)
+        key_file(tws, create=False)
+    assert not isinstance(e.value, orch_home.LooseFile)
     win["err"] = None
-    assert hp.human_key(tws, create=False) == key  # same key: nothing was reset
-    assert not [c for c in win["calls"][n:] if c[0] == "write" and c[1].endswith("human.key")]
+    assert key_file(tws, create=False) == key  # same key: nothing was reset
+    assert not [c for c in win["calls"][n:] if c[0] == "write" and c[1].endswith("test.key")]
 
 
 def test_only_link_type_reparse_tags_are_refused(win, tmp_path, monkeypatch):
@@ -377,51 +379,51 @@ def test_profile_lookup_failure_is_refused(monkeypatch):
 
 
 def _read_fails_once(monkeypatch):
-    real, n = hp.saferead.read_private, []
+    real, n = orch_home.saferead.read_private, []
 
     def once(*a):
-        if not n and str(a[1]).endswith("human.key"):  # the human key only, not the binding
+        if not n and str(a[1]).endswith("test.key"):  # the human key only, not the binding
             n.append(1)
             return None  # a transient read error, once
         return real(*a)
 
-    monkeypatch.setattr(hp.saferead, "read_private", once)
+    monkeypatch.setattr(orch_home.saferead, "read_private", once)
 
 
 def test_read_none_with_a_clean_file_on_windows_is_unknown_not_a_reset(win, tws, monkeypatch):
-    key = hp.human_key(tws)
+    key = key_file(tws)
     _read_fails_once(monkeypatch)
     with pytest.raises(winacl.Unknown):
-        hp.human_key(tws, create=False)
-    assert hp.human_key(tws, create=False) == key
+        key_file(tws, create=False)
+    assert key_file(tws, create=False) == key
 
 
 def test_read_none_with_a_real_finding_still_resets(win, tws, monkeypatch):
-    key = hp.human_key(tws)
-    d = hp.key_dir(tws, create=False)
-    os.link(d / "human.key", d / "second-name")  # a second name: a finding, not a transient error
-    assert hp.human_key(tws) != key  # read_private is None for it: reset_protection rotates the key
+    key = key_file(tws)
+    d = orch_home.key_dir(tws, create=False)
+    os.link(d / "test.key", d / "second-name")  # a second name: a finding, not a transient error
+    assert key_file(tws) != key  # read_private is None for it: reset_protection rotates the key
 
 
 def test_a_loose_or_unreadable_binding_refuses_without_a_reset(tws, monkeypatch):
-    hp.human_key(tws)
-    d = hp.key_dir(tws, create=False)
+    key_file(tws)
+    d = orch_home.key_dir(tws, create=False)
     before = sorted(p.name for p in d.iterdir())
     with monkeypatch.context() as m:
-        m.setattr(hp.saferead, "read_private", lambda *a: None)  # unreadable
+        m.setattr(orch_home.saferead, "read_private", lambda *a: None)  # unreadable
         with pytest.raises(Refused, match="copied or moved"):
-            hp.human_key(tws, create=False)
+            key_file(tws, create=False)
     assert sorted(p.name for p in d.iterdir()) == before  # nothing written, nothing reset
     os.chmod(d / "binding.json", 0o644)  # a loose binding file
     with pytest.raises(Refused, match="copied or moved"):
-        hp.human_key(tws, create=False)
+        key_file(tws, create=False)
     assert sorted(p.name for p in d.iterdir()) == before
 
 
 def test_posix_read_none_is_still_a_loose_file(tws, monkeypatch):
-    key = hp.human_key(tws)
+    key = key_file(tws)
     _read_fails_once(monkeypatch)
-    assert hp.human_key(tws) != key  # POSIX behaviour unchanged: reset
+    assert key_file(tws) != key  # POSIX behaviour unchanged: reset
 
 
 # ------------------------------------------------- scope guard (I11b: rights only inside the home)
@@ -521,7 +523,7 @@ def test_scope_never_the_current_folder_or_above(win, users, monkeypatch):
         winacl.set_private(sub, True)
     assert _writes(win) == []
     # The guarded home itself may contain the current folder (ORCH_HOME=~/.orch-test, a workspace under it,
-    # the shell standing in that workspace): it is validated by humanproof.guarded_home, so it is allowed.
+    # the shell standing in that workspace): it is validated by orch_home.guarded_home, so it is allowed.
     winacl.allow_home(users["home"])
     winacl.set_private(users["home"], True)
     assert [c[1] for c in _writes(win)] == [str(users["home"])]
@@ -533,8 +535,8 @@ def test_public_like_cwd_stays_untouched_through_keys(win, tws, tmp_path, monkey
     shared = tmp_path / "Public" / "i11b"
     shared.mkdir(parents=True)
     monkeypatch.chdir(shared)
-    hp.human_key(tws)
-    home = os.path.realpath(hp.guarded_home(tws))
+    key_file(tws)
+    home = os.path.realpath(orch_home.guarded_home(tws))
     writes = [os.path.realpath(c[1]) for c in _writes(win)]
     assert writes, "the home must have been set private"
     assert all(w == home or w.startswith(home + os.sep) for w in writes), writes
@@ -561,8 +563,8 @@ def test_install_record_is_written_with_no_rights_change_outside_any_home(win, t
     monkeypatch.setattr(winacl, "_write_dacl", lambda *a: pytest.fail("a DACL write outside the home"))
     env = tmp_path / "tools" / "orch"
     env.mkdir(parents=True)
-    hp.write_install_record(env, "dev")
-    assert (env / "orch-install.json").read_text() == hp.install_record_text("dev", env)
+    orch_home.write_install_record(env, "dev")
+    assert (env / "orch-install.json").read_text() == orch_home.install_record_text("dev", env)
     assert not [p for p in env.iterdir() if p.name.endswith(".tmp")]
     assert _writes(win) == []
 
@@ -714,14 +716,14 @@ def test_os_error_448_in_check_and_ensure_private_is_a_plain_refusal(win, tmp_pa
 def test_guarded_home_raises_home_refused_not_a_winacl_refusal(tws, tmp_path, monkeypatch):
     # independent of the install kind and of where the test runs (native Windows too): a normal install with
     # the default home and a home that passes the pairing check, so only allow_home's refusal is under test
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
-    monkeypatch.setattr(hp, "home_ok", lambda *a: True)
+    monkeypatch.setattr(orch_home, "install_kind", lambda: "normal")
+    monkeypatch.setattr(orch_home, "home_ok", lambda *a: True)
     monkeypatch.delenv("ORCH_HOME", raising=False)
 
     def refuse(path):
         raise winacl._no("orch would change rights outside its own folder: it is a drive root")
 
     monkeypatch.setattr(winacl, "allow_home", refuse)
-    with pytest.raises(hp.HomeRefused) as e:
-        hp.guarded_home(tws)
-    assert str(e.value) == hp.MSG_HOME_PLACE
+    with pytest.raises(orch_home.HomeRefused) as e:
+        orch_home.guarded_home(tws)
+    assert str(e.value) == orch_home.MSG_HOME_PLACE

@@ -89,7 +89,7 @@ def forget_static() -> None:
 
 def _argv0(orch_bin):
     try:
-        from orch.pageproof import argv0
+        from orch.pagesession import argv0
     except ImportError:
         return [orch_bin]
     return argv0(orch_bin)
@@ -97,7 +97,7 @@ def _argv0(orch_bin):
 
 def _child_env(env, orch_bin):
     try:
-        from orch.pageproof import child_env
+        from orch.pagesession import child_env
     except ImportError:
         return {**env, "ORCH_BIN": orch_bin}
     return child_env(env, orch_bin)
@@ -250,7 +250,7 @@ def shown(root: Path, t):
 
 def _plain(text, cap: int = 120) -> str:
     """One untrusted fragment (a path name an agent chose) as one plain line, like the core's
-    humanproof.part: control and format characters and line breaks become spaces, runs of space collapse,
+    the core's card text: control and format characters and line breaks become spaces, runs of space collapse,
     double quotes become single ones (it cannot fake the quotes around it), at most `cap` characters."""
     import unicodedata
 
@@ -577,7 +577,14 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },
                     "ticket_view": tv,
-                    "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
+                    # live_session: this add-on's page shows a ticket's live session; the ticket's
+                    # "Watch live" button looks for it, so it must reach the page (ORCH-15)
+                    "page": pg
+                    and {
+                        "path": pg["path"],
+                        "label": str(pg.get("label") or "")[:40],
+                        **({"live_session": True} if pg.get("live_session") is True else {}),
+                    },
                     "ticket_fields": tf,
                     "acts": acts,
                     "link_kinds": kinds,
@@ -830,6 +837,14 @@ def copies_disk_forget(root: Path) -> None:
         _DISK.pop(str(root), None)
 
 
+def _ws_tags(root: Path) -> list[str]:
+    """The workspace's own tags; [] with an older core that has none."""
+    from orch import config
+
+    get = getattr(config, "workspace_tags", None)
+    return list(get(root))[:4] if get else []
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     agents, rows = (
@@ -874,6 +889,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copy_setup,
         diag_enabled,
         focus_session_typing,
+        live_max,
         workspace_description,
         workspace_name,
     )
@@ -891,9 +907,11 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "agents_may_finish": agents_may_finish(root),
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
+        "live_max": live_max(root),  # Settings > Helper > Helpers at once: None = no limit (the default)
         "copy_setup": copy_setup(root) or "",
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
+        "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
@@ -1144,12 +1162,20 @@ def load_state(
         "mobile_mode": mobile_mode,  # the live page only, never a snapshot
         "look": look_,  # the live page only, never a snapshot
         "settings": settings,  # only the live local server: it holds the folder path
+        # Home: the note after an automatic update (new version and what changed, or why it failed); live page only
+        "auto_update_note": _auto_update_note() if with_settings else None,
     }
     add_warmth(root, tickets, state["runs"])
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
     ).hexdigest()[:12]
     return state
+
+
+def _auto_update_note() -> dict | None:
+    from . import update
+
+    return update.auto_note()
 
 
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
@@ -1221,18 +1247,62 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
 
 
 # Workspace DM reads use the same CLI boundary as Chat History.
+# The open Chat page asks every 2 s. A poll must not start an `orch` process each time (B1): the answer is kept while
+# nothing a message arrives in has changed (the inbox, the stored threads) and for CHAT_TTL seconds at most.
+CHAT_TTL = 30.0
+_CHAT: dict[tuple, tuple[float, tuple, object]] = {}
+_CHAT_LOCK = threading.Lock()
+
+
+def _chat_fingerprint(root: Path) -> tuple:
+    rows = []
+    for folder in (root / ".orch" / "inbox", root / ".orch" / "chat" / "dm"):
+        try:
+            with os.scandir(folder) as it:
+                for e in it:
+                    if e.name.endswith(".json"):
+                        st = e.stat(follow_symlinks=False)
+                        rows.append((e.path, st.st_mtime_ns, st.st_size))
+        except OSError:
+            pass
+    return tuple(sorted(rows))
+
+
+def _chat_cached(key: tuple, root: Path, build):
+    fp = _chat_fingerprint(root)
+    with _CHAT_LOCK:
+        hit = _CHAT.get(key)
+    if hit and hit[1] == fp and time.monotonic() - hit[0] < CHAT_TTL:
+        return hit[2]
+    data = build()
+    # the fingerprint is taken before the read, so a message that lands meanwhile is picked up by the next poll
+    if data is not None:
+        with _CHAT_LOCK:
+            _CHAT[key] = (time.monotonic(), fp, data)
+            while len(_CHAT) > 64:
+                _CHAT.pop(next(iter(_CHAT)))
+    return data
+
+
 def load_chat_contacts(root: Path, orch_bin: str | None) -> list | None:
-    # `chat sync` imports new workspace texts first and prints the contacts; if that cannot run (busy lock), read as is.
-    data = run_orch(orch_bin, ["chat", "sync", "--json"], root)
-    if not isinstance(data, list):
-        data = run_orch(orch_bin, ["chat", "contacts", "--json"], root)
-    return data if isinstance(data, list) else None
+    def build():
+        # `chat sync` imports new workspace texts first and prints the contacts; if that cannot run (busy lock), read as is.
+        data = run_orch(orch_bin, ["chat", "sync", "--json"], root)
+        if not isinstance(data, list):
+            data = run_orch(orch_bin, ["chat", "contacts", "--json"], root)
+        return data if isinstance(data, list) else None
+
+    return _chat_cached(("contacts", orch_bin, str(root)), root, build)
 
 
 def load_chat_thread(root: Path, orch_bin: str | None, ws: str) -> dict | None:
     if not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
         return None
-    data = run_orch(orch_bin, ["chat", "thread", ws, "--sync", "--json"], root)
-    if not isinstance(data, dict):
-        data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
-    return data if isinstance(data, dict) else None
+
+    def build():
+        data = run_orch(orch_bin, ["chat", "thread", ws, "--sync", "--json"], root)
+        if not isinstance(data, dict):
+            data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
+        return data if isinstance(data, dict) else None
+
+    return _chat_cached(("thread", orch_bin, str(root), ws), root, build)

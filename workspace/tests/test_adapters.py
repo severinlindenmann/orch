@@ -11,7 +11,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import adapters, agentsdata, config, denyrules, reminder_settings
+from orch import adapters, agentsdata, config, reminder_settings
 from orch.errors import Refused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -82,12 +82,11 @@ SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":")
 
 
 def _claude_argvs(root):
-    """The snapshots: the permission flags plus the deny rules for this workspace (slice 1.4)."""
-    rl = denyrules.rules(root) + denyrules.copies_rules(None, str(root), denyrules._account_home())
-    deny = denyrules.merge_flag(DENY, denyrules.tool_patterns(rl))
+    """The snapshots: the permission flags (the adapter's own disallowed-tools list stays)."""
+    deny = DENY
     return (
-        ["claude", "-p", "--session-id", NEW, *ORCH_OK, *SETTINGS, *deny, "--", "Do it"],
-        ["claude", "-p", "--resume", OLD, *ORCH_OK, *SETTINGS, *deny, "--", "Do it"],
+        ["claude", "-p", "--session-id", NEW, *ORCH_OK, *deny, *SETTINGS, "--", "Do it"],
+        ["claude", "-p", "--resume", OLD, *ORCH_OK, *deny, *SETTINGS, "--", "Do it"],
         deny,
     )
 

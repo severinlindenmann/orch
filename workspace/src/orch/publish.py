@@ -196,7 +196,7 @@ def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
             while True:
                 end = min(pos + CHUNK, len(text))
                 line0 = text.count("\n", 0, pos)
-                for f in secretscan.find(text[pos:end], root):
+                for f in secretscan.find(text[pos:end], root, strict=False):
                     hits[(name, f["line"] + line0, f["kind"])] = None
                 if end >= len(text):
                     break
@@ -274,6 +274,8 @@ def share_file(
     replace: str | None = None,
 ) -> dict:
     note = _note(note)
+    if note:  # R5.2: the note leaves inside the file header; the one scanner first, like the file itself
+        secretscan.refuse_if_secret_in(root, {"text": note}, "note")
     key = None
     if replace:
         _file_id(replace)

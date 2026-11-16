@@ -10,8 +10,8 @@ import pytest
 from conftest import seal_append
 from jsonschema import Draft202012Validator, FormatChecker
 
-from orch import cli_record, config, hider, pageproof
-from orch import humanproof as hp
+from orch import cli_record, config, hider, pagelaunch, pagesession
+from orch import home as orch_home
 from orch.errors import Refused
 from orch.record import RecordWriter, record_dir
 
@@ -145,10 +145,10 @@ def test_relay_refresh_keeps_the_admin_policy(ws):
 
 
 def test_insights_is_a_page_server(ws):
-    assert "insights" in hp.LAUNCH_SERVERS and "insights" in pageproof.SERVERS
-    pageproof.PageSession(ws, "insights")  # accepted as a page server
-    token = hp.write_launch_token(ws, "insights")  # orch ships the add-on (its manifest)
-    assert token and hp.consume_launch_token(ws, "insights", token)
+    assert "insights" in pagelaunch.LAUNCH_SERVERS and "insights" in pagesession.SERVERS
+    pagesession.PageSession(ws, "insights")  # accepted as a page server
+    token = pagelaunch.write_launch_token(ws, "insights")  # orch ships the add-on (its manifest)
+    assert token and pagelaunch.consume_launch_token(ws, "insights", token)
 
 
 def test_insights_launch_token_refused_without_a_shipped_manifest(ws, monkeypatch):
@@ -158,31 +158,35 @@ def test_insights_launch_token_refused_without_a_shipped_manifest(ws, monkeypatc
 
     monkeypatch.setattr(addons, "SHIPPED_ADDONS", tuple(n for n in addons.SHIPPED_ADDONS if n != "insights"))
     assert "insights" not in addons.SHIPPED_ADDONS
-    assert not hp.launch_server_ok("insights")
-    with pytest.raises(hp.Refused):
-        hp.write_launch_token(ws, "insights")
-    assert not (hp.key_dir(ws) / "launch-insights.token").exists()
-    hp._write_private(hp.key_dir(ws) / "launch-insights.token", f"{'a' * 32}\n{int(time.time()) + 30}\n")
-    assert hp.consume_launch_token(ws, "insights", "a" * 32) is False  # a planted token file does not count
-    assert hp.launch_url(ws, "insights", "http://127.0.0.1:1/") == "http://127.0.0.1:1/"
+    assert not pagelaunch.launch_server_ok("insights")
+    with pytest.raises(orch_home.Refused):
+        pagelaunch.write_launch_token(ws, "insights")
+    assert not (orch_home.key_dir(ws) / "launch-insights.token").exists()
+    orch_home._write_private(
+        orch_home.key_dir(ws) / "launch-insights.token", f"{'a' * 32}\n{int(time.time()) + 30}\n"
+    )
+    assert (
+        pagelaunch.consume_launch_token(ws, "insights", "a" * 32) is False
+    )  # a planted token file does not count
+    assert pagelaunch.launch_url(ws, "insights", "http://127.0.0.1:1/") == "http://127.0.0.1:1/"
     for server in ("focus", "dashboard"):
-        token = hp.write_launch_token(ws, server)
-        assert token and hp.consume_launch_token(ws, server, token)
+        token = pagelaunch.write_launch_token(ws, server)
+        assert token and pagelaunch.consume_launch_token(ws, server, token)
 
 
 def test_insights_never_resumes_a_page_session(ws):
-    assert hp.write_resume_cookie(ws, "insights", "c" * 40, "s" * 40) is False
-    assert not (hp.key_dir(ws) / "resume-insights.cookie").exists()
+    assert pagelaunch.write_resume_cookie(ws, "insights", "c" * 40, "s" * 40) is False
+    assert not (orch_home.key_dir(ws) / "resume-insights.cookie").exists()
     planted = f"{'c' * 40}\n{'s' * 40}\n{int(time.time()) + 60}\n"
-    hp._write_private(hp.key_dir(ws) / "resume-insights.cookie", planted)
-    assert hp.take_resume_session(ws, "insights") is None  # a planted file is never adopted
+    orch_home._write_private(orch_home.key_dir(ws) / "resume-insights.cookie", planted)
+    assert pagelaunch.take_resume_session(ws, "insights") is None  # a planted file is never adopted
 
 
 def test_registry_drops_an_unshipped_builtin_insights(ws, monkeypatch):
     from orch import addons
 
     monkeypatch.setattr(addons, "SHIPPED_ADDONS", tuple(n for n in addons.SHIPPED_ADDONS if n != "insights"))
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(orch_home, "install_kind", lambda: "normal")
     path = addons.registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     entries = [{"name": "insights", "source": "built-in"}, {"name": "dashboard", "source": "built-in"}]
@@ -480,16 +484,16 @@ def test_key_lock_nested_in_one_thread_and_another_thread_waits(ws):
     one thread go through; a second thread blocks until the first thread's OUTERMOST exit."""
     import threading
 
-    d = hp.key_dir(ws)
+    d = orch_home.key_dir(ws)
     order, entered = [], threading.Event()
 
     def other():
-        with hp._key_lock(d):
+        with orch_home._key_lock(d):
             order.append("other")
         entered.set()
 
-    with hp._key_lock(d):
-        with hp._key_lock(d):  # nested in the same thread: no wait, no deadlock
+    with orch_home._key_lock(d):
+        with orch_home._key_lock(d):  # nested in the same thread: no wait, no deadlock
             t = threading.Thread(target=other)
             t.start()
             assert not entered.wait(0.3)  # the other thread is held off ...
@@ -504,15 +508,15 @@ def test_key_lock_nested_in_one_thread_and_another_thread_waits(ws):
 
 
 def test_key_lock_is_reentrant_and_only_the_outermost_exit_unlocks(ws):
-    d = hp.key_dir(ws)
+    d = orch_home.key_dir(ws)
     lock = d / "keys.lock"
-    with hp._key_lock(d):
-        with hp._key_lock(d):
-            with hp._key_lock(d):
+    with orch_home._key_lock(d):
+        with orch_home._key_lock(d):
+            with orch_home._key_lock(d):
                 assert lock.exists()
-            assert lock.exists() and hp._lock_held(d)  # an inner exit keeps the outer lock
-        assert lock.exists() and hp._lock_held(d)
-    assert not lock.exists() and not hp._lock_held(d)
+            assert lock.exists() and orch_home._lock_held(d)  # an inner exit keeps the outer lock
+        assert lock.exists() and orch_home._lock_held(d)
+    assert not lock.exists() and not orch_home._lock_held(d)
 
 
 # ------------------------------------------------------------------ delete-detail (2.11 review)

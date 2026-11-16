@@ -5,7 +5,7 @@ from pathlib import Path
 
 from orch.errors import Refused
 
-SUBCOMMANDS = ("screen", "type")
+SUBCOMMANDS = ("type",)  # `orch run screen` is built (cli_run)
 
 
 def add_parsers(sub, common) -> None:

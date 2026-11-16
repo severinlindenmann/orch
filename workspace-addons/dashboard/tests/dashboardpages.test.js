@@ -91,6 +91,13 @@ test('home: Needs you counts a failed start on the page', () => {
 });
 
 // Real /api/state shape from the test network (sanitized): `children` is a list of ids, `parent` an id.
+test('ORCH-14: an epic says Epic on its board card; a ticket inside it says Part of the epic', () => {
+  const items = [{id:'e',key:'ORCH-20',title:'Dashboard fixes',status:'open',epic:true}, {id:'x',key:'ORCH-21',title:'Fix the header',parent:'e',status:'done'}, {id:'y',key:'ORCH-22',title:'Larger buttons',parent:'e',status:'open'}];
+  const c = context(items);
+  assert.match(JSON.stringify(c.boardCard(items[0])), /Epic · 1 of 2 done/);
+  assert.match(JSON.stringify(c.boardCard(items[2])), /Part of the epic Dashboard fixes/);
+  assert.doesNotMatch(JSON.stringify(c.boardCard(items[2])), /Step of/);
+});
 test('parts on the real /api/state shape: list nests parts under the parent whatever their status', () => {
   const real = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/state-pilatus-parts.json'), 'utf8'));
   const items = real.tickets, [parent] = items.filter(t => t.key === 'PIL-2');
@@ -145,6 +152,26 @@ test('private settings card: move button, allow button, hidden when clear, no sn
   assert.match(text([unsafe(1)]), /1 request orch can't show safely\. Not allowed\./);
   assert.match(text([unsafe(1), unsafe(2), unsafe(3)]), /3 requests orch can't show safely\. Not allowed\./);
   assert.equal(nodes(c.privateCard({git_private:{count:0, lines:[], pending:[unsafe(1), unsafe(2), unsafe(3)]}}), n => n.attrs?.className === 'card').length, 1);
+});
+
+test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a select saved on change', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const start = src.indexOf('const LIVE_MAX_CHOICES'), end = src.indexOf('function shareCard');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  vm.runInContext(src.slice(start, end), c);
+  const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+  const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join(' ');
+  const card = vm.runInContext('helpersAtOnceCard', c)({});
+  const pick = all(card, n => n.attrs?.['data-key'] === 'settings-live-max')[0];
+  assert.equal(pick.tag, 'select'); assert.equal(pick.value, 'none');
+  assert.deepEqual(all(pick, n => n.tag === 'option').map(o => o.children[0]), ['No limit', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+  assert.match(text(card), /Helpers at once/); assert.match(text(card), /Any number of helpers/);
+  const four = vm.runInContext('helpersAtOnceCard', c)({live_max:4});
+  assert.equal(all(four, n => n.attrs?.['data-key'] === 'settings-live-max')[0].value, '4');
+  assert.match(text(four), /When 4 helpers are working, the next one waits in line/);
+  assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:99}), n => n.tag === 'select')[0].value, 'none');
+  assert.ok(src.includes("permissionsCard(settings), helpersAtOnceCard(settings)]"), 'sits on the Helper tab');
 });
 
 test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote shown plainly (no Details)', () => {

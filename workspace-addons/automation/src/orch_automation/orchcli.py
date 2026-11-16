@@ -106,6 +106,22 @@ def _is_chat_ticket(root: Path, tid: str) -> bool:
     return isinstance(st, dict) and st.get("ticket") == tid
 
 
+def sync_refusal(root: Path, tid: str) -> str | None:
+    """Plain words when sync is on and this ticket's automation block is not approved on this computer, else None."""
+    from .syncapproval import allowed, sync_on
+
+    if sync_on(root):  # never the record's presence: removing it must not skip the check
+        current = ticket(root, tid)
+        # The Chat's hidden ticket is in no ticket list and never carries a synced automation block: only it, by its
+        # stored id (core's `orch chat id`, as the Scheduler reads it), is exempt. Any other ticket the lookup does not
+        # return (not found, or the list failed) stays refused: fail closed.
+        if current is None and not _is_chat_ticket(root, tid):
+            return "This synced automation needs local approval."
+        if current is not None and not allowed(root, current):
+            return "This synced automation needs local approval."
+    return None
+
+
 def run_start(
     root: Path,
     tid: str,
@@ -118,17 +134,9 @@ def run_start(
     mode None lets core choose (a live session the person can open when the machine can).
     Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
     | {"result": "failed", "reason": plain words}."""
-    from .syncapproval import allowed, sync_on
-
-    if sync_on(root):  # never the record's presence: removing it must not skip the check
-        current = ticket(root, tid)
-        # The Chat's hidden ticket is in no ticket list and never carries a synced automation block: only it, by its
-        # stored id (core's `orch chat id`, as the Scheduler reads it), is exempt. Any other ticket the lookup does not
-        # return (not found, or the list failed) stays refused: fail closed.
-        if current is None and not _is_chat_ticket(root, tid):
-            return {"result": "failed", "reason": "This synced automation needs local approval."}
-        if current is not None and not allowed(root, current):
-            return {"result": "failed", "reason": "This synced automation needs local approval."}
+    refused = sync_refusal(root, tid)
+    if refused:
+        return {"result": "failed", "reason": refused}
     cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--json", "--by", by or BY]
     if mode:
         cmd += ["--mode", mode]

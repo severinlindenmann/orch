@@ -69,6 +69,13 @@
     if (href.startsWith('/#')) el.target = '_top';
     return el;
   }
+  // The optional address of the app running for the test: only a plain http(s) address becomes a link.
+  function previewLink(value) {
+    if (typeof value !== 'string' || value.length > 300 || !/^https?:\/\/\S+$/.test(value)) return null;
+    let url; try { url = new URL(value); } catch { return null; }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const el = link('Open the preview', url.href); el.target = '_blank'; el.rel = 'noopener noreferrer'; return el;
+  }
   function ticket(id, label = 'Answer in the ticket', primary = true) {
     return validId(id) ? link(label, '/#ticket/' + id, primary) : meta('Ticket reference unavailable.');
   }
@@ -132,6 +139,18 @@
     const c = card(order.title, node('h3', plural(rows.length, 'result', 'results') + ' built, waiting for your Looks good'),
       group('stack', ...rows.map((r, i) => link((rows.length > 1 ? 'Look at ' : 'Look at the result: ') + text(r.title), '/#ticket/' + r.ticket, i === 0))),
       ...(withOrder ? [tail(orderLink(order, 'Review order'))] : []));
+    // Two or more results: one click is the same Looks good on each ticket (only inside the dashboard, which does it).
+    if (rows.length > 1 && embedded()) {
+      const all = node('button', 'Looks good, all', 'btn outline sm f-btn'); all.type = 'button';
+      const problem = meta(''); problem.setAttribute('role', 'alert'); problem.hidden = true;
+      all.addEventListener('click', async () => {
+        all.disabled = true; problem.hidden = true;
+        const result = await askDashboard({type: 'orch.looksgood', tickets: rows.map(r => r.ticket)});
+        if (result.error === undefined) return render();
+        problem.textContent = result.error || 'Looks good could not be saved. Try again.'; problem.hidden = false; all.disabled = false;
+      });
+      c.append(tail(all), problem);
+    }
     c.classList.add('f-attention'); return c;
   }
   // The run goes on by itself; until its next step has started, say so instead of showing nothing.
@@ -219,7 +238,8 @@
       else asked.get(d.id)({error: 'orch did not confirm that your message was saved.'});
     }
     else if (d.type === 'orch.ask.done' && ['delivered', 'queued', 'partial'].includes(d.state)) asked.get(d.id)({state: d.state, said: typeof d.said === 'string' ? d.said.slice(0, 300) : ''});
-    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+    else if (d.type === 'orch.looksgood.done') asked.get(d.id)({moved: Number.isInteger(d.moved) ? d.moved : 0});
+    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed' || d.type === 'orch.looksgood.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
   function askDashboard(message, wait = 30000) {
     return new Promise(resolve => {
@@ -600,6 +620,8 @@
         range.addEventListener('input', () => { const split = Number(range.value); compare.style.gridTemplateColumns = 'minmax(0,' + split + 'fr) minmax(0,' + (100 - split) + 'fr)'; });
         label.append(range); c.append(label);
       }
+      const tryIt = previewLink(item.preview);
+      if (tryIt) c.append(group('actions', tryIt));
       if (item.recommend) c.append(meta('Your agent suggests: ' + item.recommend));
       c.append(meta('Review images and pins are view-only here. Add feedback on the order ticket.')); view.append(c);
     }

@@ -11,7 +11,7 @@ function ticketFileError(file, files) {
   return '';
 }
 function ticketTextTitle(text, limit) {
-  return (text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '').slice(0, limit);
+  return (text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '').slice(0, limit).trim();  // orch keeps no trailing space
 }
 // "Pasted text (about 3 pages)": about 3000 characters to a page.
 function pastedLabel(text) {
@@ -21,6 +21,58 @@ function pastedLabel(text) {
 function ticketBase64(dataURL) {
   return dataURL.slice(dataURL.indexOf(',') + 1);
 }
+// One picked, dropped or pasted file as the dialog keeps it: {name, size, type, text | data[, url]}.
+async function ticketReadFile(file) {
+  const type = ticketFileType(file.name);
+  const item = {name:file.name, size:file.size, type};
+  if (type === 'text') {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try { item.text = new TextDecoder('utf-8', {fatal:true}).decode(bytes); }
+    catch (_) { item.data = btoa(Array.from(bytes, b => String.fromCharCode(b)).join('')); }  // not UTF-8: orch refuses it, we do not alter it
+  } else item.data = ticketBase64(await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  }));
+  return item;
+}
+const ticketSendFiles = files => files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data});
+function ticketPreview(file) {
+  const {d:previewDialog, actions:previewActions} = dialog(file.name, 'sheet');
+  previewActions.firstChild.textContent = 'Close';
+  const stage = el('div', 'new-ticket-preview');
+  if (file.type === 'image') {
+    const img = el('img'); img.alt = file.name; img.src = file.url; stage.append(img);
+  } else {
+    const pre = el('pre'); pre.textContent = file.text.slice(0, 200000); stage.append(pre);
+  }
+  previewDialog.append(stage, previewActions); window.orch.open(previewDialog);
+}
+function ticketFileChip(file, remove, label = file.name) {
+  const row = el('li', 'new-ticket-file');
+  const body = button('', 'new-ticket-file-main', () => ticketPreview(file));
+  body.append(el('span', '', label));
+  if (label === file.name && typeof sizeText === 'function') body.append(el('span', 'meta', sizeText(file.size)));
+  const x = button('Remove', 'btn ghost xs new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + (label === file.name ? file.name : 'pasted text'));
+  row.append(body, x); return row;
+}
+// What one ticket of the dialog sends: the title from the first typed line, else the long text, else the first file.
+// The agent may rewrite the title only when the person did not type one (it came from a paste or a file name, or the
+// typed first line was clipped: a sentence, not a title).
+// typed: all the text in the box (for the title); short: what stays in the box (the note); long: the text kept as note.md.
+function ticketFromText(typed, short, longText, files) {
+  const title = ticketTextTitle(typed.trim() ? typed : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length ? 80 : 200);
+  const titleAuto = typed.trim() ? ticketTextTitle(typed, Infinity).length >= 80 : true;
+  const note = short.length <= 1500 && (/[\r\n]/.test(short) || short.trim() !== title) ? short : '';
+  return {title, title_auto:titleAuto, ...(note ? {note} : {}), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:ticketSendFiles(files)} : {})};
+}
+// A ticket inside the epic: long text (over 1500 characters) is kept as note.md, like the main box; an empty one is skipped.
+function ticketStepArgs(text, files, parent, owner) {
+  if (!text.trim() && !files.length) return null;
+  const long = text.length > 1500;
+  return {...ticketFromText(text, long ? '' : text, long ? text : '', files), parent, ...(owner ? {owner} : {})};
+}
+const ticketTooBig = args => new Blob([JSON.stringify({op:'ticket.new', args})]).size > 4900000;  // the server takes 5 MB per request
 // Helpers the workspace really has: one entry per helper, the default first, never two with the same label.
 function ticketHelpers(settings) {
   const out = [], labels = new Set();
@@ -45,7 +97,8 @@ function ticketForm(t) {
   // The window closes with its Close button, Esc and a click on the backdrop (kit/overlay.js); dialog() puts the cursor back where it was.
   let helpers = [], helperSelect = null, doneWrap = null;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
-  let updateAttachments = () => {}, grow = () => {};
+  let updateAttachments = () => {}, grow = () => {}, readInto = null;
+  const steps = [];  // ORCH-14: an epic. Each entry becomes its own ticket inside the new one, with its own text and files
   const updateValidity = () => {
     if (t) return;
     const empty = !inputs.text.value.trim() && !pastedText && !files.length;
@@ -54,7 +107,7 @@ function ticketForm(t) {
   };
   d.addEventListener('close', () => {
     closed = true;
-    for (const file of files) if (file.url) URL.revokeObjectURL(file.url);
+    for (const file of [...files, ...steps.flatMap(step => step.files)]) if (file.url) URL.revokeObjectURL(file.url);
   });
   if (!t) {
     const label = el('label', '', 'What needs doing?');
@@ -75,65 +128,39 @@ function ticketForm(t) {
     const chips = el('ul', 'new-ticket-files'); chips.setAttribute('aria-label', 'Added files');
     const status = el('p', 'meta new-ticket-reading'); status.setAttribute('role', 'status');
     const help = el('p', 'meta new-ticket-help', 'Long text is kept as a file. The agent writes the title and a short description.');
-    const preview = file => {
-      const {d:previewDialog, actions:previewActions} = dialog(file.name, 'sheet');
-      previewActions.firstChild.textContent = 'Close';
-      const stage = el('div', 'new-ticket-preview');
-      if (file.type === 'image') {
-        const img = el('img'); img.alt = file.name; img.src = file.url; stage.append(img);
-      } else {
-        const pre = el('pre'); pre.textContent = file.text.slice(0, 200000); stage.append(pre);
-      }
-      previewDialog.append(stage, previewActions); window.orch.open(previewDialog);
-    };
     updateAttachments = () => {
       chips.replaceChildren();
-      const addChip = (file, remove, pasted = false) => {
-        const row = el('li', 'new-ticket-file');
-        const body = button('', 'new-ticket-file-main', () => preview(file));
-        body.append(el('span', '', pasted ? pastedLabel(file.text) : file.name));
-        if (!pasted && typeof sizeText === 'function') body.append(el('span', 'meta', sizeText(file.size)));
-        const x = button('Remove', 'btn ghost xs new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + (pasted ? 'pasted text' : file.name));
-        row.append(body, x); chips.append(row);
-      };
-      if (pastedText) addChip({name:'note.md', text:pastedText, size:new Blob([pastedText]).size, type:'text'}, () => { pastedText = ''; updateAttachments(); }, true);
-      for (const file of files) addChip(file, () => {
-        files = files.filter(item => item !== file);
+      if (pastedText) chips.append(ticketFileChip({name:'note.md', text:pastedText, size:new Blob([pastedText]).size, type:'text'}, () => { pastedText = ''; updateAttachments(); }, pastedLabel(pastedText)));
+      for (const file of files) chips.append(ticketFileChip(file, () => {
+        files.splice(files.indexOf(file), 1);
         if (file.url) URL.revokeObjectURL(file.url);
         updateAttachments();
-      });
+      }));
       help.hidden = !pastedText; updateValidity();
     };
-    const addFiles = incoming => {
+    // Reads picked, dropped or pasted files into a list (the ticket's own or a step's), one after the other: the
+    // submit waits for `reading`, so nothing is sent half read.
+    readInto = (incoming, list, errorEl, changed) => {
       reading = reading.then(async () => {
-        fileError.textContent = '';
+        errorEl.textContent = '';
         const errors = [];
         if (incoming.length) status.textContent = 'Reading ' + (incoming.length === 1 ? 'the file' : incoming.length + ' files') + '…';
         for (const file of incoming) {
           if (closed) break;
-          const problem = ticketFileError(file, files);
+          const problem = ticketFileError(file, list);
           if (problem) { errors.push(problem); continue; }
           try {
-            const type = ticketFileType(file.name);
-            const item = {name:file.name, size:file.size, type};
-            if (type === 'text') {
-              const bytes = new Uint8Array(await file.arrayBuffer());
-              try { item.text = new TextDecoder('utf-8', {fatal:true}).decode(bytes); }
-              catch (_) { item.data = btoa(Array.from(bytes, b => String.fromCharCode(b)).join('')); }  // not UTF-8: orch refuses it, we do not alter it
-            } else item.data = ticketBase64(await new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error);
-              reader.readAsDataURL(file);
-            }));
+            const item = await ticketReadFile(file);
             if (closed) break;
-            if (type === 'image') item.url = URL.createObjectURL(file);
-            files.push(item); updateAttachments();
+            if (item.type === 'image') item.url = URL.createObjectURL(file);
+            list.push(item); changed();
           } catch (_) { errors.push(file.name + ': could not read'); }
         }
         status.textContent = '';
-        fileError.textContent = errors.join('\n');
+        errorEl.textContent = errors.join('\n');
       });
     };
+    const addFiles = incoming => readInto(incoming, files, fileError, updateAttachments);
     picker.addEventListener('change', () => { addFiles(Array.from(picker.files)); picker.value = ''; });
     for (const target of [form]) {
       target.addEventListener('dragover', event => { if (Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault(); });
@@ -153,6 +180,55 @@ function ticketForm(t) {
       pastedText = combined; updateAttachments();
     });
     fields.append(zone, picker, status, fileError, chips, help); updateAttachments();
+    // Epic: several tickets at once (owner, ORCH-14). The text above is the epic; each entry below becomes its own
+    // ticket inside it (the epic page lists them), with its own text, screenshots and files.
+    const stepList = el('div', 'stack new-ticket-steps');
+    const stepHelp = el('p', 'meta new-ticket-help', 'This ticket becomes an epic. Each ticket below is made inside it, with its own files.');
+    const renumber = () => {
+      steps.forEach((step, i) => {
+        step.head.textContent = 'Ticket ' + (i + 1);
+        step.input.setAttribute('aria-label', 'Ticket ' + (i + 1) + ': what needs doing?');
+        step.remove.setAttribute('aria-label', 'Remove ticket ' + (i + 1));
+      });
+      stepHelp.hidden = !steps.length;
+      addStep.textContent = steps.length ? '＋ Add another ticket' : '＋ Make it an epic with several tickets';
+    };
+    const newStep = () => {
+      const step = {files:[]}, box = el('section', 'card pad stack new-ticket-step'), top = el('div', 'row between');
+      step.head = el('strong');
+      step.remove = button('Remove', 'btn ghost xs', () => {
+        for (const file of step.files) if (file.url) URL.revokeObjectURL(file.url);
+        steps.splice(steps.indexOf(step), 1); box.remove(); renumber();
+      });
+      top.append(step.head, step.remove);
+      const text = el('textarea', 'input'); text.name = 'step'; text.rows = 2; text.maxLength = 500000;
+      text.placeholder = 'What needs doing in this ticket?';
+      const stepPicker = el('input'); stepPicker.type = 'file'; stepPicker.multiple = true; stepPicker.hidden = true; stepPicker.accept = picker.accept;
+      const stepAttach = button('＋ Add files', 'new-ticket-attach', () => stepPicker.click());
+      const stepError = el('p', 'bad new-ticket-file-error'); stepError.setAttribute('role', 'alert');
+      const stepChips = el('ul', 'new-ticket-files'); stepChips.setAttribute('aria-label', 'Files for this ticket');
+      const draw = () => stepChips.replaceChildren(...step.files.map(file => ticketFileChip(file, () => {
+        step.files.splice(step.files.indexOf(file), 1);
+        if (file.url) URL.revokeObjectURL(file.url);
+        draw();
+      })));
+      const add = incoming => readInto(incoming, step.files, stepError, draw);
+      stepPicker.addEventListener('change', () => { add(Array.from(stepPicker.files)); stepPicker.value = ''; });
+      box.addEventListener('drop', event => {  // a drop on a ticket box is that ticket's, not the epic's
+        if (!event.dataTransfer?.files.length) return;
+        event.preventDefault(); event.stopPropagation?.(); add(Array.from(event.dataTransfer.files));
+      });
+      text.addEventListener('paste', event => {
+        const pasted = window.UI?.pastedFiles?.(event) || [];
+        if (pasted.length) { event.preventDefault(); add(pasted); }
+      });
+      box.append(top, text, stepAttach, stepPicker, stepError, stepChips);
+      Object.assign(step, {box, input:text});
+      steps.push(step); stepList.append(box); renumber(); text.focus();
+      return step;
+    };
+    const addStep = button('', 'new-ticket-attach new-ticket-add-step', newStep);
+    fields.append(stepHelp, stepList, addStep); renumber();
     // Helper: only the helpers this workspace has. One helper is fixed text; none is a plain empty state.
     // FOLLOW-UP: move to kit (shared custom select from the foundation PR); a native select until then.
     helpers = ticketHelpers(typeof state !== 'undefined' && state ? state.settings : null);
@@ -219,7 +295,7 @@ function ticketForm(t) {
     if (doneWrap && typeof fields.insertBefore === 'function' && doneWrap.parentNode === fields) fields.insertBefore(planLabel, doneWrap); else fields.append(planLabel);
   }
   const plain = t ? null : button('Save without starting', 'new-ticket-link', () => { startAfter = false; form.requestSubmit(); });
-  if (plain) submit.addEventListener('click', () => { startAfter = true; });
+  if (plain) submit.addEventListener('click', () => { if (!created) startAfter = true; });  // a retry keeps the first choice
   actions.append(submit);
   if (plain) actions.prepend(plain);
   const startNow = async () => {
@@ -228,7 +304,7 @@ function ticketForm(t) {
     window.orch.toast(run.ok ? 'Helper started' : 'The ticket was created, but the helper did not start: ' + run.text, run.ok ? 'ok' : 'error');
   };
   form.append(fields, error, reload, actions); d.append(form);
-  let created = null, creationUnresolved = false;
+  let created = null, creationUnresolved = false, epicMade = false;
   form.addEventListener('submit', async event => {
     event.preventDefault();
     await reading;
@@ -254,31 +330,50 @@ function ticketForm(t) {
         pastedText = combined; inputs.text.value = ''; grow(); updateAttachments();
       }
       const longText = pastedText, shortText = inputs.text.value;
-      values.title = ticketTextTitle(fullText.trim() ? fullText : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length ? 80 : 200);
-      // The agent may rewrite the title only when the person did not type one: it came from the pasted text or a
-      // file name, or the typed first line was clipped (a sentence, not a title). A typed title stays as typed.
-      const typedFirst = ticketTextTitle(fullText, Infinity), titleAuto = fullText.trim() ? typedFirst.length >= 80 : true;
-      values.note = shortText.length <= 1500 && (/[\r\n]/.test(shortText) || shortText.trim() !== values.title) ? shortText : '';
+      const base = ticketFromText(fullText, shortText, longText, files);
+      values.title = base.title;
+      // Every ticket is checked before anything is created, so a too-big one never leaves half the tickets behind.
+      const bigStep = steps.findIndex(step => ticketTooBig(ticketStepArgs(step.input.value, step.files, 'x', values.owner) || {}));
+      if (bigStep >= 0) { error.textContent = 'Ticket ' + (bigStep + 1) + ' is too big to send at once (over 4.9 MB). Remove a file or shorten its text.'; submit.disabled = false; idle(); return; }
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
         const planFirst = startAfter && !!planBox?.checked;
-        const args = {title:values.title, ...(planFirst ? {plan_first:true} : {}), title_auto:titleAuto, ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})};
-        if (new Blob([JSON.stringify({op:'ticket.new', args})]).size > 4900000) {  // the server takes 5 MB per request
+        const epic = epicMade = steps.some(step => ticketStepArgs(step.input.value, step.files, 'x'));
+        const args = {...base, ...(planFirst ? {plan_first:true} : {}), ...(epic ? {epic:true} : {}), ...Object.fromEntries(['owner', 'due', 'done_when'].filter(k => values[k]).map(k => [k, values[k]]))};
+        if (ticketTooBig(args)) {
           error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
           submit.disabled = false; idle(); return;
         }
         result = await act('ticket.new', args);  // one write, one history line
         if (result.ok) {
           if (result.state?.attached?.failed?.length) window.orch.toast('The ticket was created. Not saved: ' + result.state.attached.failed.join(', '), 'error');
-          created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
+          // The reply names the new ticket; the title match is only for an older server without that.
+          const newId = result.state?.created?.id || result.state?.attached?.id;
+          created = newId ? tickets().find(t => t.id === newId) : null;
+          if (!created) created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
           if (!created) {
             creationUnresolved = true;
             result = {ok:false, status:0, text:'The ticket was created, but could not be found in the reply. Close this dialog and reload before trying again.'};
           }
         }
       } else result = {ok:true};
+      // The epic's tickets, one each inside it, in order. One that was made leaves the list, so pressing the button
+      // again only sends the ones that failed.
       if (result.ok && created) {
-        window.orch.toast(startAfter ? 'Ticket created' : 'Saved. The ticket is open; start it when you are ready.', 'ok');
+        const failed = [];
+        for (const step of [...steps]) {
+          const args = ticketStepArgs(step.input.value, step.files, created.id, values.owner);
+          if (!args) continue;
+          const made = await act('ticket.new', args);
+          if (made.ok) {
+            if (made.state?.attached?.failed?.length) window.orch.toast('Ticket ' + (steps.indexOf(step) + 1) + ' was created. Not saved: ' + made.state.attached.failed.join(', '), 'error');
+            step.remove.click();
+          } else failed.push('Ticket ' + (steps.indexOf(step) + 1) + ': ' + window.DashHelpers.scrubText(made.text));
+        }
+        if (failed.length) result = {ok:false, status:0, text:'The epic was created, but not every ticket in it. ' + failed.join(' ') + ' Press the button again to send the rest.'};
+      }
+      if (result.ok && created) {
+        window.orch.toast(startAfter ? (epicMade ? 'Epic created' : 'Ticket created') : 'Saved. The ' + (epicMade ? 'epic' : 'ticket') + ' is open; start it when you are ready.', 'ok');
         window.orch.close(d);
         await startNow();
         if (typeof href === 'function') location.hash = href(created.id);  // Start and Save without starting both open the new ticket
@@ -289,7 +384,7 @@ function ticketForm(t) {
     if (!result.ok) {
       error.textContent = window.DashHelpers.scrubText(result.text);
       reload.hidden = !(t && result.status === 409);
-      if (created) { inputs.text.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; }
+      if (created) { inputs.text.disabled = true; submit.textContent = steps.length ? 'Send the rest' : 'Save details'; if (plain) plain.hidden = true; }
       return;
     }
     window.orch.toast(t ? 'Ticket updated' : 'Ticket created', 'ok');

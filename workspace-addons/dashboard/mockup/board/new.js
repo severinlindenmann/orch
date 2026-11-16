@@ -38,5 +38,9 @@ document.addEventListener('click',e=>{
 },true);
 $('#new-dialog').addEventListener('close',()=>calendar.close());
 window.addEventListener('resize',()=>calendar.close());
-$('#ticket-form').addEventListener('reset',()=>{files.length=0;renderFiles();$('#file-error').textContent=''});
+// Epic (ORCH-14): each ticket box becomes its own ticket inside this one, with its own text and files.
+const epicList=$('#epic-tickets'),epicAdd=$('#epic-add');
+function renumberEpic(){const boxes=[...epicList.children];boxes.forEach((b,i)=>{b.querySelector('strong').textContent='Ticket '+(i+1);b.querySelector('textarea').setAttribute('aria-label','Ticket '+(i+1)+': what needs doing?');b.querySelector('[data-remove]').setAttribute('aria-label','Remove ticket '+(i+1))});$('#epic-help').hidden=!boxes.length;epicAdd.textContent=boxes.length?'＋ Add another ticket':'＋ Make it an epic with several tickets'}
+epicAdd.onclick=()=>{const box=document.createElement('section');box.className='card pad stack';box.innerHTML='<div class="row between"><strong></strong><button type="button" class="btn ghost xs" data-remove>Remove</button></div><textarea class="input" rows="2" placeholder="What needs doing in this ticket?"></textarea><label class="btn ghost sm">＋ Add files<input type="file" class="sr-only" multiple></label><ul class="meta"></ul>';box.querySelector('[data-remove]').onclick=()=>{box.remove();renumberEpic()};box.querySelector('input[type=file]').onchange=e=>{const ul=box.querySelector('ul');for(const f of e.target.files){const li=document.createElement('li');li.textContent=f.name;ul.append(li)}};epicList.append(box);renumberEpic();box.querySelector('textarea').focus()};
+$('#ticket-form').addEventListener('reset',()=>{files.length=0;renderFiles();$('#file-error').textContent='';epicList.replaceChildren();renumberEpic()});
 })();

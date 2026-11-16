@@ -1,6 +1,6 @@
 """Contract tests of the Insights settings server against the REAL orch core (workspace/src/orch): the real
 `orch config get|set insights.*` (with --if-current), `orch record settings|delete-detail`, the real PageSession
-(per-server, per-port cookie) and run_with_proof. A disposable workspace and orch home under ~/.orch-test (the
+(per-server, per-port cookie). A disposable workspace and orch home under ~/.orch-test (the
 core trusts only that folder for a test home); nothing of the real ~/.orch-tool, key or workspace is touched."""
 
 import http.client
@@ -16,9 +16,8 @@ from pathlib import Path
 
 import pytest
 
-pageproof = pytest.importorskip("orch.pageproof")
-humanproof = pytest.importorskip("orch.humanproof")
-if "insights" not in getattr(pageproof, "SERVERS", ()):
+pagesession = pytest.importorskip("orch.pagesession")
+if "insights" not in getattr(pagesession, "SERVERS", ()):
     pytest.skip("this core has no Insights page server", allow_module_level=True)
 
 WORKSPACE_SRC = Path(__file__).resolve().parents[3] / "workspace" / "src"
@@ -73,23 +72,20 @@ def core(monkeypatch):
     shutil.rmtree(folder, ignore_errors=True)  # the folder this fixture created, by its exact path
 
 
-def run(core, *argv, proof=None):
+def run(core, *argv):
     ws, shim = core
     env = dict(os.environ)
     env["ORCH_ROOT"] = str(ws)
-    if proof is not None:
-        r = pageproof.run_with_proof(list(argv), proof, orch_bin=shim, cwd=ws, env=env, timeout=60)
-    else:
-        r = subprocess.run(
-            [shim, *argv],
-            check=False,
-            cwd=ws,
-            env=env,
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            timeout=60,
-        )
+    r = subprocess.run(
+        [shim, *argv],
+        check=False,
+        cwd=ws,
+        env=env,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        timeout=60,
+    )
     try:
         out = json.loads(r.stdout)
     except ValueError:
@@ -106,9 +102,8 @@ def get(core, key):
 @pytest.fixture
 def session(core):
     ws, _ = core
-    humanproof.human_key(ws)  # raises a plain reason when the test home is not trusted
-    session = pageproof.PageSession(ws, "insights")
-    assert session.key is not None
+    session = pagesession.PageSession(ws, "insights")
+    session.active = True  # a test run inside an agent tool would make it watch-only
     return session
 
 
@@ -171,11 +166,10 @@ def test_if_current_mismatch_is_changed(core):
     assert code != 0 and out["code"] == "changed" and get(core, "insights.keep_days") == 90
 
 
-def test_the_core_refuses_sharing_on_without_an_admin(core, session):
-    # no relay connection in this workspace ("not_connected"): the core itself refuses, proof or not
+def test_the_core_refuses_sharing_on_without_an_admin(core):
+    # no relay connection in this workspace ("not_connected"): the core itself refuses
     assert run(core, "config", "set", "insights.share_counts", "off", "--json")[0] == 0
-    proof = session.mint("insights.settings", "insights.share_counts=on")
-    code, _ = run(core, "config", "set", "insights.share_counts", "on", "--json", proof=proof)
+    code, _ = run(core, "config", "set", "insights.share_counts", "on", "--json")
     assert code != 0 and get(core, "insights.share_counts") is False
 
 

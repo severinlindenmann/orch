@@ -9,7 +9,6 @@ PAIRS = [  # `record delete-detail` is built (test_insights_settings.py)
     ("conn", "list"),
     ("conn", "show"),
     ("conn", "allow"),
-    ("run", "screen"),
     ("run", "type"),
 ]
 

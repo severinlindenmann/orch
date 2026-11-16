@@ -25,7 +25,7 @@ import time
 import urllib.parse
 
 from orch import hider, keystore, launchenv, term
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch.errors import Refused
 
 _recorder = None
@@ -140,24 +140,13 @@ def _write_record(root, ev):
         # verified lines only (a planted line can neither raise nor lower it); a legacy run is not counted
         own = [e for e in read.value or [] if record.is_sealed(e)]
         fresh = read.status == "unavailable" and read.reason == "missing"  # nothing recorded yet today
-        # a file with planted junk and no verified line counts zero verified lines (a junk line must not stop
-        # key uses for the day), but only while the key and the guarded home can be looked at
-        junk = (
-            read.status == "tampered"
-            and read.reason in ("unverified", "content", "removed", "old_key")
-            and hp.record_key(root) is not None
-            and hp.record_head_state(root, line["run"]) != "unknown"
-        )
-        # anything else that is not a clean read counts as the cap reached (fail closed)
-        # what orch's own chain head says was written counts too: cutting or deleting the file cannot reset it
-        head, _ = hp.record_head_read(root, line["run"])
-        seen = max(len(own), _head_lines(head))
-        if (read.status != "ok" and not fresh and not junk) or seen >= OUTSIDE_DAY_CAP:
+        # anything that is not a clean read counts as the cap reached (fail closed)
+        if (read.status != "ok" and not fresh) or len(own) >= OUTSIDE_DAY_CAP:
             raise Refused(_TOO_MANY)
 
-        def admit(lines, head):  # checked again under the run lock, where the line is written: atomic
+        def admit(lines):  # checked again under the run lock, where the line is written: atomic
             own = [e for e in lines if record.is_sealed(e)]
-            if max(len(own), _head_lines(head)) >= OUTSIDE_DAY_CAP:
+            if len(own) >= OUTSIDE_DAY_CAP:
                 raise Refused(_TOO_MANY)
             return True
 
@@ -170,13 +159,6 @@ def _write_record(root, ev):
 
 
 _TOO_MANY = "Refused: too many key uses outside a run today."
-
-
-def _head_lines(head):
-    """Lines orch's chain head says it sealed: its seq without the lines it found there before (legacy)."""
-    if not head:
-        return 0
-    return max(0, int(head["seq"]) - int(head.get("legacy_lines") or 0))
 
 
 def record_writer(root):
@@ -722,11 +704,11 @@ def _pid_alive(pid: int) -> bool:
 
 
 def sweep_tmp(root):
-    home = hp.guarded_home(root)
+    home = orch_home.guarded_home(root)
     tmp = home / "keys" / "tmp"
     if not tmp.exists() and not tmp.is_symlink():
         return
-    hp._private_dir(tmp, home)
+    orch_home._private_dir(tmp, home)
     for p in tmp.iterdir():
         if not re.fullmatch(r"\d+-[0-9a-f]{16}", p.name):
             continue
@@ -745,7 +727,7 @@ AGENT_COMMAND = (
 
 def _switch_on(root, name, flag) -> bool:
     """A profile switch (allow_get, agents_may_env): the flag in the profile."""
-    with hp._key_lock(hp.key_dir(root)):
+    with orch_home._key_lock(orch_home.key_dir(root)):
         profile = _verified(root, name)
         return bool(profile and profile.get(flag) is True)
 
@@ -955,7 +937,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             raise Refused("Refused: no keys are available for hiding output.")
         dirs = safe_path_dirs(root)
         command[0] = _program(command[0], dirs, h)
-        home = hp.guarded_home(root)
+        home = orch_home.guarded_home(root)
         parent = home / "keys" / "tmp"
         candidate = parent / f"{os.getpid()}-{secrets.token_hex(8)}"
         private = candidate / "~home"  # empty: the child's cwd and HOME (a key name can never be "~home")
@@ -974,11 +956,11 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             )
         for name in names:  # recorded BEFORE any key file is written (a failing record leaves nothing behind)
             recorder.record(name)
-        hp._private_dir(parent, home)
+        orch_home._private_dir(parent, home)
         candidate.mkdir(mode=0o700)
         temp = candidate
-        hp.winacl.set_private(temp, True)
-        hp._private_dir(temp, parent)
+        orch_home.winacl.set_private(temp, True)
+        orch_home._private_dir(temp, parent)
         private.mkdir(mode=0o700)
         if files:
             paths = {}

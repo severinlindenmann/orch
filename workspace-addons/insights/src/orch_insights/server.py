@@ -1,6 +1,6 @@
 """Loopback HTTP server, fenced by the shared UI origin checks. Reads go through the CLI; the only writes are the
-settings page clicks of POST /api/act (fixed op table in actions.py; the core decides when a human proof is
-needed, the server mints one only for a request with the session cookie AND this server's page secret)."""
+settings page clicks of POST /api/act (fixed op table in actions.py; a write needs the session cookie AND this
+server's page secret)."""
 
 import hashlib
 import hmac
@@ -129,12 +129,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _can_act(self):
         """This request carries the person's page session: cookie AND page secret (X-Orch-Page), loopback Host,
-        no proxy headers. The rule lives in PageSession.can_mint (the cookie alone never mints: another
+        no proxy headers. The rule lives in PageSession.can_act (the cookie alone never counts: another
         loopback port receives it); the server-side secret must also have been handed out by a launch."""
         return (
             self.session is not None
             and getattr(self.server, "page_secret", None) is not None
-            and self.session.can_mint(self.headers, self.server.server_address[1])
+            and self.session.can_act(self.headers, self.server.server_address[1])
         )
 
     def _read(self, *argv):
@@ -214,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
             return why
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return "forbidden"
-        from orch.pageproof import forwarded, host_ok
+        from orch.pagesession import forwarded, host_ok
 
         if (
             self.session is None
@@ -278,10 +278,15 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         if body is None:
             return self._send(400, b"That request could not be read.")
-        mint = self.session.mint if self._can_act() else None  # handed over; called only on needs_person
+        session = self._can_act()
         try:
             code, text, result = actions.run_op(
-                self.root, self.orch_bin, body.get("op"), body.get("args", {}), mint=mint, read=self._read
+                self.root,
+                self.orch_bin,
+                body.get("op"),
+                body.get("args", {}),
+                session=session,
+                read=self._read,
             )
         except actions.NeedsPerson as e:
             return self._send(403, str(e).encode())
@@ -308,7 +313,7 @@ def _page_session(root, orch_bin):
     if orch_bin not in (None, actions.SELF):
         return None
     try:
-        from orch.pageproof import PageSession
+        from orch.pagesession import PageSession
 
         return PageSession(root, "insights")
     except (ImportError, ValueError):

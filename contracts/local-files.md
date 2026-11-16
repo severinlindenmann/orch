@@ -106,6 +106,7 @@ People read a short key, e.g. `DM1-12`; the id (`t_…`) stays the identity ever
 agent = "my-agent"          # who does the work here: a built-in adapter (agents.json) or an [agents.<name>] entry
 code = "MEC"                # ticket keys MEC-1, MEC-2, … (Ticket keys, above)
 live_idle_minutes = 60      # default 60: a live session idle this long, or on a ticket Done this long, is closed (Continue resumes)
+live_max = 4                # default: no line = no limit; 2 to 10 = that many helpers at once, the next waits in line (Settings > Helper)
 
 [agents.my-agent]
 adapter = "generic"         # whose rules apply (agent-adapter.schema.json)
@@ -118,10 +119,16 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
   ask = the tool's default mode (it asks), auto = `--permission-mode auto` when the installed tool's `--help` lists it, else
   `--permission-mode acceptEdits`, full = `--dangerously-skip-permissions`. The orch `--allowedTools` list stays in every mode.
   An agent without that data (generic, Codex) ignores the setting. Applies to oneshot and live starts. `orch init` prints the mode.
+- **Automation scripts** (`[automation.scripts.<name>] command = ["prog", "arg", ...]`, automation add-on): a repeat
+  that names a script (`ext.automation.script`, a name, never a command) runs that argv without a shell instead of an
+  agent. Same trust rule as agent commands: it runs only if a person approved exactly that entry (workspace path, name,
+  argv) on this machine; the allowed entries are hashes in the orch home (`automation-script-allowed.json`). `orch automation
+  script add` by a person approves what was typed; an agent's entry waits for `orch automation script allow <name> --key <key>`
+  (a person only). An argv that cannot be shown in full (over 500 characters, control or odd characters) cannot be approved.
 - Shape: `agent-adapter.schema.json` `$defs/user_config`. Only `adapter`, `command`, `interactive` and `prompt`; nothing else.
 - `orch init` asks once which agent works here (found adapters + Other). Add-ons never ask.
 - **Invariant (9 Nov, git step 1): a settings-supplied agent command (`[agents.*]` with `command` or `interactive`) runs only if
-  this person approved exactly that entry on this machine.** Approvals live in the orch home (`agent-approvals.json`: a hash of
+  this person approved exactly that entry on this machine.** Approvals live in the orch home (`agent-allowed.json`: a hash of
   workspace path, name, adapter, command, interactive, prompt), never in the workspace, and do not depend on git, links or where the
   file came from. Anything else is not run (fail closed, also on any read error); a changed entry asks again. A built-in agent
   needs no approval; `[workspace] agent` naming an unapproved custom agent falls back to the person's default.

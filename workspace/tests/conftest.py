@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import json
 import os
@@ -78,15 +79,6 @@ def pytest_configure(config):
         os.environ["ORCH_TEST_SESSION_PIDS"] = reg
     with open(reg, "a") as f:
         f.write(f"{os.getpid()}\n")
-
-
-@pytest.fixture(autouse=True)
-def _no_tool_version_probe(monkeypatch):
-    """The deny-rule version check (adapters.deny_version_check) probes the tool; tests that only look at
-    an argv must not depend on a tool being installed. tests/test_deny_rules.py tests the real check."""
-    from orch import adapters
-
-    monkeypatch.setattr(adapters, "_deny_version_ok", lambda a, b=None: None)
 
 
 @pytest.fixture(autouse=True)
@@ -280,22 +272,46 @@ REAL_HOME_MODULES = (
     "test_secret_store",
     "test_install_kind",
     "test_winacl",
+    "test_home",
 )  # they test the home pairing itself
-REAL_PROOF_MODULES = ("test_humanproof",)  # the guarded home itself
 
 
 def ensure_keys(root):
-    """TEST HELPER: the workspace's local id and human key exist (a real proof needs both anyway)."""
-    from orch import humanproof
+    """TEST HELPER: the workspace's local id and key folder exist."""
+    from orch import home as orch_home
     from orch.errors import Refused
 
     try:
         addons.workspace_id(root, create=True)
-        humanproof.human_key(root, create=True)
-    except (
-        Refused
-    ):  # a folder a test install may not use (not under ~/.orch-test): nothing can be signed there
+        orch_home.key_dir(root, create=True)
+    except Refused:  # a folder a test install may not use (not under ~/.orch-test)
         pass
+
+
+def key_file(root, create=True):
+    """TEST HELPER: a 32-byte secret file `test.key` in the workspace key folder (rights 0600), made on
+    first use. A loose or wrong-type file is never read: the protection resets and a new file is written."""
+    import secrets
+
+    from orch import home as orch_home
+    from orch.errors import Refused
+
+    d = orch_home.key_dir(root, create=create)
+    f = d / "test.key"
+    with orch_home._key_lock(d) if create else contextlib.nullcontext():
+        try:
+            try:
+                raw = orch_home._read_guarded(f)
+            except orch_home.LooseFile as e:
+                orch_home.reset_protection(root, str(e))
+                orch_home._write_private(f, secrets.token_hex(32) + "\n")
+                raw = orch_home._read_guarded(f)
+        except FileNotFoundError:
+            if not create:
+                raise Refused("There is no key here yet.") from None
+            orch_home._write_private(f, secrets.token_hex(32) + "\n")
+            raw = orch_home._read_guarded(f)
+    return bytes.fromhex(raw.decode().strip())
 
 
 def sign_done(root, tid, by="human:tester"):
@@ -307,29 +323,13 @@ def sign_done(root, tid, by="human:tester"):
 
 @pytest.fixture(autouse=True)
 def _legacy_trust(request, monkeypatch):
-    """TEST-ONLY (1.0a-2): older CLI tests act as `--by human:` without a proof. For them (a Python-level
-    patch, no env var, no config key; production has no such path) the human gate trusts --by as before, and
-    the pending read-back is the old by/via allowlist. Modules that test the real proof opt out by name."""
-    if request.module.__name__.split(".")[-1].startswith(REAL_PROOF_MODULES):
-        return
-    from orch import humanproof, tickets
+    """TEST-ONLY: these tests keep the workspace in pytest's temp folder, which the real pairing refuses (a
+    test workspace must live under ~/.orch-test). Their orch home is the ORCH_HOME the fixture set. The
+    pairing check itself is tested by test_home.py."""
+    from orch import home as orch_home
     from orch.errors import Refused
 
-    real_by = tickets.acting_by
-
-    def legacy(args):
-        who = real_by(args)
-        root = getattr(args, "orch_root", None)
-        if who.startswith("human:") and root is not None:
-            ensure_keys(
-                root
-            )  # a person's Done is signed: the key and the local id exist, as after a real proof
-        return who
-
     def test_home(root):
-        """TEST-ONLY: these tests keep the workspace in pytest's temp folder, which the real pairing refuses
-        (a test workspace must live under ~/.orch-test). Their orch home is the ORCH_HOME the fixture set, so
-        a signed Done (key + ledger) works there. The pairing check itself is tested by test_human_proof*."""
         home = Path(os.environ["ORCH_HOME"]) if os.environ.get("ORCH_HOME") else None
         if home is None:
             raise Refused("no test home")
@@ -337,9 +337,8 @@ def _legacy_trust(request, monkeypatch):
         os.chmod(home, 0o700)
         return home
 
-    monkeypatch.setattr(tickets, "acting_by", legacy)
     if not request.module.__name__.split(".")[-1].startswith(REAL_HOME_MODULES):
-        monkeypatch.setattr(humanproof, "guarded_home", test_home)
+        monkeypatch.setattr(orch_home, "guarded_home", test_home)
 
 
 _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
@@ -382,69 +381,48 @@ _RECORD_MODULES = re.compile(
 
 @pytest.fixture(autouse=True)
 def _record_keys(request, monkeypatch, tmp_path_factory, _legacy_trust):
-    """The record writer is fail closed: no human key, no recording (record_auth, activity.md). The record
-    test modules write in plain tmp folders that are no guarded workspace, so for them the guarded home falls
-    back to a test folder and the record key is made on first use. This is this test package's fixture only:
-    no product code has a switch for it. A test of the missing key (or of a real guarded home) opts out with
-    `@pytest.mark.no_record_key`."""
-    if request.node.get_closest_marker("no_record_key") or not _RECORD_MODULES.search(
-        request.module.__name__
-    ):
+    """The record test modules write in plain tmp folders that are no guarded workspace, so for them the
+    guarded home (other stores they touch, e.g. the key store) falls back to a test folder. The record itself
+    needs no key. This is this test package's fixture only: no product code has a switch for it."""
+    if not _RECORD_MODULES.search(request.module.__name__):
         yield
         return
-    from orch import humanproof as hp
+    from orch import home as orch_home
 
-    orig_home, orig_key = hp.guarded_home, hp.record_key
+    orig_home = orch_home.guarded_home
     fallback = tmp_path_factory.mktemp("recordhome")
 
     def home(root):
         try:
             return orig_home(root)
-        except hp.HomeRefused:
+        except orch_home.HomeRefused:
             return fallback
 
     # the shared monkeypatch, set up after `_legacy_trust` (so undone before it): every patch of
-    # humanproof.guarded_home is undone in the reverse order, none leaks into the next test (test_winacl)
-    monkeypatch.setattr(hp, "guarded_home", home)
-    monkeypatch.setattr(hp, "record_key", lambda root, create=False: orig_key(root, create=True))
+    # orch_home.guarded_home is undone in the reverse order, none leaks into the next test (test_winacl)
+    monkeypatch.setattr(orch_home, "guarded_home", home)
     yield
 
 
 def seal_lines(root, run, events, *, start=1, link=None):
-    """Raw bytes of sealed lines for `events` (the writer's own seal, for tests that write run files by hand):
-    seq `start`.. in order, chained from `link` (genesis for seq 1). The events are used as given (write
-    them as the writer would: compact JSON, no `auth`)."""
-    from orch import humanproof as hp
-    from orch import record_auth as ra
-
-    ws, kid, rk = hp.record_key(root)
-    prev = link or ra.genesis(rk, ws, run)
+    """Raw bytes of run lines for `events` (for tests that write run files by hand): seq `start`.. in order,
+    one compact JSON line each. `root` and `link` are kept for the callers' sake and unused."""
     out = b""
     for n, ev in enumerate(events, start):
-        body = json.dumps(dict(ev, seq=n), separators=(",", ":"), ensure_ascii=False).encode()
-        line = ra.seal(rk, kid, ws, run, n, prev, body)
-        out += line
-        prev = ra.split(line)[3]
+        out += json.dumps(dict(ev, seq=n), separators=(",", ":"), ensure_ascii=False).encode() + b"\n"
     return out
 
 
 def seal_append(root, run, event):
-    """Append ONE sealed line to the run file as code that holds orch's key could (the Level 1 residual of the
-    record MAC): the next seq after the file's last sealed line, chained to it. For tests of what the readers
-    do with a line that verifies but is wrong in content (a pointer to another ticket's detail file, ...)."""
+    """Append ONE line to the run file by hand: the next seq after the file's last line."""
     from orch import record
-    from orch import record_auth as ra
 
     path = record.record_dir(root) / "runs" / f"{run}.jsonl"
     raw = path.read_bytes() if path.exists() else b""
     last = [x for x in raw.splitlines() if x][-1:]
-    if last:
-        body, _kid, _p, mac = ra.split(last[0])
-        seq, link = json.loads(body)["seq"] + 1, mac
-    else:
-        seq, link = 1, None
+    seq = json.loads(last[0])["seq"] + 1 if last else 1
     with path.open("ab") as f:
-        f.write(seal_lines(root, run, [event], start=seq, link=link))
+        f.write(seal_lines(root, run, [event], start=seq))
 
 
 @pytest.fixture(autouse=True)

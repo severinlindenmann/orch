@@ -18,7 +18,7 @@ function ticketTitle(t, tail = null) {
 }
 function parentLine(t) {
   const parent = ticketOf(t.parent || tickets().find(p => array(p.children).includes(t.id))?.id);
-  return parent ? h('p', {className:'meta'}, 'Step of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
+  return parent ? h('p', {className:'meta'}, parent.epic ? 'Part of the epic ' : 'Step of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
 }
 const finishedAt = t => parse(t.done_at || t.completed_at || t.updated_at);
 
@@ -244,6 +244,45 @@ function reviewAllButton() {
   const n = typeof reviewCount === 'function' ? reviewCount() : 0;
   return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all', h('span', {className:'count'}, String(n))) : null;
 }
+// "Clear old": the questions that have waited more than a week go in one click. Same path as a one-click answer:
+// the rows leave at once, the toast offers Undo, and only when the Undo window ends is each one answered.
+const OLD_QUESTION_MS = 7 * 24 * 3600 * 1000, OLD_QUESTION_ANSWER = 'Dismissed: older than a week';
+function oldQuestions() {
+  const cutoff = now().getTime() - OLD_QUESTION_MS;
+  return needsToday().needs.filter(r => r.ticket && r.answer?.question && r.answer?.digest && !needActs(r).length && Date.parse(r.since) < cutoff);
+}
+function clearOldButton() {
+  const old = snapshot ? [] : oldQuestions();
+  if (!old.length) return null;
+  const label = 'Dismiss the ' + old.length + (old.length === 1 ? ' question' : ' questions') + ' older than a week';
+  const b = h('button', {type:'button', className:'btn quiet sm', title:label, 'aria-label':label, 'data-key':'clear-old'}, 'Clear old');
+  b.onclick = () => {
+    if (changeUnavailable()) return;
+    const rows = oldQuestions();
+    if (!rows.length) return;
+    rows.forEach(r => pendingAnswers.set(r.id, true));
+    let undone = false;
+    const timer = setTimeout(async () => {
+      if (undone) return;
+      let answered = 0, failed = null;
+      try {
+        for (const r of rows) {
+          const result = await act('answer', {ticket:r.ticket, question:r.answer.question, digest:r.answer.digest, answer:OLD_QUESTION_ANSWER});
+          if (result.ok) answered++; else failed = failed || result;
+        }
+        if (failed) window.orch.toast('Cleared ' + answered + ' of ' + rows.length + ' old questions. ' + changeError(failed), 'error');
+      } finally {
+        rows.forEach(r => pendingAnswers.delete(r.id));
+        render();
+      }
+    }, ANSWER_UNDO_MS);
+    window.orch.toast('Cleared ' + rows.length + ' old ' + (rows.length === 1 ? 'question' : 'questions'), 'ok', () => {
+      undone = true; clearTimeout(timer); rows.forEach(r => pendingAnswers.delete(r.id)); render();
+    });
+    render();
+  };
+  return b;
+}
 function attentionSummary(groups, failed, results, changes) {
   const questionsAsked = groups.filter(g => g.row.answer?.question).length, other = groups.length - questionsAsked + failed.length;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
@@ -302,6 +341,22 @@ function backgroundBanner() {
   const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names.at(-1) : names[0];
   return h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, list + (names.length > 1 ? ' are' : ' is') + ' not running. Press Start so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start'));
 }
+// After an automatic update (Settings > About & updates): the new version and what changed, or a plain note that it
+// failed and orch stays on the old version. "Got it" clears it.
+function autoUpdateNote() {
+  const n = state.auto_update_note;
+  if (!n || (n.state !== 'updated' && n.state !== 'failed')) return null;
+  const num = v => String(v || '').replace(/^orch /, '');
+  const got = snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'auto-update-note-ok', 'data-key':'auto-update-note-ok'}, 'Got it');
+  if (n.state === 'failed') {
+    return h('div', {className:'banner attn', 'data-key':'auto-update-note', role:'status'}, h('p', {className:'grow'},
+      'orch could not update itself to ' + num(n.to) + (n.reason ? ': ' + clean(n.reason).replace(/[.\s]+$/, '') : '') + '. It is still ' + num(n.from) + ' and tries again later.'), got);
+  }
+  const changes = array(n.changes);
+  return h('section', {className:'card home-card', 'data-key':'auto-update-note'},
+    h('div', {className:'card-h row between'}, h('h2', {}, 'orch updated itself to ' + num(n.to)), got),
+    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, 'Updated from ' + num(n.from) + '.')));
+}
 // "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first.
 function doneAt(t) {
   if (typeof t.done_at === 'string' && t.done_at) return t.done_at;
@@ -339,7 +394,7 @@ function home() {
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const banner = backgroundBanner(), changedCard = whatChangedCard(changedList(all));
+  const banner = [backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
   const title = needCount ? needCount + (needCount === 1 ? ' thing needs you' : ' things need you') : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length);
   const head = heading(title, summary ? today + ' · ' + summary : today, {
@@ -359,7 +414,7 @@ function home() {
   const finishedBody = finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      needCount ? attentionCard('needs-you', 'Needs you · ' + needCount, 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', reviewAllButton()) : null),
+      needCount ? attentionCard('needs-you', 'Needs you · ' + needCount, 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', [clearOldButton(), reviewAllButton()]) : null),
     h('aside', {className:'stack', 'data-key':'right'},
       working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
       quiet.length ? card('quiet-now', 'No news', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,

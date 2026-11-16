@@ -12,7 +12,7 @@ import sys
 import pytest
 
 from orch import addons, winfinish
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch.errors import Refused
 
 
@@ -31,9 +31,9 @@ def _install(tmp_path, monkeypatch):
         '[tool]\nentrypoints = [\n    { name = "orch", install-path = "%s", from = "orch-workspace" },\n]\n'
         % (bindir / "orch")
     )
-    (env / "orch-install.json").write_text(hp.install_record_text("test", env))
-    monkeypatch.setattr(hp.sys, "prefix", str(env))
-    monkeypatch.setattr(hp, "_source_tree", lambda: False)
+    (env / "orch-install.json").write_text(orch_home.install_record_text("test", env))
+    monkeypatch.setattr(orch_home.sys, "prefix", str(env))
+    monkeypatch.setattr(orch_home, "_source_tree", lambda: False)
     monkeypatch.setattr(addons, "_tool_args", lambda e: ["tool", "install", "--reinstall"])
     return env, bindir
 
@@ -100,12 +100,12 @@ def test_uv_is_pinned_to_the_receipt_bin_dir(tmp_path, monkeypatch):
 
 
 def test_page_reason_from_the_update_log():
-    from orch import pageproof
+    from orch import pagesession
 
     tail = "uv failed: ...\nerror: Executable already exists: orch\nRefused: " + winfinish.plain_reason(
         "error: Failed to fetch", True
     )
-    assert pageproof._short_reason(tail).startswith("No internet connection to GitHub")
+    assert pagesession._short_reason(tail).startswith("No internet connection to GitHub")
 
 
 def test_finisher_restores_the_old_orch_when_uv_fails(tmp_path):

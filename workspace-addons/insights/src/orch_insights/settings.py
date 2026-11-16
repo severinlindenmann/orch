@@ -72,28 +72,16 @@ def current_value(answer, key):
     return str(value)
 
 
-def needs_person(key, value, current) -> bool:
-    """Widening (more detail kept, more space, sharing on) needs the person. Unknown current = widening.
-    A hint for the page only: it authorizes nothing, the core decides widening under its own lock."""
-    if current is None:
-        return True
-    if key in NUMBERS:
-        return int(value) > int(current)
-    return value == "on"
-
-
 def _options(key, current, can_act, locked=False):
     options = []
     for value in KEYS[key][1]:
-        person = needs_person(key, value, current)
-        disabled = locked or (person and not can_act and value != current)
+        disabled = locked or (not can_act and value != current)
         selected = value == current
         options.append(
             {
                 "value": value,
                 "label": LABELS[value],
                 "selected": selected,
-                "needs_person": person,
                 "disabled": disabled,
             }
         )

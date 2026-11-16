@@ -211,6 +211,29 @@ def test_load_addons_passes_place_settings_and_defaults_to_nav():
     }
 
 
+def test_load_addons_keeps_the_live_session_page_flag():
+    """ORCH-15: the ticket's Live session card finds Focus by [page] live_session; dropping the flag here hid
+    "Watch live" in the real dashboard and left only "Copy command"."""
+    from orch_dashboard.data import load_addons
+
+    def row(name, page):
+        return {"name": name, "active": True, "dashboard": {"label": "X", "icon": "link"}, "page": page}
+
+    rows = load_addons(
+        None,
+        None,
+        [
+            row("focus", {"path": "/", "label": "Open Focus", "live_session": True}),
+            row("other", {"path": "/", "label": "Open"}),
+            row("odd", {"path": "/", "live_session": "yes"}),
+        ],
+    )
+    pages = {r["name"]: r["page"] for r in rows}
+    assert pages["focus"] == {"path": "/", "label": "Open Focus", "live_session": True}
+    assert pages["other"] == {"path": "/", "label": "Open"}
+    assert pages["odd"] == {"path": "/", "label": ""}
+
+
 def test_settings_git_private(ws, monkeypatch):
     from orch_dashboard import data
 

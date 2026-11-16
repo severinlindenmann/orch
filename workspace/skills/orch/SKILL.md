@@ -53,6 +53,7 @@ Started by hand (not by orch)? Tell orch which ticket you work on so nobody star
 `orch run claim <id> --session <your session id>`. Finishing a piece of work in a live session: `orch run done <id>`.
 In a live session, when you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready`, run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
+Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
 
 **Finish a step**
 
@@ -135,6 +136,8 @@ Write the question for a person who has not seen your work, in plain words:
 
 Other cards: `--draft`, `--plan`, `--link` (with `--open <address>`), `--before F --after F`. The answer may carry changes: do exactly those, nothing more.
 
+A GitHub pull request only the person may merge: `orch ask <id> "Merge release 3?" --link "Release 3" --open <pull request address> --merge --then "<what follows>"`. The person's Merge click merges it with their own GitHub login; never merge it yourself.
+
 The ticket now waits for the answer (Waiting). Keep working on the steps that do not depend on it; stop only when
 nothing is left that you can do without the answer. Do not treat silence as an answer. On your next run, when the
 answer is in `orch ticket show <id>`, set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
@@ -196,13 +199,17 @@ When the ticket reaches Review, orch sends its summary and files to the person b
 
 If work remains, leave it visible (open steps, a log line).
 
-**Pick the workspace icon and colour** (once; when `orch look show` says nobody has)
+**Fill in the workspace profile** (the starter task of a new workspace does this; else once, when nobody has)
 
-    orch look show                        # who chose, if anyone
+    orch config get workspace.name                # also workspace.description, workspace.tags
+    orch config set workspace.name "<2 to 4 words>"
+    orch config set workspace.description "<one line: what this workspace is for>"
+    orch config set workspace.tags "<tag>,<tag>"  # 2 to 4 lowercase words
+    orch look show                        # who chose the icon, if anyone
     orch look list                        # 100 icons, 12 colours
     orch look set --icon <id> --color <token>     # fit the folder name and what the work is about
 
-Choose from the list, never invent an id. If a person already chose, `orch look set` is refused: leave it. The icon is optional: if `orch look` is refused or fails, skip it; it is never a blocker for the work.
+Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colours from the list, never invent an id. If a person already chose a field, orch refuses it: leave it. All of it is optional: if one is refused or fails, skip it; it is never a blocker for the work.
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.

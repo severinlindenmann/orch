@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import humanproof, syncgate, tickets
+from orch import syncgate, tickets
 
 from . import cli, incoming, paths, records, repo, scan
 
@@ -21,37 +21,16 @@ class Pause(repo.Refused):
         self.kind = kind
 
 
-PAUSED_KIND = "sync-paused"
-
-
-def sign(root, paused):
-    """Sign a pause this core made or changed in this process (its files, reason, kind, remote, clashes) with its
-    local1 MAC. Only capture and the person's resolutions call it: an agent can write state.json, but an edited or
-    planted pause (a reason that lowers what needs a proof, a remote it never reviewed) is no pause at all."""
-    body = {k: v for k, v in paused.items() if k != "mac"}
-    mac = humanproof.local_sign(root, PAUSED_KIND, body)
-    return {**body, "mac": mac} if mac else None  # unsigned = no pause (sync looks again)
-
-
-def seal(root, state):
-    """Before state.json is written: keep the pause only as this core signed it (verified_pause), else drop it.
-    Never signs: a planted pause written back by any core write would otherwise come out signed."""
-    state["paused"] = verified_pause(root, state)
-    return state
-
-
 def verified_pause(root, state):
-    """The pause in `state` (with its mac, so writing it back unchanged keeps it) when this core signed exactly
-    it, else None. A caller that changes it signs it again (sign); a changed pause it forgets is dropped."""
+    """The pause in `state` when it has the shape of one (files and reason), else None. An old pause that still
+    carries a mac field loads as before; the field is dropped."""
     paused = state.get("paused") if isinstance(state, dict) else None
     if not isinstance(paused, dict):
         return None
     body = {k: v for k, v in paused.items() if k != "mac"}
-    if not humanproof.local_ok(root, PAUSED_KIND, body, paused.get("mac")):
-        return None
     if not isinstance(body.get("files"), list) or not isinstance(body.get("reason"), str):
         return None
-    return paused
+    return body
 
 
 def capture(root, state, error, remote, now):
@@ -72,7 +51,7 @@ def capture(root, state, error, remote, now):
         paused["key_clashes"] = error.key_clashes
     if error.case_names:
         paused["case_names"] = {p: v for p, v in error.case_names.items() if p in files}
-    state["paused"] = sign(root, paused)  # the one place a new pause is made (Pause raised in this process)
+    state["paused"] = paused  # the one place a new pause is made (Pause raised in this process)
     # Manifest is written last by the step. Saved bytes are never used without matching its sha.
     for path in files:
         data = step.blob(root, theirs.get(path))
@@ -88,7 +67,7 @@ CHOICES = ("mine", "theirs", "key")
 
 
 def choices(root, remote):
-    """The choices for exactly this remote commit: only entries this core signed for exactly that remote and
+    """The choices for exactly this remote commit: only entries for exactly that remote and
     path (records "choice"); an entry of any other shape, edited (keep, covers, local, ...) or planted counts
     for nothing."""
     data = cli.read(root, "choices")
@@ -107,14 +86,14 @@ def choices(root, remote):
 
 
 def record_choice(root, decisions, remote, path, fields, data=None):
-    """Put a signed choice for `path` (bound to the reviewed remote, and to the chosen bytes) into `decisions`."""
+    """Put a choice for `path` (bound to the reviewed remote, and to the chosen bytes) into `decisions`."""
     if data is not None:
         fields = {**fields, "sha256": hashlib.sha256(data).hexdigest()}
     decisions["files"][path] = records.make(root, "choice", f"{remote}:{path}", fields)
 
 
 def selected(root, path, entry):
-    """The chosen bytes of `path`: only when they are exactly the bytes its signed choice names. `entry` is the
+    """The chosen bytes of `path`: only when they are exactly the bytes its choice names. `entry` is the
     VERIFIED choice (from choices()); the store is never read again here (no swap between the two reads)."""
     data = repo.safe(root, "run/sync/choices/" + path).read_bytes()
     if not isinstance(entry, dict) or entry.get("sha256") != hashlib.sha256(data).hexdigest():
@@ -201,7 +180,7 @@ def blocking(checked, path=None):
 
 
 def findings(root, path, data):
-    """What blocks `data`: a cannot-check finding counts as settled only by this core's signed record that a
+    """What blocks `data`: a cannot-check finding counts as settled only by the record that a
     person allowed exactly these bytes at exactly this path (records "file")."""
     approved = cli.read(root, "checked-files")
     hashed = hashlib.sha256(data).hexdigest()
@@ -211,10 +190,9 @@ def findings(root, path, data):
 
 def local_decisions(doc, local):
     """A chosen remote ticket with what only this machine decides taken from its own copy: the key and old
-    keys (ext.sync) and Done (a peer's Done never becomes Done here by a choice). The peer's Won't do,
-    verdict and approval fields stay as they came: the caller merges the chosen copy as the REMOTE side
-    (merge_document(local, local, chosen)), so the receiving core's verifiers decide each one and an
-    unverified one stays unverified (Fable B2). Nothing in the chosen copy becomes locally trusted."""
+    keys (ext.sync) and Done (a peer's Done never becomes Done here by a choice). The peer's other fields
+    stay as they came: the caller merges the chosen copy as the REMOTE side (merge_document(local, local,
+    chosen)), so the normal merge rules decide each one (Fable B2)."""
     out = {k: v for k, v in doc.items() if k != "key"}
     out.update({k: local[k] for k in ("key",) if k in local})
     if out.get("status") == "done" and local.get("status") != "done":
@@ -310,8 +288,7 @@ def resolve(root, path, keep, args=None, *, now=None):
                     # Fable B2: adopting a peer's ticket is a person's decision, bound to these exact bytes.
                     doc = local_decisions(doc, local)
                 # The chosen copy is the remote side of a merge whose base and local side are this machine's
-                # copy: its plain fields win, while the receiving core's verifiers decide every Won't do and
-                # verdict, its remote-only history lines are demoted (merge.py), and held ext stays held.
+                # copy: the normal merge rules decide, and held ext stays held.
                 doc = step.merge_document(root, path, local, local, doc, now)
                 if adopting:
                     raw = mine or b"{}"
@@ -342,8 +319,7 @@ def resolve(root, path, keep, args=None, *, now=None):
                 if keep == "theirs" and len(docs) == 2:
                     data = step.encoded(merge.merge_counter({}, *docs))
                 step.document(path, data)
-                # Everything that can refuse runs before the proof, so a refusal never uses it up (LOW-4).
-                # The person's proven choice covers the incoming numbers they reviewed (a far key included).
+                # The person's choice covers the incoming numbers they reviewed (a far key included).
                 covers = step.top_number(root, remote) if jump and remote else None
             elif paths.ARTIFACT.fullmatch(path) and keep == "theirs" and mine is not None and mine != data:
                 # No overwrite even on retries or two choices on the same day.
@@ -366,64 +342,15 @@ def resolve(root, path, keep, args=None, *, now=None):
                 decisions = {"remote_sha": remote, "files": {}}
             step.write(root, "run/sync/choices/" + path, data)
             fields = {"keep": keep, "at": now, **({"covers": covers} if covers is not None else {})}
-            record_choice(root, decisions, remote, path, fields, data)  # covers is inside the signature
+            record_choice(root, decisions, remote, path, fields, data)  # covers is inside the record
             step.write(root, "run/sync/choices.json", step.encoded(decisions))
             step.write(root, path, data)
             paused["files"].remove(path)
-            state["paused"] = sign(root, paused) if paused["files"] else None  # changed by core: signed again
+            state["paused"] = paused if paused["files"] else None
             step.write(root, "run/sync/state.json", step.encoded(state))
         if state["paused"]:
             return state
         return step._run(root, "resolved", now, cli.remote_allowed())
-
-
-def resolve_sides(root, path):
-    """(paused, remote, mine, theirs) read as resolve reads them, once, for the proof target AND the sign step's
-    review. The saved copy (run/sync/theirs/<path>, agent-writable) counts only when it is exactly the blob of the
-    signed pause's remote commit, as resolve checks it (L3): otherwise nothing is offered for signing."""
-    from . import step
-
-    state = cli.read(root, "state")
-    paused = verified_pause(root, state)
-    if not paths.allowed(path) or not paused or path not in paused["files"]:
-        raise repo.Refused("This file is not waiting for a choice")
-    remote = paused["remote_sha"]
-    if remote is not None and (
-        not isinstance(remote, str) or not remote
-    ):  # only None means "no remote version"
-        raise repo.Refused("Saved copy does not match the checked version")
-    live = repo.safe(root, path)
-    head = step.blob(root, step.entries(root, "HEAD").get(path))
-    mine = live.read_bytes() if live.exists() else head
-    saved = repo.safe(root, "run/sync/theirs/" + path)
-    theirs = saved.read_bytes() if saved.exists() else None
-    if (
-        remote is None
-    ):  # a pause before any remote version (first push, local mode): no saved copy can be checked (L-3)
-        if theirs is not None:
-            raise repo.Refused("Saved copy does not match the checked version")
-    elif theirs != step.blob(root, step.entries(root, remote).get(path)):
-        raise repo.Refused("Saved copy does not match the checked version")
-    return paused, remote, mine, theirs
-
-
-def resolve_target(root, path, keep, sides=None):
-    """The proof `resolve(root, path, keep)` will ask for, worked out the same way and without changing anything;
-    None when that choice needs no proof. The dashboard mints exactly this target (a stale one simply fails).
-    `sides`: resolve_sides() already read for the review the person is shown (the same bytes)."""
-    paused, remote, mine, theirs = sides or resolve_sides(root, path)
-    data = mine if keep == "mine" else theirs
-    data = data if data is not None else mine or theirs
-    if data is None:
-        return None
-    issues = findings(root, path, data)
-    if issues and all(f.code == "cannot-check" for f in issues):
-        return "sync:file:" + hashlib.sha256(data).hexdigest()
-    if paths.TICKET.fullmatch(path) and keep == "theirs" and data == theirs and mine != data:
-        return "sync:keep-theirs:" + hashlib.sha256(path.encode() + b"\0" + data).hexdigest()
-    if path == "ticket-counter.json" and (keep == "theirs" or paused.get("reason") == JUMP):
-        return f"sync:keep-{keep}-counter:{remote}"
-    return None
 
 
 def left_bytes(root, path):
@@ -438,21 +365,14 @@ def left_bytes(root, path):
     return live.read_bytes()
 
 
-def leave_out_target(root, path, data=None):
-    """The proof target of Leave it out: the path and the exact bytes left out (changed content asks again).
-    `data`: left_bytes() already read for the review the person is shown."""
-    data = left_bytes(root, path) if data is None else data
-    return "sync:leave-out:" + hashlib.sha256(path.encode() + b"\0" + data).hexdigest()
-
-
 def left_out(root, path, data):
-    """True when a person left exactly these bytes at this path out of sync (signed record "left-out")."""
+    """True when a person left exactly these bytes at this path out of sync (record "left-out")."""
     entry = cli.read(root, "left-out").get(path)
     return records.ok(root, "left-out", f"{path}:{hashlib.sha256(data).hexdigest()}", entry)
 
 
 def left_out_names(root):
-    """The paths a person left out (signed records only), for the "not synced" list."""
+    """The paths a person left out (records only), for the "not synced" list."""
     out = []
     for path, entry in sorted(cli.read(root, "left-out").items()):
         hashed = entry.get("sha256") if isinstance(entry, dict) else None
@@ -487,22 +407,17 @@ def leave_out(root, path, args, *, now=None):
         left[path] = records.make(root, "left-out", f"{path}:{hashed}", {"path": path, "sha256": hashed})
         step.write(root, "run/sync/left-out.json", step.encoded(left))
         paused["files"].remove(path)
-        state["paused"] = sign(root, paused) if paused["files"] else None
+        state["paused"] = paused if paused["files"] else None
         step.write(root, "run/sync/state.json", step.encoded(state))
     if state["paused"]:
         return state
     return step.run_once(root, "left a file out", now=now)
 
 
-def take_target(remote, tree):
-    """The proof target of take-remote: the reviewed remote commit AND the exact tree that will be applied."""
-    return f"sync:take-remote:{remote}:{tree}"
-
-
 def take_remote(root, args, *, now=None):
     """A person's way out of a HISTORY pause (several or no merge bases): take the other computer's history as
-    the new base. Everything goes through the normal merge authority (step.taken_tree); every check that can
-    refuse runs BEFORE the proof, and the proof is bound to the exact tree that is then applied."""
+    the new base. Everything goes through the normal merge (step.taken_tree); every check that can refuse
+    runs first."""
     import tempfile
 
     from . import step
@@ -564,19 +479,12 @@ def take_remote(root, args, *, now=None):
     return step._run(root, "took the other computer's history", now, cli.remote_allowed())
 
 
-def case_target(path, remote, target=None):
-    """The proof target of a name choice: bound to the incoming name, the reviewed remote and the new name."""
-    parts = [path, str(remote), target] if target else [path, str(remote)]
-    digest = hashlib.sha256("\0".join(parts).encode()).hexdigest()
-    return f"sync:case-rename:{digest}" if target else f"sync:case-keep:{digest}"
-
-
 def resolve_case(root, path, args, *, rename=None, now=None):
     """A person's way out of a name that differs from this machine's only in case (`path` = the incoming name;
     on a disk that ignores case both are one file). Keep this machine's file name: the other computer's variant
     is not applied while the remote stays at the reviewed commit (it is reported each time; a new remote commit
     asks again). Or rename this machine's file (`rename`: a new file name in the same folder): then both
-    arrive. Bound to the reviewed remote commit, the path and the new name; agents are refused."""
+    arrive. Bound to the reviewed remote commit, the path and the new name."""
     import os
 
     from . import step
@@ -635,7 +543,7 @@ def resolve_case(root, path, args, *, rename=None, now=None):
                 step.write(root, "run/sync/choices.json", step.encoded(decisions))
             paused["files"].remove(path)
             case.pop(path)
-            state["paused"] = sign(root, paused) if paused["files"] else None  # changed by core: signed again
+            state["paused"] = paused if paused["files"] else None
             step.write(root, "run/sync/state.json", step.encoded(state))
         if state["paused"]:
             return state
@@ -793,6 +701,6 @@ def keep_key(root, key, tid, args, *, now=None):
         step.write(root, "run/sync/choices.json", step.encoded(decisions))
         paused["key_clashes"].pop(key)
         paused["files"] = [p for p in paused["files"] if p not in selected_docs]
-        state["paused"] = sign(root, paused) if paused["files"] else None  # changed by core: signed again
+        state["paused"] = paused if paused["files"] else None
         step.write(root, "run/sync/state.json", step.encoded(state))
     return state if state["paused"] else step._run(root, "key chosen", now, cli.remote_allowed())

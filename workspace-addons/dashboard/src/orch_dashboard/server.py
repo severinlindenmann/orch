@@ -186,7 +186,7 @@ def _typing_allowed(root) -> bool:
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pageproof import REVOKED_MSG
+    from orch.pagesession import REVOKED_MSG
 
     if session.revoked:
         return REVOKED_MSG.encode()
@@ -199,15 +199,15 @@ REOPEN_EVERY = 30  # seconds between two "open the dashboard again" windows
 
 
 def _arm_resume(root: Path, session) -> None:
-    """Like the update hand-off: the restarted server adopts this tab's session once (15 min, one use), so the
+    """Like the Update button: the restarted server adopts this tab's session once (15 min, one use), so the
     open tabs keep working after the add-on change restarts it. Written only for a click with a page session."""
     import contextlib
 
     with contextlib.suppress(Exception):  # without it the tab shows "orch restarted. Reload ..." as before
-        from orch import humanproof
+        from orch import pagelaunch
 
-        humanproof.write_resume_cookie(root, session.server, session.cookie, session.secret)
-        humanproof.arm_restart(root)  # the other page server hands its tabs over too (#705)
+        pagelaunch.write_resume_cookie(root, session.server, session.cookie, session.secret)
+        pagelaunch.arm_restart(root)  # the other page server hands its tabs over too (#705)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -240,7 +240,7 @@ class Handler(BaseHTTPRequestHandler):
     def _refused_text(self, text: str) -> str:
         """The words of a 403 for a missing page session: a sign-in link that was used twice, a tab whose
         session the restarted server does not know (after an update), or the plain default."""
-        from orch.pageproof import RESTARTED_MSG, REVOKED_MSG
+        from orch.pagesession import RESTARTED_MSG, REVOKED_MSG
 
         if self.session is None:
             return text
@@ -422,29 +422,17 @@ class Handler(BaseHTTPRequestHandler):
             m = hmac.new(self.nonce.encode(), c.encode(), hashlib.sha256).hexdigest()
             return self._send(200, json.dumps({"pid": os.getpid(), "mac": m}).encode(), "application/json")
         if (
-            path == "/api/notices"
-        ):  # read once, and only by a page with a session (a curl must not consume it)
-            from . import handoff
-
-            ok = self.session is not None and self.session.authed(self.headers, self.server.server_address[1])
-            items = handoff.notices(self.root) if ok else []
-            return self._send(200, json.dumps(items).encode(), "application/json")
-        if (
             path == "/api/update-info"
         ):  # versions + what changed: same-origin only (checked above), no secrets
-            from . import handoff
+            from . import update
 
-            return self._send(200, json.dumps(handoff.update_info()).encode(), "application/json")
+            return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
         if path == "/api/update-status":  # only a page with a session (a finished result is read once)
-            from . import handoff
+            from . import update
 
             ok = self.session is not None and self.session.authed(self.headers, self.server.server_address[1])
-            st = handoff.update_status(self.root) if ok else None
+            st = update.update_status(self.root) if ok else None
             return self._send(200, json.dumps(st or {}).encode(), "application/json")
-        if path == "/api/handoffs":  # pending requests from a terminal; same-origin only (checked above)
-            from . import handoff
-
-            return self._send(200, json.dumps(handoff.listing(self.root)).encode(), "application/json")
         if path == "/api/term":  # the live helper session's screen (read only; typing is POST /api/term/keys)
             if not self._same_origin():
                 return self._send(403, b"forbidden", "text/plain")
@@ -596,7 +584,7 @@ class Handler(BaseHTTPRequestHandler):
             "blocks.js",
             "helpers.js",
             "session.js",
-            "handoff.js",
+            "update.js",
             "style.css",
             "logo.svg",
             "favicon.svg",
@@ -662,7 +650,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         report = path != "/api/diag"
         if report and not (
-            self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1])
+            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
         ):
             return self._send(
                 403, b"Open the dashboard from this computer to do this.", "text/plain; charset=utf-8"
@@ -697,7 +685,7 @@ class Handler(BaseHTTPRequestHandler):
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if not (
-            self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1])
+            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
         ):
             return self._send(
                 403, b"Open the dashboard from this computer to type here.", "text/plain; charset=utf-8"
@@ -726,7 +714,7 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence()
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        from orch.pageproof import forwarded, host_ok
+        from orch.pagesession import forwarded, host_ok
 
         if (
             self.session is None
@@ -758,8 +746,8 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence()
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        from orch import humanproof
-        from orch.pageproof import forwarded, host_ok
+        from orch import pagelaunch
+        from orch.pagesession import forwarded, host_ok
 
         port = self.server.server_address[1]
         if (
@@ -773,8 +761,8 @@ class Handler(BaseHTTPRequestHandler):
         if now - getattr(self.server, "reopened_at", -1e9) < REOPEN_EVERY:
             return self._send(429, b"A new window was opened a moment ago.", "text/plain; charset=utf-8")
         self.server.reopened_at = now
-        url = humanproof.launch_url(self.root, self.session.server, f"http://127.0.0.1:{port}/")
-        if "#launch=" not in url or not humanproof.open_browser(url):
+        url = pagelaunch.launch_url(self.root, self.session.server, f"http://127.0.0.1:{port}/")
+        if "#launch=" not in url or not pagelaunch.open_browser(url):
             return self._send(503, b"Open the dashboard again from orch.", "text/plain; charset=utf-8")
         self._send(
             202,
@@ -825,61 +813,33 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
         op_name = re.sub(r"[^A-Za-z0-9_.-]", "?", str(body.get("op"))[:40])
         self._act = (op_name, time.monotonic())
+        from . import update as _update
+
+        session = bool(
+            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
+        )
+        with _update.click():  # no automatic update starts during a person's click (or right after it)
+            return self._act_run(body, op_name, session)
+
+    def _act_run(self, body, op_name, session: bool):
         self._act_log(f"{op_name} start")
         try:
-            mint = None
-            if self.session is not None and self.session.can_mint(
-                self.headers, self.server.server_address[1]
-            ):
-                mint = self.session.mint
-            if body.get("op") == "notice.ack":
-                if mint is None:  # only a page with a session may clear a notice
+            if body.get("op") == "update.start":  # the Update button in Settings
+                from . import update
+
+                if not session:
                     raise actions.NeedsPerson("Open the dashboard from this computer to do this.")
-                from . import handoff
-
-                handoff.ack_notice(self.root, (body.get("args") or {}).get("id"))
-                return self._send(200, b"{}", "application/json")
-            if body.get("op") == "update.start":  # the Update button in Settings: one click of a person
-                from . import handoff
-
-                code, text = handoff.start_update(
+                code, text = update.start_update(
                     self.root,
                     self.orch_bin,
-                    mint,
                     actions.human_env(self.root, self.orch_bin),
                     session=self.session,
                 )
-                if code == 403:
-                    text = self._refused_text(text)
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
-            if body.get("op") in ("handoff.confirm", "handoff.dismiss"):
-                from . import handoff
-
-                hid = (body.get("args") or {}).get("id")
-                if body["op"] == "handoff.dismiss":
-                    if mint is None:  # only a page with a session may dismiss the person's requests
-                        raise actions.NeedsPerson("Open the dashboard from this computer to do this.")
-                    handoff.dismiss(self.root, hid)
-                    return self._send(200, b"{}", "application/json")
-                code, text = handoff.confirm(
-                    self.root,
-                    self.orch_bin,
-                    mint,
-                    hid,
-                    actions.human_env(self.root, self.orch_bin),
-                    session=self.session,
-                )  # 202 = started in the background (an update): the answer is sent below as it is
-                if code != 200:
-                    if code == 403:
-                        text = self._refused_text(text)
-                    return self._send(code, text.encode(), "text/plain; charset=utf-8")
-                state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
-                self.server.state_cache.invalidate(state)
-                return self._send(200, json.dumps(state).encode(), "application/json")
-            if body.get("op") in RESTARTING_OPS and mint is not None:
+            if body.get("op") in RESTARTING_OPS and session:
                 _arm_resume(self.root, self.session)
             code, text, extra = actions.run_op(
-                self.root, self.orch_bin, body.get("op"), body.get("args", {}), mint=mint
+                self.root, self.orch_bin, body.get("op"), body.get("args", {}), session=session
             )
         except actions.NeedsPerson as e:
             msg = self._refused_text(str(e))
@@ -931,6 +891,9 @@ class Handler(BaseHTTPRequestHandler):
                 "delivered": dlv if type(dlv) is int and dlv > 0 else 0,
                 "state": st[:20] if isinstance(st, str) else None,
             }
+        if body.get("op") == "ticket.new" and isinstance(extra, dict) and isinstance(extra.get("id"), str):
+            # the new ticket's id: the New ticket window opens it by id, never by guessing from the title
+            state["created"] = {"id": extra["id"][:40]}
         if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
             att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
             state["attached"] = {
@@ -963,7 +926,7 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
     # after the restart (Windows) would spend the file and the auto-port retry would start without it.
     srv = _Server(("127.0.0.1", port), handler)
     if orch_bin == actions.SELF:
-        from orch.pageproof import PageSession
+        from orch.pagesession import PageSession
 
         try:
             handler.keywords["session"] = PageSession(root, "dashboard")
@@ -972,4 +935,8 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
             raise
     srv.revisions = Revisions(root)
     srv.state_cache = StateCache(root, orch_bin, srv.revisions)
+    if orch_bin == actions.SELF:  # the real server: the automatic update looks once a minute (off by default)
+        from . import update
+
+        update.start_ticker(root, orch_bin, lambda: actions.human_env(root, orch_bin))
     return srv

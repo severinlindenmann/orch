@@ -29,7 +29,7 @@ def _registry() -> dict:
             directory = Path(base) / "agents"
             doc = json.loads((directory / "base.json").read_bytes())
             names = set(doc["adapters"])
-            for name in ("deny", "capabilities", "connections", "readonly"):
+            for name in ("capabilities", "connections", "readonly"):
                 fragment = json.loads((directory / f"{name}.json").read_bytes())
                 if not isinstance(fragment, dict):
                     raise RuntimeError(f"agents/{name}.json must be an object")  # noqa: TRY004

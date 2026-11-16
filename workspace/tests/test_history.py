@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 from conftest import ensure_keys
 
-from orch import cli, history, humanproof, needs, phone_view, runs, runs_live, tickets
+from orch import cli, history, needs, phone_view, runs, runs_live, tickets
+from orch import home as orch_home
 from orch.errors import Refused
 
 _REAL_RESUME = runs_live.resume_after_answer  # conftest stubs it in every test (no agent is started)
@@ -94,22 +95,22 @@ def test_a_local_write_never_launders_a_peer_line(synced):
 
 def test_store_write_failure_leaves_the_line_unverified(synced, monkeypatch):
     root, tid = synced
-    monkeypatch.setattr(humanproof, "local_sign", lambda *a, **k: None)
+    monkeypatch.setattr(history, "remember", lambda *a, **k: False)
     tickets.log(root, tid, "cannot be recorded", "human:tester")
     monkeypatch.undo()
     last = history.lines(root, _raw(root, tid))[-1]
     assert last["by"] == history.SYNC_BY and last["text"].startswith(history.SYNCED_UNVERIFIED)
 
 
-def test_a_tampered_store_verifies_nothing(synced):
+def test_a_damaged_store_verifies_nothing(synced):
     root, tid = synced
     store = Path(root, *history.OWN_LINES, f"{tid}.json")
     data = json.loads(store.read_text())
-    data["lines"].append(history.line_digest(PEER))
+    data["schema"] = "orch.own-lines/0"
     store.write_text(json.dumps(data))
     _plant(root, tid, lambda t: t["history"].append(PEER))
     shown = history.lines(root, _raw(root, tid))
-    assert shown[-1] == DEMOTED and shown[0]["by"] == history.SYNC_BY  # MAC fails: nothing verifies
+    assert shown[-1] == DEMOTED and shown[0]["by"] == history.SYNC_BY  # an unreadable store: nothing verifies
 
 
 def test_evidence_by_is_proven_by_its_own_digest(synced):
@@ -490,7 +491,7 @@ def test_sync_state_files_mean_enabled(proj, evidence):
 
 def test_the_record_is_found_by_workspace_id_too(synced):
     root, _ = synced
-    home = humanproof.guarded_home(root) / history.ENABLED_DIR
+    home = orch_home.guarded_home(root) / history.ENABLED_DIR
     keys = history._keys(root)
     assert len(keys) == 2 and len(list(home.iterdir())) == 2
     import hashlib
@@ -554,9 +555,9 @@ def test_a_step_is_bound_to_its_covers(synced):
     assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == history.SYNC_BY
 
 
-def test_a_store_without_answers_verifies_and_removing_answers_breaks_its_mac(synced):
-    """Store format: `answers` is written only once it holds a digest (older stores verify); a store that has
-    answers and loses the key fails its MAC, so the whole store stops verifying (fail closed)."""
+def test_a_store_without_answers_verifies_and_removed_answers_show_as_synced(synced):
+    """Store format: `answers` is written only once it holds a digest (older stores verify); an answer whose
+    digest is gone from the store shows as synced."""
     root, tid = synced
     tickets.check_start(root, tid, "c1", "human:tester")  # a store without any answer
     p = history._own_path(root, tid)
@@ -570,4 +571,4 @@ def test_a_store_without_answers_verifies_and_removing_answers_breaks_its_mac(sy
     p.write_text(json.dumps({k: v for k, v in data.items() if k != "answers"}))
     shown = history.shown_ticket(root, _raw(root, tid))
     assert shown["questions"][0]["answered_by"] == history.SYNC_BY
-    assert shown["checklist"][0]["by"] == history.SYNC_BY  # the whole store no longer verifies
+    assert shown["checklist"][0]["by"] == "human:tester"  # the other digests still verify

@@ -56,6 +56,20 @@ function permissionsCard(settings) {
       current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
 }
 // Share with team: off by default; on writes one short entry into the team's AGENTS.md (the orch files stay local).
+// Helpers at once (ORCH-16): no limit by default; a number makes the next helper wait in line until one is
+// finished. Saved on change, like the copies cap (a select, no typed words).
+const LIVE_MAX_CHOICES = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+function helpersAtOnceCard(settings) {
+  const n = LIVE_MAX_CHOICES.includes(settings.live_max) ? settings.live_max : null;
+  const pick = h('select', {className:'input copies-max', 'aria-label':'Helpers at once', 'data-key':'settings-live-max', disabled:snapshot || settingsBusy.has('live')},
+    h('option', {value:'none'}, 'No limit'), LIVE_MAX_CHOICES.map(v => h('option', {value:String(v)}, String(v))));
+  pick.value = n ? String(n) : 'none';
+  return h('div', {className:'stack', 'data-key':'settings-live'}, h('div', {className:'card'}, h('div', {className:'card-row'},
+    h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers at once'),
+      settingsText('p', {}, n ? 'When ' + n + ' helpers are working, the next one waits in line and starts when one is finished.' : 'Any number of helpers can work at the same time.'),
+      settingsText('p', {className:'meta'}, 'Pick a number if your computer gets slow with many helpers.')),
+    pick)));
+}
 function shareCard(settings) {
   const on = settings.share === true;
   return h('div', {className:'stack', 'data-key':'settings-share'},
@@ -595,15 +609,15 @@ function settingsPage() {
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
-      permissionsCard(settings)]),
+      permissionsCard(settings), helpersAtOnceCard(settings)]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
     panel('addons', addonsPanel),
     panel('about', aboutPanel())))
   ));
 }
 // ---- About & updates (Settings): the installed release, the newest one, what changed, one Update button, the steps.
-// Data: GET /api/update-info (orch asks its install source; nothing is sent). The click runs the same detached update
-// as "Continue" on a request from the terminal. The phase comes from handoff.js ("orch-update-state" events).
+// Data: GET /api/update-info (orch asks its install source; nothing is sent). The click runs a detached `orch update`.
+// The phase comes from update.js ("orch-update-state" events).
 const updUi = {info:null, loading:false, phase:'idle', from:null, to:null, reason:''};
 const UPD_STEPS = ['Downloading', 'Installing', 'Restarting', 'Done'];
 function updLoad(force = false) {
@@ -674,7 +688,24 @@ function aboutPanel() {
   }
   return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
     line('Installed', settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…'))),
-    line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))));
+    line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
+    autoUpdateCard(info));
+}
+// Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
+function autoUpdateCard(info) {
+  const auto = info?.auto;
+  if (!auto || typeof auto.on !== 'boolean') return null;
+  return h('div', {className:'card', 'data-key':'settings-auto-update'}, h('div', {className:'card-row'},
+    h('div', {className:'grow'}, settingsText('h3', {}, 'Update automatically when a new release is out'),
+      settingsText('p', {}, 'orch installs it by itself at a quiet moment, never while a helper is working, and shows on Home what changed.'),
+      auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a development build: it follows the \u201c' + clean(auto.ref) + '\u201d branch, so it updates to every new version there, not only to releases.') : null),
+    h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':auto.on, 'aria-label':'Update automatically when a new release is out', 'data-key':'settings-switch-auto-update', 'data-action':'auto-update-set', disabled:snapshot || settingsBusy.has('auto-update')})));
+}
+async function autoUpdateSwitch() {
+  if (settingsBusy.has('auto-update')) return;
+  const on = updUi.info?.auto?.on !== true;
+  const result = await settingsSend('update.auto', {on}, 'auto-update');
+  if (result.ok) { if (updUi.info?.auto) updUi.info.auto.on = on; window.orch.toast(on ? 'orch now updates by itself.' : 'Automatic updates are off.', 'ok'); render(); }
 }
 // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
 function openAgentForm(control) {
@@ -1061,7 +1092,7 @@ async function addonRadio(input) {
 function messageSend(control) {
   if (snapshot) return;
   const peer = control.dataset.sendTo;
-  if (/^ws_[a-z0-9]{10}$/.test(peer)) location.hash = '#chat/' + peer;
+  if (/^ws_[a-z0-9]{10}$/.test(peer)) { if (typeof chatDmHint === 'function') chatDmHint(peer, control.dataset.who); location.hash = '#chat/' + peer; }
   else if (/^ph_[a-z0-9]{10}$/.test(peer) || peer === 'phones') location.hash = '#chat';
 }
 async function copyText(control) {

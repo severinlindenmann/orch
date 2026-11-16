@@ -7,7 +7,7 @@ import stat
 import sys
 from pathlib import Path
 
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch import keystore, secretrun, secretscan, term, tickets
 from orch.errors import Refused
 
@@ -82,7 +82,7 @@ def _change_profile(root, args, who):
     """Returns the extra fields for the answer (the resolved command, warnings)."""
     name, action = args.name, args.profile_action
     extra: dict = {}
-    with hp._key_lock(hp.key_dir(root)):
+    with orch_home._key_lock(orch_home.key_dir(root)):
         profiles = keystore.read_profiles(root)  # a damaged file refuses here
         if action == "set":
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
@@ -126,6 +126,10 @@ def _scan(args, root: Path) -> None:
     if secretscan.too_large(len(data)):
         err = Refused("The text is bigger than 1 MB. Scan it in smaller parts.")
         err.extra = {"code": "too_large"}
+        raise err
+    if not secretscan.stored_keys_readable(root):  # the explicit command stays strict
+        err = Refused("Couldn't read your saved keys, so the scan could not finish. Fix that and scan again.")
+        err.extra = {"code": "stored_keys_unreadable"}
         raise err
     found = secretscan.find(data.decode("utf-8", "replace"), root)
     if not found:

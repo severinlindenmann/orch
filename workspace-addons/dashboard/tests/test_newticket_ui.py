@@ -21,12 +21,13 @@ def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
 def test_paste_title_and_description_use_existing_create_action():
     js = all_js()
     assert "const fullText = inputs.text.value;" in js
-    assert "values.title = ticketTextTitle(" in js
-    assert "shortText.length <= 1500" in js
+    # one helper builds the ticket.new args for the main ticket and for each ticket of an epic (ORCH-14)
+    assert "const base = ticketFromText(fullText, shortText, longText, files);" in js
+    assert "short.length <= 1500" in js
     assert "inputs.text.setCustomValidity(empty ? EMPTY_TICKET : '')" in js
-    assert "const args = {title:values.title" in js and "act('ticket.new', args)" in js
+    assert "const args = {...base" in js and "act('ticket.new', args)" in js
     assert "long_text:longText" in js
-    assert "files:files.map(({name, text, data})" in js
+    assert "files.map(({name, text, data})" in js
 
 
 def test_attachments_and_safe_preview():

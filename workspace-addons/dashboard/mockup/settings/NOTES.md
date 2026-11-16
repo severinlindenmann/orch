@@ -2,7 +2,7 @@
 
 ## settings.html — General
 
-- One "Workspace profile" card comes first: name, one description (the same text goes to the relay as a proposal), tags, icon and colour; the relay rows (name on relay, waiting for relay approval / live on relay) appear only when the relay is on; folder paths sit behind Details (SN-08, SN-15, SN-17; BP-49, BP-79).
+- One "Workspace profile" card comes first: name, one description (the same text goes to the relay as a proposal), tags (kept in the workspace, shown without a relay too; with a relay on they go along as a proposal), icon and colour; until a person sets them, a helper may fill in name, description, tags, icon and colour (the starter task of a first `orch init`, ORCH-7); the relay rows (name on relay, waiting for relay approval / live on relay) appear only when the relay is on; folder paths sit behind Details (SN-08, SN-15, SN-17; BP-49, BP-79).
 - Phone, helper, shared links and sync are compact summaries with direct destinations (SN-08, SN-13, SN-16).
 - Advanced groups team sharing, finished-work policy and copies; edits save locally with visible feedback (SN-18; BP-48).
 - Product data: Needs rename, appearance and policy write endpoints, current helper label, share count and cache timestamps.

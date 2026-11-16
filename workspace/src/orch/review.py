@@ -751,10 +751,49 @@ def decide(
         raise Refused(f"{key} is already answered. Use change to answer again.")
     card = _card_of(q)
     d = _decision(q, card, verdict, picked, note)
+    if digest is not None and tickets.question_digest(q) != digest:  # before a merge, not only at the write
+        raise Refused(f"{key} changed after it was shown. Look at the question again, then answer.")
+    _merge_first(root, tid, q, d, by, via)
     _, out = tickets.answer(
         root, tid, key, _plain_answer(q, d), by, via, expected_question_digest=digest, decision=d
     )
     return out
+
+
+def merge_url(q: dict) -> str | None:
+    """The pull request a merge card merges on the Merge click (`orch ask ... --merge`), else None."""
+    act, card = q.get("action"), q.get("card")
+    url = act.get("merge") if isinstance(act, dict) else None
+    if not isinstance(url, str) or not isinstance(card, dict):
+        return None
+    # only the card --merge built: a link card that shows exactly this address on a Merge button
+    if card.get("kind") != "link" or card.get("open") != url or card.get("ok_label") != "Merge":
+        return None
+    return url
+
+
+def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> None:
+    """A merge card approved: merge the pull request BEFORE the answer is saved, so a refused merge saves
+    nothing and the person can click again. Only a person's click merges: a human actor and no agent tool in
+    the environment, or an answer from a paired phone (the relay checked the phone; whoever reads the inbox
+    applies it). The merge uses the person's own GitHub login (ghmerge drops helper tokens)."""
+    url = merge_url(q)
+    if url is None or d.get("action") != "approve":
+        return
+    if not (by.startswith("human:") and (via == "phone" or not tickets.agent_tool())):
+        raise Refused("Only a person merges this. Ask the human to click Merge on the card.")
+    from orch import ghmerge
+
+    got = ghmerge.merge(url, q["action"].get("head"))
+    line = (
+        f"The pull request was merged already on GitHub ({got['login']}): {url}"
+        if got["already"]
+        else f"Merged the pull request on GitHub as {got['login']}: {url}"
+    )
+    import contextlib
+
+    with contextlib.suppress(Refused, OSError):  # merged; the answer itself is written next
+        tickets.note_history(root, tid, by, line, via)
 
 
 def _decide_check(
@@ -825,6 +864,9 @@ def change(
         raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
     card = _card_of(old)
     d = _decision(old, card, verdict, picked, note)
+    if merge_url(old) and (old.get("decision") or {}).get("action") == "approve":
+        raise Refused(f"{qid} was merged on GitHub. That cannot be taken back here.")
+    _merge_first(root, tid, old, d, by, via)
     d["replaces"] = qid
     entry = {
         k: old[k]

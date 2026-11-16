@@ -405,6 +405,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
+    x.add_argument(
+        "--starter",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="new folder: add a starter task that lets the helper fill in the workspace profile "
+        "(default: on when you run it in a terminal)",
+    )
     x = sub.add_parser("work-check", parents=[common], help="say so when files changed without a ticket")
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
@@ -432,6 +439,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x.add_argument(
         "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
+    )
+    x.add_argument(
+        "--epic",
+        action="store_true",
+        help="an epic: its sub-tickets (--parent) are the work; a run goes through them in order",
     )
     x.add_argument(
         "--start-requires",
@@ -623,6 +635,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     g.add_argument("--after", metavar="FILE", help="the file as it would become")
     g.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
     g.add_argument("--open", metavar="URL", help="an http(s) address to look at")
+    g.add_argument(
+        "--merge",
+        action="store_true",
+        help="with --link and a GitHub pull request in --open: the person's Merge click merges it "
+        "with their own GitHub login",
+    )
     x = sub.add_parser("answer", parents=[common], help="answer a question")
     x.add_argument("id")
     x.add_argument("question")
@@ -790,12 +808,25 @@ def run(args: argparse.Namespace) -> None:
         root = args.orch_root = Path.cwd()
         _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
+        new = init_mod.is_new(root)  # before anything is written (choose_agent makes .orch/)
         agent = init_mod.choose_agent(root, args.yes, asking)
         lines = init_mod.init(root, args.code)
+        start = None
+        if new and (asking if args.starter is None else args.starter):
+            t = init_mod.starter(root, by())
+            start = t["key"]
+            lines.append(f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile')
         on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
         _out(
             args,
-            {"ok": True, "root": str(root), "details": lines, "agent": agent, "recommended": on},
+            {
+                "ok": True,
+                "root": str(root),
+                "details": lines,
+                "agent": agent,
+                "recommended": on,
+                "starter": start,
+            },
             "orch is ready in this folder. "
             + agent
             + "\n"
@@ -860,6 +891,7 @@ def run(args: argparse.Namespace) -> None:
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
             title_auto=args.title_auto,
             plan_first=args.plan_first,
+            epic=args.epic,
             start_requires=args.start_requires,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
@@ -1038,6 +1070,7 @@ def run(args: argparse.Namespace) -> None:
         shorthand = [json.dumps({"type": k, "ref": getattr(args, k), **extra}) for k in kinds]
         if args.summary and shorthand and not args.file:
             shorthand[0] = json.dumps({**json.loads(shorthand[0]), "summary": args.summary})
+        tickets.refuse_secret_in_evidence(root, args.evidence + shorthand)  # before a file is copied (R5.2)
         if args.file:
             tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id
             attached = tickets.attach_file(
@@ -1084,6 +1117,8 @@ def run(args: argparse.Namespace) -> None:
         card = cli_review.has_card_flags(args)
         if card and (args.phone or args.kind or args.action or args.check):
             raise Refused("A card does not go with --phone, --kind, --action or --check.")
+        if args.merge and not card:
+            raise Refused("--merge goes with a link card: --link TITLE --open <pull request address>.")
         if card:  # the card goes where every question goes; a phone shows it from the stack
             t, q = cli_review.ask_card(
                 args, root, tickets.resolve_cli(root, args.id, json_output=args.json), by()
@@ -1265,6 +1300,9 @@ _TICKET_ARGS = {
     ("ticket", "parent"),
     ("run", "ticket"),
     ("relay", "ticket"),
+    ("diag", "ticket"),
+    ("job", "ticket"),
+    ("chat", "ticket"),
 }
 
 
@@ -1273,12 +1311,16 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
     cmd = getattr(args, "cmd", None)
     if root is None:
         return
+    js = getattr(args, "json", False)
     for c, name in _TICKET_ARGS:
-        if c == cmd and isinstance(getattr(args, name, None), str):
+        val = getattr(args, name, None) if c == cmd else None
+        if isinstance(val, str):
+            setattr(args, name, tickets.resolve_cli(root, val, json_output=js))
+        elif isinstance(val, list):  # `orch run status A B ...`: every key in the list, not only a single one
             setattr(
                 args,
                 name,
-                tickets.resolve_cli(root, getattr(args, name), json_output=getattr(args, "json", False)),
+                [tickets.resolve_cli(root, v, json_output=js) if isinstance(v, str) else v for v in val],
             )
     on = getattr(args, "on", None)
     if cmd in ("ticket", "wait") and isinstance(on, str) and on.startswith("ticket:"):

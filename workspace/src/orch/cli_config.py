@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, diag, history, nextstep, tickets
+from orch import adapters, autoupdate, config, diag, history, nextstep, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -22,14 +22,17 @@ KEYS = (
     "workspace.code",
     "workspace.name",
     "workspace.description",
+    "workspace.tags",
     "workspace.permissions",
     "workspace.live_idle_minutes",
+    "workspace.live_max",
     "workflow.agents_may_finish",
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
     "diag.enabled",
     "focus.session_typing",
+    "update.auto",
     *config.INSIGHTS_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
@@ -236,6 +239,10 @@ def _insights_set(args, root: Path) -> None:
     _out(args, res, text)
 
 
+def _shown(v) -> str:
+    return ",".join(v) if isinstance(v, list) else str(v)
+
+
 def _config(args, root: Path) -> None:
     if args.sub == "get":
         getters = {
@@ -243,14 +250,17 @@ def _config(args, root: Path) -> None:
             "workspace.code": lambda: config.workspace_code(root),
             "workspace.name": lambda: config.workspace_name(root),
             "workspace.description": lambda: config.workspace_description(root),
+            "workspace.tags": lambda: config.workspace_tags(root),
             "workspace.permissions": lambda: config.permissions(root),
             "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
+            "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
             "diag.enabled": lambda: config.diag_enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
+            "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
             "insights.keep_days": lambda: config.record_keep_days(root),
@@ -259,13 +269,14 @@ def _config(args, root: Path) -> None:
         if args.key:
             key = args.key
             value = getters[GET_ALIASES.get(key, key)]()
-            _out(args, {key: value}, str(value) if value is not None else "(not set)")
+            _out(args, {key: value}, _shown(value) if value not in (None, []) else "(not set)")
         else:
             cur = {k: get() for k, get in getters.items()}
             _out(
                 args,
                 cur,
-                "\n".join(f"{k} = {v}" for k, v in cur.items() if v is not None) or "Nothing is set.",
+                "\n".join(f"{k} = {_shown(v)}" for k, v in cur.items() if v not in (None, []))
+                or "Nothing is set.",
             )
     elif args.sub == "set" and args.key in config.INSIGHTS_KEYS:
         _insights_set(args, root)
@@ -296,6 +307,15 @@ def _config(args, root: Path) -> None:
             {"focus.session_typing": value},
             "Saved: typing into the helper's screen is " + ("on." if value else "off."),
         )
+    elif args.sub == "set" and args.key == "update.auto":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = autoupdate.set_enabled(args.value == "on", _actor(args))
+        _out(
+            args,
+            {"update.auto": value},
+            "Saved: orch updates by itself " + ("at a quiet moment." if value else "no more."),
+        )
     elif args.sub == "set" and args.key == "diag.enabled":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
@@ -309,13 +329,14 @@ def _config(args, root: Path) -> None:
             "Saved: the debug log is "
             + ("on." if value else "off. New lines are not written; old files stay."),
         )
-    elif args.sub == "set" and args.key in ("workspace.name", "workspace.description"):
-        if _actor(args).startswith("agent:"):
-            raise Refused(f"Only a person can change this. Ask them to run: orch config set {args.key} ...")
+    elif args.sub == "set" and args.key in ("workspace.name", "workspace.description", "workspace.tags"):
         what = args.key.split(".")[1]
-        setter = config.set_workspace_name if what == "name" else config.set_workspace_description
-        v = setter(root, args.value)
-        _out(args, {args.key: v}, f"Saved: the workspace {what} is {v!r}." if v else f"Saved: no {what}.")
+        v = config.set_profile_field(root, what, args.value, _actor(args))
+        if what == "tags":
+            text = f"Saved: the workspace tags are {', '.join(v)}." if v else "Saved: no tags."
+        else:
+            text = f"Saved: the workspace {what} is {v!r}." if v else f"Saved: no {what}."
+        _out(args, {args.key: v}, text)
     elif args.sub == "set" and args.key == "workspace.code":
         code = config.set_code(root, args.value)
         _out(
@@ -330,6 +351,15 @@ def _config(args, root: Path) -> None:
             args,
             {"workspace.permissions": mode},
             f"Saved: workspace.permissions = {mode}. It applies to the next agent start.",
+        )
+    elif args.sub == "set" and args.key == "workspace.live_max":
+        n = config.set_live_max(root, args.value)
+        _out(
+            args,
+            {"workspace.live_max": n or "none"},
+            "Saved: workspace.live_max = none. Any number of helpers may work at once."
+            if n is None
+            else f"Saved: workspace.live_max = {n}. When {n} helpers work at once, the next waits in line.",
         )
     elif args.sub == "set" and args.key == "workspace.live_idle_minutes":
         mins = config.set_live_idle_minutes(root, args.value)

@@ -128,11 +128,11 @@ def test_old_files_with_a_mac_still_load(proj, run):
 
 
 def test_orch_update_runs_at_once_and_queues_nothing(proj, run, monkeypatch):
-    from orch import addons, humanproof
+    from orch import addons
 
     called = []
     monkeypatch.setattr(addons, "tool_env_change_ok", lambda: None)
     monkeypatch.setattr(addons, "update", lambda *a, **k: called.append(1) or [])
     code, out, err = run("update", "--project-only")
     _plain(out, err)
-    assert called and humanproof.handoffs(proj) == []
+    assert called

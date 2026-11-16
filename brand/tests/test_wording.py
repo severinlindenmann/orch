@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = Path(__file__).with_name("wording_allowlist.json")
 
 NEVER = [
-    "Request", "Requests", "Job", "Issue", "Todo", "Subtask", "Epic", "Inbox", "Over to you", "Approval",
+    "Request", "Requests", "Job", "Issue", "Todo", "Subtask", "Inbox", "Over to you", "Approval",
     "Sign-off", "Recommended", "Proof", "Artifact", "Scheduler", "Cron", "Schedule", "Bot", "NetBird",
     "Peer", "Node",
 ]  # fmt: skip

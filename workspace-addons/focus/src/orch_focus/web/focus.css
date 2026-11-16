@@ -383,7 +383,6 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-live[data-hold] .t{display:none}
 
 /* ---- Start screen: Live now cards ---- */
-.fx-pick.fx-pick-live{max-width:960px}
 .fx-livenow{margin-top:32px;min-width:0}
 .fx-livenow[hidden]{display:none}
 .fx-livenow h2{font-size:15px;margin:0 0 12px}

@@ -9,7 +9,8 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from orch import humanproof, safegit
+from orch import home as orch_home
+from orch import safegit
 
 from .paths import NEVER_SYNCED
 
@@ -479,7 +480,7 @@ def local_allowed():
     uses; the installer's record decides, no environment variable). git runs receive-pack/upload-pack inside
     such a repository, whose own config can name commands; a real install never does that. (Local folder
     remotes such as a NAS or USB disk: possibly a later feature.)"""
-    return humanproof.install_kind() == "test"
+    return orch_home.install_kind() == "test"
 
 
 def validate_url(url):

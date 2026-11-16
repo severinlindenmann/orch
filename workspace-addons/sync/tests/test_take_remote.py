@@ -1,11 +1,6 @@
 """take-remote goes through the SAME merge authority as a normal merge (Opus hard3 #1): per ticket
-merge_document with this machine's own decisions, the reach and deletion gates before the proof, and a proof
-bound to exactly what is applied. No / several merge bases are a HISTORY pause (hard3 #4)."""
+merge_document with this machine's own decisions, and the reach and deletion gates. No / several merge bases are a HISTORY pause (hard3 #4)."""
 
-from types import SimpleNamespace
-
-import pytest
-from orch import humanproof
 from test_pause import _history_pause
 from test_step import NOW, at, run, success
 from test_two_machines import both, edit, load, machines, remote_sha
@@ -15,18 +10,6 @@ from orch_sync import pause, repo, step
 __all__ = ["machines"]
 
 FORGED = {"at": NOW, "by": "human:Pat", "via": "cli", "text": "Looks good, ship it", "chat_message": False}
-
-
-def _targets(monkeypatch):
-    seen = []
-    real = humanproof.person_by
-
-    def spy(root, args, op, target, **kw):
-        seen.append(target)
-        return real(root, args, op, target, **kw)
-
-    monkeypatch.setattr(humanproof, "person_by", spy)
-    return seen
 
 
 def _paused(machines, forged=False, **changes):
@@ -40,15 +23,6 @@ def _paused(machines, forged=False, **changes):
     return a, b, tip
 
     # (A then sees B's key for the ticket: a key clash a person settles there, as after any resolve)
-
-
-def test_take_remote_needs_a_signed_history_pause(machines, monkeypatch):
-    _a, b, _tip = _paused(machines, title="x")
-    state = repo.safe(b, "run/sync/state.json")
-    raw = state.read_text().replace('"remote_sha": "', '"remote_sha": "0')  # edited: verifies for nobody
-    state.write_text(raw)
-    with pytest.raises(repo.Refused, match="not waiting"):
-        pause.take_remote(b, SimpleNamespace(proof_stdin=False, by="agent:test"), now=NOW)
 
 
 def test_no_merge_base_is_a_history_pause_not_a_silent_merge(machines):

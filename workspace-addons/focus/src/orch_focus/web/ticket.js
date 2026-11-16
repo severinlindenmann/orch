@@ -33,12 +33,18 @@
     /* inside the dashboard the page has no header of its own: no Back to Home, no crumb, no Help bar */
     root.append(...(INAPP ? [] : [h('header', {class: 'fx-top'}, h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'}))]),
       h('main', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta fx-sub', text: 'Loading your tickets…'}), skeleton()));
-    fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); }).then(payload => {
-      const list = payload.tickets;
+    /* the lists wait for the first Live now answer (at most a few seconds), so nothing moves after they show */
+    const tickets = fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); });
+    tickets.then(payload => {
       /* inside the dashboard Focus opens straight on the next ticket that needs the person; Home keeps the whole list.
          "?all=1" (from the links beside the ticket) shows this start page: Live now, areas and jobs. */
+      const next = INAPP ? window.FocusHelpers.nextNeeding(payload.tickets) : null;
+      if (next && !/[?&]all=1/.test(location.search)) { location.replace(P + '/t/' + next.ticket.id + next.hash); return null; }
+      return S.views.livenow.ready(LIVE_WAIT_MS).then(() => payload);
+    }).then(payload => {
+      if (!payload) return;
+      const list = payload.tickets;
       const next = INAPP ? window.FocusHelpers.nextNeeding(list) : null;
-      if (next && !/[?&]all=1/.test(location.search)) { location.replace(P + '/t/' + next.ticket.id + next.hash); return; }
       const crumb = root.querySelector('.fx-workspace'); if (crumb) crumb.textContent = payload.workspace + ' / Focus';
       S.state.pickAttention = window.FocusHelpers.attentionText(list) + (INAPP && list.some(window.FocusHelpers.needsYou) ? ' They are on Home too.' : '');
       pickerSub();
@@ -99,6 +105,7 @@
     });
   }
 
+  const LIVE_WAIT_MS = 4000;
   /* the page's shape before the tickets arrive, so nothing jumps */
   function skeleton() {
     return h('div', {class: 'fx-skel', 'aria-hidden': 'true'}, [0, 1, 2].map(() => h('div', {class: 'skeleton fx-skel-row'})));

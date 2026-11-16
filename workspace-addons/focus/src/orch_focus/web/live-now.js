@@ -6,8 +6,13 @@
   const text = value => String(value ?? '').replace(/\bVPN\b/gi, 'network').replace(/\bMCP\b/gi, 'connection').replace(/\bt_[a-z0-9]{6,16}\b/g, '');
 
   let current = null;
+  /* settles once the first answer is drawn (or failed): the start page waits for it so the lists and the cards
+     appear together, instead of the tickets moving into cards a few seconds later */
+  let firstDone = null, first = Promise.resolve();
   function mount(box) {
     if (!box || box.querySelector('.fx-livenow')) return;
+    first = new Promise(done => { firstDone = done; });
+    const settle = () => { if (firstDone) { firstDone(); firstDone = null; } };
     const section = h('section', {class: 'fx-livenow', hidden: true, 'aria-label': 'Live now'});
     /* what waits for you comes first, with its answer buttons; the rest of the live work follows, each with its real current step */
     const askSection = h('section', {class: 'fx-livenow fx-livenow-ask', hidden: true, 'aria-label': 'Needs you'});
@@ -16,7 +21,7 @@
     let last = '', loading = false, sending = 0, generation = 0;
 
     async function load() {
-      if (document.hidden || loading || sending || !box.isConnected) return;
+      if (document.hidden || loading || sending || !box.isConnected) return settle();
       loading = true;
       const version = generation;
       try {
@@ -29,6 +34,7 @@
       } catch (e) { /* Keep the last snapshot until the next poll. */ }
       finally {
         loading = false;
+        settle();
         if (version !== generation && !sending) load();
       }
     }
@@ -105,7 +111,6 @@
       hideListed();
       const asking = cards.filter(c => c.question), working = cards.filter(c => !c.question);
       section.hidden = !working.length; askSection.hidden = !asking.length;
-      box.classList.toggle('fx-pick-live', !!cards.length);
       // keep the keyboard where it was: the cards are drawn again
       const both = [askSection, section];
       const at = both.map(x => x.contains(document.activeElement) ? [...x.querySelectorAll('a,button')].indexOf(document.activeElement) : -1);
@@ -132,5 +137,7 @@
     load();
   }
 
-  S.register('livenow', {mount, hideListed: () => { if (current) current(); }});
+  /* the first answer, at most `ms` long: a slow or broken answer never keeps the tickets hidden */
+  const ready = ms => Promise.race([first, new Promise(done => setTimeout(done, ms))]);
+  S.register('livenow', {mount, ready, hideListed: () => { if (current) current(); }});
 })();

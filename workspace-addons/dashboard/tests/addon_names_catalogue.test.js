@@ -5,7 +5,6 @@ const vm = require('node:vm');
 const path = require('node:path');
 const web = path.join(__dirname, '../src/orch_dashboard/web');
 const ssrc = fs.readFileSync(path.join(web, 'pages/settings.js'), 'utf8');
-const hsrc = fs.readFileSync(path.join(web, 'handoff.js'), 'utf8');
 
 const el = (tag, props, ...kids) => {
   const n = {tag, props: props || {}, kids: kids.flat(Infinity).filter(k => k != null)};
@@ -137,26 +136,10 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
   assert.match(text(find(core, byKey('addon-detail-core'))), /Relay is part of orch\. You can turn it off, but not remove it\./);
 });
 
-// 19: the update banner while it runs
-function fn(name) {
-  const i = hsrc.indexOf('  function ' + name + '(');
-  assert.ok(i >= 0, name);
-  const j = hsrc.indexOf('\n  }\n', i) + 4;
-  const ctx = vm.createContext({String, Array});
-  vm.runInContext(hsrc.slice(i, j) + '\nthis.' + name + ' = ' + name + ';', ctx);
-  return ctx[name];
-}
-test('while the update runs the banner names both versions and what changed', () => {
-  const words = fn('updatingWords'), lines = fn('changesLine');
-  const info = {update_available: true, installed: {label: 'orch 23'}, newest: {label: 'orch 24'}, changes: ['A', 'B', 'C', 'D']};
-  assert.equal(words(info), 'Updating orch 23 → orch 24');
-  assert.equal(words({update_available: true, newest: {label: 'orch 24'}}), 'Updating to orch 24');
-  assert.equal(words({}), null);
-  assert.equal(words(null), null);
-  assert.equal(lines(info), 'A; B; C; …');
-  assert.equal(lines({update_available: true, changes: ['A']}), 'A');
-  assert.equal(lines(null), '');
-  assert.match(hsrc, /sessionStorage\.setItem\("orch-update-from"/);  // so the end says "Updated orch 23 → 24."
+// 19: the Update button keeps the version before, so the end says "Updated orch 23 → 24."
+test('the Update button keeps the installed version for the finished banner', () => {
+  const ssrc = fs.readFileSync(path.join(web, 'pages', 'settings.js'), 'utf8');
+  assert.match(ssrc, /sessionStorage\.setItem\('orch-update-from'/);
 });
 
 // 885: the Focus add-on page has the one switch the refusal points to

@@ -78,7 +78,7 @@ def test_vector_cases_agree_on_schema_and_cap():
         assert ok == case["ok"], case["name"]
 
 
-def test_result_update_carries_the_snapshot_with_marked_proof_only(proj, run, new_ticket, conn):
+def test_result_update_carries_the_snapshot_with_marked_proof_only(proj, run, new_ticket, conn, monkeypatch):
     tid = new_ticket("Q3 summary for the board")
     for text in ("Read the Q3 sheet", "Write the charts", "Check the totals"):
         run("check", "add", tid, text)
@@ -88,8 +88,12 @@ def test_result_update_carries_the_snapshot_with_marked_proof_only(proj, run, ne
     run("check", "done", tid, "c1", "--file", "out/q3-chart.png", "--title", "Q3 chart", "--role", "result",
         "--by", "agent:claude")  # fmt: skip
     run("check", "done", tid, "c2", "--file", "out/notes.txt", "--role", "support", "--by", "agent:claude")
-    run("check", "done", tid, "c3", "--url", "https://ci.example.ch/run/7?token=abc123", "--role", "check",
-        "--by", "agent:claude")  # fmt: skip
+    c3 = ("check", "done", tid, "c3", "--url", "https://ci.example.ch/run/7?token=abc123", "--role", "check",
+          "--by", "agent:claude")  # fmt: skip
+    assert run(*c3)[0] != 0  # a token in a link is refused when written (#942)
+    with monkeypatch.context() as m:  # evidence written before #942 can still hold one: the phone hides it
+        m.setattr(tickets, "refuse_secret_in_evidence", lambda *a, **k: None)
+        assert run(*c3)[0] == 0
     run("ref", "add", tid, "https://github.com/acme/app/pull/142", "--title", "Fix #142")
     code, _, err = run("relay", "send", "phones", "Charts are done.", "--ticket", tid, "--update", "result")
     assert code == 0, err

@@ -71,7 +71,7 @@ def missing_dash_P(source):
         ('argv = (python, "-m", "orch")\npython = sys.executable', [1]),
         ('python = sys.executable\nargv = [python, "-I", "-P", "-m", "orch"]', []),
         ('python = sys.executable\nargv = [python, "-P", "-m", "orch"]', [2]),
-        ('argv = [sys.executable, "-P", "-m", "orch.pageproof"]', [1]),
+        ('argv = [sys.executable, "-P", "-m", "orch.pagesession"]', [1]),
         ('argv = [sys.executable, "-P", "-m", "some_addon"]', []),
         ('argv = (sys.executable, "-m", "orch", "-P")', [1]),
         ('argv = [sys.executable] + ["-m", "orch"]', [1]),
