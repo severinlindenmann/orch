@@ -368,7 +368,7 @@ def test_finishing_with_an_open_pull_request_prints_the_merge_step(proj, run, ne
     assert code == 0, out + err
     assert tickets.load(proj, tid)["status"] == "review"  # a hint, never a block
     assert "Next: the pull request is still open" in out and "wait for them and merge it" in out
-    assert "--status merged" in out
+    assert "orch ref wait" in out and "--merge" in out
 
 
 def test_finishing_with_a_merged_pull_request_prints_no_merge_step(proj, run, new_ticket):
