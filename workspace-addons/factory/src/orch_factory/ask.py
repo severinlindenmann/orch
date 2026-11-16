@@ -250,9 +250,7 @@ def texts(proposal, stage, stop_items, indexes):
 
 def _history_texts(ticket):
     return [
-        h["text"]
-        for h in authority.history(ticket)
-        if isinstance(h, dict) and isinstance(h.get("text"), str)
+        h["text"] for h in authority.history(ticket) if isinstance(h, dict) and isinstance(h.get("text"), str)
     ]
 
 
@@ -390,9 +388,7 @@ def view(root, tickets, order, n, name_of, outbox=None):
     for t in sorted(asks_of(tickets, order, n), key=lambda x: str(x.get("created_at") or x["id"])):
         ws = _x(t).get("ws")
         name = name_of.get(ws) or clean(str(ws), 60)
-        history = [
-            h for h in authority.history(t) if isinstance(h, dict) and isinstance(h.get("text"), str)
-        ]
+        history = [h for h in authority.history(t) if isinstance(h, dict) and isinstance(h.get("text"), str)]
         at = next((h.get("at") for h in history if h.get("text", "").startswith(("Asked", "Created"))), None)
         replies = []
         q = next((x for x in t.get("questions") or [] if x.get("kind") is None), None)
