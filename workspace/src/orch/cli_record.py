@@ -828,10 +828,8 @@ def _window(args) -> tuple[str, str]:
 def run_model(run: str, events: list[dict], *, root=None, problem: bool = False) -> dict:
     """One run as counts.md sees it: ticket, day started, what its agent tool can report, uses. `complete` is
     false when the run had lines changed, removed or unchecked (activity.md, Authenticated record);
-    `protected` is false for a run by a tool orch cannot give deny rules (record.UNPROTECTED_TEXT is shown
-    for it) and when the tool is not known from a verified line."""
-    from orch import adapters
-
+    `protected` is false when the tool is not known from a verified line (record.UNPROTECTED_TEXT is shown
+    for it)."""
     uses: dict[tuple, dict] = {}
     sees = None
     partial = False
@@ -881,7 +879,7 @@ def run_model(run: str, events: list[dict], *, root=None, problem: bool = False)
     return {
         "run": run,
         "complete": not problem,
-        "protected": bool(adapters.can_deny(harness, root)) if isinstance(harness, str) else False,
+        "protected": isinstance(harness, str),
         "ticket": events[0].get("ticket") if events else None,
         "day": first[:10] if first else None,
         "sees": sees,

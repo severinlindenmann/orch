@@ -42,4 +42,3 @@
 - 22:51 [mobile-testflight] AppModel defaulted to the MOCK relay unless -relayMode real (any real/TestFlight build would have been a mock); flipped: mock only with -relayMode mock (UI tests already pass it) - found in release smoke
 - 10:10 [b1-core] contract: agent-adapter.schema.json gains optional session.transcript (where the tool saves a conversation); orch never resumes a session whose saved conversation is missing (testnet 8 Nov: --resume of a hung start failed) - #292
 - 11:50 [b1-core] contract: run-pending.schema.json gains optional "human" (a person's input vs an agent's); only a person's queued input starts a run (review #287 delta-7) - #287
-- 2026-11-16 07:10 [rules-cleanup] workspace/src/orch/denyrules.py kept unchanged in #932 (#799) PENDING THE OWNER'S DECISION: it is an agent fence inside the workspace (R4.1) that keeps the agent tool out of the secret store folder (R5.2); QA recommends removing it (R5.3). Decision and follow-up: #945

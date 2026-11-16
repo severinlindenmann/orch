@@ -555,8 +555,7 @@ prefix whose hash differs) is `changed`, reason `content`, not shown. Vectors `r
 `via: hook` and for every line of a legacy run, true otherwise; never stored), the cursor is the verified seq, and
 one marker per change of `(reason, changed, removed)`. `query` and `counts` use the same view; any run with changed,
 removed or unchecked lines makes `counts` `complete: false`. `run_model` has `complete` and `protected`: `protected`
-is false for a run by a tool orch cannot give deny rules (codex, generic: the adapter's `deny.format` is `none`) and
-whenever the tool is not known from a checked line of orch's own collector (`via: log`, sealed; never a hook line); those
+is false whenever the tool is not known from a checked line of orch's own collector (`via: log`, sealed; never a hook line); those
 runs show "Records from this helper can't be fully checked." (`record.UNPROTECTED_TEXT`). `--detail` takes the
 `detail_hash` from the verified line that points at the file (never from the caller): a file with other bytes, or a
 sealed line that has a detail pointer but no `detail_hash`, is refused as `swapped` ("Details changed outside orch.");
@@ -622,9 +621,7 @@ only a legacy run reads a detail with no hash.
 
 The MAC turns "append a line" into "run code that loads orch's key". It does not stop:
 
-- **Code run as the same user.** An agent that executes code importing orch, or that reads `human.key` by a path form
-  the text-based deny rules miss (secrets.md), or that runs under an adapter whose deny format is `none` (codex,
-  generic), can seal anything. Records from such helpers show a plain marker ("Records from this helper can't be fully
+- **Code run as the same user.** An agent that executes code importing orch, or that reads `human.key` (there is no agent fence), can seal anything. Records from such helpers show a plain marker ("Records from this helper can't be fully
   checked.").
 - **Level 2** is the key held by a separate process or OS user that seals on request. Not built.
 - **Head deleted.** The head lives in the guarded home; deleting it (or leaving one of another key id) means "no

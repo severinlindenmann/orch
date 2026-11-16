@@ -429,8 +429,8 @@ def home(root: Path | None = None) -> Path:
 
 def copies_base(h: Path) -> Path:
     """Where the ticket copies of orch home `h` live: a SIBLING of the home, never inside it. Agents work in
-    these copies, and every agent is denied the whole orch home (denyrules: keys, secrets, approvals); a copy
-    inside the home would be denied too, and a carve-out cannot be made safe.
+    these copies, and the orch home is kept apart from the agents' working folders; a copy
+    inside the home would mix the two.
     `~/.orch-tool` -> `~/.orch-work`; any other home -> `<parent>/.orch-work-<8 hex of its path>` (one per
     home; the name never holds the home's own name, which the agent's shell deny rules match as text)."""
     h = h.resolve()
@@ -448,8 +448,8 @@ def copies_base(h: Path) -> Path:
 
 
 def names_clash(h: Path, base: Path) -> bool:
-    """`base` holds a text the agent's shell deny matches for home `h` (denyrules.rules: the home's name and
-    <parent>/<name> when the name has 6+ characters): every shell command naming the copy would be refused."""
+    """`base` contains the name of home `h` (or <parent>/<name>) as text, when the name has 6+ characters: a
+    copy folder named like that would be confused with the home. Folder names are kept as they are."""
     if len(h.name) < 6:
         return False
     b = str(base).replace("\\", "/").casefold()

@@ -16,7 +16,7 @@ tampering with orch-home files or the install).
 
 Level 1 **stops accidents and leaks**: a key pasted into a chat, printed in a log, written into the record, synced to a cloud
 drive with the workspace, committed to git, shown on a page or sent to the phone. It **does not stop an agent that
-deliberately searches the disk**: an agent runs as the same user and can read the key folder despite deny rules, can run
+deliberately searches the disk**: an agent runs as the same user and can read the key folder, can run
 `orch secret env <profile> -- sh -c 'echo $X | base64'`-style tricks around value hiding, or can send a key to a server.
 No OS sandbox is planned. The wording on screens and in skills never says keys are "safe from agents"; it says "kept out of
 the workspace, records and chats".
@@ -26,63 +26,12 @@ What Level 1 does:
 2. Keys go to the command, not to the agent: `env`, `file`, `exec`. `get` (prints a value) is off by default per profile.
 3. The child's stdout and stderr pass through the hider before the agent sees them.
 4. Every writer (record, detail files, logs, run logs, errors, pages, screen stream, phone snapshots) hides exact values.
-5. Deny rules for the key folder in the agent tools' own permission settings (agents.json data, written per run).
+5. (Deny rules removed 16 Nov, owner decision, #945.)
 6. Every use is a `key.use` event (activity.md). A refusal is one too.
 
-## Deny rules (slice 1.4, Level 1)
+## Deny rules
 
-orch adds deny rules to the agent tool's own permission flags on **every start** (fresh and resume, oneshot and live, every
-permission mode including `full`), generated for the workspace from the data in `agents/deny.json` (`deny` of the adapter).
-The deny **set** is the same for every adapter; an adapter only says how its tool can be told (`deny.format`).
-
-| root | path | agent's own file tools | agent's shell (command text naming it) |
-|---|---|---|---|
-| `home` | every guarded orch home candidate: `humanproof.guarded_home`, `ORCH_HOME`, `<account home>/.orch-tool` | no read, no write | refused |
-| `secrets` | `<workspace>/.orch/secrets/` (old key files) | no read, no write | refused |
-| `record` | `<workspace>/.orch/record/` | write refused, read allowed | refused (reading goes through `orch record ...`) |
-| `local-id` | `<workspace>/.orch/.local-id` | write refused, read allowed | refused |
-| `copies` | agent in a copy: every other entry of the copies folders at its start (its workspace's `.owner`, `.trash` and other tickets, then the other workspaces in orch's signed copies record; rows past what fits on a command line are left out with a warning); any other agent: every copies folder | no read, no write | refused (a copy agent's rows: the path up to `/ " ' ; & \|` or the end, never a bare prefix; first 6 rows) |
-
-`home` covers the key store, key files, `profiles.toml`, `human.key`, the nonce store, `human-settings.json`,
-`proposals.json`, `permissions.json`, `agent-approvals.json` and the relay and dev records. Never denied: the workspace
-itself, `.orch/` tickets, `.orch/run/`, anything `orch ...` prints. **Isolation invariant:** ticket copies live next to the orch home (`addons.copies_base`, `~/.orch-work`), never
-inside it, so the `home` row stays ONE blanket deny for every agent and a copy agent's own folder (its instruction file and
-skills) is simply not under it; no rule ever opens a part of the home. `copies` rows hold project files only (defense in depth): a copy agent's
-rows come from a listing at its start, so a copy made later, or a name the agent makes itself, is not denied, and its shell
-reaches `../` anyway. Level 1 cannot do better: a deny rule has no "except", and with Claude Code 2.1.325 both `[!x]`
-character classes and a one-level `<base>/*` also deny the agent's own copy (checked with the real CLI, 14 Nov 2026).
-Real isolation between copies needs OS-level separation (Level 2). A shell command is refused when its **text** contains
-a path form; orch commands never contain one, so `orch record query` and `orch secret env <profile> -- ...` work.
-
-**Format `patterns/1`** (tools with `--disallowedTools`, i.e. Claude Code): one comma-joined value merged into the tool's
-disallowed-tools flag (any spelling in the existing flags, `--disallowedTools X`, `--disallowed-tools X`, `--disallowedTools=X`, is
-merged into one; an existing list is extended, never replaced; added when there is none). The rules are added whatever the permission
-mode, including `full`. Without a workspace orch **refuses to start** such a tool. The tool that is really started must be found and report a version of
-2.0.0 or newer (patterns with `*` inside, `Read(//..)`); not found, no output, unreadable output and older all **refuse** (deny by
-default, no override): `Claude Code is missing or too old on this computer. Install or update it, then press Continue.` The one flag is placed
-**last** before the `--` that precedes the prompt (it takes a list, so nothing positional may follow it).
-- Candidate homes, always: `<account home>/.orch-tool` and `ORCH_HOME` (when set), plus the guarded/trusted home when it resolves. A
-  candidate that is or contains the workspace **refuses the start** (`orch's folder contains this workspace: move the workspace out of it,
-  then try again.`): it cannot be denied without denying the workspace. A home inside the workspace is fine (only that folder is denied).
-- file tools, per root path P (`/**` and P itself): `Read(f)` (rows with read denied only) and `Edit(f)` (every row; it covers
-  every tool that changes a file, so there is no `Write` rule) for each form f of P: absolute `//<P without its leading />`; Windows
-  drive form `//c/Users/..` and `C:/Users/..`; `~/<rest>` when P is under the account home; `./<rest>` when P is under the workspace
-  (no `../` forms: not valid file patterns). Real path and as-given path (symlinked temp folders) both.
-- shell: `Bash(*<text>*)` for each text form of P: forward-slash and backslash absolute, `~/<rest>`, `$HOME/<rest>`,
-  `${HOME}/<rest>`, `$env:USERPROFILE\<rest>` and `%USERPROFILE%\<rest>` (PowerShell, cmd), relative to the workspace (incl. `../..`),
-  and for `home` the folder's own name (at least 6 characters, e.g. `.orch-tool`, `orch-tool`) and `<parent>/<name>`.
-  `record`/`local-id`/`secrets` also the workspace-relative text `.orch/record` (and `.orch\record`, ...).
-- `,` `(` `)`, spaces and control characters in a path become `*` (a wildcard in both rule kinds: never a split list, never a
-  literal). That over-blocks a few look-alike paths and never under-blocks the real one. Nothing is read from the workspace's own settings.
-- **Over-blocking:** a shell command that mentions the home folder's own name (any text containing `orch-tool`) or merely mentions `.orch/record` or the home folder's name (an `ls`, a `grep` for it) is
-  refused. **Under-blocking:** matching is exact text and case-exact (a case-insensitive file system lets `.ORCH-TOOL` through),
-  a symlink inside the workspace that points at the home is not followed, and variables, globs, `cd` plus a short name, or a built path
-  are not seen.
-
-**Format `none`** (`codex`, generic commands): orch cannot tell the tool. codex's own `workspace-write` sandbox keeps *its
-writes* inside the workspace (and `store_args`): only that sandbox protects the home from writes, and only while it is on (a
-person's own config can change it). **Reads of `home` and writes of `.orch/record` are not enforced** (Level 1: stops
-accidents, not a tool that deliberately goes there). Vectors: `vectors/deny-v1.json`.
+Removed 16 Nov (owner decision, #945).
 
 ## Where
 

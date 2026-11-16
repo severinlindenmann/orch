@@ -82,15 +82,6 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
-def _no_tool_version_probe(monkeypatch):
-    """The deny-rule version check (adapters.deny_version_check) probes the tool; tests that only look at
-    an argv must not depend on a tool being installed. tests/test_deny_rules.py tests the real check."""
-    from orch import adapters
-
-    monkeypatch.setattr(adapters, "_deny_version_ok", lambda a, b=None: None)
-
-
-@pytest.fixture(autouse=True)
 def _no_bundled_catalogue(request, monkeypatch):
     """The bundled manifests of the shipped add-ons (shipped_addons.json) would list six not-installed
     add-ons in every `addon list` of a test without a source folder. Off by default; the catalogue tests

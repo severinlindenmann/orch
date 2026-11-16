@@ -604,7 +604,7 @@
     },
     "per_run": {
       "type": "array",
-      "description": "Each counted run: `protected` false when its agent tool is not known from a checked collector line or cannot be given deny rules; then `note` is the marker text (record.UNPROTECTED_TEXT).",
+      "description": "Each counted run: `protected` false when its agent tool is not known from a checked collector line; then `note` is the marker text (record.UNPROTECTED_TEXT).",
       "items": {
         "type": "object",
         "required": [

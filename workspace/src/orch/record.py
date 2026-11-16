@@ -31,7 +31,7 @@ from orch.record_files import MAX_INPUT, file_ok
 _OFF = "Recording is off until key hiding is ready."
 # The one place for the plain words about records made before orch checked them (Focus and the phone show it).
 UNCHECKED_TEXT = "These records were made before orch checked them."
-# The one place for the marker of a run by a helper whose deny rules orch cannot set.
+# The one place for the marker of a run by a helper whose tool orch does not know from a checked line.
 UNPROTECTED_TEXT = "Records from this helper can't be fully checked."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
