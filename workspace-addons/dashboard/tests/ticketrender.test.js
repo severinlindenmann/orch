@@ -164,3 +164,16 @@ test('status chip, shared folder line, copy line and agent bar all follow each n
   assert.equal(p.count('shared-folder'), 1, 'the shared folder line follows state.runs');
   assert.equal(p.count('agent-bar'), 1);
 });
+
+test('a working ticket shows one Watch live and one filled button in the helper bar and Live session card (report r-1116-1748)', async () => {
+  const live = {addons:[{name:'focus', page:{path:'/', live_session:true}}], services:[{addon:'focus', running:true}],
+    runs:{t_x:{running:true, claim:{agent:'claude', mode:'live'}}}};
+  const p = page(state(ticket({status:'active'}), live));
+  await tick(); await tick();
+  assert.equal(p.count('agent-bar'), 1);
+  assert.equal(p.count('live-session'), 1, 'the Live session card is there for a live run');
+  assert.equal(p.count('watch-live') + p.count('live-open'), 1, 'Watch live once on the page');
+  assert.equal(p.count('live-open'), 0, 'the helper bar holds it, next to Stop');
+  // the top bar paints outside this fake page: New ticket must step back to an outline on a ticket (B2, one filled button)
+  assert.match(read('app.js'), /newCls = 'btn ' \+ \(\[[^\]]*'ticket'[^\]]*\]\.includes\(r\.kind\) \? 'outline' : 'primary'\)/);
+});
