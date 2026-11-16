@@ -81,6 +81,24 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
     return why, ids, crew
 
 
+MEASURE_EVERY = 60  # seconds between two measurements of an order's active time
+
+
+def _keep_budget(root, store, ticket, tickets, entry):
+    """Keep the order's shown active time current while the crew works (the manager may be idle for a long while): the
+    measured minutes go into the same cache `next` writes. Returns the time of this measurement (or the old one)."""
+    seen = entry.get("measured")
+    if isinstance(seen, (int, float)) and time.time() - seen < MEASURE_EVERY:
+        return seen
+    d = flow.derive(root, store, ticket, tickets)
+    if d["phase"] != "started" or d["kind"] != "run" or d["shipped"]:
+        return None
+    flow._measure(root, d)
+    if d.get("measured"):
+        flow.refresh(root, store, ticket["id"], d)
+    return time.time()
+
+
 def _role(ticket):
     ext = ticket.get("ext") if isinstance(ticket, dict) else None
     x = ext.get("factory") if isinstance(ext, dict) else None
@@ -108,6 +126,7 @@ def once(root):
                     continue
                 entry = orders.get(t["id"], {})
                 why, ids, crew = _reasons(root, store, t, tickets, entry, granted, decided)
+                measured = _keep_budget(root, store, t, tickets, entry)
                 live = run_live(root, t["id"]) if why else False
             except Refused:
                 continue  # a broken order or an unreachable core: next pass
@@ -117,6 +136,8 @@ def once(root):
             if live and why:
                 continue  # the live run reads the order itself; ask again when it ends (nothing saved)
             new = {"crew": crew, "woken": sorted(set(entry.get("woken", [])) | set(ids))}
+            if measured is not None:
+                new["measured"] = measured
             if new != entry:
                 orders[t["id"]] = new
                 changed = True

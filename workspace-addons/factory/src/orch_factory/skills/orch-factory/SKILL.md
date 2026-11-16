@@ -31,8 +31,16 @@ The owner may also file it with one click on the Factory page (the idea box): yo
 is the owner's own words; its note says it is a Factory order. Then write the real first draft as v2 with `orch factory
 draft`, ask your open questions and stop: do NOT build it, however small it sounds. The owner presses Plan the run.
 
-The draft is one short page in plain words: what it is, for whom, 3 rough parts or screens, open questions. Answer in the
-chat with 3–5 lines and say where the draft is. Keep it small: the goal is that you and the owner mean the same thing.
+The draft is one short page in plain words: what it is, for whom, 3 rough parts or screens. Answer in the chat with 3–5
+lines and say where the draft is. Keep it small: the goal is that you and the owner mean the same thing.
+
+Open questions do NOT go into the draft as a list. Ask each one as a normal ticket question on the order, with short
+options and your suggestion, so the owner answers with one click on a card in Factory:
+
+    orch ask <order> "Who uses the booking page?" --option "Customers" --option "Staff" --recommend "Customers"
+
+Ask only what you cannot decide yourself (at most 5). When a question no longer matters, take it back
+(`orch ask <order> --take-back <q> "why"`).
 
 ### 2. Polish together
 Every owner reply that changes the idea → a new version with "what changed" at the top:
@@ -72,6 +80,11 @@ Each time you are woken, ask Factory what to do next and follow it:
 - `start-crew`: `orch factory crew add <order> <task>` then `orch factory crew start <order> <task>` for the tasks of this
   stage (one sub-ticket per task; never `orch run start` on crew tickets yourself).
 - Check the crew's results against the done-means points (evidence on the checks), then move on.
+- Words that people read in a built app use the right singular and plural ("1 point", "2 points", never "1 pts"): tell
+  the builders in their task text, and look for it when you check the results.
+- Pictures at a stop: for every taste item copy the tester's screenshots of that screen (phone width and desktop) to
+  `.orch/addons/factory/stops/<order>/s<round>/` and name them in the item (`"after": "s1/make-poll.png"`, the earlier
+  look in `before`). Without a picture the owner cannot judge a look: say in `not_checked` that there is none.
 - At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo` (anything that
   sends, publishes, deploys, deletes, pays or touches main/production is `cant-undo`: Factory refuses it otherwise); a recommended
   answer only on routine items; list what was checked AND what was not checked, and every small change made during the run.
@@ -90,8 +103,14 @@ Each time you are woken, ask Factory what to do next and follow it:
   in) and tell the owner in one line. Never widen the scope silently.
 
 ### 6. Ship and learn
-After the owner answers **Ship it**, do exactly what the proposal's `ship.does` says, then write a 5-line summary on the
-order. If the owner repeated the same comment at stops, propose it as a house rule in the summary (the owner approves it).
+Choices that come up at the ship step (for example how long a shared link lives) are asked as ticket questions with
+options and your suggestion, never as a typed answer:
+
+    orch ask <order> "How long should the link work?" --option "7 days" --option "30 days" --option "90 days" --option "Permanent" --recommend "7 days"
+
+After the owner answers **Ship it**, do exactly what the proposal's `ship.does` says. Before you hand over, remove
+everything you created only to check the live result (a test poll, sample rows, a test account): the owner never gets a
+"delete my test data" to do. Then write a 5-line summary on the order. If the owner repeated the same comment at stops, propose it as a house rule in the summary (the owner approves it).
 
 ### Autopilot (only when the owner asks for it)
 

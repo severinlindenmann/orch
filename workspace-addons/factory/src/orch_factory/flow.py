@@ -342,6 +342,21 @@ def _log_ignored(root, store, order, d):
             ticket = commands.order_ticket(root, order)
 
 
+def close_older_questions(root, order, upto, why):
+    """The step a question asked about has happened: the order's own plain questions (no Factory kind) that are still open
+    and were asked before question `upto` are taken back through core, with the plain reason. Never stops the run."""
+    try:
+        questions = commands.order_ticket(root, order).get("questions") or []
+        ids = [q.get("id") for q in questions]
+        if upto not in ids:
+            return
+        for q in questions[: ids.index(upto)]:
+            if q.get("kind") is None and q.get("answer") is None:
+                orchcli.call(root, "ask", order, why, "--take-back", q["id"], write=True)
+    except Refused:
+        pass
+
+
 def _step(d):
     base = {"order": d["tid"]}
     if d["kind"] == "autopilot":
@@ -419,6 +434,7 @@ def next_step(root, order):
             )
             if kind == "factory:start" and answer == "Start":
                 store.journal_append({"type": "started", "order": order, "q": q["id"], "by": by})
+                close_older_questions(root, order, q["id"], "Not needed any more: the run has started.")
             elif kind == "factory:autopilot" and answer == "Start":
                 g = next((x for x in autopilot.grants_of(store, ticket) if x["q"] == q["id"]), None)
                 if g:
@@ -447,6 +463,8 @@ def next_step(root, order):
                     {"type": "stop-answered", "order": order, "q": q["id"], "answer": answer, "by": by}
                 )
                 ask.close_for_stop(root, tickets, order, e["n"])
+                if answer in ("Continue", "Ship it"):
+                    close_older_questions(root, order, q["id"], "Not needed any more: this step is done.")
         d["rows"] = [r for r in store.journal_read() if r["order"] == order]
         if d["kind"] == "run" and d["phase"] == "started" and d.get("proposal", {}).get("handovers"):
             handover.settle(root, store, d)
