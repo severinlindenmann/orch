@@ -255,3 +255,20 @@ def test_switcher_numbers_may_change_the_accounts_stay(cli, fake_switcher, ws):
     _code, d = jrun(cli, "list")
     assert len(d["accounts"]) == 3
     assert next(x for x in d["accounts"] if x["label"] == "TEAMCO")["rule"]["limits"][0]["value"] == 70
+
+
+def test_a_limit_works_before_the_accounts_were_listed(cli, fake_switcher, ws):
+    """A fresh workspace: the limit command finds the accounts itself (ORCH-93 finding 2)."""
+    code, out = jrun(cli, "limit", "first", "95%", "--period", "5h", "--by", "human:owner")
+    assert code == 0, out
+    assert out["account"]["label"] == "first"
+
+
+def test_plain_history_shows_local_time(cli, fake_switcher, ws):
+    """ORCH-93 finding 3: plain history times are this computer's local time (the reason shows when there is one)."""
+    _seed(cli)
+    code, text, _ = cli("history")
+    assert code == 0
+    row = store.history(ws)[-1]
+    local = store.to_time(row["at"]).astimezone().strftime("%Y-%m-%d %H:%M")
+    assert local in text

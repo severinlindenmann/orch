@@ -175,7 +175,7 @@
     }
     return h('div', {className: 'card pad stack', role: 'listitem', 'data-acc': a.id},
       h('div', {className: 'row between'},
-        h('div', {className: 'row'}, h('span', {className: 'badge', text: String(i + 1)}), h('h3', {text: a.label}), h('span', {className: 'meta', text: TYPE[a.type] || ''}), h('span', {className: stateClass, text: stateText})),
+        h('div', {className: 'row'}, h('span', {className: 'badge', text: String(i + 1)}), h('h3', {text: a.label}), a.type === 'subscription' ? null : h('span', {className: 'meta', text: TYPE[a.type] || ''}), h('span', {className: stateClass, text: stateText})),
         list.length > 1 ? h('div', {className: 'row'}, move('up', list[i - 1]), move('down', list[i + 1])) : null),
       a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: 'No use read yet.'}),
       h('div', {className: 'row between'}, h('div', {className: 'row'}, rows, addLimit),
@@ -224,6 +224,11 @@
     if (other.length) parts.push(section('API keys and helper tools', 'Each one stops at its limit.', other));
     parts.push(history(m.history || []));
     parts.push(h('p', {className: 'meta', text: 'Logins and keys are never shown or kept here.'}));
+    if (!embedded) {
+      // opened outside the dashboard: a read-only page, so nothing may look clickable (ORCH-93 finding 5)
+      parts.unshift(h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: 'Open Usage from the dashboard to change it.'})));
+      for (const el of parts) el.querySelectorAll?.('input,select,button').forEach(c => { c.disabled = true; });
+    }
     const keep = document.activeElement?.getAttribute('aria-label');
     $('loaded').replaceChildren(...parts);
     if (keep) document.querySelector('#loaded [aria-label="' + CSS.escape(keep) + '"]')?.focus();

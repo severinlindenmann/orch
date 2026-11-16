@@ -182,12 +182,33 @@ def test_switches_early_when_the_limit_would_come_within_ten_minutes(cli, switch
     switcher.use(first=(80.0, 50.0))
     assert switching.look(ws, at(0))["did"] == "stay"  # one sample: no pace yet, 80 % is under 95 %
     switcher.use(first=(81.0, 50.0))
-    assert switching.look(ws, at(30))["did"] == "stay"  # under a minute apart: still no pace
-    switcher.use(first=(82.0, 50.0))
-    r = switching.look(ws, at(60))  # 2 % a minute: 82 + 20 reaches 95 within 10 minutes
+    assert switching.look(ws, at(150))["did"] == "stay"  # under five minutes apart: still no pace
+    switcher.use(first=(90.0, 50.0))
+    r = switching.look(ws, at(300))  # 2 % a minute: 90 + 20 reaches 95 within 10 minutes
     assert r["did"] == "switched" and r["pace"]["5h"] == pytest.approx(2.0)
     assert switcher.active() == 3
     assert "reached in under 10 min" in usage_rows(ws)[-1]["why"]
+
+
+def test_one_refresh_jump_is_not_read_as_a_burst(cli, switcher, ws):
+    """The switcher refreshes now and then: a jump seen over a short look must not switch (ORCH-93 finding 8)."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.use(first=(60.0, 50.0))
+    switching.look(ws, at(0))
+    switcher.use(first=(75.0, 50.0))  # one refresh: 15 % appears at once
+    for s in (30, 60, 120, 240):
+        assert switching.look(ws, at(s))["did"] == "stay"
+    assert switcher.changes() == []
+
+
+def test_the_reason_names_the_account_that_was_left(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.use(first=(97.0, 50.0))
+    assert switching.look(ws, at(0))["did"] == "switched"
+    row = usage_rows(ws)[-1]
+    assert row["after"] == "TEAMCO" and row["why"].startswith("first: 5 hours 97%")
 
 
 def test_slow_pace_stays(cli, switcher, ws):
@@ -204,13 +225,13 @@ def test_an_account_left_early_is_not_taken_back_until_its_use_drops(cli, switch
     jrun(cli, "switching", "on", "--by", "human:owner")
     switcher.use(first=(80.0, 50.0))
     switching.look(ws, at(0))
-    switcher.use(first=(84.0, 50.0))
-    assert switching.look(ws, at(60))["did"] == "switched"  # 4 % a minute
+    switcher.use(first=(90.0, 50.0))
+    assert switching.look(ws, at(300))["did"] == "switched"  # 2 % a minute
     for s in (
-        90,
-        120,
-        150,
-        300,
+        330,
+        360,
+        450,
+        600,
     ):  # on TEAMCO: its use looks flat for a few minutes (the switcher reads now and
         assert (
             switching.look(ws, at(s))["did"] == "stay"
@@ -218,7 +239,7 @@ def test_an_account_left_early_is_not_taken_back_until_its_use_drops(cli, switch
     assert switcher.active() == 3
     switcher.use(first=(0.0, 51.0))  # first's 5 hours started again
     switcher.reset_5h(1)
-    r = switching.look(ws, at(330))
+    r = switching.look(ws, at(630))
     assert r["did"] == "switched" and switcher.active() == 1
     assert [h["after"] for h in usage_rows(ws)] == ["TEAMCO", "first"]
 
@@ -228,12 +249,12 @@ def test_when_the_work_slows_down_the_first_account_is_taken_back(cli, switcher,
     jrun(cli, "switching", "on", "--by", "human:owner")
     switcher.use(first=(80.0, 50.0))
     switching.look(ws, at(0))
-    switcher.use(first=(84.0, 50.0))
-    assert switching.look(ws, at(60))["did"] == "switched"
-    for s in range(90, 390, 30):  # TEAMCO's use stays flat for five minutes: the work slowed down
+    switcher.use(first=(90.0, 50.0))
+    assert switching.look(ws, at(300))["did"] == "switched"
+    for s in range(330, 630, 30):  # TEAMCO's use stays flat for five minutes: the work slowed down
         switching.look(ws, at(s))
     assert switcher.active() == 3
-    assert switching.look(ws, at(390))["did"] == "switched" and switcher.active() == 1
+    assert switching.look(ws, at(630))["did"] == "switched" and switcher.active() == 1
 
 
 def test_weekly_limit_counts_too_and_an_account_turned_off_is_skipped(cli, switcher, ws):
@@ -268,7 +289,7 @@ def test_near_every_limit_it_still_leaves_an_account_that_is_over(cli, switcher,
     switcher.use(first=(90.0, 50.0), second=(91.0, 40.0), third=(91.0, 50.0))
     switching.look(ws, at(0))
     switcher.use(first=(96.0, 50.0), second=(91.0, 40.0), third=(91.0, 50.0))
-    r = switching.look(ws, at(60))  # 6 % a minute: nobody lasts 10 minutes; first is over 95 %
+    r = switching.look(ws, at(300))  # 1.2 % a minute: nobody lasts 10 minutes; first is over 95 %
     assert r["all_at_limit"] is True and r["did"] == "switched" and switcher.active() == 3
 
 

@@ -189,6 +189,14 @@ def gather(root: Path) -> dict:
 # ---------------------------------------------------------------- output
 
 
+def _local(at: str) -> str:
+    """A stored UTC time in this computer's local time, minutes only."""
+    try:
+        return store.to_time(at).astimezone().strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return at[:16].replace("T", " ")
+
+
 def _rule_text(rule: dict) -> str:
     parts = []
     for lim in rule["limits"]:
@@ -268,8 +276,9 @@ def run(args) -> int:
             print(json.dumps({"history": rows}, ensure_ascii=False))
             return 0
         out = [
-            f"{r.get('at', '')[:16].replace('T', ' ')}  {r.get('label', r.get('account'))}: {r.get('what')}"
-            f"  (by {str(r.get('who', '')).split(':', 1)[-1]})"
+            f"{_local(r.get('at', ''))}  {r.get('label', r.get('account'))}: {r.get('what')}"
+            + (f" ({r['why']})" if r.get("why") else "")
+            + f"  (by {str(r.get('who', '')).split(':', 1)[-1]})"
             for r in rows
         ] or ["No changes yet."]
         print("\n".join(out))
@@ -280,6 +289,10 @@ def run(args) -> int:
 
     who = _actor(args.by)
     end = parse_time(args.end) if getattr(args, "end", None) else None
+    try:
+        store.find(store.load(root)["accounts"], args.account)
+    except Refused:
+        gather(root)  # a fresh workspace: let the readers find the accounts first
     with store.change(root) as (accounts, rows):
         store.expire(accounts, rows)
         a = store.find(accounts, args.account)
@@ -387,7 +400,7 @@ def _loop_cmd(args, root: Path) -> int:
         url = service.page_url(root) if pid else None
         if url:
             data["url"] = url
-        line = f"Usage is running (pid {pid})." if pid else "Usage is not running. Start it: orch start"
+        line = f"Usage is running (pid {pid})." if pid else "Usage is not running. Start it: orch start."
         if not data["switcher"]:
             line += " " + NO_SWITCHER
         else:

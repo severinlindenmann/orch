@@ -28,7 +28,8 @@ from .readers import SubscriptionUse, cswap
 EVERY_SECONDS = 30
 AHEAD_MINUTES = 10
 PACE_MINUTES = 10  # samples older than this do not count for the pace
-MIN_SPAN_SECONDS = 60  # the pace needs samples at least this far apart
+MIN_SPAN_SECONDS = 300  # the pace needs samples this far apart: the switcher refreshes its numbers only every few
+# minutes, so a shorter look reads one refresh as a burst of use (ORCH-93 finding 8)
 TRUST_SPAN_SECONDS = 300  # a lower pace replaces a higher remembered one only when measured over this long
 PACE_FORGET_MINUTES = 30  # a remembered pace older than this is dropped
 RETRY_MINUTES = 10  # a failed switch to the same account is tried again (and written down) after this
@@ -344,7 +345,10 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     t = ch.target
     if t and (ch.active is None or t.use.key != ch.active.use.key):
         before = ch.active.account["label"] if ch.active else None
-        why = (ch.active.why if ch.active and not ch.active.good else ch.why) or ch.why
+        if ch.active and not ch.active.good and ch.active.why:
+            why = f"{ch.active.account['label']}: {ch.active.why}"  # the account left, not the new one
+        else:
+            why = ch.why
         plan = {"to": t.account["id"], "from": ch.active.account["id"] if ch.active else None}
         if not on:
             did = "would switch"
