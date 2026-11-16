@@ -341,6 +341,22 @@ function backgroundBanner() {
   const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names.at(-1) : names[0];
   return h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, list + (names.length > 1 ? ' are' : ' is') + ' not running. Press Start so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start'));
 }
+// After an automatic update (Settings > About & updates): the new version and what changed, or a plain note that it
+// failed and orch stays on the old version. "Got it" clears it.
+function autoUpdateNote() {
+  const n = state.auto_update_note;
+  if (!n || (n.state !== 'updated' && n.state !== 'failed')) return null;
+  const num = v => String(v || '').replace(/^orch /, '');
+  const got = snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'auto-update-note-ok', 'data-key':'auto-update-note-ok'}, 'Got it');
+  if (n.state === 'failed') {
+    return h('div', {className:'banner attn', 'data-key':'auto-update-note', role:'status'}, h('p', {className:'grow'},
+      'orch could not update itself to ' + num(n.to) + (n.reason ? ': ' + clean(n.reason).replace(/[.\s]+$/, '') : '') + '. It is still ' + num(n.from) + ' and tries again later.'), got);
+  }
+  const changes = array(n.changes);
+  return h('section', {className:'card home-card', 'data-key':'auto-update-note'},
+    h('div', {className:'card-h row between'}, h('h2', {}, 'orch updated itself to ' + num(n.to)), got),
+    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, 'Updated from ' + num(n.from) + '.')));
+}
 // "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first.
 function doneAt(t) {
   if (typeof t.done_at === 'string' && t.done_at) return t.done_at;
@@ -378,7 +394,7 @@ function home() {
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const banner = backgroundBanner(), changedCard = whatChangedCard(changedList(all));
+  const banner = [backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
   const title = needCount ? needCount + (needCount === 1 ? ' thing needs you' : ' things need you') : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length);
   const head = heading(title, summary ? today + ' · ' + summary : today, {

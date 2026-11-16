@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, diag, history, nextstep, tickets
+from orch import adapters, autoupdate, config, diag, history, nextstep, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -32,6 +32,7 @@ KEYS = (
     "workflow.copy_setup",
     "diag.enabled",
     "focus.session_typing",
+    "update.auto",
     *config.INSIGHTS_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
@@ -259,6 +260,7 @@ def _config(args, root: Path) -> None:
             "workflow.copy_setup": lambda: config.copy_setup(root),
             "diag.enabled": lambda: config.diag_enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
+            "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
             "insights.keep_days": lambda: config.record_keep_days(root),
@@ -304,6 +306,15 @@ def _config(args, root: Path) -> None:
             args,
             {"focus.session_typing": value},
             "Saved: typing into the helper's screen is " + ("on." if value else "off."),
+        )
+    elif args.sub == "set" and args.key == "update.auto":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = autoupdate.set_enabled(args.value == "on", _actor(args))
+        _out(
+            args,
+            {"update.auto": value},
+            "Saved: orch updates by itself " + ("at a quiet moment." if value else "no more."),
         )
     elif args.sub == "set" and args.key == "diag.enabled":
         if args.value not in ("on", "off"):

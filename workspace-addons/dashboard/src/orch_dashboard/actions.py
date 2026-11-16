@@ -544,6 +544,14 @@ def _diag_set(a):
     return ["config", "set", "diag.enabled", "on" if a["on"] else "off"], [], []
 
 
+def _update_auto(a):
+    """Settings > About & updates: update orch by itself at a quiet moment, `orch config set update.auto`."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "update.auto", "on" if a["on"] else "off"], [], []
+
+
 def _typing_set(a):
     """Settings > Add-ons: may the person type into the helper's screen, a plain `orch config set` (core names the key)."""
     from orch.config import SESSION_TYPING_KEY
@@ -971,6 +979,7 @@ OPS = {
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
+    "update.auto": _update_auto,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
@@ -1227,6 +1236,13 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             return 200, "", {"people": people.choose(root, args.get("name"), add=op == "person.add")}
         except people.BadName as e:
             raise BadRequest(str(e)) from None
+    if op == "update.note.dismiss":  # Home: "Got it" on the note after an automatic update; nothing runs
+        if not session:
+            raise NeedsPerson("Open the dashboard from this computer to do this.")
+        from . import update
+
+        update.dismiss_auto_note()
+        return 200, "", None
     argv = build_argv(op, args, root)
     if orch_bin == SELF and needs_session(op) and not session:  # before anything is read or run
         raise NeedsPerson("Open the dashboard from this computer to do this.")
@@ -1318,6 +1334,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "share.set",
             "private.move",
             "private.allow",
+            "update.auto",
         ):
             _audit(root, op, args)
         if op in ("copies.clean", "copies.remove_orphaned", "copies.retry"):

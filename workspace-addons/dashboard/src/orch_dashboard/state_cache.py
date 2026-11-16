@@ -44,7 +44,15 @@ class StateCache:
 
     def _served(self):
         state, age = self.state, time.monotonic() - self.at
-        return {**state, "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}, max(0.0, age)
+        out = {**state, "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}
+        if "auto_update_note" in state:  # the live page: read each time (it lives in the orch home, which
+            from . import update  # no workspace change signals), and a new note changes the revision
+
+            note = update.auto_note()
+            if note != state["auto_update_note"]:
+                out["auto_update_note"] = note
+                out["rev"] = f"{state.get('rev', '')}-u{note['at'] if note else 0}"
+        return out, max(0.0, age)
 
     def get(self) -> tuple[dict, float]:
         if self.state is None:

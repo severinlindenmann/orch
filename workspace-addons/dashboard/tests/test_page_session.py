@@ -355,6 +355,7 @@ ACT_ARGS = {
     "copies.clean": {},
     "diag.set": {"on": False},
     "typing.set": {"on": True},
+    "update.auto": {"on": True},
     "diag.delete_reports": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},

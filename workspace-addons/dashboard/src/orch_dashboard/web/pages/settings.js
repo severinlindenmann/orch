@@ -688,7 +688,24 @@ function aboutPanel() {
   }
   return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
     line('Installed', settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…'))),
-    line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))));
+    line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
+    autoUpdateCard(info));
+}
+// Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
+function autoUpdateCard(info) {
+  const auto = info?.auto;
+  if (!auto || typeof auto.on !== 'boolean') return null;
+  return h('div', {className:'card', 'data-key':'settings-auto-update'}, h('div', {className:'card-row'},
+    h('div', {className:'grow'}, settingsText('h3', {}, 'Update automatically when a new release is out'),
+      settingsText('p', {}, 'orch installs it by itself at a quiet moment, never while a helper is working, and shows on Home what changed.'),
+      auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a development build: it follows the \u201c' + clean(auto.ref) + '\u201d branch, so it updates to every new version there, not only to releases.') : null),
+    h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':auto.on, 'aria-label':'Update automatically when a new release is out', 'data-key':'settings-switch-auto-update', 'data-action':'auto-update-set', disabled:snapshot || settingsBusy.has('auto-update')})));
+}
+async function autoUpdateSwitch() {
+  if (settingsBusy.has('auto-update')) return;
+  const on = updUi.info?.auto?.on !== true;
+  const result = await settingsSend('update.auto', {on}, 'auto-update');
+  if (result.ok) { if (updUi.info?.auto) updUi.info.auto.on = on; window.orch.toast(on ? 'orch now updates by itself.' : 'Automatic updates are off.', 'ok'); render(); }
 }
 // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
 function openAgentForm(control) {
