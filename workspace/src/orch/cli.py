@@ -1037,8 +1037,15 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import runs_live as _live
 
-        t, moved = tickets.move_up(root, args.id, args.why or "", by())
-        live = _live.switch_model(root, t["id"], "opus", t["model"].get("why") or "") if moved else False
+        tid = tickets.resolve(root, args.id)
+        mine = os.environ.get("ORCH_TICKET")
+        helper = os.environ.get("ORCH_RUN") or tickets.agent_tool()
+        if helper and mine and tickets.resolve(root, mine) != tid:
+            raise Refused(
+                f"This run works on {mine}, not on {args.id}: a helper moves up only its own ticket."
+            )
+        t, moved = tickets.move_up(root, tid, args.why or "", by())
+        live = _live.switch_model(root, t["id"], "opus", by()) if moved else False
         _out(
             args,
             t,

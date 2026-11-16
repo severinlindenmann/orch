@@ -2047,7 +2047,7 @@ def _up_after_failures(root: Path, tid: str, item: dict) -> None:
         t, moved = move_up(root, tid, why, "orch")
         if moved:
             with contextlib.suppress(Exception):
-                runs_live.switch_model(root, tid, "opus", why)
+                runs_live.switch_model(root, tid, "opus", "orch")
 
 
 def check_exists(root: Path, tid: str, cid: str) -> None:

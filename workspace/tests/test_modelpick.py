@@ -196,10 +196,10 @@ def test_a_live_session_switches_model_at_its_next_turn_end(proj, monkeypatch):
     monkeypatch.setattr(runs_live, "MODEL_SWITCH_DELAY", 0)
     monkeypatch.setattr(runs_live, "_hold_reason", lambda *a, **k: None)
     t, moved = tickets.move_up(proj, tid, "the plan needs a new design", "agent:claude")
-    assert moved and runs_live.switch_model(proj, tid, "opus", "the plan needs a new design")
+    assert moved and runs_live.switch_model(proj, tid, "opus", "agent:claude")
     assert sent == []  # mid-turn: nothing is typed yet
     (item,) = runs.undelivered(proj, tid)
-    assert "Model moved up to Opus" in item["text"]
+    assert item["text"] == "Model moved up to Opus. Go on with the ticket." and item["by"] == "agent:claude"
     rec = runs.read(proj, tid)
     rec["live"] = {"state": "idle", "since": tickets.now()}
     runs._write(proj, rec)
@@ -219,8 +219,8 @@ def test_no_live_session_means_the_next_start_switches(proj):
     from orch import runs_live
 
     tid = _sonnet_ticket(proj)
-    assert runs_live.switch_model(proj, tid, "opus", "x") is False
-    assert runs_live.switch_model(proj, tid, "fable", "x") is False
+    assert runs_live.switch_model(proj, tid, "opus", "orch") is False
+    assert runs_live.switch_model(proj, tid, "fable", "orch") is False
 
 
 def test_only_a_person_sets_the_model_and_only_sonnet_or_opus(proj):
@@ -253,3 +253,14 @@ def test_cli_model_and_show(proj, run):
     assert "Model: Opus (chosen by severin)" in out
     code, out = run("ticket", "model", t["id"], "auto")[:2]
     assert code == 0 and "picks the model again" in out
+
+
+def test_a_helper_moves_up_only_its_own_ticket(proj, run, monkeypatch):
+    mine, other = _sonnet_ticket(proj), _sonnet_ticket(proj, "Fix a typo in the footer")
+    monkeypatch.setenv("ORCH_RUN", "r_abcdefgh")
+    monkeypatch.setenv("ORCH_TICKET", mine)
+    code, out, err = run("ticket", "model", other, "up", "--why", "hard")[:3]
+    assert code == 2 and "only its own ticket" in out + err
+    assert tickets.load(proj, other)["model"]["name"] == "sonnet"
+    code, out = run("ticket", "model", mine, "up", "--why", "the plan needs a new design")[:2]
+    assert code == 0 and tickets.load(proj, mine)["model"]["name"] == "opus"
