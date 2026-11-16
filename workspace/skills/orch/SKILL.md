@@ -1,8 +1,8 @@
 ---
 name: orch
-description: Track every piece of work as an orch ticket with a step list, proof for each step, questions for a person, waiting and sub-tickets. Use when you start or resume any task, need a decision, are blocked, want to wait for a time or an answer, or are about to say it is done. Not for sharing files or sending messages (other skills do that).
+description: Track every piece of work as an orch ticket with a step list, evidence for each step, questions for a person, waiting and sub-tickets. Use when you start or resume any task, need a decision, are blocked, want to wait for a time or an answer, or are about to say it is done. Not for sharing files or sending messages (other skills do that).
 ---
-# orch: tickets with proof
+# orch: tickets with evidence
 
 Chat helper exception: in Chat, propose a ticket with `--ref proposal:<short ticket title>` and let the person click Make ticket. Never run `orch ticket new` from Chat; the work recipes below apply outside Chat.
 
@@ -19,7 +19,7 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
 - Any request, even a small one: find or make its ticket first.
 - Ask a person only for what the ask list says (see "When to ask" below). Never ask "may I do this step". Every question has options and a recommended answer: `orch ask`, then keep working on what does not depend on the answer. For something they must see to decide (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question (`--choose`, `--draft`, see below) so it shows as a card.
 - You are blocked (a tool or permission is refused): `orch ask`, then go on with the other steps.
-- You are about to say "done": every step needs proof first.
+- You are about to say "done": every step needs evidence first.
 - The work is big: split it into sub-tickets.
 
 ## When to ask
@@ -63,12 +63,12 @@ After you ran a check command (tests, a build, a linter), record it: `orch check
 (`--output <file in the project>` adds the last lines of its output). orch only writes it down and never runs it; the
 person then sees whether files changed since the check.
 
-Proof flags: `--command`, `--note`, `--pr`, `--commit`, `--file <path>`, `--url` (one or more). A file is copied
-into the ticket (files of the workspace or of your own working copy of this ticket, at most 25 MB; never another ticket's copy). Record what really happened. Never invent proof.
+Evidence flags: `--command`, `--note`, `--pr`, `--commit`, `--file <path>`, `--url` (one or more). A file is copied
+into the ticket (files of the workspace or of your own working copy of this ticket, at most 25 MB; never another ticket's copy). Record what really happened. Never invent evidence.
 Every finished step also gets `--summary "<what came out, one plain line>"` (at most 200 characters; no file names or
 sizes) and, when the step produced a file, a picture or a PR, that as `--file` / `--pr` with `--title "<short name>"`.
-The person reads the summary on the task and opens the proof from it. "Completed" says nothing.
-Record checks with orch check record, so the next run and the person can see whether they still pass. If a step's proof is changed or failed when you send the ticket to Review, the move still works and orch prints as the next step: run the checks again and record them with orch check record.
+The person reads the summary on the task and opens the evidence from it. "Completed" says nothing.
+Record checks with orch check record, so the next run and the person can see whether they still pass. If a step's evidence is changed or failed when you send the ticket to Review, the move still works and orch prints as the next step: run the checks again and record them with orch check record.
 
     orch check done <id> c1 --summary "Connected as Dev Team; all 3 workspaces answered." --file out/check.md --title "Connection check"
 
@@ -87,7 +87,7 @@ Wait for the answer. If it is yes, the person marks it; do not try to tick or re
 
 Write reports, exports, drafts, pictures and other output files for a ticket into that folder, unless the person
 explicitly asks for a file in the project. Give each a plain name (`connection-check.md`, not `out2.tmp`): the
-Artifacts tab shows the name, a preview and an Open button. Proof can point at them:
+Artifacts tab shows the name, a preview and an Open button. Evidence can point at them:
 `orch check done <id> c1 --file <path>`.
 
 **A long text or files came with the ticket**
@@ -193,7 +193,7 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
 
     orch ticket summary <id> "<what was done and what is left>"      # at most 200 characters
     orch ticket outcome <id> --changed "<what changed>" --why "<why>" [--not-included "<what was left out>"]   # each at most 300 characters; shown on the Notes page
-    orch ticket status <id> done                         # only when every step has proof
+    orch ticket status <id> done                         # only when every step has evidence
 
 When the ticket reaches Review, orch sends its summary and files to the person by itself: add no task for that and don't write that it was sent. Answering a person's message is still your job.
 
