@@ -46,7 +46,7 @@ SECURITY = re.compile(
     r"|(^|/)sync[^/]*\.py$|^workspace-addons/sync/"
 )
 STRUCTURE = re.compile(
-    r"^\.github/|(^|/)(AGENTS|CLAUDE)\.md$|\.schema\.json$|^(relay|publish)/"
+    r"^\.github/|^[A-Z][A-Z_]*\.md$|(^|/)AGENTS\.md$|\.schema\.json$|^(relay|publish)/"
     r"|(^|/)(relay|publish)[^/]*\.py$|(^|/)install\.(sh|ps1)$|(^|/)(pyproject\.toml|uv\.lock|Cargo\.(toml|lock)"
     r"|package(-lock)?\.json|Dockerfile)$|\.ya?ml$"
 )
