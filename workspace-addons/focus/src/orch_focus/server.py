@@ -644,7 +644,7 @@ class Handler(BaseHTTPRequestHandler):
                 and pagelaunch.write_resume_cookie(self.root, s.server, s.cookie, s.secret)
             ):
                 srv.resume_written = exp
-        except Exception:  # noqa: BLE001, S110 - without it the tab shows "orch restarted. Reload" as before
+        except Exception:  # noqa: BLE001, S110 - without it the restarted server uses its kept session
             pass
 
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None):
@@ -663,15 +663,21 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code, data):
         self._send(code, json.dumps(data).encode(), "application/json")
 
-    def _fence(self, method: str, api: bool) -> str | None:
-        """Host + Origin check of orch_ui.origin. A POST without Origin is refused too: the page always sends one."""
+    def _fence(self, method: str, api: bool, signing_in: bool = False) -> str | None:
+        """Host + Origin check of orch_ui.origin. A POST without Origin is refused too: the page always sends one.
+        Any host name passes once signed in (session cookie), or for the sign-in itself: where the browser is
+        does not matter."""
         try:
             from orch_ui.origin import check_request
         except ImportError:
             return "Focus is not available in this install."
         if method == "POST" and self.headers.get("Origin") is None:
             return "This request was refused (no origin)."
-        return check_request(method, self.headers, self.server.server_address[1], api=api)
+        port = self.server.server_address[1]
+        signed_in = signing_in or bool(
+            self.session is not None and self.session.cookie_ok(self.headers, port)
+        )
+        return check_request(method, self.headers, port, api=api, signed_in=signed_in)
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
@@ -812,11 +818,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.orch_bin == actions.SELF and not (
             self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
         ):
-            return self._send(
-                403,
-                b"Open Focus from this computer (orch focus open) to do this.",
-                "text/plain; charset=utf-8",
-            )
+            return self._send(403, actions.SIGNIN.encode(), "text/plain; charset=utf-8")
         try:
             (areas.accept if op == "area.accept" else areas.remove)(self.root, args["area"])
         except areas.BadArea as e:
@@ -830,19 +832,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _session_post(self):
         """POST /session: the page hands over the one-time launch token from its URL fragment; the server spends
-        it and sets the session cookie (H1). Loopback Host, no proxy headers, same fence as an action."""
-        why = self._fence("POST", True)
+        it and sets the session cookie (H1). Same fence as an action, from any computer."""
+        why = self._fence("POST", True, signing_in=True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
             return self._send(403, b"This request came from another website and was refused.", "text/plain")
-        from orch.pagesession import forwarded, host_ok
-
-        if (
-            self.session is None
-            or forwarded(self.headers)
-            or not host_ok(self.headers, self.server.server_address[1])
-        ):
+        if self.session is None:
             return self._send(403, b"forbidden", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
@@ -852,7 +848,7 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "Focus"), "text/plain; charset=utf-8")
-        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its sessionStorage
+        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its localStorage
         self._send(
             200,
             json.dumps({"secret": self.session.secret}).encode(),
@@ -1003,7 +999,7 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
         from orch.pagesession import PageSession
 
         try:
-            handler.keywords["session"] = PageSession(root, "focus")
+            handler.keywords["session"] = PageSession(root, "focus", srv.server_address[1])
         except BaseException:
             srv.server_close()
             raise

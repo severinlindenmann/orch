@@ -20,7 +20,7 @@ def start_update(root: Path, orch_bin, env, session=None, start=None) -> tuple[i
     """The person clicked Update: run `orch update` detached. `session` is the page session to keep open
     across the restart; a request without a page session is refused by the caller before this runs."""
     if pagelaunch is None:
-        return 403, "Open the dashboard from this computer to do this."
+        return 503, "Updating is not available in this install."
     if session is not None:
         pagelaunch.write_resume_cookie(root, session.server, session.cookie, session.secret)
     try:

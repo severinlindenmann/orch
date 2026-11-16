@@ -195,7 +195,9 @@ def _link_msg(session, name: str) -> bytes:
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
 RESTARTING_OPS = ("addon.set", "addon.uninstall")
-REOPEN_EVERY = 30  # seconds between two "open the dashboard again" windows
+# What a browser that has not signed in may load under a host name that is not this computer's (a proxy in front):
+# the page shell only, no data. Everything else there needs the session cookie of that host name.
+_PRIVATE_PREFIXES = ("/api/", "/view/", "/addon/", "/page/", "/ready", "/styleguide")
 
 
 def _arm_resume(root: Path, session) -> None:
@@ -203,7 +205,7 @@ def _arm_resume(root: Path, session) -> None:
     open tabs keep working after the add-on change restarts it. Written only for a click with a page session."""
     import contextlib
 
-    with contextlib.suppress(Exception):  # without it the tab shows "orch restarted. Reload ..." as before
+    with contextlib.suppress(Exception):  # without it the restarted server falls back to the kept session
         from orch import pagelaunch
 
         pagelaunch.write_resume_cookie(root, session.server, session.cookie, session.secret)
@@ -238,16 +240,11 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _refused_text(self, text: str) -> str:
-        """The words of a 403 for a missing page session: a sign-in link that was used twice, a tab whose
-        session the restarted server does not know (after an update), or the plain default."""
-        from orch.pagesession import RESTARTED_MSG, REVOKED_MSG
+        """The words of a 403 for a missing page session: a sign-in link that was used twice, else sign in."""
+        from orch.pagesession import REVOKED_MSG
 
-        if self.session is None:
-            return text
-        if self.session.revoked:
+        if self.session is not None and self.session.revoked:
             return REVOKED_MSG
-        if self.session.stale(self.headers, self.server.server_address[1]):
-            return RESTARTED_MSG
         return text
 
     def _act_log(self, text: str) -> None:
@@ -280,10 +277,49 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _host_ok(self) -> bool:
-        host = (self.headers.get("Host") or "").strip().lower()
-        host = host.rsplit("]", 1)[0] + "]" if host.startswith("[") else host.split(":", 1)[0]
-        return host in ("127.0.0.1", "localhost", "[::1]")
+    def _host_ok(self, path: str = "/") -> bool:
+        """DNS-rebinding guard. This computer's names always pass. Any other well-formed name (a proxy in front,
+        another computer) passes with this server's session cookie, or for the page shell alone (no data):
+        after the sign-in it does not matter where the browser is."""
+        raw = (self.headers.get("Host") or "").strip().lower()
+        host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
+        if host in ("127.0.0.1", "localhost", "[::1]"):
+            return True
+        try:
+            from orch_ui.origin import any_host_ok
+        except ImportError:
+            return False
+        if not any_host_ok(raw):
+            return False
+        if self._signed_in():
+            return True
+        # a sandboxed ticket page's own files: its origin is opaque, so the browser sends no cookie with them
+        # (a cross-site load an attacker's page can show but never read); the page document itself needs one
+        px = PROXY.fullmatch(path)
+        if px and PAGE_PATH.fullmatch(px.group(2) or ""):  # an unguessable key in the address
+            return True
+        if (
+            path.startswith("/view/")
+            and self.headers.get("Sec-Fetch-Site") in ("same-site", "cross-site")
+            and self.headers.get("Sec-Fetch-Dest") in ticketfiles.PAGE_SUBRESOURCE_DEST
+            and not path.lower().endswith((".html", ".htm"))
+        ):
+            return True
+        return path == "/" or (
+            not path.startswith(_PRIVATE_PREFIXES) and path.lower().endswith((*STATIC_EXT, ".html"))
+        )
+
+    def _signed_in(self) -> bool:
+        """This server's session cookie (no page secret needed): enough to READ under any host name."""
+        if getattr(self, "session", None) is None:  # a server without a page session: nobody signs in
+            return False
+        return self.session.cookie_ok(self.headers, self.server.server_address[1])
+
+    def _can_act(self) -> bool:
+        """The person's session (cookie + page secret), wherever the browser is."""
+        if getattr(self, "session", None) is None:
+            return False
+        return self.session.can_act(self.headers, self.server.server_address[1])
 
     def _shipped(self, name: str) -> bool:
         """True only for an add-on `orch addon list` says is shipped with orch; anything else, or unknown, is not."""
@@ -321,6 +357,12 @@ class Handler(BaseHTTPRequestHandler):
         if port is None or ".." in rest or "//" in rest:
             return self._send(404, b"not found", "text/plain")
         up = {"Host": f"127.0.0.1:{port}", "X-Forwarded-Prefix": f"/addon/{name}"}
+        if self._can_act():  # the person signed in here: vouch for them to the add-on's own page server
+            from orch.pagesession import VOUCH_HEADER, vouch_key
+
+            key = vouch_key(self.root, create=True)
+            if key:
+                up[VOUCH_HEADER] = key
         body = None
         if method == "POST":
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
@@ -376,13 +418,13 @@ class Handler(BaseHTTPRequestHandler):
         if origin is None:
             return True
         host = (self.headers.get("Host") or "").strip().lower()
-        return origin.lower() in (f"http://{host}",)
+        return origin.lower() in (f"http://{host}", f"https://{host}")
 
     def do_GET(self):
         self._trace()
-        if not self._host_ok():  # DNS rebinding guard
-            return self._send(421, b"misdirected request", "text/plain")
         path, _, query = self.path.partition("?")
+        if not self._host_ok(path):  # DNS rebinding guard
+            return self._send(421, b"misdirected request", "text/plain")
         if path == "/" and selfupdate.answer(self):
             return
         px = PROXY.fullmatch(path)
@@ -430,8 +472,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/update-status":  # only a page with a session (a finished result is read once)
             from . import update
 
-            ok = self.session is not None and self.session.authed(self.headers, self.server.server_address[1])
-            st = update.update_status(self.root) if ok else None
+            st = update.update_status(self.root) if self._can_act() else None
             return self._send(200, json.dumps(st or {}).encode(), "application/json")
         if path == "/api/term":  # the live helper session's screen (read only; typing is POST /api/term/keys)
             if not self._same_origin():
@@ -634,9 +675,10 @@ class Handler(BaseHTTPRequestHandler):
 
     do_PUT = do_DELETE = do_PATCH = _refuse
 
-    def _fence(self) -> str | None:
+    def _fence(self, signing_in: bool = False) -> str | None:
         """Host + Origin check of orch_ui.origin on every POST. A missing Origin is refused too: the
-        dashboard page always sends one, so only a script outside the browser lacks it."""
+        dashboard page always sends one, so only a script outside the browser lacks it. Any host name passes
+        with the session cookie (or for the sign-in itself, whose one-time token is the proof)."""
         try:
             from orch_ui.origin import check_request
         except ImportError:
@@ -645,7 +687,13 @@ class Handler(BaseHTTPRequestHandler):
             return "This request was refused (no origin)."
         if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
             return "This request came from another website and was refused."
-        return check_request("POST", self.headers, self.server.server_address[1], api=True)
+        return check_request(
+            "POST",
+            self.headers,
+            self.server.server_address[1],
+            api=True,
+            signed_in=signing_in or self._signed_in(),
+        )
 
     def _diag_post(self, path: str):
         """The page's action trail (any page of this app, a fence only) and Report a problem (the person's own
@@ -654,12 +702,10 @@ class Handler(BaseHTTPRequestHandler):
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         report = path != "/api/diag"
-        if report and not (
-            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
-        ):
-            return self._send(
-                403, b"Open the dashboard from this computer to do this.", "text/plain; charset=utf-8"
-            )
+        if report and not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return self._send(415, b"send JSON", "text/plain")
         limit = diagapi.MAX_REPORT if path == "/api/diag/report" else diagapi.MAX_TRAIL
@@ -686,17 +732,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, json.dumps(out).encode(), "application/json")
 
     def _term_keys(self):
-        """Type into the live helper session: the person's own dashboard session only (cookie + page secret, loopback
-        Host, no proxy headers: the same rule as a human-only action). A script or an agent has none of it."""
+        """Type into the live helper session: the person's own dashboard session only (cookie + page secret: the
+        same rule as a human-only action, from any computer). A script or an agent has none of it."""
         why = self._fence()
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        if not (
-            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
-        ):
-            return self._send(
-                403, b"Open the dashboard from this computer to type here.", "text/plain; charset=utf-8"
-            )
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return self._send(415, b"send JSON", "text/plain")
         try:
@@ -716,18 +760,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
     def _session_post(self):
-        """POST /session: the page hands over the one-time launch token it got in the URL fragment; the server
-        spends it and sets the session cookie (H1). Same fence as an action; loopback Host, no proxy headers."""
-        why = self._fence()
+        """POST /session: the page hands over the one-time sign-in token it got in the URL fragment; the server
+        spends it and sets the session cookie (H1). Same fence as an action, from any computer."""
+        why = self._fence(signing_in=True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        from orch.pagesession import forwarded, host_ok
-
-        if (
-            self.session is None
-            or forwarded(self.headers)
-            or not host_ok(self.headers, self.server.server_address[1])
-        ):
+        if self.session is None:
             return self._send(403, b"forbidden", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
@@ -737,7 +775,7 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "dashboard"), "text/plain; charset=utf-8")
-        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its sessionStorage
+        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its localStorage
         self._send(
             200,
             json.dumps({"secret": self.session.secret}).encode(),
@@ -745,45 +783,11 @@ class Handler(BaseHTTPRequestHandler):
             {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)},
         )
 
-    def _session_reopen(self):
-        """POST /session/reopen: a tab whose session this (restarted) server does not know asks for a new one. The
-        supported way, as `orch start` does it: a fresh launch link opened in the person's own browser by the OS;
-        the token never goes into this answer. Only a page that presents a stale session, same fence as an action,
-        at most once per 30 s."""
-        why = self._fence()
-        if why:
-            return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        from orch import pagelaunch
-        from orch.pagesession import forwarded, host_ok
-
-        port = self.server.server_address[1]
-        if (
-            self.session is None
-            or forwarded(self.headers)
-            or not host_ok(self.headers, port)
-            or not self.session.stale(self.headers, port)
-        ):
-            return self._send(403, b"forbidden", "text/plain")
-        now = time.monotonic()
-        if now - getattr(self.server, "reopened_at", -1e9) < REOPEN_EVERY:
-            return self._send(429, b"A new window was opened a moment ago.", "text/plain; charset=utf-8")
-        self.server.reopened_at = now
-        url = pagelaunch.launch_url(self.root, self.session.server, f"http://127.0.0.1:{port}/")
-        if "#launch=" not in url or not pagelaunch.open_browser(url):
-            return self._send(503, b"Open the dashboard again from orch.", "text/plain; charset=utf-8")
-        self._send(
-            202,
-            b"The dashboard opened again in a new window. Keep working there.",
-            "text/plain; charset=utf-8",
-        )
-
     def do_POST(self):
         self._trace()
         path = self.path.split("?", 1)[0]
         if path == "/session":
             return self._session_post()
-        if path == "/session/reopen":
-            return self._session_reopen()
         if path == "/api/term/keys":
             return self._term_keys()
         if path in ("/api/diag", "/api/diag/report", "/api/diag/open", "/api/diag/share"):
@@ -822,9 +826,7 @@ class Handler(BaseHTTPRequestHandler):
         self._act = (op_name, time.monotonic())
         from . import update as _update
 
-        session = bool(
-            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
-        )
+        session = self._can_act()
         with _update.click():  # no automatic update starts during a person's click (or right after it)
             return self._act_run(body, op_name, session)
 
@@ -835,7 +837,7 @@ class Handler(BaseHTTPRequestHandler):
                 from . import update
 
                 if not session:
-                    raise actions.NeedsPerson("Open the dashboard from this computer to do this.")
+                    raise actions.NeedsPerson(actions.SIGNIN)
                 code, text = update.start_update(
                     self.root,
                     self.orch_bin,
@@ -945,7 +947,7 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
         from orch.pagesession import PageSession
 
         try:
-            handler.keywords["session"] = PageSession(root, "dashboard")
+            handler.keywords["session"] = PageSession(root, "dashboard", srv.server_address[1])
         except BaseException:
             srv.server_close()
             raise

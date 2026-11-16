@@ -23,7 +23,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument(
         "--print-launch-url",
         action="store_true",
-        help=argparse.SUPPRESS,  # test installs only: print a one-time page link (for browser tests)
+        help="a one-time sign-in link to open the dashboard elsewhere",
     )
     x = sub.add_parser(
         "stop", parents=[common], help="stop them (asks which workspace when you are outside one)"
@@ -114,9 +114,11 @@ def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
 
 def _services_cmd(args, root: Path) -> None:
     if args.cmd == "start":
-        if args.print_launch_url:  # refuse before anything starts
-            if not pagelaunch.is_test_workspace(root):
-                raise Refused("--print-launch-url works only on a test install, in a test folder.")
+        if args.print_launch_url:  # refuse before anything starts: a person only, never an agent
+            from orch import tickets
+
+            if tickets.agent_tool() is not None and not pagelaunch.is_test_workspace(root):
+                raise Refused("Only a person can print a sign-in link. Run orch start in your own terminal.")
         from orch import worktrees
 
         worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run (never raises)

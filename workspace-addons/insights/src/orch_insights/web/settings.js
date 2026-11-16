@@ -3,7 +3,7 @@
 (() => {
   const prefix = document.documentElement.dataset.prefix || '';
   const byId = id => document.getElementById(id);
-  const UNLINKED = 'This page could not be linked to your session. Open Insights again from the dashboard on this computer.';
+  const UNLINKED = 'This page could not be linked to your session. Open Insights again from the dashboard.';
   // The page secret of this server (H2): memory only, never storage, cookie or URL.
   let view = null, busy = false, pendingTicket = null, pageSecret = '';
 
@@ -32,8 +32,11 @@
     }
   }
 
+  // Behind the dashboard this page shares the dashboard's origin: its sign-in (kept in localStorage) counts here too.
   function headers(extra) {
-    return pageSecret ? {...extra, 'X-Orch-Page': pageSecret} : {...extra};
+    let secret = pageSecret;
+    if (!secret) { try { secret = localStorage.getItem('orch_page_secret') || ''; } catch { secret = ''; } }
+    return secret ? {...extra, 'X-Orch-Page': secret} : {...extra};
   }
 
   async function act(op, args) {
@@ -168,7 +171,7 @@
   function deleteCard() {
     const section = card('Delete detail for a ticket');
     if (view.tickets.error) { section.append(node('p', view.tickets.error, 'note set-block')); return section; }
-    if (!view.can_act) section.append(node('p', 'Open Insights from the dashboard on this computer to do this.', 'note set-block'));
+    if (!view.can_act) section.append(node('p', 'Sign in to do this: open the dashboard with a sign-in link from orch.', 'note set-block'));
     for (const entry of view.tickets.rows) section.append(ticketItem(entry));
     if (!view.tickets.rows.length) section.append(node('p', 'No tickets.', 'muted set-block'));
     return section;

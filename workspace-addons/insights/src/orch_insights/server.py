@@ -36,7 +36,7 @@ KIT_FILES = (
 )
 WEB_FILES = ("index.html", "insights.css", "insights.js", "settings.js", "checkup.js")
 PLAIN = "text/plain; charset=utf-8"
-RELINK = "This sign-in link can not be used. Open Insights from the dashboard on this computer again."
+RELINK = "This sign-in link can not be used. Open Insights again from the dashboard."
 TYPES = {
     "html": "text/html; charset=utf-8",
     "css": "text/css; charset=utf-8",
@@ -128,13 +128,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(data).encode(), "application/json")
 
     def _can_act(self):
-        """This request carries the person's page session: cookie AND page secret (X-Orch-Page), loopback Host,
-        no proxy headers. The rule lives in PageSession.can_act (the cookie alone never counts: another
-        loopback port receives it); the server-side secret must also have been handed out by a launch."""
-        return (
-            self.session is not None
-            and getattr(self.server, "page_secret", None) is not None
-            and self.session.can_act(self.headers, self.server.server_address[1])
+        """This request is the person's, from any computer: the dashboard in front vouches for it, or it carries
+        this server's own page session (cookie AND page secret, once handed out by a sign-in). The rule lives
+        in PageSession (the cookie alone never counts: every port of the host receives it)."""
+        if self.session is None or not self.session.active:
+            return False
+        if self.session.vouched(self.headers):
+            return True
+        return getattr(self.server, "page_secret", None) is not None and self.session.can_act(
+            self.headers, self.server.server_address[1]
         )
 
     def _read(self, *argv):
@@ -146,12 +148,16 @@ class Handler(BaseHTTPRequestHandler):
         tickets = self._read("ticket", "list", "--all", "--json")
         return build_settings(settings, counts, tickets, self._can_act())
 
-    def _fence(self, method, api):
+    def _fence(self, method, api, signing_in=False):
         try:
             from orch_ui.origin import check_request
         except ImportError:
             return "Insights is not available in this install."
-        why = check_request(method, self.headers, self.server.server_address[1], api=api)
+        port = self.server.server_address[1]
+        signed_in = signing_in or bool(
+            self.session is not None and self.session.cookie_ok(self.headers, port)
+        )
+        why = check_request(method, self.headers, port, api=api, signed_in=signed_in)
         if method == "POST" and self.headers.get("Origin") is None:
             return why or "This request was refused (no origin)."
         return why
@@ -205,8 +211,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _session_refusal(self):
         """Why POST /session is refused: the action fence, plus Sec-Fetch-Site same-origin/none (absent is
-        refused too) and a JSON body (M5), loopback Host and no proxy headers."""
-        why = self._fence("POST", True)
+        refused too) and a JSON body (M5). From any computer: the one-time token is the proof."""
+        why = self._fence("POST", True, signing_in=True)
         if why:
             return why
         why = self._site_refusal()
@@ -214,13 +220,7 @@ class Handler(BaseHTTPRequestHandler):
             return why
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return "forbidden"
-        from orch.pagesession import forwarded, host_ok
-
-        if (
-            self.session is None
-            or forwarded(self.headers)
-            or not host_ok(self.headers, self.server.server_address[1])
-        ):
+        if self.session is None:
             return "forbidden"
         return None
 

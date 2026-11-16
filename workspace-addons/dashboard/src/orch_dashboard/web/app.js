@@ -435,7 +435,7 @@ async function addonSet(name, on, tries = 20, pause = 1500) {
   }
   return result;
 }
-// Remove an add-on from this computer (`orch addon uninstall`, refused while it is on: turn it off first). The
+// Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The
 // services restart like for the switch, so a lost answer is checked by reading the state again.
 async function addonUninstall(name, tries = 20, pause = 1500) {
   const still = rows => array(rows).some(a => a && a.name === name);

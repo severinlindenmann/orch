@@ -55,30 +55,33 @@ def is_test_workspace(root: Path) -> bool:
 
 
 def printable_launch_url(root: Path, server: str, base_url: str) -> str:
-    """TEST-ONLY exception to "the launch token is never printed": `orch start --no-open
-    --print-launch-url`, on a test install and a test workspace only, so the Playwright lane can open a page
-    session. Refused everywhere else."""
-    if not is_test_workspace(root):
-        raise Refused("Printing a launch link works only on a test install, in a test folder.")
-    token = write_launch_token(root, server)  # the ONE writer (below): same file, format, 30 s, single use
+    """`orch start --print-launch-url`: a one-time sign-in link printed for a person, so they can sign in from
+    another computer (a headless server, a proxy in front). Never under an agent tool (an agent must not sign
+    in as the person); a test install in a test folder may (the Playwright lane). Single use, PRINTED_LIFE."""
+    from orch import tickets
+
+    if tickets.agent_tool() is not None and not is_test_workspace(root):
+        raise Refused("Only a person can print a sign-in link. Run orch start in your own terminal.")
+    token = write_launch_token(root, server, life=PRINTED_LIFE)  # the ONE writer (below), single use
     if token is None:
-        raise Refused("A launch link could not be made.")
+        raise Refused("A sign-in link could not be made.")
     return f"{base_url.rstrip('/')}/#launch={token}"
 
 
 LAUNCH_LIFE = 30  # seconds: the token is single use and dies on the first page load
+PRINTED_LIFE = 600  # seconds a printed sign-in link lasts: time to open it on another computer
 
 
-def write_launch_token(root: Path, server: str) -> str | None:
+def write_launch_token(root: Path, server: str, life: int = LAUNCH_LIFE) -> str | None:
     """The one-time token that bootstraps a page session: <key folder>/launch-<server>.token (0600, once,
-    30 s). Returned ONLY to the code that opens the browser at `#launch=<token>` (a URL fragment); never
-    printed or logged."""
+    `life` seconds). Returned to the code that opens the browser at `#launch=<token>` (a URL fragment) or, for
+    a person, printed by `orch start --print-launch-url`; never logged."""
     if not launch_server_ok(server):
         raise Refused("Unknown page server.")  # a local or marketplace add-on never gets a launch token
     try:
         d = orch_home.key_dir(root)
         token = secrets.token_urlsafe(24)
-        orch_home._write_private(d / f"launch-{server}.token", f"{token}\n{int(time.time()) + LAUNCH_LIFE}\n")
+        orch_home._write_private(d / f"launch-{server}.token", f"{token}\n{int(time.time()) + life}\n")
         return token
     except (Refused, OSError):
         return None

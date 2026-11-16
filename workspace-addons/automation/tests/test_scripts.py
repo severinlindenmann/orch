@@ -1,4 +1,4 @@
-"""Scripts: a repeat that runs a command from this computer's settings instead of an agent (ORCH-20)."""
+"""Scripts: a repeat that runs a command from the local settings instead of an agent (ORCH-20)."""
 
 import json
 import sys

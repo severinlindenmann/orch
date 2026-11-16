@@ -87,6 +87,11 @@ again.
   certificates, key custody in the workspace, planning gates, fixed requirements, approval chains, a required hub, agent
   fences inside the workspace, permission matrices per action. Normal TLS, tokens and the publish link key are not
   banned.
+- **R4.1a No "same computer only"** (owner, 16 Nov): inside a logged-in workspace no action may be limited to the
+  computer orch runs on. The only gate is the sign-in (a one-time sign-in link, then the session the browser keeps).
+  No check of a loopback address or Host, of proxy headers, or of a session that only counts on this machine; no
+  text that sends the person to "this computer". A workspace is used from anywhere: another computer, behind a
+  proxy, on a headless server. Relay and publish exposure from outside stay strict (R5).
 - **R4.2** A new noun the user has to learn (new object, state or mode) needs owner approval. Prefer extending tickets,
   checklists, questions or `ext`.
 - **R4.3** One implementation per job, many surfaces: CLI, dashboard and phone all call the same CLI or API path. No

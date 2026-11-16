@@ -1,5 +1,11 @@
 # Human-only actions: proof from the human channel (invariant H1)
 
+> **Page sessions, owner rule 16 Nov (AGENTS.md R4.1a):** the sign-in is the only gate of a page server. The loopback
+> Host and "no `X-Forwarded-*`" requirements below no longer apply: a signed-in session (cookie + page secret, now kept in
+> the browser's localStorage and in the key folder for 30 days) acts from any computer, through any proxy. The dashboard
+> vouches for the person to an add-on page behind it (`X-Orch-Person`, a private key in the key folder). A person prints a
+> sign-in link for another computer with `orch start --print-launch-url` (never under an agent tool). See `pagesession.py`.
+
 **Threat-model boundary (owner decision R1: Level 1, no OS sandbox).** An agent runs as the same OS user and can always read
 or write anything that user can. **Goal:** no agent can act as the person *through orch's own interfaces*: flags,
 environment, workspace files, the local page, the relay client. **Non-goal:** an agent that patches the orch install, edits
@@ -77,7 +83,7 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    the command being run; `iat ≤ now < exp` and `exp − iat ≤ 60`; the nonce was not used before (used nonces kept in
    `<orch home>/keys/<ws>/proofs-used.json` until their `exp`, written under the key lock); and no agent tool is detected
    (the old check stays as a second line). Then `by` comes **from the proof**; `--by` / `--from` are ignored (a different
-   `--by` is refused as `forged`). Refusals are exit 2, `code: not_allowed`, "Do this in the dashboard on this computer."
+   `--by` is refused as `forged`). Refusals are exit 2, `code: not_allowed`, "Do this in the dashboard."
 7. **Streams.** One proof covers one command process: `orch run type --proof-stdin` takes the lock and accepts the keys that
    follow on the same stdin until it exits; a new process needs a new proof.
 

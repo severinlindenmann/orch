@@ -375,11 +375,15 @@ def _attach_all(root: Path, orch_bin: str | None, tid: str, files: list[tuple[st
     return {"saved": saved, "failed": failed}
 
 
+# The only gate is the sign-in (owner rule, 16 Nov); equal to orch.pagesession.SIGNIN_MSG.
+SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
+
+
 def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
     if orch_bin == SELF and needs_session(op) and not session:
-        raise NeedsPerson("Open Focus from this computer (orch focus open) to do this.")
+        raise NeedsPerson(SIGNIN)
     files = attachments(op, args)  # checked before anything is written
     code, stdout, stderr = orch(root, orch_bin, argv)
     if code == 124:
