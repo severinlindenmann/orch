@@ -42,7 +42,7 @@ window.SWIPE_ITEMS=[
  {id:'d7',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-47',ticketId:'DT-47',ticketTitle:'Opening hours page',when:'today 09:15',need:'Done when is not fully covered',title:'New opening hours on the website',
   why:'The helper says this is ready for your check.',okLabel:'Looks good',open:'https://example.com/pull/12',
   then:'The ticket is done.',
-  preview:{type:'doc',heading:'What was done',paras:['In short: Sunday 9–13 is on the website and the Google entry.','No task covers: “the sign at the door shows it”'],
+  preview:{type:'doc',heading:'What was done',paras:['In short: Sunday 9–13 is on the website and the Google entry.','No task covers: “the poster at the door shows it”'],
    steps:['Done: Change the hours on the website — Page now says Sunday 9:00 – 13:00 · Ran: page check (all links fine) · PR #12','Done: Update the Google entry — Saved; Google shows the new hours']}},
  {id:'d8',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-48',ticketId:'DT-48',ticketTitle:'Supplier call',when:'today 09:20',title:'Call the supplier about oat milk',
   why:'The helper says this is ready for your check.',okLabel:'Looks good',
