@@ -85,6 +85,8 @@ Each time you are woken, ask Factory what to do next and follow it:
 - Pictures at a stop: for every taste item copy the tester's screenshots of that screen (phone width and desktop) to
   `.orch/addons/factory/stops/<order>/s<round>/` and name them in the item (`"after": "s1/make-poll.png"`, the earlier
   look in `before`). Without a picture the owner cannot judge a look: say in `not_checked` that there is none.
+  When the app runs for the test, also put its address in the item (`"preview": "http://127.0.0.1:5173/"`), so the
+  owner can open the screen itself.
 - At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo` (anything that
   sends, publishes, deploys, deletes, pays or touches main/production is `cant-undo`: Factory refuses it otherwise); a recommended
   answer only on routine items; list what was checked AND what was not checked, and every small change made during the run.

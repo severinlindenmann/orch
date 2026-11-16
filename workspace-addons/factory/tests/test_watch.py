@@ -4,12 +4,13 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
-from test_flow import ask_stop, autopilot_order, core, edit, finish_crew, started
+from test_flow import ask_stop, autopilot_order, core, edit, finish_crew, run_proposal, started, waiting_stop
 
-from orch_factory import orchcli, runfiles, service, watch
-from orch_factory.store import Refused
+from orch_factory import flow, orchcli, runfiles, service, watch
+from orch_factory.store import Refused, Store
 
 
 def runs(ws):
@@ -127,6 +128,118 @@ def test_stop_that_is_not_for_autopilot_does_not_wake(ws, run):
     n = len(runs(ws))
     ask_stop(ws, run, order, "build", {"title": "Delete data", "tag": "cant-undo"})
     assert watch.once(ws) == [] and len(runs(ws)) == n
+
+
+def plain_line():
+    """build and check have no stop (the plan says the crew's OK is enough), ship has one."""
+    return run_proposal(
+        line=[
+            {"stage": "build", "stop": False, "why": "Layout already approved."},
+            {"stage": "check", "stop": False, "why": "Booking flow, phone layout."},
+            {"stage": "ship", "stop": True, "why": "You decide whether it goes live."},
+        ],
+        tasks=[
+            {
+                "slug": "booking-form",
+                "title": "Booking form",
+                "role": "builder",
+                "stage": "build",
+                "proves": [0],
+            },
+            {"slug": "review", "title": "Review against done means", "role": "reviewer", "stage": "check"},
+            {"slug": "release", "title": "Prepare the release", "role": "builder", "stage": "ship"},
+        ],
+    )
+
+
+def manager_runs(ws, order):
+    return [r for r in runs(ws) if r["ticket"] == order]
+
+
+def test_last_ok_starts_the_next_stage_at_once(ws, run):
+    """#47: the crew's last result is OK -> the next stage's crew starts in the same pass, no manager run, no question."""
+    order, _ = started(ws, run, data=plain_line())
+    watch.once(ws)  # the person's Start wakes the manager
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    run("crew", "start", order, "booking-form")
+    assert watch.once(ws) == []
+    questions = len(core(ws, "ticket", "show", order)["questions"])
+    edit(ws, tid, lambda t: t.update(status="done"))  # the owner's Looks good
+    t0 = time.monotonic()
+    woke = watch.once(ws)
+    took = time.monotonic() - t0
+    assert (
+        len(woke) == 1
+        and woke[0]["stage"] == "check"
+        and woke[0]["why"] == "started the check stage as planned"
+    )
+    review = woke[0]["crew"][0]
+    assert runs(ws)[-1] == {"ticket": review, "agent": "claude", "by": "agent:factory"}
+    assert took < 10, f"the next stage took {took:.1f} s to start"
+    assert len(manager_runs(ws, order)) == 1  # only the first wake for Start: the manager was not needed
+    assert len(core(ws, "ticket", "show", order)["questions"]) == questions  # no new step for the person
+    assert "Factory started the check stage as planned: Review against done means." in history(ws, order)
+    assert core(ws, "ticket", "show", review)["ext"]["factory"]["task"] == "review"
+    assert watch.once(ws) == [] and len(runs(ws)) == 3  # never twice
+    assert (
+        run("next", order)["step"] == "start-crew"
+    )  # the manager's view is unchanged: crew of check, already started
+    edit(ws, review, lambda t: t.update(status="done"))
+    woke = watch.once(ws)  # ship has crew too: started the same way; its stop stays the manager's
+    assert woke[0]["stage"] == "ship"
+    edit(ws, woke[0]["crew"][0], lambda t: t.update(status="done"))
+    woke = watch.once(ws)
+    assert woke == [{"order": order, "why": "crew task release is done"}]  # the stop needs the manager
+    assert len(manager_runs(ws, order)) == 2
+
+
+def test_continue_at_a_stop_starts_the_next_stage(ws, run):
+    order, q = waiting_stop(ws, run)
+    watch.once(ws)
+    n = len(manager_runs(ws, order))
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    woke = watch.once(ws)
+    assert len(woke) == 1 and woke[0]["stage"] == "ship"
+    assert len(manager_runs(ws, order)) == n
+    assert any(
+        r["type"] == "stop-answered" for r in Store(ws).journal_read()
+    )  # taken in, as the manager's next does
+
+
+def test_send_back_still_wakes_the_manager(ws, run):
+    order, q = waiting_stop(ws, run)
+    watch.once(ws)
+    core(ws, "answer", order, q, "Send back", "--by", "human:anna")
+    assert watch.once(ws) == [{"order": order, "why": "anna answered stop"}]
+
+
+def test_first_stage_stays_with_the_manager(ws, run):
+    order, _ = started(ws, run, data=plain_line())
+    assert watch.once(ws) == [{"order": order, "why": "anna answered start"}]
+    assert manager_runs(ws, order) and len(runs(ws)) == 1
+
+
+def test_next_stage_that_cannot_start_wakes_the_manager(ws, run, monkeypatch):
+    order, _ = started(ws, run, data=plain_line())
+    watch.once(ws)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    watch.once(ws)
+    edit(ws, tid, lambda t: t.update(status="done"))
+
+    def used_up(root, order, task):
+        raise Refused(
+            "The time budget is used up. Ask the owner for more time (a change proposal).", "refused"
+        )
+
+    monkeypatch.setattr(flow, "crew_start", used_up)
+    woke = watch.once(ws)
+    assert len(woke) == 1 and "stage" not in woke[0]
+    assert woke[0]["why"].startswith(
+        "crew task booking-form is done; Factory could not start the check stage itself: "
+    )
+    assert len(manager_runs(ws, order)) == 2
 
 
 def test_once_command_json(ws, run):

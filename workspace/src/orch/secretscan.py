@@ -5,6 +5,7 @@ is one list. A finding names a kind and a line, never the matched text."""
 from __future__ import annotations
 
 import re
+import sys
 import unicodedata
 from pathlib import Path
 
@@ -66,11 +67,37 @@ def too_large(n: int) -> bool:
     return n > MAX_BYTES
 
 
-def find(text: str, root: Path | None = None) -> list[dict]:
+NOTE_SKIPPED = "Couldn't read your saved keys, so this check skipped them. Every other secret check ran."
+_noted = False
+
+
+def note_skipped(root: Path | None = None) -> None:
+    """The visible note when a send skipped the stored-key comparison: once per process on stderr (a CLI user
+    sees it next to the result), every time in the debug log. Never silent."""
+    global _noted
+    if not _noted:
+        _noted = True
+        print(NOTE_SKIPPED, file=sys.stderr)
+    try:
+        from orch import diag
+
+        diag.log("secretscan.stored_keys_unreadable", "warn", root=root)
+    except Exception:  # noqa: BLE001 - the note on stderr already reached the user
+        pass
+
+
+def stored_keys_readable(root: Path) -> bool:
+    from orch import phone_results
+
+    return phone_results.value_hider(root) is not None
+
+
+def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[dict]:
     """[{kind, line}] (line from 1, one entry per kind and line), in text order. Pattern kinds first, then any
     other line the phone view's scrub would change (key=value, spaced values, flag values), then lines that
     hold a stored key value of the workspace (`root`). A stored-key check that cannot run reports `stored-key`
-    on line 1 (fail closed)."""
+    on line 1 (fail closed) when `strict`. With strict=False (sends: relay, publish) only that comparison is
+    skipped, with a visible note (note_skipped); every other detector still runs and blocks."""
     from orch import phone_view
 
     found: dict[tuple[int, str], None] = {}
@@ -93,7 +120,10 @@ def find(text: str, root: Path | None = None) -> list[dict]:
 
         h = phone_results.value_hider(root)
         if h is None:
-            found[(1, "stored-key")] = None
+            if strict:
+                found[(1, "stored-key")] = None
+            else:
+                note_skipped(root)
         else:
             try:
                 for n, raw in enumerate(text.split("\n"), 1):
@@ -141,16 +171,6 @@ def _leaves(doc, path: str = "", top: bool = True):
             yield from _leaves(v, path, False)
 
 
-def _stored_root(root: Path | None) -> Path | None:
-    """`root` when this workspace's stored keys can be listed, else None (the token patterns and key=value
-    checks still run)."""
-    if root is None:
-        return None
-    from orch import phone_results
-
-    return root if phone_results.value_hider(root) is not None else None
-
-
 def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
     """R5.2: nothing leaves this machine (relay, publish) with a secret in it. The one scanner, run on every
     string of the body. A hit raises Refused with one sentence naming the kind and the field, never the value.
@@ -166,7 +186,7 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
         parts.append(text)
         lines += text.count("\n") + 1
     try:
-        found = find("\n".join(parts), _stored_root(root))
+        found = find("\n".join(parts), root, strict=False)
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(
             f"orch could not check the {what} for secrets, so nothing was sent. Try again."
@@ -201,10 +221,9 @@ def refuse_if_secret(data: bytes, what: str = "file", root: Path | None = None) 
     assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
     found: list[dict] = []
     try:
-        sroot = _stored_root(root)
         for start in range(0, max(len(data), 1), step - overlap):
             for text in _views(data[start : start + step]):
-                found = find(text, sroot)
+                found = find(text, root, strict=False)
                 if found:
                     break
             if found or start + step >= len(data):

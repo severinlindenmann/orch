@@ -127,6 +127,10 @@ def _scan(args, root: Path) -> None:
         err = Refused("The text is bigger than 1 MB. Scan it in smaller parts.")
         err.extra = {"code": "too_large"}
         raise err
+    if not secretscan.stored_keys_readable(root):  # the explicit command stays strict
+        err = Refused("Couldn't read your saved keys, so the scan could not finish. Fix that and scan again.")
+        err.extra = {"code": "stored_keys_unreadable"}
+        raise err
     found = secretscan.find(data.decode("utf-8", "replace"), root)
     if not found:
         print(json.dumps({"found": []}) if getattr(args, "json", False) else "No secrets found.")
