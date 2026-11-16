@@ -83,7 +83,7 @@ def tickets_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
         try:
             t = tickets._load_raw(root, tid)  # the file as it is: no verdict view, no ledger write
         except Exception as e:  # noqa: BLE001
-            gaps.append(f"{tid}: {type(e).__name__}")
+            gaps.append(f"{tid} - {type(e).__name__}")
             continue
         hist = [
             {"at": h.get("at"), "via": h.get("via")}  # when and how; never who or what was said
@@ -136,7 +136,7 @@ def runs_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
         try:
             rec = runs.read(root, tid)
         except Exception as e:  # noqa: BLE001
-            gaps.append(f"{tid}: run record {type(e).__name__}")
+            gaps.append(f"{tid} - run record {type(e).__name__}")
             continue
         if not rec:
             continue
