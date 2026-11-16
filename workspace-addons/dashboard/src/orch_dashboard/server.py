@@ -815,15 +815,15 @@ class Handler(BaseHTTPRequestHandler):
         self._act = (op_name, time.monotonic())
         from . import update as _update
 
+        session = bool(
+            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
+        )
         with _update.click():  # no automatic update starts during a person's click (or right after it)
-            return self._act_run(body, op_name)
+            return self._act_run(body, op_name, session)
 
-    def _act_run(self, body, op_name):
+    def _act_run(self, body, op_name, session: bool):
         self._act_log(f"{op_name} start")
         try:
-            session = bool(
-                self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
-            )
             if body.get("op") == "update.start":  # the Update button in Settings
                 from . import update
 
