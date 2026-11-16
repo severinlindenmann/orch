@@ -27,6 +27,7 @@ KEYS = (
     "workspace.live_idle_minutes",
     "workspace.live_max",
     "workflow.agents_may_finish",
+    "workflow.reviewer",
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
@@ -269,6 +270,7 @@ def _config(args, root: Path) -> None:
             "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
             "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
+            "workflow.reviewer": lambda: config.reviewer_on(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
@@ -301,6 +303,15 @@ def _config(args, root: Path) -> None:
             raise Refused("Choose on or off.")
         value = config.set_agents_may_finish(root, args.value == "on", _actor(args))
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
+    elif args.sub == "set" and args.key == "workflow.reviewer":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = config.set_reviewer(root, args.value == "on", _actor(args))
+        _out(
+            args,
+            {"workflow.reviewer": value},
+            f"The Reviewer accepts small finished work for you: {args.value}.",
+        )
     elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
         if args.key == "workflow.copies":
             v = config.set_copies_mode(root, args.value)
