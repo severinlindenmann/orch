@@ -11,7 +11,7 @@ import re
 import shutil
 from pathlib import Path
 
-from orch import adapters, addons, harness, history, reminder_settings, services, skills
+from orch import adapters, addons, harness, history, nextstep, reminder_settings, services, skills
 from orch.errors import Refused
 
 TOOL = "orch-workspace"  # the uv tool the installers make (install.sh, install.ps1)
@@ -21,6 +21,7 @@ KEPT = (".orch/tickets", ".orch/config.toml", ".orch/secrets")  # the person's d
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 

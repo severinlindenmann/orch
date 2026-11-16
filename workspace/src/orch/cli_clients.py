@@ -23,7 +23,6 @@ def _exp(v) -> str:
 
 
 def _host(url: str) -> str:
-    from urllib.parse import urlsplit
 
     return urlsplit(url).netloc or url
 
@@ -141,6 +140,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("id")
     t = argparse.ArgumentParser(add_help=False)
     t.add_argument("--ticket")
+    t.add_argument("--dry-run", action="store_true", help="show what would leave this machine; send nothing")
     x = rel.add_parser("send", parents=[common, t], help="send a message or file to a workspace or phone")
     x.add_argument("workspace")
     x.add_argument("text", nargs="?", default="")
@@ -170,6 +170,11 @@ def add_parsers(sub, common) -> None:
         "--group",
         action="store_true",
         help="open the ticket's group chat with that workspace (needs --ticket)",
+    )
+    x.add_argument(
+        "--full",
+        action="store_true",
+        help="share the whole ticket (checklist, open question), not only the summary (needs --ticket)",
     )
     x = rel.add_parser("start", parents=[common, t], help="start a named task on another workspace")
     x.add_argument("workspace")
@@ -270,18 +275,14 @@ def _confirm(args):
     return ask
 
 
-def _as_person(args, root: Path, op: str, target: str, **kw) -> str | None:
-    """A person's own act in a group (H1). Returns the VERIFIED human identity (from a proof; a terminal
-    command is handed off to the page and refused here), or None for a caller that claims to be an agent (an
-    agent session, or --by agent:...). EVERY caller branches on the return value: a person's flags
-    (--dashboard, --click) are honoured only for a verified identity, an agent claim gets the downgraded
-    action. Never "did not raise"."""
+def _as_person(args) -> str | None:
+    """The person acting in a group: their identity, or None for a caller that is an agent (an agent session,
+    or --by agent:...). A person's flags (--dashboard, --click) count only for a person; an agent claim gets
+    the downgraded action."""
     if tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:"):
         return None
-    who = humanproof.person_by(root, args, op, target, **kw)
-    if not who.startswith("human:"):
-        return None
-    return who
+    who = tickets.acting_by(args)
+    return who if who.startswith("human:") else None
 
 
 def _file_sha(root: Path, path: str) -> str:
@@ -313,24 +314,6 @@ def _group_title(root: Path, group: str, host: str | None = None) -> str:
     return "a group chat"
 
 
-def _member_parts(root: Path, host: str, group: str) -> dict:
-    """Card parts for an act in a joined group: its title (matched on host AND id) and the host's name."""
-    return {
-        "title": humanproof.part(_group_title(root, group, host)),
-        "host": humanproof.part(relay.name_of(root, host)),
-    }
-
-
-def _share_card(args) -> dict:
-    """What the share card must show and what the page will run (F4): the full resolved path of the file (the
-    card shows it in an "Exact file:" block) and a command with that absolute path, so the page's folder can
-    never turn a relative name into another file."""
-    full = str(Path(args.file).resolve())
-    argv = humanproof._clean_argv(humanproof.CURRENT_ARGV) or []
-    argv = [full if a == args.file else a for a in argv]
-    return {"exact": full, "argv": argv}
-
-
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
@@ -345,25 +328,13 @@ def run_group(args, root: Path, out) -> None:
     elif sub == "say":
         as_person = None
         if args.dashboard:  # writing into the group AS the person: only with the person's verified proof
-            as_person = _as_person(
-                args, root, "group.write_as_person", tid,
-                parts={"title": humanproof.ticket_name(root, tid)}, value=args.text,
-            )  # fmt: skip
+            as_person = _as_person(args)
         r = cg.say(root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by)
         out(args, r, "Written into the group.")
     elif sub == "add":
         r = cg.add_member(root, tid, ws, by)
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
     elif sub == "remove":
-        person = _as_person(
-            args, root, "group.remove_member", f"{tid}:{args.workspace}",
-            parts={
-                "title": humanproof.ticket_name(root, tid),
-                "workspace": humanproof.part(relay.name_of(root, ws)),
-            },
-        )  # fmt: skip
-        if person is None:  # an agent claim never removes a member (no typed yes, no flag counts)
-            raise Refused(humanproof.AGENT_REFUSED)
         r = cg.remove_member(root, tid, ws, by)
         out(args, r, "Removed from the group.")
     elif sub == "ask":
@@ -373,14 +344,7 @@ def run_group(args, root: Path, out) -> None:
         click, sha = False, None  # the downgraded action: confined to the workspace, no click
         if args.click:  # a person shares a file with the group: the proof binds the file's CONTENT
             sha = _file_sha(root, args.file)
-            if _as_person(
-                args, root, "group.share_file", f"{tid}:{sha}",
-                parts={
-                    "title": humanproof.ticket_name(root, tid),
-                    "file": humanproof.part(Path(args.file).name),
-                },
-                **_share_card(args),
-            ):  # fmt: skip
+            if _as_person(args):
                 click = True
         # the bytes that are uploaded are checked against the bytes the proof covers (expect_sha)
         r = cg.share_file(
@@ -397,14 +361,8 @@ def run_group(args, root: Path, out) -> None:
         out(args, r, "Shared with the group.")
     elif sub == "reply":
         as_person = None
-        if (
-            args.dashboard
-        ):  # only a verified person speaks as themselves; an agent claim is downgraded to helper
-            host = relay.resolve(root, args.host)
-            as_person = _as_person(
-                args, root, "group.write_as_person", humanproof.group_target(root, host, args.group),
-                parts=_member_parts(root, host, args.group), value=args.text,
-            )  # fmt: skip
+        if args.dashboard:  # only a person speaks as themselves; an agent claim is downgraded to helper
+            as_person = _as_person(args)
         m = cg.say_member(
             root,
             relay.resolve(root, args.host),
@@ -420,15 +378,7 @@ def run_group(args, root: Path, out) -> None:
         click, sha = False, None  # an agent claim: no click, so share_member refuses in words
         if args.click:  # the proof binds the file's content, checked against the uploaded bytes
             sha = _file_sha(root, args.file)
-            host = relay.resolve(root, args.host)
-            if _as_person(
-                args, root, "group.share_file", f"{humanproof.group_target(root, host, args.group)}:{sha}",
-                parts={
-                    **_member_parts(root, host, args.group),
-                    "file": humanproof.part(Path(args.file).name),
-                },
-                **_share_card(args),
-            ):  # fmt: skip
+            if _as_person(args):
                 click = True
         m = cg.share_member(
             root,
@@ -456,8 +406,7 @@ def run_publish(args, root: Path, out) -> None:
         out(
             args,
             who,
-            f"Connected to {_host(args.url)} as {who['name']}.\n"
-            'Next: describe this workspace: orch publish profile --description "..." --tags a,b',
+            f"Connected to {_host(args.url)} as {who['name']}.",
         )
     elif sub == "whoami":
         w = publish.whoami(root)
@@ -517,7 +466,7 @@ def run_publish(args, root: Path, out) -> None:
         out(
             args,
             r,
-            f"Created a {r['stack']} app in {args.folder}.\nNext: orch publish app {args.folder}",
+            f"Created a {r['stack']} app in {args.folder}.",
         )
     elif sub == "list":
         r = publish.list_all(root)
@@ -593,28 +542,20 @@ def run_relay(args, root: Path, out) -> None:
     if sub == "mobile":
         return run_mobile(args, root, out)
     t = getattr(args, "ticket", None)
-    if sub not in ("connect", "status", "outbox", "view"):
+    dry = bool(getattr(args, "dry_run", False))
+    if (
+        sub not in ("connect", "status", "outbox", "view") and not dry
+    ):  # a preview sends nothing, not even the outbox
         _resend_waiting(root)
     if sub == "group":
         return run_group(args, root, out)
     if sub == "connect":
-        # connecting (or changing the relay address) is a person's action (H1): proof for this relay host
-        address = humanproof.server_address(args.url)  # refuses a URL with a name or password in it
-        if not humanproof.person_by(
-            root,
-            args,
-            "relay.connect",
-            address,
-            parts={"host": address, "scheme": urlsplit(args.url.strip()).scheme},
-            exact=address,
-        ).startswith("human:"):
-            raise Refused(humanproof.AGENT_REFUSED)
+        humanproof.server_address(args.url)  # refuses a URL with a name or password in it
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
             args,
             who,
-            f"Connected to {_host(args.url)} as {who['name']}.\n{line}\n"
-            'Next: describe this workspace: orch relay profile --description "..." --tags a,b',
+            f"Connected to {_host(args.url)} as {who['name']}.\n{line}",
         )
     elif sub == "status":
         try:
@@ -652,6 +593,8 @@ def run_relay(args, root: Path, out) -> None:
         lines = [f"{m['id']}  to {relay.name_of(root, m['to'])}  {m['type']}" for m in left]
         for d in (res or {}).get("dropped", []):
             lines.append(f"Not sent, the relay refused {d['id']}: {d['reason']}")
+        for d in (res or {}).get("failed", []):
+            lines.append(f"Not sent {d['id']}: {d['reason']}")
         if res and res["sent"]:
             lines.insert(0, f"Sent {len(res['sent'])} waiting message{'s' if len(res['sent']) != 1 else ''}.")
         if left and (res or {}).get("problem"):
@@ -696,52 +639,25 @@ def run_relay(args, root: Path, out) -> None:
         if r["ticket"]:
             txt += f" Ticket: {r['ticket']}"
         out(args, r, txt)
+    elif sub in ("send", "delegate", "start") and dry:
+        with relay.dry_run():
+            m = _build_send(root, args, sub, t)
+        out(args, _preview_dict(m), _preview_text(m))
     elif sub == "send":
-        if args.file and (args.update or args.reply_to or args.speak):
-            raise Refused("--update, --reply-to and --speak go with a text, not a file.")
-        if args.summary and not args.speak:
-            raise Refused("--summary goes with --speak.")
-        if args.file:
-            m = relay.send_file(root, args.workspace, Path(args.file), args.text or None, t)
-        elif args.text:
-            speak = relay.speak_hint(root, t, args.text, args.summary) if args.speak else None
-            refs = [
-                {"kind": k, {"ticket": "key", "reference": "url", "proposal": "title"}.get(k, "path"): v}
-                for k, _, v in (r.partition(":") for r in args.ref)
-            ]
-            m = relay.send_text(
-                root, args.workspace, args.text, t, args.update, args.reply_to, speak=speak, refs=refs
-            )
-        else:
-            raise Refused("Nothing to send. Give a text or --file.")
+        m = _build_send(root, args, sub, t)
         out(args, m, _sent_line(root, m, "Message sent to {}."))
         _view_hint(m, t, args.update)
     elif sub == "topic":
         r = relay.topic(root, args.message, args.title, tickets.current_actor())
         out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
     elif sub == "delegate":
-        m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t, args.group)
+        m = _build_send(root, args, sub, t)
         out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
     elif sub == "start":
-        m = relay.send_start(root, args.workspace, args.key, args.text, t)
+        m = _build_send(root, args, sub, t)
         out(args, m, _sent_line(root, m, "Start request sent to {}."))
     elif sub == "allow":
-        msg = relay.load_message(root, args.id)
-        b = msg.get("body", {})
-        task = b.get("title") or b.get("key") or args.id
         mode = "once" if args.once else "permanent"
-        if not humanproof.person_by(
-            root,
-            args,
-            "relay.allow",
-            f"{args.id}:{mode}",
-            parts={
-                "peer": humanproof.part(relay.name_of(root, msg.get("from"))),
-                "task": humanproof.part(task),
-                "mode": mode,
-            },
-        ).startswith("human:"):
-            raise Refused(humanproof.AGENT_REFUSED)
         m = relay.give_allow(root, args.id, mode)
         out(args, m, f"Allowed ({m['body']['mode']}). {relay.name_of(root, m['to'])} has been told.")
     elif sub == "refresh":
@@ -782,6 +698,64 @@ def _view_hint(m: dict, ticket: str | None, update: str | None) -> None:
         print(f"Sent without the ticket page: {m['view_note']}.", file=sys.stderr)
 
 
+def _build_send(root: Path, args, sub: str, t: str | None) -> dict:
+    """send, delegate and start: one path for a real send and for --dry-run (relay.dry_run())."""
+    if sub == "delegate":
+        return relay.send_delegate(
+            root, args.workspace, args.title, args.text, args.check, t, args.group, args.full
+        )
+    if sub == "start":
+        return relay.send_start(root, args.workspace, args.key, args.text, t)
+    if args.file and (args.update or args.reply_to or args.speak):
+        raise Refused("--update, --reply-to and --speak go with a text, not a file.")
+    if args.summary and not args.speak:
+        raise Refused("--summary goes with --speak.")
+    if args.file:
+        return relay.send_file(root, args.workspace, Path(args.file), args.text or None, t)
+    if not args.text:
+        raise Refused("Nothing to send. Give a text or --file.")
+    speak = relay.speak_hint(root, t, args.text, args.summary) if args.speak else None
+    refs = [
+        {"kind": k, {"ticket": "key", "reference": "url", "proposal": "title"}.get(k, "path"): v}
+        for k, _, v in (r.partition(":") for r in args.ref)
+    ]
+    return relay.send_text(
+        root, args.workspace, args.text, t, args.update, args.reply_to, speak=speak, refs=refs
+    )
+
+
+def _preview_dict(m: dict) -> dict:
+    """The message exactly as it would leave, without what a send makes up (id, time) or a preview adds."""
+    return {k: v for k, v in m.items() if k not in ("id", "created_at", "dry_run")}
+
+
+def _preview_text(m: dict) -> str:
+    lines = ["Nothing was sent. This would leave this machine:", f"to: {m['to']}", f"type: {m['type']}"]
+    if m.get("ticket"):
+        lines.append(f"ticket: {m['ticket']}")
+    for k, v in m["body"].items():
+        if k == "ticket_card":
+            lines.extend(_card_lines(v))
+            continue
+        v = "; ".join(map(str, v)) if isinstance(v, list) else v
+        lines.append(f"{k}: {v if k != 'allow_token' else '(permission token)'}")
+    lines.append("Send it for real: run the same command without --dry-run.")
+    return "\n".join(lines)
+
+
+def _card_lines(c: dict) -> list[str]:
+    """The whole ticket (--full) as it leaves: every field of the card."""
+    out = ["whole ticket:"]
+    for k in ("key", "title", "status", "summary"):
+        if c.get(k):
+            out.append(f"  {k}: {c[k]}")
+    if c.get("question"):
+        out.append(f"  open question: {c['question']['text']}")
+    out.append(f"  checklist: {c.get('done', 0)} of {c.get('total', 0)} done")
+    out.extend(f"    [{'x' if i['done'] else ' '}] {i['text']}" for i in c.get("checklist", []))
+    return out
+
+
 def _sent_line(root: Path, m: dict, ok: str) -> str:
     if m.get("sent") is False and m.get("problem"):
         return f"Not sent: {m['problem']} The message is kept and goes out once this is fixed."
@@ -795,6 +769,8 @@ def _resend_waiting(root: Path) -> None:
         res = relay.resend_outbox(root)
     except (Refused, OSError):
         return
+    for d in res["failed"]:
+        print(f"A saved message was not sent: {d['reason']} [{d['id']}]", file=sys.stderr)
     for d in res["dropped"]:
         print(
             f"A saved message could not be sent and was removed: {d['reason']} [{d['id']}]", file=sys.stderr

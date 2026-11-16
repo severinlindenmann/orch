@@ -305,3 +305,23 @@ def test_stop_waits_until_the_watcher_is_gone(ws):
     assert service.stop(ws) == "stopped"
     assert service.running_pid(ws, clean=False) is None
     assert not (runfiles.run_dir(ws, "factory") / "factory.json").exists()
+
+
+def test_the_watcher_keeps_the_shown_active_time_current_while_the_manager_is_idle(ws, run, monkeypatch):
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    times = ["2026-11-15T10:00:00Z", "2026-11-15T10:04:00Z", "2026-11-15T10:08:00Z"]
+    (ws / "record.json").write_text(json.dumps({tid: [{"run": "r1", "at": t} for t in times]}))
+    watch.once(ws)
+    used = core(ws, "ticket", "show", order)["ext"]["factory"]["budget"]["active_min_used"]
+    assert used == 8
+    # measured at most once a minute: a longer record is not read again at once
+    (ws / "record.json").write_text(
+        json.dumps({tid: [{"run": "r1", "at": t} for t in [*times, "2026-11-15T10:12:00Z"]]})
+    )
+    watch.once(ws)
+    assert core(ws, "ticket", "show", order)["ext"]["factory"]["budget"]["active_min_used"] == 8
+    monkeypatch.setattr(watch.time, "time", lambda: 9e12)
+    watch.once(ws)
+    assert core(ws, "ticket", "show", order)["ext"]["factory"]["budget"]["active_min_used"] == 12

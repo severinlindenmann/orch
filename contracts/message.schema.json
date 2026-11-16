@@ -37,6 +37,7 @@
         { "if": { "required": ["body"], "properties": { "body": { "required": ["review_result"], "properties": { "review_result": { "required": ["result", "reason"], "properties": { "result": { "const": "refused" }, "reason": { "enum": ["needs_person", "invalid", "unavailable"] } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Couldn't use your answer" } } } } } },
         { "if": { "required": ["body"], "properties": { "body": { "required": ["review_result"], "properties": { "review_result": { "required": ["result"], "properties": { "result": { "const": "decided" } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Already decided" } } } } } }
       ] } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["taken_back"] } } }, "then": { "required": ["reply_to", "ticket"], "properties": { "type": { "const": "text" }, "to": { "const": "phones" }, "body": { "additionalProperties": false, "required": ["text"], "properties": { "text": { "type": "string", "not": { "pattern": "\\n" }, "pattern": "^Taken back: [^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]{1,200}$" }, "taken_back": {} } } } } },
     { "if": { "properties": { "type": { "const": "control" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/control" } } } },
     { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/file" } } } },
     { "if": { "properties": { "type": { "const": "question" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/question" } }, "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["proposal"] } } }, "then": { "not": { "required": ["ticket"] } }, "else": { "required": ["ticket"] } } },
@@ -108,8 +109,8 @@
     },
     "text": {
       "type": "object",
-      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }, { "required": ["proposal_result"] }, { "required": ["review_result"] }],
-      "description": "A text needs at least one of text, attachments, voice, location, feedback, proposal_result, review_result. Only the relay sets client_id, attachments, voice, location and feedback (on the text it builds for POST /v1/phone/send); a workspace message with any of them is refused (422 invalid).",
+      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }, { "required": ["proposal_result"] }, { "required": ["review_result"] }, { "required": ["taken_back"] }],
+      "description": "A text needs at least one of text, attachments, voice, location, feedback, proposal_result, review_result, taken_back. Only the relay sets client_id, attachments, voice, location and feedback (on the text it builds for POST /v1/phone/send); a workspace message with any of them is refused (422 invalid).",
       "properties": {
         "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
         "client_id": { "$ref": "#/$defs/client_id" },
@@ -160,6 +161,7 @@
         "feedback": { "$ref": "#/$defs/feedback" },
         "proposal_result": { "$ref": "#/$defs/proposal_result" },
         "review_result": { "$ref": "#/$defs/review_result" },
+        "taken_back": { "$ref": "#/$defs/taken_back" },
         "update": {
           "type": "object", "required": ["kind"], "additionalProperties": false,
           "properties": {
@@ -190,6 +192,13 @@
         { "if": { "properties": { "result": { "const": "refused" } } }, "then": { "required": ["reason"], "not": { "required": ["summary"] } }, "else": { "not": { "required": ["reason"] } } },
         { "if": { "properties": { "result": { "const": "changed" } } }, "then": { "not": { "required": ["summary"] } } }
       ]
+    },
+    "taken_back": {
+      "description": "Not chat. The workspace tells the phones that a question it sent to them was taken back (relay-api.md, Question taken back): one text to `phones`, reply_to = the question's message id, ticket (and key) = the question's, body only {text, taken_back}; body.text is exactly `Taken back: <reason>` (the relay checks it; old phones show it as a plain line). Never pushed, never unread; a phone cannot send it. The phone removes the question's card and shows no bubble.",
+      "type": "object", "additionalProperties": false, "required": ["reason"],
+      "properties": {
+        "reason": { "type": "string", "minLength": 1, "maxLength": 200, "not": { "pattern": "\\n" }, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]*\\S[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]*$", "description": "One plain line: why the question no longer matters. No control characters, not blank." }
+      }
     },
     "card_text": { "type": "string", "minLength": 1, "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]*$" }, { "pattern": "\\S" }], "description": "review.py _text: not blank, no control characters but newline and tab, no DEL, no bidi embedding/override/isolate characters (U+202A-U+202E, U+2066-U+2069; stricter than review.py today, which must align). Lengths are set where it is used (code points, as Python len)." },
     "card_opt_text": { "type": "string", "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]*$" }, { "anyOf": [{ "maxLength": 0 }, { "pattern": "\\S" }] }], "description": "As card_text, but empty is allowed (= not given)." },
@@ -306,7 +315,7 @@
       "required": ["title", "status", "running"],
       "if": { "not": { "required": ["light"], "properties": { "light": { "const": true } } } },
       "then": { "required": ["checklist", "done", "total", "history_tail", "attachments"] },
-      "allOf": [{ "if": { "required": ["light"], "properties": { "light": { "const": true } } }, "then": { "not": { "required": ["results"] } } }],
+      "allOf": [{ "if": { "required": ["light"], "properties": { "light": { "const": true } } }, "then": { "not": { "anyOf": [{ "required": ["results"] }, { "required": ["due"] }] } } }],
       "description": "Optional, only next to body.update: a snapshot of the ticket for the phone's ticket chat (title, tasks, the last history lines, proof and references). Written by the sending workspace; the relay stores it with the text, never interprets it, and refuses a text whose ticket_view is over 16384 bytes as compact UTF-8 JSON (422 invalid). The newest one of a ticket wins. Plain text everywhere, never HTML; secrets are removed by the workspace before sending.",
       "properties": {
         "light": { "type": "boolean", "description": "true = a LIGHT status update for a ticket the phone already lists (quiet, update kind note, never pushed). It carries only title, status, started, running, summary, agent and updated_at; checklist, done, total, history_tail, attachments, refs and results are absent (results: refused by the schema) and the phone overlays the present fields on its last full snapshot (never wipes them). No flag (or false) = a full snapshot as before, which replaces the stored one." },
@@ -316,6 +325,7 @@
         "started": { "type": "boolean", "description": "The ticket was started by an agent at least once; with status open/ready the phone says \"Paused\", else \"Not started\"." },
         "agent": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The agent working on it now or last, as a display name (e.g. Claude)." },
         "summary": { "type": "string", "maxLength": 200 },
+        "due": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?$", "description": "Optional, full snapshots only (never light): the ticket's due, the same value as ticket.schema.json due: YYYY-MM-DD (the whole day) or YYYY-MM-DDTHH:MM (local wall time of the workspace, no seconds, no zone). Absent when the ticket has none. The phone shows \"Due 18:30\" or \"Late since 18:30\"; it never edits it." },
         "running": { "type": "boolean", "description": "An agent runs on the ticket now (the phone says \"Goes in after this step\"), else \"Saved for the next run\"." },
         "checklist": {
           "type": "array", "maxItems": 200,
@@ -494,7 +504,24 @@
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "text": { "type": "string" },
         "checklist": { "type": "array", "items": { "type": "string" } },
+        "ticket_card": { "$ref": "#/$defs/ticket_card" },
         "allow_token": { "type": "string", "pattern": "^ora_[A-Za-z0-9_-]{22}$", "description": "From an earlier permanent allow. Without it the receiver asks its person first." }
+      }
+    },
+    "ticket_card": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ticket", "title", "status", "summary", "question", "checklist", "done", "total"],
+      "description": "Only on a delegate sent with `orch relay delegate --full` (opt-in per send): the whole ticket as the same card a group shares (chat-groups.schema.json shared_ticket) without `rev`. Never the history, other questions, files or refs. At most 4096 bytes as compact UTF-8 JSON (the sender drops checklist items from the end to fit). The receiver keeps it as data in ext.relay.shared_card; an older receiver ignores the field.",
+      "properties": {
+        "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
+        "key": { "$ref": "#/$defs/display_key" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
+        "summary": { "type": "string", "maxLength": 280 },
+        "question": { "oneOf": [ { "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["question_id", "text"], "properties": { "question_id": { "type": "string", "pattern": "^q[0-9]{1,4}$" }, "text": { "type": "string", "minLength": 1, "maxLength": 500 } } } ] },
+        "checklist": { "type": "array", "maxItems": 20, "items": { "type": "object", "additionalProperties": false, "required": ["text", "done"], "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 200 }, "done": { "type": "boolean" } } } },
+        "done": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
       }
     },
     "start": {

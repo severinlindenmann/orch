@@ -33,6 +33,7 @@ test('shows "You: <name>", every person and Add person', () => {
 test('no person chosen yet: says so plainly and still offers Add person', () => {
   const c = load();
   c.state({me:null, people:[]});
-  assert.match(c.texts(c.root), /You:\s+Not set/);
+  assert.match(c.texts(c.root), /Pick your name/);
+  assert.doesNotMatch(c.texts(c.root), /Not set/);
   assert.match(c.texts(c.root), /Add person/);
 });

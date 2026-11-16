@@ -299,6 +299,18 @@ progress::-moz-progress-bar{background:var(--brand)}
 .skeleton-region{position:relative}
 .skeleton-region>.skeleton-cover{position:absolute;inset:0;z-index:1;background:var(--surface-3);border-radius:inherit}
 .skeleton-region>*:not(.skeleton-cover){visibility:hidden}
+/* Per-route loading skeletons: the shapes of the dashboard pages (home, tickets list and board, ticket, section), moved from dashboard style.css (#795 A2a). */
+.skeleton-page{display:grid;gap:16px;align-content:start}
+.sk-stack{display:grid;gap:16px}
+.sk-columns{display:grid;grid-template-columns:minmax(0,1fr) var(--panel-width);gap:24px}
+.sk-title{height:32px;width:40%}
+.sk-toolbar{height:32px;width:100%}
+.sk-card{height:120px;border-radius:var(--radius-card)}
+.sk-story{height:200px}
+.sk-row{height:40px}
+.sk-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:start}
+@media(max-width:899px){.sk-board{grid-template-columns:minmax(0,1fr)}.sk-board>:nth-child(n+2){display:none}}
+@media(max-width:899px){.sk-columns{grid-template-columns:minmax(0,1fr)}}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--text-faint);border-top-color:var(--brand);border-radius:50%}
 /* Overlays. details.menu is the trigger wrapper; .menu-pop (or a non-details .menu) is the raised panel. */
 details.menu,.dropdown{position:relative}
@@ -491,3 +503,12 @@ html{scrollbar-gutter:stable}
 .week-bands .run.band time{display:inline;color:var(--text-muted)}.week-bands .run.band>span{display:inline}
 .week-bands .band-all{grid-column:1/8}
 @media(max-width:950px){.week-bands{grid-template-columns:1fr}.week-bands .run.band{grid-column:auto!important}}
+
+/* Desktop density (from dashboard pages/desktop.css, #795 A1): opt in with <html data-density="desktop">. A mouse screen
+   (721 px and wider, hover) gets 32 px controls; the 44 px touch targets stay for phones and touch screens. */
+@media (min-width:721px) and (hover:hover) {
+  :where([data-density=desktop]) .btn,:where([data-density=desktop]) .btn.sm{min-height:32px}
+  :where([data-density=desktop]) .btn.xs{min-height:28px}
+  :where([data-density=desktop]) .btn.icon,:where([data-density=desktop]) .btn.icon.sm{width:32px;min-width:32px}
+  :where([data-density=desktop]) .input{min-height:36px;font-size:14px}
+}

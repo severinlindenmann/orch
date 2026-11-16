@@ -396,7 +396,7 @@ def test_shipped_recommended_reads_the_local_source_manifests(monkeypatch):
     repo = Path(__file__).resolve().parents[2]
     monkeypatch.setenv("ORCH_REPO", str(repo))
     monkeypatch.setattr(addons, "discover", lambda: {})
-    assert sorted(addons.shipped_recommended()) == ["automation", "dashboard", "focus"]
+    assert sorted(addons.shipped_recommended()) == ["automation", "dashboard", "focus", "lessons"]
 
 
 def test_secrets_stay_ignored_even_when_linking_is_refused(proj, run, tmp_path_factory):
@@ -423,19 +423,6 @@ def test_orch_gitignore_protects_without_git_info_and_secrets_refuse_when_nothin
     with pytest.raises(skills.Refused, match="Nothing was stored"):
         net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
     assert not (proj / ".orch/secrets/x.json").exists()
-
-
-def test_share_command_on_off_status_and_agents_are_refused(proj, run, monkeypatch):
-    assert run("init")[0] == 0
-    code, out, _ = run("share", "--json")
-    assert code == 0 and '"shared": false' in out
-    assert run("share", "on")[0] == 0 and (proj / "AGENTS.md").is_file()
-    assert '"shared": true' in run("share", "status", "--json")[1]
-    monkeypatch.setenv("CLAUDECODE", "1")
-    code, _, err = run("share", "off")
-    assert code == 2 and "Only a person" in err and (proj / "AGENTS.md").is_file()
-    monkeypatch.delenv("CLAUDECODE")
-    assert run("share", "off")[0] == 0 and not (proj / "AGENTS.md").exists()
 
 
 def test_review_fixes_user_folder_kept_share_off_exact_and_eol(proj, run):

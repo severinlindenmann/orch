@@ -8,6 +8,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+from orch.errors import Refused
+
 MAX_BYTES = 1_000_000
 
 _RX = [
@@ -111,3 +113,108 @@ def refusal(found: list[dict]) -> str:
         f"The text has {WORDS.get(first['kind'], 'a secret')} on line {first['line']}{more}. "
         "Remove it and try again."
     )
+
+
+# Protocol fields that the wire needs and that are no content: only these top-level names are skipped, so a
+# nested field called "token" or "key" is still scanned. Ids and hashes are NOT skipped (a secret put into an
+# "id" is still a secret); they never look like one. Dict keys are scanned too.
+_ALLOW_TOKEN = re.compile(r"ora_[A-Za-z0-9_-]{22}")  # the one-time allow token a delegate/start/allow carries
+_ALLOW_FIELDS = {"allow_token", "token"}
+
+
+def _leaves(doc, path: str = "", top: bool = True):
+    """(field, text) for every string in a message body, nested ones too, and every dict key (named
+    "field name", never by the key itself). The protocol fields above are skipped only in the OUTERMOST dict:
+    a dict nested anywhere (also inside a list) is content."""
+    if isinstance(doc, str):
+        if doc:
+            yield path or "text", doc
+    elif isinstance(doc, dict):
+        for k, v in doc.items():
+            if top and k in _ALLOW_FIELDS and isinstance(v, str) and _ALLOW_TOKEN.fullmatch(v):
+                continue  # the allow token sent on purpose; all else is scanned
+            if isinstance(k, str) and k:
+                yield f"{path}.field name" if path else "field name", k
+            yield from _leaves(v, f"{path}.{k}" if path else str(k), False)
+    elif isinstance(doc, (list, tuple)):
+        for v in doc:
+            yield from _leaves(v, path, False)
+
+
+def _stored_root(root: Path | None) -> Path | None:
+    """`root` when this workspace's stored keys can be listed, else None (the token patterns and key=value
+    checks still run)."""
+    if root is None:
+        return None
+    from orch import phone_results
+
+    return root if phone_results.value_hider(root) is not None else None
+
+
+def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
+    """R5.2: nothing leaves this machine (relay, publish) with a secret in it. The one scanner, run on every
+    string of the body. A hit raises Refused with one sentence naming the kind and the field, never the value.
+    Fails closed when the scan itself breaks."""
+    leaves = list(_leaves(body))
+    if not leaves:
+        return
+    starts: list[tuple[int, str]] = []  # (first line in the joined text, field)
+    lines = 1
+    parts = []
+    for field, text in leaves:
+        starts.append((lines, field))
+        parts.append(text)
+        lines += text.count("\n") + 1
+    try:
+        found = find("\n".join(parts), _stored_root(root))
+    except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
+        raise Refused(
+            f"orch could not check the {what} for secrets, so nothing was sent. Try again."
+        ) from None
+    if not found:
+        return
+    first = found[0]
+    field = next(f for ln, f in reversed(starts) if ln <= first["line"])
+    more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
+    kind = WORDS.get(first["kind"], "a secret")
+    raise Refused(
+        f"The {what} has {kind} in its {field.split('.')[-1]}{more}, so nothing was sent. "
+        "Remove it and send again."
+    )
+
+
+def _views(window: bytes):
+    """Every reading of a window of bytes that could show a secret: UTF-8, Latin-1, and UTF-16 (either byte
+    order, either alignment). No guessing which one the file "really" is: all of them are scanned."""
+    yield window.decode("utf-8", "replace")
+    yield window.decode("latin-1")
+    for off in (0, 1):
+        part = window[off : len(window) - ((len(window) - off) % 2)]
+        yield part.decode("utf-16-le", "replace")
+        yield part.decode("utf-16-be", "replace")
+
+
+def refuse_if_secret(data: bytes, what: str = "file", root: Path | None = None) -> None:
+    """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
+    read in every encoding (_views) with the full find() including the stored-key check."""
+    step, overlap = MAX_BYTES, 65536
+    assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
+    found: list[dict] = []
+    try:
+        sroot = _stored_root(root)
+        for start in range(0, max(len(data), 1), step - overlap):
+            for text in _views(data[start : start + step]):
+                found = find(text, sroot)
+                if found:
+                    break
+            if found or start + step >= len(data):
+                break
+    except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
+        raise Refused(
+            f"orch could not check the {what} for secrets, so nothing was sent. Try again."
+        ) from None
+    if found:
+        raise Refused(
+            f"The {what} has {WORDS.get(found[0]['kind'], 'a secret')}, so nothing was sent. "
+            "Remove it and send again."
+        )

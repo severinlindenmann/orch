@@ -211,39 +211,6 @@ def test_orch_bin_from_the_environment_is_ignored():
     assert argv[1:5] == ["-I", "-P", "-m", "orch"] and argv[0] == pageproof.sys.executable
 
 
-def test_handoff_listing_hides_the_command_and_confirm_runs_it_with_a_proof(live, monkeypatch):
-    root, port = live
-    hp.request_handoff(
-        root,
-        "ticket.answer",
-        "t_abc123:q1:" + "a" * 64,
-        "Answer q1",
-        "Blue",
-        argv=["answer", "t_abc123", "q1", "--", "Blue"],
-    )
-    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
-    items = json.loads(c.getresponse().read())
-    assert items and "argv" not in items[0] and items[0]["value"] == "Blue"
-    hid = items[0]["id"]
-    # no session: watch-only, nothing taken
-    assert post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}})[0] == 403
-    ck = session(root, port)
-    seen = {}
-
-    class R:
-        returncode, stdout, stderr = 0, "{}", ""
-
-    from orch_dashboard import handoff
-
-    monkeypatch.setattr(
-        handoff, "run_with_proof", lambda argv, proof, **kw: seen.update(argv=argv, proof=proof) or R()
-    )
-    st, _, _ = post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})
-    assert st == 200 and seen["argv"][0] == "answer" and seen["proof"].startswith("hp1.")
-    assert post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})[0] == 404
-
-
 def test_second_use_of_a_link_ends_the_session_and_says_so(live):
     root, port = live
     tok = hp.write_launch_token(root, "dashboard")
@@ -260,45 +227,6 @@ def test_second_use_of_a_link_ends_the_session_and_says_so(live):
     assert st == 403 and b"Someone else tried" in body  # the first page's cookie no longer mints
 
 
-def test_a_notice_is_read_not_consumed_and_only_the_ack_of_a_session_clears_it(live):
-    root, port = live
-    nid = hp._notice_id("protection_reset", "x", hp.RESET_NOTICE)
-    d = hp.key_dir(root)
-    note = {"id": nid, "kind": "protection_reset", "at": "x", "text": hp.RESET_NOTICE}
-    hp._write_private(d / "notices.json", json.dumps([note]))
-
-    def get(cookie=None):
-        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        h = {
-            "Host": f"127.0.0.1:{port}",
-            **({"Cookie": cookie, "X-Orch-Page": SECRETS[cookie]} if cookie else {}),
-        }
-        c.request("GET", "/api/notices", headers=h)
-        return json.loads(c.getresponse().read())
-
-    assert get() == []  # a curl without a session sees nothing
-    ck = session(root, port)
-    assert get(ck)[0]["text"] == hp.RESET_NOTICE[:600] and get(ck)[0]["id"] == nid
-    assert get(ck)  # read twice: still there (the launch reload must not lose it)
-    ack = {"op": "notice.ack", "args": {"id": nid}}
-    assert post(port, "/api/act", ack)[0] == 403 and get(ck)  # no session: the notice stays
-    assert post(port, "/api/act", ack, {"Cookie": ck})[0] == 200
-    assert get(ck) == []  # acknowledged: gone
-
-
-def test_dismiss_needs_a_session(live):
-    root, port = live
-    hp.request_handoff(
-        root, "ticket.answer", "t_a:q1:" + "a" * 64, "L", "x", argv=["answer", "t_a", "q1", "--", "x"]
-    )
-    hid = hp.handoffs(root)[0]["id"]
-    assert post(port, "/api/act", {"op": "handoff.dismiss", "args": {"id": hid}})[0] == 403
-    assert hp.handoffs(root)  # still there
-    ck = session(root, port)
-    assert post(port, "/api/act", {"op": "handoff.dismiss", "args": {"id": hid}}, {"Cookie": ck})[0] == 200
-    assert hp.handoffs(root) == []
-
-
 def test_a_sandboxed_addon_page_cannot_use_the_session(live):
     """A page of a local add-on runs in an opaque origin: its requests carry Origin "null" and the fence refuses
     them, even with the person's cookie in the jar."""
@@ -312,32 +240,6 @@ def test_a_sandboxed_addon_page_cannot_use_the_session(live):
             {"Cookie": ck, "Origin": "null", "Sec-Fetch-Site": "cross-site"},
         )
         assert st == 403
-
-
-def test_update_click_runs_detached_answers_at_once_and_the_restart_keeps_the_session(live, monkeypatch):
-    root, port = live
-    hp.request_handoff(root, "update", "orch", "Update orch", "", argv=["update"])
-    hid = hp.handoffs(root)[0]["id"]
-    ck = session(root, port)
-    started = {}
-    from orch_dashboard import handoff
-
-    def fake_start(argv, proof, **kw):  # stands in for the detached child: records, does not wait
-        started.update(argv=argv, proof=proof)
-        return 4242
-
-    monkeypatch.setattr(handoff, "start_detached", fake_start)
-    monkeypatch.setattr(
-        handoff, "run_with_proof", lambda *a, **k: pytest.fail("an update must not run with a timeout")
-    )
-    st, _, body = post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})
-    assert st == 202 and b"Update started" in body and started["proof"].startswith("hp1.")
-    # the update restarts the server: a NEW server for the same workspace adopts the page's session once
-    s2 = pageproof.PageSession(root, "dashboard")  # restarted on the same port: the cookie name is per port
-    page = {"Host": f"127.0.0.1:{port}", "Cookie": ck, "X-Orch-Page": SECRETS[ck]}
-    assert s2.can_mint(page, port)  # the open tab's cookie AND secret still work
-    s3 = pageproof.PageSession(root, "dashboard")  # a second restart: the marker is spent
-    assert not s3.can_mint(page, port)
 
 
 def test_resume_cookie_is_one_use_expires_and_only_after_a_click(live, monkeypatch):
@@ -407,38 +309,6 @@ def test_update_result_is_shown_to_a_session_once(live):
     ck = session(root, port)
     assert get(ck) == {"state": "failed", "reason": "The server said no."}
     assert get(ck) == {}  # once
-
-
-def test_the_listing_sends_structured_parts_and_the_exact_value_never_a_sentence_or_the_command(live):
-    root, port = live
-    hp.request_handoff(
-        root,
-        "ticket.answer",
-        "t_a:q1:" + "a" * 64,
-        "",
-        "Blue {value}",
-        argv=["answer", "t_a", "q1", "--", "Blue {value}"],
-        parts={"title": "T {value}", "question": "Which"},
-    )
-    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
-    item = json.loads(c.getresponse().read())[0]
-    assert item["parts"] == {"title": "T {value}", "question": "Which"} and item["value"] == "Blue {value}"
-    assert item["exact"] == ""
-    assert "argv" not in item and "label" not in item
-
-
-def test_the_listing_carries_the_full_exact_target_for_a_long_host(live):
-    root, port = live
-    host = ".".join(["a" * 50] * 4) + ".example"
-    hp.request_handoff(
-        root, "relay.connect", host, "", "", argv=["relay", "connect", f"https://{host}", "--workspace", "w"],
-        parts={"host": host}, exact=host,
-    )  # fmt: skip
-    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
-    item = json.loads(c.getresponse().read())[0]
-    assert item["exact"] == host and item["parts"]["host"] == host and len(host) > 120
 
 
 def test_wont_do_clicks_need_a_proof_on_the_real_server_path():
@@ -538,6 +408,7 @@ ACT_ARGS = {
     "run.start": {"ticket": TID},
     "run.stop": {"ticket": TID},
     "run.send": {"ticket": TID, "text": "x"},
+    "run.take_back": {"ticket": TID, "id": "p_abcdef12"},
     "addon.start": {},
     "addon.act": {"addon": "scheduler", "verb": "pause", "target": TID},
     "config.agent": {"name": "claude"},
@@ -546,6 +417,7 @@ ACT_ARGS = {
     "private.move": {},
     "private.allow": {"name": "mine", "key": "a" * 64},
     "addon.set": {"name": "scheduler", "on": True},
+    "addon.uninstall": {"name": "scheduler"},
     "share.set": {"on": True},
     "workflow.set": {"on": True},
     "copies.set": {"mode": "off"},
@@ -553,6 +425,7 @@ ACT_ARGS = {
     "look.profile": {"service": "relay", "description": "Demo", "tags": ["a"]},
     "copies.clean": {},
     "diag.set": {"on": False},
+    "typing.set": {"on": True},
     "diag.delete_reports": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},
@@ -705,33 +578,6 @@ def test_group_say_target_is_host_and_group_like_the_cli(tmp_path, monkeypatch):
     assert hp.group_target(tmp_path, "Alpha", gid) == want[1]
     assert acts.proof_for("group.say", {"group": gid, "host": "ws_hostb00002"}, tmp_path) != want
     assert acts.proof_for("group.say", {"ticket": TID, "text": "x"}) == ("group.write_as_person", TID)
-
-
-@pytest.mark.parametrize(
-    "op,args,target,head",
-    [
-        ("copies.remove_orphaned", {"ws8": "deadbeef"}, "deadbeef", "remove-orphaned"),
-        ("copies.retry", {"ticket": "t_abc123"}, "t_abc123", "retry"),
-    ],
-)
-def test_copy_click_mints_exact_target(live, monkeypatch, op, args, target, head):
-    root, port = live
-    ck = session(root, port)
-    seen = {}
-
-    class R:
-        returncode, stdout, stderr = 0, "{}", ""
-
-    def fake(argv, proof, **kw):
-        seen.update(argv=argv, proof=proof)
-        return R()
-
-    monkeypatch.setattr(actions, "run_with_proof", fake)
-    st, _, body = post(port, "/api/act", {"op": op, "args": args}, {"Cookie": ck})
-    assert st == 200, body
-    assert seen["argv"][:3] == ["copy", head, target]
-    core_op = "copy." + head.replace("-", "_")
-    assert hp.verify_and_consume(root, seen["proof"], core_op, target).startswith("human:")
 
 
 # ---- #539: the cookie alone is never a session (browsers send it to every loopback port) -------------------------
@@ -956,29 +802,6 @@ def _restart(live_port, root):
     srv = make_server(root, live_port, orch_bin=pageproof.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
-
-
-def test_open_tab_keeps_its_session_after_the_update_restart(live, monkeypatch):
-    """The whole path: click Update, the old server ends, the restarted one (same port) takes the same tab's
-    next action. Nothing but the one-use resume file carries the session over."""
-    from orch_dashboard import handoff
-
-    root, port = live
-    hp.request_handoff(root, "update", "orch", "Update orch", "", argv=["update"])
-    hid = hp.handoffs(root)[0]["id"]
-    ck = session(root, port)
-    monkeypatch.setattr(handoff, "start_detached", lambda argv, proof, **kw: 4242)
-    assert post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})[0] == 202
-    old = SERVERS[port]  # swap servers on the same port: stop the fixture's, start a new one
-    old.shutdown()
-    old.server_close()
-    new = _restart(port, root)
-    try:
-        st, _, body = _answer(port, ck)
-        assert st != 403 and b"Reload" not in body and b"from this computer" not in body
-    finally:
-        new.shutdown()
-        new.server_close()
 
 
 def test_open_tab_keeps_its_session_after_an_addon_change_restart(live, monkeypatch):

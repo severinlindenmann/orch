@@ -10,7 +10,7 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from conftest import ensure_signing
+from conftest import ensure_keys
 from fakes import WS
 from test_relay_client import msg
 
@@ -27,7 +27,7 @@ MSG_V = jsonschema.Draft202012Validator(SCHEMA)
 
 @pytest.fixture
 def conn(proj, run, rel):
-    ensure_signing(proj)
+    ensure_keys(proj)
     rel.snapshot["workspaces"]["phones"] = [
         {"id": PHONE, "name": "iPhone", "online": True, "last_seen": None}
     ]
@@ -214,29 +214,8 @@ def test_old_phone_without_a_verdict_keeps_working_on_plain_questions(proj, run,
 # ---- RULE A: asked records and bodies of old questions stay as they were --------------------------------
 
 
-def test_old_asked_records_keep_their_mac(proj, conn):
-    ensure_signing(proj)
-    rec = {
-        "ticket": "t_x",
-        "question_id": "q1",
-        "to": "phones",
-        "question_digest": "ab" * 32,
-    }
-    assert relay._asked_signed_fields("m_1", rec)[-1] == "ab" * 32  # no digest field appended
-    relay.sign_asked(proj, "m_1", rec)
-    assert relay.asked_mac_ok(proj, "m_1", rec)
-    rev = {"ticket": "t_x", "question_id": "review-1", "to": "phones", "review": True, "round": 1}
-    old_fields = relay._asked_signed_fields("m_2", rev)
-    relay.sign_asked(proj, "m_2", rev)
-    assert relay.asked_mac_ok(proj, "m_2", rev)
-    # a record with a digest is signed over it: changing it breaks the MAC
-    rev2 = {**rev, "digest": "cd" * 32}
-    relay.sign_asked(proj, "m_3", rev2)
-    assert relay.asked_mac_ok(proj, "m_3", rev2)
-    assert relay._asked_signed_fields("m_3", rev2) == [*relay._asked_signed_fields("m_3", rev), "cd" * 32]
-    assert old_fields == relay._asked_signed_fields("m_2", rev)
-    rev2["digest"] = "ee" * 32
-    assert not relay.asked_mac_ok(proj, "m_3", rev2)
+def test_asked_records_carry_no_mac(proj, conn):
+    assert not hasattr(relay, "asked_mac_ok") and not hasattr(relay, "QUESTION_MAC_KIND")  # MAC gone
 
 
 def test_question_without_card_fields_is_byte_identical(proj, new_ticket, conn):
@@ -256,7 +235,7 @@ def _chunk(kind: bytes, body: bytes) -> bytes:
 
 
 def png(n=1):
-    """A well-formed PNG (the secret gate reads anything else as unknown); n varies the bytes."""
+    """A well-formed PNG (the secret check reads anything else as unknown); n varies the bytes."""
     ihdr = _chunk(b"IHDR", (n).to_bytes(4, "big") * 2 + bytes([8, 2, 0, 0, 0]))
     return b"\x89PNG\r\n\x1a\n" + ihdr + _chunk(b"IEND", b"")
 
@@ -296,11 +275,11 @@ def test_sync_cards_sends_once_with_files_and_digest(proj, new_ticket, conn):
     MSG_V.validate({**m, "schema": "orch.msg/1"})
     assert phone_view.sync_cards(proj) == [] and len(card_questions(conn)) == 1  # idempotent
     rec = relay.net.read_json(relay._asked_path(proj), {})[m["id"]]
-    assert rec["question_digest"] == b["digest"] and relay.asked_mac_ok(proj, m["id"], rec)
+    assert rec["question_digest"] == b["digest"] and "question_mac" not in rec
 
 
 def test_sync_cards_needs_a_phone(proj, run, new_ticket, rel):
-    ensure_signing(proj)
+    ensure_keys(proj)
     assert run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)[0] == 0
     tid = new_ticket()
     add_card(proj, tid, img_card("invoice.png"), {"invoice.png": png()})
@@ -314,7 +293,7 @@ def test_sync_cards_skips_a_question_already_asked_of_the_phones(proj, new_ticke
     assert phone_view.sync_cards(proj) == [] and not card_questions(conn)
 
 
-def test_gate_refusal_holds_the_file_back(proj, new_ticket, conn):
+def test_check_refusal_holds_the_file_back(proj, new_ticket, conn):
     tid = new_ticket()
     secret = b"password = hunter2hunter2hunter2\nAKIAIOSFODNN7EXAMPLE\n-----BEGIN PRIVATE KEY-----\nabc\n"
     q = add_card(
@@ -384,7 +363,7 @@ def test_review_question_carries_the_digest(proj, new_ticket, conn):
     assert m["body"]["digest"] == review.check_digest(tickets.load(proj, tid))
     MSG_V.validate({**m, "schema": "orch.msg/1"})
     rec = relay.net.read_json(relay._asked_path(proj), {})[m["id"]]
-    assert rec["digest"] == m["body"]["digest"] and relay.asked_mac_ok(proj, m["id"], rec)
+    assert rec["digest"] == m["body"]["digest"] and "question_mac" not in rec
 
 
 # ---- review.py: the wire card ---------------------------------------------------------------------------

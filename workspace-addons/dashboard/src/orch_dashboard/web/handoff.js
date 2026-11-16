@@ -17,6 +17,16 @@
     var have = info.installed && info.installed.label;
     return have ? "Update from " + have + " to " + info.newest.label + "?" : "Update orch to " + info.newest.label + "?";
   }
+  // While it runs: "Updating orch 23 → orch 24" (the same facts, said as it happens); null when orch does not know them.
+  function updatingWords(info) {
+    if (!info || info.update_available !== true || !info.newest || !info.newest.label) return null;
+    var have = info.installed && info.installed.label;
+    return have ? "Updating " + have + " \u2192 " + info.newest.label : "Updating to " + info.newest.label;
+  }
+  function changesLine(info) {  // the first few changes on one line, for the banner
+    var c = info && info.update_available === true && Array.isArray(info.changes) ? info.changes.map(String) : [];
+    return c.slice(0, 3).join("; ") + (c.length > 3 ? "; \u2026" : "");
+  }
   function updateChanges(info) {
     return info && info.update_available === true && Array.isArray(info.changes) ? info.changes.map(String).join("\n") : "";
   }
@@ -123,9 +133,15 @@
     ok.type = no.type = "button";
     ok.onclick = function () {
       ok.disabled = true;
+      var facts = i.op === "update" ? updInfo : null;  // the versions as they were when the person said yes
       post("handoff.confirm", i.id).then(function (r) {
         if (r.ok) {
-          if (r.status === 202) { updateStarted(); r.text().then(function (t) { startedBanner = banner(t); }); }
+          if (r.status === 202) {
+            updateStarted();
+            var going = updatingWords(facts);
+            if (going && facts.installed && facts.installed.label) { try { sessionStorage.setItem("orch-update-from", JSON.stringify(facts.installed.label)); } catch (e) {} }
+            r.text().then(function (t) { startedBanner = going ? banner(going + ". " + t.replace(/^Update started\.\s*/, ""), false, changesLine(facts)) : banner(t); });
+          }
           poll();
         } else { return r.text().then(function (t) { ok.disabled = false; banner(t); }); }
       });
@@ -209,11 +225,16 @@
   }
   var shown = "";
   // the update banners ("started", then the outcome): ONE at a time, a new one replaces the old; "Got it" clears it
-  function banner(text) {
+  function banner(text, changes, list) {
     var old = document.querySelectorAll ? document.querySelectorAll(".orch-update-banner") : [];
     for (var k = 0; k < old.length; k++) old[k].remove();
     var b = el("div", text, "orch-notice"); b.setAttribute("role", "status");
     b.className = "banner info orch-notice orch-update-banner"; b.style.cssText = "margin:8px 16px 0";
+    if (changes) {  // after an update: where the list of changes is (Settings > About & updates)
+      var a = el("a", "What changed"); a.href = "#settings/about"; a.style.cssText = "margin-left:12px"; a.setAttribute("data-key", "update-changes-link");
+      b.appendChild(a);
+    }
+    if (list) b.appendChild(el("span", " What changed: " + list, "meta"));  // while it runs: the first few changes, one line
     var x = el("button", "Got it"); x.type = "button"; x.style.cssText = "margin-left:12px"; x.onclick = function () { b.remove(); };
     b.appendChild(x); place(b);
     return b;
@@ -236,6 +257,16 @@
       : "The update did not finish. orch is still the old version. Start the update again when you are ready.";
     if (t !== shown) { shown = t; startedGone(); banner(t); }
   }
+  // "Updated orch 24 → 25." when the version before is known (the Settings button keeps it for the page reload)
+  function finishedWords(release) {
+    var to = Number(release);
+    if (!(to > 0)) return "Update finished.";
+    var from = null;
+    try { from = JSON.parse(sessionStorage.getItem("orch-update-from")); } catch (e) {}
+    try { sessionStorage.removeItem("orch-update-from"); } catch (e) {}
+    from = Number(String(from == null ? "" : from).replace(/^orch /, ""));
+    return from > 0 && from !== to ? "Updated orch " + from + " \u2192 " + to + "." : "Updated to orch " + to + ".";
+  }
   function tell(state, reason) {
     if (!state) return;
     try { window.dispatchEvent(new CustomEvent("orch-update-state", {detail: {state: state, reason: reason || ""}})); } catch (e) {}
@@ -250,10 +281,13 @@
       tell(s.state, s.reason);
       updateDone();
       var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
-      var t = s.state === "finished" ? (Number(s.release) > 0 ? "Updated to orch " + Number(s.release) + "." : "Update finished.") : "Update failed: " + why + ".";
-      if (t !== shown) { shown = t; startedGone(); banner(t); }
+      var t = s.state === "finished" ? finishedWords(s.release) : "Update failed: " + why + ".";
+      if (t !== shown) { shown = t; startedGone(); banner(t, s.state === "finished"); }
       poll();  // an update request that waited no longer applies: it is gone from the list now
     }).catch(function () { tell("unreachable"); updateOverdue(true); });
   }
-  notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
+  // A hidden tab does not poll (nobody sees the answer); it asks once when it is shown again.
+  function whenShown(fn) { return function () { if (document.visibilityState !== "hidden") fn(); }; }
+  notices(); poll(); updateStatus(); setInterval(whenShown(poll), 4000); setInterval(whenShown(updateStatus), 4000);
+  document.addEventListener("visibilitychange", whenShown(function () { poll(); updateStatus(); }));
 })();

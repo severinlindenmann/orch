@@ -57,7 +57,6 @@ def test_a_verdict_from_the_peer_a_question_was_asked_of_is_ignored(proj, run, n
         "to": "ws_reports001",
         "question_digest": tickets.question_digest(q),
     }
-    relay.sign_asked(proj, mid, rec)
     _write_asked(proj, {**_asked(proj), mid: rec})
     body = _case("choice-ok-picked")["body"]
     body["answered_by"] = "human:iPhone"
@@ -78,7 +77,6 @@ def test_a_plain_answer_from_the_peer_to_a_card_question_is_not_a_person(proj, r
         "to": "ws_reports001",
         "question_digest": tickets.question_digest(q),
     }
-    relay.sign_asked(proj, mid, rec)
     _write_asked(proj, {**_asked(proj), mid: rec})
     body = {"question_id": "q4", "answer": "A", "answered_by": "human:owner"}
     conn.inbox.append(msg("m_peera0000000002", "answer", body, frm="ws_reports001", ticket=tid, reply_to=mid))
@@ -98,26 +96,33 @@ def test_an_agent_session_never_applies_a_verdict(proj, run, new_ticket, conn, m
     assert question(proj, tid, "q3")["answer"] is None and results(conn) == []
 
 
-# ---- MAC coverage of the asked record ---------------------------------------------------------------------
+# ---- plain checks on the asked record ---------------------------------------------------------------------
 
 
-def test_adding_a_digest_to_an_old_review_record_breaks_its_mac(proj, conn):
-    rev = {"ticket": "t_x", "question_id": "review-1", "to": "phones", "review": True, "round": 1}
-    relay.sign_asked(proj, "m_r1", rev)
-    assert relay.asked_mac_ok(proj, "m_r1", rev)
-    assert not relay.asked_mac_ok(proj, "m_r1", {**rev, "digest": "ab" * 32})
-    signed = {**rev, "digest": "cd" * 32}
-    relay.sign_asked(proj, "m_r2", signed)
-    stripped = {k: v for k, v in signed.items() if k != "digest"}
-    assert not relay.asked_mac_ok(proj, "m_r2", stripped)
-    assert not relay.asked_mac_ok(proj, "m_r2", {**signed, "digest": None})
+def test_a_stale_digest_on_a_review_record_is_refused_not_applied(proj, run, new_ticket, conn):
+    """The record's digest is the plain "card changed since sent" compare: a different digest is refused."""
+    tid = new_ticket()
+    install(proj, tid)
+    qmsg = send_card(proj, conn, tid, "q4")
+    asked = _asked(proj)
+    asked[qmsg["id"]]["question_digest"] = "ab" * 32
+    _write_asked(proj, asked)
+    put_answer(conn, qmsg, _case("choice-ok-picked"), 1)
+    run("relay", "inbox")
+    assert question(proj, tid, "q4")["answer"] is None
 
 
-def test_a_digest_on_an_ordinary_record_is_covered_too(proj, conn):
-    """An agent cannot add a `digest` to an ordinary record to steer the review/question digest choice."""
-    rec = {"ticket": "t_x", "question_id": "q1", "to": "phones", "question_digest": "ab" * 32}
-    relay.sign_asked(proj, "m_o1", rec)
-    assert not relay.asked_mac_ok(proj, "m_o1", {**rec, "digest": "ab" * 32})
+def test_an_old_record_with_a_question_mac_still_takes_the_right_answer(proj, run, new_ticket, conn):
+    """Records written before the MAC was dropped keep a question_mac field: it is ignored."""
+    tid = new_ticket()
+    install(proj, tid)
+    qmsg = send_card(proj, conn, tid, "q4")
+    asked = _asked(proj)
+    asked[qmsg["id"]]["question_mac"] = "A" * 43
+    _write_asked(proj, asked)
+    put_answer(conn, qmsg, _case("choice-ok-picked"), 1)
+    run("relay", "inbox")
+    assert question(proj, tid, "q4")["decision"]["picked"] == "C"
 
 
 # ---- replay -----------------------------------------------------------------------------------------------
@@ -148,7 +153,6 @@ def test_forged_vresults_cannot_make_an_applied_or_block_application(proj, run, 
     asked[qmsg["id"]]["vresults"] = {"m_other": {"to": PHONE, "id": "m_x", "created_at": "x", "body": {}}}
     asked[qmsg["id"]]["vpending"] = "m_cs00000000000001"
     _write_asked(proj, asked)
-    assert relay.asked_mac_ok(proj, qmsg["id"], _asked(proj)[qmsg["id"]])
     put_answer(conn, qmsg, _case("choice-ok-picked"), 1)
     run("relay", "inbox")
     assert question(proj, tid, "q4")["decision"]["picked"] == "C"

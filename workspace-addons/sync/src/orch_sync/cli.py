@@ -206,21 +206,12 @@ def _remote_gate(root, address, args, public):
     """Every path that sets a remote passes here (gate parity): the address's visibility is probed every time (a
     cached answer is agent-writable, M1), a public address is only ever used on the person's use-public choice,
     and the choice itself is a person's proof bound to that exact address (M4). Returns the probed visibility."""
-    from orch import config, humanproof
 
     from .visibility import remote_visibility
 
     visibility = remote_visibility(address)
     if visibility == "public" and not public:
         raise PublicAddress(address)
-    by = humanproof.person_by(
-        root,
-        args,
-        "addon.act",
-        remote_target(address, public),
-        no_handoff="Choosing where sync keeps a copy needs a person's proof over stdin.",
-    )
-    config.require_person(by, "choose where sync keeps a copy")
     return visibility
 
 
@@ -322,23 +313,17 @@ def status_result(root, settings):
 
 def deleted(root, ticket, keep, args):
     """A missing ticket notice: OK (keep it restored) or leave it deleted on every computer (a person's proof)."""
-    from orch import config, humanproof, syncgate
+    from orch import syncgate
 
     from .step import encoded, entries, step_lock, write
 
     with step_lock(root), syncgate.hold(root):
         state = read(root, "state")
-        if ticket not in state.get("deleted", {}):
+        # OK on the grouped card: every listed notice at once (only OK, never the signed leave-deleted)
+        group = ticket.split(",") if keep and "," in ticket else [ticket]
+        if any(t not in state.get("deleted", {}) for t in group):
             raise repo.Refused("No missing ticket notice")
         if not keep:
-            by = humanproof.person_by(
-                root,
-                args,
-                "addon.act",
-                "sync:deleted:" + ticket,
-                no_handoff="Leaving a ticket deleted needs a person's proof.",
-            )
-            config.require_person(by, "leave this ticket deleted")
             from . import records
 
             # bound to the synced copy the person leaves deleted: a changed ticket needs them again
@@ -350,7 +335,8 @@ def deleted(root, ticket, keep, args):
                 root, "delete", f"{ticket}:{old[1]}", {"ticket": ticket, "blob": old[1]}
             )
             write(root, "run/sync/allow-delete.json", encoded(allowed))
-        state["deleted"].pop(ticket)
+        for t in group:
+            state["deleted"].pop(t)
         from .pause import verified_pause
 
         state["paused"] = verified_pause(root, state)  # a planted pause is not written back

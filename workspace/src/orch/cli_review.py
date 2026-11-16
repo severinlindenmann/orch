@@ -9,7 +9,7 @@ import re
 import time
 from pathlib import Path
 
-from orch import history, review, review_server, runs, runs_live, safefile, tickets
+from orch import history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link")
@@ -77,6 +77,7 @@ def _guard(fn, *a, **kw):
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
@@ -255,7 +256,6 @@ def _answer(args, root: Path) -> None:
         args.by
     )  # the person chosen in orch (--by human:<name>), else the computer's user
     digest = given or current
-    runs.require_signing(root)  # an answer that could not be passed on is refused, not half done
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
     entry = _guard(
         fn, root, tid, key, args.verdict, args.picked, args.note, by=who, via=args.via, digest=digest
@@ -263,7 +263,7 @@ def _answer(args, root: Path) -> None:
     import contextlib
 
     with contextlib.suppress(Refused):  # saved; a busy run only delays it reaching the agent
-        runs_live.pass_answer(root, tid, entry, who, proven=True)
+        runs_live.pass_answer(root, tid, entry, who)
     _out(args, entry, f"Answered {entry['id']}: {entry.get('answer')}")
 
 

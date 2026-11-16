@@ -551,6 +551,48 @@ def test_s3_view_carries_record_notes(server):
     assert json.loads(req(server, "GET", f"/api/t/{TID}")[1])["record_notes"] == []
 
 
+# --- take back a waiting message (#692.2) ------------------------------------------------------------
+def test_take_back_builds_exact_argv_and_bad_ids_run_nothing(server, fake_orch):
+    st, body, _ = req(
+        server, "POST", "/api/act", {"op": "run.take_back", "args": {"ticket": TID, "id": "p_abc12345"}}
+    )
+    assert st == 200, body
+    got = [c for c in calls(fake_orch) if c[:2] == ["run", "take-back"]]
+    assert got and got[0][:4] == ["run", "take-back", TID, "p_abc12345"] and "--json" in got[0]
+    n = len(calls(fake_orch))
+    for bad in ({"ticket": TID, "id": "../x"}, {"ticket": TID}, {"ticket": TID, "id": "p_abc12345", "x": 1}):
+        assert req(server, "POST", "/api/act", {"op": "run.take_back", "args": bad})[0] == 400
+    assert len(calls(fake_orch)) == n
+
+
+def test_view_lists_the_waiting_messages(server, fake_orch, ws):
+    (fake_orch.parent / "status.json").write_text(json.dumps({
+        "running": False, "pending": 2,
+        "waiting_input": [{"id": "p_abc12345", "text": "Use CHF", "at": "2026-11-15T10:00:00Z"}, {"id": 5, "text": "x"}],
+    }))  # fmt: skip
+    v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
+    assert v["run"]["waiting_input"] == [
+        {"id": "p_abc12345", "text": "Use CHF", "at": "2026-11-15T10:00:00Z"}
+    ]
+
+
+def test_list_carries_the_newest_result_only_for_tickets_in_review(server, ws):
+    from .conftest import ticket
+
+    d = ws / ".orch" / "tickets"
+    ev = {"type": "file", "ref": f".orch/tickets/{TID}/evidence/report.md", "at": "2026-11-15T10:00:00Z"}
+    done = {"id": "c1", "text": "Report", "done": True, "evidence": [ev]}
+    (d / f"{TID}.json").write_text(json.dumps(ticket(status="review", checklist=[done])))
+    other = "t_other0001"
+    (d / f"{other}.json").write_text(json.dumps(ticket(id=other, status="active", checklist=[done])))
+    rows = {r["id"]: r for r in json.loads(req(server, "GET", "/api/tickets")[1])["tickets"]}
+    assert rows[TID]["result"] == {
+        "name": "Report", "kind": "doc", "at": "2026-11-15T10:00:00Z",
+        "preview": f"/api/file?t={TID}&n=report.md&m=view",
+    }  # fmt: skip
+    assert "result" not in rows[other]
+
+
 # --- files added from the composer (ticket.attach) ---------------------------------------------------
 def _files(*named):
     import base64

@@ -36,7 +36,8 @@ def test_agent_finish(proj, run, new_ticket, path):
         )
     )
     code, out, err = run("ticket", *args, "--by", "agent:generic")
-    assert (code, out, err) == (0, tickets.REVIEW_MESSAGE + "\n", "")
+    assert (code, err) == (0, "")
+    assert out.splitlines()[0] == tickets.REVIEW_MESSAGE and out.splitlines()[-1].startswith("Next: ")
     t = tickets.load(proj, tid)
     assert t["status"] == "review"
     assert any(
@@ -134,22 +135,26 @@ def test_finish_with_proof(proj, run, new_ticket, patch, allowed):
 def test_actor_from_environment_and_explicit_override(proj, run, new_ticket, monkeypatch):
     tid = new_ticket()
     monkeypatch.setattr(tickets, "agent_tool", lambda: "generic")
-    assert run("ticket", "status", tid, "done")[1] == tickets.REVIEW_MESSAGE + "\n"
+    assert run("ticket", "status", tid, "done")[1].splitlines()[0] == tickets.REVIEW_MESSAGE
     assert tickets.load(proj, tid)["status"] == "review"
     # an agent in the environment counts as an agent whatever --by says
-    assert run("ticket", "status", tid, "done", "--by", "human:tester")[1] == tickets.REVIEW_MESSAGE + "\n"
+    assert (
+        run("ticket", "status", tid, "done", "--by", "human:tester")[1].splitlines()[0]
+        == tickets.REVIEW_MESSAGE
+    )
     assert tickets.load(proj, tid)["status"] == "review"
     monkeypatch.setattr(tickets, "agent_tool", lambda: None)
     assert run("ticket", "status", tid, "done", "--by", "human:tester")[0] == 0
     assert tickets.load(proj, tid)["status"] == "done"
 
 
-def test_agent_cannot_turn_the_switch_on(proj, run, monkeypatch):
+def test_the_switch_is_a_plain_setting(proj, run, monkeypatch):
     monkeypatch.setattr(tickets, "agent_tool", lambda: "generic")
     code, out, err = run("config", "set", "workflow.agents_may_finish", "on", "--by", "human:tester")
-    assert code != 0 and "Only a person" in err + out
-    assert not config.agents_may_finish(proj)
+    assert code == 0, out + err
+    assert config.agents_may_finish(proj) is True
     assert run("config", "set", "workflow.agents_may_finish", "off")[0] == 0
+    assert not config.agents_may_finish(proj)
 
 
 def test_list_order_and_closed_filter(proj, run, new_ticket):

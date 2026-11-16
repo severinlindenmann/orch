@@ -187,7 +187,7 @@ final class SwipeThresholdTests: XCTestCase {
     func testFlickNeedsSpeedAndSmallerDistance() {
         XCTAssertEqual(ReviewStackRules.goes(dx: 81, dy: 0, speed: 601, size: size), .right)    // 20 % of 400 = 80
         XCTAssertNil(ReviewStackRules.goes(dx: 81, dy: 0, speed: 600, size: size))
-        XCTAssertNil(ReviewStackRules.goes(dx: 79, dy: 0, speed: 2000, size: size))             // a flick alone is no approval
+        XCTAssertNil(ReviewStackRules.goes(dx: 79, dy: 0, speed: 2000, size: size))             // a flick alone does nothing
         XCTAssertEqual(ReviewStackRules.goes(dx: 0, dy: 91, speed: 700, size: size), .down)     // 15 % of 600 = 90
         XCTAssertNil(ReviewStackRules.goes(dx: 0, dy: 89, speed: 700, size: size))
     }

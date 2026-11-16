@@ -1690,22 +1690,6 @@ def test_copy_clean_names_why_it_keeps_a_copy_and_does_not_say_none_left(repo, r
     assert "No separate copies left" not in out
 
 
-def test_an_unrelated_op_on_an_unsigned_done_does_not_try_to_release_the_copy(repo, monkeypatch):
-    """Opus delta: a raw Done without the person's signature reads as Review; an unrelated op restores the raw
-    status but did not close the ticket, so apply_op must not call on_closed."""
-    t = repo.tids[0]
-    make(repo)
-    path = tickets.ticket_path(repo, t)
-    doc = json.loads(path.read_text(encoding="utf-8"))
-    doc["status"] = "done"  # raw done, no verdict
-    path.write_text(json.dumps(doc), encoding="utf-8")
-    assert tickets.load(repo, t)["status"] == "review"
-    calls = []
-    monkeypatch.setattr(worktrees, "on_closed", lambda *a, **k: calls.append(a))
-    tickets.apply_op(repo, t, lambda tk: tk.setdefault("notes_probe", 1), by=tickets.SYSTEM)
-    assert calls == []
-
-
 @pytest.mark.parametrize("mode", ["always", "together"])
 def test_a_reclaim_right_after_release_goes_back_into_the_tickets_copy(repo, monkeypatch, mode):
     """Lane C D6b: release, then claim the same (not done) ticket again at once: it works in its copy again,

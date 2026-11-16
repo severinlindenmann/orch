@@ -34,7 +34,7 @@ def test_take_back_take_back_removes_it_everywhere(tk, run):
     assert any(r["ticket"] == tid for r in json.loads(run("needs", "--json")[1]))
     code, out, err = run("ask", tid, "--take-back", q["id"], "not needed", "--by", "agent:x")
     assert code == 0, out + err
-    assert out.strip() == f"Taken back {q['id']}. Next: keep working on the ticket."
+    assert out.strip() == f"Taken back {q['id']}.\nNext: keep working on the ticket."
     t = tickets.load(root, tid)
     got = t["questions"][0]
     assert got["taken_back"]["reason"] == "not needed" and got["taken_back"]["by"] == "agent:x"
@@ -148,9 +148,9 @@ def test_old_ticket_files_without_the_field_keep_working(tk, run):
 
 
 def _asked_question(proj):
-    from conftest import ensure_signing
+    from conftest import ensure_keys
 
-    ensure_signing(proj)
+    ensure_keys(proj)
     tid = tickets.create(proj, "Deploy", "human:tester")["id"]
     tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
     rec = {
@@ -159,7 +159,6 @@ def _asked_question(proj):
         "to": "phones",
         "question_digest": tickets.question_digest(tickets.load(proj, tid)["questions"][0]),
     }
-    relay.sign_asked(proj, "m_q00000000000001", rec)
     relay._asked_path(proj).parent.mkdir(parents=True, exist_ok=True)
     relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
     return tid

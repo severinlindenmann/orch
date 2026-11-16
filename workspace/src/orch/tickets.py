@@ -17,10 +17,10 @@ import sys
 import tempfile
 import time
 import unicodedata
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import config, diag, history, humanproof, net, procs, saferead, syncgate, term
+from orch import config, diag, history, net, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -120,6 +120,15 @@ def current_actor(explicit: str | None = None) -> str:
     if history.is_reserved_label(who):
         raise Refused(f"'{who}' is reserved for orch's sync. Use agent:<tool> or human:<name>.")
     return who
+
+
+def acting_by(args) -> str:
+    """Who runs this command: the agent tool seen in the environment, else --by, else human:<os user>.
+    Plain: no op is human-only, an agent's command just runs and is recorded as agent:<tool>."""
+    tool = agent_tool()
+    if tool:
+        return "agent:" + str(tool)
+    return current_actor(getattr(args, "by", None))
 
 
 def tickets_dir(root: Path) -> Path:
@@ -232,8 +241,7 @@ def next_key(root: Path) -> str:
 
 
 def _load_raw(root: Path, tid: str) -> dict:
-    """The ticket file as it is (no signed-verdict view): for the writers, which must see and keep what a
-    peer or an agent wrote."""
+    """The ticket file as it is: for the writers, which must see and keep what a peer or an agent wrote."""
     p = ticket_path(root, tid)
     if not p.exists():
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
@@ -241,41 +249,9 @@ def _load_raw(root: Path, tid: str) -> dict:
 
 
 def load(root: Path, tid: str) -> dict:
-    """The ticket as every reader sees it: a raw `done` without this core's current verdict is Review."""
-    return _effective(root, _load_raw(root, tid))
-
-
-def _effective(root: Path, t, checker=None, ledger=None):
-    """THE one read path of the signed verdict (human-proof.md "Done needs a signed verdict", invariant V1).
-    A raw `done` that does not carry a verdict entry this core vouches for (its own MAC over the ticket's
-    checklist AND the current ledger entry) is returned as `review` with a computed `verdict_needed: true`
-    (never stored). A raw ticket that is NOT done tombstones its ledger entry now, so an old entry cannot come
-    back by editing the file to active and back to done. The file is never rewritten by a reader."""
-    if not isinstance(t, dict):
-        return t
-    if t.get("status") == "done":
-        chk = checker or humanproof.VerdictChecker(root)
-        if chk.ok(t):
-            return t
-        return {**t, "status": "review", "verdict_needed": True}
-    if isinstance(t.get("id"), str):
-        _replay_tombstone(root, t["id"], ledger)
-    return t
-
-
-def _replay_tombstone(root: Path, tid: str, ledger=None) -> None:
-    """The ledger entry of a ticket whose file is not done: tombstone it (under the ticket lock, taken without
-    waiting: a writer that holds it signs or tombstones itself, and a sync step in progress is left alone)."""
-    try:
-        led = humanproof.verdict_ledger(root) if ledger is None else ledger
-        if not led or led.get(tid) is None or syncgate.live_holder(root) is not None:
-            return
-        with _locked(root, tid, wait=0.0):
-            raw = json.loads(ticket_path(root, tid).read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and raw.get("status") != "done":
-                humanproof.verdict_forget(root, tid)
-    except (Refused, OSError, ValueError):
-        pass  # best effort: the reader still shows the truth (a non-done ticket), the next read tries again
+    """The ticket as it is on disk. Old fields this version no longer uses (verdicts, wont_mac, ...) stay in
+    the file and are kept on every save, never dropped."""
+    return _load_raw(root, tid)
 
 
 _SCHEMA_RE = re.compile(r"orch\.ticket/(\d+)$")
@@ -445,26 +421,9 @@ def _get(ticket: dict, path: str):
     return cur
 
 
-def _disk_status(p: Path):
-    try:
-        t = json.loads(p.read_text(encoding="utf-8"))
-        return t.get("status") if isinstance(t, dict) else None
-    except (OSError, ValueError):
-        return None
-
-
 def _write(root: Path, ticket: dict) -> None:
-    """Lock-free atomic write (tmp + os.replace). Callers hold the lock. THE one write guard of the signed
-    verdict: a new raw `done` needs a verdict entry this core vouches for (the file already holding `done` is
-    left as it is: an unrelated op never rewrites a peer's Done); any other status tombstones this ticket's
-    ledger entry first (leaving Done needs no proof)."""
+    """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
     p = ticket_path(root, ticket["id"])
-    ticket = {k: v for k, v in ticket.items() if k != "verdict_needed"}  # computed for readers, never stored
-    ok = ticket.get("status") == "done" and humanproof.verdict_ok(root, ticket)
-    if ticket.get("status") == "done" and not ok and _disk_status(p) != "done":
-        raise Refused(humanproof.VERDICT_NEEDED)
-    if not ok:  # left Done, or a Done whose state no longer matches its verdict (a step reopened and redone)
-        humanproof.verdict_forget(root, ticket["id"])  # the old entry must never come back
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
@@ -527,8 +486,7 @@ def _refuse_closed_agent(root: Path, tid: str, by: str) -> None:
     if not _agent_actor(by):
         return
     ticket = _load_raw(root, tid)
-    status = _effective(root, ticket)["status"] if ticket.get("status") == "done" else ticket.get("status")
-    if status in CLOSED:
+    if ticket.get("status") in CLOSED:
         raise ClosedRefused(CLOSED_AGENT)
 
 
@@ -585,11 +543,8 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
     ticket_path(root, tid)  # id shape check, same friendly refusal
     with _locked(root, tid):
         ticket = _load_raw(root, tid)
-        raw_status = ticket.get("status")
-        info.update(status=raw_status, revision=revision(ticket))
-        eff_status = _effective(root, ticket)["status"] if raw_status == "done" else raw_status
-        if raw_status == "done":
-            ticket["status"] = eff_status  # ops see what readers see: an unsigned Done is Review
+        eff_status = ticket.get("status")
+        info.update(status=eff_status, revision=revision(ticket))
         if eff_status in CLOSED and _agent_actor(by):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
@@ -609,16 +564,6 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
                 raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
-        restored = False
-        if ticket.get("status") == eff_status and raw_status == "done":
-            ticket["status"] = "done"  # an unrelated op never rewrites a peer's Done into Review
-            restored = True  # (an unsigned Done is still Review: this op did not close the ticket)
-        elif (
-            ticket.get("status") == "done"
-            and eff_status != "done"
-            and not humanproof.verdict_ok(root, ticket)
-        ):
-            raise Refused(humanproof.VERDICT_NEEDED)  # no op makes a ticket Done without signing it
         if was_review and ticket.get("status") != "review":
             # leaving Review closes the phones' review round in the same lock (fb8): an old "accept"
             # can never apply to work that came back to Review later
@@ -630,13 +575,10 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         _write(root, ticket)
         info.update(status_to=ticket.get("status"), revision_to=revision(ticket), written=True)
         after = ticket.get("status")
-        closed_now = after in CLOSED and eff_status not in CLOSED and not restored
+        closed_now = after in CLOSED and eff_status not in CLOSED
         # entering Review, leaving Review for more work, or leaving Done: a review round starts or ends
         new_round = (
-            not closed_now
-            and not restored
-            and after != eff_status
-            and (after == "review" or eff_status in ("review", "done"))
+            not closed_now and after != eff_status and (after == "review" or eff_status in ("review", "done"))
         )
     if closed_now:
         # THE one place a ticket becomes done/dropped, whatever op did it (accept, status, patch from the
@@ -685,7 +627,6 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
     `general: true`) is left out unless include_general: it is not a ticket anyone lists, counts or closes."""
     d = tickets_dir(root)
     out = []
-    checker = humanproof.VerdictChecker(root, snapshot=True)  # key and ledger read once for the listing
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
@@ -699,7 +640,7 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten
             if include_general or t.get("general") is not True:
-                out.append(_effective(root, t, checker, checker.ledger()))
+                out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
 
@@ -1146,30 +1087,11 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 AGENT_FINISH_TEXT = "finished by the agent (agents may finish is on)"
 
 
-def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
-    """The ticket is becoming Done (it was not Done for the reader): sign it, inside the ticket lock, with the
-    checklist as it is now. Signers: an agent while the recorded grant `agents_may_finish` is effective (kind
-    "agent"), or a person with a verified proof (kind "person"). Anyone else: refused, never an unsigned
-    Done."""
+def _note_agent_finish(ticket: dict, actor: str) -> None:
+    """The ticket is becoming Done: when an agent does it (only with `agents_may_finish`, decided in
+    _finish_status), the history says why it could."""
     if actor.startswith("agent:"):
-        if not config.agents_may_finish(root):
-            raise Refused(humanproof.VERDICT_NEEDED)
-        kind = "agent"
         add_history(ticket, actor, AGENT_FINISH_TEXT)
-    elif proven and _is_person(actor):
-        kind = "person"
-    else:
-        raise Refused(humanproof.VERDICT_NEEDED)
-    old = (humanproof.verdict_ledger(root) or {}).get(ticket["id"])  # superseded by the new entry
-    entry = humanproof.verdict_sign(
-        root,
-        ticket,
-        kind,
-        person=actor if kind == "person" else None,
-        line=ticket["history"][-1] if ticket["history"] else None,
-    )
-    kept = [e for e in ticket.get("verdicts") or [] if isinstance(e, dict) and e.get("mac") != old]
-    ticket["verdicts"] = [entry, *kept][: humanproof.VERDICT_MAX]
 
 
 def note_history(root: Path, tid: str, by: str, text: str, via: str | None = None) -> None:
@@ -1177,12 +1099,11 @@ def note_history(root: Path, tid: str, by: str, text: str, via: str | None = Non
     apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via), by=by)
 
 
-def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: bool = False) -> dict:
+def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
     """A person accepts a ticket in Review: Review -> Done, like the dashboard's Accept. Refused for an agent
     (an agent in the environment, or any `by` that is not human:) and when the ticket is not in Review, so a
-    second accept is refused. The relay's phone path calls it only for a phone-verified answer to the
-    current review question (relay._apply_review_answer), which passes proven=True (the relay channel is the
-    phone's proof). The accept signs the verdict: without `proven` nothing becomes Done."""
+    second accept is refused. The relay's phone path calls it for an answer to the current review question
+    (relay._apply_review_answer)."""
     if not by.startswith("human:") or agent_tool():
         raise Refused("Only a person can accept.")
 
@@ -1194,7 +1115,6 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: boo
         ticket["status"] = "done"
         ticket["waiting_on"] = None
         add_history(ticket, by, "Status review -> done", via)
-        _sign_done(root, ticket, by, proven)
 
     return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away (worktrees.on_closed)
 
@@ -1208,7 +1128,6 @@ def ask_for_changes(
     via: str | None = None,
     phone: str | None = None,
     pid: str | None = None,
-    proven: bool = False,
 ) -> dict:
     """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
     Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
@@ -1241,9 +1160,7 @@ def ask_for_changes(
     if load(root, tid)["status"] != "review":
         raise Refused("This ticket is not waiting for your review.")
     # Queue the note first, then commit the ticket: a failure of either leaves nothing half done.
-    item = runs.pending_add(
-        root, tid, by, "message", note, via or _env_via(), pid, phone=phone, proven=proven
-    )
+    item = runs.pending_add(root, tid, by, "message", note, via or _env_via(), pid, phone=phone)
     try:
         return apply_op(root, tid, op, by=SYSTEM)[0]
     except BaseException:
@@ -1353,7 +1270,7 @@ def recheck_hint(root: Path, tid: str, status: str, by: str) -> str | None:
     return RECHECK_HINT
 
 
-def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False) -> dict:
+def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
@@ -1370,7 +1287,7 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
         if old != target and target == status:
             add_history(ticket, actor, f"Status {old} -> {target}")
         if target == "done" and old != "done":
-            _sign_done(root, ticket, actor, proven)
+            _note_agent_finish(ticket, actor)
 
     return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away of a done/closed ticket
 
@@ -1379,6 +1296,98 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
 
 
 PROTECTED_FIELDS = ("title_auto", "plan_first", "description", "description_by")  # orch writes these itself
+
+
+DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
+_DUE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?|(\d{1,2}:\d{2})")
+
+
+def clean_due(text: str, today: str | None = None) -> str:
+    """One spelling in the `due` field: `YYYY-MM-DD` (a day) or `YYYY-MM-DDTHH:MM` (local wall time, no
+    zone). Input also takes `YYYY-MM-DD HH:MM` and `HH:MM` (= today, local). Anything else is refused."""
+    m = _DUE_TIME.fullmatch(text.strip())
+    if not m:
+        raise Refused(DUE_MSG)
+    day, hm, only = m.groups()
+    if only:
+        day, hm = today or datetime.now().strftime("%Y-%m-%d"), only
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+        if hm:
+            datetime.strptime(hm, "%H:%M")
+    except ValueError:
+        raise Refused(DUE_MSG) from None
+    return f"{day}T{int(hm[:-3]):02d}:{hm[-2:]}" if hm else day
+
+
+def _when_words(at: datetime, now: datetime) -> str:
+    """A local time in plain words: "18:30" (today), "Mon 18:30" (within a week), "1 Dec 2026, 18:30".
+    Same wording as the dashboard helper `whenWords` (web/helpers.js)."""
+    gap = (at.date() - now.date()).days
+    hm = at.strftime("%H:%M")
+    if gap == 0:
+        return hm
+    if abs(gap) < 7:
+        return f"{at.strftime('%a')} {hm}"
+    return f"{at.day} {at.strftime('%b %Y')}, {hm}"
+
+
+def due_label(due: str | None, status: str = "open", now: datetime | None = None) -> str | None:
+    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 18:30" (another day), "Late since
+    18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day wording).
+    Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
+    if not due or "T" not in str(due):
+        return None
+    try:
+        at = datetime.strptime(str(due), "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+    now = now or datetime.now()
+    late = at < now and status not in ("done", "dropped")
+    return f"{'Late since' if late else 'Due'} {_when_words(at, now)}"
+
+
+QUIET_HOURS = 6  # a working ticket with no history line for this long is "quiet" (fixed, no setting: R4.4)
+
+
+def quiet_since(ticket: dict, now: datetime | None = None) -> str | None:
+    """G2: the UTC time (`YYYY-MM-DDTHH:MM:SSZ`) of the newest history line (else updated/created time) when
+    the ticket is Working (status active) and that is more than QUIET_HOURS ago; otherwise None. Read-only,
+    computed from the history: nothing is stored. The one place the dashboard and the CLI both ask."""
+    if ticket.get("status") != "active":
+        return None
+    stamps = [
+        h.get("at")
+        for h in ticket.get("history") or []
+        if isinstance(h, dict) and isinstance(h.get("at"), str)
+    ] or [v for v in (ticket.get("updated_at"), ticket.get("created_at")) if isinstance(v, str)]
+    newest = None
+    for text in stamps:
+        try:
+            at = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=UTC)
+        if newest is None or at > newest[0]:
+            newest = (at, text)
+    if newest is None:
+        return None
+    if (now or datetime.now(UTC)) - newest[0] <= timedelta(hours=QUIET_HOURS):
+        return None
+    return newest[0].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
+    """The words "No news since 09:20" (local time; "Mon 09:20" on another day). None when not quiet.
+    Same words as the dashboard helper `quietWords`."""
+    if not since:
+        return None
+    try:
+        at = datetime.fromisoformat(since.replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
+    except ValueError:
+        return None
+    return f"No news since {_when_words(at, now or datetime.now())}"
 
 
 def clean_field(key: str, value):
@@ -1399,12 +1408,7 @@ def clean_field(key: str, value):
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
-        try:
-            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
-                raise ValueError
-            datetime.strptime(v, "%Y-%m-%d")
-        except ValueError:
-            raise Refused("due must be a date like 2026-11-10.") from None
+        v = clean_due(v)
     return v
 
 
@@ -1797,33 +1801,11 @@ def _person_only(by: str, item: dict, tid: str, cid: str) -> None:
         _refuse_if_wont_do(item, tid, cid)
 
 
-def _sign_wont(root: Path, tid: str, item: dict, by: str | None = None, line: str | None = None) -> None:
-    """The receiving core's own wontdo1 MAC over the step's decision (human-proof.md "Synced won't do"). Only
-    a person's decision reaches here (a proven CLI call); no usable key = no MAC (the sync then treats the
-    step as an agent's, which is the safe side)."""
-    item["wont_nonce"] = secrets.token_hex(8)  # a fresh decision record every time
-    if (
-        item.get("wont_do") and humanproof.bindable_actor(by) and isinstance(line, str)
-    ):  # who, when and which line are inside the MAC (new decisions)
-        item["wont_by"], item["wont_at"] = by, now()
-        item["wont_line"] = humanproof.history_digest(line, _env_via())  # the exact line the writer adds
-    else:
-        for k in ("wont_by", "wont_at", "wont_line"):
-            item.pop(k, None)
-    mac = humanproof.wont_sign(root, tid, item)  # also makes it the CURRENT entry of the ledger
-    if mac:
-        item["wont_mac"] = mac
-    else:
-        item.pop("wont_mac", None)
-        item.pop("wont_nonce", None)
-        for k in ("wont_by", "wont_at", "wont_line"):
-            item.pop(k, None)  # (no usable key: unsigned, so the sync treats it as an agent's)
-
-
 def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
     """A person decides a step will not be done. Person only, enforced here like accept_review: `by` must be
     human: and no agent tool may be in the environment; an agent can only ask (orch ask ...). The step stays
-    done=false (it is not done), counts as resolved and needs no proof. Calling again changes the reason."""
+    done=false (it is not done) and counts as resolved. It is stored plain: wont_do, wont_by, wont_at. Calling
+    again changes the reason."""
     if not _is_person(by):
         raise Refused(WONT_DO_AGENT.format(tid=tid, cid=cid))
     why = " ".join((reason or "").split())
@@ -1841,10 +1823,9 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
             item["reason"] = why
         else:
             item.pop("reason", None)
-        item.update({"by": by, "at": now()})
-        text = f"Marked {cid} as won't do"
-        _sign_wont(root, tid, item, by, text)
-        add_history(t, by, text)
+        item.update({"by": by, "at": now(), "wont_by": by, "wont_at": now()})
+        history.created("steps", item)  # the step mark is core's own (like check_start)
+        add_history(t, by, f"Marked {cid} as won't do")
         return item
 
     return apply_op(root, tid, op, by=by)
@@ -1910,18 +1891,6 @@ def check_exists(root: Path, tid: str, cid: str) -> None:
     _item(load(root, tid), cid)
 
 
-class NeedsProof(Refused):
-    """A person's decision (undoing a Won't do) was asked for without the person's proof (H1)."""
-
-
-def _undo_guard(by: str, item: dict, tid: str, cid: str, proven: bool) -> None:
-    """Changing a Won't do step (rename, remove, reopen) is a person's decision and needs the person's proof
-    (H1). Called under the ticket lock on the ticket as it is now."""
-    _person_only(by, item, tid, cid)  # an agent is refused with its own words
-    if not proven:
-        raise NeedsProof("Changing a Won't do is a person's decision.")
-
-
 def check_edit(
     root: Path,
     tid: str,
@@ -1931,7 +1900,6 @@ def check_edit(
     if_revision: int | None = None,
     was: str | None = None,
     covers: str | None = None,
-    proven: bool = False,
 ) -> tuple[dict, dict]:
     if text is None and covers is None:
         raise Refused("Say the new text or --covers.")
@@ -1941,10 +1909,7 @@ def check_edit(
 
     def op(t):
         item = _item(t, cid)
-        if item.get("wont_do"):
-            _undo_guard(by, item, tid, cid, proven)
-        else:
-            _person_only(by, item, tid, cid)
+        _person_only(by, item, tid, cid)
         if text is not None:
             item["text"] = text.strip()
             add_history(t, by, f"Renamed {cid}")
@@ -1952,10 +1917,6 @@ def check_edit(
             item["covers"] = covers
             if text is None:
                 add_history(t, by, f"Linked {cid} to Done when")
-        if item.get("wont_do"):
-            _sign_wont(
-                root, tid, item
-            )  # a proven edit of a Won't do step re-signs it for the new text/covers
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
@@ -1977,17 +1938,13 @@ def check_move(root: Path, tid: str, cid: str, after: str, by: str) -> tuple[dic
     return apply_op(root, tid, op, by=by)
 
 
-def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
-    """Allowed, except a Won't do step: that is a person's decision and needs the person's proof (decided
-    under the lock). The history line keeps the step text and its proof."""
+def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
+    """Allowed, except a Won't do step: that is a person's decision (decided under the lock). The history line
+    keeps the step text and its proof."""
 
     def op(t):
         item = _item(t, cid)
-        if item.get("wont_do"):
-            _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
-        humanproof.wont_forget(
-            root, tid, cid
-        )  # tombstone (whatever the file says): no old MAC on a reused id
+        _person_only(by, item, tid, cid)  # an agent cannot delete a person's decision
         t["checklist"].remove(item)
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
@@ -1999,22 +1956,18 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
     return apply_op(root, tid, op, by=by)
 
 
-def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
+def check_reopen(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
     """Open again; the old proof stays in the history line. A Won't do step is a person's decision: only a
-    person undoes it, and (H1) only with the person's proof: `proven` is True only when the caller verified a
-    proof for this step. Decided HERE, under the ticket lock, on the ticket as it is now (no check-then-act
+    person undoes it. Decided HERE, under the ticket lock, on the ticket as it is now (no check-then-act
     gap, and a ticket that cannot be read refuses)."""
 
     def op(t):
         item = _item(t, cid)
         if item.get("wont_do"):
-            _undo_guard(by, item, tid, cid, proven)
-            for k in ("wont_do", "reason"):
+            _person_only(by, item, tid, cid)
+            for k in ("wont_do", "reason", "wont_by", "wont_at"):
                 item.pop(k, None)
             _clear_doing(item)
-            _sign_wont(
-                root, tid, item
-            )  # the person's undo, signed: a synced copy may drop wont_do only with it
             add_history(t, by, f"Reopened {cid}")
             return item
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
@@ -2643,6 +2596,7 @@ def answer(
                 ans = opt
                 break
         q["answer"], q["answered_by"], q["via"] = ans, by, via
+        q["answered_at"] = now()  # when, whatever `via` says (a page shows "Answered on your phone 12:34")
         if decision is not None:
             q["decision"], q["at"] = dict(decision), now()
         _release_wait(root, tid, ticket, qid)
@@ -2651,6 +2605,20 @@ def answer(
         return q
 
     return apply_op(root, tid, op, by=by)
+
+
+def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:
+    """Record when a question went to the person's phones (questions[].sent_at, once): one quiet write under
+    the ticket lock; a question that is gone or already marked changes nothing."""
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None or q.get("sent_at"):
+            return NO_WRITE
+        q["sent_at"] = now()
+        return q
+
+    apply_op(root, tid, op, by=by)
 
 
 def record_answered(
@@ -2684,6 +2652,7 @@ def record_answered(
         }
         q = {"id": _next_id(ticket["questions"], "q"), **q}
         q["answer"], q["answered_by"], q["via"], q["at"] = entry["answer"], by, via, now()
+        q["answered_at"] = q["at"]
         if replaces is not None:
             q["decision"] = {**(q.get("decision") or {}), "replaces": replaces, "replaced_by": None}
             old["decision"] = {**(old.get("decision") or {}), "replaced_by": q["id"]}
@@ -2741,7 +2710,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     return apply_op(root, tid, op2, by=by)[0]
 
 
-def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bool = False) -> dict:
+def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
     """Atomic change of several fields; refused (exit 2 + current values) when `revision` changed."""
     try:
         obj = json.loads(data)
@@ -2794,7 +2763,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bo
         note = f" (status {old} -> {status})" if old != status else ""
         add_history(ticket, actor, "Patched " + ", ".join(sorted(obj)) + note)
         if status == "done" and old != "done":
-            _sign_done(root, ticket, actor, proven)
+            _note_agent_finish(ticket, actor)
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 

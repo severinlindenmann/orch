@@ -10,7 +10,7 @@
   const MAX = 25 * 1024 * 1024, MAX_FILES = 5;
   const TYPES = 'PNG, JPG, GIF, WebP, TXT, MD, CSV, JSON or LOG';
   const staged = [];  // {file, id, url|null}
-  let chips, error, hint, drop, input, send, interrupt;
+  let chips, error, hint, drop, input, send, pin;
 
   const size = n => (n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1024 / 1024).toFixed(1) + ' MB');
   const ext = name => (String(name).split('.').pop() || '').toLowerCase();
@@ -71,12 +71,11 @@
     chips = h('ul', {class: 'fx-chips', hidden: true, 'aria-label': 'Files to add'});
     error = h('p', {class: 'fx-file-error', role: 'alert', hidden: true});
     hint = h('p', {class: 'meta fx-compose-hint', text: 'Paste a screenshot or drop files · up to 25 MB each'});
-    interrupt = h('button', {type: 'button', class: 'btn sm', 'data-act': 'interrupt', hidden: true, title: 'Stop what the helper is doing and read this now', text: 'Interrupt now'});
     send = els.form.querySelector('button');
     send.textContent = 'Send';
     send.title = 'Queue this instruction: the helper reads it after the current step';
     els.form.prepend(chips);
-    els.form.append(els.attachFile, input, interrupt);
+    els.form.append(els.attachFile, input);
     els.compose.append(error, hint);
     els.attachFile.addEventListener('click', () => input.click());
     input.addEventListener('change', () => { add([...input.files]); input.value = ''; });
@@ -96,9 +95,36 @@
     document.addEventListener('dragleave', e => { if (hasFiles(e) && --depth <= 0) { depth = 0; drop.hidden = true; } });
     document.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
     document.addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); depth = 0; drop.hidden = true; if (!els.compose.hidden) add([...e.dataTransfer.files]); });
-    interrupt.addEventListener('click', () => submit(true));
+    pin = h('div', {class: 'queued-wrap', hidden: true, 'aria-live': 'polite'});
+    els.form.before(pin);
     els.form.addEventListener('submit', e => { e.preventDefault(); submit(false); });
     render();
+  }
+
+  /* A message the helper has not read yet waits right above the message box, with one button: Take back. */
+  function renderWaiting(v) {
+    if (!pin) return;
+    const list = (v && v.run && Array.isArray(v.run.waiting_input)) ? v.run.waiting_input : [];
+    const key = JSON.stringify(list.map(m => [m.id, m.text]));
+    if (key === pin.dataset.k) return;
+    pin.dataset.k = key;
+    pin.hidden = !list.length;
+    pin.replaceChildren(...list.map(m => {
+      const btn = h('button', {class: 'btn sm', type: 'button', text: 'Take back'});
+      btn.addEventListener('click', () => takeBack(m, btn));
+      return h('article', {class: 'queued-msg'}, h('p', {text: m.text}), h('div', {class: 'row'}, h('span', {class: 'grow', text: 'Helper reads this after the current step'}), btn));
+    }));
+  }
+
+  async function takeBack(m, btn) {
+    btn.disabled = true;
+    const r = await act('run.take_back', {ticket: TID, id: m.id});
+    if (!r.ok) { btn.disabled = false; toast(r.message, 'error'); return; }
+    const cur = els.msg.value.trim();
+    els.msg.value = cur ? m.text + '\n' + cur : m.text;
+    els.msg.style.height = 'auto'; els.msg.style.height = els.msg.scrollHeight + 'px';
+    els.msg.focus();
+    toast('Taken back. The helper never saw it.', 'ok');
   }
 
   let busy = false;
@@ -106,7 +132,7 @@
     if (busy) return;
     const text = els.msg.value.trim();
     if (!text && !staged.length) return;
-    busy = true; send.disabled = interrupt.disabled = true;
+    busy = true; send.disabled = true;
     try {
       if (!(await upload())) return;
       if (!text) return;
@@ -115,13 +141,15 @@
       const r = await act('run.send', {ticket: TID, text});
       if (!r.ok) { els.msg.value = text; toast(r.message, 'error'); return; }
       if (now) { const again = await act('run.start', {ticket: TID}); toast(again.ok ? 'Interrupted. The helper reads it now.' : again.message, again.ok ? 'ok' : 'error'); }
-      else toast(r.note || 'Queued. The helper reads it after the current step.', 'ok');
-    } finally { busy = false; send.disabled = interrupt.disabled = false; }
+      else toast(r.note || 'Sent. You can take it back until the helper reads it.', 'ok');
+    } finally { busy = false; send.disabled = false; }
   }
 
-  /* Interrupt only makes sense while the helper works */
-  function update(v) { if (interrupt) interrupt.hidden = !v.run.running; }
+  /* "Interrupt now" lives in the ticket's ⋯ menu, not beside Send: it sends what is in the message box, right now */
+  function interruptNow() {
+    if (!els.msg.value.trim() && !staged.length) { toast('Write your message first, then choose Interrupt now.', 'error'); els.msg.focus(); return; }
+    submit(true);
+  }
 
-  S.register('compose', {mount, add, update, submit, files: () => staged});
-  S.subscribe(update);
+  S.register('compose', {mount, add, submit, interruptNow, renderWaiting, files: () => staged});
 })();

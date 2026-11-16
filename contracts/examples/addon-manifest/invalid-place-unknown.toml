@@ -1,0 +1,12 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "lessons"
+version = "0.1.0"
+description = "Unknown place."
+run = "orch_lessons"
+skill = "skills/orch-lessons"
+
+[dashboard]
+label = "Lessons"
+icon = "book"
+place = "sidebar"

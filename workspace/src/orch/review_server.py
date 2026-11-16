@@ -184,7 +184,7 @@ class Handler(BaseHTTPRequestHandler):
     def _text(self, code: int, text: str):
         self._send(code, text.encode(), "text/plain; charset=utf-8")
 
-    def _origin_gate(self, method: str, api: bool) -> str | None:
+    def _origin_check(self, method: str, api: bool) -> str | None:
         """Host + Origin (the kit's origin.py); a POST without Origin is refused too (the page sends one)."""
         check_request = _origin_check()
         if check_request is None:
@@ -211,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------ GET
     def do_GET(self):
         path, _, query = self.path.partition("?")
-        why = self._origin_gate("GET", path.startswith("/api/"))
+        why = self._origin_check("GET", path.startswith("/api/"))
         if why:
             return self._text(403, why)
         if path == "/":
@@ -275,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path not in ("/session", "/api/answer"):
             return self._text(405, "not allowed")
-        why = self._origin_gate("POST", True)
+        why = self._origin_check("POST", True)
         if why:
             return self._text(403, why)
         if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):

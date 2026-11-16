@@ -176,3 +176,5 @@ Final component validation: the requested `node base/scripts/qa-components.cjs 1
 - Live session (fb17 PR 2): the centre of the shell shows the helper's real screen (read-only for everyone, typing for the person's own dashboard session). See proposals/fb17-focus-shell.html (the `term` block). With no live session the centre says why in one line.
 
 - UX round item 4 (owner: focus-one-ticket): when something needs the person, Focus opens on the next ticket that needs them (oldest question, then oldest result), with "See everything on Home" and "Live now and areas" beside it. The start page (Live now, areas, jobs) shows when nothing waits.
+
+- Fix wave b6 (15 Nov): "Watch live" on a running ticket (agent bar and the ticket's "Live session" card) opens Focus on that ticket (`#addon/focus/t/<ticket>`, Live tab is the default). The card's terminal commands sit behind one small "Copy command" menu. "Tickets in focus" lists tickets a helper is working on first, then the most recently updated. Home: the phone-mode "ended" notice is one toast (then marked seen); the sidebar shows "Pick your name" (opens the person menu) until a person is chosen.

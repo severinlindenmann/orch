@@ -1,7 +1,6 @@
 .new-ticket .new-ticket-text {
   box-sizing: border-box;
   width: 100%;
-  min-height: 6.5em;
   max-height: 480px;
   resize: vertical;
   font-size: 16px;
@@ -14,8 +13,8 @@
   align-self: flex-start; min-height: 44px; padding: 0; border: 0; background: transparent;
   color: var(--brand); text-decoration: underline; cursor: pointer; font-size: 14px;
 }
-.new-ticket-files { display: flex; flex-direction: column; gap: 7px; }
-.new-ticket .new-ticket-file { display: flex; padding: 0; border-radius: 7px; min-width: 0; }
+.new-ticket-files { display: flex; flex-direction: column; }
+.new-ticket .new-ticket-file { display: flex; padding: 0; min-width: 0; }
 .new-ticket-file-main {
   display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0;
   border: 0; background: transparent; color: var(--text); padding: 9px 10px; text-align: left; font-size: 12px;
@@ -29,7 +28,6 @@
 .new-ticket-preview { max-height: 65vh; overflow: auto; }
 .new-ticket-preview pre { white-space: pre; font-size: 12px; }
 .new-ticket-preview img { max-width: 100%; height: auto; }
-.new-ticket { position: relative; }
 .new-ticket-drop { display: grid; gap: 4px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: 8px; background: var(--surface); }
 .new-ticket-drop:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
 .new-ticket-file-hint { margin: 0; }
@@ -41,7 +39,7 @@ ul.new-ticket-files { list-style: none; margin: 0; padding: 0; max-height: 160px
 .new-ticket-helper p { margin: 0; }
 .new-ticket-helper-fixed { min-height: 44px; display: flex; align-items: center; }
 /* Second pass (accepted New ticket draft): title + one line, X at the top right, footer with the quiet save at the left */
-.new-ticket{max-width:560px;width:calc(100vw - 32px)}
+.new-ticket{position:relative;max-width:560px;width:calc(100vw - 32px)}
 .new-ticket h2{margin:0 40px 4px 0}
 .new-ticket .new-ticket-sub{margin:0 0 16px}
 .new-ticket .new-ticket-text{min-height:96px}
