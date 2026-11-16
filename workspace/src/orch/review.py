@@ -700,10 +700,10 @@ def _find(ticket: dict, qid: str) -> dict:
     return q
 
 
-def check_digest(ticket: dict) -> str:
+def check_digest(ticket: dict, root: Path | None = None) -> str:
     """What a person is shown of a Check result: exactly check_card(ticket) (title, steps with their done and
     won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
-    shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket)}
+    shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket, root)}
     return _sha(_canon(shown).encode())
 
 
@@ -743,9 +743,23 @@ def _check_open(ticket: dict) -> str | None:
     return None
 
 
-def check_card(ticket: dict) -> dict:
-    """A Check result as a card: the summary, every step with its evidence (note, what was run, pull request)
-    and the parts of Done when no step covers. No preview when there is nothing to show (an empty box)."""
+def _parent_line(ticket: dict, root: Path | None) -> str:
+    """'Part of: ORCH-49 Factory follow-ups' for a sub-ticket (needs `root`); "" without a parent."""
+    pid = ticket.get("parent")
+    if root is None or not isinstance(pid, str) or not pid:
+        return ""
+    try:
+        parent = tickets.load(root, pid)
+    except (Refused, OSError, ValueError):
+        return ""
+    name = " ".join(x for x in (parent.get("key"), parent.get("title")) if isinstance(x, str) and x.strip())
+    return _clip(f"Part of: {name}", 300) if name else ""
+
+
+def check_card(ticket: dict, root: Path | None = None) -> dict:
+    """A Check result as a card: the summary, Done when, the parent ticket (with `root`), every step with its
+    evidence (note, what was run, pull request) and the parts of Done when no step covers. No preview when
+    there is nothing to show (an empty box)."""
     steps = []
     for c in ticket.get("checklist") or []:
         if not isinstance(c, dict):
@@ -755,6 +769,9 @@ def check_card(ticket: dict) -> dict:
         steps.append(_clip(f"{state}: {c.get('text', '')}" + (f" — {said}" if said else ""), 1200))
     summary_text = str(ticket.get("summary") or "").strip()
     paras = [_clip(f"In short: {summary_text}", 1200)] if summary_text else []
+    done_when = str(ticket.get("done_when") or "").strip()
+    paras += [_clip(f"Done when: {done_when}", 1200)] if done_when else []
+    paras += [x for x in (_parent_line(ticket, root),) if x]
     uncovered = tickets.proof_state(ticket)["uncovered"]
     paras += [_clip(f"No task covers: “{p}”", 600) for p in uncovered[:10]]
     card = {
@@ -868,9 +885,9 @@ def _decide_check(
         raise Refused(f"verdict is one of {', '.join(VERDICTS)}.")
     if ticket.get("status") != "review":
         raise Refused("This ticket is not waiting for your review.")
-    if digest is not None and digest != check_digest(ticket):
+    if digest is not None and digest != check_digest(ticket, root):
         raise Refused("This result changed after it was shown. Look at it again, then answer.")
-    card = check_card(ticket)
+    card = check_card(ticket, root)
     n = _note_bv(note)
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
@@ -988,8 +1005,8 @@ def stack(root: Path) -> list[dict]:
                     "id": f"core:review:{t['id']}",
                     "key": "review",
                     "kind": "check",
-                    "card": check_card(t),
-                    "digest": check_digest(t),
+                    "card": check_card(t, root),
+                    "digest": check_digest(t, root),
                     "since": hist[-1]["at"] if hist else t.get("updated_at") or t.get("created_at"),
                     "options": [],
                     "recommended": None,

@@ -286,6 +286,11 @@ def test_a_secret_in_a_card_file_name_never_reaches_the_phone(proj, new_ticket, 
 
 
 def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
+    ev = [
+        {"type": "command", "ref": "pytest -q", "exit": 0, "summary": "12 tests pass."},
+        {"type": "note", "summary": "Merged on green CI.", "ref": "pr-green: GREEN, 4 checks"},
+        {"type": "pr", "ref": "https://github.com/o/r/pull/12"},
+    ]
     t = {
         "id": "t_x",
         "title": "T",
@@ -293,26 +298,47 @@ def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
         "summary": "Merged in PR 12 on green CI.",
         "done_when": "Tests pass; the phone shows it",
         "checklist": [
-            {
-                "id": "c1",
-                "text": "Tests pass",
-                "done": True,
-                "covers": "Tests pass",
-                "evidence": [
-                    {"type": "command", "ref": "pytest -q", "exit": 0, "summary": "12 tests pass."},
-                    {"type": "note", "summary": "Merged on green CI.", "ref": "pr-green: GREEN, 4 checks"},
-                    {"type": "pr", "ref": "https://github.com/o/r/pull/12"},
-                ],
-            }
+            {"id": "c1", "text": "Tests pass", "done": True, "covers": "Tests pass", "evidence": ev}
         ],
     }
     card = review.check_card(t)
     (step,) = card["preview"]["steps"]
     assert step.startswith("Done: Tests pass — ")
-    for bit in ("12 tests pass.", "Ran: pytest -q", "Merged on green CI.", "pr-green: GREEN, 4 checks", "PR #12"):
+    for bit in (
+        "12 tests pass.",
+        "Ran: pytest -q",
+        "Merged on green CI.",
+        "pr-green: GREEN, 4 checks",
+        "PR #12",
+    ):
         assert bit in step
-    assert card["preview"]["paras"] == ["In short: Merged in PR 12 on green CI.", "No task covers: “the phone shows it”"]
+    assert card["preview"]["paras"] == [
+        "In short: Merged in PR 12 on green CI.",
+        "Done when: Tests pass; the phone shows it",
+        "No task covers: “the phone shows it”",
+    ]
     assert card["open"] == "https://github.com/o/r/pull/12" and card["need"]
     review.check_wire_card(review.wire_card(card, {}), 0)  # still a valid phone card
     bare = review.check_card({"id": "t_y", "title": "T", "status": "review", "checklist": []})
     assert "preview" not in bare and "open" not in bare and "need" not in bare
+
+
+def test_check_card_of_a_sub_ticket_without_steps_names_done_when_and_parent(proj, new_ticket, run):
+    parent = new_ticket("Factory follow-ups")
+    code, out, _ = run(
+        "ticket", "new", "Plain names in two comments", "--parent", parent, "--json", "--by", "human:tester"
+    )
+    tid = json.loads(out)["id"]
+    for argv in (
+        ("ticket", "edit", tid, "--done-when", "The two comments no longer name it"),
+        ("ticket", "summary", tid, "Both comments now say helper."),
+    ):
+        assert run(*argv, "--by", "human:tester")[0] == 0
+    t = tickets.load(proj, tid)
+    paras = review.check_card(t, proj)["preview"]["paras"]
+    assert paras[:2] == [
+        "In short: Both comments now say helper.",
+        "Done when: The two comments no longer name it",
+    ]
+    assert paras[2].startswith("Part of: ") and paras[2].endswith("Factory follow-ups")
+    assert review.check_digest(t, proj) != review.check_digest(t)  # the digest covers what is shown
