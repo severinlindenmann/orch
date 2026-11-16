@@ -259,7 +259,12 @@ def test_style_guide_has_its_own_address(server):
     assert "style-src 'self' 'unsafe-inline'" in r.headers["Content-Security-Policy"]
     for link in set(re.findall(r'(?:href|src|poster)="([a-z0-9][a-z0-9./-]*\.[a-z0-9]+)"', page)):
         assert urllib.request.urlopen(f"{server}/styleguide/{link}").status == 200, link
-    for bad in ("/styleguide/../server.py", "/styleguide/demo.html", "/styleguide/nothing.css", "/styleguidex"):
+    for bad in (
+        "/styleguide/../server.py",
+        "/styleguide/demo.html",
+        "/styleguide/nothing.css",
+        "/styleguidex",
+    ):
         try:
             code = urllib.request.urlopen(f"{server}{bad}").status
         except urllib.error.HTTPError as e:
