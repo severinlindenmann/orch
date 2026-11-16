@@ -18,9 +18,12 @@ on:
 # cancels the older run, so only the newest commit is tested and the queue stays short (15 Nov: 24 queued runs). A
 # cancelled push run may have been the one that would have run the mobile UI tests; the nightly schedule run covers
 # that (it runs mobile in full). Schedule and manual runs keep their own group and are never cancelled.
+# A re-run (run_attempt > 1) replays its ORIGINAL event, so it is not news about the PR: it gets a group of its own
+# and cancels nothing. Before, re-running the red job of a draft-time run joined the PR's group and cancelled the real
+# run that marking the PR ready had started (16 Nov, ORCH-7).
 concurrency:
-  group: ci-${{ github.event.pull_request.number || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+  group: ci-${{ (github.run_attempt > 1 && format('rerun-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.run_attempt == 1 && (github.event_name == 'pull_request' || github.event_name == 'push') }}
 permissions:
   contents: read
 jobs:
@@ -109,7 +112,12 @@ jobs:
     steps:
       - name: draft PRs are not tested
         if: github.event.pull_request.draft == true
-        run: echo "draft PR - CI runs when it is marked ready for review" && exit 1
+        # a re-run of this job replays the draft-time event and lands here again, however the PR looks now
+        run: |
+          echo "draft PR - CI runs when it is marked ready for review"
+          echo "Re-running this job does not help: it replays the draft-time event and stays red."
+          echo "PR already marked ready? Look at its newest ci run. No such run: push a commit to start one."
+          exit 1
       - name: every called job passed or was skipped
         if: github.event.pull_request.draft != true
         run: |
