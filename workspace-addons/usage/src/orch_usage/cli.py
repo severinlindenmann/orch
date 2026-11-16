@@ -1,4 +1,5 @@
-"""orch usage list|history|limit|period|order|on|off|end (store: store.py; readers: readers/)."""
+"""orch usage list|history|limit|period|order|on|off|end|switching|run|start|stop|status
+(store: store.py; readers: readers/; early switching: switching.py; background process: service.py)."""
 
 from __future__ import annotations
 
@@ -274,6 +275,9 @@ def run(args) -> int:
         print("\n".join(out))
         return 0
 
+    if cmd in ("run", "start", "stop", "status", "switching"):
+        return _loop_cmd(args, root)
+
     who = _actor(args.by)
     end = parse_time(args.end) if getattr(args, "end", None) else None
     with store.change(root) as (accounts, rows):
@@ -315,6 +319,101 @@ def run(args) -> int:
     )
 
 
+def _loop_cmd(args, root: Path) -> int:
+    from . import service, switching
+
+    cmd = args.cmd
+    if cmd == "run":
+        import signal
+
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        if args.once:
+            r = switching.look(root)
+            return _emit(args, r, _look_text(r))
+        print(f"orch usage for {root.name} started {store.now()}", flush=True)
+        nonce = service.announce(root)  # background run: record pid + start time in .orch/run/usage/
+        try:
+            switching.run_forever(root, log=lambda m: print(m, flush=True))
+        except KeyboardInterrupt:
+            pass
+        finally:
+            service.forget(root, nonce)
+        return 0
+    if cmd == "start":
+        try:
+            pid = service.start(root)
+        except RuntimeError as e:
+            raise Refused(str(e)) from None
+        return _emit(args, {"running": True, "pid": pid}, f"Usage is running (pid {pid}).")
+    if cmd == "stop":
+        try:
+            res = service.stop(root)
+        except RuntimeError as e:
+            res = str(e)
+        if res in ("stopped", "not running"):
+            return _emit(
+                args,
+                {"stopped": res == "stopped"},
+                "Usage stopped." if res == "stopped" else "Usage was not running.",
+            )
+        note = (
+            "A file in .orch/run/usage/ names a process that is not the Usage loop; nothing was stopped."
+            if res == "not verified"
+            else res
+        )
+        return _emit(args, {"stopped": False, "note": note}, note)
+    if cmd == "status":
+        pid = service.running_pid(root)
+        last = switching._read(switching.memory_path(root)).get("last") or {}
+        on = switching.switching_on(root)
+        data = {
+            "running": bool(pid),
+            "pid": pid,
+            "switching": on,
+            "switcher": bool(cswap.command()),
+            "last": last,
+        }
+        line = f"Usage is running (pid {pid})." if pid else "Usage is not running. Start it: orch start"
+        if not data["switcher"]:
+            line += " " + NO_SWITCHER
+        else:
+            line += " Switching is " + ("on." if on else "off: Usage only shows what it would switch.")
+        if last:
+            line += f"\nLast look {last.get('at', '')[:16].replace('T', ' ')} UTC: {last.get('did')} ({last.get('why')})."
+        print(json.dumps(data, ensure_ascii=False) if args.json else line)
+        return 0 if pid else 1
+    # switching on|off
+    who = _actor(args.by)
+    on = args.state == "on"
+    changed = switching.set_switching(root, who, on)
+    if on and not cswap.command():
+        nxt = NO_SWITCHER
+    elif on:
+        nxt = "Usage now switches by itself before an account reaches a limit."
+    else:
+        nxt = "Usage only shows and warns; it does not switch."
+    return _emit(
+        args,
+        {"switching": on, "changed": changed, "next": nxt},
+        (SAVED + " " if changed else "Already like that. ") + nxt,
+    )
+
+
+def _look_text(r: dict) -> str:
+    if not r.get("switcher"):
+        return NO_SWITCHER
+    text = {
+        "stay": f"Staying on {r.get('active')}.",
+        "switched": f"Switched from {r.get('active')} to {r.get('target')}.",
+        "would switch": f"Would switch from {r.get('active')} to {r.get('target')} (switching is off).",
+        "switch failed": f"Could not switch to {r.get('target')}. It is tried again in 10 minutes.",
+        "waiting to try again": f"Waiting to try {r.get('target')} again.",
+    }.get(r["did"], r["did"])
+    if r.get("all_at_limit"):
+        text += " Warning: every account is at or near its limit."
+    return text
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="orch usage")
     ap.add_argument("--dir", default=os.environ.get("ORCH_ROOT", "."))
@@ -354,6 +453,13 @@ def main(argv=None) -> int:
     s.add_argument("account")
     s.add_argument("when")
     s.add_argument("--by")
+    s = p("switching")
+    s.add_argument("state", choices=("on", "off"))
+    s.add_argument("--by")
+    s = p("run")
+    s.add_argument("--once", action="store_true")
+    for name in ("start", "stop", "status"):
+        p(name)
     args = ap.parse_args(argv)
     args.json = bool(getattr(args, "json", False)) or "--json" in (argv if argv is not None else sys.argv)
     try:

@@ -1,6 +1,6 @@
 ---
 name: orch-usage
-description: Use when the person asks how far a subscription or API credit is used, which account is in use, or asks to change an account's limit, the period it counts over, its order, to turn it on or off, or to make a rule temporary. Usage keeps only labels, numbers, rules and a history, never a login or key. Not for buying, topping up, adding or removing accounts.
+description: Use when the person asks how far a subscription or API credit is used, which account is in use, whether Usage switches by itself, or asks to change an account's limit, the period it counts over, its order, to turn it on or off, or to make a rule temporary. Usage keeps only labels, numbers, rules and a history, never a login or key. Not for buying, topping up, adding or removing accounts.
 ---
 # orch usage
 
@@ -39,9 +39,21 @@ place in the order, on or off, and an optional end. Every change lands in the hi
 
 When a rule ends it falls back to the rule before its last change, and the history says so.
 
+**Switching early** (subscriptions, through the account switcher)
+
+    orch usage status                              # running? switching on or off? the last look
+    orch usage switching on                        # only when the person asked for it
+    orch usage switching off                       # show and warn only
+
+Usage looks every 30 seconds while it runs (`orch start`). It keeps the first account in order that is under its
+limits and would not reach one within 10 minutes at the current pace, and moves on before the limit. Every switch, a
+switch it would make while switching is off, and a warning when every account is at or near its limit land in the
+history. Switching is off until the person turns it on. Without the account switcher Usage shows and warns only.
+
 An account is named by its label from `orch usage list` (or the start of it). Every command takes `--json`.
 
 ## Rules
 - Change a rule only when the person asked for that change; never to make room for your own work.
 - Never write a login, token, key or address into a label, a ticket or the history.
 - Without the account switcher Usage shows and warns only; it never switches.
+- Turn switching on or off only when the person asked for it. Never run the account switcher yourself to switch.

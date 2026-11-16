@@ -249,7 +249,7 @@
  "usage": {
   "acts": {},
   "agents_block": "skills/orch-usage/AGENTS-block.md",
-  "background": false,
+  "background": true,
   "description": "Every account the helpers spend on, its limits, its order and a history of every change.",
   "gitignore": [
    ".orch/addons/usage/"

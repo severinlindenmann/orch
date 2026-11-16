@@ -1,4 +1,4 @@
-# Usage: accounts, limits, order and history. Stage 1 part 1: store, readers and commands; the page comes next.
+# Usage: accounts, limits, order, history and early switching (background loop). The page comes next.
 schema = "orch.addon/1"
 orch_api = 1
 name = "usage"
@@ -8,3 +8,4 @@ run = "orch_usage"
 skill = "skills/orch-usage"
 agents_block = "skills/orch-usage/AGENTS-block.md"
 gitignore = [".orch/addons/usage/"]
+background = true

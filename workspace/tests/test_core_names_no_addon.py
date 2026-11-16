@@ -14,6 +14,7 @@ ADDONS = sorted(d.name for d in (ROOT / "workspace-addons").iterdir() if (d / "s
 _MANIFEST = "manifest field of contracts/addon-manifest.md, not a package name"
 _FOLLOW_UP = "follow-up: core still names this add-on's setting/marker (see #837)"
 _GONE = "removed by #799"
+_TOKENS = "the record kind 'usage' / the providers' JSON key for token use, not the Usage add-on"
 ALLOW = {
     "orch/addons.py": {"dashboard": _MANIFEST},
     "orch/cli.py": {"dashboard": _MANIFEST},
@@ -27,6 +28,11 @@ ALLOW = {
     "orch/pagesession.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/pagelaunch.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/syncgate.py": {"sync": _GONE},
+    "orch/adapters.py": {"usage": _TOKENS},
+    "orch/cli_record.py": {"usage": _TOKENS},
+    "orch/collect_claude.py": {"usage": _TOKENS},
+    "orch/collect_execjson.py": {"usage": _TOKENS},
+    "orch/record.py": {"usage": _TOKENS},
 }
 
 
