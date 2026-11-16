@@ -139,6 +139,11 @@ class Person:
     def authed(self, headers, port):
         return self.can_act(headers, port)
 
+    def cookie_ok(self, headers, port):
+        return self.ok
+
+    revoked = False
+
 
 def typing_on(tmp_path, on=True):
     """[focus] session_typing in the workspace's config file (a plain setting; off by default)."""

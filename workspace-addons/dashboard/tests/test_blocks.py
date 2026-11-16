@@ -528,14 +528,14 @@ def test_the_edit_prompt_is_not_drawn_for_unsafe_arguments(tmp_path):
 
 @node
 def test_a_button_that_asks_for_a_review_carries_the_flag(tmp_path):
-    """Allow on this computer for a script: the page asks the add-on what to show before the click (data-review)."""
+    """Allow this script: the page asks the add-on what to show before the click (data-review)."""
     import copy
 
     view = copy.deepcopy(ACCORDION)
     item = view["blocks"][0]["items"][0]
     item["actions"] = [
         {
-            "label": "Allow on this computer",
+            "label": "Allow this script",
             "action": {
                 "op": "addon.act",
                 "args": {"verb": "allow-script", "target": "t_mec009", "review": True},

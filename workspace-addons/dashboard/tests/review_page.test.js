@@ -53,7 +53,7 @@ test('an answer is one review.answer click: question card, check card, picked an
 });
 test('refusals become the codes the page understands', async () => {
   const reply = r => ctx({}, {act:async () => r}).reviewApi().answer({id:CARD.id, digest:ID, verdict:'ok'});
-  assert.equal((await reply({ok:false, status:403, text:'Open the dashboard from this computer.'})).error.code, 'needs_person');
+  assert.equal((await reply({ok:false, status:403, text:'Sign in to do this: open the dashboard with a sign-in link from orch.'})).error.code, 'needs_person');
   assert.deepEqual({...(await reply({ok:false, status:422, text:JSON.stringify({ok:false, error:{code:'changed', message:'It changed.'}})})).error}, {code:'changed', message:'It changed.'});
   assert.equal((await reply({ok:false, status:400, text:'That is not a card.'})).error.code, 'refused');
   assert.equal((await reply({ok:false, status:0, text:'Could not reach orch.'})).error.code, 'error');

@@ -68,7 +68,7 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
             scripts.allow(root, name, value)
         except scripts.ScriptError as e:
             raise Bad(str(e)) from None
-        return {"ticket": target, "script": name, "allowed": True, "text": "Allowed on this computer."}
+        return {"ticket": target, "script": name, "allowed": True, "text": "Script allowed."}
     if verb == "run":
         name = script_of(t)
         r = start_script(root, t, name) if name else orchcli.run_start(root, target, by=by)
@@ -120,7 +120,7 @@ def review(root: Path, verb: str, target: str) -> dict:
     return {
         "target": f"automation:{target}:{scripts.key(root, name, argv)}",
         "review": {
-            "title": "Allow this script on this computer?",
+            "title": "Allow this script?",
             "value": scripts.shown(argv),
             "body": f"Each time the repeat is due, orch runs this command here, without a helper ({name}). "
             "If it changes, orch asks again.",

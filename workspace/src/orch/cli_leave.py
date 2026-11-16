@@ -329,7 +329,7 @@ def _uninstall_text(root: Path, res: dict) -> str:
     out = ["Removed:", *[f"  {r}" for r in res["removed"]]] if res["removed"] else ["Nothing to remove."]
     out.append(
         f"Kept your tickets and settings in {root / '.orch'}. "
-        f"To remove orch from this computer: uv tool uninstall {TOOL}"
+        f"To uninstall orch itself: uv tool uninstall {TOOL}"
     )
     return "\n".join(out)
 

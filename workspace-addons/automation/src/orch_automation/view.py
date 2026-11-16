@@ -326,7 +326,7 @@ def _schedules(
     """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown.
     `waiting`: ids of schedules that arrived by sync and are not allowed on this computer yet: they offer
     "Allow on this computer" (the person signs it) instead of Start now. `scripts_waiting`: ids of repeats whose
-    script is set up here but not allowed yet: "Allow on this computer" shows its command first."""
+    script is set up here but not allowed yet: "Allow this script" shows its command first."""
     rows = []
     for t in tickets:
         if not scheduled(t) or not (cron := _repeats(t, True)):
@@ -370,7 +370,7 @@ def _schedules(
                         }
                         if t["id"] in waiting
                         else {  # a script nobody allowed here yet: the page shows its command before the click
-                            "label": "Allow on this computer",
+                            "label": "Allow this script",
                             "action": {
                                 "op": "addon.act",
                                 "args": {"verb": "allow-script", "target": t["id"], "review": True},

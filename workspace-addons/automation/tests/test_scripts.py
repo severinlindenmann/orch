@@ -1,4 +1,4 @@
-"""Scripts: a repeat that runs a command from this computer's settings instead of an agent (ORCH-20)."""
+"""Scripts: a repeat that runs a command from the local settings instead of an agent (ORCH-20)."""
 
 import json
 import sys
@@ -281,7 +281,7 @@ def test_the_background_runner_command(ws):
     assert argv[4:] == ["--dir", str(ws), "script", "run", "t_scr00010"]
 
 
-# ---- the dashboard's Allow on this computer -----------------------------------------------------------------
+# ---- the dashboard's Allow this script ---------------------------------------------------------------------
 
 
 def test_review_shows_the_command_and_binds_the_key(ws, agent):
@@ -331,7 +331,7 @@ def test_the_automation_tab_offers_allow_until_the_script_is_allowed(ws, agent, 
     r = row()
     assert r["subtitle"] == "Runs watch"
     assert r["actions"][0] == {
-        "label": "Allow on this computer",
+        "label": "Allow this script",
         "action": {
             "op": "addon.act",
             "args": {"verb": "allow-script", "target": "t_scr00013", "review": True},
