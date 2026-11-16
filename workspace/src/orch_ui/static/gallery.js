@@ -13,10 +13,10 @@ q('#w-loading').append(UI.state({kind:'loading'}));
  /* a design review as one set (ORCH-65): the question text, the set name, a suggestion, a choice with how it is today */
  items.unshift({id:'g0',kind:'draft',kindLabel:'Draft',icon:'page',group:'Home look',ticket:'DT-50',ticketId:'t_look',ticketTitle:'Home look',when:'today 11:02',title:'Home: one list of what needs you',
   text:'Now: questions, results and a factory start sit in three places. Proposal: one list, most urgent first, each row with its picture and one button.',okLabel:'Build it',suggest:'ok',then:'The helper builds it.',
-  preview:{type:'compare',before:{type:'img',src:'demo-image.svg',alt:'Today'},after:{type:'img',src:'demo-image.svg',alt:'Proposal'}}},
+  preview:{type:'compare',before:pg('Today','Three places.'),after:pg('Proposal','One list.')}},
   {id:'g0b',kind:'choice',kindLabel:'Choose',icon:'cards',group:'Home look',ticket:'DT-50',ticketId:'t_look',ticketTitle:'Home look',when:'today 11:03',title:'Home: where the sets go',
   text:'Which place for a set of cards on Home?',then:'The helper builds the one you pick.',
-  preview:{type:'options',before:{type:'img',src:'demo-image.svg',alt:'Today'},options:[{id:'A',title:'Top of Home',suggested:true,preview:pg('A','On top.')},{id:'B',title:'Inside Needs you',preview:pg('B','In the list.')}]}});
+  preview:{type:'options',before:pg('Today','As it is.'),options:[{id:'A',title:'Top of Home',suggested:true,preview:pg('A','On top.')},{id:'B',title:'Inside Needs you',preview:pg('B','In the list.')}]}});
  UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true});
  const e={id:'core:q:T-1:q4',ticket:'T-1',by:'Severin',via:'phone',at:Date.now()-36e5,card:{kind:'choice',title:'Home: which layout?',preview:{type:'options',options:[{id:'A',title:'As today',preview:pg('A','Cards.')},{id:'B',title:'Recent changes first',preview:pg('B','Changes.')}]}},
   decision:{action:'use_with_changes',picked:'B',changes:['Dates on the left'],summary:'Use B with 1 change',words:{text:'Take B, but dates on the left.'},pins:[{n:1,on:'option B',x:40,y:55,text:'Dates here'}]}};
