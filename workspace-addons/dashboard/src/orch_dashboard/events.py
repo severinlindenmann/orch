@@ -12,10 +12,8 @@ class Revisions:
         self.condition = threading.Condition()
         self.clients = 0
         self.thread = None
-        self.rev = (
-            ""  # what the event stream sends: the files' signature, or the state copy once it is stored
-        )
-        self.seen = ""  # the files' signature the watcher saw last
+        self.rev = ""  # what the event stream sends: the files' state, or the stored copy's mark
+        self.seen = ""  # the files' state the watcher saw last
         self.closed = False
         # set by the state cache: a file change starts its background build, and the pages are told by publish()
         # when the new copy is ready (told at the change itself, every page asked while the copy was old)
