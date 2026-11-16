@@ -13,6 +13,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | status of a ticket not started | Backlog (status chip; the button that shows a ticket stays "Open") | `open` | Open (as a status) |
 | list of things for the person | Needs you | `orch needs` | Over to you, Inbox |
 | question with options | Question / Your answer | `question`, `q1` | Approval, Sign-off |
+| a click that decides for the person (a sync address, which version to keep) | Confirm / Needs your OK / Confirmed | `sign` (the click), `seen` | Sign, Signed, Signature, signed, signature ("Sign in" for the page login stays) |
 | a question the helper withdrew | Taken back: <reason> | `--take-back`, `taken_back` | Cancelled, Deleted, Withdrawn |
 | the task a question belongs to, on its card | About: <task text> | `--check c1` | Regarding, Subject |
 | the suggested option | Suggested | `recommended` | Recommended |

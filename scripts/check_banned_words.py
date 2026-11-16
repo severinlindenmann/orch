@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """R4.1 banned-word diff check (stdlib only).
 
-Fails when a line ADDED by the PR contains sign/signing/signature, certificate, keypair, approval or gate
+Fails when a line ADDED by the PR contains sign/signs/signed/signing/signature, certificate, keypair, approval or gate
 (whole words, case-insensitive). Deleted lines never count, and a word the same file loses on a deleted line
 cancels one re-added copy (one-line mockup pages re-add every word when a link changes). Passes when the PR has
 the label `owner-approved`.
@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-BANNED = re.compile(r"(?<![A-Za-z])(signing|signature|signatures|sign|certificate|certificates|keypair|keypairs|approval|approvals|gate)(?![A-Za-z])", re.I)
+BANNED = re.compile(r"(?<![A-Za-z])(signing|signature|signatures|signed|signs|sign|certificate|certificates|keypair|keypairs|approval|approvals|gate)(?![A-Za-z])", re.I)
 LABEL = "owner-approved"
 ALLOWLIST = Path(__file__).with_name("banned_words_allowlist.txt")
 # "sign in / sign-in / sign out / sign up" is the normal page login (allowed by R4.1), not signing

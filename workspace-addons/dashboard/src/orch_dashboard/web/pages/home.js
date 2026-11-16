@@ -166,7 +166,7 @@ function needActionsRow(row, key) {
   });
   return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-need-row':row.id},
     h('div', {className:'grow'}, h('p', {}, clean(row.text)), h('p', {className:'meta'}, source)),
-    h('div', {className:'acts'}, signed ? h('span', {className:'sig', 'data-key':key + '-sig'}, iconEl('shield'), 'Needs your signature') : null, controls));
+    h('div', {className:'acts'}, signed ? h('span', {className:'sig', 'data-key':key + '-sig'}, iconEl('shield'), 'Needs your OK') : null, controls));
 }
 // Work that stopped short (core rows): a pull request left open after its checks passed, or a helper idle at its
 // prompt. Two buttons, each one click on an op the page already has; the words sent to the helper are fixed here.
