@@ -196,7 +196,7 @@ def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
             while True:
                 end = min(pos + CHUNK, len(text))
                 line0 = text.count("\n", 0, pos)
-                for f in secretscan.find(text[pos:end], root):
+                for f in secretscan.find(text[pos:end], root, strict=False):
                     hits[(name, f["line"] + line0, f["kind"])] = None
                 if end >= len(text):
                     break

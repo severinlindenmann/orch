@@ -237,6 +237,9 @@ of this workspace's own stored keys: the same detection as the phone view (`work
 - Clean: exit 0; `No secrets found.` (`--json`: `{"found": []}`).
 - Found: exit 2, `The text has a GitHub token on line 3. Remove it and try again.`; `--json`:
   `{"error", "code": "refused", "found": [{"kind", "line"}]}`. Too large: exit 2, `code: "too_large"`.
+- Strict: if the stored keys cannot be read, exit 2, `code: "stored_keys_unreadable"`. Sends (relay, publish, resend) instead
+  skip only the stored-key comparison and print `Couldn't read your saved keys, so this check skipped them. Every other
+  secret check ran.` on stderr (also in the debug log); all other detectors still block.
 - Never prints the matched text or a key's value. Kinds: `private-key`, `orch-token`, `api-key`, `github-token`,
   `gitlab-or-slack-token`, `aws-key`, `jwt`, `bearer-token`, `api-token`, `password-in-url`, `webhook-token`,
   `secret-value`, `stored-key`.
