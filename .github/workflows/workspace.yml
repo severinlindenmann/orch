@@ -18,7 +18,8 @@ jobs:
         os: ${{ fromJSON(inputs.windows && (inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') || (inputs.full && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]')) }}
     runs-on: ${{ matrix.os }}
     # The suite takes 3-6 min; a hung test must not hold the runner for GitHub's 6 h default.
-    timeout-minutes: 40  # the full suite (6000+ tests) outgrew 20 min on macOS
+    # the full suite (6000+ tests) outgrew 20 min on macOS; on Windows it takes about 95 min (#980)
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 120 || 40 }}
     defaults:
       run:
         working-directory: workspace
