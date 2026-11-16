@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from lib import Fail, Skip, check, free_port, http, scenario, wait_http
+from lib import Fail, Skip, check, free_port, http, page_signin, scenario, wait_http
 
 AGENT = Path(__file__).parent / "fixtures" / "generic-agent" / "agent.py"
 NEEDS_FIXTURE = Path(__file__).parent / "fixtures" / "needs-addon"
@@ -784,9 +784,12 @@ class Focus:
         self.w = w
         rc, out, err = w.sh(["orch", "addon", "add", "focus", "--yes"], timeout=600)
         check(rc == 0, f"addon add focus: {(err or out)[-300:]}")
-        w.o("start", by=None)  # core starts the background add-ons and keeps the record `orch needs` checks
-        self.base = w.j("focus", "status", by=None)["url"].rstrip("/")
+        # core starts the background add-ons and keeps the record `orch needs` checks; the page's clicks are the
+        # person's, so sign in with the link orch prints, like a browser (an action without it: 'Sign in to do this')
+        started = w.j("start", "--print-launch-url", by=None)
         w.e.cleanup.append(lambda: w.sh(["orch", "stop"]))
+        self.base, self.auth = page_signin(started, "focus")
+        check(self.base == w.j("focus", "status", by=None)["url"].rstrip("/"), "the sign-in link is not the Focus page")
 
     def get(self, path: str, headers: dict | None = None):
         return http("GET", self.base + path, headers)
@@ -797,7 +800,8 @@ class Focus:
         return r.json()
 
     def act(self, op: str, args: dict, headers: dict | None = None):
-        h = {"Origin": self.base, "Sec-Fetch-Site": "same-origin", **(headers or {})}
+        """A click on the page, signed in (headers override, e.g. a forged Origin for the fence checks)."""
+        h = {**self.auth, **(headers or {})}
         return http("POST", self.base + "/api/act", h, {"op": op, "args": args})
 
     def act_ok(self, op: str, args: dict) -> dict:
@@ -930,7 +934,8 @@ def f3_focus(e):
     check(wait_for(lambda: w.lines("input"), 30), "the first prompt never reached the live agent")
     sent = fx.act_ok("run.send", {"ticket": tid, "text": "Use CHF please"})
     check(wait_for(lambda: len(w.lines("input")) == 2, 30), f"sent text never arrived (note {sent['note']!r})")
-    check(w.lines("input")[1].endswith(": Use CHF please"), f"second input {w.lines('input')[1]!r}")
+    # the sender on its own line, the text indented under it (a text cannot forge another sender's line), as in V2-L1
+    check("human:" in w.lines("input")[1] and w.lines("input")[1].endswith("Use CHF please"), f"second input {w.lines('input')[1]!r}")
     time.sleep(1.5)
     check(len(w.lines("input")) == 2, f"input arrived more than once: {w.lines('input')}")
     # the tool says it waits for the person's OK (its Notification hook)
@@ -976,8 +981,9 @@ def f4_focus(e):
         "bad Host (POST)": fx.act("run.start", body, {"Host": "evil.example"}),
         "cross-site Origin": fx.act("run.start", body, {"Origin": evil}),
         "cross-site fetch": fx.act("run.start", body, {"Sec-Fetch-Site": "cross-site"}),
-        "no Origin": http("POST", fx.base + "/api/act", {"Sec-Fetch-Site": "same-origin"}, {"op": "run.start", "args": body}),
-        "not JSON": http("POST", fx.base + "/api/act", {"Origin": fx.base, "Content-Type": "text/plain"}, b'{"op":"run.start"}'),
+        # signed in, so the fence itself refuses these (not the missing sign-in)
+        "no Origin": http("POST", fx.base + "/api/act", {k: v for k, v in fx.auth.items() if k != "Origin"}, {"op": "run.start", "args": body}),
+        "not JSON": http("POST", fx.base + "/api/act", {**fx.auth, "Content-Type": "text/plain"}, b'{"op":"run.start"}'),
     }
     for what, r in refused.items():
         check(r.status in (400, 403, 415), f"{what} was not refused: {r}")
@@ -1058,10 +1064,13 @@ def s2_dashboard_start_makes_tasks(e):
     tid = w.ticket("Start from the dashboard", "first step", "second step")
     rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
     check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
-    w.o("start", by=None)
+    started = w.j("start", "--print-launch-url", by=None)
+    w.e.cleanup.append(lambda: w.sh(["orch", "stop"]))
     dbase = w.j("dashboard", "status", by=None)["url"].rstrip("/")
     check(wait_http(dbase + "/"), "the dashboard did not come up")
-    r = http("POST", dbase + "/api/act", {"Origin": dbase, "Sec-Fetch-Site": "same-origin"}, {"op": "run.start", "args": {"ticket": tid}})
+    base, auth = page_signin(started, "dashboard")  # Start is the person's click: signed in, like a browser
+    check(base == dbase, f"the sign-in link is not the dashboard: {base} vs {dbase}")
+    r = http("POST", dbase + "/api/act", auth, {"op": "run.start", "args": {"ticket": tid}})
     check(r.status == 200, f"dashboard run.start: {r}")
     done = wait_for(lambda: [c for c in w.load(tid)["checklist"] if c.get("done")], 45)
     check(done, f"no task done 45 s after Start: {w.load(tid)['checklist']}; agent log: {w.lines('prompt')}")

@@ -17,9 +17,24 @@ from receiver import Receiver
 STATE_POLL_S = 0.5  # /api/state runs `orch` subprocesses on every call; 0.5 s keeps the probe light and still < the page's 3 s poll
 
 
+_AUTH: dict[str, dict] = {}  # dashboard url -> the signed-in headers (cookie + page secret) of that page
+
+
+def signin(e, w: Path) -> None:
+    """Sign in to the dashboard of workspace `w` like a browser (the sign-in link `orch start` prints): a click on
+    the page is the person's and is refused with 'Sign in to do this' without it. A failed sign-in is kept quiet
+    here: the next act() then shows the refusal as the step's result."""
+    rc, out, _ = e.sh(["orch", "start", "--print-launch-url", "--json"], cwd=w, timeout=120)
+    try:
+        base, headers = lib.page_signin(json.loads(out), "dashboard")
+        _AUTH[base] = headers
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def act(dash: str, op: str, args: dict) -> lib.Resp:
-    return lib.http("POST", dash + "/api/act", {"Content-Type": "application/json", "Origin": dash},
-                    {"op": op, "args": args})
+    h = {**(_AUTH.get(dash) or {"Origin": dash}), "Content-Type": "application/json"}
+    return lib.http("POST", dash + "/api/act", h, {"op": op, "args": args})
 
 
 def state(dash: str) -> dict:
@@ -68,6 +83,7 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
     if not dash:
         L.step("B00", "dashboard of Pilatus is up", lambda st: (_ for _ in ()).throw(Blocked("no dashboard url")))
         return L
+    signin(e, w)
     fake_log = env.root / "fake-agent.log"
     cfg = w / ".orch" / "config.toml"
     if real_agents:
@@ -83,6 +99,7 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
         e.sh(["orch", "start", "--no-open"], cwd=w, timeout=120, env={"CLAUDE_CODE_OAUTH_TOKEN": tok})
         env.refresh_urls()
         dash = env.urls.get("reports")
+        signin(e, w)  # the restart made a new page session
         L.notes.append("REAL Claude agent (built-in adapter, narrow allowed tools); the login is only in this workspace's processes; latencies include the model")
     else:
         script = env.root / "fake-agent.sh"
@@ -453,6 +470,7 @@ def lane_g(env, out: Path) -> Lane:
 
     dash = env.urls.get("reports")
     w = e.ws("Reports")
+    signin(e, w)
 
     def team(on: bool):
         def go(st):
