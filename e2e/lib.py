@@ -92,6 +92,24 @@ def http(method: str, url: str, headers: dict | None = None, body=None, timeout:
             time.sleep(1)
 
 
+def page_signin(start_json: dict, addon: str) -> tuple[str, dict]:
+    """Sign in to an orch page server the way a browser does: take the one-time sign-in link that
+    `orch start --print-launch-url --json` printed for `addon`, hand its token to POST /session (what the page does
+    with the `#launch=` fragment) and keep the session cookie and the page secret. Returns (base url, headers every
+    later action sends: Origin, Sec-Fetch-Site, Cookie and X-Orch-Page). Without them an action is refused with
+    'Sign in to do this' (the sign-in is the only check, from any computer)."""
+    url = next((x["url"] for x in start_json.get("launch") or [] if x.get("addon") == addon), None)
+    check(url and "#launch=" in url, f"orch start printed no sign-in link for {addon}: {start_json.get('launch')}")
+    base, token = url.split("#launch=", 1)
+    base = base.rstrip("/")
+    r = http("POST", base + "/session", {"Origin": base, "Sec-Fetch-Site": "same-origin"}, {"token": token}, timeout=15)
+    check(r.status == 200, f"sign-in at {addon} refused: {r.status} {r.body[:200]!r}")
+    cookie = (r.headers.get("set-cookie") or "").split(";", 1)[0]
+    secret = (r.json() or {}).get("secret")
+    check(cookie and secret, f"sign-in at {addon} gave no session (cookie {bool(cookie)}, secret {bool(secret)})")
+    return base, {"Origin": base, "Sec-Fetch-Site": "same-origin", "Cookie": cookie, "X-Orch-Page": secret}
+
+
 def free_port(used: set[int]) -> int:
     for _ in range(500):
         p = random.randint(18000, 18999)
