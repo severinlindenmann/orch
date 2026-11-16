@@ -558,7 +558,7 @@ def test_preview_never_points_outside_the_list(monkeypatch):
 
 def _done_before_the_write_scan(monkeypatch, run, *argv):
     """`orch check done` as it ran before evidence writes were scanned (#942): a ticket written then can still
-    hold a secret, so the phone gate below must keep stopping it."""
+    hold a secret, so the phone check below must keep stopping it."""
     from orch import secretscan
 
     with monkeypatch.context() as m:
@@ -592,7 +592,7 @@ def _done_before_the_write_scan(monkeypatch, run, *argv):
         ("x.jpg", jpeg(APP0, tail=b"\x00\x00"), True),  # camera NUL padding is fine
     ],
 )
-def test_evidence_files_go_through_the_same_secret_gate(
+def test_evidence_files_go_through_the_same_secret_check(
     proj,
     run,
     new_ticket,
