@@ -260,7 +260,8 @@ def test_counts_window_nothing_and_errors(ws, capsys):
     assert code == 0 and ans["runs"] == 0 and ans["items"] == []
     check(validator("counts", "answer"), ans, "counts")
     _, (ans,) = cli_lines(capsys, "counts")
-    assert ans["runs"] == 0  # the default window is the last 30 days
+    _, (d30,) = cli_lines(capsys, "counts", "--days", "30")
+    assert ans["runs"] == d30["runs"]  # the default window is the last 30 days (the fixture date is real now)
     for bad in (
         ["--from", "2026-11-01"],
         ["--days", "0"],
