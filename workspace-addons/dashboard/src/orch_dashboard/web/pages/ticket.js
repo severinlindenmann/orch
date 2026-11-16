@@ -407,12 +407,19 @@ function agentBar(t) {
   const line = window.DashHelpers.agentLine(t, run, Date.now(), liveLink, state.settings);
   const session = array(t.sessions).slice().sort((a, b) => (Date.parse(b.last_used) || 0) - (Date.parse(a.last_used) || 0))[0];
   const step = array(t.checklist).find(task => !task.wont_do && task.state === 'doing');
+  // ORCH-61: the core's one state word, and when the helper last wrote to the ticket and what, so working and stuck
+  // differ without Watch live; Stop says when the helper sits idle.
+  const helper = window.DashHelpers.helperState(run, t), last = run?.last_activity;
+  const lastLine = helper && last?.at ? h('p', {className:'meta truncate', 'data-key':'agent-last'},
+    'Last activity ' + window.DashHelpers.ago(last.at, Date.now()) + (last.text ? ': ' + clean(window.DashHelpers.historyLine({text:last.text}, t.checklist)) : '')) : null;
+  const idle = helper && ['idle', 'stuck'].includes(helper.state);
   return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'},
     h('span', {className:'dot ' + (line.startFailed ? 'error' : run?.running ? 'working' : 'idle'), 'aria-hidden':'true'}),
     line.startFailed ? h('span', {className:'ab-text grow', 'data-key':'start-failed'}, clean(line.status))
-      : h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), line.startFailed ? null : ticketWarmth(t, run, session),
+      : h('div', {className:'grow'}, h('p', {className:'ab-text truncate'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), lastLine),
+    helper && window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : null, line.startFailed ? null : ticketWarmth(t, run, session),
     snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
-      alive ? ticketButton('Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
+      alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
 }
 
 // "X is also changing this folder": one quiet line from the core (orch run status), no banner. A hint, not a lock.
@@ -1297,6 +1304,7 @@ function ticketPaused(t, run) {
 const openChanges = t => array(t.checklist).filter(c => !c.done && !c.wont_do && changeTask(c.text, c.origin));
 // One strip at the top of the ticket in every state: one status pill, one sentence, one main action (no stepper).
 // Pill names are the master's status icons: todo, working, needs, check, done. The helper is just "Helper".
+const stripHelperPill = helper => { const p = window.UI.helperPill(helper.state, helper.word); p.dataset.key = 'status-helper-' + helper.state; return p; };
 function ticketStripModel(t, run, fresh) {
   const q = questions(t)[0], at = t.updated_at ? time(t.updated_at) : '';
   if (t.status === 'done') {
@@ -1311,7 +1319,12 @@ function ticketStripModel(t, run, fresh) {
   }
   if (t.status === 'review') return {pill:'check', word:'Check', sentence:'Helper finished' + (at ? ' ' + at : '') + '.'};
   if (t.bring_back?.state === 'waiting') return {pill:'needs', word:'Needs you', sentence:'Helper has changes waiting for you.'};
-  if (run?.running) return {pill:'working', word:'Working', sentence:openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.'};
+  if (run?.running) {
+    // the core's one helper state (ORCH-61): a helper that sits idle or is stuck never reads "Working" here
+    const helper = window.DashHelpers.helperState(run, t), PILL = {working:'working', starting:'working', you:'needs', waiting:'check', idle:'todo', stuck:'needs'};
+    if (helper && helper.state !== 'working') return {pill:PILL[helper.state] || 'todo', word:helper.word, helper, sentence:(helper.detail || helper.word) + '.'};
+    return {pill:'working', word:'Working', sentence:openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.'};
+  }
   if (fresh) return {pill:'todo', word:'To do', sentence:'Not started. Your helper begins when you press Start.'};
   if (ticketPaused(t, run)) return {pill:'todo', word:'To do', sentence:'Paused' + (at ? ' ' + at : '') + '.'};
   return {pill:'todo', word:window.DashHelpers.statusWord(t.status) || 'To do', sentence:at ? 'Updated ' + at + '.' : ''};
@@ -1331,7 +1344,7 @@ function ticketProgress(t, run) {
   const current = run?.running ? list.find(c => !c.done && !c.wont_do && c.state === 'doing') : null;
   return h('section', {className:'card progress-card', 'data-key':'progress'}, h('div', {className:'section-head'}, h('h2', {}, 'Progress'), h('span', {className:'meta'}, ticketProgressCounts(t))),
     h('ol', {className:'task-list'}, list.map((c, i) => c === current
-      ? h('li', {className:'current-task', 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark working', 'aria-hidden':'true'}, '◉'), h('div', {className:'grow'}, h('h3', {}, taskTitle(c)), h('p', {className:'meta'}, 'Your helper is working on this task.')))
+      ? h('li', {className:'current-task', 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark working', 'aria-hidden':'true'}, '◉'), h('div', {className:'grow'}, h('h3', {}, taskTitle(c)), h('p', {className:'meta'}, ['working', 'starting'].includes(window.DashHelpers.helperState(run, t)?.state) ? 'Your helper is working on this task.' : 'Your helper is on this task.')))
       : h('li', {className:'task-row' + (c.wont_do ? ' skipped' : ''), 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark' + (c.done && !c.wont_do ? ' good' : ''), 'aria-hidden':'true'}, c.wont_do ? '–' : c.done ? '✓' : '○'),
         h('div', {className:'grow'}, h('p', {className:'task-title'}, taskTitle(c)), c.wont_do && c.reason ? h('p', {className:'task-note meta'}, clean(c.reason)) : null), h('span', {className:'meta'}, taskWord(c))))));
 }
@@ -1460,7 +1473,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
   return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
-      h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
+      m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
       h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);

@@ -508,6 +508,10 @@ class Tracker:
                 "running": running, "mode": claim.get("mode"), "agent": agent, "label": label, "run": claim.get("run"),
                 "pending": status.get("pending", 0),
                 "waiting_input": _waiting_input(status),
+                # ORCH-61: the core's one helper state (the dashboard shows the same), and its times
+                "helper": status.get("helper") if isinstance(status.get("helper"), dict) else None,
+                "age_seconds": status.get("age_seconds") if isinstance(status.get("age_seconds"), int) else None,
+                "idle_seconds": status.get("idle_seconds") if isinstance(status.get("idle_seconds"), int) else None,
             },
             "state": state,
             "generic": generic,

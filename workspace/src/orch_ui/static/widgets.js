@@ -10,6 +10,34 @@ const ST={
  needs:'<circle cx="12" cy="12" r="8" fill="currentColor"/><path d="M12 8v5" stroke="#101216" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1.2" fill="#101216"/>',
  check:'<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/>',
  done:'<circle cx="12" cy="12" r="8" fill="currentColor"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="#101216" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'};
+/* Helpers list (ORCH-61): one row per live helper, the same on dashboard Home and in Focus. The state comes from the core
+   (orch run status "helper": working | starting | you | waiting | idle | stuck); the page never words it itself.
+   UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 waits for you · 1 idle";
+   UI.helperList(rows, o) -> <section class="card helper-list"> with rows {key, title, href, state, word, meta, actions:[{label, run, key}]},
+   o.title (default "Helpers"), o.empty (shown when there are no rows), o.dataKey. */
+const HELPER_LOOK={working:['working','working'],starting:['working','working'],you:['needs','needs'],waiting:['','check'],idle:['','todo'],stuck:['failed','needs']};
+UI.helperPill=(state,word)=>{const [cls,icon]=HELPER_LOOK[state]||['','todo'];const p=el('span','pill helper-pill'+(cls?' '+cls:''));p.dataset.state=state||'';p.append(UI.statusIcon(icon),document.createTextNode(word||''));return p};
+const HELPER_COUNT=[['working','working'],['starting','starting'],['you','waits for you','wait for you'],['waiting','on hold'],['idle','idle'],['stuck','stuck']];
+UI.helperSummary=rows=>{const n={};(rows||[]).forEach(r=>{n[r.state]=(n[r.state]||0)+1});return HELPER_COUNT.filter(([k])=>n[k]).map(([k,one,many])=>n[k]+' '+(n[k]>1&&many?many:one)).join(' · ')};
+/* The meta line under a helper's title, the same words everywhere: "Step 3 of 4 · 52 min", "Since 3 h · your answer",
+   "Nothing running for 18 min". row: {state, detail, step:{n,of}, minutes, idle, finished} (minutes: since start, idle: quiet). */
+const helperSpan=m=>m==null?'':m<1?'just now':m<60?m+' min':m<1440?Math.round(m/60)+' h':Math.round(m/1440)+' days';
+UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
+ if(r.finished&&(r.state==='idle'||r.state==='stuck'))return 'Finished · '+(d||'session still open');
+ if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.toLowerCase()].filter(Boolean).join(' · ');
+ if(r.state==='waiting'||r.state==='idle'||r.state==='stuck')return d;
+ return [r.step?'Step '+r.step.n+' of '+r.step.of:'',helperSpan(r.minutes),d].filter(Boolean).join(' · ')};
+UI.helperList=(rows,o)=>{o=o||{};rows=rows||[];const box=el('section','card helper-list');if(o.dataKey)box.dataset.key=o.dataKey;
+ const head=el('header','card-h');head.append(el('h2','',o.title||'Helpers'));const sum=UI.helperSummary(rows);if(sum)head.append(el('span','meta helper-sum',sum));box.append(head);
+ if(!rows.length){box.append(el('p','card-row meta',o.empty||'No helper is running.'));return box}
+ rows.forEach(r=>{const row=el('div','card-row helper-row');row.dataset.state=r.state||'';if(r.dataKey)row.dataset.key=r.dataKey;
+  const main=el('div','grow helper-main'),title=el(r.href?'a':'span','helper-title');if(r.href)title.href=r.href;title.title=(r.key?r.key+' ':'')+(r.title||'');
+  if(r.key)title.append(el('span','helper-key',r.key),document.createTextNode(' '));title.append(document.createTextNode(r.title||''));main.append(title);
+  const meta=r.meta!=null?r.meta:UI.helperMeta(r);if(meta)main.append(el('p','meta',meta));
+  const side=el('div','helper-side');side.append(UI.helperPill(r.state,r.word));
+  (r.actions||[]).forEach(a=>{const b=el('button','btn outline sm',a.label);b.type='button';if(a.key)b.dataset.key=a.key;b.onclick=()=>a.run&&a.run(b);side.append(b)});
+  row.append(main,side);box.append(row)});
+ return box};
 /* Status icon: UI.statusIcon('needs') -> <svg class="st needs"> (todo | working | needs | check | done) */
 UI.statusIcon=name=>svg('st '+(ST[name]?name:'todo'),ST[name]||ST.todo);
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
