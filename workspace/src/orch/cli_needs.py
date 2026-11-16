@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -9,7 +10,9 @@ from orch import needs as needs_mod
 
 
 def add_parsers(sub, common) -> None:
-    sub.add_parser("needs", parents=[common], help="what waits for a person")
+    x = sub.add_parser("needs", parents=[common], help="what waits for a person")
+    # orch's own detached run: asks GitHub about pull requests left open (stuck.py), prints nothing
+    x.add_argument("--look-at-pulls", action="store_true", help=argparse.SUPPRESS)
 
 
 def _line(r: dict) -> str:
@@ -27,6 +30,11 @@ def _line(r: dict) -> str:
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "needs":
         return False
+    if args.look_at_pulls:
+        from orch import history, stuck, tickets
+
+        stuck.look(root, history.shown_json(root, tickets.list_all(root)))
+        return True
     rows = needs_mod.needs(root)
     if args.json:
         print(json.dumps(rows, indent=2, ensure_ascii=False))

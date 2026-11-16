@@ -176,6 +176,8 @@ def proj(tmp_path, monkeypatch):
     from orch import runs_live
 
     monkeypatch.setattr(runs_live, "resume_after_answer", lambda *a, **k: None)
+    # `orch needs` may start a detached look at a ticket's pull request (stuck.py): never the real GitHub
+    monkeypatch.setenv("ORCH_NO_PULL_LOOK", "1")
     return tmp_path
 
 

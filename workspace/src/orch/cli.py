@@ -667,6 +667,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("target", help="the number from `orch ref list`, or the address")
     x.add_argument("--status", required=True, metavar="WORD", help='a short lower-case word; "" clears it')
+    x = lk.add_parser(
+        "merge",
+        parents=[common],
+        help="a person merges the ticket's GitHub pull request with their own GitHub login",
+    )
+    x.add_argument("id")
+    x.add_argument("target", help="the number from `orch ref list`, or the address")
+    x.add_argument(
+        "--head", required=True, metavar="COMMIT", help="merge only while this is its newest commit"
+    )
 
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
     x = e.add_parser("set", parents=[common])
@@ -943,6 +953,10 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.set_status(root, args.id, args.status, who)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
+        if not hint and who.startswith("agent:"):
+            from orch import stuck
+
+            hint = stuck.finish_hint(t)  # its pull request is still open
         if hint and t["status"] == "review":
             shown = {**shown, "next_step": hint}
         text = (
@@ -1207,6 +1221,40 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t["ext"][args.addon], f"ext.{args.addon} set on {t['id']}")
 
 
+def _ref_merge(args, root: Path, who: str) -> None:
+    """A person's Merge on a pull request left open (Home, `orch needs`): the same merge as the Merge card
+    (ghmerge: the person's own GitHub login, only the commit that was shown); the reference then says
+    merged."""
+    from orch import ghmerge
+
+    if not who.startswith("human:") or tickets.agent_tool():
+        raise Refused("Only a person merges this. Ask the human to press Merge on Home.")
+    t = tickets.load(root, args.id)
+    rows = refs.all_refs(root, t)
+    ref = next(
+        (
+            r
+            for n, r in rows
+            if (str(n) == args.target if args.target.isdigit() else r.get("url") == args.target)
+        ),
+        None,
+    )
+    key = t.get("key") or t["id"]
+    if ref is None or not ghmerge.is_pr_url(ref.get("url")):
+        raise Refused(f"{key} has no GitHub pull request {args.target}. See them: orch ref list {key}")
+    url = ref["url"]
+    got = ghmerge.merge(url, args.head)
+    line = (
+        f"The pull request was merged already on GitHub ({got['login']}): {url}"
+        if got["already"]
+        else f"Merged the pull request on GitHub as {got['login']}: {url}"
+    )
+    with contextlib.suppress(Refused, OSError):  # merged on GitHub; the note and the shown state are extras
+        tickets.ref_set(root, t["id"], url, "merged", who)
+        tickets.note_history(root, t["id"], who, line)
+    _out(args, {"merged": True, "already": got["already"], "url": url}, line)
+
+
 def _ref(args, root: Path, by) -> None:
     kinds = refs.active_kinds(root)
     if args.sub == "add":
@@ -1235,6 +1283,8 @@ def _ref(args, root: Path, by) -> None:
                     f"  {n}  {d['type']}  {value}{suffix}"
                     + (f"  {d['status'].capitalize()}" if d["status"] else "")
                 )
+    elif args.sub == "merge":
+        _ref_merge(args, root, by())
     elif args.sub == "set":
         t, ref, changed = tickets.ref_set(root, args.id, args.target, args.status, by())
         d = refs.describe(ref, kinds, root)

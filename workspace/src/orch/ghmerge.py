@@ -3,12 +3,14 @@
 The merge runs with the person's OWN GitHub login: the one the GitHub command line (gh) is signed in with
 on this computer. Token variables a helper's environment may carry (GH_TOKEN, GITHUB_TOKEN, ...) are
 dropped, so a helper's account never does the merge. GitHub itself decides who may merge (branch rules);
-a refusal comes back to the person in plain words. Only review.decide/change call this, after the person
-check.
+a refusal comes back to the person in plain words. Only review.decide/change and `orch ref merge` call
+merge(), after the person check. checks() only reads (orch needs uses it for a finished ticket whose pull
+request is still open).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -90,6 +92,65 @@ def _gh_plain(gh: str, args: list[str], timeout: int) -> subprocess.CompletedPro
         raise Refused("GitHub did not answer in time. Try again in a minute.") from None
     except OSError:
         raise Refused("--merge needs the GitHub command line (gh) to read the pull request.") from None
+
+
+JSON_CHECKS = "state,isDraft,headRefOid,statusCheckRollup"
+PASSED = ("SUCCESS", "SKIPPED", "NEUTRAL")
+
+
+def _newest(rollup: list) -> list:
+    """One entry per check: GitHub lists every run of a workflow on the commit (a first run made while the
+    pull request was a draft, the full run after), and only the newest run of a check counts."""
+    last: dict = {}
+    for n, c in enumerate(rollup):
+        if not isinstance(c, dict):
+            return rollup
+        key = (c.get("workflowName"), c.get("name") or c.get("context") or n)
+        when = str(c.get("startedAt") or "")
+        if key not in last or when >= last[key][0]:
+            last[key] = (when, c)
+    return [c for _, c in last.values()]
+
+
+def passed(rollup) -> bool:
+    """True when every check of a pull request has finished, none failed and at least one succeeded."""
+    if not isinstance(rollup, list) or not rollup:
+        return False
+    good = 0
+    for c in _newest(rollup):
+        if not isinstance(c, dict):
+            return False
+        if "state" in c and "status" not in c:  # a commit status (no run): SUCCESS or not
+            word = c.get("state")
+        elif c.get("status") != "COMPLETED":
+            return False
+        else:
+            word = c.get("conclusion")
+        if word not in PASSED:
+            return False
+        good += word == "SUCCESS"
+    return good > 0
+
+
+def checks(url: str) -> dict | None:
+    """What GitHub says about a pull request now, read-only, with whatever login this process has:
+    {"state": OPEN|MERGED|CLOSED, "head": <newest commit>, "green": <open, not a draft, checks passed>}.
+    None when it cannot be read (no gh, not signed in, no network): the caller then shows nothing."""
+    gh = shutil.which("gh")
+    if gh is None or not is_pr_url(url):
+        return None
+    try:
+        v = _gh_plain(gh, ["pr", "view", url, "--json", JSON_CHECKS], 15)
+        data = json.loads(v.stdout) if v.returncode == 0 else None
+    except (Refused, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("state"), str):
+        return None
+    head = data.get("headRefOid")
+    if not isinstance(head, str) or not SHA.fullmatch(head):
+        return None
+    green = data["state"] == "OPEN" and data.get("isDraft") is False and passed(data.get("statusCheckRollup"))
+    return {"state": data["state"], "head": head, "green": green}
 
 
 def head_of(url: str) -> str:
