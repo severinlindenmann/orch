@@ -1243,3 +1243,71 @@ def test_the_first_task_waits_while_the_tool_still_draws_notices(proj, run, monk
 def test_typing_alone_never_counts_as_delivered(proj, run, monkeypatch):
     tid, rn, item, sent, screen = _stuck(proj, run, monkeypatch, pane=_screen("", above="Brewed for 1s"))
     assert [i["id"] for i in runs.undelivered(proj, tid)] == [item["id"]]
+
+
+def _asked_for_ok(proj, run, monkeypatch, pane="Do you want to proceed?\n ❯ 1. Yes\n   2. No\n"):
+    """A live run that was up and then showed a permission dialog (a tool notice set attention)."""
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane=pane)
+    runs_live._set_state(proj, tid, rn, "attention")
+    return tid, rn, screen
+
+
+def test_a_dialog_that_went_away_by_itself_counts_as_working_again(proj, run, monkeypatch):
+    # report r-1116-1738-ws: the tool blocked the call after a minute and went on; no Stop, no new prompt
+    tid, rn, screen = _asked_for_ok(proj, run, monkeypatch)
+    memo, t0 = {}, time.time()
+    assert runs_live.check_attention(proj, tid, rn, memo, now=t0) is False  # the dialog still shows
+    screen["pane"] = _screen("")
+    assert runs_live.check_attention(proj, tid, rn, memo, now=t0 + 1) is False  # gone, but not long enough
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+    assert runs_live.check_attention(proj, tid, rn, memo, now=t0 + 1 + runs_live.ATTENTION_CLEAR_SECONDS)
+    assert runs.read(proj, tid)["live"]["state"] == "working"
+    from orch import runwatch
+
+    waits = runwatch.waiting_on(proj, runs.read(proj, tid), tickets.load(proj, tid), [])
+    assert not any(w["kind"] == "person" and "OK" in w["what"] for w in waits)
+
+
+def test_a_dialog_that_comes_back_restarts_the_wait(proj, run, monkeypatch):
+    tid, rn, screen = _asked_for_ok(proj, run, monkeypatch)
+    memo, t0 = {}, time.time()
+    screen["pane"] = _screen("")
+    runs_live.check_attention(proj, tid, rn, memo, now=t0)
+    screen["pane"] = "Do you want to make this edit?\n"  # the next dialog (or a redraw) shows
+    assert runs_live.check_attention(proj, tid, rn, memo, now=t0 + 2) is False
+    screen["pane"] = _screen("")
+    assert runs_live.check_attention(proj, tid, rn, memo, now=t0 + 4) is False  # counted from here again
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+
+
+def test_a_scrolled_pane_never_clears_the_wait(proj, run, monkeypatch):
+    tid, rn, screen = _asked_for_ok(proj, run, monkeypatch)
+    screen["pane"], screen["mode"] = _screen(""), "1"  # scrolled up: the dialog may be below
+    memo, t0 = {}, time.time()
+    for dt in (0, 10, 100):
+        assert runs_live.check_attention(proj, tid, rn, memo, now=t0 + dt) is False
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+
+
+def test_a_first_run_screen_or_another_state_is_left_alone(proj, run, monkeypatch):
+    tid, rn, screen = _asked_for_ok(proj, run, monkeypatch, pane=_screen(""))
+    rec = runs.read(proj, tid)
+    rec["live"]["why"] = "Claude Code wants a login."  # a first-run screen: check_starting owns it
+    runs._write(proj, rec)
+    memo, t0 = {}, time.time()
+    for dt in (0, 10):
+        assert runs_live.check_attention(proj, tid, rn, memo, now=t0 + dt) is False
+    runs_live._set_state(proj, tid, rn, "idle")
+    for dt in (20, 30):
+        assert runs_live.check_attention(proj, tid, rn, memo, now=t0 + dt) is False
+    assert runs.read(proj, tid)["live"]["state"] == "idle"
+
+
+def test_a_new_notice_restarts_the_wait(proj, run, monkeypatch):
+    tid, rn, screen = _asked_for_ok(proj, run, monkeypatch, pane=_screen(""))
+    memo, t0 = {}, time.time()
+    runs_live.check_attention(proj, tid, rn, memo, now=t0)
+    since, first = memo["attention_gone"]
+    memo["attention_gone"] = ("2000-01-01T00:00:00Z", first)  # a newer notice came since the screen was read
+    assert runs_live.check_attention(proj, tid, rn, memo, now=t0 + 10) is False
+    assert runs.read(proj, tid)["live"]["state"] == "attention"

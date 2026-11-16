@@ -208,13 +208,15 @@
   }
   /* A helper's changes waiting to be added: shown as "Changes to add" from the ticket, not as a second row. */
   const isBringBack = row => !!row && row.kind === 'copies:bring-back';
-  /* The one "Needs you" number (sidebar badge, top bar, Home heading and pill, Tickets pill): one per ticket (or per
-     row without a ticket) that needs an answer, plus failed starts, results to check and changes to add. Notices
-     (isNotice) and the bring-back rows (counted as changes) are not counted. results/changes are numbers or lists. */
-  function needsYouCount(rows, failed, results = 0, changes = 0) {
-    const asked = new Set(arr(rows).filter(r => r && !isNotice(r) && !isBringBack(r)).map(r => r.ticket || r.id)).size;
-    const n = v => Array.isArray(v) ? v.length : Number(v) || 0;
-    return asked + arr(failed).length + n(results) + n(changes);
+  /* The one "Needs you" number (Review menu entry, top bar, Home heading, Review page, Tickets pill, Focus): the open
+     questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov, ORCH-63).
+     One per question (a ticket with two open questions counts two); a ticket that only waits for another ticket, a
+     failed start, a helper idle at its prompt and other rows without a question are shown on Home but not counted.
+     results is a number or a list. */
+  function needsYouCount(rows, results = 0) {
+    const asked = new Set(arr(rows).filter(r => r && r.ticket && r.answer && r.answer.question && !isNotice(r) && !isBringBack(r))
+      .map(r => r.ticket + ':' + r.answer.question)).size;
+    return asked + (Array.isArray(results) ? results.length : Number(results) || 0);
   }
 
   /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */

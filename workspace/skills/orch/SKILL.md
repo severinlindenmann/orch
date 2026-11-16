@@ -136,6 +136,12 @@ Write the question for a person who has not seen your work, in plain words:
     orch review link             # the address of the review page, to send the owner
 
 Other cards: `--draft`, `--plan`, `--link` (with `--open <address>`), `--before F --after F`. The answer may carry changes: do exactly those, nothing more.
+The question text is shown on the card in full: write the Now / Proposal there, keep `--why` to one line. Mark what you
+recommend: `--suggest <option>` on a choice, `--suggest ok` or `--suggest no` on another card. A choice can show how it
+is today beside the options: `--choose ... --before files/today.png`. Several cards that belong together (a design
+review): give each the same `--group "<short name>"`; the person sees them as one set with its own count.
+Links to look at beside the card (a mockup, an issue): `--ref "Mockup=http://…"` (up to 5). A line under one option of
+a choice: `--describe "A=Keeps the menu as it is"`.
 
 A GitHub pull request only the person may merge: `orch ask <id> "Merge release 3?" --link "Release 3" --open <pull request address> --merge --then "<what follows>"`. The person's Merge click merges it with their own GitHub login; never merge it yourself.
 

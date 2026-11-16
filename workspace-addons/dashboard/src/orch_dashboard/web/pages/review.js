@@ -7,17 +7,11 @@ function reviewCards() { return array(state?.review?.cards); }
 function reviewAnswered() { return array(state?.review?.answered); }
 // The cards of the stack: every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
 function reviewCount() { return reviewCards().length; }
-// The subtitle shows THE needs-you number (home.js needsToday: the top bar, sidebar and Home show the same one, ORCH-63).
-// What has no card here (a failed start, changes to add, a helper idle at its prompt) is said as "more on Home".
+// The subtitle shows THE needs-you number (needsYouTotal: open questions plus results to check, exactly what this page
+// shows as cards; the Review menu entry and the top bar show the same one, ORCH-63).
 function reviewSubtitle() {
-  const things = k => k + (k === 1 ? ' thing waits' : ' things wait') + ' on you';
-  if (typeof needsToday !== 'function') { const k = reviewCount(); return k ? things(k) + ', most urgent first.' : 'Nothing waits for you.'; }
-  const {count:n, groups, failed, changes} = needsToday(), onCard = new Set(reviewCards().map(c => c.ticket));
-  const homeOnly = groups.filter(g => !(g.row.ticket && onCard.has(g.row.ticket))).length
-    + failed.filter(([t]) => !onCard.has(t.id)).length + changes.filter(t => !onCard.has(t.id)).length;
-  if (!n) return 'Nothing waits for you.';
-  if (!homeOnly) return things(n) + ', most urgent first.';
-  return homeOnly >= n ? things(n) + ', all on Home.' : things(n) + ': ' + (n - homeOnly) + ' here, ' + homeOnly + ' more on Home.';
+  const n = typeof needsYouTotal === 'function' ? needsYouTotal() : reviewCount();
+  return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
 function reviewWord(answer) {
@@ -54,25 +48,46 @@ function reviewApi() {
     }
   };
 }
-// The deck list: one line per card, the one on screen in bold, answered ones quiet with their word.
+// The deck list: one section per set of cards (the helper's group, else the ticket) with its own count, one line
+// per card, the one on screen in bold, answered ones quiet with their word.
+function reviewGroupOf(it) { return it.group || it.ticketTitle || it.ticket || ''; }
 function reviewDrawSide(queue, deck) {
   if (!queue || !deck) return;
-  queue.replaceChildren(...deck.items.map((it, i) => {
-    const a = deck.answers[it.id], row = el('button', 'btn ghost sm review-queue-row' + (i === deck.index && !a ? ' is-now' : '') + (a ? ' is-done' : ''));
-    row.type = 'button'; row.setAttribute('role', 'listitem');
-    const icon = iconEl(it.icon);
-    row.append(icon, el('span', 'review-queue-title', it.title));
+  const groups = new Map();
+  deck.items.forEach((it, i) => {
+    const key = reviewGroupOf(it);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  });
+  const row = i => {
+    const it = deck.items[i], a = deck.answers[it.id], r = el('button', 'btn ghost sm review-queue-row' + (i === deck.index && !a ? ' is-now' : '') + (a ? ' is-done' : ''));
+    r.type = 'button'; r.setAttribute('role', 'listitem');
+    r.append(iconEl(it.icon), el('span', 'review-queue-title', it.title));
     const word = a ? reviewWord(a) : i === deck.index ? 'Now' : '';
-    if (word) row.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));
-    row.onclick = () => deck.jump(i);
-    return row;
+    if (word) r.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));
+    r.onclick = () => deck.jump(i);
+    return r;
+  };
+  const one = groups.size < 2;
+  queue.replaceChildren(...[...groups].map(([name, rows]) => {
+    const sec = el('div', 'review-group');
+    sec.setAttribute('role', 'list');
+    sec.setAttribute('aria-label', name || 'Cards');
+    if (!one || name) {
+      const left = rows.filter(i => !deck.answers[deck.items[i].id]).length;
+      const head = el('h3', 'review-group-head');
+      head.append(el('span', '', name || 'Cards'), el('span', 'meta', left ? left + ' of ' + rows.length + ' waiting' : 'All ' + rows.length + ' answered'));
+      sec.append(head);
+    }
+    sec.append(...rows.map(row));
+    return sec;
   }));
 }
 function reviewPage() {
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':''},
     h('h2', {}, 'All cards'),
     h('p', {className:'meta'}, 'Click one to jump there.'),
-    h('div', {className:'review-queue', role:'list', 'aria-label':'All cards', 'data-review-queue':''}));
+    h('div', {className:'review-queue', 'aria-label':'All cards', 'data-review-queue':''}));
   return fragment(
     heading('Review', reviewSubtitle()),
     h('div', {className:'review-layout', 'data-key':'review-layout'},
@@ -84,7 +99,8 @@ function mountReview(main) {
   main.querySelectorAll('[data-review-host]').forEach(host => {
     if (mounts.has(host) || !window.UI?.reviewPage) return;
     const queue = main.querySelector('[data-review-queue]');
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, onChange:deck => reviewDrawSide(queue, deck)});
+    const want = /[?&]card=([^&]+)/.exec(typeof location === 'undefined' ? '' : location.hash || '');  // the ticket page's "Look and answer" opens this card
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => reviewDrawSide(queue, deck)});
     mounts.set(host, {destroy() { page.destroy(); }, page});
   });
 }

@@ -80,6 +80,20 @@ test('mapCard keeps option previews and picks a kind label', () => {
   assert.equal(it.preview.options[1].suggested, true);
 });
 
+test('mapCard carries the question text, the set, the suggestion and a choice\'s Today picture (ORCH-65)', () => {
+  const {UI} = load();
+  const c = card('o'); Object.assign(c, {text: 'Now: three counts. Proposal: one.', group: 'Home look', recommended: 'B'});
+  c.card = {kind: 'choice', title: 'Which?', preview: {type: 'options', before: {type: 'img', src: 'reviewed/aa/t.png'}, options: [{id: 'A', title: 'One'}, {id: 'B', title: 'Two'}]}};
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.equal(it.text, 'Now: three counts. Proposal: one.'); assert.equal(it.group, 'Home look');
+  assert.equal(it.preview.options[1].suggested, true); assert.equal(it.preview.options[0].suggested, false);
+  assert.equal(it.preview.before.src, '/f/T-1/reviewed/aa/t.png'); assert.equal(it.suggest, undefined);
+  const l = card('l'); l.links = [{label: 'Mockup', url: 'http://127.0.0.1:8780/a.html'}, {label: 'Bad', url: 'javascript:x'}]; l.card = {kind: 'draft', title: 'B'};
+  assert.equal(JSON.stringify(UI.review.mapCard(l, fakeApi([[]]), NOW).links), JSON.stringify([{label: 'Mockup', url: 'http://127.0.0.1:8780/a.html'}]));
+  const d = card('d'); d.recommended = 'ok'; d.card = {kind: 'draft', title: 'Block'};
+  assert.equal(UI.review.mapCard(d, fakeApi([[]]), NOW).suggest, 'ok');
+});
+
 test('the deck is text only by default: voice is off', async () => {
   const {decks} = await mount(fakeApi([[card('a')]]));
   assert.equal(decks[0].o.voice, false);

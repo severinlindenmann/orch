@@ -37,11 +37,12 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
  thead.append(tr);table.append(thead,tbody);wrap.append(table);draw();return wrap};
 /* Swipe review deck (draft 15 Nov, revised after the Codex challenge): UI.swipeDeck(host, items, o)
    o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), onUndo(item), onChange()}
-   Moves: right = approve (button names the action: it.okLabel, "Use C"), left = Don't do / Send back / None of these,
-   down = comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
-   up = Later (stays unanswered, goes to the end). Buttons and keys (→ ← ↓ ↑, Space bigger, B before/after, O all, Z undo)
-   do the same. A swipe needs real distance (no flick-only approve); a drag from the phone's left edge is left to the
-   system back gesture; a second finger cancels. Every card says what happens when you approve (it.then).
+   Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
+   → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
+   ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
+   ↑ Later (stays unanswered, goes to the end); Space bigger, B before/after, O all, Z undo. A tap on an option picks
+   it, a tap on the picture opens it bigger. The answered card fades; nothing flies. Every card says what happens
+   when you approve (it.then). Item extras: text (the question), group, suggest ('ok'|'no'), links [{label,url}].
    verdicts: ok | no | talk | later. note: {picked, changes:{text, clips, pins:[{n,on,x,y,text}]}, about} */
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
  let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
@@ -57,7 +58,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* bottom: the three answers + Later */
  const acts=el('div','swipe-actions');
  const mk=(cls,icon,label,key,fn)=>{const r=el('span','ring');r.append(ic(icon,cls==='ok'?28:24));const l=el('span','act-label'),w=el('span','act-word',label);l.append(w);if(key)l.append(el('kbd','',key));const b=btn('swipe-act '+cls,[r,l]);b.onclick=fn;return b};
- const noBtn=mk('no','x',"Don't do",'←',()=>fly('no')),talkBtn=mk('talk','mic','Comment','↓',()=>fly('talk')),okBtn=mk('ok','check','Looks good','→',()=>fly('ok'));
+ const noBtn=mk('no','x',"Don't do",'←',()=>fly('no')),talkBtn=mk('talk',o.voice?'mic':'comment','Comment','↓',()=>fly('talk')),okBtn=mk('ok','check','Looks good','→',()=>fly('ok'));
  const laterBtn=btn('btn ghost sm swipe-later',['Later']);laterBtn.append(el('kbd','','↑'));laterBtn.onclick=()=>fly('later');
  acts.append(noBtn,talkBtn,okBtn);const laterRow=el('div','swipe-later-row');laterRow.append(laterBtn);
  host.replaceChildren(top,stage,acts,laterRow,live);
@@ -81,7 +82,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const buildCompare=(it,big)=>{const p=it.preview,w=el('div','swipe-compare');const views=big?[['slide','Slide'],['both','Side by side'],['before','Before'],['after','After']]:[['before','Before'],['after','After'],['both','Both']];
   const ctl=el('div','segmented swipe-cmp-ctl');ctl.setAttribute('role','group');ctl.setAttribute('aria-label','Before and after');
   const set=v=>{w.dataset.view=v;ctl.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)))};
-  const pane=side=>{const d=el('div','cmp-pane '+side);d.dataset.on=side;d.append(buildPreview({title:it.title+' '+side,preview:p[side]},big),el('span','cmp-tag',side==='before'?'Before':'After'));return d};
+  const pane=side=>{const d=el('div','cmp-pane '+side);d.dataset.on=side;d.append(buildPreview({title:it.title+' '+side,preview:p[side]},big),el('span','cmp-tag',side==='before'?'Before':'After'));
+   if(!big){const z=btn('btn icon sm cmp-zoom',[ic('expand',16)],side==='before'?'Make before bigger':'Make after bigger');z.dataset.side=side;z.addEventListener('pointerdown',e=>e.stopPropagation());z.onclick=e=>{e.stopPropagation();openViewer(side)};d.append(z)}return d};
   views.forEach(([v,l])=>{const b=btn('btn sm',[l]);b.dataset.v=v;b.onclick=e=>{e.stopPropagation();set(v)};ctl.append(b)});
   ctl.addEventListener('pointerdown',e=>e.stopPropagation());
   w.append(pane('before'),pane('after'),ctl);
@@ -91,10 +93,12 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     handle.addEventListener('pointermove',mv);handle.addEventListener('pointerup',()=>handle.removeEventListener('pointermove',mv),{once:true})});
    w.append(line,r);w.cut=cut}
   if(p.note)w.append(el('span','cmp-note',p.note));
-  w.cycle=()=>{const i=views.findIndex(([v])=>v===w.dataset.view);set(views[(i+1)%views.length][0])};
-  set(big?'slide':(mode==='phone'?'after':'both'));return w};
+  w.cycle=()=>{const i=views.findIndex(([v])=>v===w.dataset.view);set(views[(i+1)%views.length][0])};w.view=set;
+  set(big?'slide':(mode==='phone'||(host.clientWidth&&host.clientWidth<560)?'after':'both'));return w};
  /* Options A / B / C: tap to pick (ring + Picked). On the card a drag that starts on a tile still swipes; a tap picks. */
- const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':''));w.style.setProperty('--n',String((p.options||[]).length));
+ const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':''));w.style.setProperty('--n',String((p.options||[]).length+(p.before?1:0)));
+  if(p.before){const t=el('div','swipe-opt today');t.dataset.on='before';const h=el('span','opt-h');h.append(el('b','opt-letter',''),el('span','opt-title','Today'));h.firstChild.append(ic('clock',14));
+   const th=el('span','opt-thumb');th.append(buildPreview({title:'Today',preview:p.before},big));t.append(h,th);if(p.beforeText)t.append(el('span','opt-text',p.beforeText));w.append(t)}
   (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label','Option '+op.id+': '+op.title+(op.suggested?' (suggested)':''));
    const h=el('span','opt-h');h.append(el('b','opt-letter',op.id),el('span','opt-title',op.title));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
    const th=el('span','opt-thumb');if(op.preview)th.append(buildPreview({title:op.title,preview:op.preview},big));
@@ -105,14 +109,18 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const pick=(it,id)=>{if(!it)return;if(id)picked[it.id]=id;else delete picked[it.id];
   host.querySelectorAll('.swipe-opt').forEach(b=>{if(b.closest('.swipe-card:not(.under):not(.under2),.swipe-viewer'))b.setAttribute('aria-pressed',String(b.dataset.opt===picked[it.id]))});
   syncWords();live.textContent=id?'Picked '+id:'Nothing picked'};
- const syncWords=()=>{const it=items[idx];if(!it)return;okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
+ const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
+ const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
   okBtn.classList.toggle('wait',okWord(it)==='Pick one');
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:''));c.setAttribute('aria-label',it.title);
-  const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
-  h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));h.append(el('h3','',it.title));if(it.why)h.append(el('p','',it.why));
+  const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.group)m.append(el('span','swipe-group',it.group));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
+  const sw=it.suggest==='ok'?okWord(it):it.suggest==='no'?noWord(it):isOpt(it)?(((it.preview.options||[]).find(x=>x.suggested)||{}).id):null;if(sw&&sw!=='Pick one')m.append(el('span','swipe-sug','Suggested: '+sw));
+  h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));h.append(el('h3','',it.title));
+  if(it.text&&it.text!==it.title)h.append(el('p','swipe-text',it.text));/* the whole question; a long one scrolls inside the head */
+  if(it.why)h.append(el('p','swipe-why',it.why));
   const pv=hasPreview(it)?el('div','swipe-preview'):null;/* nothing to preview: no empty box */
   if(pv){pv.append(buildPreview(it,false));
   const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex);
@@ -121,9 +129,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
+  (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   ft.append(row);
-  [['right',okWord(it)==='Pick one'?'Pick one first':okWord(it)],['left',noWord(it)],['down','Comment'],['up','Later']].forEach(([d,t])=>{c.append(el('div','swipe-edge '+d),el('div','swipe-stamp '+d,t))});
   c.append(...[h,pv,ft].filter(Boolean));return c};
  /* order: waiting cards first (Later ones at the end), then answered */
  const waiting=()=>{const w=items.map((_,i)=>i).filter(i=>!ans[items[i].id]);return w.filter(i=>!later.has(items[i].id)).concat(w.filter(i=>later.has(items[i].id)))};
@@ -149,23 +157,19 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const wire=c=>{let sx=0,sy=0,t0=0,id=null,dx=0,dy=0,start=null;const pts=new Set();
   c.addEventListener('pointerdown',e=>{pts.add(e.pointerId);if(pts.size>1){id=null;c.classList.remove('dragging');reset(c);return}/* a second finger cancels */
    if(overlay||busy||e.button>0)return;const hb=host.getBoundingClientRect();if(mode==='phone'&&e.clientX-hb.left<16)return;/* leave the left edge to the system back gesture */
-   id=e.pointerId;sx=e.clientX;sy=e.clientY;t0=performance.now();dx=dy=0;start=e.target;c.setPointerCapture(id);c.classList.add('dragging')});
-  c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy;show(c,dx,dy)});
+   id=e.pointerId;sx=e.clientX;sy=e.clientY;t0=performance.now();dx=dy=0;start=e.target;c.setPointerCapture(id)});
+  c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy});/* the card does not move: answers are buttons and keys (owner 16 Nov) */
   const end=e=>{pts.delete(e.pointerId);if(e.pointerId!==id)return;id=null;c.classList.remove('dragging');const dt=performance.now()-t0,dist=Math.hypot(dx,dy);
    if(dist<8&&dt<400){reset(c);const opt=start&&start.closest&&start.closest('.swipe-opt');if(opt){pick(items[idx],picked[items[idx].id]===opt.dataset.opt?null:opt.dataset.opt);return}
-    if(start&&start.closest&&start.closest('.swipe-preview'))openViewer();return}
-   const w=stage.clientWidth,h=stage.clientHeight,dir=dirOf(dx,dy),v=dist/Math.max(dt,1);
-   /* real distance needed: 30 % of the width (or 22 % of the height), or a quick move of at least 20 % / 15 % */
-   const go=(dir==='down'||dir==='up')?(Math.abs(dy)>h*.22||(v>.6&&Math.abs(dy)>h*.15)):(Math.abs(dx)>w*.3||(v>.6&&Math.abs(dx)>w*.2));
-   if(!go)return reset(c);fly({right:'ok',left:'no',down:'talk',up:'later'}[dir],dx,dy)};
+    if(start&&start.closest&&start.closest('.swipe-preview')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
+   reset(c)};
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(UI.toast&&!o.quiet)UI.toast(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
-  if(verdict==='talk'){show(c,dx||0,Math.max(dy||0,h*.12));return openComment()}
+  if(verdict==='talk')return openComment();
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
-  busy=true;const tx=verdict==='ok'?w*1.4:verdict==='no'?-w*1.4:0,ty=verdict==='later'?-h*1.2:(dy||0)+40;
-  show(c,dx||tx*.1,dy||0);requestAnimationFrame(()=>{c.classList.add('leaving');show(c,tx,ty)});
-  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},220)};
+  busy=true;c.classList.add('leaving');/* a short fade, no swipe */
+  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
  const defer=it=>{later.add(it.id);done.push({item:it,verdict:'later',idx,laterOnly:true});const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length;
   live.textContent='Later: '+it.title;render();if(UI.toast&&!o.quiet)UI.toast('Later: '+it.title+'. It stays at the end.',()=>undo())};
  const commit=(verdict,note)=>{const it=items[idx];done.push({item:it,verdict,note,idx,prev:ans[it.id],prevPick:ans[it.id]&&ans[it.id].note?ans[it.id].note.picked:undefined});ans[it.id]={verdict,note,item:it};later.delete(it.id);
@@ -191,13 +195,13 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    t.append(th,m,el('span','swipe-ov-title',it.title),st);t.onclick=()=>jump(i);return t};
   const order=waiting().concat(items.map((_,i)=>i).filter(i=>ans[items[i].id]));
   /* grouped by ticket (the round), then by task ("About: ..."); cards without a task come last under their ticket */
-  const tk=new Map();order.forEach(i=>{const it=items[i],key=it.ticketId||it.ticket||'';let t=tk.get(key);if(!t){t={title:it.ticketTitle,key:it.ticket,tasks:new Map(),plain:[]};tk.set(key,t)}
+  const tk=new Map();order.forEach(i=>{const it=items[i],key=it.group?'g:'+it.group:it.ticketId||it.ticket||'';let t=tk.get(key);if(!t){t={title:it.group||it.ticketTitle,key:it.group?'':it.ticket,tasks:new Map(),plain:[],rows:[]};tk.set(key,t)}t.rows.push(i);
    if(it.about){if(!t.tasks.has(it.task||it.about))t.tasks.set(it.task||it.about,{about:it.about,rows:[]});t.tasks.get(it.task||it.about).rows.push(i)}else t.plain.push(i)});
   const body=el('div','swipe-viewer-body');
   const head=(text,tag,cls)=>{const h=el(tag,cls,text);h.style.cssText='margin:0;padding:var(--s3) var(--s4) 0';body.append(h)};
   const grid=rows=>{const gr=el('div','swipe-ov-grid');rows.forEach(i=>gr.append(tile(i)));body.append(gr)};
   if(![...tk.values()].some(t=>t.title||t.tasks.size))grid(order);
-  else tk.forEach(t=>{head(t.title?(t.key&&t.key!==t.title?t.title+' · '+t.key:t.title):t.key,'h3');
+  else tk.forEach(t=>{const left=t.rows.filter(i=>!ans[items[i].id]).length;head((t.title?(t.key&&t.key!==t.title?t.title+' · '+t.key:t.title):t.key)+' · '+(left?left+' of '+t.rows.length+' waiting':'all '+t.rows.length+' answered'),'h3');
    t.tasks.forEach(k=>{head('About: '+k.about,'p','meta');grid(k.rows)});if(t.plain.length)grid(t.plain)});
   v.append(b,body);openOverlay(v,body.querySelector('.current')||x);return v};
  /* Comment sheet. The subject (which option) and the outcome are separate: the buttons say what happens.
@@ -229,7 +233,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):'The helper gets your words and makes a new version. Nothing is approved.'};
   ta.addEventListener('input',sync);
   const close=()=>{closeOverlay();reset(cur)};cancel.onclick=close;
-  const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');show(c,verdict==='ok'?stage.clientWidth*1.4:0,verdict==='ok'?0:stage.clientHeight*1.2);
+  const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');
    setTimeout(()=>{busy=false;delete drafts[it.id];commit(verdict,note)},220)};
   const words=()=>({text:ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice()});
   back.onclick=()=>leave('talk',{changes:words(),about:about?about.v:null});
@@ -243,7 +247,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(about)setAbout(picked[it.id]||'all');drawClips();sync();openOverlay(scr,o.state?null:ta);return {mic,start,stop,ta,send:back,use,setAbout,sync}};
  /* Viewer: bigger, zoom, Open, and spots (tap “Spot”, tap the place, say or type what to change; the spot remembers
     which option or side it is on). */
- const openViewer=()=>{const it=items[idx];if(!it)return null;const v=el('div','swipe-viewer');v.setAttribute('role','dialog');v.setAttribute('aria-label',it.title);
+ const openViewer=side=>{const it=items[idx];if(!it)return null;side=side==='before'||side==='after'?side:null;const v=el('div','swipe-viewer');v.setAttribute('role','dialog');v.setAttribute('aria-label',it.title);
   const barEl=el('div','swipe-viewer-bar'),close=btn('btn ghost icon sm',[ic('x',18)],'Close');close.onclick=()=>{closeOverlay();render()};
   let z=1;const zo=btn('btn icon sm',[ic('minus',16)],'Zoom out'),zi=btn('btn icon sm',[ic('plus',16)],'Zoom in');
   const pinBtn=btn('btn sm',[ic('pin',16),mode==='phone'?'Spot':'Mark a spot'],'Mark a spot and say what to change');pinBtn.setAttribute('aria-pressed','false');
@@ -270,7 +274,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    no.onclick=()=>{pop.remove();tmp.remove()};inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();add.click()}});
    if(o.voice)row.append(m);row.append(el('span','grow'),no,add);pop.append(inp,row);zm.append(pop);if(!o.state)inp.focus();return pop};
   (pins[it.id]||[]).forEach((pn,i)=>zm.append(pinEl(pn,i)));
-  foot.append(hint,list);drawList();v.append(barEl,body,foot);openOverlay(v,close);return {askPin,pinning,setZ,compare:zm.querySelector('.swipe-compare')}};
+  foot.append(hint,list);drawList();v.append(barEl,body,foot);openOverlay(v,close);const cw=zm.querySelector('.swipe-compare');if(side&&cw)cw.view(side);return {askPin,pinning,setZ,compare:zm.querySelector('.swipe-compare')}};
  /* keys: only when the deck itself or the card has focus (a focused button keeps its own Space / Enter) */
  host.addEventListener('keydown',e=>{if(e.key==='Tab')return;const t=e.target;
   if(overlay){if(e.key==='Escape'){e.preventDefault();const wasViewer=overlay.classList.contains('swipe-viewer');closeOverlay();wasViewer?render():reset(cur);return}

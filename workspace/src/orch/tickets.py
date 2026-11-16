@@ -2475,10 +2475,19 @@ def ask(
     check: str | None = None,
     card: dict | None = None,
     shown: dict | None = None,
+    group: str | None = None,
+    links: list[dict] | None = None,
 ) -> tuple[dict, dict]:
-    """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here)."""
+    """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
+    group: a short name for cards that belong together (one set on Review); only with a card."""
     if not text.strip():
         raise Refused("A question needs text.")
+    if group is not None:
+        group = " ".join(group.split())
+        if card is None or not group or len(group) > GROUP_MAX or any(ord(ch) < 32 for ch in group):
+            raise Refused(f"A group is a short name (at most {GROUP_MAX} characters) on a card.")
+    if links is not None and card is None:
+        raise Refused("Links go with a card.")
     if recommended is not None and options and recommended not in options:
         raise Refused("The recommended answer must be one of the options.")
     if kind is not None and not KIND_RE.fullmatch(kind):
@@ -2536,6 +2545,10 @@ def ask(
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
+            if group:
+                q["group"] = group
+            if links:  # part of what the person is shown: in the digest (question_digest)
+                q["links"] = [dict(x) for x in links]
         ticket["questions"].append(q)
         ticket["status"] = "waiting"
         ticket["waiting_on"] = {"kind": "question", "ref": q["id"]}
@@ -2545,6 +2558,7 @@ def ask(
     return apply_op(root, tid, op, by=by)
 
 
+GROUP_MAX = 80
 QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
 
 
@@ -2554,7 +2568,11 @@ def question_digest(q) -> str:
     if not isinstance(q, dict):
         return QUESTION_UNENCODABLE
     shown = {k: q.get(k) for k in ("id", "text", "options", "kind", "action", "recommended")}
-    for k in ("card", "shown"):  # RULE A: only when present, so a question without a card keeps its digest
+    for k in (
+        "card",
+        "shown",
+        "links",
+    ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]
     try:
