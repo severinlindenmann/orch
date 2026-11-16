@@ -53,6 +53,7 @@ Started by hand (not by orch)? Tell orch which ticket you work on so nobody star
 `orch run claim <id> --session <your session id>`. Finishing a piece of work in a live session: `orch run done <id>`.
 In a live session, when you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready`, run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
+Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
 
 **Finish a step**
 
