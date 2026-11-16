@@ -619,7 +619,8 @@ def test_v1_home_and_ticket_controls():
     assert "function connectionNotice(connectionEl, hadState)" in home
     assert "connectionNotice(connection, !!state)" in js
     assert "main.replaceChildren(skeletonFor(hashKind(location.hash)))" in js
-    assert "[t.title, t.key, t.owner, t.note]" in tickets and "startsWith('agent:')" in tickets
+    # ORCH-58: a number (58, ORCH-58) matches the key exactly; words search title, key, owner and note
+    assert "keyMatch(t, needle)" in tickets and "t.key, t.owner, t.note]" in tickets and "startsWith('agent:')" in tickets
     assert "'data-key':'ticket-search'" in tickets and "aria-pressed" in tickets
     # The shell's unused old delegation and shared CSS are outside this lane's edit scope.
     for old in ("Jump to", "status-jumps", "board-jump", "boardCol"):
