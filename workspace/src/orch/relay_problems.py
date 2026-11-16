@@ -219,8 +219,8 @@ def shared_here(root: Path) -> dict[str, str]:
         return {}
     out = {}
     for f in sorted(rdir.glob("r-*/" + SHARED)):
-        if f.is_symlink() or f.parent.is_symlink():
-            continue
+        if f.is_symlink() or f.parent.is_symlink() or (f.parent / FROM).exists():
+            continue  # a fetched report is never "shared from here", whatever files it holds
         got = net.read_json(f, None)
         if isinstance(got, dict) and PID.fullmatch(str(got.get("id"))):
             out.setdefault(got["id"], f.parent.name)
@@ -283,6 +283,7 @@ def _unpack(data: bytes, ref: str, dest: Path) -> int:
                     for p in parts
                 )
                 or m.name.startswith("/")
+                or (len(parts) == 2 and parts[1] in (SHARED, FROM))  # only orch writes these, never a sender
             ):
                 raise Refused(
                     "That shared problem holds something that is not a plain file. Nothing was kept."
@@ -318,7 +319,7 @@ def fetch(root: Path, pid: str) -> dict:
     for part in (root / ".orch", root / ".orch" / "diag", rdir):
         if part.is_symlink():
             raise Refused(f"{part} is a link. Nothing was fetched.")
-    mine = _mark(meta, shared_here(root), _own_workspace(root))
+    mine = _mark({**meta, "id": pid}, shared_here(root), _own_workspace(root))
     if mine.get("report"):  # shared from here: the report is here already, no second copy (ORCH-86)
         folder = rdir / mine["report"]
         return {"ref": folder.name, "path": str(folder), "problem": meta, "new": False, "mine": True}

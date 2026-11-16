@@ -363,3 +363,29 @@ def test_a_refused_send_does_not_block_the_next_report(proj, run, srv):
     (Path(md["path"]) / "SUMMARY.md").write_text("# x\npassword: admin:hunter:1234\n")
     (Path(md["path"]) / "shared.json").unlink()
     assert run("relay", "problem", "share", md["ref"])[0] == 2
+
+
+@pytest.mark.parametrize("name", ["shared.json", "from.json"])
+def test_a_fetched_report_cannot_claim_to_be_shared_from_here(proj, run, srv, name):
+    """A sender's archive with its own shared.json (naming another problem) would hide that problem as
+    "shared from here": such an archive is refused, and a fetched folder never counts as shared from here."""
+    ref = "r-1116-1200-ws"
+    members = []
+    for n, data in (("SUMMARY.md", b"# x"), (name, json.dumps({"id": "pb_" + "b" * 16}).encode())):
+        info = tarfile.TarInfo(f"{ref}/{n}")
+        info.size = len(data)
+        members.append((info, data))
+    data = bad_tar(members)
+    srv.blobs["b_" + "0" * 16] = data
+    srv.problems.append(
+        {"id": PID, "ref": ref, "from": "ws_other00001", "status": "new", "taken_by": None}
+        | {"blob_id": "b_" + "0" * 16, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    )
+    code, _, err = run("relay", "problem", "get", PID)
+    assert code == 2 and "Nothing was kept" in err
+    folder = diag_report.reports_dir(proj) / ref
+    assert not folder.exists()
+    folder.mkdir(parents=True)  # as an older orch would have kept it
+    (folder / "from.json").write_text(json.dumps({"id": PID}))
+    (folder / "shared.json").write_text(json.dumps({"id": "pb_" + "b" * 16}))
+    assert relay_problems.shared_here(proj) == {}
