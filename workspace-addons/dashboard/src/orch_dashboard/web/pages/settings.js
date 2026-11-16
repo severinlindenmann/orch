@@ -1070,7 +1070,7 @@ async function addonAct(control) {
   d.append(actions);
   window.orch.open(d);
 }
-// "Allow on this computer" on a repeat whose script is not allowed here yet: the add-on answers what the person reads
+// "Allow this script" on a repeat whose script is not allowed here yet: the add-on answers what the person reads
 // (the command in full, never behind Details) and a target that ends in the entry's key; the click sends that key back,
 // so only what was shown is allowed (as Settings > Allow this command).
 async function addonReview(id, control) {
@@ -1092,7 +1092,7 @@ async function addonReview(id, control) {
     locks.add('addon-act');
     const result = await act('addon.act', {...args, value:key});
     locks.delete('addon-act');
-    window.orch.toast(result.ok ? 'Allowed on this computer.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? 'Script allowed.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
     await loadAddon(id);
   });
 }
