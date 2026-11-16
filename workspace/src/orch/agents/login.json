@@ -1,0 +1,7 @@
+{
+  "adapters": {
+    "claude": {
+      "login": { "status": ["auth", "status", "--json"], "logged_in": "loggedIn", "ends": "loginExpiresAt" }
+    }
+  }
+}
