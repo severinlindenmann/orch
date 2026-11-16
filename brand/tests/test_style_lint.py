@@ -27,6 +27,15 @@ def test_issue_refs_in_comments_not_counted():
     assert cs.count("a{color:#fff} // was #000\nlet u = 'https://x/#abc'; c = '#123'") == {"hex": 2, "style": 0}
 
 
+def test_href_anchor_is_not_a_colour():
+    assert cs.count('<a href="#add">x</a> el("a",{href:\'#add\'}) a{color:#add}') == {"hex": 1, "style": 0}
+
+
+def test_generated_data_samples_and_tests_are_exempt():
+    files = cs.scan()
+    assert not any(f.endswith("look-data.js") or "/templates/" in f or "/tests/" in f for f in files)
+
+
 def test_more_hex_fails_fewer_passes():
     allowed = {"a.html": {"hex": 2, "style": 0}}
     assert cs.violations({"a.html": {"hex": 3, "style": 0}}, allowed)
