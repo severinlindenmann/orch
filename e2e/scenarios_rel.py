@@ -203,12 +203,18 @@ def r7(e):
     inbox(e, "Pilatus")  # stores the received allow token
     _sched_once(e, "Reports")
     # the message that was just allowed runs right away (like --once) ...
-    check(_agent_runs(log) == base + 1, "the message allowed with --permanent did not run")
+    def runs_reach(n):  # the agent takes 3 s and a slow runner a bit more: wait for its end line
+        end = time.time() + 40
+        while time.time() < end and _agent_runs(log) < n:
+            time.sleep(1)
+        return _agent_runs(log)
+
+    check(runs_reach(base + 1) == base + 1, f"the message allowed with --permanent did not run ({_agent_runs(log)} of {base + 1})")
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "second time")
     st2 = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"].get("text") == "second time"]
     check(st2 and st2[-1]["allowed"] is True, f"second start with token must be allowed: {st2}")
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == base + 2, "second start (with token) did not run")
+    check(runs_reach(base + 2) == base + 2, f"second start (with token) did not run ({_agent_runs(log)} of {base + 2})")
     keyed = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("start_key") == "weekly-report"]
     check(len(keyed) == 1, f"second start made another ticket: {len(keyed)}")
     al = e.rel.admin.call("GET", "/admin/api/allows").json()["items"]

@@ -322,6 +322,7 @@ def a4(e):
         started = _wait(lambda: "start" in log.read_text(), 40)
         check(started, "agent was not started within 40 s")
         _wait(lambda: "end" in log.read_text(), 15)
+        _wait(lambda: not tload(ws, t).get("waiting_on"), 40)  # the automation reaps the finished run a moment later
         d = tload(ws, t)
         check(not d.get("waiting_on"), f"waiting_on not cleared: {d.get('waiting_on')}")
         check(any("Automation started an agent run" in h["text"] for h in d["history"]), "no automation history entry")
