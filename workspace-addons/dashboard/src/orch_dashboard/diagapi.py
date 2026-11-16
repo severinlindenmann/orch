@@ -1,5 +1,6 @@
 """The dashboard's side of problem reports (contracts/diag.md): the page's action trail (`POST /api/diag`), making a
-report (`POST /api/diag/report`) and opening its folder (`POST /api/diag/open`).
+report (`POST /api/diag/report`), opening its folder (`POST /api/diag/open`) and sending it to the connected relay
+(`POST /api/diag/share`, or `share: true` on the report itself).
 
 The trail takes ONLY the fixed `ui.*` events below, with typed, cut values: never a request or response body, a
 header, a cookie, or text a person typed. Everything is written through `orch.diag` (same hider, same budgets,
@@ -8,6 +9,7 @@ header, a cookie, or text a person typed. Everything is written through `orch.di
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import subprocess
@@ -21,7 +23,7 @@ except ImportError:  # pragma: no cover - the dashboard without orch writes and 
 
 MAX_TRAIL = 32 * 1024
 MAX_EVENTS = 100
-MAX_REPORT = 3 * 1024 * 1024
+MAX_REPORT = 40 * 1024 * 1024  # the page snapshot plus up to 25 MB of added files as base64
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 ADDON = re.compile(r"[a-z][a-z0-9-]{1,31}")
 REF = re.compile(r"r-\d{4}-\d{4}-[A-Za-z0-9_.-]{1,40}")
@@ -106,7 +108,17 @@ def make_report(root: Path, body) -> tuple[int, dict | str]:
     """(status, answer): the report folder made by `orch diag report`'s own code, plus the page snapshot."""
     if diag is None:
         return 503, "Reports are not available here."
-    if not isinstance(body, dict) or set(body) - {"ticket", "addon", "note", "expected", "content", "page"}:
+    if not isinstance(body, dict) or set(body) - {
+        "ticket",
+        "addon",
+        "note",
+        "expected",
+        "content",
+        "page",
+        "more",
+        "files",
+        "share",
+    }:
         return 400, "That request could not be read."
     ticket, addon = body.get("ticket"), body.get("addon")
     if ticket is not None and not (isinstance(ticket, str) and TID.fullmatch(ticket)):
@@ -119,6 +131,22 @@ def make_report(root: Path, body) -> tuple[int, dict | str]:
         if v is not None and not isinstance(v, str):
             return 400, "That request could not be read."
         texts[k] = (v or "").strip()[:600] or None
+    more = body.get("more")
+    if more is not None and not isinstance(more, str):
+        return 400, "That request could not be read."
+    files = []
+    raw_files = body.get("files") or []
+    if not isinstance(raw_files, list) or len(raw_files) > 10:
+        return 400, "A report takes at most 10 added files."
+    for f in raw_files:
+        if not (isinstance(f, dict) and isinstance(f.get("name"), str) and isinstance(f.get("data"), str)):
+            return 400, "That request could not be read."
+        try:
+            files.append((f["name"], base64.b64decode(f["data"], validate=True)))
+        except ValueError:
+            return 400, "An added file could not be read."
+    if body.get("share") not in (None, True, False):
+        return 400, "That request could not be read."
     content = body.get("content") is not False
     page = body.get("page")
     if page is not None and not isinstance(page, str):
@@ -135,6 +163,8 @@ def make_report(root: Path, body) -> tuple[int, dict | str]:
             expected=texts["expected"],
             content=content,
             page=page if page and content else None,
+            more=more,
+            files=files,
         )
     except Refused as e:
         return 422, str(e)[:300]
@@ -154,7 +184,32 @@ def make_report(root: Path, body) -> tuple[int, dict | str]:
         {"verdict": c["verdict"], "name": str(c["name"])[:60], "fact": str(c["fact"])[:300]}
         for c in made["checks"]
     ]
-    return 200, {"ref": made["ref"], "path": made["path"], "problems": made["problems"], "checks": rows}
+    out = {"ref": made["ref"], "path": made["path"], "problems": made["problems"], "checks": rows}
+    if body.get("share") is True:  # the person ticked it in the same dialog; the report stays here either way
+        code, res = share_report(root, {"ref": made["ref"]})
+        out.update(res if code == 200 else {"share_error": res})
+    return 200, out
+
+
+def share_report(root: Path, body) -> tuple[int, dict | str]:
+    """Send one report of this workspace to the connected relay (`orch relay problem share`'s own code)."""
+    ref = body.get("ref") if isinstance(body, dict) and set(body) == {"ref"} else None
+    if not isinstance(ref, str) or not REF.fullmatch(ref):
+        return 400, "That is not a report."
+    from orch import relay_problems
+    from orch.errors import Refused
+
+    try:
+        sent = relay_problems.share(root, ref)
+    except Refused as e:
+        return 422, str(e)[:300]
+    except Exception as e:  # noqa: BLE001 - a plain answer; the cause goes to the debug log
+        if diag:
+            diag.error("diag.report_failed", e, root=root)
+        return 500, "The report could not be sent. Please try again."
+    if diag:
+        diag.log("diag.report_shared", "info", root=root, ref=ref)
+    return 200, {"shared": {"to": str(sent["to"])[:120]}}
 
 
 def open_folder(root: Path, body) -> tuple[int, dict | str]:

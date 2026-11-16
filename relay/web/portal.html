@@ -10,8 +10,10 @@
 <script src="/admin/kit.js"></script>
 <script>
 'use strict';
-const screens=[['overview','Overview'],['add','Add workspace'],['groups','Groups'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['subscribers','Subscribers'],['phones','Phones']];
-function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',groups:'group',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',subscribers:'antenna',phones:'phone'})[k]||k,16);return span.firstElementChild}
+// The visible name of the problems page lives only here; rename it in this one line.
+const PROBLEMS_LABEL='Problems';
+const screens=[['overview','Overview'],['add','Add workspace'],['groups','Groups'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['subscribers','Subscribers'],['phones','Phones'],['problems',PROBLEMS_LABEL]];
+function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',groups:'group',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',subscribers:'antenna',phones:'phone',problems:'file'})[k]||k,16);return span.firstElementChild}
 const $=s=>document.querySelector(s), app=$('#app'), enc=encodeURIComponent;
 let token='', epoch=0, workspaces=[], phoneList=[], subList=[], groupList=[], mapGroup='', toastTimer;
 try{token=sessionStorage.getItem('orch_admin')||''}catch{}
@@ -397,6 +399,38 @@ async function phones(v){
  const result=el('div',{class:'stack'});const f=form(async f=>{const nm=f.elements.name.value.trim();if(!nm)throw new FieldError('Give the phone a name.','name');const r=await api('/phones','POST',{name:nm,workspaces:selected(f)});f.hidden=true;result.replaceChildren(el('h3',{},'Scan with your phone'),sub('Open the orch app and scan this code. It works once, for 24 hours.'),el('pre',{class:'copy-box'},r.link),el('div',{class:'actions'},button('Copy link',()=>copy(r.link),'primary'),button('Done',()=>route())));try{result.prepend(qr(r.qr_svg))}catch(e){showError(null,e)}},field('Phone name',chk(input('name','',{maxLength:100,placeholder:'e.g. My phone',autocomplete:'off'}),needs('Give the phone a name.'))),checks(),submit('Show code'));
  show(...head('','Connect a phone'),panel('Scan with your phone',el('div',{class:'form-body'},f,result)),panel('Your phones',...(cards.length?cards:[empty('No phones yet','Create a code above and scan it with the orch app.')])));
 }
+// ---------- problems (reports other workspaces shared) ----------
+function problemState(p){return p.status==='done'?'Done':p.status==='taken'?'Taken by '+(p.taken_by_name||'the admin'):'New'}
+async function downloadProblem(p){
+ let r;try{r=await fetch('/admin/api/problems/'+enc(p.id)+'/file',{headers:{'X-Orch-Admin':token},credentials:'same-origin',cache:'no-store'})}catch{throw Error('Could not reach the relay. Check your connection and try again.')}
+ if(!r.ok)throw Error('The file could not be downloaded. Try again.');
+ const url=URL.createObjectURL(await r.blob()),a=el('a',{href:url,download:p.ref+'.tar'});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
+}
+async function problemSheet(p){
+ const d=await api('/problems/'+enc(p.id));let dlg;
+ const part=(t,x)=>x?el('div',{},el('h3',{},t),el('p',{},x)):null;
+ const change=async status=>{await api('/problems/'+enc(p.id),'PATCH',{status});orch.close(dlg);toast(status==='done'?'Marked as done':'Moved back to New');await route()};
+ dlg=sheet(d.from_name+' · '+time(d.shared_at),
+  sub(problemState(d)+' · '+d.files+(d.files===1?' file':' files')+(d.attachments?' · '+d.attachments+(d.attachments===1?' added file':' added files'):'')+(d.orch_version?' · orch '+d.orch_version:'')+(d.os?' · '+d.os:'')),
+  part('What happened',d.note),part('What was expected',d.expected),part('More details',d.more),
+  d.problems.length?el('div',{},el('h3',{},'Checks that found a problem'),el('div',{class:'checks'},d.problems.map(n=>el('span',{class:'chip'},n)))):null,
+  el('div',{},el('h3',{},'Summary'),el('pre',{class:'copy-box',tabindex:0},d.summary||'')),
+  el('div',{class:'actions'},button('Download',()=>downloadProblem(d),'primary'),
+   button(d.status==='done'?'Reopen':'Mark done',()=>change(d.status==='done'?'new':'done')),
+   button('Delete',async()=>{if(!await confirmDialog('Delete this problem?','The report and its files are removed from the relay.','Delete'))return;await api('/problems/'+enc(p.id),'DELETE');orch.close(dlg);toast('Problem deleted');await route()},'ghost danger')));
+}
+async function problemsPage(v){
+ const r=await api('/problems');if(v!==epoch)return;const items=r.items||[],picked=new Set(r.readers||[]);
+ const pick=form(async f=>{await api('/problems/readers','PUT',{workspaces:selected(f)});toast('Saved')},
+  el('p',{},'These workspaces can see shared problems and pick them up. Other workspaces can still share problems.'),
+  workspaces.length?el('div',{class:'checks workspace-pills'},workspaces.map(w=>el('label',{},input('workspace',w.id,{type:'checkbox',checked:picked.has(w.id)}),w.name))):el('p',{class:'muted'},'Add a workspace first.'),
+  workspaces.length?submit('Save'):null);
+ const rows=items.length?items.map(p=>el('div',{class:'card-row','data-row':''},el('div',{class:'grow'},el('h3',{},p.note||'No description'),
+   sub('From '+p.from_name+' · '+time(p.shared_at)+(p.attachments?' · '+p.attachments+(p.attachments===1?' added file':' added files'):''))),
+   el('span',{class:'chip'+(p.status==='new'?' active':'')},problemState(p)),button('Open',()=>problemSheet(p)))):
+  [empty('No problems shared yet.','A problem gets here when someone presses Report a problem in their dashboard and chooses to share it.')];
+ show(...head('',PROBLEMS_LABEL),panel('Who may pick problems up',el('div',{class:'form-body'},pick)),panel('Shared problems · '+items.length,...rows));
+}
 // Direct controls shared by the route views and network sheets.
 function enhance(root){
  root.querySelectorAll('input[name="tags"]:not([type="hidden"])').forEach(hidden=>{
@@ -689,7 +723,7 @@ document.body.classList.remove('menu-open');$('#menu').setAttribute('aria-expand
  if(!token){auth();return}document.body.classList.remove('signedout');const v=++epoch;
  const topAdd=$('#top-add');topAdd.hidden=!['overview','subscribers'].includes(key);topAdd.textContent=key==='subscribers'?'Add subscriber':'Add workspace';topAdd.href=key==='subscribers'?'#subscribers':'#add';topAdd.onclick=key==='subscribers'?e=>{e.preventDefault();subscriberDialog()}:null;document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));const changed=lastRoute!==null&&lastRoute!==key;lastRoute=key;
  const slow=loadingTimer=setTimeout(()=>{if(v===epoch)app.replaceChildren(skeleton())},300);
- try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;groupList=(await api('/groups')).items||[];if(v!==epoch)return;const subs=await api('/subscribers').catch(e=>{if(e.status===404)return {items:[]};throw e});if(v!==epoch)return;subList=subs.items||[];await ({overview,add,groups:groupsPage,rules,messages,config,webhooks,subscribers:subscribersPage,phones}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
+ try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;groupList=(await api('/groups')).items||[];if(v!==epoch)return;const subs=await api('/subscribers').catch(e=>{if(e.status===404)return {items:[]};throw e});if(v!==epoch)return;subList=subs.items||[];await ({overview,add,groups:groupsPage,rules,messages,config,webhooks,subscribers:subscribersPage,phones,problems:problemsPage}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
 }
 for(const [key,title,hidden]of screens)if(!hidden)$('#nav').append(el('a',{href:'#'+key,class:'nav-item'},uiIcon(key),title));
 $('#menu').addEventListener('click',()=>{const o=document.body.classList.toggle('menu-open');$('#menu').setAttribute('aria-expanded',String(o))});

@@ -212,6 +212,17 @@ HINTS = {
     "publish new": lambda d, a: f"orch publish app {a.folder}",
     "publish *": "carry on with your ticket: orch ticket list",
     "relay connect": 'describe this workspace: orch relay profile --description "..." --tags a,b',
+    "relay problem share": "carry on with your ticket: orch ticket list",
+    "relay problem list": lambda d, a: (
+        "take one: orch relay problem get <id>" if d else "nothing to pick up; carry on with your ticket."
+    ),
+    "relay problem get": lambda d, a: (
+        f"read .agents/skills/orch-diagnose/SKILL.md, then investigate orch report {d.get('ref')}"
+        if isinstance(d, dict)
+        else None
+    ),
+    "relay problem done": "orch relay problem list",
+    "relay problem back": "orch relay problem list",
     "relay *": "carry on; a reply comes in on your next run.",
 }
 

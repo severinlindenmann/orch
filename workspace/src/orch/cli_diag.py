@@ -40,6 +40,8 @@ def add_parsers(sub, common) -> None:
     r.add_argument("--since")
     r.add_argument("--note")
     r.add_argument("--expected")
+    r.add_argument("--more", help="further details, up to 4000 characters")
+    r.add_argument("--file", action="append", default=[], help="add a picture or file (up to 10 times)")
     r.add_argument(
         "--content",
         dest="content",
@@ -115,6 +117,17 @@ def dispatch(args, root: Path) -> bool:
         text = f"Deleted {gone} {label}{'' if gone == 1 else 's'}."
         print(json.dumps({"deleted": gone, "what": args.what}) if args.json else text)
     else:
+        files = []
+        for raw in args.file[: diag_report.ATTACH_MAX + 1]:
+            f = Path(raw).expanduser()
+            if not f.is_file():
+                raise Refused(f"{raw} is not a file. Check the path and try again.")
+            if f.stat().st_size > diag_report.ATTACH_FILE_BYTES:  # before reading it
+                raise Refused(
+                    f"{f.name} is bigger than {diag_report.ATTACH_FILE_BYTES // 1024 // 1024} MB. "
+                    "Leave it out or make it smaller."
+                )
+            files.append((f.name, f.read_bytes()))
         made = diag_report.make(
             root,
             ticket=args.ticket,
@@ -124,6 +137,8 @@ def dispatch(args, root: Path) -> bool:
             note=args.note,
             expected=args.expected,
             content=args.content,
+            more=args.more,
+            files=files,
         )
         if args.json:
             print(
