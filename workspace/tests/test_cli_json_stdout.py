@@ -120,3 +120,18 @@ def test_run_send_and_stop_json_are_json_only(busy, run, new_ticket):
         assert _single_json(out), (args, out[:120])
         if code == 2 and out.strip():
             assert "error" in json.loads(out), args
+
+
+def test_batched_run_status_json_is_json_only(busy, run, new_ticket):
+    """The dashboard asks for all runs in one process: `orch run status <id> <id> … --json`."""
+    import os
+
+    from orch import runs
+
+    a, b = new_ticket(), new_ticket()
+    runs.claim(busy, a, "agent:scheduler", "claude", pid=os.getpid())
+    code, out, err = run("run", "status", a, b, "--json")
+    assert code == 0, err
+    data = json.loads(out)
+    assert data["runs"][a]["running"] is True and data["runs"][b]["running"] is False
+    assert skillrender.MESSAGE not in out
