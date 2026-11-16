@@ -16,14 +16,14 @@ import sys
 import time
 from pathlib import Path
 
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch import winacl, winfinish
 from orch.errors import Refused
 
 
 def key_dir(root: Path, create: bool = True) -> Path:
     """The private folder the launch, resume and update files live in."""
-    return hp.key_dir(root, create=create)
+    return orch_home.key_dir(root, create=create)
 
 
 LAUNCH_SERVERS = ("focus", "dashboard", "insights")
@@ -46,11 +46,11 @@ def launch_server_ok(server) -> bool:
 def is_test_workspace(root: Path) -> bool:
     """A test install AND a workspace whose realpath is under the literal <account home>/.orch-test (Windows:
     <profile folder>\\.orch-test, case-insensitive)."""
-    account = hp.account_home()
+    account = orch_home.account_home()
     return (
-        hp.install_kind() == "test"
-        and hp._prefix_is_real_dir(account)
-        and hp._under(os.path.realpath(root), hp._join(account, ".orch-test"))
+        orch_home.install_kind() == "test"
+        and orch_home._prefix_is_real_dir(account)
+        and orch_home._under(os.path.realpath(root), orch_home._join(account, ".orch-test"))
     )
 
 
@@ -76,9 +76,9 @@ def write_launch_token(root: Path, server: str) -> str | None:
     if not launch_server_ok(server):
         raise Refused("Unknown page server.")  # a local or marketplace add-on never gets a launch token
     try:
-        d = hp.key_dir(root)
+        d = orch_home.key_dir(root)
         token = secrets.token_urlsafe(24)
-        hp._write_private(d / f"launch-{server}.token", f"{token}\n{int(time.time()) + LAUNCH_LIFE}\n")
+        orch_home._write_private(d / f"launch-{server}.token", f"{token}\n{int(time.time()) + LAUNCH_LIFE}\n")
         return token
     except (Refused, OSError):
         return None
@@ -89,11 +89,11 @@ def consume_launch_token(root: Path, server: str, token: str) -> bool:
     if not launch_server_ok(server):
         return False
     try:
-        d = hp.key_dir(root, create=False)
+        d = orch_home.key_dir(root, create=False)
         f = d / f"launch-{server}.token"
-        with hp._key_lock(d):
+        with orch_home._key_lock(d):
             try:
-                lines = hp._read_guarded(f).decode("utf-8").split()
+                lines = orch_home._read_guarded(f).decode("utf-8").split()
             finally:
                 with contextlib.suppress(OSError):
                     f.unlink()  # single use, whatever the outcome (a loose file is spent too)
@@ -177,8 +177,8 @@ def write_resume_cookie(root: Path, server: str, cookie: str, secret: str) -> bo
     ):
         return False
     try:
-        hp._write_private(
-            hp.key_dir(root) / f"resume-{server}.cookie",
+        orch_home._write_private(
+            orch_home.key_dir(root) / f"resume-{server}.cookie",
             f"{cookie}\n{secret}\n{int(time.time()) + RESUME_LIFE}\n",
         )
         return True
@@ -196,7 +196,9 @@ def arm_restart(root: Path) -> bool:
     write. It grants nothing by itself: no cookie is stored unless a page server with an authenticated tab
     sees it."""
     try:
-        hp._write_private(hp.key_dir(root) / "restart-armed", f"{int(time.time()) + RESTART_ARM_LIFE}\n")
+        orch_home._write_private(
+            orch_home.key_dir(root) / "restart-armed", f"{int(time.time()) + RESTART_ARM_LIFE}\n"
+        )
         return True
     except (Refused, OSError):
         return False
@@ -206,14 +208,14 @@ def disarm_restart(root: Path) -> None:
     """A page server that has just (re)started ends the arm window: a later restart (one an agent causes)
     must not find it still armed and get a session handed over without a click."""
     with contextlib.suppress(Refused, OSError):
-        (hp.key_dir(root, create=False) / "restart-armed").unlink(missing_ok=True)
+        (orch_home.key_dir(root, create=False) / "restart-armed").unlink(missing_ok=True)
 
 
 def restart_armed(root: Path) -> int | None:
     """The expiry (epoch seconds) of a live arm_restart marker, else None. Any error: not armed."""
     try:
-        d = hp.key_dir(root, create=False)
-        raw = hp._read_guarded(d / "restart-armed").decode("ascii").strip()
+        d = orch_home.key_dir(root, create=False)
+        raw = orch_home._read_guarded(d / "restart-armed").decode("ascii").strip()
     except (Refused, OSError, ValueError, winacl.Unknown):
         return None
     if raw.isdigit() and time.time() < int(raw) <= time.time() + RESTART_ARM_LIFE:
@@ -226,11 +228,11 @@ def take_resume_session(root: Path, server: str, why: list | None = None) -> tup
     if server not in ("focus", "dashboard"):
         return None
     try:
-        d = hp.key_dir(root, create=False)
+        d = orch_home.key_dir(root, create=False)
         f = d / f"resume-{server}.cookie"
-        with hp._key_lock(d):
+        with orch_home._key_lock(d):
             try:
-                lines = hp._read_guarded(f).decode("utf-8").split()
+                lines = orch_home._read_guarded(f).decode("utf-8").split()
             except winacl.Unknown:
                 if why is not None:
                     why.append("Windows could not read the resume file; it is kept for the next start")
@@ -278,9 +280,9 @@ def write_update_status(
     if state not in ("running", "finished", "failed"):
         return
     with contextlib.suppress(Refused, OSError):
-        d = hp.key_dir(root)
-        with hp._key_lock(d):
-            hp._write_private(
+        d = orch_home.key_dir(root)
+        with orch_home._key_lock(d):
+            orch_home._write_private(
                 d / "update-status.json",
                 json.dumps(
                     {
@@ -297,10 +299,10 @@ def take_update_status(root: Path) -> dict | None:
     """The detached update's result for the page. A finished or failed result is read ONCE (then cleared); a
     running one stays."""
     try:
-        d = hp.key_dir(root, create=False)
-        with hp._key_lock(d):
+        d = orch_home.key_dir(root, create=False)
+        with orch_home._key_lock(d):
             f = d / "update-status.json"
-            data = json.loads(hp._read_guarded(f).decode("utf-8"))
+            data = json.loads(orch_home._read_guarded(f).decode("utf-8"))
             if isinstance(data, dict) and "finish_offset" in data:
                 from orch import addons
 

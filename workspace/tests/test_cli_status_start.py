@@ -1,5 +1,5 @@
 """`orch start` in a real terminal opens the page with a launch token (it crashed: a local import
-shadowed the module-level `humanproof`, UnboundLocalError), and no function re-imports a name its module
+shadowed the module-level `orch_home`, UnboundLocalError), and no function re-imports a name its module
 already imports."""
 
 import argparse

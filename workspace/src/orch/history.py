@@ -40,7 +40,8 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-from orch import humanproof, safefile
+from orch import home as orch_home
+from orch import safefile
 
 SYNC_BY = "agent:sync"  # reserved: tickets.current_actor refuses it, only core and the sync merge write it
 SYNCED_UNVERIFIED = "(synced, not verified here) "
@@ -225,9 +226,9 @@ def _enabled_paths(root: Path) -> list[Path]:
     names = [hashlib.sha256(k.encode()).hexdigest()[:32] + ".json" for k in _keys(root)]
     homes = []
     with contextlib.suppress(Exception):
-        homes.append(humanproof.guarded_home(root))
+        homes.append(orch_home.guarded_home(root))
     with contextlib.suppress(Exception):
-        homes.append(humanproof.account_home() / ".orch-tool")
+        homes.append(orch_home.account_home() / ".orch-tool")
     return [h / ENABLED_DIR / n for h in homes for n in names]
 
 
@@ -311,14 +312,12 @@ def sync_enabled(root: Path) -> bool:
 
 
 def ensure_key(root: Path) -> None:
-    """The workspace's local id and human key exist (the store and the record are signed with it). Raises
+    """The workspace's local id and key folder exist (the own-lines store lives next to them). Raises
     Refused when the guarded orch home cannot be used."""
     from orch import addons
 
     addons.workspace_id(Path(root), create=True)
-    humanproof.key_dir(Path(root))
-    humanproof.human_key(Path(root))
-    _KEYS.pop(os.path.realpath(root), None)  # a cached "no key" answer is stale now
+    orch_home.key_dir(Path(root))
 
 
 def enable_sync(root: Path, adopt: bool = False) -> bool:
@@ -328,7 +327,6 @@ def enable_sync(root: Path, adopt: bool = False) -> bool:
     tickets as its own, but NEVER when a ticket already shows sync's traces (they may hold another machine's
     lines) or the record exists; then write the record (keyed by real path and workspace id). True when this
     call adopted. Raises Refused when the record cannot be written: sync must not run without it."""
-    from orch.errors import Refused
 
     root = Path(root)
     ensure_key(root)
@@ -336,19 +334,16 @@ def enable_sync(root: Path, adopt: bool = False) -> bool:
     if adopt and not enabled_recorded(root) and not tickets_show_sync(root):
         adopt_local_objects(root)
         adopted = True
-    home = humanproof.guarded_home(root)
+    home = orch_home.guarded_home(root)
     folder = home / ENABLED_DIR
-    humanproof._private_dir(folder, home)
+    orch_home._private_dir(folder, home)
     keys = _keys(root)
     record = {"schema": "orch.sync-enabled/2", "keys": keys, "at": int(time.time())}
-    mac = humanproof.local_sign(root, "sync-enabled", record)
-    if not mac:
-        raise Refused("orch could not record that sync is on here; sync was not started.")
-    body = json.dumps({**record, "mac": mac}) + "\n"
+    body = json.dumps(record) + "\n"
     for k in keys:  # one file per key: a moved folder (same id) or a new id (same folder) still finds one
         p = folder / (hashlib.sha256(k.encode()).hexdigest()[:32] + ".json")
         if not os.path.lexists(p):
-            humanproof._write_private(p, body)
+            orch_home._write_private(p, body)
     _ENABLED[os.path.realpath(root)] = True
     return adopted
 
@@ -356,18 +351,6 @@ def enable_sync(root: Path, adopt: bool = False) -> bool:
 # ----------------------------------------------------------------------------------- own-objects store
 
 _OWN_CACHE: dict[tuple, dict | None] = {}
-_KEYS: dict[str, tuple[float, object]] = {}
-_KEY_FOR = 2.0  # seconds the workspace key is reused in one process
-
-
-def _ctx_key(root: Path):
-    rp = os.path.realpath(root)
-    got = _KEYS.get(rp)
-    if got and time.monotonic() - got[0] < _KEY_FOR:
-        return got[1]
-    ctx = humanproof.local_key(root)
-    _KEYS[rp] = (time.monotonic(), ctx)
-    return ctx
 
 
 def _own_path(root: Path, tid: str) -> Path:
@@ -379,7 +362,7 @@ def _own_record(tid: str, have: dict) -> dict:
     return {"ticket": tid, **{k: have[k] for k in KINDS if k not in _OPTIONAL_KINDS or have.get(k)}}
 
 
-def _parse_own(raw: bytes, tid: str, root: Path, ctx) -> dict | None:
+def _parse_own(raw: bytes, tid: str) -> dict | None:
     try:
         data = json.loads(raw)
     except (ValueError, RecursionError):
@@ -394,12 +377,10 @@ def _parse_own(raw: bytes, tid: str, root: Path, ctx) -> dict | None:
         if not all(isinstance(d, str) and _DIGEST_RE.fullmatch(d) for d in v):
             return None
         have[k] = v
-    if not humanproof.local_ok(root, "own-lines", _own_record(tid, have), data.get("mac"), ctx):
-        return None
     return have
 
 
-def _read_own(root: Path, tid: str, ctx) -> dict | None:
+def _read_own(root: Path, tid: str) -> dict | None:
     try:
         st = os.lstat(_own_path(root, tid))
         if st.st_size > OWN_BYTES:
@@ -407,23 +388,23 @@ def _read_own(root: Path, tid: str, ctx) -> dict | None:
         raw = safefile._read_parts(Path(root), list(OWN_LINES), [f"{tid}.json"], OWN_BYTES)
     except (OSError, safefile.TooLarge, ValueError):
         return None
-    return _parse_own(raw, tid, Path(root), ctx) if raw is not None else None
+    return _parse_own(raw, tid) if raw is not None else None
 
 
-def _own(root: Path, tid, ctx) -> dict | None:
+def _own(root: Path, tid) -> dict | None:
     """The digests this core recorded for ticket `tid`, as sets per kind: parsed once per file state. None =
     nothing verifies (no store, unreadable, oversized, MAC fails, a bad ticket id)."""
-    if ctx is None or not isinstance(tid, str) or not _TID_RE.fullmatch(tid):
+    if not isinstance(tid, str) or not _TID_RE.fullmatch(tid):
         return None
     p = _own_path(root, tid)
     try:
         st = os.lstat(p)
     except OSError:
         return None
-    key = (str(p), st.st_mtime_ns, st.st_size, st.st_ino, hashlib.sha256(ctx[1]).hexdigest()[:16])
+    key = (str(p), st.st_mtime_ns, st.st_size, st.st_ino)
     if key in _OWN_CACHE:
         return _OWN_CACHE[key]
-    have = _read_own(root, tid, ctx)
+    have = _read_own(root, tid)
     out = {k: frozenset(v) for k, v in have.items()} if have is not None else None
     if len(_OWN_CACHE) > 4096:
         _OWN_CACHE.clear()
@@ -441,18 +422,12 @@ def remember(root: Path, tid, found: dict[str, list]) -> bool:
     if not any(new.values()):
         return True
     root = Path(root)
-    ctx = humanproof.local_key(root)
-    if ctx is None:
-        return False
-    have = _read_own(root, tid, ctx) if os.path.lexists(_own_path(root, tid)) else None
+    have = _read_own(root, tid) if os.path.lexists(_own_path(root, tid)) else None
     have = have or {k: [] for k in KINDS}
     merged = {k: list(dict.fromkeys([*have[k], *new[k]]))[-OWN_MAX:] for k in KINDS}
     if merged == have:
         return True
-    mac = humanproof.local_sign(root, "own-lines", _own_record(tid, merged), ctx)
-    if not mac:
-        return False
-    body = {"schema": "orch.own-lines/2", **_own_record(tid, merged), "mac": mac}
+    body = {"schema": "orch.own-lines/2", **_own_record(tid, merged)}
     p = _own_path(root, tid)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -479,7 +454,7 @@ def _adopt_relay_allow(root: Path, doc: dict) -> None:
         return
     for q in doc.get("questions") or []:
         if isinstance(q, dict) and q.get("kind") == "relay:allow" and isinstance(q.get("id"), str):
-            humanproof.relay_allow_set(
+            orch_home.relay_allow_set(
                 root, doc["id"], q["id"], mid, applied=r.get("allow_applied") == q["id"]
             )
 
@@ -543,11 +518,10 @@ def _at(v) -> float | None:
 
 class _Proof:
     """Everything one read needs to judge person fields, built once per call (shown_json over many tickets
-    shares it): the workspace root and the local key of the own-lines store."""
+    shares it): the workspace root."""
 
     def __init__(self, root: Path):
         self.root = Path(root)
-        self.ctx = _ctx_key(self.root)
 
 
 # ------------------------------------------------------------------------------------------- shown
@@ -559,7 +533,7 @@ def _demoted_line(h: dict) -> dict:
 
 def _shown(proof: _Proof, t: dict) -> dict:
     tid = t.get("id")
-    own = _own(proof.root, tid, proof.ctx) or {}
+    own = _own(proof.root, tid) or {}
     has = lambda kind, obj: (d := _digest(kind, obj)) is not None and d in own.get(kind, ())  # noqa: E731
     out = dict(t)
     changed = False
@@ -661,7 +635,7 @@ def answer_proven(root: Path, ticket, question) -> bool:
         by, ans = question.get("answered_by"), question.get("answer")
         if not isinstance(by, str) or ans is None or is_reserved_label(by):
             return False
-        own = _own(root, ticket.get("id"), _ctx_key(root)) or {}
+        own = _own(root, ticket.get("id")) or {}
         text = f"Answered {question.get('id')}: {ans}"
         hist = ticket.get("history") if isinstance(ticket.get("history"), list) else []
         if _digest("answers", question) not in own.get("answers", ()):

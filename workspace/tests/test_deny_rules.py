@@ -259,7 +259,7 @@ def test_every_render_call_site_passes_a_workspace():
 def test_default_home_and_orch_home_are_always_rows(proj_ws, monkeypatch, tmp_path):
     from orch import denyrules as d
 
-    monkeypatch.setattr("orch.humanproof.guarded_home", lambda r: (_ for _ in ()).throw(OSError("x")))
+    monkeypatch.setattr("orch.home.guarded_home", lambda r: (_ for _ in ()).throw(OSError("x")))
     monkeypatch.setattr("orch.addons.home", lambda r=None: (_ for _ in ()).throw(OSError("x")))
     other = tmp_path / "elsewhere"
     monkeypatch.setenv("ORCH_HOME", str(other))

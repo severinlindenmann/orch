@@ -250,7 +250,7 @@ def shown(root: Path, t):
 
 def _plain(text, cap: int = 120) -> str:
     """One untrusted fragment (a path name an agent chose) as one plain line, like the core's
-    humanproof.part: control and format characters and line breaks become spaces, runs of space collapse,
+    the core's card text: control and format characters and line breaks become spaces, runs of space collapse,
     double quotes become single ones (it cannot fake the quotes around it), at most `cap` characters."""
     import unicodedata
 

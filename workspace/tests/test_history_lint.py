@@ -57,7 +57,7 @@ PERSON_OK = {
         "render",
     ): "v['person'] is the adapter's template value, not a ticket's",
     (
-        "workspace/src/orch/humanproof.py",
+        "workspace/src/orch/orch_home.py",
         "wont_decision",
     ): "proof code: the bytes a person's decision MAC covers",
     ("workspace/src/orch/relay.py", "_answer_by"): "a relay message's body (its own rule), not a ticket",

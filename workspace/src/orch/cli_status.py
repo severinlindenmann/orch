@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import history, humanproof, look, pagelaunch, services, term
+from orch import cardtext, history, look, pagelaunch, services, term
 from orch.errors import Refused
 
 
@@ -235,7 +235,7 @@ def _copy_clean(args, root: Path) -> None:
     if args.sub == "review":
         target, tip, paths = worktrees.approval_view(root, args.ticket)
         # Path names are the agent's: each one is shown as one plain line (no newlines, no fake quotes).
-        shown = [humanproof.part(p) for p in paths]
+        shown = [cardtext.part(p) for p in paths]
         summary = worktrees.control_summary(shown)
         size = worktrees.change_counts(root, tip)
         result = {

@@ -55,11 +55,13 @@ from orch import (
     diag,
     harness,
     history,
-    humanproof,
     runs,
     safegit,
     sharedfolder,
     tickets,
+)
+from orch import (
+    home as orch_home,
 )
 from orch.errors import Refused
 
@@ -156,7 +158,7 @@ def copies_dir(root: Path) -> Path | None:
 
 def _check_copies_home(home: Path) -> None:
     """Reject an unguarded destination before creating any folders or lock files."""
-    guarded = humanproof.guarded_home(home)
+    guarded = orch_home.guarded_home(home)
     if guarded.resolve() != home.resolve():
         raise Refused("The copies record is outside the guarded home.")
 
@@ -164,25 +166,25 @@ def _check_copies_home(home: Path) -> None:
 def _copies_key(home: Path, *, create: bool = False) -> bytes:
     """Account/home key, independent of workspace ids and path bindings; never in a copy."""
     _check_copies_home(home)
-    humanproof.winacl.no_reparse(home)
+    orch_home.winacl.no_reparse(home)
     if create:
         home.mkdir(parents=True, exist_ok=True)
-    humanproof._check_dir(home)
+    orch_home._check_dir(home)
     d = home / "keys" / "copies"
     if create:
-        humanproof._private_dir(d, home)
+        orch_home._private_dir(d, home)
     else:
-        humanproof._check_dir(d.parent)
-        humanproof._check_dir(d)
+        orch_home._check_dir(d.parent)
+        orch_home._check_dir(d)
     f = d / "identity.key"
-    with humanproof._key_lock(d) if create else contextlib.nullcontext():
+    with orch_home._key_lock(d) if create else contextlib.nullcontext():
         try:
-            raw = humanproof._read_guarded(f)
+            raw = orch_home._read_guarded(f)
         except FileNotFoundError:
             if not create:
                 raise
-            humanproof._write_private(f, secrets.token_hex(32) + "\n")
-            raw = humanproof._read_guarded(f)
+            orch_home._write_private(f, secrets.token_hex(32) + "\n")
+            raw = orch_home._read_guarded(f)
     key = bytes.fromhex(raw.decode("ascii").strip())
     if len(key) != 32:
         raise Refused("The copies identity key is damaged.")
@@ -203,13 +205,13 @@ def _copies_store(home: Path, key: bytes) -> tuple[int, dict]:
     """
     d = home / "keys" / "copies"
     try:
-        raw = humanproof._read_guarded(d / "registry.json")
+        raw = orch_home._read_guarded(d / "registry.json")
     except FileNotFoundError:
         if os.path.lexists(d / "counter"):
             raise Refused("The copies identity store is missing.") from None
         return 0, {}
     doc = json.loads(raw)
-    counter = json.loads(humanproof._read_guarded(d / "counter"))
+    counter = json.loads(orch_home._read_guarded(d / "counter"))
     if not isinstance(doc, dict):
         raise Refused("The copies identity store is damaged.")
     data = {k: doc.get(k) for k in ("version", "counter", "entries")}
@@ -238,7 +240,7 @@ def _copies_store(home: Path, key: bytes) -> tuple[int, dict]:
         ):
             raise Refused("The copies identity store has an invalid identity.")
     if data["counter"] == counter + 1:
-        humanproof._write_private(d / "counter", str(data["counter"]) + "\n")
+        orch_home._write_private(d / "counter", str(data["counter"]) + "\n")
     return data["counter"], data["entries"]
 
 
@@ -247,8 +249,8 @@ def _save_copies_store(home: Path, key: bytes, counter: int, entries: dict) -> N
     d = home / "keys" / "copies"
     data = {"version": "orch.copies/2", "counter": counter + 1, "entries": entries}
     doc = {**data, "mac": _copies_mac(key, data)}
-    humanproof._write_private(d / "registry.json", json.dumps(doc) + "\n")
-    humanproof._write_private(d / "counter", str(counter + 1) + "\n")
+    orch_home._write_private(d / "registry.json", json.dumps(doc) + "\n")
+    orch_home._write_private(d / "counter", str(counter + 1) + "\n")
 
 
 def _known_copies(base: Path) -> dict:

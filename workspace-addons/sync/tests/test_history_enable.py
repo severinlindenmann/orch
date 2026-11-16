@@ -91,7 +91,7 @@ def test_a_missing_marker_still_records_before_refusing(root):
 
 
 def test_enabling_refuses_when_it_cannot_be_recorded(root, monkeypatch):
-    from orch import humanproof
+    from orch import home as orch_home
     from orch.errors import Refused
 
     from orch_sync import cli
@@ -99,7 +99,7 @@ def test_enabling_refuses_when_it_cannot_be_recorded(root, monkeypatch):
     def refused(_root):
         raise Refused("no home")
 
-    monkeypatch.setattr(humanproof, "guarded_home", refused)
+    monkeypatch.setattr(orch_home, "guarded_home", refused)
     assert cli.main(["--dir", str(root), "set", "--mode", "local"]) == 2
     assert not (root / ".orch/.git").exists()
 

@@ -13,7 +13,8 @@ import shutil
 import stat
 from pathlib import Path
 
-from orch import humanproof, saferead
+from orch import home as orch_home
+from orch import saferead
 from orch.errors import Refused
 
 SKIP_TOP = {".git", ".venv", "node_modules", ".pytest_cache", ".ruff_cache", "build", "dist"}
@@ -72,7 +73,7 @@ def tree_hash(files: dict[str, bytes]) -> str:
 
 
 def snapshots_dir(root: Path) -> Path:
-    return humanproof.key_dir(root) / "addon-snapshots"
+    return orch_home.key_dir(root) / "addon-snapshots"
 
 
 def snapshot(root: Path, folder: Path) -> dict:
@@ -113,14 +114,14 @@ def _info(folder: Path, digest: str, dest: Path) -> dict:
 def _bases() -> list[Path]:
     """The orch homes a snapshot may live in: the account's default home, and on a dev or test install also
     the test home (ORCH_HOME under the real <account home>/.orch-test). Never an env-chosen home otherwise."""
-    account = humanproof.account_home()
+    account = orch_home.account_home()
     bases = [account / ".orch-tool"]
     env = os.environ.get("ORCH_HOME")
     if (
         env
-        and humanproof.install_kind() in ("dev", "test")
-        and humanproof._prefix_is_real_dir(account)
-        and humanproof._under(os.path.realpath(env), humanproof._join(account, ".orch-test"))
+        and orch_home.install_kind() in ("dev", "test")
+        and orch_home._prefix_is_real_dir(account)
+        and orch_home._under(os.path.realpath(env), orch_home._join(account, ".orch-test"))
     ):
         bases.append(Path(env))
     return bases
@@ -135,13 +136,13 @@ def home_of(snapshot_dir: Path, digest: str) -> Path | None:
     for base in _bases():
         if base.is_symlink() or os.path.realpath(base) != os.path.abspath(base):
             continue
-        parts, want = humanproof._parts(str(src)), humanproof._parts(str(base))
+        parts, want = orch_home._parts(str(src)), orch_home._parts(str(base))
         if (
             len(parts) == len(want) + 4
             and parts[: len(want)] == want
             and parts[len(want)] == "keys"
             and parts[len(want) + 2] == "addon-snapshots"
-            and parts[len(want) + 3] == (digest.lower() if humanproof._is_windows() else digest)
+            and parts[len(want) + 3] == (digest.lower() if orch_home._is_windows() else digest)
             and len(parts[len(want) + 1]) == 32
         ):
             return base
@@ -154,7 +155,7 @@ ALLOWED = "addons-allowed.json"
 def _allowed(home: Path) -> list[str]:
     raw = None
     try:
-        if humanproof.file_problem(home / ALLOWED) is None:
+        if orch_home.file_problem(home / ALLOWED) is None:
             raw = saferead.read_private(Path(os.path.realpath(home)), ALLOWED, 1 << 20)
         data = json.loads(raw) if raw is not None else {}
     except (OSError, ValueError):
@@ -167,7 +168,7 @@ def allow(home: Path, digest: str) -> None:
     """Record a person-allowed content hash in the guarded home (only inside addons.trusted_local_add)."""
     have = _allowed(home)
     if digest not in have:
-        humanproof._write_private(
+        orch_home._write_private(
             Path(home) / ALLOWED, json.dumps({"hashes": [*have, digest][-200:]}, sort_keys=True)
         )
 

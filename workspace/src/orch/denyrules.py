@@ -100,7 +100,8 @@ def path_forms(path: str, workspace: str, account_home: str | None) -> dict:
 def _candidates(root: Path) -> list[str]:
     """Every place orch's home can be. `<account home>/.orch-tool` and ORCH_HOME (when set) are ALWAYS
     there, whatever the lookups below do; the guarded/trusted homes are added when they resolve."""
-    from orch import addons, humanproof
+    from orch import addons
+    from orch import home as orch_home
     from orch.errors import Refused
 
     out: list[str] = []
@@ -116,7 +117,7 @@ def _candidates(root: Path) -> list[str]:
     if os.environ.get("ORCH_HOME"):
         add(os.environ["ORCH_HOME"])
     for get in (
-        lambda: humanproof.guarded_home(root),
+        lambda: orch_home.guarded_home(root),
         lambda: addons.home(root),
         lambda: addons.home_candidates(include_real=True),
     ):

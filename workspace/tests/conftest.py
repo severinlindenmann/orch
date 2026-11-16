@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import json
 import os
@@ -280,22 +281,46 @@ REAL_HOME_MODULES = (
     "test_secret_store",
     "test_install_kind",
     "test_winacl",
+    "test_home",
 )  # they test the home pairing itself
-REAL_PROOF_MODULES = ("test_humanproof",)  # the guarded home itself
 
 
 def ensure_keys(root):
-    """TEST HELPER: the workspace's local id and human key exist (a real proof needs both anyway)."""
-    from orch import humanproof
+    """TEST HELPER: the workspace's local id and key folder exist."""
+    from orch import home as orch_home
     from orch.errors import Refused
 
     try:
         addons.workspace_id(root, create=True)
-        humanproof.human_key(root, create=True)
-    except (
-        Refused
-    ):  # a folder a test install may not use (not under ~/.orch-test): nothing can be signed there
+        orch_home.key_dir(root, create=True)
+    except Refused:  # a folder a test install may not use (not under ~/.orch-test)
         pass
+
+
+def key_file(root, create=True):
+    """TEST HELPER: a 32-byte secret file `test.key` in the workspace key folder (rights 0600), made on
+    first use. A loose or wrong-type file is never read: the protection resets and a new file is written."""
+    import secrets
+
+    from orch import home as orch_home
+    from orch.errors import Refused
+
+    d = orch_home.key_dir(root, create=create)
+    f = d / "test.key"
+    with orch_home._key_lock(d) if create else contextlib.nullcontext():
+        try:
+            try:
+                raw = orch_home._read_guarded(f)
+            except orch_home.LooseFile as e:
+                orch_home.reset_protection(root, str(e))
+                orch_home._write_private(f, secrets.token_hex(32) + "\n")
+                raw = orch_home._read_guarded(f)
+        except FileNotFoundError:
+            if not create:
+                raise Refused("There is no key here yet.") from None
+            orch_home._write_private(f, secrets.token_hex(32) + "\n")
+            raw = orch_home._read_guarded(f)
+    return bytes.fromhex(raw.decode().strip())
 
 
 def sign_done(root, tid, by="human:tester"):
@@ -307,29 +332,13 @@ def sign_done(root, tid, by="human:tester"):
 
 @pytest.fixture(autouse=True)
 def _legacy_trust(request, monkeypatch):
-    """TEST-ONLY (1.0a-2): older CLI tests act as `--by human:` without a proof. For them (a Python-level
-    patch, no env var, no config key; production has no such path) the human gate trusts --by as before, and
-    the pending read-back is the old by/via allowlist. Modules that test the real proof opt out by name."""
-    if request.module.__name__.split(".")[-1].startswith(REAL_PROOF_MODULES):
-        return
-    from orch import humanproof, tickets
+    """TEST-ONLY: these tests keep the workspace in pytest's temp folder, which the real pairing refuses (a
+    test workspace must live under ~/.orch-test). Their orch home is the ORCH_HOME the fixture set. The
+    pairing check itself is tested by test_home.py."""
+    from orch import home as orch_home
     from orch.errors import Refused
 
-    real_by = tickets.acting_by
-
-    def legacy(args):
-        who = real_by(args)
-        root = getattr(args, "orch_root", None)
-        if who.startswith("human:") and root is not None:
-            ensure_keys(
-                root
-            )  # a person's Done is signed: the key and the local id exist, as after a real proof
-        return who
-
     def test_home(root):
-        """TEST-ONLY: these tests keep the workspace in pytest's temp folder, which the real pairing refuses
-        (a test workspace must live under ~/.orch-test). Their orch home is the ORCH_HOME the fixture set, so
-        a signed Done (key + ledger) works there. The pairing check itself is tested by test_human_proof*."""
         home = Path(os.environ["ORCH_HOME"]) if os.environ.get("ORCH_HOME") else None
         if home is None:
             raise Refused("no test home")
@@ -337,9 +346,8 @@ def _legacy_trust(request, monkeypatch):
         os.chmod(home, 0o700)
         return home
 
-    monkeypatch.setattr(tickets, "acting_by", legacy)
     if not request.module.__name__.split(".")[-1].startswith(REAL_HOME_MODULES):
-        monkeypatch.setattr(humanproof, "guarded_home", test_home)
+        monkeypatch.setattr(orch_home, "guarded_home", test_home)
 
 
 _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
@@ -388,20 +396,20 @@ def _record_keys(request, monkeypatch, tmp_path_factory, _legacy_trust):
     if not _RECORD_MODULES.search(request.module.__name__):
         yield
         return
-    from orch import humanproof as hp
+    from orch import home as orch_home
 
-    orig_home = hp.guarded_home
+    orig_home = orch_home.guarded_home
     fallback = tmp_path_factory.mktemp("recordhome")
 
     def home(root):
         try:
             return orig_home(root)
-        except hp.HomeRefused:
+        except orch_home.HomeRefused:
             return fallback
 
     # the shared monkeypatch, set up after `_legacy_trust` (so undone before it): every patch of
-    # humanproof.guarded_home is undone in the reverse order, none leaks into the next test (test_winacl)
-    monkeypatch.setattr(hp, "guarded_home", home)
+    # orch_home.guarded_home is undone in the reverse order, none leaks into the next test (test_winacl)
+    monkeypatch.setattr(orch_home, "guarded_home", home)
     yield
 
 

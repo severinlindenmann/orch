@@ -13,7 +13,7 @@ from orch import (
     pagelaunch,
     pagesession,
 )
-from orch import humanproof as hp
+from orch import home as orch_home
 
 from orch_dashboard import actions, data
 from orch_dashboard.server import make_server
@@ -273,7 +273,9 @@ def test_print_launch_url_gives_the_page_a_session_once_and_reuse_revokes(live):
     assert c.getresponse().status == 200
     st, ck, _ = post(port, "/session", {"token": token})
     assert st == 200 and ck.startswith(f"orch_page_dashboard_{port}=")
-    assert pagelaunch.LAUNCH_LIFE == 30 and not list(hp.key_dir(root).glob("launch-dashboard.token"))  # spent
+    assert pagelaunch.LAUNCH_LIFE == 30 and not list(
+        orch_home.key_dir(root).glob("launch-dashboard.token")
+    )  # spent
     st, _, body = post(port, "/session", {"token": token})
     assert st == 403 and b"Someone else tried to use this sign-in link" in body
     st, _, _ = post(
@@ -287,8 +289,8 @@ def test_print_launch_url_gives_the_page_a_session_once_and_reuse_revokes(live):
 
 def test_the_printable_link_is_refused_outside_a_test_folder(live, monkeypatch):
     root, port = live
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
-    with pytest.raises(hp.Refused):
+    monkeypatch.setattr(orch_home, "install_kind", lambda: "normal")
+    with pytest.raises(orch_home.Refused):
         pagelaunch.printable_launch_url(root, "dashboard", f"http://127.0.0.1:{port}")
 
 
@@ -640,7 +642,7 @@ def test_open_tab_keeps_its_session_after_an_addon_change_restart(live, monkeypa
         port, "/api/act", {"op": "addon.set", "args": {"name": "factory", "on": True}}, {"Cookie": ck}
     )
     assert st == 200
-    assert list(hp.key_dir(root).glob("resume-dashboard.cookie"))  # armed before the op ran
+    assert list(orch_home.key_dir(root).glob("resume-dashboard.cookie"))  # armed before the op ran
     old = SERVERS[port]
     old.shutdown()
     old.server_close()
@@ -661,7 +663,7 @@ def test_an_addon_change_without_a_session_arms_nothing(live, monkeypatch):
     post(
         port, "/api/act", {"op": "addon.set", "args": {"name": "factory", "on": True}}, {"X-Orch-Page": None}
     )
-    assert not list(hp.key_dir(root).glob("resume-dashboard.cookie"))
+    assert not list(orch_home.key_dir(root).glob("resume-dashboard.cookie"))
 
 
 def test_reload_of_an_unknown_session_opens_a_fresh_sign_in_window(live, monkeypatch):
@@ -692,7 +694,9 @@ def test_a_busy_port_does_not_spend_the_resume_file(live):
     srv = make_server(root, 0, orch_bin=pagesession.SELF)  # the retry (auto-port) still adopts the session
     try:
         assert srv.RequestHandlerClass is not None
-        assert list(hp.key_dir(root).glob("resume-dashboard.cookie")) == []  # spent by the server that bound
+        assert (
+            list(orch_home.key_dir(root).glob("resume-dashboard.cookie")) == []
+        )  # spent by the server that bound
     finally:
         srv.server_close()
 
@@ -714,14 +718,14 @@ def test_a_transient_read_failure_keeps_the_resume_file(live, monkeypatch):
 
     root, _ = live
     assert pagelaunch.write_resume_cookie(root, "dashboard", "c" * 40, "s" * 40)
-    real = hp._read_guarded
+    real = orch_home._read_guarded
 
     def flaky(path):
         raise winacl.Unknown("try again")
 
-    monkeypatch.setattr(hp, "_read_guarded", flaky)
+    monkeypatch.setattr(orch_home, "_read_guarded", flaky)
     assert pagelaunch.take_resume_session(root, "dashboard") is None
-    monkeypatch.setattr(hp, "_read_guarded", real)
+    monkeypatch.setattr(orch_home, "_read_guarded", real)
     assert pagelaunch.take_resume_session(root, "dashboard") == ("c" * 40, "s" * 40)
 
 
@@ -729,7 +733,7 @@ def test_a_resume_file_that_cannot_be_removed_is_not_adopted(live, monkeypatch):
     """No replay: when the one use cannot be proven (the unlink fails), nothing is adopted."""
     root, _ = live
     assert pagelaunch.write_resume_cookie(root, "dashboard", "c" * 40, "s" * 40)
-    f = hp.key_dir(root) / "resume-dashboard.cookie"
+    f = orch_home.key_dir(root) / "resume-dashboard.cookie"
     real = type(f).unlink
 
     def deny(self, *a, **k):

@@ -66,7 +66,7 @@ class Ws:
 
 
 def _tool_python(e) -> str:
-    """The interpreter of orch's own tool environment (its shebang), where `orch.humanproof` can be imported."""
+    """The interpreter of orch's own tool environment (its shebang), where `orch.home` can be imported."""
     shim = (e.bin / "orch").resolve()
     first = shim.read_text(errors="replace").splitlines()[0]
     check(first.startswith("#!"), f"orch shim has no shebang: {first[:80]!r}")
@@ -108,7 +108,7 @@ def git_sync(e):
         record.write_bytes(old_record) if old_record is not None else record.unlink(missing_ok=True)
 
     e.cleanup.append(restore)  # backstop; the finally below restores it right after this scenario
-    rc, out, err = e.sh([py, "-c", ("import sys; from pathlib import Path; from orch import humanproof as h; "
+    rc, out, err = e.sh([py, "-c", ("import sys; from pathlib import Path; from orch import home as h; "
                          "h.write_install_record(Path(sys.prefix), 'test')")], env=ENV)
     check(rc == 0, f"install record: {(err or out)[-200:]}")
     try:

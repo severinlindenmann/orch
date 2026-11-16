@@ -135,10 +135,10 @@ def trusted_local_add(content_hash: str):
         _LOCAL_ADD_PROVEN = prev
 
 
-def humanproof_home(root: Path) -> Path:
-    from orch import humanproof
+def guarded_home_of(root: Path) -> Path:
+    from orch import home as orch_home
 
-    return humanproof.guarded_home(root)
+    return orch_home.guarded_home(root)
 
 
 def prepare_local_add(root: Path, folder: Path) -> dict:
@@ -168,18 +168,18 @@ def _entry_snapshot_ok(e: dict) -> bool:
 def _local_add_ok() -> bool:
     """Code from a folder runs inside orch's own tool environment (every orch process, page servers too):
     only a dev or test install, or a person's hand-off, may put it there."""
-    from orch import humanproof
+    from orch import home as orch_home
 
-    return _LOCAL_ADD_PROVEN is not None or humanproof.install_kind() in ("dev", "test")
+    return _LOCAL_ADD_PROVEN is not None or orch_home.install_kind() in ("dev", "test")
 
 
 def _env_source_ok() -> bool:
     """ORCH_REPO / ORCH_REF choose where code is installed from: an agent could aim them at its own code. They
     count only on a dev or test install, never on a normal one (a person's update uses the source shown on
     its card)."""
-    from orch import humanproof
+    from orch import home as orch_home
 
-    return humanproof.install_kind() in ("dev", "test")
+    return orch_home.install_kind() in ("dev", "test")
 
 
 def _src_env(name: str) -> str | None:
@@ -499,9 +499,9 @@ def _builtin_ok(name: str) -> bool:
     or test install with a local source, its folder is inside that source's workspace-addons, no link)."""
     if name in SHIPPED_ADDONS:
         return True
-    from orch import humanproof
+    from orch import home as orch_home
 
-    if humanproof.install_kind() not in ("dev", "test") or not _is_local(repo()):
+    if orch_home.install_kind() not in ("dev", "test") or not _is_local(repo()):
         return False
     base = Path(repo()) / "workspace-addons" / name
     return base.is_dir() and os.path.realpath(base) == os.path.abspath(base)
@@ -535,13 +535,13 @@ def tool_env_change_ok() -> None:
     """Anything that reinstalls orch's own tool environment (update, add-on add/remove) is a person's op on
     the account's own orch folder: on a NORMAL install with another ORCH_HOME it is refused, never run from
     that folder's add-on list."""
-    from orch import humanproof
+    from orch import home as orch_home
 
-    if humanproof.install_kind() != "normal":
+    if orch_home.install_kind() != "normal":
         return
     default = real_home() / ".orch-tool"
     if os.path.realpath(home()) != os.path.realpath(default):
-        raise humanproof.HomeRefused(humanproof.MSG_ENV_CHANGE)
+        raise orch_home.HomeRefused(orch_home.MSG_ENV_CHANGE)
 
 
 def _missing_source(e: dict) -> str | None:
@@ -553,9 +553,9 @@ def _missing_source(e: dict) -> str | None:
         if not _entry_snapshot_ok(e):
             return f"it changed since you allowed it ({e['name']})"
         return None
-    from orch import humanproof
+    from orch import home as orch_home
 
-    if humanproof.install_kind() not in (
+    if orch_home.install_kind() not in (
         "dev",
         "test",
     ):  # never because a hand-off is running: it allows one hash
@@ -729,9 +729,9 @@ def _reinstall_plan() -> dict | None:
     one. The installer's record (valid only for this very environment) decides the kind; none (an install from
     before the record existed) counts as `normal` and a normal record is written by this update, never an
     elevation. A source checkout without a record is no tool environment."""
-    from orch import humanproof
+    from orch import home as orch_home
 
-    kind = humanproof.read_install_record() or (None if humanproof._source_tree() else "normal")
+    kind = orch_home.read_install_record() or (None if orch_home._source_tree() else "normal")
     if kind is None:
         return None
     env = Path(sys.prefix)
@@ -739,13 +739,13 @@ def _reinstall_plan() -> dict | None:
 
 
 def _record_text(plan: dict) -> str:
-    from orch import humanproof
+    from orch import home as orch_home
 
-    return humanproof.install_record_text(plan["kind"], plan["env"])
+    return orch_home.install_record_text(plan["kind"], plan["env"])
 
 
 def _install_tool(entries: list[dict]) -> None:
-    from orch import humanproof
+    from orch import home as orch_home
 
     plan = _reinstall_plan()
     if plan is None and not _reinstall_anywhere():
@@ -772,7 +772,7 @@ def _install_tool(entries: list[dict]) -> None:
             raise Refused(winfinish.plain_reason(detail, restored)) from e
         winfinish.discard_backup(kept)
     if plan and ((plan["env"] / "bin").exists() or (plan["env"] / "Scripts").exists()):
-        humanproof.write_install_record(plan["env"], plan["kind"])
+        orch_home.write_install_record(plan["env"], plan["kind"])
 
 
 def _running_workspaces(root: Path) -> list[str]:
@@ -2008,7 +2008,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
                 raise Refused("This add-on changed since you allowed it. Ask for it again.")
             if not addonsnap.verify(Path(snap["snapshot"]), snap["hash"]):
                 raise Refused("The saved copy of this add-on was changed. Ask for it again.")
-            addonsnap.allow(humanproof_home(root), snap["hash"])  # only inside trusted_local_add
+            addonsnap.allow(guarded_home_of(root), snap["hash"])  # only inside trusted_local_add
             origin, folder = folder, Path(snap["snapshot"])
         if not (folder / "pyproject.toml").is_file():
             raise Refused(f"{folder} is not an add-on folder (no pyproject.toml).")

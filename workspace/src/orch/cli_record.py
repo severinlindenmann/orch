@@ -1,7 +1,7 @@
 """`orch record tail | query | counts | settings | delete-detail` (contracts/activity.md, counts.md).
 
 Every view reads the record through these commands (add-ons never read the files). The views write nothing
-(but `settings` may record a lowered retention value, humanproof.retention) and need no proof. `delete-detail`
+(but `settings` may record a lowered retention value) and need no proof. `delete-detail`
 is a person's own decision (op `record.delete_detail`, invariant H1).
 """
 

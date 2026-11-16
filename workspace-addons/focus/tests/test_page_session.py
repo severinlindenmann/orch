@@ -13,7 +13,7 @@ from orch import (
     pagelaunch,
     pagesession,
 )
-from orch import humanproof as hp
+from orch import home as orch_home
 
 from orch_focus import actions
 from orch_focus.server import make_server
@@ -358,5 +358,5 @@ def test_restart_marker_expires(live, monkeypatch):
     import time
 
     real = time.time
-    monkeypatch.setattr(hp.time, "time", lambda: real() + pagelaunch.RESTART_ARM_LIFE + 5)
+    monkeypatch.setattr(orch_home.time, "time", lambda: real() + pagelaunch.RESTART_ARM_LIFE + 5)
     assert pagelaunch.restart_armed(root) is None

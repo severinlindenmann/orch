@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from orch import hider, humanproof, record
+from orch import hider, record
+from orch import home as orch_home
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN = "r_8k2m01"
@@ -60,7 +61,7 @@ def test_a_new_record_has_no_mac_and_makes_no_key_file(store):
     assert all("auth" not in json.loads(line) for line in lines)
     assert [json.loads(line)["seq"] for line in lines] == [1, 2]
     # nothing was made in the guarded home: no key folder, no record key, no head or cutover file
-    assert not list(humanproof.guarded_home(ws).rglob("*"))
+    assert not list(orch_home.guarded_home(ws).rglob("*"))
     for name in ("record_key", "ensure_record_key", "record_head_read", "record_cutover_read"):
-        assert not hasattr(humanproof, name)
+        assert not hasattr(orch_home, name)
     assert not list(record.record_dir(ws).rglob("*.head"))

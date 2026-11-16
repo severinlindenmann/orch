@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from orch import addons, pagelaunch
-from orch import humanproof as hp
+from orch import home as home_mod
 from orch.errors import Refused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,35 +20,35 @@ def _prefix(tmp_path, monkeypatch, record=None, kind=None):
     env = tmp_path / "toolenv"
     env.mkdir(exist_ok=True)
     if kind is not None:
-        record = hp.install_record_text(kind, env)
+        record = home_mod.install_record_text(kind, env)
     if record is not None:
         (env / "orch-install.json").write_text(record.replace("@ENV@", os.path.realpath(env)))
-    monkeypatch.setattr(hp.sys, "prefix", str(env))
+    monkeypatch.setattr(home_mod.sys, "prefix", str(env))
     return env
 
 
 @pytest.mark.parametrize("kind", ["normal", "dev", "test"])
 def test_record_format_roundtrip(tmp_path, monkeypatch, kind):
     env = _prefix(tmp_path, monkeypatch)
-    text = hp.install_record_text(kind, env)
+    text = home_mod.install_record_text(kind, env)
     assert json.loads(text) == {"schema": "orch.install/1", "kind": kind, "root": os.path.realpath(env)}
     (env / "orch-install.json").write_text(text)
-    assert hp.install_kind() == kind
+    assert home_mod.install_kind() == kind
 
 
 def test_bad_kinds_are_not_records(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
-        hp.install_record_text("admin", "/x")
+        home_mod.install_record_text("admin", "/x")
     _prefix(tmp_path, monkeypatch, '{"kind": "admin", "root": "@ENV@"}')
-    assert hp.read_install_record() is None
+    assert home_mod.read_install_record() is None
 
 
 def test_missing_record_on_a_non_source_install_is_normal(tmp_path, monkeypatch):
     _prefix(tmp_path, monkeypatch)
-    monkeypatch.setattr(hp, "_source_tree", lambda: False)
-    assert hp.install_kind() == "normal"
-    monkeypatch.setattr(hp, "_source_tree", lambda: True)
-    assert hp.install_kind() == "test"  # running from the source tree, as the suite does
+    monkeypatch.setattr(home_mod, "_source_tree", lambda: False)
+    assert home_mod.install_kind() == "normal"
+    monkeypatch.setattr(home_mod, "_source_tree", lambda: True)
+    assert home_mod.install_kind() == "test"  # running from the source tree, as the suite does
 
 
 def test_installer_records_match_the_format(tmp_path):
@@ -63,7 +63,7 @@ def test_installer_records_match_the_format(tmp_path):
         assert len(line) == 1
         cmd = line[0].replace('"$TOOL_DIR/orch-install.json"', f"'{out}'")
         subprocess.run(["sh", "-c", f"KIND={kind}; ROOT={tmp_path}; {cmd}"], check=True)
-        assert json.loads(out.read_text()) == json.loads(hp.install_record_text(kind, tmp_path))
+        assert json.loads(out.read_text()) == json.loads(home_mod.install_record_text(kind, tmp_path))
     sh = (ROOT / "install.sh").read_text()
     assert "ORCH_INSTALL_KIND" in sh and "normal|dev|test" in sh
     ps = (ROOT / "install.ps1").read_text()
@@ -85,7 +85,7 @@ def test_update_carries_the_record_over(tmp_path, monkeypatch):
     monkeypatch.setattr(addons, "run_uv", lambda args: (env / "orch-install.json").unlink())  # the reinstall
     monkeypatch.setattr(addons, "_tool_args", lambda entries: [])
     addons._install_tool([])
-    assert hp.read_install_record() == "dev"
+    assert home_mod.read_install_record() == "dev"
 
 
 # ---------------------------------------------------------------- N6: ORCH_REPO / ORCH_REF
@@ -94,7 +94,7 @@ def test_update_carries_the_record_over(tmp_path, monkeypatch):
 def test_normal_install_ignores_repo_and_ref(tmp_path, monkeypatch, capsys):
     src = tmp_path / "x"
     (src / "workspace").mkdir(parents=True)
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     monkeypatch.setenv("ORCH_REPO", str(src))
     monkeypatch.setenv("ORCH_REF", "evil")
     assert addons.repo() == addons.DEFAULT_REPO
@@ -107,7 +107,7 @@ def test_normal_install_ignores_repo_and_ref(tmp_path, monkeypatch, capsys):
 def test_dev_and_test_installs_honour_repo_and_ref(tmp_path, monkeypatch, kind):
     src = tmp_path / "x"
     (src / "workspace").mkdir(parents=True)
-    monkeypatch.setattr(hp, "install_kind", lambda: kind)
+    monkeypatch.setattr(home_mod, "install_kind", lambda: kind)
     monkeypatch.setenv("ORCH_REPO", str(src))
     monkeypatch.setenv("ORCH_REF", "develop")
     assert addons.repo() == str(src) and addons.ref() == "develop" and addons._is_local(str(src))
@@ -115,7 +115,7 @@ def test_dev_and_test_installs_honour_repo_and_ref(tmp_path, monkeypatch, kind):
 
 
 def test_normal_install_never_honours_repo_and_ref_not_even_inside_an_update(monkeypatch):
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     monkeypatch.setenv("ORCH_REF", "v2")
     monkeypatch.setenv("ORCH_REPO", "/tmp/x")
     assert addons.ref() != "v2" and addons.repo() == addons.DEFAULT_REPO
@@ -123,7 +123,7 @@ def test_normal_install_never_honours_repo_and_ref_not_even_inside_an_update(mon
 
 
 def test_addon_add_says_so_on_a_normal_install(proj, monkeypatch, capsys):
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     monkeypatch.setenv("ORCH_REPO", "/tmp/x")
     with pytest.raises(Refused):
         addons.add(proj, "no-such-addon", yes=True)
@@ -141,7 +141,7 @@ def tws(tmp_path, monkeypatch):
     (acct / ".orch-test" / "home").mkdir()
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     return ws
 
 
@@ -149,21 +149,23 @@ def test_launch_url_on_a_test_install(tws):
     url = pagelaunch.printable_launch_url(tws, "focus", "http://127.0.0.1:8123")
     token = url.split("#launch=")[1]
     assert url.startswith("http://127.0.0.1:8123/#launch=")
-    tok, exp = (hp.key_dir(tws) / "launch-focus.token").read_text().split()  # the ONE format: token, expiry
+    tok, exp = (
+        (home_mod.key_dir(tws) / "launch-focus.token").read_text().split()
+    )  # the ONE format: token, expiry
     assert (
         tok == token
         and 0 < int(exp) - __import__("time").time() <= pagelaunch.LAUNCH_LIFE
         and pagelaunch.LAUNCH_LIFE == 30
     )
-    assert oct((hp.key_dir(tws) / "launch-focus.token").stat().st_mode & 0o777) == "0o600"
+    assert oct((home_mod.key_dir(tws) / "launch-focus.token").stat().st_mode & 0o777) == "0o600"
 
 
 def test_launch_url_refused_on_dev_normal_and_outside_the_test_folder(tws, tmp_path, monkeypatch):
     for kind in ("dev", "normal"):
-        monkeypatch.setattr(hp, "install_kind", lambda k=kind: k)
+        monkeypatch.setattr(home_mod, "install_kind", lambda k=kind: k)
         with pytest.raises(Refused, match="only on a test install"):
             pagelaunch.printable_launch_url(tws, "focus", "http://127.0.0.1:1")
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     other = tmp_path / "acct" / "real-ws"
     other.mkdir()
     with pytest.raises(Refused, match="only on a test install"):
@@ -173,7 +175,7 @@ def test_launch_url_refused_on_dev_normal_and_outside_the_test_folder(tws, tmp_p
 
 
 def test_start_refuses_print_launch_url_outside_test(proj, monkeypatch, run):
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     code, out, err = run("start", "--no-open", "--print-launch-url")
     assert code == 2 and "only on a test install" in (out + err)
 
@@ -189,7 +191,7 @@ def _folder_addon(tmp_path):
 
 
 def test_normal_install_refuses_a_folder_addon_without_a_handoff(proj, tmp_path, monkeypatch):
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     f = _folder_addon(tmp_path)
     with pytest.raises(Refused, match="only you can allow it"):
         addons.add(proj, str(f), yes=True)
@@ -197,13 +199,13 @@ def test_normal_install_refuses_a_folder_addon_without_a_handoff(proj, tmp_path,
 
 
 def test_folder_addon_passes_the_core_check_on_dev_test_and_with_the_handoff(proj, tmp_path, monkeypatch):
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     assert not addons._local_add_ok()
     with addons.trusted_local_add("a" * 64):
         assert addons._local_add_ok()
     assert not addons._local_add_ok()
     for kind in ("dev", "test"):
-        monkeypatch.setattr(hp, "install_kind", lambda k=kind: k)
+        monkeypatch.setattr(home_mod, "install_kind", lambda k=kind: k)
         assert addons._local_add_ok()
 
 
@@ -216,7 +218,7 @@ def test_reinstall_needs_a_record_for_this_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(addons, "_tool_args", lambda e: called.append(1) or [])
     with pytest.raises(Refused, match="tool folder"):  # no record
         addons._install_tool([])
-    (env / "orch-install.json").write_text(hp.install_record_text("normal", tmp_path / "other"))
+    (env / "orch-install.json").write_text(home_mod.install_record_text("normal", tmp_path / "other"))
     with pytest.raises(Refused, match="tool folder"):  # a record for another environment
         addons._install_tool([])
     assert not called
@@ -237,32 +239,32 @@ def test_reinstall_pins_uv_tool_dir_to_the_recorded_place(tmp_path, monkeypatch)
 
 def test_env_vars_do_not_steer_the_install_kind(tmp_path, monkeypatch):
     _prefix(tmp_path, monkeypatch, kind="normal")
-    monkeypatch.setattr(hp, "_source_tree", lambda: False)
-    before = hp.install_kind()
+    monkeypatch.setattr(home_mod, "_source_tree", lambda: False)
+    before = home_mod.install_kind()
     monkeypatch.setenv("UV_TOOL_DIR", str(tmp_path / "x"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "y"))
-    assert hp.install_kind() == before == "normal"
+    assert home_mod.install_kind() == before == "normal"
 
 
 def test_record_for_another_root_is_ignored(tmp_path, monkeypatch):
-    _prefix(tmp_path, monkeypatch, hp.install_record_text("test", tmp_path / "elsewhere"))
-    monkeypatch.setattr(hp, "_source_tree", lambda: False)
-    assert hp.read_install_record() is None and hp.install_kind() == "normal"
+    _prefix(tmp_path, monkeypatch, home_mod.install_record_text("test", tmp_path / "elsewhere"))
+    monkeypatch.setattr(home_mod, "_source_tree", lambda: False)
+    assert home_mod.read_install_record() is None and home_mod.install_kind() == "normal"
     _prefix_old = tmp_path / "toolenv" / "orch-install.json"
     _prefix_old.write_text('{"kind": "test"}')  # an old record without root
-    assert hp.install_kind() == "normal"
+    assert home_mod.install_kind() == "normal"
 
 
 def test_lane_c_layout_tool_env_under_orch_test_testnet(tmp_path, monkeypatch):
     """UV_TOOL_DIR under ~/.orch-test/testnet is legitimate: its record names that environment."""
     env = tmp_path / ".orch-test" / "testnet" / "tools" / "orch-workspace"
     env.mkdir(parents=True)
-    (env / "orch-install.json").write_text(hp.install_record_text("test", env))
-    monkeypatch.setattr(hp.sys, "prefix", str(env))
-    monkeypatch.setattr(hp, "_source_tree", lambda: False)
-    assert hp.install_kind() == "test"
+    (env / "orch-install.json").write_text(home_mod.install_record_text("test", env))
+    monkeypatch.setattr(home_mod.sys, "prefix", str(env))
+    monkeypatch.setattr(home_mod, "_source_tree", lambda: False)
+    assert home_mod.install_kind() == "test"
     monkeypatch.setenv("UV_TOOL_DIR", str(env.parent))
-    assert hp.install_kind() == "test"
+    assert home_mod.install_kind() == "test"
 
 
 @pytest.fixture
@@ -273,7 +275,7 @@ def rws(tmp_path, monkeypatch):
     (ws / ".orch").mkdir(parents=True)
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.delenv("ORCH_HOME", raising=False)
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     return ws
 
 
@@ -297,7 +299,7 @@ def test_planted_folder_entry_is_not_installed_on_a_normal_install(rws, tmp_path
         "hash": snap["hash"],
     }
     assert addons._missing_source(entry) is not None  # right place, but never allowed by a person
-    addonsnap.allow(hp.guarded_home(rws), snap["hash"])
+    addonsnap.allow(home_mod.guarded_home(rws), snap["hash"])
     assert snap["snapshot"] in addons._tool_args([entry])  # allowed hash in the right place: installed
 
 
@@ -307,7 +309,7 @@ def test_snapshot_in_an_agent_chosen_home_is_skipped(tws, tmp_path, monkeypatch,
 
     f = _real_addon(tmp_path)
     snap = addons.prepare_local_add(tws, f)  # under the test home (ORCH_HOME)
-    addonsnap.allow(hp.guarded_home(tws), snap["hash"])
+    addonsnap.allow(home_mod.guarded_home(tws), snap["hash"])
     entry = {
         "name": "hello",
         "source": snap["snapshot"],
@@ -316,7 +318,7 @@ def test_snapshot_in_an_agent_chosen_home_is_skipped(tws, tmp_path, monkeypatch,
         "hash": snap["hash"],
     }
     assert addons._missing_source(entry) is None  # a test install may use its test home
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")  # the same layout on a normal install
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")  # the same layout on a normal install
     assert "changed since you allowed it" in addons._missing_source(entry)
     assert snap["snapshot"] not in addons._tool_args([entry])
     # a snapshot folder with a link on the way is no snapshot either
@@ -340,7 +342,7 @@ def throwaway(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_HOME", str(orch_home))
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
     monkeypatch.chdir(ws)
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     return acct, orch_home, ws
 
 
@@ -366,16 +368,16 @@ def test_update_on_a_normal_install_with_another_orch_home_is_refused(throwaway,
         lambda: addons.update(ws),
         lambda: addons._reinstall([], save=True, then=[], root=ws, done="x"),
     ):
-        with pytest.raises(hp.HomeRefused, match="different orch folder than your account's") as e:
+        with pytest.raises(home_mod.HomeRefused, match="different orch folder than your account's") as e:
             call()
-        assert "Start orch normally" in str(e.value) and e.value.code == hp.NOT_TOGETHER
+        assert "Start orch normally" in str(e.value) and e.value.code == home_mod.NOT_TOGETHER
     assert ran == [] and not (acct / ".orch-tool").exists()  # nothing installed, real home untouched
     assert addons.registry() and addons.home() == orch_home  # read-only ops still see the list
 
 
 def test_a_dev_or_test_install_may_update_from_its_own_orch_home(throwaway, monkeypatch):
     acct, orch_home, ws = throwaway
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     addons._save_registry([{"name": "focus", "source": "built-in", "version": "0.1.0"}])
     seen = []
     monkeypatch.setattr(addons, "_install_tool", lambda e: seen.append(e))
@@ -419,7 +421,7 @@ def test_a_planted_hashless_folder_entry_rides_no_approval(rws, tmp_path, capsys
 
     good = _folder_addon(tmp_path)
     snap = addons.prepare_local_add(rws, good)
-    addonsnap.allow(hp.guarded_home(rws), snap["hash"])
+    addonsnap.allow(home_mod.guarded_home(rws), snap["hash"])
     planted = {"name": "planted", "source": "/agent/dir", "version": "0.1.0"}
     mine = {
         "name": "mine",
@@ -451,7 +453,7 @@ def test_install_uses_the_snapshot_not_the_live_folder(tws, tmp_path, monkeypatc
     assert not (Path(snap["snapshot"]) / "evil.py").exists()
     from orch import addonsnap
 
-    assert snap["hash"] in addonsnap._allowed(hp.guarded_home(tws))  # recorded inside the hand-off
+    assert snap["hash"] in addonsnap._allowed(home_mod.guarded_home(tws))  # recorded inside the hand-off
 
 
 def test_tampered_snapshot_is_refused_on_reinstall(tws, tmp_path, capsys):
@@ -459,7 +461,7 @@ def test_tampered_snapshot_is_refused_on_reinstall(tws, tmp_path, capsys):
 
     f = _real_addon(tmp_path)
     snap = addons.prepare_local_add(tws, f)
-    addonsnap.allow(hp.guarded_home(tws), snap["hash"])
+    addonsnap.allow(home_mod.guarded_home(tws), snap["hash"])
     entry = {
         "name": "hello",
         "source": snap["snapshot"],
@@ -483,7 +485,7 @@ def _old_install(tmp_path, monkeypatch):
     monkeypatch.setattr(addons, "tool_env_change_ok", lambda: None)  # the home rule has its own tests
     env = _prefix(tmp_path, monkeypatch)  # no record
     (env / "bin").mkdir()
-    monkeypatch.setattr(hp, "_source_tree", lambda: False)
+    monkeypatch.setattr(home_mod, "_source_tree", lambda: False)
     monkeypatch.setattr(addons, "_tool_args", lambda e: [])
     return env
 
@@ -494,7 +496,7 @@ def test_update_of_an_install_without_a_record_writes_a_normal_one(tmp_path, mon
     monkeypatch.setattr(addons, "run_uv", lambda a: seen.append(os.environ.get("UV_TOOL_DIR")))
     addons._install_tool([])
     assert seen == [os.path.realpath(tmp_path)]
-    assert hp.read_install_record() == "normal"
+    assert home_mod.read_install_record() == "normal"
     assert json.loads((env / "orch-install.json").read_text())["root"] == os.path.realpath(env)
 
 
@@ -502,19 +504,19 @@ def test_an_update_never_changes_the_kind(tmp_path, monkeypatch):
     for kind in ("test", "dev", "normal"):
         env = _prefix(tmp_path, monkeypatch)
         (env / "bin").mkdir(exist_ok=True)
-        monkeypatch.setattr(hp, "_source_tree", lambda: False)
+        monkeypatch.setattr(home_mod, "_source_tree", lambda: False)
         monkeypatch.setattr(addons, "_tool_args", lambda e: [])
-        (env / "orch-install.json").write_text(hp.install_record_text(kind, env))
+        (env / "orch-install.json").write_text(home_mod.install_record_text(kind, env))
         monkeypatch.setattr(addons, "run_uv", lambda a, e=env: (e / "orch-install.json").unlink())
         addons._install_tool([])
-        assert hp.read_install_record() == kind
+        assert home_mod.read_install_record() == kind
         (env / "orch-install.json").unlink()
     (env / "orch-install.json").write_text(
-        hp.install_record_text("test", tmp_path / "other")
+        home_mod.install_record_text("test", tmp_path / "other")
     )  # not for this env
     monkeypatch.setattr(addons, "run_uv", lambda a: None)
     addons._install_tool([])
-    assert hp.read_install_record() == "normal"  # a foreign record is never elevated to
+    assert home_mod.read_install_record() == "normal"  # a foreign record is never elevated to
 
 
 def test_windows_update_keeps_the_record_and_pins_the_tool_dir(tmp_path, monkeypatch):
@@ -523,7 +525,7 @@ def test_windows_update_keeps_the_record_and_pins_the_tool_dir(tmp_path, monkeyp
     env = _old_install(tmp_path, monkeypatch)
     for rec in (None, "test"):
         if rec:
-            (env / "orch-install.json").write_text(hp.install_record_text(rec, env))
+            (env / "orch-install.json").write_text(home_mod.install_record_text(rec, env))
         got: dict = {}
         monkeypatch.setattr(winfinish, "needed", lambda: True)
         monkeypatch.setattr(winfinish, "pending", lambda h: False)
@@ -635,7 +637,7 @@ def test_same_content_same_hash_and_build_output_ignored(tws, tmp_path):
 
 @pytest.fixture
 def win(monkeypatch):
-    monkeypatch.setattr(hp, "_is_windows", lambda: True)
+    monkeypatch.setattr(home_mod, "_is_windows", lambda: True)
     monkeypatch.setattr(os.path, "realpath", lambda p: str(p))  # the simulated paths are already real
 
 
@@ -643,7 +645,7 @@ PROFILE = "C:\\Users\\Pat"
 
 
 def test_windows_prefix_is_case_insensitive_and_component_wise(win):
-    ok = hp.home_ok
+    ok = home_mod.home_ok
     ws = PROFILE + "\\.orch-test\\e2e\\ws"
     home = PROFILE + "\\.orch-test\\e2e\\.orch-tool"
     assert ok(PROFILE, "test", True, ws, home)
@@ -657,8 +659,8 @@ def test_windows_prefix_is_case_insensitive_and_component_wise(win):
 
 
 def test_windows_forward_slashes_compare_like_backslashes(win):
-    assert hp._under("C:/Users/Pat/.orch-test/x", PROFILE + "\\.orch-test")
-    assert not hp._under("C:\\Users\\Pat\\.orch-test", PROFILE + "\\.orch-test")  # the prefix itself
+    assert home_mod._under("C:/Users/Pat/.orch-test/x", PROFILE + "\\.orch-test")
+    assert not home_mod._under("C:\\Users\\Pat\\.orch-test", PROFILE + "\\.orch-test")  # the prefix itself
 
 
 class _St:
@@ -667,24 +669,24 @@ class _St:
 
 
 def test_windows_reparse_point_is_no_test_prefix(win, monkeypatch):
-    monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
-    assert hp._prefix_is_real_dir(Path(PROFILE))
-    monkeypatch.setattr(hp, "_lstat", lambda p: _St(hp.REPARSE))  # a junction or symlink
-    assert not hp._prefix_is_real_dir(Path(PROFILE))
-    monkeypatch.setattr(hp, "_lstat", lambda p: _St(0, 0o100600))  # a file
-    assert not hp._prefix_is_real_dir(Path(PROFILE))
+    monkeypatch.setattr(home_mod, "_lstat", lambda p: _St(0))
+    assert home_mod._prefix_is_real_dir(Path(PROFILE))
+    monkeypatch.setattr(home_mod, "_lstat", lambda p: _St(home_mod.REPARSE))  # a junction or symlink
+    assert not home_mod._prefix_is_real_dir(Path(PROFILE))
+    monkeypatch.setattr(home_mod, "_lstat", lambda p: _St(0, 0o100600))  # a file
+    assert not home_mod._prefix_is_real_dir(Path(PROFILE))
 
 
 def test_windows_is_test_workspace(win, monkeypatch):
-    monkeypatch.setattr(hp, "account_home", lambda: Path(PROFILE))
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
-    monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
+    monkeypatch.setattr(home_mod, "account_home", lambda: Path(PROFILE))
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
+    monkeypatch.setattr(home_mod, "_lstat", lambda p: _St(0))
     assert pagelaunch.is_test_workspace(Path(PROFILE + "\\.ORCH-TEST\\testnet\\ws"))
     assert not pagelaunch.is_test_workspace(Path(PROFILE + "\\Documents\\ws"))
-    monkeypatch.setattr(hp, "_lstat", lambda p: _St(hp.REPARSE))
+    monkeypatch.setattr(home_mod, "_lstat", lambda p: _St(home_mod.REPARSE))
     assert not pagelaunch.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))
-    monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
-    monkeypatch.setattr(hp, "install_kind", lambda: "dev")
+    monkeypatch.setattr(home_mod, "_lstat", lambda p: _St(0))
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "dev")
     assert not pagelaunch.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))  # test installs only
 
 
@@ -712,7 +714,7 @@ def test_other_orch_home_gets_the_plain_text_first(throwaway, monkeypatch, capsy
     code = cli.main(argv)
     cap = capsys.readouterr()
     text = cap.out + cap.err
-    assert code == 2 and hp.MSG_ENV_CHANGE in text
+    assert code == 2 and home_mod.MSG_ENV_CHANGE in text
     assert "Do this in the dashboard" not in text and "dashboard on this computer" not in text
     assert ran == []  # nothing installed
     assert not (acct / ".orch-tool").exists()  # real home untouched
@@ -724,4 +726,4 @@ def test_the_check_does_not_block_list_or_turning_on_in_the_workspace(throwaway,
 
     assert cli.main(["addon", "list"]) == 0
     assert cli.main(["update", "--project-only"]) in (0, 2)
-    assert hp.MSG_ENV_CHANGE not in capsys.readouterr().err
+    assert home_mod.MSG_ENV_CHANGE not in capsys.readouterr().err

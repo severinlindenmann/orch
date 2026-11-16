@@ -564,10 +564,10 @@ def test_process_death_recovers_journal(done_copy, monkeypatch):
     script = """
 import os, signal, subprocess, sys
 from pathlib import Path
-from orch import addons, humanproof, worktrees
+from orch import addons, worktrees
 home = Path(os.environ["ORCH_HOME"])
 addons.real_home = lambda: home.parent
-humanproof.guarded_home = lambda root: home
+orch_home.guarded_home = lambda root: home
 def killed(top, args):
     if "--no-ff" in args:
         msg = args[args.index("-m") + 1]

@@ -25,7 +25,7 @@ import time
 import urllib.parse
 
 from orch import hider, keystore, launchenv, term
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch.errors import Refused
 
 _recorder = None
@@ -704,11 +704,11 @@ def _pid_alive(pid: int) -> bool:
 
 
 def sweep_tmp(root):
-    home = hp.guarded_home(root)
+    home = orch_home.guarded_home(root)
     tmp = home / "keys" / "tmp"
     if not tmp.exists() and not tmp.is_symlink():
         return
-    hp._private_dir(tmp, home)
+    orch_home._private_dir(tmp, home)
     for p in tmp.iterdir():
         if not re.fullmatch(r"\d+-[0-9a-f]{16}", p.name):
             continue
@@ -727,7 +727,7 @@ AGENT_COMMAND = (
 
 def _switch_on(root, name, flag) -> bool:
     """A profile switch (allow_get, agents_may_env): the flag in the profile."""
-    with hp._key_lock(hp.key_dir(root)):
+    with orch_home._key_lock(orch_home.key_dir(root)):
         profile = _verified(root, name)
         return bool(profile and profile.get(flag) is True)
 
@@ -937,7 +937,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             raise Refused("Refused: no keys are available for hiding output.")
         dirs = safe_path_dirs(root)
         command[0] = _program(command[0], dirs, h)
-        home = hp.guarded_home(root)
+        home = orch_home.guarded_home(root)
         parent = home / "keys" / "tmp"
         candidate = parent / f"{os.getpid()}-{secrets.token_hex(8)}"
         private = candidate / "~home"  # empty: the child's cwd and HOME (a key name can never be "~home")
@@ -956,11 +956,11 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             )
         for name in names:  # recorded BEFORE any key file is written (a failing record leaves nothing behind)
             recorder.record(name)
-        hp._private_dir(parent, home)
+        orch_home._private_dir(parent, home)
         candidate.mkdir(mode=0o700)
         temp = candidate
-        hp.winacl.set_private(temp, True)
-        hp._private_dir(temp, parent)
+        orch_home.winacl.set_private(temp, True)
+        orch_home._private_dir(temp, parent)
         private.mkdir(mode=0o700)
         if files:
             paths = {}
