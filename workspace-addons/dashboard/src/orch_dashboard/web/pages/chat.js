@@ -526,6 +526,8 @@ new MutationObserver(() => {
 
 // Workspace DMs are a separate layer, so group/Chat changes can merge independently.
 const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false, loaded:false, picker:null, error:false, lastFetch:-Infinity, timer:null};
+// How often an open workspace thread looks for new texts (relay delivery is ~1 s; R8.3 wants the screen within 2 s).
+const CHAT_DM_POLL = 2000;
 const chatDmId = id => typeof id === 'string' && /^ws_[a-z0-9]{10}$/.test(id);
 const chatDmContact = ws => chatDm.contacts.find(c => c.ws === ws);
 // "Send a message" on Contacts already knows the name: the thread opens with it, before the contacts have loaded.
@@ -553,9 +555,9 @@ function chatDmMessages(ws) {
   return [...saved, ...array(chatDm.pending.get(ws)).filter(m => !ids.has(m.id))];
 }
 async function chatDmLoad(force = false) {
-  if (snapshot || route().kind !== 'chat') return;
+  if (snapshot || route().kind !== 'chat' || document.hidden) return;  // a hidden tab does not poll
   if (chatDm.loading) return;  // a thread opened meanwhile is picked up when this load ends (see finally)
-  const delay = force || (!chatDm.loaded && !chatDm.contacts.length) ? 0 : 5000 - (Date.now() - chatDm.lastFetch);
+  const delay = force || (!chatDm.loaded && !chatDm.contacts.length) ? 0 : CHAT_DM_POLL - (Date.now() - chatDm.lastFetch);
   if (delay > 0) {
     if (!chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, delay);
     return;
@@ -591,7 +593,7 @@ async function chatDmLoad(force = false) {
       render();
       // The person opened another thread while this load ran: read that one now, not on the next 5 s tick.
       if (!chatDm.error && chatDmId(chatUi.open) && chatUi.open !== fetched && chatDmContact(chatUi.open)) chatDmLoad(true);
-      else if (chatDmId(chatUi.open) && !chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, 5000);
+      else if (chatDmId(chatUi.open) && !chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, CHAT_DM_POLL);
     }
   }
 }
@@ -619,6 +621,7 @@ function chatDmRoute() {
   if (chatDmId(ws)) { chatUi.open = ws; chatUi.listOpen = false; chatUi.day = null; }
   if (route().kind === 'chat') { render(); chatDmLoad(); }
 }
+document.addEventListener?.('visibilitychange', () => { if (!document.hidden && chatDmId(chatUi.open)) chatDmLoad(); });
 window.addEventListener('hashchange', chatDmRoute);
 window.addEventListener('orch:state', chatDmRoute);
 window.addEventListener('DOMContentLoaded', chatDmRoute);
