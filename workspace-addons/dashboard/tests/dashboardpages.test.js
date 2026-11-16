@@ -376,12 +376,15 @@ test('settings: the folder is shown plainly with Copy path and the quiet full pa
   }
 });
 
-// Dash 02/21/43/44: no ticket keys or status chips on Home rows, no empty Working now, See all tickets right after.
-test('home rows: no key or chip, no empty Working now, See all tickets (N), finish time instead of Done', () => {
+// Dash 02/21/43/44: no status chips on Home rows, no empty Working now, See all tickets right after.
+// ORCH-58 (owner, 16 Nov): the ticket number goes before every title; a result row is titled with the ticket.
+test('home rows: number before the title, no chip, no empty Working now, See all tickets (N), finish time instead of Done', () => {
   const today = new Date(); today.setHours(9, 5);
   const items = [{id:'a', key:'PIL-54', title:'Pay invoice', status:'review'}, {id:'d', key:'PIL-55', title:'Book room', status:'done', done_at:today.toISOString()}];
   const home = context(items, {parse:v => v ? new Date(v) : null, time:d => d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')}).home(), text = JSON.stringify(home);
-  assert.doesNotMatch(text, /PIL-5/); assert.doesNotMatch(text, /"(review|done)"\]/);
+  assert.match(text, /\{"tag":"h3","attrs":\{\},"children":\[\{"tag":"span","attrs":\{"className":"key"\},"children":\["PIL-54"\]\}," ","Pay invoice"\]\},\{"tag":"p","attrs":\{"className":"meta"\},"children":\["Check the result"\]\}/, 'result row: number + ticket name, Check the result as the small line');
+  assert.match(text, /"children":\["PIL-55"\]\}," ","Book room"/, 'finished row shows the number');
+  assert.doesNotMatch(text, /"(review|done)"\]/);
   assert.doesNotMatch(text, /Working now|No tickets are being worked on/);
   assert.match(text, /Finished 9:05/);
   const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0];
@@ -602,4 +605,23 @@ test('home: a long add-on question is one short title in its row', () => {
   const items = [{id:'a', title:'Launch a loyalty card', status:'waiting', questions:[{id:'q1', text:long}]}, {id:'b', title:'T b', status:'waiting', questions:[{id:'q1', text:'Plain?'}]}];
   const row = nodes(context(items, {needsList:() => needs, snapshot:false, button:label => ({tag:'button', children:[label]})}).home(), n => n.attrs?.['data-key'] === 'need-f1')[0];
   assert.ok(row); assert.match(JSON.stringify(row), /Start 'Loyalty card'\?/); assert.doesNotMatch(JSON.stringify(row), /Regular customers/);
+});
+
+// ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.
+test('tickets list: number before the title, and a search hit is visible without opening its group', () => {
+  const items = [{id:'o', key:'ORCH-63', title:'Open one', status:'open'}];
+  for (let i = 0; i < 7; i++) items.push({id:'d' + i, key:'ORCH-' + (30 + i), title:'Done ' + i, status:'done'});
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null), addEventListener(){}, dataset:{}, classList:{add(){}}});
+  const c = context(items, {h, iconEl:() => null, parentLine:() => null});
+  const titles = table => nodes(table, n => n.tag === 'a' && /^#ticket\//.test(n.attrs?.href || '')).map(a => a.children.map(x => typeof x === 'string' ? x : x.children.join('')).join(''));
+  let table = c.ticketTable(c.filteredTickets());
+  assert.deepEqual(titles(table), ['ORCH-63 Open one'], 'the Done group starts folded (more than 5)');
+  assert.equal(nodes(table, n => n.attrs?.className === 'key')[0].children[0], 'ORCH-63');
+  assert.deepEqual(titles(c.boardCard(items[0])), ['ORCH-63 Open one'], 'board card shows the number');
+  vm.runInContext("ticketSearch = '31'", c);
+  table = c.ticketTable(c.filteredTickets());
+  assert.deepEqual(titles(table), ['ORCH-31 Done 1'], 'the hit inside the folded Done group shows at once');
+  assert.match(JSON.stringify(table), /1 ticket matches “31”/);
+  vm.runInContext("ticketSearch = ''", c);
+  assert.deepEqual(titles(c.ticketTable(c.filteredTickets())), ['ORCH-63 Open one'], 'clearing the search folds Done again');
 });
