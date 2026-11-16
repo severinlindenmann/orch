@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from lib import check, free_port, http, kill_group, scenario
+from lib import check, free_port, http, kill_group, page_signin, scenario
 from scenarios_ws import tload
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hello-world"
@@ -289,13 +289,32 @@ def a13(e):
         st2, v = get("/api/addon/automation")
         check(st2 == 200 and v["state"] == "ok" and v["view"]["schema"] == "orch.addon-view/1", f"automation view: {v}")
         check(get("/api/addon/nope")[0] == 404, "unknown add-on tab not 404")
-        # the dashboard buttons: addon.act run / toggle / delete reach the real automation CLI and are accepted
-        tid = e.orchj(ws, "ticket", "new", "A13 repeating")["id"]
-        e.orch(ws, "automation", "repeat", tid, "0 7 * * 1")
+    # the dashboard buttons, as the person: sign in with the link orch prints (like a browser), then addon.act
+    # toggle / run / delete reach the real automation CLI and work; the same click without the sign-in is refused
+    tid = e.orchj(ws, "ticket", "new", "A13 repeating")["id"]
+    e.orch(ws, "automation", "repeat", tid, "0 7 * * 1")
+    try:
+        base, auth = page_signin(e.orchj(ws, "start", "--print-launch-url"), "dashboard")
+
+        def act(verb: str, headers: dict):
+            return http("POST", base + "/api/act", headers=headers,
+                        body={"op": "addon.act", "args": {"addon": "automation", "verb": verb, "target": tid}})
+
+        r = act("toggle", {"Origin": base, "Sec-Fetch-Site": "same-origin"})
+        check(r.status == 403 and r.text.startswith("Sign in to "), f"addon.act without sign-in not refused: {r}")
+
+        def sched() -> dict:
+            return (tload(ws, tid).get("ext") or {}).get("automation") or {}
+
+        check(sched().get("recurring") is True and sched().get("paused") is not True, f"repeat not on: {sched()}")
         for verb in ("toggle", "run", "delete"):
-            r = http("POST", base + "/api/act", headers={"Origin": base, "Content-Type": "application/json"},
-                     body={"op": "addon.act", "args": {"addon": "automation", "verb": verb, "target": tid}})
+            r = act(verb, auth)
             check(r.status == 200, f"addon.act automation {verb}: {r.status} {r.body[:200]!r}")
+            if verb == "toggle":
+                check(sched().get("paused") is True, f"the toggle did not switch the repeat off: {sched()}")
+        check(not sched(), f"delete left the repeat: {sched()}")
+    finally:
+        e.sh(["orch", "stop"], cwd=ws)
     check(before_help != _help(e, ws), "help unchanged")
 
 
