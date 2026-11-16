@@ -13,7 +13,7 @@
 
   let look = null, name = 'Workspace', owner = null;
   let open = false, more = false, short = [], draft = {icon: null, color: null}, cat = null, light = false;
-  let editing = false, pd = {name: '', description: '', tags: [], tag: ''}, ws = {name: '', description: ''}, busy = false, saving = false, status = '', statusTone = 'ok';
+  let editing = false, pd = {name: '', description: '', tags: [], tag: ''}, ws = {name: '', description: '', tags: []}, busy = false, saving = false, status = '', statusTone = 'ok';
 
   const clean = v => String(v == null ? '' : v).normalize('NFC').trim();
   function hash(text) {
@@ -153,6 +153,7 @@
   const TAGMAX = 4;
   const tagClean = t => clean(t).toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '').slice(0, 24);
   const shownDescription = () => ws.description || (look && look.description) || '';
+  const shownTags = () => (ws.tags && ws.tags.length ? ws.tags : (look && look.tags) || []);  // the workspace's own first, then the relay's
   function addTag() {
     const t = tagClean(pd.tag);
     pd.tag = '';
@@ -179,7 +180,7 @@
   function profileCard() {
     if (!look) return null;
     const svc = look.service;
-    const tagsNow = look.tags || [];
+    const tagsNow = shownTags();
     const foot = editing ? n('div', {className: 'card-row'}, n('div', {className: 'grow'}), n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'pf-cancel', 'data-key': 'pf-cancel'}, 'Cancel'),
       n('button', {type: 'button', className: 'btn primary sm', 'data-lk': 'pf-save', 'data-key': 'pf-save', disabled: busy}, svc ? 'Save and send' : 'Save')) : null;
     return n('div', {className: 'stack', 'data-key': 'settings-profile', 'data-testid': 'settings-profile'},
@@ -192,10 +193,10 @@
         profileRow('Description', n('p', {className: shownDescription() ? '' : 'meta', 'data-key': 'pf-description-value'}, shownDescription() || 'Not set'),
           [n('input', {className: 'input', type: 'text', maxlength: 280, 'data-key': 'pf-description', 'data-lk-input': 'description', 'aria-label': 'Description', value: pd.description, placeholder: 'For example: our website and newsletter'}),
             n('p', {className: 'meta'}, 'One short line about what this workspace is for.' + (svc ? ' It is sent to the ' + (svc === 'publish' ? 'publish' : 'relay') + ' too, for your phone and shared pages.' : ''))], 'description'),
-        svc ? profileRow('Tags', tagsNow.length ? chips(tagsNow, false) : n('p', {className: 'meta'}, 'None'),
+        profileRow('Tags', tagsNow.length ? chips(tagsNow, false) : n('p', {className: 'meta'}, 'None'),
           [chips(pd.tags, true), pd.tags.length < TAGMAX ? n('div', {className: 'row'}, n('input', {className: 'input', type: 'text', maxlength: 24, 'data-key': 'pf-tag', 'data-lk-input': 'tag', 'aria-label': 'New tag', value: pd.tag, placeholder: 'tag'}),
             n('button', {type: 'button', className: 'btn sm', 'data-lk': 'tag-add', 'data-key': 'pf-tag-add'}, 'Add')) : null,
-            n('p', {className: 'meta'}, 'Two to four short words, so others find this workspace. Lowercase letters, digits and hyphens.')], 'tags') : null,
+            n('p', {className: 'meta'}, (svc ? 'Two to four short words, so others find this workspace.' : 'Two to four short words about this workspace.') + ' Lowercase letters, digits and hyphens.')], 'tags'),
         foot,
         n('div', {className: 'card-row', 'data-key': 'lk-look-row'}, n('span', {className: 'set-label'}, 'Icon and colour'),
           n('div', {className: 'grow lk-current'}, badge(open ? draft : look, name, 32), n('span', {className: 'meta', 'data-testid': 'look-summary'}, lookText(open ? draft : look))),
@@ -224,6 +225,11 @@
       const r = await run('workspace.set', {field: 'description', text: desc2});
       if (!r || !r.ok) return;
       ws.description = desc2;
+    }
+    if (pd.tags.join(',') !== (ws.tags || []).join(',')) {
+      const r = await run('workspace.set', {field: 'tags', text: pd.tags.join(',')});
+      if (!r || !r.ok) return;
+      ws.tags = [...pd.tags];
     }
     if (svc) {
       const body = {service: svc};
@@ -320,7 +326,7 @@
         if (r && r.ok) { remember(draft.icon); Object.assign(look, {icon: draft.icon, color: draft.color, set_by: 'human'}); open = false; status = 'Saved. Your phone and shared pages show it at their next refresh.'; statusTone = 'ok'; paintFavicon(); repaint(); window.dispatchEvent(new CustomEvent('orch:look-saved')); }
         break;
       }
-      case 'pf-edit': editing = true; pd = {name: ws.name, description: shownDescription(), tags: [...(look.tags || [])], tag: ''}; status = ''; repaint(); document.querySelector('[data-key="pf-name"]')?.focus(); break;
+      case 'pf-edit': editing = true; pd = {name: ws.name, description: shownDescription(), tags: [...shownTags()], tag: ''}; status = ''; repaint(); document.querySelector('[data-key="pf-name"]')?.focus(); break;
       case 'pf-cancel': editing = false; repaint(); break;
       case 'tag-add': addTag(); repaint(); document.querySelector('[data-key="pf-tag"]')?.focus(); break;
       case 'tag-del': pd.tags = pd.tags.filter(x => x !== v); repaint(); break;
@@ -337,7 +343,7 @@
   window.addEventListener('orch:state', e => {
     look = e.detail && e.detail.look ? e.detail.look : null;
     name = clean(e.detail && e.detail.workspace) || 'Workspace';
-    if (!editing) ws = {name: clean(e.detail && e.detail.settings && e.detail.settings.ws_name), description: clean(e.detail && e.detail.settings && e.detail.settings.ws_description)};
+    if (!editing) ws = {name: clean(e.detail && e.detail.settings && e.detail.settings.ws_name), description: clean(e.detail && e.detail.settings && e.detail.settings.ws_description), tags: (Array.isArray(e.detail && e.detail.settings && e.detail.settings.ws_tags) ? e.detail.settings.ws_tags : []).filter(t => typeof t === 'string').map(tagClean).filter(Boolean).slice(0, TAGMAX)};
     owner = clean(e.detail && e.detail.people && e.detail.people.me) || null;
     if (look) {
       if (!open) draft = {icon: look.icon || null, color: look.color || null};

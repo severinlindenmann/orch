@@ -830,6 +830,14 @@ def copies_disk_forget(root: Path) -> None:
         _DISK.pop(str(root), None)
 
 
+def _ws_tags(root: Path) -> list[str]:
+    """The workspace's own tags; [] with an older core that has none."""
+    from orch import config
+
+    get = getattr(config, "workspace_tags", None)
+    return list(get(root))[:4] if get else []
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     agents, rows = (
@@ -894,6 +902,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "copy_setup": copy_setup(root) or "",
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
+        "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),

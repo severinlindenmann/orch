@@ -711,6 +711,115 @@ def set_workspace_description(root: Path, value: str) -> str | None:
     return v or None
 
 
+WS_TAG_RE = re.compile(r"[a-z0-9-]{1,24}")
+MAX_WS_TAGS = 4  # the dashboard's limit (the relay takes up to 8)
+
+
+def _parse_tags(value: str) -> list[str]:
+    out: list[str] = []
+    for t in value.replace(" ", ",").split(","):
+        t = t.strip().lower()
+        if t and t not in out:
+            out.append(t)
+    if any(not WS_TAG_RE.fullmatch(t) for t in out):
+        raise Refused("Tags are short words: lowercase letters, digits and hyphens, at most 24 characters.")
+    if len(out) > MAX_WS_TAGS:
+        raise Refused(f"Use at most {MAX_WS_TAGS} tags.")
+    return out
+
+
+def workspace_tags(root: Path | None) -> list[str]:
+    """[workspace] tags = "a,b": a few short words about this workspace; [] when not set or hand-edited."""
+    if root is None:
+        return []
+    try:
+        v = (read(root).get("workspace") or {}).get("tags")
+    except Refused:
+        return []
+    if not isinstance(v, str):
+        return []
+    try:
+        return _parse_tags(v)
+    except Refused:
+        return []
+
+
+def set_workspace_tags(root: Path, value: str) -> list[str]:
+    """ "a,b" (commas or spaces); "" clears them."""
+    tags = _parse_tags(value)
+    set_key(root, "workspace", "tags", ",".join(tags) or None)
+    return tags
+
+
+# ---- who set the workspace profile (name, description, tags)
+# Kept per machine in the orch home, keyed by the workspace's real path, like the look's `look_set_by`: an
+# agent that edits config.toml cannot fake "agent" to unlock a person's choice.
+
+PROFILE_FIELDS = ("name", "description", "tags")
+
+
+def _profile_by_file() -> Path:
+    from orch import addons
+
+    return addons.home() / "profile-set-by.json"
+
+
+def profile_set_by(root: Path) -> dict[str, str]:
+    """{field: "agent"|"human"} for the fields someone set with orch; a field left out = nobody recorded."""
+    from orch import net
+
+    doc = net.read_json(_profile_by_file(), {})
+    v = doc.get(_perm_key(root)) if isinstance(doc, dict) else None
+    if not isinstance(v, dict):
+        return {}
+    return {k: w for k, w in v.items() if k in PROFILE_FIELDS and w in ("agent", "human")}
+
+
+def _save_profile_by(root: Path, field: str, who: str) -> None:
+    from orch import net
+
+    doc = net.read_json(_profile_by_file(), {})
+    doc = doc if isinstance(doc, dict) else {}
+    mine = doc.get(_perm_key(root))
+    mine = mine if isinstance(mine, dict) else {}
+    mine[field] = who
+    doc[_perm_key(root)] = mine
+    net.write_json(_profile_by_file(), doc, private=False)
+
+
+def set_profile_field(root: Path, field: str, value: str, by: str):
+    """Set the workspace name, description or tags. `by` is the actor ("agent:<tool>" | "human:<name>").
+    An agent may set a field while nobody has chosen it, and change its own choice later; once a person set it
+    (or it was set before orch kept track), an agent is refused. Returns the saved value."""
+    if field not in PROFILE_FIELDS:
+        raise Refused("Pick the name, the description or the tags.")
+    setters = {"name": set_workspace_name, "description": set_workspace_description}
+    setter = setters.get(field, set_workspace_tags)
+    getter = {"name": workspace_name, "description": workspace_description}.get(field, workspace_tags)
+    if by.startswith("agent:"):
+        was = profile_set_by(root).get(field)
+        if was == "human" or (getter(root) and was != "agent"):
+            raise Refused(f"The person chose the workspace {field}. Leave it; they change it in Settings.")
+        if field == "tags":
+            _parse_tags(value)  # refused before anything is written
+        else:
+            _ws_text(value, field, MAX_WS_NAME if field == "name" else MAX_WS_DESCRIPTION)
+        try:  # first: if this fails, nothing is written
+            _save_profile_by(root, field, "agent")
+        except OSError as x:  # e.g. an agent whose sandbox only lets it write in the workspace
+            raise Refused(
+                f"orch could not save the workspace {field} here (this tool may only write in the folder). "
+                "It is optional: skip it and carry on with the task."
+            ) from x
+        return setter(root, value)
+    v = setter(root, value)
+    try:
+        _save_profile_by(root, field, "human")
+    except OSError:
+        pass  # the value is saved; with nothing recorded an agent still treats a set field as the person's
+    return v
+
+
 def agent_entries(root: Path) -> dict[str, dict]:
     """The [agents.<name>] entries that may be used: well-formed, approved here when they run a command."""
     return {n: e for n, e in _raw_entries(root).items() if agent_approved(root, n, e)}

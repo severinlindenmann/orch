@@ -809,8 +809,12 @@ def _workspace_set(a):
     travels after `--` as one value. Empty clears it. A person's click only (signed)."""
     _only(a, ("field", "text"))
     field, v = a.get("field"), a.get("text", "")
-    if field not in ("name", "description"):
-        raise BadRequest("Pick the name or the description.")
+    if field not in ("name", "description", "tags"):
+        raise BadRequest("Pick the name, the description or the tags.")
+    if field == "tags":  # "a,b": the core checks each tag
+        if not isinstance(v, str) or not re.fullmatch(r"[a-z0-9,-]{0,103}", v.strip()):
+            raise BadRequest("Use up to 4 tags: lowercase letters, digits and hyphens.")
+        return ["config", "set", "workspace.tags"], [], [v.strip()]
     limit = 60 if field == "name" else 280
     if not isinstance(v, str) or len(v.strip()) > limit or any(c in v for c in "\r\n\x00"):
         raise BadRequest(f"Write one line of at most {limit} characters.")
