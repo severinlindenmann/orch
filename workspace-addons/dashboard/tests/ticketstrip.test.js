@@ -17,7 +17,7 @@ function ctx(extra = {}) {
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, t) => h(tag, {className:cls}, t), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:t => h('p', {}, t),
-    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:v => String(v || ''), time:v => kit.UI.stamp(v), ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
+    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:v => String(v || ''), dueText:t => String(t.due || ''), time:v => kit.UI.stamp(v), ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'x'), chip:t => h('span', {}, t), href:id => '#ticket/' + id, MOVE_CHOICES:[], moveTicket(){}, button:label => h('button', {}, label), loadArtifacts(){}, ticketArtifactPreview:() => null, agentBar:() => null,
     surface:v => v, inlineField:(t, f) => h('span', {}, String(t[f] ?? '')), ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false, repeatsAddon:() => null, act:async () => ({ok:true}),

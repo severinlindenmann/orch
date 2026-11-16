@@ -24,11 +24,10 @@ import stat
 import sys
 import threading
 import time
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import saferead, term, winacl, winfinish
+from orch import saferead, winacl, winfinish
 from orch.errors import Refused
 
 # Switch for the read-back rule in runs.human_waiting (supervisor 9 Nov): OFF = a line counts as a person's by
@@ -65,36 +64,6 @@ class HomeRefused(Refused):
 WRONG_RIGHTS = "Refused: the key folder has the wrong rights. Fix: orch doctor"
 POSIX = os.name == "posix"
 
-OPS = frozenset(
-    "run.takeover run.type run.release focus.settings insights.settings record.delete_detail secret.add "
-    "secret.remove secret.profile conn.allow checkup.accept checkup.rollback checkup.send_to_admin "
-    "checkup.reject ticket.verdict ticket.answer relay.connect private.allow private.move config.agent_add "
-    "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
-    "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
-    "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup "
-    "copy.remove_orphaned copy.retry".split()
-)
-SETTING_DEFAULTS = {
-    "focus.live_session": True,
-    "focus.session_typing": False,
-    "insights.share_counts": True,
-    "insights.share_names": False,
-    "secret.allow_get": False,
-    "conn.allow": False,
-    "workflow.agents_may_finish": False,
-}
-# Retention widening settings (Insights > Settings, `insights.settings`): a number, not a switch. The record
-# holds the highest value a person approved; the effective value is the LOWER of the file value and the record
-# (or the default record when none exists): a file value alone never keeps records longer or larger.
-RETENTION_DEFAULTS = {"insights.keep_days": 90, "insights.max_mb": 2048}
-RETENTION_ALLOWED = {"insights.keep_days": (30, 90, 365), "insights.max_mb": (512, 1024, 2048, 4096)}
-# The lowest retention that can ever count (file or record): 30 days / 512 MB. Lowering is open to anyone, but
-# an edit of config.toml (keep_days = 1) must never make pruning delete nearly the whole record.
-RETENTION_FLOOR = {setting: min(allowed) for setting, allowed in RETENTION_ALLOWED.items()}
-_TARGET_RE = re.compile(r"[A-Za-z0-9_.:@=-]+")  # `=`: the value-bound insights.settings target key=value
-_BY_RE = re.compile(r"human:[^\x00-\x1f]{1,58}")
-_NONCE_RE = re.compile(r"[A-Za-z0-9_-]{22}")
 PENDING_MAC_KINDS = ("answer", "message", "text")
 
 
@@ -290,7 +259,6 @@ SAFE_DEFAULTS = {
     "secret.allow_get": False,
     "conn.allow": False,
 }  # live_session and share_counts stay at the owner defaults (3C, I5): their records are dropped
-RESET_NOTICE = "orch reset its protection on this computer; please turn on again what you need."
 _SECRET_FILES = (
     "proofs-used.json",
     "delivered.json",
@@ -1296,375 +1264,7 @@ def new_payload(op: str, target: str, by: str, now: int | None = None, life: int
     }
 
 
-def _payload_ok(p) -> bool:
-    if not isinstance(p, dict):
-        return False
-    req = {"op", "target", "by", "iat", "exp", "nonce"}
-    if not req <= set(p) or not set(p) <= req | {"dev"}:
-        return False
-    if "dev" in p and p["dev"] is not True:
-        return False
-    return (
-        p["op"] in OPS
-        and isinstance(p["target"], str)
-        and 1 <= len(p["target"]) <= 128
-        and _TARGET_RE.fullmatch(p["target"]) is not None
-        and isinstance(p["by"], str)
-        and _BY_RE.fullmatch(p["by"]) is not None
-        and all(isinstance(p[k], int) and not isinstance(p[k], bool) and p[k] >= 0 for k in ("iat", "exp"))
-        and isinstance(p["nonce"], str)
-        and _NONCE_RE.fullmatch(p["nonce"]) is not None
-    )
-
-
-def _decode(part: str):
-    try:
-        return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
-    except ValueError:
-        return None
-
-
-def check_proof(
-    proof,
-    *,
-    key_hex: str | None,
-    op: str,
-    target: str,
-    now: int,
-    by_flag: str | None = None,
-    agent_env: bool = False,
-    used_nonces=(),
-    home_trusted: bool = True,
-    dev_record: bool = False,
-    dev_key: str | None = None,
-) -> str:
-    """Pure check (reference hp_verify). Returns ok | agent_env | forged | missing | dev_on_real | wrong_op |
-    wrong_target | expired | replayed. Flags and the environment are never trusted."""
-    if agent_env:
-        return "agent_env"
-    if not home_trusted:
-        return "forged"
-    if not proof or not isinstance(proof, str):
-        return "missing"
-    parts = proof.split(".")
-    if len(parts) != 3 or parts[0] != "hp1":
-        return "forged"
-    p = _decode(parts[1])
-    if not _payload_ok(p):
-        return "forged"
-    if p.get("dev"):
-        if not dev_record:
-            return "dev_on_real"
-        key = dev_key
-        if not key or p["by"] != "human:test-human":
-            return "forged"
-    else:
-        key = key_hex
-    try:
-        kb = bytes.fromhex(key or "")
-    except ValueError:
-        return "forged"
-    if not kb:
-        return "forged"
-    want = _b64u(hmac.new(kb, f"hp1.{parts[1]}".encode(), hashlib.sha256).digest())
-    if not hmac.compare_digest(want, parts[2]):
-        return "forged"
-    if by_flag is not None and by_flag != p["by"]:
-        return "forged"
-    if p["op"] != op:
-        return "wrong_op"
-    if p["target"] != target:
-        return "wrong_target"
-    if p["exp"] - p["iat"] > HP_MAX_LIFE or not p["iat"] <= now < p["exp"]:
-        return "expired"
-    if p["nonce"] in used_nonces:
-        return "replayed"
-    return "ok"
-
-
-def verify_and_consume(root: Path, proof, op: str, target: str, by_flag: str | None = None) -> str:
-    """Verify a proof against this workspace's key, spend its nonce (single use), return `by` FROM THE PROOF.
-    The key and the nonce store are loaded together under keys.lock; if a protection reset happens while they
-    are read, the proof is refused (a reset never accepts a proof). Raises
-    Refused("Do this in the dashboard on this computer.") on any failure."""
-    from orch import tickets
-
-    msg = "Do this in the dashboard on this computer."
-    try:
-        d = key_dir(root, create=False)
-        with _key_lock(d):
-            resets = _RESETS
-            try:
-                key = human_key(root, create=False).hex()
-            except (Refused, OSError):
-                key = (
-                    None  # a dev demo workspace has only the dev key; check_proof refuses non-dev proofs then
-                )
-            store = d / "proofs-used.json"
-            used = _read_json(root, store, {})
-            if _RESETS != resets:
-                raise Refused(msg)
-            if not isinstance(used, dict):
-                raise Refused(msg)
-            now = int(time.time())
-            used = {n: e for n, e in used.items() if isinstance(e, int) and e > now}
-            res = check_proof(
-                proof,
-                key_hex=key,
-                op=op,
-                target=target,
-                now=now,
-                by_flag=by_flag,
-                agent_env=bool(tickets.agent_tool()),
-                used_nonces=used,
-                dev_record=dev_workspace(root),
-                dev_key=_dev_key_hex(d),
-            )
-            if res != "ok":
-                raise Refused(msg)
-            p = _decode(proof.split(".")[1])
-            used[p["nonce"]] = p["exp"]
-            _write_private(store, json.dumps(used))
-    except (Refused, OSError):
-        raise Refused(msg) from None
-    return p["by"]
-
-
 # ------------------------------------------------------------------------------------------- settings
-
-
-def settle(setting: str, events: list[dict]) -> list[bool]:
-    """Reference hp_settle. file:v = someone edited the file; proof:v = a person set it with a proof. Lowering
-    in the file writes a tombstone (false). Effective = file AND (record, or the default when none
-    existed)."""
-    default = SETTING_DEFAULTS[setting]
-    file_val, record, out = default, None, []
-    for ev in events:
-        if ev["by"] == "proof":
-            file_val = record = ev["value"]
-        else:
-            file_val = ev["value"]
-            if ev["value"] is False:
-                record = False
-        out.append(bool(file_val and (record if record is not None else default)))
-    return out
-
-
-def _settings_path(root: Path) -> tuple[Path, str]:
-    home = guarded_home(root)
-    return home / "human-settings.json", hashlib.sha256(os.path.realpath(root).encode()).hexdigest()[:32]
-
-
-def _settings_load(root: Path, path: Path):
-    """None when the file never existed; raises Refused when unreadable or damaged (N12: every widening
-    off). A loose file is reset (reset_protection) and read again."""
-    try:
-        try:
-            raw = _read_guarded(path)
-        except LooseFile as e:
-            reset_protection(root, str(e))
-            raw = _read_guarded(path)
-        data = json.loads(raw)
-    except FileNotFoundError:
-        return None
-    except (OSError, ValueError, Refused) as e:
-        raise Refused("The settings record is unreadable.") from e
-    if (
-        not isinstance(data, dict)
-        or data.get("schema") != "orch.human-settings/1"
-        or not isinstance(data.get("workspaces"), dict)
-    ):
-        raise Refused("The settings record is unreadable.")
-    return data
-
-
-def _settings_write(root: Path, setting: str, value, by: str, check=None) -> None:
-    """`check(current record value or None)` runs under the lock, before the write: it may refuse (raise), or
-    answer True when the record already says this (nothing is written)."""
-    path, wkey = _settings_path(root)
-    d = key_dir(root)  # creates the home; the lock lives in the workspace's key folder
-    with _key_lock(d):
-        data = _settings_load(root, path) or {"schema": "orch.human-settings/1", "workspaces": {}}
-        if check is not None:
-            rec = (data["workspaces"].get(wkey) or {}).get(setting)
-            if check(rec.get("value") if isinstance(rec, dict) else None) is True:
-                return
-        data["workspaces"].setdefault(wkey, {})[setting] = {
-            "value": value,
-            "by": by,
-            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
-        _write_private(path, json.dumps(data, indent=2, sort_keys=True))
-
-
-_CONN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")  # same shape as inventory.NAME_RE
-
-
-def is_conn_grant_key(setting) -> bool:
-    """Exactly `conn.allow.<connection name>` with a well-formed name (no arbitrary suffix)."""
-    if not isinstance(setting, str) or not setting.startswith("conn.allow."):
-        return False
-    return _CONN_NAME_RE.fullmatch(setting[len("conn.allow.") :]) is not None
-
-
-def is_secret_get_key(setting) -> bool:
-    """Exactly a per-profile secret switch (allow_get, agents_may_env)."""
-    return (
-        isinstance(setting, str)
-        and re.fullmatch(r"secret\.(allow_get|agents_may_env)\.[a-z][a-z0-9-]{0,31}", setting) is not None
-    )
-
-
-def record_set(root: Path, setting: str, value, by: str) -> None:
-    """THE one writer of a widening setting's record, for every key in SETTING_DEFAULTS. A grant (any value
-    but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
-    an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
-    moment where the file says on and the record is stale."""
-    if setting in RETENTION_DEFAULTS:
-        _retention_set(root, setting, value, by)
-        return
-    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting) and not is_secret_get_key(setting):
-        raise Refused("That is not a setting a person has to allow.")
-    if value is not False and not str(by).startswith("human:"):
-        raise Refused(AGENT_REFUSED)
-    if value is False and not str(by).startswith("human:"):
-        by = "reset"  # a lowering by anyone else: the tombstone names no person
-    _settings_write(root, setting, value, by)
-
-
-def conn_grants(root: Path) -> dict:
-    """conn.allow grants recorded with a proof, by connection name ("*" or a list of actions). Unreadable
-    record or home = no grants (fail closed)."""
-    try:
-        path, wkey = _settings_path(root)
-        data = _settings_load(root, path)
-    except (Refused, OSError):
-        return {}
-    out = {}
-    for key, rec in ((data or {}).get("workspaces", {}).get(wkey) or {}).items():
-        if not (key.startswith("conn.allow.") and isinstance(rec, dict)):
-            continue
-        val = rec.get("value")
-        # only "*" or a list of action names is a grant; a tombstone (False) or any other type is none
-        if val == "*" or (isinstance(val, list) and all(isinstance(a, str) for a in val)):
-            out[key[len("conn.allow.") :]] = val
-    return out
-
-
-def _setting_record(root: Path, setting: str):
-    path, wkey = _settings_path(root)
-    data = _settings_load(root, path)
-    rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
-    return rec.get("value") if isinstance(rec, dict) else None
-
-
-def effective(
-    root: Path, setting: str, file_value: bool | None, file_now: Callable[[], bool | None] | None = None
-) -> bool:
-    """Effective value of a widening switch: file AND (record, or the owner default when no record ever
-    existed). An unreadable home or record = off (N12).
-
-    A parsed False in the file writes the False tombstone (`by: file`) at once, so a person's off from the
-    file stays off when an agent edits the file back to on. Like retention(), it is decided under keys.lock
-    with the record and (through `file_now`, when given) the file read AGAIN there: a person's grant writes
-    the record and then the file under the same lock, so a reader that saw the old off file in between never
-    writes its tombstone over the new grant. A file value that is not a bool (None: config.toml could not be
-    read, e.g. mid-write or not valid) is off and writes nothing: only a parsed false is the person's off."""
-    default = SETTING_DEFAULTS.get(setting, False)
-    if not isinstance(file_value, bool):
-        return False
-    try:
-        rec_val = _setting_record(root, setting)
-        if file_value is False and rec_val is not False:
-            with _key_lock(key_dir(root)):  # re-entrant: _settings_write below takes it again
-                if file_now is not None:
-                    now = file_now()
-                    file_value = now if isinstance(now, bool) else None
-                rec_val = _setting_record(root, setting)
-                if file_value is False and rec_val is not False:
-                    _settings_write(root, setting, False, "file", lambda current: current is False)
-                    rec_val = False
-    except (Refused, OSError):
-        return False
-    return bool(file_value and (rec_val if rec_val is not None else default))
-
-
-def _retention_ok(setting: str, value) -> bool:
-    """A retention record value that can count: a whole number from the floor (30 / 512) up to the largest
-    allowed value. Anything else (a planted 99999 or 1, true, "*") counts as no record (the default
-    record)."""
-    return type(value) is int and RETENTION_FLOOR[setting] <= value <= max(RETENTION_ALLOWED[setting])
-
-
-def retention_snap(setting: str, value: int) -> int:
-    """A FILE retention number as it can count: snapped DOWN to the allowed list (keep_days 100 -> 90,
-    99999 -> 365) and never below the floor (keep_days 1, 0 or -5 -> 30, max_mb 1 -> 512: a whole number
-    <= 0 reads as "as little as possible"). Anything but a whole number (true, a float, a string) is the
-    default record, whatever the caller checked before."""
-    if type(value) is not int:
-        return RETENTION_DEFAULTS[setting]
-    if value <= 0:
-        return RETENTION_FLOOR[setting]
-    allowed = RETENTION_ALLOWED[setting]
-    return max((v for v in allowed if v <= value), default=RETENTION_FLOOR[setting])
-
-
-def _retention_set(root: Path, setting: str, value, by: str) -> None:
-    """record_set for a retention number. Raising it above the current record (or the default record when
-    there is none) needs a person (`by` = the verified human:...); anyone may lower it (the record then names
-    no person), so a lowered value only rises again with a proof. Decided under the settings lock."""
-    allowed = RETENTION_ALLOWED[setting]
-    if type(value) is not int or value not in allowed:
-        raise Refused("Choose one of: " + ", ".join(str(v) for v in allowed) + ".")
-    person = str(by).startswith("human:")
-
-    def check(current) -> bool:
-        floor = current if _retention_ok(setting, current) else RETENTION_DEFAULTS[setting]
-        if value > floor and not person:
-            raise Refused(AGENT_REFUSED)
-        return not person and value == current  # the same value again keeps who approved it
-
-    _settings_write(root, setting, value, by if person else "reset", check)
-
-
-def _retention_record(root: Path, setting: str) -> int:
-    """The retention record value that counts (the default record when none / unreadable / not valid)."""
-    rec_val = _setting_record(root, setting)
-    return rec_val if _retention_ok(setting, rec_val) else RETENTION_DEFAULTS[setting]
-
-
-def retention(root: Path, setting: str, file_value: int) -> int:
-    """Effective retention value: the LOWER of the file value and the record (the default record when none
-    exists, or when the record is not a valid number). A file value below the record lowers the record at once
-    (like a tombstone), so editing the file back up later changes nothing without a proof. `file_value` is
-    already snapped to the allowed list with its floor (config.file_value). An UNREADABLE settings record
-    falls back to the lower of the file value and the default record (90 / 2048): never wider than the
-    default, but possibly wider than a lowered record that can no longer be read (documented, human-proof.md).
-
-    So a READ may write: the lowering record (`by: file`). It is decided under keys.lock with the file and the
-    record read AGAIN there (a person's widening writes the record and then the file under the same lock, so a
-    reader that saw the old file in between never writes the old value over the new record)."""
-    from orch import config
-
-    default = RETENTION_DEFAULTS[setting]
-    try:
-        rec_val = _retention_record(root, setting)
-        if file_value < rec_val:
-            with _key_lock(key_dir(root)):  # re-entrant: _settings_write below takes it again
-                file_value = config.file_value(root, *config.INSIGHTS_KEYS[setting])
-                rec_val = _retention_record(root, setting)
-                if file_value < rec_val:
-                    lower = file_value
-
-                    def check(current) -> bool:  # the record as it is now, under the lock
-                        floor = current if _retention_ok(setting, current) else default
-                        return not lower < floor
-
-                    _settings_write(root, setting, lower, "file", check)
-                    rec_val = lower
-    except (Refused, OSError):
-        rec_val = default
-    return min(file_value, rec_val)
 
 
 # ------------------------------------------------------------------------------------------- launch token
@@ -1720,12 +1320,9 @@ _LOADING_OLD = threading.local()  # .active: a reset is reading the old key in t
 
 
 def reset_protection(root: Path, reason: str) -> None:
-    """ONE response to a loose secret or integrity file (human.key, human-settings.json, proofs-used,
-    delivered, handoffs, the dev record): tighten the folders, rotate human.key (old proofs and MACs stop
-    verifying), empty the nonce/delivered/handoffs stores, put the widening settings at the safest defaults,
-    log a line with no secret and queue a one-time notice for the dashboard. Never a silent chmod of a
-    secret file. Takes keys.lock itself (re-entrant: callers may already hold it). A reset never widens
-    and never accepts a proof."""
+    """The response to a loose secret or integrity file: tighten the folders, rotate human.key (the record
+    chain starts a new key, see record_reset_note), empty the nonce/delivered stores and log a line with no
+    secret. Never a silent chmod of a secret file. Takes keys.lock itself (re-entrant)."""
     global _RESETS
     home = guarded_home(root)
     d = key_dir(root)  # never a folder of its own: one key folder per real path
@@ -1756,7 +1353,6 @@ def reset_protection(root: Path, reason: str) -> None:
         for name in _SECRET_FILES:
             with contextlib.suppress(OSError):
                 (d / name).unlink()
-        _reset_settings(root, home)
         if reason.startswith("dev-workspaces"):
             with contextlib.suppress(OSError):
                 (home / "dev-workspaces.json").unlink()
@@ -1765,148 +1361,16 @@ def reset_protection(root: Path, reason: str) -> None:
             fd = os.open(home / "protection-reset.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(f"{_now()} workspace={ws} reset: {safe}\n")
-        with contextlib.suppress(OSError, ValueError):
-            nf = d / "notices.json"
-            try:
-                notes = json.loads(_read_guarded(nf))
-            except (FileNotFoundError, LooseFile, ValueError):
-                notes = []
-            if not any(isinstance(n, dict) and n.get("kind") == "protection_reset" for n in notes):
-                at = _now()
-                notes.append(
-                    {"id": _notice_id("protection_reset", at, RESET_NOTICE), "kind": "protection_reset",
-                     "at": at, "text": RESET_NOTICE}
-                )  # fmt: skip
-                _write_private(nf, json.dumps(notes))
-
-
-def _lowering(setting, value) -> bool:
-    """A record a reset keeps: a tombstone (False), or a retention number at or below its default."""
-    if setting in RETENTION_DEFAULTS:
-        return _retention_ok(setting, value) and value <= RETENTION_DEFAULTS[setting]
-    return value is False
-
-
-def _reset_settings(root: Path, home: Path) -> None:
-    """A reset only ever LOWERS: every record whose value is False (a tombstone, in any workspace; a lowered
-    retention number too) is kept
-    whatever the file's rights, anything else is dropped, and the opening settings are written False. A
-    record file that exists but cannot be read also closes live_session and share_counts (unreadable=off)."""
-    path, wkey = _settings_path(root)
-    readable, prior = True, {}
-    try:
-        os.lstat(path)  # FileNotFoundError: the record never existed
-        base, rel = _home_of(path)
-        raw = saferead.read_private(base, rel, MAX_READ)  # whatever its rights: only False values are kept
-        if raw is None:
-            raise ValueError("unreadable")
-        data = json.loads(raw)
-        if (
-            not isinstance(data, dict)
-            or data.get("schema") != "orch.human-settings/1"
-            or not isinstance(data.get("workspaces"), dict)
-        ):
-            raise ValueError("shape")
-        prior = data["workspaces"]
-    except FileNotFoundError:
-        pass
-    except (OSError, ValueError):
-        readable = False
-    out: dict = {}
-    for wk, recs in prior.items():
-        if isinstance(recs, dict):
-            keep = {k: v for k, v in recs.items() if isinstance(v, dict) and _lowering(k, v.get("value"))}
-            if keep:
-                out[wk] = keep
-    mine = out.setdefault(wkey, {})
-    closing = dict(SAFE_DEFAULTS)
-    if not readable:
-        closing.update({"focus.live_session": False, "insights.share_counts": False})
-    for k in closing:
-        mine.setdefault(k, {"value": False, "by": "reset", "at": _now()})
-    _write_private(
-        path, json.dumps({"schema": "orch.human-settings/1", "workspaces": out}, indent=2, sort_keys=True)
-    )
-
-
-def _notice_id(kind: str, at: str, text: str) -> str:
-    return hashlib.sha256(f"{kind}|{at}|{text}".encode()).hexdigest()[:12]
-
-
-def _notices_load(root: Path) -> tuple[Path, list[dict]]:
-    nf = key_dir(root, create=False) / "notices.json"
-    notes = json.loads(_read_guarded(nf))
-    return nf, [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
 
 
 def read_notices(root: Path) -> list[dict]:
-    """The notices for the person (dashboard). Reading NEVER clears them: only the person's "Got it"
-    (ack_notice) does, so a page that is reloaded or left before it showed the notice loses nothing."""
-    try:
-        _, notes = _notices_load(root)
-    except (OSError, ValueError, Refused):
-        return []
-    return [
-        {
-            "id": n.get("id") or _notice_id(str(n.get("kind")), str(n.get("at")), str(n.get("text"))),
-            "kind": str(n.get("kind"))[:40],
-            "text": str(n.get("text"))[:600],
-        }
-        for n in notes
-    ]
+    """Retired with the hand-off card (the dashboard still calls it until its own clean-up)."""
+    return []
 
 
 def ack_notice(root: Path, nid: str) -> bool:
-    """The person pressed "Got it": remove that notice (session-only on the page)."""
-    try:
-        d = key_dir(root, create=False)
-        with _key_lock(d):
-            nf, notes = _notices_load(root)
-            keep = [
-                n
-                for n in notes
-                if (n.get("id") or _notice_id(str(n.get("kind")), str(n.get("at")), str(n.get("text"))))
-                != nid
-            ]
-            if len(keep) == len(notes):
-                return False
-            if keep:
-                _write_private(nf, json.dumps(keep))
-            else:
-                with contextlib.suppress(OSError):
-                    nf.unlink()
-            return True
-    except (OSError, ValueError, Refused):
-        return False
-
-
-def cli_notices(root: Path) -> list[str]:
-    """The texts of notices the CLI has not shown yet, each marked shown (cli_shown) so a command says it
-    ONCE. The notice itself stays for the page until "Got it"."""
-    try:
-        d = key_dir(root, create=False)
-        with _key_lock(d):
-            nf, notes = _notices_load(root)
-            fresh = [n for n in notes if not n.get("cli_shown")]
-            if not fresh:
-                return []
-            for n in fresh:
-                n["cli_shown"] = True
-            _write_private(nf, json.dumps(notes))
-            return [str(n.get("text"))[:600] for n in fresh]
-    except (OSError, ValueError, Refused):
-        return []
-
-
-def take_notices(root: Path) -> list[dict]:
-    """The one-time notices for the person (dashboard), cleared when read."""
-    try:
-        nf = key_dir(root, create=False) / "notices.json"
-        notes = json.loads(_read_guarded(nf))
-        nf.unlink()
-    except (OSError, ValueError, Refused):
-        return []
-    return [n for n in notes if isinstance(n, dict)]
+    """Retired with the hand-off card."""
+    return False
 
 
 def private_json(root: Path, name: str, default):
@@ -2172,6 +1636,7 @@ def action_is_human(root: Path, target, record, mac) -> bool:
 # One-time use of a signed action record: each record carries a random `id`; once the decision has been
 # applied, its id is spent here (guarded home, next to human.key) and a record with a spent id never counts
 # again, even when it is planted back. An unreadable store counts every id as spent (fail closed).
+_NONCE_RE = re.compile(r"[A-Za-z0-9_-]{22}")
 ACTIONS_USED = "actions-used.json"
 ACTIONS_USED_MAX = 5000
 
@@ -2312,71 +1777,6 @@ def pin_ok(root: Path, kind: str, body) -> bool:
         return False
     digest = _pin_digest(body)
     return digest is not None and hmac.compare_digest(digest, pin["digest"])
-
-
-# The secret-profile BODY ledger (guarded home): keys/<ws>/profile.json holds, per profile name, the CURRENT
-# profile1 MAC of its body {env, files, set, run, extra} (null = tombstone, the profile was removed). The file
-# itself is editable by anything running as the user, so it vouches for nothing: secretrun/keystore verify the
-# body against this ledger and fail closed on a missing or different MAC.
-PROFILE_LEDGER = "profile.json"
-PROFILE_CHANGED = "this key profile was changed outside orch; set it up again"
-
-
-def profile_body(profile: dict) -> dict:
-    """The part of a profile the MAC covers: what runs and what it receives (the switches have their own
-    settings records)."""
-    body = {
-        "env": dict(profile.get("env") or {}),
-        "files": dict(profile.get("files") or {}),
-        "set": dict(profile.get("set") or {}),
-        "run": list(profile["run"]) if profile.get("run") else None,
-        "extra": sorted(profile.get("extra") or []),
-    }
-    # The person-approved real HOME is covered by the MAC only when present (older profiles keep theirs).
-    if profile.get("real_home") is True:
-        body["real_home"] = True
-    if profile.get("kind"):  # the program kind and the person's "any command" (#577), likewise
-        body["kind"] = profile["kind"]
-    if profile.get("any_command") is True:
-        body["any_command"] = True
-    return body
-
-
-def profile_mac(key: bytes, workspace: str, name: str, body: dict) -> str:
-    """profile1.<workspace id>.<profile name>.<canonical body {env, files, set, run, extra}>: binds WHERE it
-    belongs (another profile or workspace) and WHAT was approved."""
-    return _b64u(
-        hmac.new(
-            key, f"profile1.{workspace}.{name}.{_canon(profile_body(body))}".encode(), hashlib.sha256
-        ).digest()
-    )
-
-
-def profile_sign(root: Path, name: str, body: dict | None) -> None:
-    """Record the current MAC of profile `name` (None: tombstone). Raises Refused when it cannot be recorded
-    (the caller must not write the profile then)."""
-
-    mac = None
-    if body is not None:
-        ws = _healed_id(root, True)
-        mac = profile_mac(human_key(root), ws, name, body)
-    if not _ledger_put(root, PROFILE_LEDGER, "orch.profile-ledger/1", name, mac):
-        raise Refused("orch could not record this key profile. Nothing was changed.")
-
-
-def profile_verified(root: Path, name: str, body: dict) -> bool:
-    """True only when the body's MAC (this key, this workspace, this name) is the current ledger entry.
-    Never raises; no key, no workspace id or no readable ledger = False (fail closed)."""
-
-    try:
-        ws = _healed_id(root, False)
-        ent = _ledger_load(root, PROFILE_LEDGER)
-        cur = ent.get(name) if ent else None
-        if not ws or not isinstance(cur, str):
-            return False
-        return hmac.compare_digest(cur, profile_mac(human_key(root, create=False), ws, name, body))
-    except Exception:  # noqa: BLE001
-        return False
 
 
 def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
@@ -2661,114 +2061,12 @@ def verdict_verifier(root: Path):
     return VerdictChecker(root).state
 
 
-def dev_can_mark(install_dev: bool, creating: bool, has_human_key: bool) -> bool:
-    return bool(install_dev and creating and not has_human_key)
-
-
 # ------------------------------------------------------------------------------------------- dev test human
-
-
-def _dev_path(root: Path) -> Path:
-    return guarded_home(root) / "dev-workspaces.json"
-
-
-def dev_workspace(root: Path) -> bool:
-    """Is this workspace a dev demo workspace? ONLY the record in the guarded orch home counts (written by the
-    dev installer when it creates the workspace); no workspace file, state dir file or environment is read."""
-    try:
-        data = _read_json(root, _dev_path(root), {})
-    except (Refused, OSError):
-        return False
-    ws = data.get("workspaces") if isinstance(data, dict) else None
-    return isinstance(ws, dict) and os.path.realpath(root) in ws and install_kind() in ("dev", "test")
-
-
-def _dev_key_hex(d: Path) -> str | None:
-    try:
-        return _read_guarded(d / "dev-human.key").decode("utf-8").strip()
-    except (OSError, Refused, ValueError):
-        return None
-
-
-def dev_mark(root: Path) -> None:
-    """Called only by the dev installer when it CREATES a demo workspace (reference dev_can_mark): record the
-    workspace as dev and make its dev key. A workspace that already has a human.key never becomes dev."""
-    d = key_dir(root)
-    if not dev_can_mark(install_kind() in ("dev", "test"), True, (d / "human.key").exists()):
-        raise Refused("This workspace cannot be a dev workspace.")
-    path = _dev_path(root)
-    with _key_lock(d):
-        data = _read_json(root, path, {"workspaces": {}})
-        data.setdefault("workspaces", {})[os.path.realpath(root)] = {"at": int(time.time())}
-        _write_private(path, json.dumps(data, indent=2, sort_keys=True))
-        if not (d / "dev-human.key").exists():
-            _write_private(d / "dev-human.key", secrets.token_hex(32) + "\n")
-
-
-def mint_dev(root: Path, op: str, target: str, life: int = 30) -> str:
-    """The scripted test human's proof (e2e only). Refused unless this is a dev workspace."""
-    if not dev_workspace(root):
-        raise Refused("This is not a dev workspace.")
-    key = _dev_key_hex(key_dir(root, create=False))
-    if not key:
-        raise Refused("This is not a dev workspace.")
-    p = new_payload(op, target, "human:test-human", life=life)
-    p["dev"] = True
-    return mint(bytes.fromhex(key), p)
 
 
 # ------------------------------------------------------------------------------------------- CLI gate
 
 HANDOFF = "Do this in the dashboard on this computer."
-
-
-class HandOffPending(Refused):
-    """Raised ONLY where person_by has written (or found) the hand-off card: the person is to click on the
-    page. A Refused for anything else (an agent, a bad value, no card) is not this."""
-
-
-AGENT_REFUSED = "Only a human can do this. Ask the human to run it themselves."
-HANDOFF_PER_OP = 3
-
-
-def read_proof_line() -> str:
-    """The proof is the FIRST line of stdin (--proof-stdin). Never argv, never env."""
-    try:
-        return sys.stdin.readline().strip()
-    except (OSError, ValueError):
-        return ""
-
-
-# The command a hand-off runs once the person clicks (set by cli.main; no --by / --proof-stdin in it).
-CURRENT_ARGV: list[str] | None = None
-# What a page may run for a hand-off: the command words an op may start with (the proof binds op + target).
-HANDOFF_HEADS = {
-    "ticket.answer": (("answer",),),
-    "run.human_input": (("run", "send"),),
-    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch"), ("ticket", "status")),
-    "relay.allow": (("relay", "allow"),),
-    "relay.connect": (("relay", "connect"),),
-    "update": (("update",),),
-    "addon.add_local": (("addon", "add"),),
-    "chat.send": (("chat", "say"), ("chat", "send")),
-    "check.wont_do": (("check", "wont-do"),),
-    "check.wont_do_undo": (("check", "reopen"), ("check", "edit"), ("check", "remove")),
-    "chat.make_ticket": (("chat", "make-ticket"),),
-    "config.agents_may_finish": (("config", "set"),),
-    "config.copy_setup": (("config", "set"),),
-    "copy.remove_orphaned": (("copy", "remove-orphaned"),),
-    "copy.retry": (("copy", "retry"),),
-    "config.permissions": (("config", "set"),),
-    "config.agent_add": (("config", "agent", "add"),),
-    "private.allow": (("private", "allow"),),
-    "private.move": (("private", "move"),),
-    "config.share": (("share", "on"),),
-    "look.shared_pages": (("look", "shared-pages"),),
-    "look.icon": (("look", "set"),),
-    "group.write_as_person": (("relay", "group", "say"), ("relay", "group", "reply")),
-    "group.remove_member": (("relay", "group", "remove"),),
-    "group.share_file": (("relay", "group", "share"), ("relay", "group", "send-file")),
-}
 
 
 def agent_add_target(
@@ -2778,71 +2076,6 @@ def agent_add_target(
     proof for one command (or live command, or prompt mode) can never save another. Same in the dashboard."""
     doc = json.dumps([command, interactive or "", prompt or ""])
     return f"{name}:{hashlib.sha256(doc.encode('utf-8')).hexdigest()}"
-
-
-def entry_exact(entry: dict) -> str:
-    """Every field a private.allow key approves (adapter, command, live command, prompt), one per line."""
-    rows = [
-        ("Adapter", entry.get("adapter")),
-        ("Command", entry.get("command")),
-        ("Live command", entry.get("interactive")),
-        ("Prompt via", entry.get("prompt")),
-    ]
-    return "\n".join(f"{k}: {v}" for k, v in rows if v)
-
-
-def allow_card_is_current(root: Path, target: str) -> bool:
-    """private.allow takes its values from the settings file, not argv: the card's target is name:key, so the
-    card is only good while the entry still hashes to that key."""
-    from orch import config
-
-    name, _, key = str(target).partition(":")
-    e = config._raw_entries(root).get(name)
-    return e is not None and config._entry_key(root, name, e) == key
-
-
-def agent_add_exact(command: str, interactive: str | None = None, prompt: str | None = None) -> str:
-    """Every value config.agent_add saves, one per line, for the card's exact block."""
-    rows = [("Command", command), ("Live command", interactive), ("Prompt via", prompt)]
-    return "\n".join(f"{k}: {v}" for k, v in rows if v)
-
-
-def exact_in_argv(op: str, exact: str, argv) -> bool:
-    """The full value(s) shown in the card's exact block must be part of the command that runs."""
-    if op in ("relay.connect", "addon.add_local", "group.share_file"):
-        return exact in " ".join(argv)
-    if op == "config.agent_add":
-        words = list(argv)
-        vals = [ln.split(": ", 1)[1] for ln in exact.splitlines() if ": " in ln]
-        return (
-            bool(vals)
-            and len(vals) == len(exact.splitlines())
-            and all(
-                v in words or any(w.startswith("--") and w.endswith("=" + v) for w in words) for v in vals
-            )
-        )
-    return True
-
-
-EXACT_OPS = ("relay.connect", "addon.add_local", "group.share_file", "config.agent_add", "private.allow")
-
-
-def _clean_argv(argv) -> list[str] | None:
-    out, skip = [], False
-    for a in argv or []:
-        if skip:
-            skip = False
-            continue
-        if a == "--by":
-            skip = True
-            continue
-        if a.startswith("--by=") or a in ("--proof-stdin", "--unchecked-ok"):
-            continue  # --unchecked-ok skips the password check: a hand-off refuses in words, the page asks
-        out.append(a)
-    return out if all(isinstance(x, str) and len(x) <= 4000 for x in out) and len(out) <= 20 else None
-
-
-VALUE_MAX = 4000  # the exact text a person approves is shown whole; longer is not queued
 
 
 def group_target(root: Path, host: str, group: str) -> str:
@@ -2856,19 +2089,6 @@ def group_target(root: Path, host: str, group: str) -> str:
     except Refused:
         pass  # the command itself refuses an unknown host in words
     return f"{host}:{group}"
-
-
-def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
-    """The ticket (and question) in plain words for the hand-off card: title, never a raw id."""
-    from orch import tickets
-
-    try:
-        t = tickets.load(root, tid)
-        text = f"\u201c{t.get('title', '')}\u201d"
-        q = next((x for x in t.get("questions") or [] if qid and x.get("id") == qid), None)
-        return text + (f", question: {q.get('text', '')}" if q else "")
-    except (Refused, OSError, ValueError, AttributeError):
-        return "a ticket"
 
 
 PART_MAX = 120
@@ -2910,313 +2130,18 @@ def server_address(url: str) -> str:
     return f"{host}:{port}" if port else host
 
 
-def ticket_name(root: Path, tid: str) -> str:
-    """The ticket's title (never its id), as one safe fragment."""
-    from orch import tickets
-
-    try:
-        t = str(tickets.load(root, tid).get("title", ""))
-    except (Refused, OSError, ValueError, AttributeError):
-        t = ""
-    return part(t) or "this ticket"
-
-
-def question_text(root: Path, tid: str, qid: str, q: dict | None = None) -> str:
-    """q: the question already read by the caller (shown as is, not read again); None: read it here."""
-    from orch import tickets
-
-    try:
-        if q is None:
-            q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
-        t = str((q or {}).get("text", ""))
-    except (Refused, OSError, ValueError, AttributeError):
-        t = ""
-    return part(t.rstrip("?! ")) or "the question"
-
-
-def step_text(root: Path, tid: str, cid: str) -> str:
-    """The step's text (never its id) as one safe fragment."""
-    from orch import tickets
-
-    try:
-        t = tickets.load(root, tid)
-        item = next((c for c in t.get("checklist") or [] if c.get("id") == cid), None)
-        text = str((item or {}).get("text", ""))
-    except (Refused, OSError, ValueError, AttributeError):
-        text = ""
-    return part(text) or "this step"
-
-
-def step_number(root: Path, tid: str, cid: str) -> int:
-    """The step's place in the ticket's list (1, 2, 3 ...): shown next to its (agent-written) text."""
-    from orch import tickets
-
-    try:
-        ids = [c.get("id") for c in tickets.load(root, tid).get("checklist") or []]
-        return ids.index(cid) + 1
-    except (Refused, OSError, ValueError, AttributeError):
-        return 0
-
-
-def step_parts(root: Path, tid: str, cid: str, **more) -> dict:
-    return {
-        "title": ticket_name(root, tid),
-        "step": step_text(root, tid, cid),
-        "n": step_number(root, tid, cid),
-        **more,
-    }
-
-
-def status_parts(root: Path, tid: str, data: str) -> dict:
-    """A person's ticket patch as fields: {title, status, also: [other keys]} (never the JSON)."""
-    try:
-        obj = json.loads(data)
-    except ValueError:
-        obj = {}
-    obj = obj if isinstance(obj, dict) else {}
-    st = obj.get("status")
-    return {
-        "title": ticket_name(root, tid),
-        "status": st if st in ("done", "review") else "back",
-        "also": [part(k) for k in list(obj)[:6] if k != "status"],
-    }
-
-
-SECRET_MARK = "@secret"
-
-
-def _split_token(argv: list[str]) -> tuple[list[str], str | None]:
-    """A relay token never goes into handoffs.json: it is replaced by a mark and kept apart."""
-    out, token = list(argv), None
-    for i, a in enumerate(out):
-        if a == "--token" and i + 1 < len(out):
-            token, out[i + 1] = out[i + 1], SECRET_MARK
-        elif a.startswith("--token="):
-            token, out[i] = a[len("--token=") :], "--token=" + SECRET_MARK
-    return out, token
-
-
-def _join_token(argv: list[str], token: str) -> list[str]:
-    return [
-        token if a == SECRET_MARK else "--token=" + token if a == "--token=" + SECRET_MARK else a
-        for a in argv
-    ]
-
-
-def request_handoff(
-    root: Path, op: str, target: str, label: str = "", value: str = "", argv=None, parts=None, exact=None
-) -> bool:
-    """A command asked for a human-only action without a proof: leave a pending item on the page ("Requested
-    by a command"). At most 3 per op; a NEW request is dropped when full (N18), never evicting an older one.
-    The item holds the command to run once the person clicks. Best effort: a failure here only means the item
-    is missing. Returns True when newly queued, "dup" when the same request already waits, False when not
-    queued. The exact value the person will see is the value that runs: it must
-    be one of the command's own words (checked here and again when the page takes the item)."""
-    heads = HANDOFF_HEADS.get(op, ())
-    if not isinstance(argv, list) or not any(argv[: len(h)] == list(h) for h in heads):
-        return False  # never queue what the page could not run
-    if len(value) > VALUE_MAX or (value and value not in argv):
-        return False
-    exact = str(exact)[:2000] if exact else ""
-    if exact and op in EXACT_OPS and not exact_in_argv(op, exact, argv):
-        return False  # the shown full target must be part of the command that runs
-    try:
-        d = key_dir(root)
-        path = d / "handoffs.json"
-        now = int(time.time())
-        with _key_lock(d):
-            items = [i for i in _read_json(root, path, []) if isinstance(i, dict) and i.get("exp", 0) > now]
-            argv, token = _split_token(argv)
-            same = [
-                i for i in items if i.get("op") == op and i.get("target") == target and i.get("argv") == argv
-            ]
-            if same:
-                return "dup"  # already waiting: the FIRST request stays (its token too); no new browser
-            if sum(1 for i in items if i.get("op") == op) >= HANDOFF_PER_OP:
-                return False
-            hid = _b64u(secrets.token_bytes(9))
-            if token is not None:
-                _write_private(d / f"handoff-{hid}.secret", token)
-            for f in d.glob("handoff-*.secret"):  # a secret whose request is gone or expired
-                if f.name != f"handoff-{hid}.secret" and f.name[8:-7] not in {i.get("id") for i in items}:
-                    with contextlib.suppress(OSError):
-                        f.unlink()
-            items.append(
-                {
-                    "id": hid,
-                    "op": op,
-                    "target": target,
-                    "label": label[:400],
-                    "exact": exact,
-                    "parts": {k: v for k, v in (parts or {}).items() if isinstance(k, str)},
-                    "value": value,
-                    "argv": argv,
-                    "at": now,
-                    "exp": now + 600,
-                }
-            )
-            _write_private(path, json.dumps(items))
-        return True
-    except (Refused, OSError, ValueError):
-        return False
-
-
 def handoffs(root: Path) -> list[dict]:
-    """The pending command requests for the page to show (core-written, read by the page servers)."""
-    try:
-        d = key_dir(root, create=False)
-        now = int(time.time())
-        with _key_lock(d):  # a secret is written under this lock just before its item
-            items = _read_json(root, d / "handoffs.json", [])
-            live = [i for i in items if isinstance(i, dict) and i.get("exp", 0) > now]
-            ids = {i.get("id") for i in live}
-            for f in d.glob("handoff-*.secret"):  # a secret whose request expired or is gone
-                if f.name[8:-7] not in ids:
-                    with contextlib.suppress(OSError):
-                        f.unlink()
-        return live
-    except (Refused, OSError, ValueError):
-        return []
+    """Retired: there is no hand-off queue any more (the dashboard still calls it until its own clean-up)."""
+    return []
 
 
 def handoff_take(root: Path, hid: str) -> dict | None:
-    """The item with this id, removed from the list (single click, single run). The command must start with
-    the words its op allows, else None."""
-    try:
-        d = key_dir(root, create=False)
-        with _key_lock(d):
-            items = [i for i in _read_json(root, d / "handoffs.json", []) if isinstance(i, dict)]
-            hit = next((i for i in items if i.get("id") == hid and i.get("exp", 0) > time.time()), None)
-            if hit is None:
-                return None
-            # taking an update request answers every other waiting update request too (one update at a time)
-            gone = [i for i in items if i is hit or (hit.get("op") == "update" and i.get("op") == "update")]
-            _write_private(d / "handoffs.json", json.dumps([i for i in items if i not in gone]))
-            for i in gone:
-                if i is not hit:
-                    with contextlib.suppress(OSError, TypeError):
-                        (d / f"handoff-{i.get('id')}.secret").unlink()
-            secret = d / f"handoff-{hid}.secret"
-            token = None
-            if SECRET_MARK in json.dumps(hit.get("argv")):
-                token = _read_guarded(secret).decode("utf-8").strip()
-            with contextlib.suppress(OSError):
-                secret.unlink()
-    except (Refused, OSError, ValueError):
-        return None
-    argv = hit.get("argv")
-    if token is not None and isinstance(argv, list):
-        hit = {**hit, "argv": _join_token(argv, token)}
-        argv = hit["argv"]
-    heads = HANDOFF_HEADS.get(hit.get("op"), ())
-    if not isinstance(argv, list) or not any(argv[: len(h)] == list(h) for h in heads):
-        return None
-    if hit.get("value") and hit["value"] not in argv:  # only the STORED, shown value may run
-        return None
-    if hit.get("op") == "private.allow" and not allow_card_is_current(root, hit.get("target")):
-        return None  # the entry changed after the card was made: the person never saw this one
-    if hit.get("exact") and hit.get("op") in EXACT_OPS:
-        if not exact_in_argv(hit["op"], hit["exact"], argv):  # the full target shown must be what runs
-            return None
-    return hit
+    """Retired with the hand-off queue."""
+    return None
 
 
 def handoff_drop(root: Path, hid: str) -> None:
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", str(hid)):
-        return
-    try:
-        d = key_dir(root, create=False)
-        with _key_lock(d):
-            items = [
-                i
-                for i in _read_json(root, d / "handoffs.json", [])
-                if isinstance(i, dict) and i.get("id") != hid
-            ]
-            _write_private(d / "handoffs.json", json.dumps(items))
-            with contextlib.suppress(OSError):
-                (d / f"handoff-{hid}.secret").unlink()
-    except (Refused, OSError, ValueError):
-        pass
-
-
-OPEN_EVERY = 30  # seconds: the browser is opened at most this often for hand-offs
-
-
-def _may_open(root: Path) -> bool:
-    """Rate limit for opening the browser: one stamp file in the key folder, by its modification time."""
-    try:
-        stamp = key_dir(root) / "handoff-open.stamp"
-        now = time.time()
-        with contextlib.suppress(OSError):
-            if now - stamp.stat().st_mtime < OPEN_EVERY:
-                return False
-        _write_private(stamp, "x")
-        return True
-    except (Refused, OSError):
-        return False
-
-
-def _dashboard_note(root: Path, open_ok: bool = True) -> str:
-    """After a hand-off: open the dashboard on a desktop (launch token in the URL
-    fragment, never printed) and say in plain words what to click. No token is ever returned or printed."""
-    url = None
-    try:
-        from orch import services
-
-        row = next((r for r in services.workspace_rows(root) if r.get("addon") == "dashboard"), None)
-        url = services.local_url(row.get("url")) if row else None
-    except Exception:  # noqa: BLE001 - the note is best effort
-        url = None
-    if url and open_ok and term.is_terminal(sys.stdout) and _may_open(root):
-        open_browser(launch_url(root, "dashboard", url))
-        return f"Opened the dashboard ({url}): press Continue to send this to the agent."
-    if url:
-        return f"Waiting for your click in the dashboard: open {url} and press Continue to send this."
-    return "Waiting for your click: open the dashboard on this computer and press Continue."
-
-
-def person_by(
-    root: Path,
-    args,
-    op: str,
-    target: str,
-    *,
-    label: str = "",
-    value: str = "",
-    argv=None,
-    no_handoff=None,
-    parts=None,
-    exact=None,
-    proof: str | None = None,
-) -> str:
-    """Who acts for a human-only op (invariant H1). With --proof-stdin: the person in a verified proof (`by`
-    comes from the proof, --by must agree). An agent (agent tool in the environment, or --by agent:...) keeps
-    its own, unprivileged, identity. Anything claiming to be a person without a proof is refused and handed
-    off to the page. `proof`: the proof line the caller already read from stdin (read_proof_line) BEFORE it
-    took keys.lock, so a stdin that never closes cannot hold the lock; only verify-and-consume runs here.
-
-    `no_handoff`: the words of the refusal when this command cannot be approved on the page as typed: no
-    hand-off card is queued (humanproof.HANDOFF = "Do this in the dashboard on this computer.": the person
-    does it on the page itself, which sends a proof)."""
-    if getattr(args, "proof_stdin", False):
-        line = read_proof_line() if proof is None else proof
-        return verify_and_consume(root, line, op, target, getattr(args, "by", None))
-    tool = None
-    from orch import tickets
-
-    tool = tickets.agent_tool()
-    if tool:
-        return "agent:" + str(tool)
-    explicit = getattr(args, "by", None)
-    if explicit and explicit.startswith("agent:"):
-        return tickets.current_actor(explicit)
-    if no_handoff:
-        raise Refused(no_handoff)  # this command cannot be approved on the page as typed
-    clean = _clean_argv(CURRENT_ARGV) if argv is None else argv
-    queued = request_handoff(root, op, target, label, value, clean, parts, exact)
-    if not queued:
-        raise Refused(HANDOFF)
-    raise HandOffPending(_dashboard_note(root, open_ok=queued is True))
+    """Retired with the hand-off queue."""
 
 
 # ------------------------------------------------------------------------------------------- launch token
@@ -3422,64 +2347,6 @@ def take_resume_session(root: Path, server: str, why: list | None = None) -> tup
 
 
 # ----------------------------------------------------------------------------------- e2e test human (CLI)
-
-# What the e2e scripts need (e2e/scenarios_v2.py, e2e/scenarios_ws.py, e2e/windows/standard-user-flow.ps1 call
-# `orch dev-proof update orch`); the rest are the other first-batch ops an e2e driver may script.
-DEV_PROOF_OPS = frozenset(
-    "update ticket.verdict ticket.answer relay.connect relay.allow run.human_input chat.send "
-    "chat.make_ticket".split()
-)
-
-
-def dev_proof_cli(root: Path, op: str, target: str, by_flag: str | None = None) -> str:
-    """The proof the scripted test human of the e2e harness hands to `<command> --proof-stdin`. NARROW: a
-    TEST install only (not a dev one), a workspace under the literal <account home>/.orch-test, a dev record
-    for it, only the ops above, and never from an orch-started agent context (ORCH_RUN / ORCH_TICKET /
-    ORCH_VIA, a detected agent tool, `--by agent:`). Defence in depth only: the environment is
-    caller-controlled (Level 1), so an agent that scrubs it can still ask; this stops the agents orch
-    itself starts in test workspaces from self-approving. Every mint is logged as dev:test-human with the
-    op and nothing secret."""
-    from orch import tickets
-
-    no = "No test-human proof here."
-    if not is_test_workspace(root):
-        raise Refused(no)
-    if any(os.environ.get(k) for k in ("ORCH_RUN", "ORCH_TICKET", "ORCH_VIA")) or tickets.agent_tool():
-        raise Refused(no)
-    if by_flag and by_flag.startswith("agent:"):
-        raise Refused(no)
-    if op not in DEV_PROOF_OPS:
-        raise Refused(no)
-    if op == "update":  # the target is the resolved source (what this install would update from)
-        from orch import addons
-
-        target = update_target(addons.repo(), addons.ref())
-    proof = mint_dev(root, op, target)
-    with contextlib.suppress(Refused, OSError):
-        fd = os.open(key_dir(root) / "dev-proof.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(f"{_now()} dev:test-human minted op={op}\n")
-    return proof
-
-
-def dev_mark_cli(root: Path, by_flag: str | None = None) -> None:
-    """`orch dev-mark` (hidden): the e2e harness marks a demo workspace dev, right after creating it. Same
-    narrow gate as dev_proof_cli (test install, under ~/.orch-test, no orch-started agent context) and
-    dev_can_mark: a workspace with a human.key can never become dev. Defence in depth (Level 1)."""
-    from orch import tickets
-
-    no = "This workspace cannot be marked as a dev workspace."
-    if not is_test_workspace(root):
-        raise Refused(no)
-    if any(os.environ.get(k) for k in ("ORCH_RUN", "ORCH_TICKET", "ORCH_VIA")) or tickets.agent_tool():
-        raise Refused(no)
-    if by_flag and by_flag.startswith("agent:"):
-        raise Refused(no)
-    dev_mark(root)
-    with contextlib.suppress(Refused, OSError):
-        fd = os.open(key_dir(root) / "dev-proof.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(f"{_now()} dev:test-human marked this workspace as dev\n")
 
 
 def update_target(repo: str, ref: str) -> str:

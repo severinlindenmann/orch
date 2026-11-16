@@ -40,57 +40,6 @@ def test_preview(root, monkeypatch):
     assert run(root, "set", "--mode", "remote", "--kind", "team") == 2
 
 
-def test_the_plain_set_path_is_gated_too(root, monkeypatch, capsys):
-    """M4: `orch sync set --remote` (no dashboard) refuses without the person's set-remote proof, and a proof for
-    another address does not do; mode local, mode off and the interval stay unsigned."""
-    from orch import tickets
-
-    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    monkeypatch.setattr(
-        tickets, "agent_tool", lambda: None
-    )  # not even the heuristic helps: the proof decides
-    address = "https://host/repo"
-    assert run(root, "set", "--mode", "remote", "--remote", address) == 2
-    assert "proof" in json.loads(capsys.readouterr().out)["error"]
-    proof(root, cli.remote_target("https://host/other"), monkeypatch)
-    assert run(root, "set", "--mode", "remote", "--remote", address, "--proof-stdin") == 2
-    assert not (root / ".orch/run/sync/settings.json").exists() and not (root / ".orch/.git").exists()
-    proof(root, cli.remote_target(address, public=True), monkeypatch)  # the public choice is a different one
-    assert run(root, "set", "--mode", "remote", "--remote", address, "--proof-stdin") == 2
-    assert not (root / ".orch/run/sync/settings.json").exists()
-    proof(root, cli.remote_target(address), monkeypatch)
-    assert run(root, "set", "--mode", "remote", "--remote", address, "--proof-stdin") == 0
-    assert json.loads((root / ".orch/run/sync/settings.json").read_text())["remote"] == address
-    capsys.readouterr()
-    assert run(root, "set", "--interval", "60") == 0  # how often: unsigned
-    assert run(root, "set", "--mode", "local") == 0  # unsigned
-    # local keeps no address (N-3): turning remote on again means choosing an address again, signed
-    assert "remote" not in json.loads((root / ".orch/run/sync/settings.json").read_text())
-    assert run(root, "set", "--mode", "remote") == 2
-    assert json.loads((root / ".orch/run/sync/settings.json").read_text())["mode"] == "local"
-    proof(root, cli.remote_target(address), monkeypatch)
-    assert run(root, "set", "--mode", "remote", "--remote", address, "--proof-stdin") == 0
-    assert run(root, "set", "--mode", "off") == 0  # unsigned
-
-
-def test_a_public_address_on_the_plain_set_path(root, monkeypatch, capsys):
-    """The public check lives in apply_set: the plain set never uses a public address on the set-remote proof;
-    only --public with the person's use-public proof for exactly that address."""
-    from orch_sync import visibility
-
-    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    monkeypatch.setattr(visibility, "remote_visibility", lambda url: "public")
-    address = "https://github.com/mia/orch"
-    assert set_remote(root, address, "--json") == 2
-    assert "public" in json.loads(capsys.readouterr().out)["error"]
-    assert not (root / ".orch/run/sync/settings.json").exists()
-    proof(root, cli.remote_target(address), monkeypatch)
-    assert run(root, "set", "--mode", "remote", "--remote", address, "--public", "--proof-stdin") == 2
-    proof(root, cli.remote_target(address, public=True), monkeypatch)
-    assert run(root, "set", "--mode", "remote", "--remote", address, "--public", "--proof-stdin") == 0
-    assert json.loads((root / ".orch/run/sync/settings.json").read_text())["remote"] == address
-
-
 def test_synced_content_has_no_authority(root, capsys):
     (root / ".orch/config.toml").write_text('[sync]\nmode="remote"\nkind="team"\nremote="file:///evil"\n')
     (root / ".orch/tickets").mkdir()

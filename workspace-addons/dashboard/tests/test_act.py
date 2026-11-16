@@ -177,6 +177,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ],
         ),
         (
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": "2026-11-30T18:30"}},
+            ["ticket", "edit", "t_abcdef", "--due=2026-11-30T18:30", *common],
+        ),
+        (
             {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": ""}},
             ["ticket", "edit", "t_abcdef", "--due=", *common],
         ),
@@ -190,6 +194,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        (
+            {"op": "run.take_back", "args": {"ticket": "t_abcdef", "id": "p_abcdef12"}},
+            ["run", "take-back", "t_abcdef", "p_abcdef12", *common],
+        ),
         ({"op": "share.set", "args": {"on": True}}, ["share", "on", *common]),
         ({"op": "share.set", "args": {"on": False}}, ["share", "off", *common]),
         ({"op": "private.move", "args": {}}, ["private", "move", *common]),

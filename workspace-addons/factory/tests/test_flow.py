@@ -618,6 +618,101 @@ def test_start_text_shows_what_matters(ws, run):
     assert text.endswith("(Proposal 1)") and ".." not in text
 
 
+def test_start_text_shows_what_leaves_with_a_handover(ws, run):
+    """R7.3: Start counts as the click for the hand-over files (owner Q6), so the Start text names the receiving
+    workspace and every file, uncut."""
+    p = json.loads(run_proposal())
+    files = ["brief/header.md", "brief/a long folder name/old header picture final.png"]
+    p["handovers"] = [
+        {
+            "task": "booking-form",
+            "workspace": "ws_design0001",
+            "why": "Design makes our pictures.",
+            "minutes": 40,
+            "sends": {"files": files},
+        }
+    ]
+    order, _ = started(ws, run, data=json.dumps(p).encode())
+    text = core(ws, "ticket", "show", order)["questions"][0]["text"]
+    assert "Handover: booking-form → ws_design0001 (they get: " + ", ".join(files) + ")" in text
+
+
+def test_files_added_after_start_are_refused(ws, run):
+    """The Start answer is bound to the frozen proposal: a file added to it later breaks the hash."""
+    p = json.loads(run_proposal())
+    p["handovers"] = [
+        {
+            "task": "booking-form",
+            "workspace": "ws_design0001",
+            "why": "Design makes our pictures.",
+            "sends": {"files": ["brief/header.md"]},
+        }
+    ]
+    order, _ = started(ws, run, data=json.dumps(p).encode())
+    assert authority.started(order, ws)
+    frozen = ws / ".orch/addons/factory/proposals" / order / "p1.json"
+    data = json.loads(frozen.read_bytes())
+    data["handovers"][0]["sends"]["files"].append("brief/extra.png")
+    frozen.write_text(json.dumps(data))
+    assert run("show", order, code=2)["code"] == "tampered"
+
+
+@pytest.mark.parametrize(
+    "bad", ["../x.png", "/etc/passwd", "~/x", "brief/.env", ".git/config", "a\\b", "C:/x"]
+)
+def test_handover_file_paths_must_stay_relative(ws, run, bad):
+    p = json.loads(run_proposal())
+    p["handovers"] = [
+        {"task": "booking-form", "workspace": "ws_design0001", "why": "Pictures.", "sends": {"files": [bad]}}
+    ]
+    order = run("idea", "Booking page")["order"]
+    assert run("propose", order, "--file", "-", data=json.dumps(p).encode(), code=2)["code"] == "invalid"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "brief/x.png\n",
+        "brief/x.png ",
+        " brief/x.png",
+        "brief/a  b.png",
+        "brief /x.png",
+        "brief/a,b.png",
+        "brief/a;b.png",
+        "brief/a\u202eb.png",
+        "brief/a\u200bb.png",
+        "a/./b.png",
+    ],
+)
+def test_handover_file_strict_check_beyond_the_schema(ws, run, bad):
+    """A JSON-schema `$` can match before a trailing newline; the Python allowlist check refuses at freeze."""
+    p = json.loads(run_proposal())
+    p["handovers"] = [
+        {"task": "booking-form", "workspace": "ws_design0001", "why": "Pictures.", "sends": {"files": [bad]}}
+    ]
+    order = run("idea", "Booking page")["order"]
+    assert run("propose", order, "--file", "-", data=json.dumps(p).encode(), code=2)["code"] == "invalid"
+
+
+def test_handover_file_ok_allows_plain_names():
+    from orch_factory.store import handover_file_ok
+
+    for good in ("brief/header.md", "Bilder/Übersicht (alt)-v2_final.png", "a b/c.d"):
+        assert handover_file_ok(good), good
+
+
+def test_start_text_never_shows_a_changed_path():
+    """What Start shows must equal what is shared: a path the render would clean is refused, never shown altered."""
+    from orch_factory import render
+    from orch_factory.store import Refused
+
+    h = {"task": "t", "workspace": "ws_design0001", "why": "x", "sends": {"files": ["brief/x.png\n"]}}
+    with pytest.raises(Refused):
+        render.handover_line(h)
+    h["sends"]["files"] = ["brief/x.png"]
+    assert render.handover_line(h).endswith("(they get: brief/x.png)")
+
+
 def test_agent_strings_are_cleaned(ws, run):
     p = json.loads(run_proposal())
     p["title"] = "Booking\n“page”\x00" + chr(0x202E) + "  now"

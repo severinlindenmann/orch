@@ -198,13 +198,6 @@ def test_move_runs_no_clean_filter_an_agent_planted(proj, run, tmp_path):
     assert git(proj, "ls-files", "--", ".orch/unknown").stdout == ""
 
 
-def test_move_is_for_a_person_not_an_agent(proj, run, monkeypatch):
-    repo(proj)
-    monkeypatch.setenv("CLAUDECODE", "1")
-    code, out, err = run("private", "move")
-    assert code == 2 and "person" in (out + err)
-
-
 def test_a_tracked_file_with_a_hostile_name_is_handled(proj):
     repo(proj)
     d = proj / ".orch" / "tickets"
@@ -307,16 +300,6 @@ def test_a_broken_approvals_file_fails_closed(proj):
     config.allow_agent(proj, "mine", config.pending_agents(proj)[0]["key"])
     config._approvals_path().write_text("not json")
     assert config.agent_entries(proj) == {}
-
-
-def test_an_agent_cannot_allow_or_self_approve(proj, run, monkeypatch):
-    write_config(proj, EVIL)
-    monkeypatch.setenv("CLAUDECODE", "1")
-    assert run("private", "allow", "mine", "--key", config.pending_agents(proj)[0]["key"])[0] == 2
-    code, out, err = run("config", "agent", "add", "sneaky", "--command", "touch X {prompt}")
-    assert code == 2 and "orch ask" in out + err  # an agent only asks; nothing is written
-    assert "sneaky" not in config.agent_entries(proj)
-    assert not any(p["name"] == "sneaky" for p in config.pending_agents(proj))
 
 
 def test_a_builtin_agent_needs_no_approval(proj):

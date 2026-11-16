@@ -1,8 +1,7 @@
 """Factory add-on scenarios A18-A21: the real core, the real `orch factory`, the scripted test human.
 
-A person's answer needs the person's proof (H1): the proofs come from the scripted test human of a TEST install
-(the driver writes the install record into this run's own tool environment, like the installer does, and the
-workspaces live under <real home>/.orch-test). Never a real person, never a real home.
+A person's answer is a plain `orch answer --by human:test`: the scripted test human. The workspaces live under
+<real home>/.orch-test. Never a real person, never a real home.
 """
 from __future__ import annotations
 
@@ -56,7 +55,6 @@ class F:
         check(rc == 0, f"install record: {(err or out)[-200:]}")
         self.w = W(e, sid, root=self.base / "ws", env=env)
         self.w.o("init", "--yes", by=None)
-        self.w.o("dev-mark", by=None)
         # core's [workspace] agent, as the harness writes it (`orch config agent add` is a person's action here)
         py, ag = shlex.quote(sys.executable), shlex.quote(str(Path(__file__).parent / "fixtures" / "generic-agent" / "agent.py"))
         (self.w.root / ".orch" / "config.toml").write_text(
@@ -109,15 +107,7 @@ class F:
 
     # -- the scripted test human --
     def human(self, tid: str, qid: str, answer: str):
-        q = next(x for x in self.ticket(tid)["questions"] if x["id"] == qid)
-        code = ("import sys, json; from pathlib import Path; from orch import humanproof as h, tickets; "
-                "q = json.loads(sys.argv[3]); d = tickets.question_digest(q); print(d); "
-                "print(h.mint_dev(Path(sys.argv[1]), 'ticket.answer', f'{sys.argv[2]}:{q[\"id\"]}:{d}'))")
-        rc, out, err = self.w.sh([self.py, "-c", code, str(self.w.root), tid, json.dumps(q)])
-        lines = out.split()
-        check(rc == 0 and len(lines) == 2 and lines[1].startswith("hp1."), f"no test-human proof: {(err or out)[-200:]}")
-        rc, out, err = self.w.sh(["orch", "answer", tid, qid, answer, "--question-digest", lines[0], "--proof-stdin", "--json"],
-                                 input=lines[1] + "\n")
+        rc, out, err = self.w.sh(["orch", "answer", tid, qid, answer, "--by", "human:test", "--json"])
         check(rc == 0, f"human answer {answer!r}: {(err or out)[-300:]}")
         got = next(x for x in self.ticket(tid)["questions"] if x["id"] == qid)
         check(str(got.get("answered_by", "")).startswith("human:") and got["answer"] == answer,
