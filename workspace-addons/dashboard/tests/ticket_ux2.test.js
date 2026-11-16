@@ -84,7 +84,7 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(nodes(all.find(n => n.attrs.id === 'ticket-panel-overview')).some(n => n.attrs['data-field'] === 'note'), 'Note in Overview');
   assert.match(text(all.find(n => n.attrs.className === 'side-panel properties')), /Properties.*Owner.*Due.*Done when/);
   assert.ok(!all.some(n => n.tag === 'details' && /Details/.test(text(n))) && !/Technical details|\+ Add detail/.test(body), 'no Details toggles');
-  assert.equal(body.split('PIL-54').length, 2, 'the key appears once, as a quiet line');
+  assert.equal(body.split('PIL-54').length, 1, 'no footer line with the key under Properties (linked work, 15 Nov)');
   assert.match(body, /Add a rain planYou asked: Please add a rain plan\./);
   const typed = {...t, id:'t2', sessions:[]};
   ctx.tickets = () => [typed];
