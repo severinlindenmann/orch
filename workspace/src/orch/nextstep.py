@@ -154,6 +154,16 @@ def _status_cmd(data, args) -> str:
     return "orch stop  (when you are done)" if data else "orch ticket list"
 
 
+def _ref_wait(data, args) -> str:
+    """Says the verdict again: the last line is all a caller that reads through a pipe sees (PR 978)."""
+    if data and all(o.get("ok") for o in data):
+        merged = all(o.get("status") == "merged" for o in data)
+        return "GREEN" + (
+            " and merged: finish the ticket" if merged else ": merge, or run it again with --merge"
+        )
+    return "NOT green or not merged (see the line above): fix it, push, then run orch ref wait again"
+
+
 HINTS = {
     "init": _init,
     "update": _update,
@@ -211,6 +221,7 @@ HINTS = {
     "ref rm": _on_ticket,
     "ref set": _on_ticket,
     "ref merge": _on_ticket,
+    "ref wait": _ref_wait,
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": "keep working on what does not wait: orch ticket list",

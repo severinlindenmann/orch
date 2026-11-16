@@ -53,9 +53,9 @@ A deleted issue, or one you cannot see: `orch ref set <ticket> <n> --status "not
 
 When the ticket or the workspace rules say to merge the pull request once its checks pass ("merge on green"), the merge is part of your work. Do not finish before it:
 
-    gh pr checks <pull request url> --watch     # wait until every check has finished
-    gh pr merge <pull request url> --merge       # only when all of them passed
-    orch ref set <ticket> <n> --status merged
+    orch ref wait <ticket> --merge     # waits for every check (no AI call), merges only on green, notes the verdict
+
+It waits for the ticket's open pull requests one after the other, merges each only while it is up to date with its base branch and only the commit that was checked, and stops at the first that is not green. Run it bare (exit 0 = all green and merged, 1 = not; the last line says why), not through a pipe. Without `--merge` it only waits and writes the verdict.
 
 Checks failed: fix, push and wait again. You may not merge (branch rules, no rights): say so in the ticket summary. Never leave a pull request open with passed checks and stop without a word; orch then shows the person "passed its checks but was not merged".
 
