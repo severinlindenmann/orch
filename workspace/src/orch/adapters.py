@@ -69,6 +69,8 @@ _warned: set[str] = set()
 # hooks and MCP folders and its instruction files. Bringing back work that touches one needs a person's
 # review (worktrees._control_paths); the tool names live here, not in the copies code.
 AGENT_CONTROL_NAMES = frozenset({".claude", ".codex", "claude.md", "claude.local.md"})
+# The guide files agents read in a project, in the order a profile proposal reads them (profile_propose.py).
+GUIDE_FILES = ("AGENTS.md", "CLAUDE.md")
 
 
 def builtin_names() -> list[str]:

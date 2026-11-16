@@ -41,7 +41,7 @@ MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = (
     140 * 1024 * 1024
 )  # a new ticket with files: at most 100 MB of files (newticket.js) as base64, plus the text
-LEAN_OPS = ("chat.send_ws", "chat.sync_ws")
+LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose")
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -862,6 +862,15 @@ class Handler(BaseHTTPRequestHandler):
             self.server.state_cache.invalidate(state)  # before the reply's own keys are added
         if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
             state["chat_dm_result"] = extra
+        if body.get("op") == "workspace.propose" and isinstance(extra, dict):
+            # a proposal only, shown in the edit fields; the page saves it with workspace.set after the person's Save
+            tags = extra.get("tags") if isinstance(extra.get("tags"), list) else []
+            state["proposal"] = {
+                "name": str(extra.get("name") or "")[:60],
+                "description": str(extra.get("description") or "")[:280],
+                "tags": [str(t)[:24] for t in tags if isinstance(t, str)][:4],
+                "icon": str(extra["icon"])[:32] if isinstance(extra.get("icon"), str) else None,
+            }
         if body.get("op") == "config.agent.test" and isinstance(
             extra, dict
         ):  # the answer of the try, plain words only

@@ -1174,9 +1174,9 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
     }
     rec = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
     try:  # what the person is shown of the Check result; the phone echoes it in a verdict
-        body["digest"] = rec["digest"] = review.check_digest(ticket)
+        body["digest"] = rec["digest"] = review.check_digest(ticket, root)
         with contextlib.suppress(Refused):  # the Check card; one that fails the wire check goes without it
-            wire = review.wire_card(review.check_card(ticket), {})
+            wire = review.wire_card(review.check_card(ticket, root), {})
             h = phone_results.value_hider(root)
             if h is not None and phone_view.wire_card_clean(wire, h):
                 body["card"] = wire
@@ -1582,7 +1582,7 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
         if not phone_view.close_review(root, tid, n, qmid) or ticket.get("status") != "review":
             line("A review answer from the phone came too late and was ignored")
             return result({"result": "decided"}, f"not applied to {tid}: not the current review")
-        now = review.check_digest(ticket)
+        now = review.check_digest(ticket, root)
     else:
         if q.get("answer") is not None:
             body = {"result": "applied" if _is_mine(rec, q, answer_id, by) else "decided"}

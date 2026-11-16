@@ -309,7 +309,7 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("too_large", "A note is at most 8 KB.")
     if key == "review":
         q = None
-        current = review.check_digest(t)
+        current = review.check_digest(t, root)
     else:
         q = next((x for x in t.get("questions") or [] if x.get("id") == key), None)
         if q is None:

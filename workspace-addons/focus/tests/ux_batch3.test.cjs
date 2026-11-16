@@ -189,8 +189,8 @@ test('UX B: the picker says its list is on Home too, and row actions are 32 px m
 });
 test('UX B2: Focus opens on the next ticket that needs you (oldest question, then oldest result); nothing waiting -> start page', () => {
   const H = require('../src/orch_focus/web/helpers.js');
-  const rows = [{id:'a', status:'review', updated_at:'2026-11-01T00:00:00Z'}, {id:'b', status:'waiting', updated_at:'2026-11-05T00:00:00Z'},
-    {id:'c', status:'waiting', updated_at:'2026-11-03T00:00:00Z'}, {id:'d', status:'active'}, {id:'e', status:'review', updated_at:'2026-11-02T00:00:00Z'}];
+  const rows = [{id:'a', status:'review', updated_at:'2026-11-01T00:00:00Z'}, {id:'b', status:'waiting', question_count:1, updated_at:'2026-11-05T00:00:00Z'},
+    {id:'c', status:'waiting', question_count:1, updated_at:'2026-11-03T00:00:00Z'}, {id:'d', status:'active'}, {id:'e', status:'review', updated_at:'2026-11-02T00:00:00Z'}];
   assert.deepEqual([H.nextNeeding(rows).ticket.id, H.nextNeeding(rows).hash], ['c', '']);
   assert.deepEqual([H.nextNeeding(rows.filter(t => t.status !== 'waiting')).ticket.id, H.nextNeeding(rows.filter(t => t.status !== 'waiting')).hash], ['a', '#results']);
   assert.equal(H.nextNeeding(rows.filter(t => t.status === 'active')), null);

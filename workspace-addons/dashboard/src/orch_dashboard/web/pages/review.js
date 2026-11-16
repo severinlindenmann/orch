@@ -5,12 +5,19 @@
 const REVIEW_ID = /^core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]{1,4})|review:(t_[a-z0-9]{6,16}))$/;
 function reviewCards() { return array(state?.review?.cards); }
 function reviewAnswered() { return array(state?.review?.answered); }
-// The one number of "things that wait on you" this page shows: the cards of the stack (the same questions and
-// results to check that Home counts; Home's own total is not changed by this page).
+// The cards of the stack: every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
 function reviewCount() { return reviewCards().length; }
+// The subtitle shows THE needs-you number (home.js needsToday: the top bar, sidebar and Home show the same one, ORCH-63).
+// What has no card here (a failed start, changes to add, a helper idle at its prompt) is said as "more on Home".
 function reviewSubtitle() {
-  const n = reviewCount();
-  return n ? n + (n === 1 ? ' thing waits on you, most urgent first.' : ' things wait on you, most urgent first.') : 'Nothing waits for you.';
+  const things = k => k + (k === 1 ? ' thing waits' : ' things wait') + ' on you';
+  if (typeof needsToday !== 'function') { const k = reviewCount(); return k ? things(k) + ', most urgent first.' : 'Nothing waits for you.'; }
+  const {count:n, groups, failed, changes} = needsToday(), onCard = new Set(reviewCards().map(c => c.ticket));
+  const homeOnly = groups.filter(g => !(g.row.ticket && onCard.has(g.row.ticket))).length
+    + failed.filter(([t]) => !onCard.has(t.id)).length + changes.filter(t => !onCard.has(t.id)).length;
+  if (!n) return 'Nothing waits for you.';
+  if (!homeOnly) return things(n) + ', most urgent first.';
+  return homeOnly >= n ? things(n) + ', all on Home.' : things(n) + ': ' + (n - homeOnly) + ' here, ' + homeOnly + ' more on Home.';
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
 function reviewWord(answer) {

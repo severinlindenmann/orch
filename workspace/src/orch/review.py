@@ -710,18 +710,80 @@ def _find(ticket: dict, qid: str) -> dict:
     return q
 
 
-def check_digest(ticket: dict) -> str:
+def check_digest(ticket: dict, root: Path | None = None) -> str:
     """What a person is shown of a Check result: exactly check_card(ticket) (title, steps with their done and
     won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
-    shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket)}
+    shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket, root)}
     return _sha(_canon(shown).encode())
 
 
-def check_card(ticket: dict) -> dict:
-    items = [
-        f"{'Done' if c.get('done') or c.get('wont_do') else 'Open'}: {c.get('text', '')}"
-        for c in ticket.get("checklist", [])
-    ]
+_PR_NUMBER = re.compile(r"/pull/(\d+)")
+
+
+def _step_evidence(c: dict) -> str:
+    """What a step's evidence says, in one plain line: the completion note, what was run, the pull request."""
+    bits: list[str] = []
+    for ev in c.get("evidence") or []:
+        if not isinstance(ev, dict):
+            continue
+        kind, ref = ev.get("type") or ev.get("kind"), str(ev.get("ref") or ev.get("text") or "").strip()
+        said = [str(ev.get("summary") or "").strip()]
+        if kind == "note":
+            said.append(ref)
+        elif kind == "command" and ref:
+            failed = isinstance(ev.get("exit"), int) and ev["exit"] != 0
+            said.append(f"Ran: {ref}" + (f" (failed, exit {ev['exit']})" if failed else ""))
+        elif kind == "pr":
+            m = _PR_NUMBER.search(ref)
+            said.append(f"PR #{m.group(1)}" if m else "Pull request")
+        bits += [x for x in said if x and x not in bits]
+    return " · ".join(bits)
+
+
+def _check_open(ticket: dict) -> str | None:
+    """The newest pull request in the steps' evidence: the card's Open button."""
+    for c in reversed(ticket.get("checklist") or []):
+        evs = c.get("evidence") if isinstance(c, dict) else None
+        for ev in reversed(evs if isinstance(evs, list) else []):
+            if not isinstance(ev, dict):
+                continue
+            ref = ev.get("ref")
+            if ev.get("type") == "pr" and isinstance(ref, str) and len(ref) <= 500 and _OPEN.fullmatch(ref):
+                return ref
+    return None
+
+
+def _parent_line(ticket: dict, root: Path | None) -> str:
+    """'Part of: ORCH-49 Factory follow-ups' for a sub-ticket (needs `root`); "" without a parent."""
+    pid = ticket.get("parent")
+    if root is None or not isinstance(pid, str) or not pid:
+        return ""
+    try:
+        parent = tickets.load(root, pid)
+    except (Refused, OSError, ValueError):
+        return ""
+    name = " ".join(x for x in (parent.get("key"), parent.get("title")) if isinstance(x, str) and x.strip())
+    return _clip(f"Part of: {name}", 300) if name else ""
+
+
+def check_card(ticket: dict, root: Path | None = None) -> dict:
+    """A Check result as a card: the summary, Done when, the parent ticket (with `root`), every step with its
+    evidence (note, what was run, pull request) and the parts of Done when no step covers. No preview when
+    there is nothing to show (an empty box)."""
+    steps = []
+    for c in ticket.get("checklist") or []:
+        if not isinstance(c, dict):
+            continue
+        state = "Won't do" if c.get("wont_do") else "Done" if c.get("done") else "Open"
+        said = _step_evidence(c)
+        steps.append(_clip(f"{state}: {c.get('text', '')}" + (f" — {said}" if said else ""), 1200))
+    summary_text = str(ticket.get("summary") or "").strip()
+    paras = [_clip(f"In short: {summary_text}", 1200)] if summary_text else []
+    done_when = str(ticket.get("done_when") or "").strip()
+    paras += [_clip(f"Done when: {done_when}", 1200)] if done_when else []
+    paras += [x for x in (_parent_line(ticket, root),) if x]
+    uncovered = tickets.proof_state(ticket)["uncovered"]
+    paras += [_clip(f"No task covers: “{p}”", 600) for p in uncovered[:10]]
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
@@ -729,8 +791,17 @@ def check_card(ticket: dict) -> dict:
         "then": "The ticket is done.",
         "ok_label": "Looks good",
     }
-    if items:
-        card["preview"] = {"type": "doc", "heading": "Steps", "steps": [_clip(i, 300) for i in items[:50]]}
+    if uncovered:
+        card["need"] = "Done when is not fully covered"
+    url = _check_open(ticket)
+    if url:
+        card["open"] = url
+    if steps or paras:
+        card["preview"] = {"type": "doc", "heading": "What was done"}
+        if paras:
+            card["preview"]["paras"] = paras
+        if steps:
+            card["preview"]["steps"] = steps[:50]
     return card
 
 
@@ -824,9 +895,9 @@ def _decide_check(
         raise Refused(f"verdict is one of {', '.join(VERDICTS)}.")
     if ticket.get("status") != "review":
         raise Refused("This ticket is not waiting for your review.")
-    if digest is not None and digest != check_digest(ticket):
+    if digest is not None and digest != check_digest(ticket, root):
         raise Refused("This result changed after it was shown. Look at it again, then answer.")
-    card = check_card(ticket)
+    card = check_card(ticket, root)
     n = _note_bv(note)
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
@@ -917,8 +988,8 @@ def stack(root: Path) -> list[dict]:
         order[t["id"]] = {k: v[0] for k, v in tasks.items()}
         if t.get("status") not in needs.OPEN:
             for q in t.get("questions") or []:
-                if q.get("answer") is not None or q.get("kind") not in (None, "plain"):
-                    continue  # an add-on's own question is its business
+                if q.get("answer") is not None:
+                    continue  # every open question is a card, an add-on's own too (Factory's Start?, ORCH-63)
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
@@ -947,8 +1018,8 @@ def stack(root: Path) -> list[dict]:
                     "id": f"core:review:{t['id']}",
                     "key": "review",
                     "kind": "check",
-                    "card": check_card(t),
-                    "digest": check_digest(t),
+                    "card": check_card(t, root),
+                    "digest": check_digest(t, root),
                     "since": hist[-1]["at"] if hist else t.get("updated_at") or t.get("created_at"),
                     "options": [],
                     "recommended": None,
