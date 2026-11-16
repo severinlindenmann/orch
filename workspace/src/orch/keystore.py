@@ -1,6 +1,6 @@
 """The key store (contracts/secrets.md, Level 1): keys live in the guarded orch home, never in the workspace.
 
-    <guarded home>/keys/<workspace local id>/    0700 (humanproof.key_dir: guarded home, local-id binding)
+    <guarded home>/keys/<workspace local id>/    0700 (orch_home.key_dir: guarded home, local-id binding)
         keys.json      0600  {"schema": "orch.keys/1", "keys": {name: {type, source, value | file, added_at}}}
                              the keys a person added here (source "workspace")
         admin-keys.json 0600 same shape, source "admin": written only by the relay refresh, read-only here
@@ -31,7 +31,7 @@ import time
 import tomllib
 from pathlib import Path
 
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch import saferead
 from orch.errors import Refused
 
@@ -149,7 +149,7 @@ def _load(d: Path, admin: bool = False) -> dict:
 
 
 def _store(d: Path, keys: dict, admin: bool = False) -> None:
-    hp._write_private(
+    orch_home._write_private(
         d / ("admin-keys.json" if admin else "keys.json"),
         json.dumps({"schema": KEYS_SCHEMA, "keys": keys}, indent=2) + "\n",
     )
@@ -167,32 +167,32 @@ def _read(path: Path, limit: int = 8 * 1024 * 1024) -> bytes:
     """The bytes of a guarded key-store file: the rights check, then saferead.read_private (a link, FIFO, hard
     link, swap or oversize file is refused). FileNotFoundError when it is not there."""
     _check_file(path)
-    base, rel = hp._home_of(path)
+    base, rel = orch_home._home_of(path)
     data = saferead.read_private(base, rel, limit)
     if data is None:
-        raise Refused(hp.WRONG_RIGHTS)
+        raise Refused(orch_home.WRONG_RIGHTS)
     return data
 
 
 def _check_file(p: Path) -> None:
-    """humanproof's rights check, with the key store's own plain words (a loose file was set aside before this
+    """orch_home's rights check, with the key store's own plain words (a loose file was set aside before this
     is reached; what is left here is a link or a non-file)."""
     try:
-        hp._check_file(p)
-    except hp.LooseFile:
-        raise Refused(hp.WRONG_RIGHTS) from None
+        orch_home._check_file(p)
+    except orch_home.LooseFile:
+        raise Refused(orch_home.WRONG_RIGHTS) from None
 
 
 def _is_loose(p: Path) -> bool:
     """Loose = wider than 0600, another owner, or (Windows) an ACL beyond user and SYSTEM: the verdict is
-    humanproof.file_problem, so its platform hook applies here too. A link or a non-file is not "loose":
+    orch_home.file_problem, so its platform hook applies here too. A link or a non-file is not "loose":
     it stays refused. "unknown" (Windows could not tell) raises winacl.Unknown: refuse, set nothing aside."""
     try:
-        why = hp.file_problem(p)
+        why = orch_home.file_problem(p)
     except OSError:
         return False
     if why == "unknown":  # Windows could not tell: refuse this call only, never set a key aside for it
-        raise hp.winacl.Unknown("Windows would not tell the rights of a key file. Try again.")
+        raise orch_home.winacl.Unknown("Windows would not tell the rights of a key file. Try again.")
     return why is not None and why != "type"
 
 
@@ -208,10 +208,10 @@ def _quarantine(path: Path) -> None:
         n += 1
         dst = path.with_name(f"{path.name}.loose-{ts}-{n}")
     if path.parent.name == "files":  # a key-file value: nothing but the fact that it existed is kept
-        hp._write_private(dst, "")
+        orch_home._write_private(dst, "")
     else:
         names = sorted(_names_from(path))
-        hp._write_private(
+        orch_home._write_private(
             dst, json.dumps({"schema": KEYS_SCHEMA, "keys": {n: {} for n in names}}, indent=2) + "\n"
         )
     path.unlink()
@@ -226,7 +226,7 @@ def _tighten_locked(d: Path) -> None:
 
 def _tighten(d: Path) -> None:
     if any(_is_loose(d / f) for f in ("keys.json", "admin-keys.json")):
-        with hp._key_lock(d):
+        with orch_home._key_lock(d):
             _tighten_locked(d)
 
 
@@ -244,7 +244,7 @@ def _names_from(path: Path) -> set[str]:
     """Key NAMES in a set-aside file, for display only. Values are never returned: the names are untrusted
     (validated, plain text) and the rest of the file is dropped here."""
     try:
-        base, rel = hp._home_of(path)
+        base, rel = orch_home._home_of(path)
         data = saferead.read_private(
             base, rel, 8 * 1024 * 1024
         )  # no rights check: its rights are why it is here
@@ -269,7 +269,7 @@ def _file_loose_check(d: Path, name: str) -> None:
     """A key-file value that is loose is set aside, under keys.lock, and never read."""
     fp = d / "files" / name
     if _is_loose(fp):
-        with hp._key_lock(d):
+        with orch_home._key_lock(d):
             if _is_loose(fp):
                 _quarantine(fp)
 
@@ -286,7 +286,7 @@ def _dismiss(d: Path, name: str) -> None:
     for p in _aside(d, "keys.json"):
         names = _names_from(p) - {name}
         if names:
-            hp._write_private(
+            orch_home._write_private(
                 p, json.dumps({"schema": KEYS_SCHEMA, "keys": {n: {} for n in sorted(names)}}) + "\n"
             )
         else:
@@ -340,10 +340,10 @@ def _existing_dir(root: Path) -> Path | None:
     from orch import addons
 
     ws = addons.workspace_id(root, create=False)
-    home = hp.guarded_home(root)  # refuses first: no answer about a home that does not pair
+    home = orch_home.guarded_home(root)  # refuses first: no answer about a home that does not pair
     if ws is None or not (home / "keys" / ws).is_dir():
         return None
-    d = hp.key_dir(root, create=False)
+    d = orch_home.key_dir(root, create=False)
     _tighten(d)
     return d
 
@@ -351,7 +351,7 @@ def _existing_dir(root: Path) -> Path | None:
 def _files_dir(d: Path, create: bool) -> Path:
     f = d / "files"
     if create:
-        hp._private_dir(f, d.parent)
+        orch_home._private_dir(f, d.parent)
     return f
 
 
@@ -362,8 +362,8 @@ def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> 
     if source != "workspace":
         raise Refused(READ_ONLY)  # admin keys come only from set_admin (the relay refresh)
     _check_value(type_, value)
-    d = hp.key_dir(root)
-    with hp._key_lock(d):
+    d = orch_home.key_dir(root)
+    with orch_home._key_lock(d):
         _tighten_locked(d)
         keys = _load(d)
         entry: dict = {"type": type_, "source": "workspace", "added_at": _now()}
@@ -409,7 +409,7 @@ def _write_private_bytes(path: Path, data: bytes) -> None:
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as f:
-            hp.winacl.set_private(tmp, False)  # before any secret is written (Windows)
+            orch_home.winacl.set_private(tmp, False)  # before any secret is written (Windows)
             f.write(data)
         os.replace(tmp, path)
     finally:
@@ -419,8 +419,8 @@ def _write_private_bytes(path: Path, data: bytes) -> None:
 
 def remove(root: Path, name: str) -> None:
     _name(name)
-    d = hp.key_dir(root)
-    with hp._key_lock(d):
+    d = orch_home.key_dir(root)
+    with orch_home._key_lock(d):
         _tighten_locked(d)
         keys = _load(d)
         e = keys.get(name)
@@ -457,7 +457,7 @@ def get_value(root: Path, name: str):
             raise gone
         raise Refused("There is no such key.")
     if e["type"] == "key-file":
-        hp._check_dir(d / "files")
+        orch_home._check_dir(d / "files")
         if _file_needs_reentry(d, name):
             raise gone
         try:
@@ -514,7 +514,7 @@ def preflight(root: Path) -> None:
     """Everything set_admin needs, checked without writing a key: the folder (pairing, binding, rights)
     and both key files readable. Refused means nothing was changed; the relay refresh calls it before it
     replaces anything."""
-    d = hp.key_dir(root)
+    d = orch_home.key_dir(root)
     _tighten(d)
     _load(d)
     _load(d, admin=True)
@@ -527,9 +527,9 @@ def set_admin(root: Path, items: dict) -> list[str]:
     for the skipped ones. Raises Refused (nothing changed) when the folder is not usable."""
     if not isinstance(items, dict):
         raise Refused("The admin keys are not a list of keys.")
-    d = hp.key_dir(root)
+    d = orch_home.key_dir(root)
     skipped: list[str] = []
-    with hp._key_lock(d):
+    with orch_home._key_lock(d):
         _tighten_locked(d)
         _load(d)  # a damaged key file refuses here, before anything is written
         _load(d, admin=True)
@@ -677,8 +677,8 @@ def _toml(profiles: dict) -> str:
 
 def write_profiles(root: Path, profiles: dict) -> None:
     """Replace profiles.toml. Names only. An unreadable old file refuses the save."""
-    d = hp.key_dir(root)
-    with hp._key_lock(d):
+    d = orch_home.key_dir(root)
+    with orch_home._key_lock(d):
         _tighten_locked(d)
         values = set()
         for e in [*_load(d).values(), *_load(d, admin=True).values()]:
@@ -686,7 +686,7 @@ def write_profiles(root: Path, profiles: dict) -> None:
                 values.add(e["value"])
         _profile_check(profiles, values)
         read_profiles(root)  # Refused when damaged: never fall back to {}
-        hp._write_private(d / "profiles.toml", _toml(profiles))
+        orch_home._write_private(d / "profiles.toml", _toml(profiles))
 
 
 def read_profiles(root: Path) -> dict:
@@ -721,10 +721,10 @@ def record_write(root: Path, record: str, data: dict) -> None:
     relay.connect). One file, new file + rename under keys.lock."""
     if not isinstance(data, dict):
         raise Refused("A record is an object.")
-    d = hp.key_dir(root)
+    d = orch_home.key_dir(root)
     path = _record_path(d, record)
-    with hp._key_lock(d):
-        hp._write_private(path, json.dumps(data, indent=2) + "\n")
+    with orch_home._key_lock(d):
+        orch_home._write_private(path, json.dumps(data, indent=2) + "\n")
 
 
 def record_read(root: Path, record: str) -> dict | None:
@@ -732,7 +732,7 @@ def record_read(root: Path, record: str) -> dict | None:
     d = _existing_dir(root)
     if d is None:
         return None
-    data = hp._read_json(root, _record_path(d, record), None)
+    data = orch_home._read_json(root, _record_path(d, record), None)
     if data is not None and not isinstance(data, dict):
         raise Refused("A record in the orch folder is unreadable.")
     return data

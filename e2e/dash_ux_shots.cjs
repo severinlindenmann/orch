@@ -18,7 +18,7 @@ const WEB = path.join(DASH, 'src', 'orch_dashboard', 'web');
 const FIX = path.join(DASH, 'tests', 'fixtures');
 const BASE = 'http://dash.test';
 const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'";
-const OPTIONAL = new Set(['/api/notices', '/api/handoffs', '/api/update-status']);
+const OPTIONAL = new Set(['/api/update-status']);
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
 function fixtures() {

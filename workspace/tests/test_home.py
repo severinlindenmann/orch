@@ -1,16 +1,15 @@
-"""Guarded home, human key, loose-file reset and the pending read-back rule."""
+"""Guarded home, key folder, loose-file reset, install record."""
 
 import contextlib
-import json
 import os
+from pathlib import Path
 
 import pytest
+from conftest import key_file
 
-from orch import addons, runs
-from orch import humanproof as hp
+from orch import addons
+from orch import home as hp
 from orch.errors import Refused
-
-TID = "t_abc123"
 
 
 @pytest.fixture
@@ -47,7 +46,7 @@ def test_normal_install_real_workspace_with_env_home_is_refused(tws, monkeypatch
         hp.guarded_home(tws)  # real workspace + env-chosen home
     assert e.value.code == hp.NOT_TOGETHER
     with pytest.raises(Refused):
-        hp.human_key(tws)
+        key_file(tws)
     assert not (acct / ".orch-tool").exists()  # nothing created in the account home
 
 
@@ -90,68 +89,15 @@ def test_symlinked_prefix_is_no_test_path(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- key and proofs
 
 
-def test_human_key_rights_and_reuse(tws):
-    k = hp.human_key(tws)
-    assert len(k) == 32 and hp.human_key(tws) == k
-    f = hp.key_dir(tws) / "human.key"
+def test_key_file_rights_and_reuse(tws):
+    k = key_file(tws)
+    assert len(k) == 32 and key_file(tws) == k
+    f = hp.key_dir(tws) / "test.key"
     assert oct(f.stat().st_mode & 0o777) == "0o600"
 
 
-# ---------------------------------------------------------------- settings
-
-
-# ---------------------------------------------------------------- pending read-back
-
-
-def _file(tws):
-    return runs.pending_path(tws, TID)
-
-
-def test_a_person_line_starts_a_run(tws):
-    runs.pending_add(tws, TID, "human:pat", "answer", "yes", "dashboard")
-    assert len(runs.human_waiting(tws, TID)) == 1
-
-
-def test_an_agent_written_line_never_starts_a_run(tws, monkeypatch):
-    runs.pending_add(tws, TID, "agent:claude", "message", "hi", "cli")
-    assert runs.human_waiting(tws, TID) == []
-    monkeypatch.setenv("CLAUDECODE", "1")  # a human: name written from inside an agent is the agent's line
-    runs.pending_add(tws, TID, "human:pat", "message", "hi", "cli")
-    monkeypatch.delenv("CLAUDECODE")
-    assert runs.human_waiting(tws, TID) == []
-    assert len(runs.undelivered(tws, TID)) == 2  # still delivered to a run that is already going
-
-
-def test_phone_channel_line_counts(tws):
-    runs.pending_add(tws, TID, "iPhone", "message", "hi", "phone", phone="ph_abc123")
-    assert len(runs.human_waiting(tws, TID)) == 1
-
-
-def test_phone_marker_in_agent_env_is_agent_input(tws, monkeypatch):
-    monkeypatch.setenv("CLAUDECODE", "1")
-    runs.pending_add(tws, TID, "iPhone", "message", "hi", "phone", phone="ph_abc123")
-    monkeypatch.delenv("CLAUDECODE")
-    assert runs.human_waiting(tws, TID) == []
-
-
-def test_a_delivered_line_is_not_waiting_again_until_undelivered(tws):
-    item = runs.pending_add(tws, TID, "human:pat", "answer", "yes", "dashboard")
-    runs.mark_delivered(tws, TID, [item["id"]])
-    assert runs.human_waiting(tws, TID) == []
-    runs.undeliver(tws, TID, [item["id"]])
-    assert len(runs.human_waiting(tws, TID)) == 1
-
-
-def test_live_retry_does_not_change_who_wrote_it(tws):
-    runs.pending_add(tws, TID, "human:pat", "answer", "yes", "dashboard")
-    d = json.loads(_file(tws).read_text())
-    d["live_retry"] = True
-    _file(tws).write_text(json.dumps(d) + "\n")
-    assert len(runs.human_waiting(tws, TID)) == 1
-
-
 def test_keys_folder_symlink_refused_on_read(tws):
-    hp.human_key(tws)
+    key_file(tws)
     home = tws.parent / "home"
     real = home / "keys-real"
     (home / "keys").rename(real)
@@ -161,11 +107,11 @@ def test_keys_folder_symlink_refused_on_read(tws):
 
 
 def test_loose_folders_are_tightened_not_refused(tws):
-    k = hp.human_key(tws)
+    k = key_file(tws)
     home = tws.parent / "home"
     for d in (home, home / "keys", hp.key_dir(tws)):
         d.chmod(0o755)
-    assert hp.human_key(tws, create=False) == k  # same key: only the folders were tightened
+    assert key_file(tws, create=False) == k  # same key: only the folders were tightened
     for d in (home, home / "keys", hp.key_dir(tws)):
         assert oct(d.stat().st_mode & 0o777) == "0o700"
 
@@ -174,15 +120,15 @@ def test_loose_folders_are_tightened_not_refused(tws):
 
 
 def _loose_setup(tws):
-    """A key and a delivered id."""
-    key = hp.human_key(tws)
-    hp.consume(tws, ["p_aaaaaaaa"])  # delivered.json
+    """A key and a store file."""
+    key = key_file(tws)
+    hp._write_private(hp.key_dir(tws) / "notes.json", "{}")
     return key, hp.key_dir(tws), tws.parent / "home"
 
 
 READERS = {
-    "human.key": lambda tws: hp.human_key(tws),
-    "delivered.json": lambda tws: hp.delivered_ids(tws),
+    "test.key": lambda tws: key_file(tws),
+    "notes.json": lambda tws: hp._read_json(tws, hp.key_dir(tws) / "notes.json", {}),
 }
 
 
@@ -193,32 +139,32 @@ def test_loose_secret_file_resets_protection(tws, name):
     path.chmod(0o644)  # loose: the content is never trusted
     with contextlib.suppress(Refused):
         READERS[name](tws)
-    assert hp.human_key(tws) != key  # rotated
-    assert not (d / "delivered.json").exists()
+    if name == "test.key":
+        assert key_file(tws) != key  # rotated
     log = (home / "protection-reset.log").read_text()
-    assert name in log and key.hex() not in log and hp.human_key(tws).hex() not in log
+    assert name in log and key.hex() not in log
 
 
 def test_wrong_type_is_loose_too(tws):
-    key = hp.human_key(tws)
-    f = hp.key_dir(tws) / "human.key"
+    key = key_file(tws)
+    f = hp.key_dir(tws) / "test.key"
     f.unlink()
     f.symlink_to(tws / "elsewhere")
-    assert hp.human_key(tws) != key  # a link in place of the key: never followed, key rotated
-    assert not (hp.key_dir(tws) / "human.key").is_symlink()
+    assert key_file(tws) != key  # a link in place of the key: never followed, key rotated
+    assert not (hp.key_dir(tws) / "test.key").is_symlink()
 
 
 def test_extra_file_check_hook_counts_as_loose(tws, monkeypatch):
-    key = hp.human_key(tws)
+    key = key_file(tws)
     flagged = []  # the hook flags the key once; the reset writes a good one
 
     def acl(p):
-        if p.name == "human.key" and not flagged:
+        if p.name == "test.key" and not flagged:
             flagged.append(1)
             return "acl"
 
     monkeypatch.setattr(hp, "FILE_CHECKS", [acl])
-    assert hp.human_key(tws) != key
+    assert key_file(tws) != key
     monkeypatch.setattr(hp, "FILE_CHECKS", [])
 
 
@@ -230,13 +176,20 @@ def _key_lock_held(d):
 
 
 def test_reset_holds_the_key_lock(tws, monkeypatch):
-    hp.human_key(tws)
+    key_file(tws)
     d = hp.key_dir(tws)
     seen = []
-    real = hp._write_private
-    monkeypatch.setattr(hp, "_write_private", lambda p, t: (seen.append(_key_lock_held(d)), real(p, t))[1])
+    real = os.open
+
+    def spy(path, *a, **k):
+        if Path(path).name == "protection-reset.log":
+            seen.append(_key_lock_held(d))
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(hp.os, "open", spy)
     hp.reset_protection(tws, "test:mode")
-    assert seen and all(seen)  # every write of the reset ran under keys.lock
+    monkeypatch.undo()
+    assert seen and all(seen)  # the write of the reset ran under keys.lock
     assert not _key_lock_held(d)  # and it was released
     with hp._key_lock(d), hp._key_lock(d):  # re-entrant for readers that already hold it
         assert _key_lock_held(d)
@@ -247,18 +200,18 @@ def test_reset_holds_the_key_lock(tws, monkeypatch):
 
 
 def test_fifo_in_place_of_a_guarded_file_does_not_hang(tws):
-    key = hp.human_key(tws)
-    f = hp.key_dir(tws) / "delivered.json"
+    key = key_file(tws)
+    f = hp.key_dir(tws) / "notes.json"
     os.mkfifo(f, 0o600)
     with contextlib.suppress(Refused):
-        hp.delivered_ids(tws)  # returns, never blocks: reset
-    assert hp.human_key(tws) != key
+        hp._read_json(tws, f, {})  # returns, never blocks: reset
+    assert key_file(tws) == key
 
 
 def test_symlinked_and_oversized_and_hardlinked_files_are_loose(tws):
     for kind in ("symlink", "big", "hardlink"):
-        key = hp.human_key(tws)
-        f = hp.key_dir(tws) / "human.key"
+        key = key_file(tws)
+        f = hp.key_dir(tws) / "test.key"
         f.unlink()
         if kind == "symlink":
             f.symlink_to(tws / ".orch")
@@ -267,7 +220,7 @@ def test_symlinked_and_oversized_and_hardlinked_files_are_loose(tws):
         else:
             hp._write_private(tws / "other", key.hex())
             os.link(tws / "other", f)
-        assert hp.human_key(tws) != key, kind  # never read, reset
+        assert key_file(tws) != key, kind  # never read, reset
 
 
 def test_install_record_read_through_saferead(tmp_path, monkeypatch):

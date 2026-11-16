@@ -1283,7 +1283,7 @@ def test_sync_is_shipped_and_can_be_added(proj, monkeypatch, run, uv_calls, kind
 
     import jsonschema
 
-    from orch import humanproof
+    from orch import home as orch_home
 
     base = Path(__file__).resolve().parents[2]
     folder = base / "workspace-addons" / "sync"
@@ -1297,7 +1297,7 @@ def test_sync_is_shipped_and_can_be_added(proj, monkeypatch, run, uv_calls, kind
     # proj fakes real_home: exercise the default home without touching the account home.
     monkeypatch.delenv("ORCH_HOME_STRICT")
     monkeypatch.setenv("ORCH_HOME", str(addons.real_home() / ".orch-tool"))
-    monkeypatch.setattr(humanproof, "install_kind", lambda: kind)
+    monkeypatch.setattr(orch_home, "install_kind", lambda: kind)
     monkeypatch.setattr(addons, "repo", lambda: "https://github.com/example/orch")
     monkeypatch.setattr(addons, "_entry_points", lambda: {"sync": "orch_sync"} if uv_calls else {})
     monkeypatch.setattr(addons, "_manifest_file", lambda module: manifest)

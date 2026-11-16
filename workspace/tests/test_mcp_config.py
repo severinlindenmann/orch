@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 from conftest import CONTRACTS
 
-from orch import addons, conn_config, humanproof, inventory
+from orch import addons, conn_config, inventory
+from orch import home as home_mod
 
 VEC = json.loads((CONTRACTS / "vectors" / "inventory-v1.json").read_text(encoding="utf-8"))
 WID = "0123456789abcdef0123456789abcdef"
@@ -145,7 +146,7 @@ def test_default_reads_the_real_proof_grant_store(tmp_path, monkeypatch):
     (base / "home").mkdir()
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setenv("ORCH_HOME", str(base / "home"))
-    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     _mcp(root, {"s": {"command": ["srv"]}}, {"s": ["write", "read"]})
     assert conn_config.proof_grants(root) == {}
     (root / ".orch" / "config.toml").write_text('[conn.allow]\ns = ["read"]\n')

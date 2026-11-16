@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import base64
 import getpass
-import hashlib
 import json
 import os
 import re
@@ -27,14 +26,13 @@ from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 
 _run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 try:
-    from orch.pageproof import SELF, argv0, run_with_proof
+    from orch.pagesession import SELF, argv0
 except ImportError:  # standalone use without orch: nothing runs
     SELF = "orch:self"
 
     def argv0(orch_bin):
         return [str(orch_bin)]
 
-    run_with_proof = None
 
 MAX_TEXT = 2000
 LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
@@ -114,86 +112,12 @@ class Unavailable(Exception):
 
 
 class NeedsPerson(Exception):
-    """A human-only click without a proof session (HTTP 403): the page is watch-only here."""
-
-
-# page op -> (core op, target of the proof) for the clicks that are a person's (H1, contracts/human-proof.md).
-# `ticket.patch` is a verdict only when it sets Done ("Looks good"); the core checks the rest.
-PROOF_OPS = {
-    "copies.remove_orphaned": (
-        "copy.remove_orphaned",
-        lambda a: f"{a.get('ws8')}:discard" if a.get("discard") else a.get("ws8"),
-    ),
-    "copies.retry": ("copy.retry", lambda a: a.get("ticket")),
-    "copies.approve": (
-        "copy.retry",
-        lambda a: f"approve:{a.get('ticket')}:{a.get('tip')}:{a.get('control_paths')}:{a.get('paths_hash')}",
-    ),
-    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}:{_question_digest(a)}"),
-    "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
-    "chat.say": ("chat.send", lambda a: "general"),
-    "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
-    "chat.make_ticket": ("chat.make_ticket", lambda a: a.get("id")),
-    "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:reopen"),
-    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:edit"),
-    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:remove"),
-    "chat.send_ws": ("chat.send", lambda a: a.get("workspace")),
-    "private.move": ("private.move", lambda a: "move"),
-    "private.allow": ("private.allow", lambda a: f"{a.get('name')}:{a.get('key')}"),
-    "config.permissions": ("config.permissions", lambda a: a.get("mode")),
-    "config.agent.add": ("config.agent_add", lambda a: _agent_add_target(a)),
-    "look.set": ("look.icon", lambda a: "look"),
-}
-
-
-def _agent_add_target(a):
-    """The proof target of config.agent_add: core's one definition (name + digest of every saved value; the
-    dashboard never offers a live command)."""
-    from orch import humanproof
-
-    return humanproof.agent_add_target(a.get("name"), a.get("command"), None, a.get("prompt_via"))
-
-
-def proof_for(op, args, root=None):
-    """(core op, target) when this click needs a proof, else None."""
-    if op == "ticket.patch" and isinstance(args.get("data"), dict) and "status" in args["data"]:
-        return "ticket.verdict", args.get("ticket")
-    if (
-        op == "check.set" and args.get("done") is False
-    ):  # un-ticking may undo a Won't do (a person's decision)
-        return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}:reopen"
-    if op == "group.say":  # writing into a group as the person (host: by ticket; invited: by group)
-        if args.get("ticket"):
-            return "group.write_as_person", str(args["ticket"])
-        from orch import humanproof as _hp
-
-        return "group.write_as_person", _hp.group_target(root, str(args.get("host")), str(args.get("group")))
-    if op == "group.remove":
-        return "group.remove_member", f"{args.get('ticket')}:{args.get('workspace')}"
-    if (
-        op == "group.share" and root is not None
-    ):  # the proof binds the file's CONTENT (the core hashes the same)
-        return "group.share_file", f"{args.get('ticket')}:{_share_sha(root, args)}"
-    if op == "workflow.set":  # allowing agents to finish tickets (off needs no proof)
-        return ("config.agents_may_finish", "on") if args.get("on") is True else None
-    if op == "copies.set" and "setup" in args:  # a command orch runs in every new copy; clearing is free
-        v = args.get("setup")
-        if isinstance(v, str) and v.strip() not in ("", "none"):
-            return "config.copy_setup", hashlib.sha256(v.strip().encode()).hexdigest()
-        return None
-    if op == "share.set":  # sharing the orch entry with the team (off needs no proof)
-        return ("config.share", "on") if args.get("on") is True else None
-    if op == "look.shared":
-        return "look.shared_pages", "on" if args.get("on") is True else "off"
-    hit = PROOF_OPS.get(op)
-    return (hit[0], hit[1](args)) if hit else None
+    """A human-only click without a page session (HTTP 403): the page is watch-only here."""
 
 
 # Ops any scripted request may do without a page session: they are what an agent can do through the CLI as
 # itself (a ticket, a task, a note, a reference), nothing that speaks or decides for the person. EVERY other op acts
-# as the person (`--by human:...`): the server refuses it without a page session (watch-only), and an op with a
-# core gate (PROOF_OPS) also needs the person's proof.
+# as the person: the server refuses it without a page session (watch-only).
 FREE_OPS = frozenset(
     {
         "ticket.new",
@@ -209,22 +133,6 @@ FREE_OPS = frozenset(
         "config.agent.test",
     }
 )
-
-
-def _share_sha(root, args) -> str:
-    """The content hash the core computes for the same artifact (a person's click shares a ticket artifact). Read
-    here with the file inside the ticket's artifacts folder only; anything else gives a target no proof matches."""
-    import hashlib
-    from pathlib import Path
-
-    art = (Path(root) / ".orch" / "tickets" / str(args.get("ticket")) / "artifacts").resolve()
-    try:
-        path = (art / str(args.get("file"))).resolve()
-        if art not in path.parents or not path.is_file() or path.stat().st_size > 25 * 1024 * 1024:
-            return "unreadable"
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return "unreadable"
 
 
 def needs_session(op) -> bool:
@@ -782,10 +690,9 @@ def _act_target(v) -> str:
 
 def _addon_act(a):
     """ONE generic op for an add-on's own verbs: `orch <addon> act <verb> -- <target>`. The add-on name is checked
-    against `orch addon list` in run_op (it must be on here); the dashboard code never names one. `sign` = the
-    person signed this click on the page. Two phases (see addon_proof_target): `review: true` only asks the add-on
-    for {target, review} (nothing runs) and the page shows that review; the signed click echoes the target it
-    showed (`seen`), and run_op mints a proof only when the add-on still names exactly that target."""
+    against `orch addon list` in run_op (it must be on here); the dashboard code never names one. `review: true` only
+    asks the add-on for {target, review} (nothing runs) and the page shows that review; the confirming click
+    runs the verb as the person."""
     _only(a, ("addon", "verb", "target", "value", "sign", "review", "seen"))
     addon, verb = a.get("addon"), a.get("verb")
     if not (isinstance(addon, str) and ADDON.fullmatch(addon) and addon not in RESERVED):
@@ -834,7 +741,7 @@ def _review(v) -> dict | None:
     return out if out.get("title") else None
 
 
-def addon_proof_target(
+def addon_review_target(
     root: Path, orch_bin: str, argv: list[str], addon: str
 ) -> tuple[str | None, dict | None]:
     """Which proof a signed add-on click needs and what the person is shown: `orch <addon> act <verb> --proof-target
@@ -1191,7 +1098,7 @@ def human_env(root: Path, orch_bin: str) -> dict:
     except ImportError:
         raise Unavailable("The orch tool is not available here.") from None
     env = _without_agent(os.environ)
-    from orch.pageproof import child_env
+    from orch.pagesession import child_env
 
     return child_env({**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}, orch_bin)
 
@@ -1212,7 +1119,7 @@ def _sweep_shares(parent: Path, older_than: float = 600.0) -> None:
             continue
 
 
-def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, str, dict | None]:
+def share_file(root: Path, orch_bin: str | None, args, session: bool = False) -> tuple[int, str, dict | None]:
     """Share a file picked in the browser: `orch publish file` on a private copy under .orch/run/share, removed
     right after. The link (which holds the key) never goes back to the page: the list shows the new row."""
     if not isinstance(args, dict) or set(args) - {"name", "data", "days"}:
@@ -1236,7 +1143,7 @@ def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, 
         raise BadRequest("That file is over 3 MB. Share bigger files with `orch publish file` in a terminal.")
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
-    if orch_bin == SELF and mint is None:
+    if orch_bin == SELF and not session:
         raise NeedsPerson("Open the dashboard from this computer to do this.")
     if not publish_connected(root, orch_bin):
         raise BadRequest("Sharing is not set up here.")
@@ -1287,26 +1194,23 @@ def _op_timeout(op, args) -> int:
     return 75 if op == "config.agent.test" else 60
 
 
-def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
-    """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
-    proof for a request that carries a page session; None = watch-only (the click is refused)."""
+def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) -> tuple[int, str, dict | None]:
+    """Run one op as the person. Returns (http status, plain text, parsed json or None). `session` is True for a
+    request that carries the page session; False = watch-only (the click is refused)."""
     if op == "link.share":
-        return share_file(root, orch_bin, args, mint)
+        return share_file(root, orch_bin, args, session)
     if op in ("person.set", "person.add"):  # "You: <name>": a name only, kept here, nothing runs
         if not isinstance(args, dict):
             raise BadRequest("The arguments must be an object.")
-        if mint is None:  # watch-only: choosing who you are is the person's click
+        if not session:  # watch-only: choosing who you are is the person's click
             raise NeedsPerson("Open the dashboard from this computer to do this.")
         try:
             return 200, "", {"people": people.choose(root, args.get("name"), add=op == "person.add")}
         except people.BadName as e:
             raise BadRequest(str(e)) from None
     argv = build_argv(op, args, root)
-    if orch_bin == SELF and needs_session(op) and mint is None:  # before anything is read, hashed or run (F8)
+    if orch_bin == SELF and needs_session(op) and not session:  # before anything is read or run
         raise NeedsPerson("Open the dashboard from this computer to do this.")
-    need = (
-        proof_for(op, args, root) if orch_bin == SELF else None
-    )  # a test fake (explicit ORCH_BIN) needs none
     files = attachments(op, args)
     forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:
@@ -1334,41 +1238,27 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
         )
     if op == "addon.act" and args.get("review") is True:
-        # phase 1: what the person will sign; nothing runs (with any orch, a test fake too)
-        target, review = addon_proof_target(root, orch_bin, argv, args["addon"])
+        # phase 1: what the person will confirm; nothing runs (with any orch, a test fake too)
+        target, review = addon_review_target(root, orch_bin, argv, args["addon"])
         if review is None:
-            raise BadRequest("This can't be signed right now. Nothing was changed.")
+            raise BadRequest("This can't be confirmed right now. Nothing was changed.")
         return 200, "", {"target": target, "review": review}
     if op == "addon.act" and args.get("sign") is True and orch_bin == SELF:
-        target, _ = addon_proof_target(
-            root, orch_bin, argv, args["addon"]
-        )  # a click with a session only (above)
-        if target != args.get("seen"):  # phase 2: only what the page showed is minted
+        # phase 2: the click must still match what the page showed
+        target, _ = addon_review_target(root, orch_bin, argv, args["addon"])
+        if target != args.get("seen"):
             raise BadRequest("This changed after you opened it. Nothing was changed; open it again.")
-        need = ("addon.act", target) if target else None
-    if need and mint is None:  # a request without the page secret: a plain refusal, never a crash
-        raise NeedsPerson("Open the dashboard from this computer to do this.")
     try:
-        if need:
-            r = run_with_proof(
-                argv,
-                mint(*need),
-                orch_bin=orch_bin,
-                cwd=root,
-                env=human_env(root, orch_bin),
-                timeout=_op_timeout(op, args),
-            )
-        else:
-            r = _run(
-                [*argv0(orch_bin), *argv],
-                check=False,
-                cwd=root,
-                capture_output=True,
-                text=True,
-                timeout=_op_timeout(op, args),
-                stdin=subprocess.DEVNULL,
-                env=human_env(root, orch_bin),
-            )
+        r = _run(
+            [*argv0(orch_bin), *argv],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=_op_timeout(op, args),
+            stdin=subprocess.DEVNULL,
+            env=human_env(root, orch_bin),
+        )
     except subprocess.TimeoutExpired:
         if op == "addon.set" and args.get("on") is True:  # the install may still finish on its own
             forget_static()

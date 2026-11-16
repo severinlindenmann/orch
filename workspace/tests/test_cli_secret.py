@@ -13,7 +13,7 @@ import pytest
 from conftest import seed_profiles
 
 from orch import cli, keystore, secretrun
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch.errors import Refused
 
 TOKEN = "tok-Q7xP2mK9vL4zR8"  # made-up values, long enough to be stored
@@ -250,7 +250,7 @@ def test_program_is_never_found_through_the_callers_path_or_cwd(store, run, ws, 
 
 
 def test_temp_folder_swept_when_its_process_is_gone(store, run, ws):
-    tmp = hp.guarded_home(ws) / "keys" / "tmp"
+    tmp = orch_home.guarded_home(ws) / "keys" / "tmp"
     tmp.mkdir(parents=True, exist_ok=True)
     stale = tmp / "999999999-0123456789abcdef"
     stale.mkdir()
@@ -886,7 +886,7 @@ def test_reading_the_switch_takes_the_key_lock(store, run, ws, monkeypatch):
     import contextlib
 
     seen = []
-    real_lock = hp._key_lock
+    real_lock = orch_home._key_lock
 
     @contextlib.contextmanager
     def tracking(d):
@@ -894,7 +894,7 @@ def test_reading_the_switch_takes_the_key_lock(store, run, ws, monkeypatch):
         with real_lock(d):
             yield
 
-    monkeypatch.setattr(hp, "_key_lock", tracking)
+    monkeypatch.setattr(orch_home, "_key_lock", tracking)
     assert run("secret", "get", "plain", "other-token")[0] == 0
     assert seen
 
@@ -1122,7 +1122,7 @@ def test_a_failing_record_leaves_no_key_file_behind(store, run, ws, monkeypatch)
     monkeypatch.setattr(secretrun, "_recorder", boom)
     code, _, err = run("secret", "file", "filesonly", "--", PY, "-c", "pass")
     assert code == 2 and "could not be recorded" in err
-    assert not (hp.guarded_home(ws) / "keys" / "tmp").exists()
+    assert not (orch_home.guarded_home(ws) / "keys" / "tmp").exists()
 
 
 def test_the_record_text_is_built_from_the_checked_command_name(store, run, ws, in_run):
@@ -1160,7 +1160,7 @@ def test_secret_change_by_must_be_a_person_or_reset():
 
 def _nothing_touched(ws):
     assert not (ws / "started").exists()
-    assert not (hp.guarded_home(ws) / "keys" / "tmp").exists()
+    assert not (orch_home.guarded_home(ws) / "keys" / "tmp").exists()
 
 
 def _agent_call(run, monkeypatch, *cmd, profile="filesonly", mode="file"):
@@ -1287,7 +1287,7 @@ def test_the_unattributed_run_has_a_daily_cap(store, run, ws, monkeypatch):
 
 
 def _pfile(ws):
-    return hp.key_dir(ws) / "profiles.toml"
+    return orch_home.key_dir(ws) / "profiles.toml"
 
 
 def _edit_file(ws, old, new):

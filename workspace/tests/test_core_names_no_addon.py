@@ -24,8 +24,8 @@ ALLOW = {
     "orch/tickets.py": {
         "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)"
     },
-    "orch/humanproof.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
-    "orch/pageproof.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
+    "orch/pagesession.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
+    "orch/pagelaunch.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/syncgate.py": {"sync": _GONE},
 }
 

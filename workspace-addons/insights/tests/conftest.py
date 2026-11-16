@@ -60,12 +60,11 @@ TICKETS = [
 # Answers: record counts (answer.json), record settings (settings.json), ticket list (tickets.json). A file
 # "<name>_exit" makes that read fail; external.json is merged into settings.json right after a settings read (a
 # change made elsewhere in between). The writes follow the final core shape:
-#   config set insights.<key> <value> [--proof-stdin] [--if-current <old>] --json
+#   config set insights.<key> <value> [--if-current <old>] --json
 #     -> {"insights.<key>": v, "changed": bool, "widened": bool}; the fake decides widening by comparing with
-#        settings.json, wants a proof only for widening, answers `changed` on an --if-current mismatch
-#   record delete-detail <ticket> [--proof-stdin] --json -> {"deleted": 3}, always needs a proof
-# A valid proof is exactly a string the FakeSession minted for that op/target (minted.jsonl), single use
-# (used.txt); otherwise {"code": "needs_person"}, exit 2, nothing changed. refuse.json = a fixed core refusal,
+#        settings.json and answers `changed` on an --if-current mismatch
+#   record delete-detail <ticket> --json -> {"deleted": 3}
+# Every write is a plain person action (nothing on stdin). refuse.json = a fixed core refusal,
 # stderr.txt is written to stderr, a file "pause" makes a write sleep that many seconds first.
 # Every call is appended to calls.jsonl: argv, stdin, the full environment, cwd.
 FAKE = """#!{python}
@@ -83,7 +82,7 @@ with open(folder / "calls.jsonl", "a") as log:
     log.write(json.dumps({{**call, "env": dict(os.environ)}}) + "\\n")
 if (folder / "stderr.txt").exists():
     sys.stderr.write((folder / "stderr.txt").read_text())
-plain = [a for a in args if a != "--proof-stdin"]
+plain = list(args)
 FIELDS = {{"insights.keep_days": "keep_days", "insights.max_mb": "max_mb",
           "insights.share_counts": "share_counts", "insights.share_names": "share_names"}}
 
@@ -110,20 +109,6 @@ def before_write():
     if (folder / "pause").exists():
         time.sleep(float((folder / "pause").read_text()))
 
-def proof_ok(op, target):
-    if "--proof-stdin" not in args or not stdin:
-        return False
-    proof = stdin.splitlines()[0]
-    minted, used = folder / "minted.jsonl", folder / "used.txt"
-    rows = [json.loads(line) for line in minted.read_text().splitlines()] if minted.exists() else []
-    if proof in (used.read_text().splitlines() if used.exists() else []):
-        return False
-    if {{"op": op, "target": target, "proof": proof}} not in rows:
-        return False
-    with open(used, "a") as out:
-        out.write(proof + "\\n")
-    return True
-
 def config_set():
     guard = plain[4:-1]
     if plain[-1] != "--json" or plain[2] not in FIELDS:
@@ -141,8 +126,6 @@ def config_set():
         print(json.dumps({{key: value, "changed": False, "widened": False}}))
         sys.exit(0)
     widened = int(value) > int(current) if not isinstance(raw, bool) else value == "on"
-    if widened and not proof_ok("insights.settings", key + "=" + value):
-        refuse("needs_person", "Do this in the dashboard on this computer.")
     settings[FIELDS[key]] = (value == "on") if isinstance(raw, bool) else int(value)
     (folder / "settings.json").write_text(json.dumps(settings))
     print(json.dumps({{key: value, "changed": True, "widened": widened}}))
@@ -152,8 +135,6 @@ def delete_detail():
     if len(plain) != 4 or plain[3] != "--json":
         sys.exit(3)
     before_write()
-    if not proof_ok("record.delete_detail", plain[2]):
-        refuse("needs_person", "Do this in the dashboard on this computer.")
     print(json.dumps({{"deleted": 3}}))
     sys.exit(0)
 
@@ -193,19 +174,17 @@ def calls(fake):
 
 
 class FakeSession:
-    """A page session for tests: the real can_mint rules (cookie, loopback Host, no proxy headers), a recorded mint."""
+    """A page session for tests: the real can_act rules (cookie, loopback Host, no proxy headers)."""
 
     cookie = "good-cookie-value"
     token = "launch-token-abcdefghijklmnop"
 
     def __init__(self, folder=None):
-        self.minted = []
         self.revoked = False
         self.secret = "fake-page-secret-" + "s" * 30  # the core's page secret (PageSession.secret)
-        self.folder = folder  # the fake orch's folder: minted proofs are what its core accepts
 
     def cookie_name(self, port):
-        return f"orch_page_insights_{port}"  # the core's per-server, per-port name (pageproof.cookie_name)
+        return f"orch_page_insights_{port}"  # the core's per-server, per-port name (pagesession.cookie_name)
 
     def set_cookie(self, port, value):
         return f"{self.cookie_name(port)}={value}; HttpOnly; SameSite=Strict; Path=/"
@@ -222,18 +201,10 @@ class FakeSession:
             sent.encode(), self.secret.encode()
         )
 
-    def can_mint(self, headers, port):
-        from orch.pageproof import forwarded, host_ok
+    def can_act(self, headers, port):
+        from orch.pagesession import forwarded, host_ok
 
         return host_ok(headers, port) and not forwarded(headers) and self.authed(headers, port)
-
-    def mint(self, op, target):
-        self.minted.append((op, target))
-        proof = f"hp1.fakeproof{len(self.minted)}.mac"
-        if self.folder is not None:
-            with open(self.folder / "minted.jsonl", "a") as log:
-                log.write(json.dumps({"op": op, "target": target, "proof": proof}) + "\n")
-        return proof
 
     def launch(self, token):
         return self.cookie if token == self.token else None

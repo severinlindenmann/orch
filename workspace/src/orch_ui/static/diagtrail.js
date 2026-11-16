@@ -14,7 +14,7 @@
 })(typeof window !== 'undefined' ? window : null, function () {
   'use strict';
   const TICKET = /^#ticket\/(t_[a-z0-9]{6,16})/;
-  const QUIET = /^\/api\/(state|term|notices|handoffs|update-status|chat\/)/; // polls: logged only when slow or failing
+  const QUIET = /^\/api\/(state|term|update-status|chat\/)/; // polls: logged only when slow or failing
   const SKIP = /^\/api\/(diag|events)/; // our own batches and the live stream
   const SLOW_MS = 800, BATCH = 60, QUEUE_MAX = 200, EVERY_MS = 2000;
   const path = url => {

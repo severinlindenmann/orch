@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/handoff.js'), 'utf8');
-const start = src.indexOf('  // The page stops waiting'), end = src.indexOf('  notices(); poll();');
+const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/update.js'), 'utf8');
+const start = src.indexOf('  // The page stops waiting'), end = src.indexOf('  updateStatus(); setInterval');
 
 function page(now, store, reply) {
   const banners = [];
@@ -13,7 +13,7 @@ function page(now, store, reply) {
     ? {then() { return {then() { return {catch(f) { f(); }}; }}; }}
     : {then(f) { const s = f({ok: true, json: () => reply}); return {then(g) { g(s); return {catch() {}}; }}; }};
   const c = vm.createContext({sessionStorage, fetch, Date: {now: () => now}, Number, String, shown: ''});
-  vm.runInContext('var shown = ""; function poll() {} function banner(t) { out.push(t); }\n' + src.slice(start, end) + '\nthis.S = updateStatus; this.go = updateStarted; this.hold = function (b) { startedBanner = b; };', Object.assign(c, {out: banners}));
+  vm.runInContext('var shown = ""; function banner(t) { out.push(t); }\n' + src.slice(start, end) + '\nthis.S = updateStatus; ', Object.assign(c, {out: banners}));
   return {c, banners};
 }
 
@@ -45,24 +45,6 @@ test('a server that cannot be reached after the wait says "orch restarted", not 
   assert.ok(!('orch-update-started' in store));
 });
 
-// fb1: "Update started" and "Update finished" stayed stacked
-test('the "Update started" banner goes away when the update finishes, fails or is overdue', () => {
-  for (const [now, reply] of [[2000, {state: 'finished'}], [2000, {state: 'failed', reason: 'No internet'}], [1000 + 181000, {state: 'running'}]]) {
-    const store = {'orch-update-started': '1000'};
-    const p = page(now, store, reply);
-    let removed = 0;
-    p.c.hold({remove() { removed++; }});
-    p.c.S();
-    assert.equal(p.banners.length, 1);
-    assert.equal(removed, 1, JSON.stringify(reply));
-  }
-  const store = {'orch-update-started': '1000'}, p = page(2000, store, {state: 'running'});
-  let removed = 0;
-  p.c.hold({remove() { removed++; }});
-  p.c.S();
-  assert.equal(removed, 0, 'still running: the started banner stays');
-});
-
 test('a finished update names the new release, or keeps the old text when unknown', () => {
   const a = page(1000, {}, {state: 'finished', reason: '', release: 21});
   a.c.S();
@@ -82,4 +64,23 @@ test('a finished update names both versions and links what changed', () => {
   assert.deepEqual(b.banners, ['Updated orch 24 → 25.']);
   assert.ok(!('orch-update-from' in store), 'the old version is used once');
   assert.ok(/banner\(t, s\.state === "finished"\)/.test(src), 'the finished banner carries the What changed link');
+});
+
+test('the update banners replace each other, one at a time', () => {
+  const live = [];
+  const doc = {
+    querySelectorAll: () => live.filter(b => !b.gone),
+    createElement: () => { const e = {children: [], gone: false, style: {}, setAttribute() {}, appendChild(c) { this.children.push(c); }, remove() { this.gone = true; }}; return e; },
+    getElementById: () => null,
+    body: {insertBefore: (b) => live.push(b), firstChild: null},
+  };
+  const ctx = vm.createContext({document: doc, Date, Number, Math});
+  vm.runInContext(src.slice(src.indexOf('  function el('), src.indexOf('\n', src.indexOf('  function el(')) + 1), ctx);
+  const i = src.indexOf('  function place('), j = src.indexOf('  // the detached update');
+  vm.runInContext(src.slice(i, j) + '\nthis.banner = banner;', ctx);
+  const a = ctx.banner('Update started.');
+  const b = ctx.banner('Update finished.');
+  assert.equal(a.gone, true, 'the earlier update banner is replaced');
+  assert.equal(b.gone, false);
+  assert.equal(doc.querySelectorAll().length, 1);
 });

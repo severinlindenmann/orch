@@ -12,8 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons, config, diag, pageproof, runs, tickets
-from orch import humanproof as hp
+from orch import addons, config, diag, pagelaunch, pagesession, runs, tickets
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "workspace-addons" / "dashboard" / "src"))
 pytest.importorskip("orch_dashboard.server")
@@ -39,7 +38,7 @@ def live(tmp_path, monkeypatch):
 
     monkeypatch.setattr(actions, "_run", no_child)
     monkeypatch.setattr(data, "_run", no_child)
-    srv = make_server(root, 0, orch_bin=pageproof.SELF)
+    srv = make_server(root, 0, orch_bin=pagesession.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield root, srv.server_address[1]
     srv.shutdown()
@@ -65,7 +64,7 @@ def post(port, path, body, headers=None):
 
 
 def session(root, port):
-    tok = hp.write_launch_token(root, "dashboard")
+    tok = pagelaunch.write_launch_token(root, "dashboard")
     st, ck, body = post(port, "/session", {"token": tok})
     assert st == 200
     cookie = ck.split(";")[0]
@@ -265,14 +264,7 @@ def test_settings_ops_build_one_core_command_each():
         actions.build_argv("diag.delete_reports", {"x": 1})
 
 
-def test_diag_ops_are_plain_actions_no_proof():
-    for op, args in (
-        ("diag.set", {"on": False}),
-        ("diag.set", {"on": True}),
-        ("diag.delete_reports", {}),
-        ("diag.delete_notes", {}),
-    ):
-        assert actions.proof_for(op, args) is None
+def test_diag_ops_need_the_page_session():
     assert all(actions.needs_session(o) for o in ("diag.set", "diag.delete_reports"))
 
 

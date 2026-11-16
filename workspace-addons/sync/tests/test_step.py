@@ -1,9 +1,7 @@
-import io
 import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from orch import humanproof
 
 from orch_sync import cli, repo, step
 
@@ -44,20 +42,9 @@ def save(root, path=TICKET, value=None):
     return p
 
 
-def proof(root, target, monkeypatch):
-    """A person's proof for `target` (op addon.act) on stdin, as the dashboard passes it with --proof-stdin."""
-    key = humanproof.human_key(root)
-    token = humanproof.mint(key, humanproof.new_payload("addon.act", target, "human:Pat"))
-    monkeypatch.setattr("sys.stdin", io.StringIO(token + "\n"))
-
-
 def set_remote(root, remote, *args):
-    """`orch sync set --mode remote --remote <remote>` with the person's set-remote proof (choosing the address)."""
-    with pytest.MonkeyPatch.context() as m:
-        proof(root, cli.remote_target(str(remote)), m)
-        return cli.main(
-            ["--dir", str(root), "set", "--mode", "remote", "--remote", str(remote), "--proof-stdin", *args]
-        )
+    """`orch sync set --mode remote --remote <remote>` (choosing the address)."""
+    return cli.main(["--dir", str(root), "set", "--mode", "remote", "--remote", str(remote), *args])
 
 
 def configure(root, remote=None):
@@ -380,16 +367,14 @@ def test_failed_write_leaves_no_temp_file(root, monkeypatch):
     assert p.read_bytes() == b"new"
 
 
-def test_merge_document_preserves_local_history_and_demotes_remote(root):
+def test_merge_document_keeps_both_history_lines(root):
     local_line = {"at": NOW, "by": "human:lindenmann", "text": "Answered q1: yes"}
     remote_line = {"at": NOW, "by": "agent:relay from ph_abc", "text": "Approved"}
     local = dict(ticket(), history=[local_line])
     remote = dict(ticket(), history=[remote_line])
     out = step.merge_document(root, TICKET, ticket(), local, remote, NOW)
     assert local_line in out["history"]
-    assert {**remote_line, "by": "agent:sync", "text": "(synced, not verified here) Approved"} in out[
-        "history"
-    ]
+    assert remote_line in out["history"]
 
 
 def test_a_ticket_with_an_orch_history_line_is_synced():

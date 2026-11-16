@@ -61,7 +61,7 @@ if (LAUNCH) {
     await page.goto(LAUNCH);
     await page.waitForFunction(() => !location.hash.includes('launch='), null, { timeout: 15000 });
     await page.waitForTimeout(2000); // the page reloads once with its session (no networkidle: the page holds a stream open)
-    const ckName = `orch_page_dashboard_${new URL(base).port}`; // per server, per port (pageproof.cookie_name)
+    const ckName = `orch_page_dashboard_${new URL(base).port}`; // per server, per port (pagesession.cookie_name)
     const ck = (await page.context().cookies()).find(c => c.name === ckName);
     if (!ck) throw new Error(`no ${ckName} session cookie after the launch URL`);
     if (!ck.httpOnly) throw new Error('the session cookie is not HttpOnly');

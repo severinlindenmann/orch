@@ -13,9 +13,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import key_file
 
 from orch import addons, cli, services
-from orch import humanproof as hp
+from orch import home as home_mod
 
 real_os_open = os.open
 real_mkdir = os.mkdir
@@ -157,7 +158,7 @@ def fsguard(request, tmp_path, monkeypatch):
         if k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT") or k.startswith("CODEX_"):
             monkeypatch.delenv(k)
     monkeypatch.chdir(ws)
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     monkeypatch.setattr(addons, "reexec", lambda a: None)
     monkeypatch.setattr(addons, "run_uv", lambda a: None)
     monkeypatch.setattr(addons, "_reinstall", lambda *a, **k: True)
@@ -247,18 +248,18 @@ def test_relay_connect_and_refresh(fsguard):
         srv.stop()
 
 
-def test_human_key_and_reset_on_the_test_path(fsguard, monkeypatch):
+def test_key_file_and_reset_on_the_test_path(fsguard, monkeypatch):
     """The key and the reset write to the TEST home only, never to Z/.orch-tool."""
     z, orch_home, ws, _ = fsguard
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     prefix = z / ".orch-test"
     prefix.mkdir()
     tws = prefix / "ws"
     (tws / ".orch").mkdir(parents=True)
     monkeypatch.setenv("ORCH_HOME", str(prefix / "home"))
     (prefix / "home").mkdir()
-    hp.human_key(tws)
-    hp.reset_protection(tws, "test:mode")
+    key_file(tws)
+    home_mod.reset_protection(tws, "test:mode")
 
 
 def test_start_update_stop_combined(fsguard):
@@ -284,14 +285,14 @@ def test_strict_state_writes_stay_in_orch_home(fsguard, monkeypatch, tmp_path):
     assert _cli("ticket", "new", "strict home check", "--json", "--by", "agent:x")[0] == 0
     addons._save_registry([{"name": "focus", "source": "built-in", "version": "0.1.0"}])
     assert (orch_home / "addons.json").is_file()
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     prefix = z / ".orch-test"
     prefix.mkdir()
     tws = prefix / "ws"
     (tws / ".orch").mkdir(parents=True)
     monkeypatch.setenv("ORCH_HOME", str(prefix / "home"))
     (prefix / "home").mkdir()
-    hp.human_key(tws, create=True)
+    key_file(tws, create=True)
     # HOME may get an agent tool's own scratch folder (probing an installed `codex` makes ~/.codex/tmp),
     # but never anything of orch's
     assert not (tmp_path / "X" / ".orch-tool").exists() and not (tmp_path / "X" / ".orch-test").exists()

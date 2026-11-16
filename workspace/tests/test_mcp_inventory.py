@@ -7,7 +7,8 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import addons, config, humanproof, inventory
+from orch import addons, config, inventory
+from orch import home as home_mod
 
 VEC = json.loads((CONTRACTS / "vectors" / "inventory-v1.json").read_text(encoding="utf-8"))
 SCHEMA = json.loads((CONTRACTS / "inventory.schema.json").read_text(encoding="utf-8"))
@@ -223,7 +224,7 @@ def test_allow_needs_a_proof_made_grant(tmp_path, monkeypatch):
     (base / "home").mkdir()
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setenv("ORCH_HOME", str(base / "home"))
-    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     _mcp(root, {"s": {"command": ["p"], "profile": "x"}}, allow={"s": ["read", "write"]})
     i = inventory.connections(root)[0][0]
     assert [a["allowed"] for a in i["actions"]] == [False, False] and not i[
@@ -245,7 +246,7 @@ def test_tombstone_or_odd_grant_means_no_actions(tmp_path, monkeypatch):
     (base / "home").mkdir()
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setenv("ORCH_HOME", str(base / "home"))
-    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     _mcp(root, {"s": {"command": ["p"]}}, allow={"s": ["read"]})
     for bad in (False, None, True, 1, {"read": True}, ["read", 3]):
         _grant(root, "s", bad)

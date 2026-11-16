@@ -46,10 +46,10 @@ def test_outer_tracks_orch_sync_refuses_and_writes_nothing(team):
     assert "sync:move:orch-files" in ids
 
 
-def test_the_move_row_asks_the_core_op_with_a_sign_step_and_later(team):
+def test_the_move_row_asks_the_core_op_and_later(team):
     (row,) = [r for r in needs.rows(team) if r["id"] == "sync:move:orch-files"]
     move, later = row["actions"]
-    assert (move["op"], move["sign"]) == ("private.move", True) and "verb" not in move
+    assert move["op"] == "private.move" and "sign" not in move and "verb" not in move
     assert later == {"label": "Not now", "later": True}
     assert "git" not in row["text"].lower() and "git" not in move["review"]["body"].lower()
 

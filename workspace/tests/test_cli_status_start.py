@@ -1,12 +1,12 @@
 """`orch start` in a real terminal opens the page with a launch token (it crashed: a local import
-shadowed the module-level `humanproof`, UnboundLocalError), and no function re-imports a name its module
+shadowed the module-level `orch_home`, UnboundLocalError), and no function re-imports a name its module
 already imports."""
 
 import argparse
 import ast
 from pathlib import Path
 
-from orch import cli_status, humanproof, services, term, worktrees
+from orch import cli_status, pagelaunch, services, term, worktrees
 
 
 def test_start_in_a_terminal_opens_the_launch_url(tmp_path, monkeypatch):
@@ -15,9 +15,9 @@ def test_start_in_a_terminal_opens_the_launch_url(tmp_path, monkeypatch):
     monkeypatch.setattr(services, "start", lambda root: rows)
     monkeypatch.setattr(worktrees, "schedule_sweep", lambda root: None)
     monkeypatch.setattr(term, "is_terminal", lambda stream: True)
-    monkeypatch.setattr(humanproof, "write_launch_token", lambda root, server: "tok123")
+    monkeypatch.setattr(pagelaunch, "write_launch_token", lambda root, server: "tok123")
     opened = []
-    monkeypatch.setattr(humanproof, "open_browser", lambda url: opened.append(url))
+    monkeypatch.setattr(pagelaunch, "open_browser", lambda url: opened.append(url))
     args = argparse.Namespace(cmd="start", print_launch_url=False, json=False, no_open=False)
     cli_status._services_cmd(args, tmp_path)
     assert opened == ["http://127.0.0.1:8421#launch=tok123"]

@@ -11,7 +11,7 @@ function ticketFileError(file, files) {
   return '';
 }
 function ticketTextTitle(text, limit) {
-  return (text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '').slice(0, limit);
+  return (text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '').slice(0, limit).trim();  // orch keeps no trailing space
 }
 // "Pasted text (about 3 pages)": about 3000 characters to a page.
 function pastedLabel(text) {
@@ -270,7 +270,10 @@ function ticketForm(t) {
         result = await act('ticket.new', args);  // one write, one history line
         if (result.ok) {
           if (result.state?.attached?.failed?.length) window.orch.toast('The ticket was created. Not saved: ' + result.state.attached.failed.join(', '), 'error');
-          created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
+          // The reply names the new ticket; the title match is only for an older server without that.
+          const newId = result.state?.created?.id || result.state?.attached?.id;
+          created = newId ? tickets().find(t => t.id === newId) : null;
+          if (!created) created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
           if (!created) {
             creationUnresolved = true;
             result = {ok:false, status:0, text:'The ticket was created, but could not be found in the reply. Close this dialog and reload before trying again.'};

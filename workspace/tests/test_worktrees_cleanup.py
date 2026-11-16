@@ -10,10 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons, harness, humanproof, runs, tickets, worktrees
+from orch import addons, harness, runs, tickets, worktrees
+from orch import home as orch_home
 from orch.errors import Refused
 
-_REAL_GUARDED_HOME = humanproof.guarded_home  # the true pairing check, before tests/conftest.py replaces it
+_REAL_GUARDED_HOME = orch_home.guarded_home  # the true pairing check, before tests/conftest.py replaces it
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="uses POSIX permissions and links")
 
@@ -1320,16 +1321,16 @@ def test_review_retry_bounds_remove_and_restores_deadline(repo, monkeypatch, rai
 
 @pytest.fixture(autouse=True)
 def _copies_test_home(monkeypatch, request):
-    from orch import humanproof
+    from orch import home as orch_home
 
     if request.node.name.startswith("test_task_e_real_guard"):
         # conftest's autouse patch gives every module a usable test home: these tests need the real pairing
-        monkeypatch.setattr(humanproof, "guarded_home", _REAL_GUARDED_HOME)
+        monkeypatch.setattr(orch_home, "guarded_home", _REAL_GUARDED_HOME)
         return
 
     # Legacy proj fixtures live outside the fake account's .orch-test directory.
     # Keep the real private-directory, file, and key checks on their isolated home.
-    monkeypatch.setattr(humanproof, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
+    monkeypatch.setattr(orch_home, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
 
 
 def test_review_retry_linked_gitdir_keeps_lock(repo):
@@ -1407,12 +1408,12 @@ def test_task_d_replayed_store_is_unknown(repo, update):
 
 
 def test_task_e_real_guard_round_trip(repo, monkeypatch):
-    from orch import humanproof
+    from orch import home as orch_home
 
     home = addons.real_home() / ".orch-test" / "copies-home"
     home.mkdir(parents=True)
     monkeypatch.setenv("ORCH_HOME", str(home))
-    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    monkeypatch.setattr(orch_home, "install_kind", lambda: "test")
     p = make(repo)
     assert worktrees._known_copies(p.parent.parent)[wid8(repo)] == {
         "main": str(repo.resolve()),
@@ -1427,9 +1428,9 @@ def test_task_e_real_guard_round_trip(repo, monkeypatch):
 
 
 def test_task_e_real_guard_outside_refused(repo, monkeypatch):
-    from orch import humanproof
+    from orch import home as orch_home
 
-    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    monkeypatch.setattr(orch_home, "install_kind", lambda: "test")
     home = addons.home(repo)
     before = {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()}
     entry, note = worktrees._create_inner(repo, repo.tids[0])
@@ -1509,14 +1510,14 @@ def test_task_f_unbound_existing_copies_refused_without_store_change(repo, owner
 
 
 def test_task_f_interrupted_store_write_heals_counter(repo, monkeypatch):
-    from orch import humanproof
+    from orch import home as orch_home
 
     p = make(repo)
     store = addons.home(repo) / "keys" / "copies" / "registry.json"
     counter = store.with_name("counter")
     old = store.read_bytes()
     before = int(counter.read_text())
-    write = humanproof._write_private
+    write = orch_home._write_private
 
     def crash(path, text):
         if path == counter:
@@ -1524,7 +1525,7 @@ def test_task_f_interrupted_store_write_heals_counter(repo, monkeypatch):
         return write(path, text)
 
     with monkeypatch.context() as patch:
-        patch.setattr(humanproof, "_write_private", crash)
+        patch.setattr(orch_home, "_write_private", crash)
         with pytest.raises(OSError, match="simulated"):
             worktrees._remember_copies(repo, p.parent)
     assert int(counter.read_text()) == before
@@ -1537,7 +1538,7 @@ def test_task_f_interrupted_store_write_heals_counter(repo, monkeypatch):
 
 @pytest.mark.parametrize("gap", [-1, 2])
 def test_task_f_other_counter_mismatches_remain_unknown(repo, gap):
-    from orch import humanproof
+    from orch import home as orch_home
 
     p = make(repo)
     home = addons.home(repo)
@@ -1546,7 +1547,7 @@ def test_task_f_other_counter_mismatches_remain_unknown(repo, gap):
     doc["counter"] += gap
     data = {k: doc[k] for k in ("version", "counter", "entries")}
     doc["mac"] = worktrees._copies_mac(worktrees._copies_key(home), data)
-    humanproof._write_private(store, json.dumps(doc))
+    orch_home._write_private(store, json.dumps(doc))
     before = store.with_name("counter").read_bytes()
     assert worktrees._known_copies(p.parent.parent) == {}
     assert store.with_name("counter").read_bytes() == before

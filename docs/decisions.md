@@ -3,6 +3,12 @@
 One line per decision, newest first. Agents never reopen a decision without the owner (AGENTS.md R9.5).
 Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 
+- 2026-11-16: `orch uninstall` has no option to delete tickets: it always keeps `.orch/tickets`, `.orch/config.toml`
+  and `.orch/secrets`.
+- 2026-11-16: The person's own "when to ask" list is the file `.orch/ask-when.md`.
+- 2026-11-16: A secret inside a ticket shared with `--full` goes out as `[hidden]` (redacted, not refused).
+- 2026-11-16: The agent deny rules (denyrules) are removed: no agent fence on orch's own folders inside the workspace;
+  the secret scan stays (#945).
 - 2026-11-15: Publish apps have two independent settings: reach (public = internet, private = only on the private
   network, own listener) and auth (needs the app's private link). The link key stays the auth; no passwords, no
   end-to-end encryption for apps. In product text "public"/"private" mean reach, never auth.

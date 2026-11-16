@@ -310,7 +310,7 @@ def main() -> int:
         # another ORCH_HOME, MSG_ENV_CHANGE); the same record the installer writes with ORCH_INSTALL_KIND=dev
         shim = (e.bin / "orch").resolve().read_text(errors="replace").splitlines()[0]
         subprocess.run([shim[2:].strip().split()[0], "-c", "import sys; from pathlib import Path; "
-                        "from orch import humanproof as h; h.write_install_record(Path(sys.prefix), 'dev')"],
+                        "from orch import home as h; h.write_install_record(Path(sys.prefix), 'dev')"],
                        env=e.env, capture_output=True, text=True)
         if shutil.which("claude", path=e.path) is None:
             # orch links its skills into the folder of every agent it finds on the PATH (W1, A12, A13): a CI runner
