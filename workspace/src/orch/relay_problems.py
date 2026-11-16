@@ -83,22 +83,43 @@ def scan(root: Path, folder: Path) -> None:
                     if p.suffix == ".json"
                     else [json.loads(line) for line in text.splitlines() if line.strip()]
                 )
-                secretscan.refuse_if_secret_in(root, _no_code_places(doc), f"report file {rel}")
+                secretscan.refuse_if_secret_in(root, _no_code_places(root, doc), f"report file {rel}")
                 continue
         except ValueError:
             pass  # not what its name says: checked as a plain file
         if wrote and p.suffix == ".md":
-            data = _CODE_PLACE.sub(_PLACE, data.decode("utf-8", "replace")).encode()
+            data = _swap(root, data.decode("utf-8", "replace")).encode()
         secretscan.refuse_if_secret(data, f"report file {rel}" if own else f"added file {p.name}", root)
 
 
-def _no_code_places(doc):
+_names_ok: dict[str, bool] = {}
+
+
+def _swap(root: Path, text: str) -> str:
+    """Code places in text as the word "code-place", but only where both names pass the secret check by
+    themselves: a real token used as a "module" or "function" stays in the text and is caught."""
+
+    def one(m):
+        names = m.group(0).rsplit(":", 1)[0]
+        if names not in _names_ok:
+            if len(_names_ok) > 5000:
+                _names_ok.clear()
+            try:
+                _names_ok[names] = not secretscan.find(names.replace(":", "\n"), root, strict=False)
+            except Exception:  # noqa: BLE001 - a check that cannot run is never a pass
+                _names_ok[names] = False
+        return _PLACE if _names_ok[names] else m.group(0)
+
+    return _CODE_PLACE.sub(one, text)
+
+
+def _no_code_places(root: Path, doc):
     if isinstance(doc, str):
-        return _CODE_PLACE.sub(_PLACE, doc)
+        return _swap(root, doc)
     if isinstance(doc, dict):
-        return {k: _no_code_places(v) for k, v in doc.items()}
+        return {k: _no_code_places(root, v) for k, v in doc.items()}
     if isinstance(doc, list):
-        return [_no_code_places(v) for v in doc]
+        return [_no_code_places(root, v) for v in doc]
     return doc
 
 
@@ -181,9 +202,7 @@ def share(root: Path, ref: str) -> dict:
     }
     body = {k: v for k, v in body.items() if v is not None}
     # The summary is SUMMARY.md again: checked like the file (scan), the person's own words unchanged.
-    secretscan.refuse_if_secret_in(
-        root, {**body, "summary": _CODE_PLACE.sub(_PLACE, body["summary"])}, "report"
-    )
+    secretscan.refuse_if_secret_in(root, {**body, "summary": _swap(root, body["summary"])}, "report")
     got = net.call_json("POST", cfg["url"] + "/v1/problems", net.auth_headers(cfg), body, 60)[1]
     pid = got.get("id") if isinstance(got, dict) else None
     if not PID.fullmatch(str(pid)):

@@ -306,6 +306,12 @@ def test_a_refused_send_does_not_block_the_next_report(proj, run, srv):
         shaped = make(proj)
         (Path(shaped["path"]) / "errors.json").write_text(text)
         assert run("relay", "problem", "share", shaped["ref"])[0] == 2, text
+    # a real token as one name of something shaped like a code place stays in the text and is caught
+    token = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    for text in (f'[{{"sample_frames": ["mod:{token}:12"]}}]', f'[{{"sample_frames": ["{token}:fn:12"]}}]'):
+        tok = make(proj)
+        (Path(tok["path"]) / "errors.json").write_text(text)
+        assert run("relay", "problem", "share", tok["ref"])[0] == 2, text
     md = make(proj)
     (Path(md["path"]) / "SUMMARY.md").write_text("# x\n- at secretscan:refuse_if_secret:241\n")
     res = run("relay", "problem", "share", md["ref"])
