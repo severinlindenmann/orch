@@ -81,6 +81,8 @@ pub struct AppRow {
     pub view_token_hash: Option<String>,
     pub expires_at: Option<String>,
     pub updated_at: String,
+    /// random per app; mixed into the open private-network address, new on create and on a reach/auth change
+    pub cap_nonce: String,
 }
 
 pub fn open(path: &std::path::Path) -> rusqlite::Result<Connection> {
@@ -123,6 +125,15 @@ pub fn open(path: &std::path::Path) -> rusqlite::Result<Connection> {
         "ALTER TABLE apps ADD COLUMN reach TEXT NOT NULL DEFAULT 'public'",
         [],
     );
+    // Open-cap nonce: older rows get their own random value (never empty, never shared).
+    let _ = c.execute(
+        "ALTER TABLE apps ADD COLUMN cap_nonce TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+    c.execute(
+        "UPDATE apps SET cap_nonce=lower(hex(randomblob(16))) WHERE cap_nonce=''",
+        [],
+    )?;
     Ok(c)
 }
 
@@ -380,7 +391,7 @@ pub fn file_ids_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<String>> {
 
 // ---- apps
 
-const APP_COLS: &str = "name,workspace,about,stack,store,public,health,status,port,code_dir,view_token_hash,expires_at,updated_at,reach";
+const APP_COLS: &str = "name,workspace,about,stack,store,public,health,status,port,code_dir,view_token_hash,expires_at,updated_at,reach,cap_nonce";
 
 fn app_from(r: &Row) -> rusqlite::Result<AppRow> {
     Ok(AppRow {
@@ -398,6 +409,7 @@ fn app_from(r: &Row) -> rusqlite::Result<AppRow> {
         expires_at: r.get(11)?,
         updated_at: r.get(12)?,
         reach: r.get(13)?,
+        cap_nonce: r.get(14)?,
     })
 }
 
@@ -414,9 +426,9 @@ pub fn get_app(c: &Connection, name: &str) -> rusqlite::Result<Option<AppRow>> {
 pub fn put_app(c: &Connection, a: &AppRow, now: &str) -> rusqlite::Result<()> {
     c.execute(
         &format!(
-            "INSERT INTO apps({APP_COLS},created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+            "INSERT INTO apps({APP_COLS},created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
              ON CONFLICT(name) DO UPDATE SET workspace=?2,about=?3,stack=?4,store=?5,public=?6,health=?7,
-               status=?8,port=?9,code_dir=?10,view_token_hash=?11,expires_at=?12,updated_at=?13,reach=?14"
+               status=?8,port=?9,code_dir=?10,view_token_hash=?11,expires_at=?12,updated_at=?13,reach=?14,cap_nonce=?15"
         ),
         params![
             a.name,
@@ -433,6 +445,7 @@ pub fn put_app(c: &Connection, a: &AppRow, now: &str) -> rusqlite::Result<()> {
             a.expires_at,
             a.updated_at,
             a.reach,
+            a.cap_nonce,
             now
         ],
     )?;
@@ -457,7 +470,7 @@ pub fn list_apps(
     let rows = st
         .query_map(
             params![after.unwrap_or(i64::MAX), workspace, limit + 1],
-            |r| Ok((app_from(r)?, r.get::<_, i64>(14)?)),
+            |r| Ok((app_from(r)?, r.get::<_, i64>(15)?)),
         )?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(page(rows, limit, |t| t.1).map_items(|t| t.0))

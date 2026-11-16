@@ -114,6 +114,10 @@ default from the URL scheme) of `ORCH_PUBLISH_PRIVATE_URL` (DNS rebinding guard;
 bind, the server logs one error and keeps serving the public and admin listeners; private-reach apps stay hidden.
 An app that moves between reaches on redeploy gets a new private link. Open apps (`auth = false`) on the private network are also served under a secret `/a/<name>/~<key>/` address, so that a page from elsewhere cannot read them cross-origin; their pages must use relative links.
 
+How production is set up: the listener binds only the private-network IP, so it is never on the public interface. A private
+DNS name that points at that IP (e.g. `publish.office.internal`) is the private URL. The private network's own access policy
+must allow TCP 80 to this host. If the host firewall has a general allow for port 80, add a deny on the public interface (step 3).
+
 Host setup on the VPS (Linux only):
 1. Check port 80 is free on the private IP: `ss -ltnp 'sport = :80'`.
 2. Bind the private-network IP on port 80. Port 80 is below 1024, so give the service the right to bind it, with a systemd

@@ -450,11 +450,6 @@ async fn deploy_inner(
     }
     std::fs::create_dir_all(&data_dir)?;
     // switch
-    st.runner.stop(name).await;
-    st.runner.rename(&format!("{name}~new"), name);
-    st.sleep.sleeping.lock().unwrap().remove(name);
-    st.sleep.cooldown.lock().unwrap().remove(name);
-    touch(st, name);
     let mut view_token = None;
     let mut hash = existing.and_then(|e| e.view_token_hash.clone());
     // an app that moves between the private network and the internet gets a new link
@@ -467,6 +462,11 @@ async fn deploy_inner(
     if !auth {
         hash = None;
     }
+    // the secret address of an open private-network app changes when reach or auth changes
+    let cap_nonce = match existing {
+        Some(e) if e.reach == m.reach && e.public == !auth => e.cap_nonce.clone(),
+        _ => util::rand_token("", 16),
+    };
     let row = AppRow {
         name: name.into(),
         workspace: w.id.clone(),
@@ -482,8 +482,26 @@ async fn deploy_inner(
         view_token_hash: hash,
         expires_at: expires_at.clone(),
         updated_at: util::now(),
+        cap_nonce,
     };
-    db::put_app(&st.db.lock().unwrap(), &row, &util::now())?;
+    // The old process leaves the table first (requests get the offline page while it stops), then the row
+    // (reach, auth, token) is written, then the new process takes the name: no request is ever served
+    // old content under new access, nor new content under old access.
+    let old_proc = st.runner.take(name);
+    let put = db::put_app(&st.db.lock().unwrap(), &row, &util::now());
+    if let Err(e) = put {
+        if let Some(o) = old_proc {
+            st.runner.stop_taken(o).await;
+        }
+        return Err(e.into());
+    }
+    st.runner.rename(&format!("{name}~new"), name);
+    st.sleep.sleeping.lock().unwrap().remove(name);
+    st.sleep.cooldown.lock().unwrap().remove(name);
+    touch(st, name);
+    if let Some(o) = old_proc {
+        st.runner.stop_taken(o).await;
+    }
     if let Some(old) = existing {
         let root = st.cfg.app_root(name);
         if let Some(v) = version_root(&root, FsPath::new(&old.code_dir)) {
@@ -887,7 +905,10 @@ fn app_cap(st: &State, app: &AppRow) -> Option<String> {
     if app.public {
         // open app on the private network: stable address, no view token
         return (app.reach == "private").then(|| {
-            util::hmac_sha256(&st.app_key, format!("open\0{}", app.name).as_bytes())[..16]
+            util::hmac_sha256(
+                &st.app_key,
+                format!("open\0{}\0{}", app.name, app.cap_nonce).as_bytes(),
+            )[..16]
                 .iter()
                 .map(|b| format!("{b:02x}"))
                 .collect()
@@ -983,6 +1004,10 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
             "It is no longer available. Ask the owner to share it again.",
             false,
         );
+    }
+    if app.public && app.reach == "private" && had_cap && !cap_ok {
+        // a stale or wrong secret address (e.g. before a rotation) is a missing app, not a redirect to the new one
+        return notice_gone();
     }
     if app.public && app.reach == "private" && !cap_ok {
         // open app on the private network: move to its secret address (no token needed, no CORS headers)
@@ -1120,6 +1145,15 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
     let Some(port) = st.runner.live_port(&app.name) else {
         return offline_page();
     };
+    // the row may have changed between the caller's read and now (a redeploy swaps the process)
+    match db::get_app(&st.db.lock().unwrap(), &app.name) {
+        Ok(Some(fresh)) => {
+            if let Some(r) = access_changed(app, &fresh) {
+                return r;
+            }
+        }
+        _ => return notice_gone(),
+    }
     let uri = format!(
         "http://127.0.0.1:{}/{}{}",
         port,

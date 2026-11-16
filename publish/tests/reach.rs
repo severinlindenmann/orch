@@ -458,3 +458,119 @@ async fn moved_app_answers_missing_even_when_stopped() {
         404
     );
 }
+
+/// The `~cap` an open private-network app currently answers with.
+async fn open_cap(t: &T, name: &str) -> String {
+    let r = pget(&t.private, &format!("/a/{name}/")).await;
+    assert_eq!(r.status, 302);
+    r.headers["location"].to_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn open_cap_rotates_on_reach_auth_change_and_recreate() {
+    let t = setup_private();
+    let ws = t.workspace("A", all_rights()).await;
+    let open = "reach = \"private\"\nauth = false";
+    put(&t, &ws, "rc", open).await;
+    let cap1 = open_cap(&t, "rc").await;
+    // same settings: the address stays
+    put(&t, &ws, "rc", open).await;
+    assert_eq!(open_cap(&t, "rc").await, cap1);
+    assert_eq!(pget(&t.private, &cap1).await.status, 200);
+    // auth change and back: new address, old one is gone
+    put(&t, &ws, "rc", "reach = \"private\"").await;
+    put(&t, &ws, "rc", open).await;
+    let cap2 = open_cap(&t, "rc").await;
+    assert_ne!(cap1, cap2);
+    assert_eq!(pget(&t.private, &cap1).await.status, 404);
+    assert_eq!(pget(&t.private, &cap2).await.status, 200);
+    // reach move and back
+    put(&t, &ws, "rc", "reach = \"public\"\nauth = false").await;
+    put(&t, &ws, "rc", open).await;
+    let cap3 = open_cap(&t, "rc").await;
+    assert_ne!(cap2, cap3);
+    assert_eq!(pget(&t.private, &cap2).await.status, 404);
+    // delete + recreate (even by another workspace): new address
+    let del = t.api(&ws, "DELETE", "/v1/apps/rc", vec![]).await;
+    assert!(del.status.is_success(), "{}", del.status);
+    let ws2 = t.workspace("B", all_rights()).await;
+    put(&t, &ws2, "rc", open).await;
+    let cap4 = open_cap(&t, "rc").await;
+    assert_ne!(cap3, cap4);
+    assert_eq!(pget(&t.private, &cap3).await.status, 404);
+    assert_eq!(pget(&t.private, &cap4).await.status, 200);
+}
+
+/// A python app that answers every request with `word`.
+fn word_app(word: &str) -> String {
+    format!(
+        "import os\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\nclass H(BaseHTTPRequestHandler):\n    def do_GET(self):\n        self.send_response(200)\n        self.end_headers()\n        self.wfile.write(b\"{word}\")\n    def log_message(self, *a):\n        pass\nHTTPServer((\"127.0.0.1\", int(os.environ[\"PORT\"])), H).serve_forever()\n"
+    )
+}
+
+async fn put_py(t: &T, ws: &(String, String), name: &str, extra: &str, word: &str) -> Resp {
+    let toml = py_toml(name, extra);
+    t.api(
+        ws,
+        "PUT",
+        &format!("/v1/apps/{name}?days=7"),
+        bundle(&[("app.toml", &toml), ("main.py", &word_app(word))]),
+    )
+    .await
+}
+
+/// Redeploy private-open -> public: the OLD process (private-only content) is never served on the
+/// public listener, at any moment of the swap.
+#[tokio::test]
+async fn redeploy_never_serves_old_process_under_new_access() {
+    let t = setup_private();
+    let ws = t.workspace("A", all_rights()).await;
+    let r = put_py(&t, &ws, "rr", "reach = \"private\"\nauth = false", "old").await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (pub_r, flag) = (t.public.clone(), done.clone());
+    let poller = tokio::spawn(async move {
+        let mut seen = vec![];
+        while !flag.load(std::sync::atomic::Ordering::SeqCst) {
+            let g = call(&pub_r, "GET", "/a/rr/", &[], vec![]).await;
+            seen.push((g.status.as_u16(), g.text()));
+            tokio::task::yield_now().await;
+        }
+        seen
+    });
+    let r = put_py(&t, &ws, "rr", "reach = \"public\"\nauth = false", "new").await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    done.store(true, std::sync::atomic::Ordering::SeqCst);
+    for (status, body) in poller.await.unwrap() {
+        assert!(
+            !(status == 200 && body == "old"),
+            "old process served under the new access"
+        );
+    }
+    let g = call(&t.public, "GET", "/a/rr/", &[], vec![]).await;
+    assert_eq!((g.status.as_u16(), g.text()), (200, "new".to_string()));
+}
+
+#[tokio::test]
+async fn redeploy_writes_the_row_before_the_new_process_is_live() {
+    use orch_publish::db;
+    let t = setup_private();
+    let ws = t.workspace("A", all_rights()).await;
+    put(&t, &ws, "rd", "reach = \"private\"\nauth = false").await;
+    let before = db::get_app(&t.st.db.lock().unwrap(), "rd")
+        .unwrap()
+        .unwrap();
+    put(&t, &ws, "rd", "reach = \"public\"\nauth = false").await;
+    let after = db::get_app(&t.st.db.lock().unwrap(), "rd")
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.reach, "public");
+    assert_ne!(before.cap_nonce, after.cap_nonce);
+    assert!(!after.cap_nonce.is_empty());
+    // the old private address is not served any more, the new reach answers at once
+    assert_eq!(pget(&t.private, "/a/rd/").await.status, 404);
+    assert_eq!(
+        call(&t.public, "GET", "/a/rd/", &[], vec![]).await.status,
+        200
+    );
+}
