@@ -2003,7 +2003,9 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
         add_history(
-            t, by, f"Removed step {cid} '{item['text']}' ({state}" + (f"; evidence: {proof})" if proof else ")")
+            t,
+            by,
+            f"Removed step {cid} '{item['text']}' ({state}" + (f"; evidence: {proof})" if proof else ")"),
         )
         return item
 
@@ -3084,7 +3086,8 @@ def _attach_file(
     size = cur_src.stat().st_size
     if size > MAX_PROOF_BYTES:
         raise Refused(
-            f"{cur_src.name} is {_size_text(size)}. An evidence file can be at most 25 MB. Use --url or --note."
+            f"{cur_src.name} is {_size_text(size)}. "
+            "An evidence file can be at most 25 MB. Use --url or --note."
         )
     dest_dir = base / ".orch" / "tickets" / tid / "evidence"
     cur = base
