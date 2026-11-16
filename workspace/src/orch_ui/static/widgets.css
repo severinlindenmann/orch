@@ -176,7 +176,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 /* Swipe review deck (draft 15 Nov, owner idea): one card at a time; right = Looks good, left = Don't do / Send back,
    down = Comment (voice or text). Buttons + keys (← ↓ →) always do the same as the swipe. UI.swipeDeck() builds it. */
 .swipe{position:relative;display:flex;flex-direction:column;gap:var(--s4);min-height:0;outline:none;--swipe-card-h:560px}
-.swipe:focus,.swipe:focus-visible{outline:none;box-shadow:none}
+.swipe:focus{outline:none}.swipe:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--radius-card)}
 .swipe-top{display:flex;align-items:center;gap:var(--s3);font-size:13px;line-height:18px;color:var(--text-muted)}
 .swipe-top .progress{flex:1;height:4px}
 .swipe-stage{position:relative;flex:1;min-height:var(--swipe-card-h);touch-action:pan-y}
