@@ -20,3 +20,6 @@ Not now buttons stand for that dialog.
 
 ## Fix wave b5 (Factory page)
 The Factory page draws its frame and the idea box at once and reads the order list after (skeleton). The draft page opens the newest version by itself, and the draft's open questions are question cards (options, suggestion, one Answer button that opens the dashboard's question card), not a list inside the draft text.
+
+## Fix wave owner decisions (16 Nov)
+The order page's Results to check card has `Looks good, all` (two or more results; one toast with Undo, the same Looks good as on each ticket). A stop item may carry an optional preview address and then shows `Open the preview` (opens the running app in a new tab).

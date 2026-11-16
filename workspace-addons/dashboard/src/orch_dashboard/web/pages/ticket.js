@@ -1748,6 +1748,48 @@ async function fileEmbedIdea(req) {
 }
 addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });
 
+// "Looks good, all" on the Factory results card: the SAME Looks good as on each ticket page (the status move with the
+// recorded review tip), for the listed tickets that still wait in review. One toast for the batch, with one Undo.
+const EMBED_BATCH_MAX = 10;
+function embedLooksGoodRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.looksgood') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (!Array.isArray(data.tickets) || !data.tickets.length || data.tickets.length > EMBED_BATCH_MAX) return null;
+  if (!data.tickets.every(x => typeof x === 'string' && EMBED_TICKET.test(x))) return null;
+  return {...shown, id:data.id, tickets:[...new Set(data.tickets)]};
+}
+let embedLooksGoodBusy = false;  // one batch at a time
+async function looksGoodAll(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (embedLooksGoodBusy) return;
+  embedLooksGoodBusy = true;
+  try {
+    try {
+      const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+      if (res.ok) { mutation++; accept(await res.json()); }
+    } catch (_) { /* Fall back to what the page already has. */ }
+    const waiting = req.tickets.map(ticketOf).filter(t => t && t.status === 'review');
+    if (!waiting.length) return reply({type:'orch.looksgood.failed', error:'Nothing here is waiting for your Looks good any more.'});
+    await Promise.all(waiting.map(t => {
+      const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
+      return moveTicket(t.id, 'done', false, {quiet:true, ...(tip ? {review_tip:tip} : {})});
+    }));
+    const moved = waiting.filter(t => ticketOf(t.id)?.status === 'done');
+    if (!moved.length) return reply({type:'orch.looksgood.failed', error:'Looks good could not be saved. Try again.'});
+    const toast = window.orch.toast('Looks good on ' + (moved.length === 1 ? '1 result' : moved.length + ' results'), 'ok');
+    if (toast?.querySelector) {
+      const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
+      undo.addEventListener('click', () => { toast.remove(); for (const t of moved) moveTicket(t.id, 'review', true, {quiet:true}); });
+      toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
+    }
+    if (moved.length < waiting.length) window.orch.toast((waiting.length - moved.length) + ' could not be saved. Try those again from their tickets.', 'error');
+    reply({type:'orch.looksgood.done', moved:moved.length});
+  } finally { embedLooksGoodBusy = false; }
+}
+addEventListener('message', e => { const req = embedLooksGoodRequest(e); if (req) looksGoodAll(req); });
+
 // Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
 // target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this
 // page's session) and tells the page whether it went out. Same origin and shipped-frame fences as orch.idea.

@@ -34,3 +34,7 @@ Home: the question is body text; answering moves the card out, the next one in, 
 ## Review stack (15 Nov 2026)
 
 - Needs-you block: "Review all" button (primary) opens `../review/review.html`. Its number is the same set of questions and results Home already counts; the Home total is unchanged.
+
+## Clear old (16 Nov 2026)
+
+- Needs-you head: a quiet `Clear old` button (only when a question is older than a week). One click hides them with the toast "Cleared 37 old questions · Undo"; the helper sees each as dismissed. No setting, no new page.
