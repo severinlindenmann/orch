@@ -36,8 +36,8 @@ STATE_MAX = 256 * 1024
 DIFF_MAX = 2 * 1024 * 1024
 
 # What a changed file is, by its path (the first match wins in this order: a test is never "look").
-# Tests: only real test folders (at the top or right under a package) and test file names.
-TEST = re.compile(r"^(e2e|tests?|[^/]+/tests?|[^/]+/[^/]+/tests?)/|(^|/)test_[^/]*\.py$|\.test\.[cm]?js$")
+# Tests: only real test folders (at the top, or one or two levels down).
+TEST = re.compile(r"^(e2e|tests?|[^/]+/tests?|[^/]+/[^/]+/tests?)/")  # a test name in a source folder is code
 # What may leave the machine (manager, 16 Nov: a green PR still let a password in a picture through): the
 # secret check and scan and what they read with, sign-in and session code, sync, the contracts. Never small.
 SECURITY = re.compile(
@@ -69,10 +69,10 @@ KIND_TEXT = {
 
 
 def kind_of(path: str) -> str:
-    """test | security | structure | look | words | code."""
+    """security | test | structure | look | words | code."""
     for name, rx in (
+        ("security", SECURITY),  # first: a security file never hides as a test
         ("test", TEST),
-        ("security", SECURITY),
         ("structure", STRUCTURE),
         ("look", LOOK),
         ("words", WORDS),
