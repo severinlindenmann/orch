@@ -1,7 +1,8 @@
 """orch run list, screen and status: spot a stuck helper through orch alone (ORCH-25)."""
 
 import json
-import os
+import subprocess
+import time
 
 import pytest
 
@@ -30,7 +31,21 @@ def _key(proj, tid):
     return tickets.load(proj, tid)["key"]
 
 
-def _live(proj, tid, state, since="2026-11-16T10:00:00Z", agent_pid=None):
+@pytest.fixture
+def child():
+    """A throwaway process to stand for the run's wrapper: never this test process, which orch's idle cleanup
+    may stop (a session idle over the limit is closed with its process tree)."""
+    p = subprocess.Popen(["sleep", "120"])
+    yield p.pid
+    p.kill()
+    p.wait()
+
+
+def _since(seconds_ago):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
+
+
+def _live(proj, tid, state, pid, since=None, agent_pid=None):
     rec = {
         "schema": "orch.run/1",
         "ticket": tid,
@@ -38,10 +53,10 @@ def _live(proj, tid, state, since="2026-11-16T10:00:00Z", agent_pid=None):
         "by": "human:tester",
         "agent": "generic",
         "mode": "live",
-        "pid": os.getpid(),  # alive
-        "started_at": "2026-11-16T09:00:00Z",
-        "renewed_at": "2026-11-16T09:00:00Z",
-        "live": {"state": state, "since": since},
+        "pid": pid,  # alive
+        "started_at": _since(1200),
+        "renewed_at": _since(1200),
+        "live": {"state": state, "since": since or _since(300)},
     }
     if agent_pid:
         rec["agent_pid"] = agent_pid
@@ -70,9 +85,9 @@ def test_tool_commands_see_the_tool_shell_not_mcp_servers():
     assert runwatch.tool_commands(None, TABLE) == [] and runwatch.tool_commands(999, TABLE) == []
 
 
-def test_waiting_on_ci_is_not_idle(proj, new_ticket):
+def test_waiting_on_ci_is_not_idle(proj, new_ticket, child):
     tid = new_ticket()
-    rec = _live(proj, tid, "idle", agent_pid=AGENT)
+    rec = _live(proj, tid, "idle", child, agent_pid=AGENT)
     waits = runwatch.waiting_on(proj, rec, tickets.load(proj, tid), TABLE)
     assert [w["kind"] for w in waits] == ["command", "command"] and waits[0]["label"] == "pr-green.sh"
     assert runwatch.signal(rec, waits) == "waiting"
@@ -81,10 +96,10 @@ def test_waiting_on_ci_is_not_idle(proj, new_ticket):
     assert runwatch.signal(rec, waits) == "working"
 
 
-def test_waiting_on_a_person_and_on_the_screen(proj, new_ticket, run):
+def test_waiting_on_a_person_and_on_the_screen(proj, new_ticket, run, child):
     tid = new_ticket()
     run("ask", tid, "Which colour?", "--option", "red", "--option", "blue", "--by", "agent:helper")
-    rec = _live(proj, tid, "attention")
+    rec = _live(proj, tid, "attention", child)
     whats = [w["what"] for w in runwatch.waiting_on(proj, rec, tickets.load(proj, tid), [])]
     assert whats == ["an answer from the person", "the person's OK on the screen"]
 
@@ -99,19 +114,19 @@ def test_status_takes_keys_alone_and_in_a_list(proj, new_ticket, run):
     assert set(json.loads(out)["runs"]) == {a, b}
 
 
-def test_status_shows_idle_since_and_waiting_on(proj, new_ticket, run, monkeypatch):
+def test_status_shows_idle_since_and_waiting_on(proj, new_ticket, run, monkeypatch, child):
     tid = new_ticket()
-    _live(proj, tid, "idle", agent_pid=AGENT)
+    _live(proj, tid, "idle", child, agent_pid=AGENT)
     monkeypatch.setattr(runwatch, "_table", lambda: TABLE)
     code, out, err = run("run", "status", _key(proj, tid), "--json")
     data = json.loads(out)
-    assert code == 0 and data["signal"] == "waiting" and data["idle_since"] == "2026-11-16T10:00:00Z"
+    assert code == 0 and data["signal"] == "waiting" and data["idle_since"].endswith("Z")
     assert data["waiting_on"][0]["label"] == "pr-green.sh" and data["idle_seconds"] >= 0
     code, out, _ = run("run", "status", tid)
     assert "Waiting on: pr-green.sh (running 6 min)" in out
     monkeypatch.setattr(runwatch, "_table", lambda: [])
     code, out, _ = run("run", "status", tid)
-    assert "Idle at its prompt for" in out and "nothing running" in out
+    assert "Idle at its prompt for 5 min" in out and "nothing running" in out
     data = json.loads(run("run", "status", tid, "--json")[1])
     assert data["signal"] == "idle" and data["waiting_on"] == []
 
@@ -122,9 +137,9 @@ def test_status_without_a_run_says_none(proj, new_ticket, run):
     assert data["signal"] == "none" and data["idle_since"] is None
 
 
-def test_list_shows_every_run_without_writing(proj, new_ticket, run, monkeypatch):
+def test_list_shows_every_run_without_writing(proj, new_ticket, run, monkeypatch, child):
     a, b = new_ticket("A"), new_ticket("B")
-    _live(proj, a, "idle", agent_pid=AGENT)
+    _live(proj, a, "idle", child, agent_pid=AGENT)
     monkeypatch.setattr(runwatch, "_table", lambda: TABLE)
     before = _files(proj)
     code, out, err = run("run", "list", "--json")
@@ -150,11 +165,11 @@ def test_screen_refuses_without_a_live_session(proj, new_ticket, run):
     assert code == 2 and "No live session on" in err and "not built yet" not in err
 
 
-def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypatch):
+def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypatch, child):
     from orch import runs_live
 
     tid = new_ticket()
-    _live(proj, tid, "working")
+    _live(proj, tid, "working", child)
     calls = []
 
     class R:
