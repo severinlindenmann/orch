@@ -167,7 +167,7 @@ def propose(root, order, data):
 
 
 def decide(root, order, qid, answer, why):
-    from . import flow
+    from . import ask, flow
 
     why = clean(why, 200)
     if not why:
@@ -190,6 +190,8 @@ def decide(root, order, qid, answer, why):
             raise Refused("That stop is not waiting for a decision now.", "not_allowed")
         if entry["q"].get("answer") is not None:
             raise Refused("A person or an earlier decision already answered this.", "not_allowed")
+        if ask.has_ask(tickets, ticket["id"], entry["n"]):
+            raise Refused("You asked another workspace about this stop, so you decide it.", "not_allowed")
         check(entry, answer, grants(store, tickets), clock(), ticket["id"], rows)
         store.journal_append(
             {

@@ -513,6 +513,10 @@
           "items": {
             "$ref": "#/$defs/proposal/properties/tasks/items"
           }
+        },
+        "takes_back": {
+          "$ref": "#/$defs/slug",
+          "description": "\"Do it here instead\": the slug of a hand-over task of the started proposal that this change takes back. The add-on refuses a slug that is not a hand-over. On the person's Accept the other workspace is told (a group text) and the task runs here."
         }
       }
     },

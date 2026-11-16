@@ -385,6 +385,8 @@
     });
     copy.title = 'Works only on this computer';
     left.append(open1, dl, copy, el('span', 'meta fv-local-hint', 'Works only on this computer'));
+    // Only when the caller can share (the sharing add-on is on): one more button, no hint when it is off.
+    if (typeof opts.share === 'function') left.append(btn('Share by link…', 'ghost sm', () => opts.share(files[index])));
     const prev = btn('← Prev', 'outline sm', () => go(index - 1)), next = btn('Next →', 'outline sm', () => go(index + 1));
     right.append(prev, next); actions.append(left, right);
     // Full screen: the same dialog fills the window. The button says what it does; Esc leaves full screen first,

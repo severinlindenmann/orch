@@ -18,6 +18,7 @@ ALLOW = {
     # readers that read no author
     ("workspace/src/orch/tickets.py", "attach"): "writer: is the line already there (its text only)",
     ("workspace/src/orch/workcheck.py", "last_event"): "timestamps only",
+    ("workspace/src/orch/tickets.py", "quiet_since"): "timestamps only (No news since, G2)",
     ("workspace/src/orch/phone_view.py", "phone_proof"): "evidence files for the phone, no author",
     ("workspace/src/orch/tickets.py", "trim_runs"): "writer: caps recorded runs",
     # add-ons that read tickets from orch's CLI JSON (already shown by cli._out -> history.shown_json)

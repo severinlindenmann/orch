@@ -278,3 +278,16 @@ def test_reserved_config(proj, section, key, default, valid):
     assert getter(proj) == default
     config.path(proj).write_text(f"{section} = 4\n")
     assert getter(proj) == default
+
+
+def test_focus_session_typing_is_a_plain_setting(proj, run):
+    assert run("config", "get", "focus.session_typing")[1].strip() == "False"
+    code, out, _ = run("config", "set", "focus.session_typing", "on")
+    assert code == 0 and "typing into the helper's screen is on" in out
+    assert config.focus_session_typing(proj) is True
+    assert json.loads(run("config", "get", "focus.session_typing", "--json")[1]) == {
+        "focus.session_typing": True
+    }
+    assert run("config", "set", "focus.session_typing", "off")[0] == 0
+    assert config.focus_session_typing(proj) is False
+    assert run("config", "set", "focus.session_typing", "maybe")[0] == 2

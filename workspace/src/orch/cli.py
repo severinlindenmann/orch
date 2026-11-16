@@ -125,6 +125,8 @@ def _line(t: dict) -> str:
     bits = [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
     if due := tickets.due_label(t.get("due"), t["status"]):
         bits.append(due)  # only a due with a time shows in the list; a day-only due stays as it was
+    if quiet := tickets.quiet_label(t.get("quiet_since")):
+        bits.append(quiet)  # G2: only `ticket list` sets quiet_since
     return (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
 
@@ -887,6 +889,8 @@ def run(args: argparse.Namespace) -> None:
         ids = {x["id"] for x in everything}
         for t in ts:
             t["children"] = tickets.children_counts(everything, t["id"])
+            if quiet := tickets.quiet_since(t):
+                t["quiet_since"] = quiet
         txt = (
             "\n".join(
                 _line(t) + (" - parent missing" if t.get("parent") and t["parent"] not in ids else "")

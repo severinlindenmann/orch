@@ -83,11 +83,33 @@ def handover_line(h):
     return f"{clean(h['task'], 48)} → {clean(h['workspace'], 64)} (they get: {gets})"
 
 
+HANDOVER_WORDS = {  # the relay task's state, in the plain words of the order page (one mapping)
+    "waiting_start": "Waiting for {n} to start",
+    "waiting_allow": "Waiting for {n} to allow",
+    "queued": "Queued at {n}",
+    "working": "Working at {n}",
+    "review": "Ready for review at {n}",
+    "done": "Done",
+    "denied": "{n} said no",
+    "failed": "Failed at {n}",
+    "not_needed": "Done here instead",
+}
+
+
+def handover_words(name, state):
+    """The state of a handed-over task for the order page; an unknown state reads as waiting."""
+    n = clean(name or "the other workspace", 64)
+    return HANDOVER_WORDS.get(state, "Waiting for {n}").format(n=n)
+
+
 question_text = start_text
 
 
 def change_text(c, n):
-    head = [f"Add '{clean(c['title'])}'? +{c['adds_min']} min"]
+    if c.get("takes_back"):
+        head = [f"Do it here instead: {clean(c['title'])} · +{c['adds_min']} min"]
+    else:
+        head = [f"Add '{clean(c['title'])}'? +{c['adds_min']} min"]
     if "adds_usd" in c:
         head.append(f"+${c['adds_usd']:g}")
     if "new_eta" in c:

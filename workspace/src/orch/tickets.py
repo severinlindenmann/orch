@@ -17,7 +17,7 @@ import sys
 import tempfile
 import time
 import unicodedata
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from orch import config, diag, history, net, procs, saferead, syncgate, term
@@ -1320,6 +1320,18 @@ def clean_due(text: str, today: str | None = None) -> str:
     return f"{day}T{int(hm[:-3]):02d}:{hm[-2:]}" if hm else day
 
 
+def _when_words(at: datetime, now: datetime) -> str:
+    """A local time in plain words: "18:30" (today), "Mon 18:30" (within a week), "1 Dec 2026, 18:30".
+    Same wording as the dashboard helper `whenWords` (web/helpers.js)."""
+    gap = (at.date() - now.date()).days
+    hm = at.strftime("%H:%M")
+    if gap == 0:
+        return hm
+    if abs(gap) < 7:
+        return f"{at.strftime('%a')} {hm}"
+    return f"{at.day} {at.strftime('%b %Y')}, {hm}"
+
+
 def due_label(due: str | None, status: str = "open", now: datetime | None = None) -> str | None:
     """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 18:30" (another day), "Late since
     18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day wording).
@@ -1331,16 +1343,51 @@ def due_label(due: str | None, status: str = "open", now: datetime | None = None
     except ValueError:
         return None
     now = now or datetime.now()
-    gap = (at.date() - now.date()).days
-    hm = at.strftime("%H:%M")
-    if gap == 0:
-        when = hm
-    elif abs(gap) < 7:
-        when = f"{at.strftime('%a')} {hm}"
-    else:
-        when = f"{at.day} {at.strftime('%b %Y')}, {hm}"
     late = at < now and status not in ("done", "dropped")
-    return f"{'Late since' if late else 'Due'} {when}"
+    return f"{'Late since' if late else 'Due'} {_when_words(at, now)}"
+
+
+QUIET_HOURS = 6  # a working ticket with no history line for this long is "quiet" (fixed, no setting: R4.4)
+
+
+def quiet_since(ticket: dict, now: datetime | None = None) -> str | None:
+    """G2: the UTC time (`YYYY-MM-DDTHH:MM:SSZ`) of the newest history line (else updated/created time) when
+    the ticket is Working (status active) and that is more than QUIET_HOURS ago; otherwise None. Read-only,
+    computed from the history: nothing is stored. The one place the dashboard and the CLI both ask."""
+    if ticket.get("status") != "active":
+        return None
+    stamps = [
+        h.get("at")
+        for h in ticket.get("history") or []
+        if isinstance(h, dict) and isinstance(h.get("at"), str)
+    ] or [v for v in (ticket.get("updated_at"), ticket.get("created_at")) if isinstance(v, str)]
+    newest = None
+    for text in stamps:
+        try:
+            at = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=UTC)
+        if newest is None or at > newest[0]:
+            newest = (at, text)
+    if newest is None:
+        return None
+    if (now or datetime.now(UTC)) - newest[0] <= timedelta(hours=QUIET_HOURS):
+        return None
+    return newest[0].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
+    """The words "No news since 09:20" (local time; "Mon 09:20" on another day). None when not quiet.
+    Same words as the dashboard helper `quietWords`."""
+    if not since:
+        return None
+    try:
+        at = datetime.fromisoformat(since.replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
+    except ValueError:
+        return None
+    return f"No news since {_when_words(at, now or datetime.now())}"
 
 
 def clean_field(key: str, value):

@@ -193,17 +193,20 @@
       if (d.delivered === true || d.queued === true) asked.get(d.id)({ticket: d.ticket, delivered: d.delivered === true});
       else asked.get(d.id)({error: 'orch did not confirm that your message was saved.'});
     }
-    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+    else if (d.type === 'orch.ask.done' && ['delivered', 'queued', 'partial'].includes(d.state)) asked.get(d.id)({state: d.state, said: typeof d.said === 'string' ? d.said.slice(0, 300) : ''});
+    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
-  function askDashboard(message) {
+  function askDashboard(message, wait = 30000) {
     return new Promise(resolve => {
       const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
-      const timer = setTimeout(() => finish({error: ''}), 30000);  // an older dashboard never answers
+      const timer = setTimeout(() => finish({error: ''}), wait);  // an older dashboard never answers
       function finish(result) { clearTimeout(timer); asked.delete(id); resolve(result); }
       asked.set(id, finish);
       window.parent.postMessage({...message, id}, location.origin);
     });
   }
+  // Ask another workspace at a stop (816 A): one click; the dashboard runs the add-on's ask act as the person.
+  const askWorkspace = target => askDashboard({type: 'orch.ask', target}, 120000);
   const fileIdea = textValue => askDashboard({type: 'orch.idea', text: textValue});
   // Plan the run / Ask for changes on a draft: the dashboard sends the words to the agent on the order as YOUR message
   // (its own proven "send to the agent" click, the same as typing on the ticket) and starts the agent when none works.
@@ -374,6 +377,12 @@
         p('ETA ' + whenRange(time.eta_from, time.eta_to)), meta('Budget preset · ' + capital(b.preset)),
         meta('Active time cap: ' + duration(b.active_min_cap) + '. API spend is a target, not a cap.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
       card('Crew + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
+    for (const h of array(order.handover)) {
+      const tiles = group('actions', ...array(h.files).map(f => badge(f.split('/').pop())));
+      view.append(card(text(h.name) + ' does this', p(text(h.name) + ' makes ' + text(h.title) + (h.minutes ? ' · about ' + h.minutes + ' min' : '')), meta(h.why),
+        p('They get: this brief' + (array(h.files).length ? ' and ' + plural(array(h.files).length, 'file', 'files') + ':' : '')), ...(array(h.files).length ? [tiles] : []),
+        meta(text(h.name) + '’s time is not counted here. Everything else stays here, and ' + text(h.name) + ' allows it on their side.')));
+    }
     view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What Ship does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
     const assumptions = card('Assumptions');
     for (const a of array(data.assumptions)) assumptions.append(group('row', ...(a.uncertain ? [badge('Unsure')] : []), p(a.text)));
@@ -386,6 +395,20 @@
       node('h3','Skipped stages'), list(array(data.skipped).map(s => capital(s.stage) + ' — ' + text(s.why))),
       node('h3','Handovers'), list(array(data.handovers).map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why)))));
     view.append(details);
+  }
+  // A task handed to another workspace that nobody has picked up for a day: one click asks your helper to propose "Do it here instead".
+  const DAY = 24 * 3600 * 1000, handoverOpen = ['waiting_start', 'waiting_allow', 'queued'];
+  const waitedADay = w => handoverOpen.includes(w.state) && w.since && Date.now() - Date.parse(w.since) > DAY;
+  function doItHere(order, c) {
+    const button = node('button', 'Ask Helper to do it here', 'btn outline sm'); button.type = 'button';
+    const status = node('span', null, 'meta'); status.setAttribute('role', 'status');
+    button.addEventListener('click', async () => {
+      button.disabled = true; status.textContent = ' Sending…';
+      const result = await toAgent(order.id, 'Propose a change "Do it here instead" for the task "' + text(c.title) + '": ' + text(c.with.name) + ' has not finished it after a day.');
+      status.textContent = result.ticket ? ' Sent. Your helper proposes the change; you decide.' : ' That didn’t work. Nothing was sent.';
+      if (!result.ticket) button.disabled = false;
+    });
+    return group('actions', button, status);
   }
   function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'No tiny changes recorded.')); }
   const statusWord = {open: 'open', todo: 'not started', doing: 'working', done: 'done', blocked: 'blocked'};
@@ -400,10 +423,11 @@
     const main = group('stack', lineCard, card('Time + budget', budget(order), meta('Due ' + when(order.due))));
     const crew = card('Crew now');
     for (const c of array(order.crew)) {
-      const label = [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
+      const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
       const row = group('f-record f-crew');
       if (validId(c.ticket)) { const a = link(label + ' ↗', '/#ticket/' + c.ticket); a.className = 'f-crewlink'; a.title = c.title || ''; row.append(a); } else row.append(node('span', label));
       row.append(meta(c.title));
+      if (c.with && waitedADay(c.with) && embedded() && validId(order.id)) row.append(doItHere(order, c));
       crew.append(row);
     }
     if (!array(order.crew).length) crew.append(meta('No crew assigned yet.'));
@@ -449,11 +473,91 @@
     } else figure.append(p(value || 'No image supplied.'));
     return figure;
   }
-  function stopPage(order, round) {
+  const picturesOf = item => [item.before, item.after].filter(imageName);
+  const askState = {queued: 'Queued', delivered: 'Delivered', answered: 'Answered', failed: 'Failed', partial: 'Partly sent', closed: 'Closed'};
+  const askPill = state => { const el = node('span', null, 'pill ' + ({answered: 'done', failed: 'needs', partial: 'needs', queued: 'todo'}[state] || 'working')); el.append(node('span', askState[state] || state)); return el; };
+  // "Maya says" / "Design's helper says": text from another workspace is data, shown as plain text and cut to a few lines.
+  function replyBlock(a, r, retry) {
+    const row = group('list-row', askPill('answered'), group('grow', node('strong', r.by === 'helper' ? a.ws_name + "'s helper says: " : a.ws_name + ' says: '), document.createTextNode(text(r.text)), ...(r.more ? [meta(' …more on the ask ticket')] : [])), meta(r.at ? when(r.at) : ''));
+    const add = node('button', 'Add to my comments', 'btn ghost sm'); add.type = 'button';
+    add.addEventListener('click', async () => {
+      const quoted = a.ws_name + ' wrote: "' + text(r.text).replace(/\s+/g, ' ') + '"';
+      try { await navigator.clipboard.writeText(quoted); add.textContent = 'Copied · paste it into your comments'; } catch (_) { add.textContent = 'Could not copy'; }
+    });
+    row.append(add);
+    return row;
+  }
+  function otherViews(order, stop, openAskDialog) {
+    const c = card('Other views', meta('They advise. You decide.'));
+    for (const a of array(stop.asks)) {
+      const replies = array(a.replies);
+      if (replies.length) for (const r of replies) c.append(replyBlock(a, r));
+      else {
+        const note = {queued: a.ws_name + ' is offline. Your question goes out when it is back.', failed: a.note || 'Not delivered to ' + a.ws_name + '.', partial: a.note || 'Only part of it reached ' + a.ws_name + '.', closed: 'Asked ' + a.ws_name + ' · closed when you answered', delivered: 'Asked ' + a.ws_name + ' · no answer yet'}[a.state] || 'Asked ' + a.ws_name;
+        const row = group('list-row', askPill(a.state), group('grow', document.createTextNode(note)), meta(a.at ? when(a.at) : ''));
+        if ((a.state === 'failed' || a.state === 'partial') && openAskDialog) { const again = node('button', 'Send again', 'btn outline sm'); again.type = 'button'; again.addEventListener('click', () => openAskDialog(a)); row.append(again); }
+        c.append(row);
+      }
+    }
+    return c;
+  }
+  // The dialog: who, exactly what leaves this computer (the line and the items you tick), a check for passwords and keys.
+  function askDialog(order, stop, reach) {
+    const items = array(stop.data?.items);
+    const d = node('dialog', null, 'dialog'); d.setAttribute('aria-labelledby', 'ask-title');
+    const select = node('select', null, 'input'); select.setAttribute('aria-label', 'Who');
+    for (const w of reach) { const o = node('option', w.name + (w.description ? ' · ' + w.description : '')); o.value = w.ws; select.append(o); }
+    const who = node('label', 'Who', 'field'); who.append(select);
+    const ticks = items.map((item, i) => {
+      const n = picturesOf(item).length;
+      const box = node('input'); box.type = 'checkbox'; box.checked = true;
+      const label = node('label', null, 'check-label'); label.append(box, document.createTextNode(' ' + text(item.title) + (n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : '')));
+      return {box, label, i, text: label.lastChild, suffix: n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : ''};
+    });
+    const checked = meta('Checking for passwords and keys…');
+    const preview = group('stack', meta('Reading what will be sent…'));
+    const problem = p(''); problem.hidden = true; problem.setAttribute('role', 'alert');
+    const cancel = node('button', 'Cancel', 'btn'); cancel.type = 'button'; cancel.addEventListener('click', () => d.close());
+    const send = node('button', 'Send', 'btn primary'); send.type = 'button'; send.disabled = true;
+    const close = node('div', null, 'row between'); close.append(node('h2', 'Ask another workspace'));
+    close.firstChild.id = 'ask-title';
+    d.append(close, who, node('h3', 'What leaves this computer'), preview, ...ticks.map(t => t.label),
+      p('Not sent: other orders, crew logs, budget, chat, anything you untick.'), checked, problem, group('actions actions-end', cancel, send));
+    // the check runs when the dialog opens, before Send: a file with a hit is shown unticked and disabled with its reason
+    read('/api/order/' + order.id + '/stop/' + stop.n + '/scan').then(scan => {
+      const hits = [];
+      // exactly what the add-on sends, built by the one function that sends it: card title, line, question, item texts
+      preview.replaceChildren(node('strong', text(scan.title)), p('“' + text(scan.line) + '”'), meta('Question: ' + text(scan.question)));
+      for (const row of array(scan.items)) { const t = ticks[row.i]; if (t) t.text.nodeValue = ' ' + text(row.check) + t.suffix; }
+      for (const row of array(scan.items)) {
+        const t = ticks[row.i]; const bad = array(row.files).filter(f => f.ok === false);
+        if (!t || !bad.length) continue;
+        t.box.checked = false; t.box.disabled = true;
+        for (const f of bad) { hits.push(f.name); t.label.append(node('strong', ' · not sent: ' + text(f.name) + ' ' + text(f.why || 'could not be checked'))); }
+      }
+      checked.textContent = hits.length ? 'Found in a picture: untick it or remove the password first.' : 'Checked for passwords and keys: nothing found.';
+      send.disabled = false;
+    }).catch(() => { checked.textContent = 'Could not check for passwords and keys now. Send checks again before anything leaves.'; send.disabled = false; });
+    send.addEventListener('click', async () => {
+      send.disabled = true; cancel.disabled = true; problem.hidden = true;
+      const picked = ticks.filter(t => t.box.checked).map(t => t.i);
+      const result = await askWorkspace(order.id + ':s' + stop.n + ':' + select.value + ':' + (picked.length ? picked.join(',') : '-'));
+      if (result.state) { d.close(); render(); return; }  // partial: the row on the stop says what went out
+      problem.textContent = result.error || 'It was not sent. Nothing left this computer. Try again.'; problem.hidden = false;
+      send.disabled = false; cancel.disabled = false;
+    });
+    d.addEventListener('close', () => d.remove());
+    document.body.append(d);
+    d.showModal();
+  }
+  function stopPage(order, round, reach = []) {
     const stop = array(order.stops).find(s => String(s.n) === round);
     if (!stop) throw new Error('Stop not found');
     const data = stop.data || {};
-    view.append(heading(stageName(order, stop.stage) + ' · stop review', order.title, orderLink(order)), meta([({open: 'Waiting for you', decided: 'Decided by your agent', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
+    const canAsk = stop.state === 'open' && embedded() && reach.length > 0 && validId(order.id);
+    const ask = canAsk ? node('button', 'Ask another workspace', 'btn outline sm f-btn') : null;
+    if (ask) { ask.type = 'button'; ask.addEventListener('click', () => askDialog(order, stop, reach)); }
+    view.append(heading(stageName(order, stop.stage) + ' · stop review', order.title, ...(ask ? [ask] : []), orderLink(order)), meta([({open: 'Waiting for you', decided: 'Decided by your agent', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
     for (const [index, item] of array(data.items).entries()) {
       const compare = group('f-compare', preview(order, 'Before', item.before), preview(order, 'After', item.after));
       const c = card(item.title, badge(tagWord(item.tag)), compare);
@@ -467,6 +571,8 @@
       if (item.recommend) c.append(meta('Your agent suggests: ' + item.recommend));
       c.append(meta('Review images and pins are view-only here. Add feedback on the order ticket.')); view.append(c);
     }
+    if (array(stop.asks).length) view.append(otherViews(order, stop, canAsk ? () => askDialog(order, stop, reach) : null));
+    if (stop.autopilot_waits) view.append(p('Autopilot waits for you on this stop, because you asked for a view.'));
     view.append(group('grid-2', card('Checked', list(data.checked)), card('Not checked', list(data.not_checked))),
       card('Changed during the run', list(data.changed_during_run)), answer(stop.state === 'open' ? order : {...order, open: null}));
   }
@@ -534,7 +640,11 @@
         if (order.id !== match[1]) throw new Error('Order reference mismatch');
         showNotices(homeData, order);
         if (match[2]) draw = () => proposal(order);
-        else if (match[3] === 'stop') draw = () => stopPage(order, match[4]);
+        else if (match[3] === 'stop') {
+          const reach = await read('/api/reach', signal).catch(() => []);  // empty when the relay is off: no button then
+          if (serial !== request) return;
+          draw = () => stopPage(order, match[4], array(reach));
+        }
         else if (match[3] === 'draft') {
           const draft = await read('/api/order/' + match[1] + '/draft/' + match[4], signal);
           if (serial !== request) return;
