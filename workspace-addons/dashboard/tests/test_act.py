@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -1472,3 +1473,29 @@ def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():
     ):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("workspace.set", bad)
+
+
+def test_ticket_new_reply_names_the_new_ticket(ws, act_orch):
+    """The New ticket window opens the new ticket by the id in the reply. Matching by title failed when the typed
+    text was cut to 80 characters right after a space: orch keeps the title without it (ORCH-8)."""
+    from orch_dashboard.server import make_server
+
+    act_orch.write_text(
+        act_orch.read_text().replace(
+            'print(json.dumps({"ok": True}))',
+            'print(json.dumps({"id": "t_new123"} if a[:2] == ["ticket", "new"] else {"ok": True}))',
+        )
+    )
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        code, text, _ = post(base, {"op": "ticket.new", "args": {"title": "Work"}})
+        assert code == 200, text
+        assert json.loads(text)["created"] == {"id": "t_new123"}
+        code, text, _ = post(base, {"op": "log", "args": {"ticket": "t_abcdef", "text": "x"}})
+        assert code == 200, text
+        assert "created" not in json.loads(text)
+    finally:
+        srv.shutdown()
+        srv.server_close()

@@ -302,3 +302,25 @@ test('b4: Save without starting says Saving… at once, then the ticket opens', 
   release(); await pending; await new Promise(resolve => setImmediate(resolve));
   assert.equal(s.c.location.hash, '#ticket/new');
 });
+test('ORCH-8: the new ticket opens by the id in the reply, even when orch changed its title', async () => {
+  const s = setup();
+  // Cut to 80 characters right after a space, with a file: the dialog used to look for "… this " and find nothing.
+  s.c.act = async (op, args) => { s.calls.push({op, args}); if (op === 'ticket.new') s.c.tickets().push({id:'t_new123', title:args.title.trim() + ' (renamed)'}); return {ok:true, state:{created:{id:'t_new123'}}}; };
+  await s.drop([{name:'Screenshot 08-19.png',size:1}]);
+  s.input.value = 'add a option that when a user does first orch init it adds a default task, this default task'; await s.input.fire('input');
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(s.calls[0].args.title, 'add a option that when a user does first orch init it adds a default task, this');
+  assert.equal(s.c.location.hash, '#ticket/t_new123');
+  assert.ok(!walk(s.d).some(n => /could not be found/.test(n.textContent)));
+});
+test('ORCH-8: an older reply without the id still finds the ticket by its title (no trailing space)', async () => {
+  const s = setup();
+  s.c.act = async (op, args) => { s.calls.push({op, args}); if (op === 'ticket.new') s.c.tickets().push({id:'t_old1', title:args.title}); return {ok:true, state:{}}; };
+  await s.drop([{name:'photo.png',size:1}]);
+  s.input.value = 'x'.repeat(79) + ' and more words after the cut'; await s.input.fire('input');
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(s.calls[0].args.title, 'x'.repeat(79));
+  assert.equal(s.c.location.hash, '#ticket/t_old1');
+});
