@@ -118,3 +118,33 @@ def test_s3_card_marks_unchecked_steps_and_carries_notes():
     marks = {s["text"]: s.get("unchecked") for s in c["steps"]}
     assert marks == {"Checked": None, "Read it": "agent", "Old step": "before"}
     assert c["notes"] == ["Some records were changed outside orch."]
+
+
+def test_cards_read_the_views_side_by_side_in_list_order(monkeypatch):
+    """ORCH-18: the start page waits for this answer; one view after the other took seconds with four helpers."""
+    import threading
+
+    monkeypatch.setattr(livecards, "card", lambda v: {"ticket": v["id"], "question": v.get("q")})
+    monkeypatch.setattr(livecards.areas, "label", lambda root, out: None)
+    lock, now, most = threading.Lock(), [0], [0]
+
+    class Tracker:
+        root = None
+
+        def tickets_list(self):
+            return [{"id": f"t_{i:06d}", "status": "active" if i % 3 else "open"} for i in range(30)]
+
+        def view(self, tid):
+            with lock:
+                now[0] += 1
+                most[0] = max(most[0], now[0])
+            time.sleep(0.05)
+            with lock:
+                now[0] -= 1
+            return {"id": tid, "run": {"running": tid != "t_000001"}, "q": "x" if tid == "t_000005" else None}
+
+    out = livecards.cards(Tracker())
+    assert most[0] > 1  # more than one view was read at a time
+    assert len(out) == livecards.MAX_CARDS
+    # the first eight running tickets of the list, the one that waits for you first
+    assert [c["ticket"] for c in out] == ["t_000005"] + [f"t_{i:06d}" for i in (2, 4, 7, 8, 10, 11, 13)]

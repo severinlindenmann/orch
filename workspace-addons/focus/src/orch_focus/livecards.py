@@ -7,9 +7,12 @@ redacted by events.make(); ids appear only where the page needs them for a link 
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from . import areas
 
 MAX_CARDS = 8
+WORKERS = 6  # views read at the same time
 MAX_STEPS = 3
 MAX_OPTIONS = 4
 ACTIVE = ("active", "waiting")  # ticket statuses a running agent can have
@@ -122,15 +125,16 @@ def same_file(cards: list[dict]) -> list[dict]:
 
 
 def cards(tracker) -> list[dict]:
-    """Cards for every ticket whose agent runs now, those that wait for you first."""
-    out: list[dict] = []
-    for row in tracker.tickets_list():
-        if row["status"] not in ACTIVE:
-            continue
-        v = tracker.view(row["id"])
-        if v and v["run"]["running"]:
-            out.append(card(v))
-        if len(out) == MAX_CARDS:
-            break
+    """Cards for every ticket whose agent runs now, those that wait for you first.
+
+    The views are read side by side (each asks `orch` about its ticket): one after the other took a few seconds
+    with four helpers at work, and the start page waits for this answer before it shows its lists."""
+    ids = [row["id"] for row in tracker.tickets_list() if row["status"] in ACTIVE]
+    if len(ids) > 1:
+        with ThreadPoolExecutor(max_workers=min(WORKERS, len(ids))) as pool:
+            views = list(pool.map(tracker.view, ids))
+    else:
+        views = [tracker.view(t) for t in ids]
+    out = [card(v) for v in views if v and v["run"]["running"]][:MAX_CARDS]
     areas.label(tracker.root, out)
     return sorted(out, key=lambda c: c["question"] is None)
