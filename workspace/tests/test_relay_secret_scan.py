@@ -128,7 +128,7 @@ def test_protocol_fields_are_not_content(proj, on):
 
     relay.scan_outgoing(
         proj,
-        {"allow_token": "orn_" + "A" * 24, "blob_id": "b_" + "0" * 16, "sha256": "f" * 64, "text": "hello"},
+        {"allow_token": "ora_" + "A" * 22, "blob_id": "b_" + "0" * 16, "sha256": "f" * 64, "text": "hello"},
     )
     json.dumps({})  # (no secret: no refusal)
 
@@ -150,7 +150,7 @@ def test_blob_check_big_file_utf16_and_odd_paths(proj, on):
 def test_nested_token_field_is_scanned_top_level_one_is_not(proj, on):
     from orch import relay
 
-    relay.scan_outgoing(proj, {"text": "hi", "token": TOKEN})  # the protocol's own field
+    relay.scan_outgoing(proj, {"text": "hi", "token": "ora_" + "A" * 22})  # the protocol's own field
     with pytest.raises(Refused):
         relay.scan_outgoing(proj, {"text": "hi", "meta": {"token": TOKEN}})
 
@@ -301,13 +301,32 @@ def test_every_encoding_is_scanned_whatever_the_head_looks_like(proj, on):
 def test_protocol_names_are_skipped_only_in_the_outermost_dict(proj, on):
     from orch import relay
 
-    relay.scan_outgoing(proj, {"token": TOKEN, "text": "hi"})  # the protocol's own field, outermost
+    relay.scan_outgoing(proj, {"token": "ora_" + "A" * 22, "text": "hi"})  # the allow token, outermost
     for body in (
         {"items": [{"token": TOKEN}]},
         {"items": [{"key": TOKEN}], "text": "x"},
         {"a": {"b": [{"allow_token": TOKEN}]}},
         {"mid": {"note": TOKEN}},
         {"digest": [TOKEN]},
+    ):
+        with pytest.raises(Refused) as e:
+            relay.scan_outgoing(proj, body)
+        assert TOKEN not in str(e.value), body
+
+
+def test_only_an_allow_token_shape_is_skipped_everything_else_under_protocol_names_is_scanned(proj, on):
+    from orch import relay
+
+    relay.scan_outgoing(proj, {"token": "ora_" + "A" * 22, "text": "hi"})
+    relay.scan_outgoing(
+        proj, {"allow_token": "ora_" + "b1" * 11, "mid": "m_text000000000001", "digest": "f" * 64}
+    )
+    for body in (
+        {"mid": TOKEN},
+        {"question_id": f"pw is hunter2, key {TOKEN}"},
+        {"sig": TOKEN},
+        {"token": TOKEN},
+        {"token": "ora_" + "A" * 22 + " " + TOKEN},
     ):
         with pytest.raises(Refused) as e:
             relay.scan_outgoing(proj, body)
