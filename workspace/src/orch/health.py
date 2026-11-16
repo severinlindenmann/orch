@@ -4,7 +4,8 @@ A recipe says which command to run and how to read its answer:
   - a helper tool (built-in adapter with a `login` part, agents/login.json): the tool's own status
     command, which prints one JSON object. orch keeps exactly two facts from it: works or not, and the
     end time (re-written as a UTC time). The helpers it stops are the live runs on that tool.
-  - a workspace recipe (.orch/checks.json, written by a person):
+  - a workspace recipe (.orch/local/checks.json, written by a person on this computer; local/ is never
+    committed, so a cloned project cannot bring commands that run by themselves):
     {"checks": {name: {"label", "command", "works"?, "ends"?}}}. Without "works" the exit code alone
     answers: 0 = works, anything else = needs renewing.
 
@@ -32,6 +33,11 @@ _MAX = 65536  # status answers are small; a longer one is not read
 _NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 _BINARY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _ARG = re.compile(r"-{0,2}[A-Za-z0-9][A-Za-z0-9._:=/@-]{0,63}")
+# a recipe names a tool's own status command, never a shell or a script runner
+_NOT_A_TOOL = frozenset(
+    "sh bash zsh fish dash ksh csh tcsh pwsh powershell cmd env sudo doas xargs nohup python python3 node "
+    "deno bun perl ruby php osascript awk sed eval exec uv uvx npx".split()
+)
 _FIELD = re.compile(r"[A-Za-z_]{1,32}")
 _LABEL = re.compile(r"[^\x00-\x1f\x7f]{1,40}")
 
@@ -67,6 +73,8 @@ def _recipe(name, doc) -> dict | None:
         return None
     if not (_BINARY.fullmatch(cmd[0]) and all(_ARG.fullmatch(a) for a in cmd[1:])):
         return None
+    if cmd[0].lower().removesuffix(".exe") in _NOT_A_TOOL:
+        return None
     if not (isinstance(label, str) and _LABEL.fullmatch(label)):
         return None
     works, ends = doc.get("works"), doc.get("ends")
@@ -85,8 +93,12 @@ def _recipe(name, doc) -> dict | None:
     }
 
 
+def recipes_path(root: Path) -> Path:
+    return Path(root) / ".orch" / "local" / "checks.json"
+
+
 def workspace_recipes(root: Path) -> list[dict]:
-    doc = net.read_json(Path(root) / ".orch" / "checks.json", {})
+    doc = net.read_json(recipes_path(root), {})
     items = doc.get("checks") if isinstance(doc, dict) else None
     if not isinstance(items, dict):
         return []

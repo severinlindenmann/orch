@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from orch import adapters, cli_health, health, runs
+from orch import adapters, cli_health, harness, health, runs
 
 NOW = datetime(2026, 11, 16, 12, 0, tzinfo=UTC)
 CLAUDE = {"command": ["claude", "auth", "status", "--json"], "works": "loggedIn", "ends": "loginExpiresAt"}
@@ -118,6 +118,9 @@ def test_exit_code_recipe_reads_nothing_the_command_prints(monkeypatch, code, wa
         ("t", {"command": ["t", "$(rm -rf x)"]}, False),
         ("t", {"command": ["t", "a b"]}, False),
         ("t", {"command": "t status"}, False),
+        ("t", {"command": ["bash", "-c", "x"]}, False),  # never a shell or a script runner
+        ("t", {"command": ["python3", "x.py"]}, False),
+        ("t", {"command": ["PowerShell.exe", "x"]}, False),
         ("t", {"command": []}, False),
         ("t", {"command": ["t"] * 10}, False),
         ("T!", {"command": ["t"]}, False),
@@ -130,8 +133,8 @@ def test_workspace_recipe_shape(name, doc, ok):
 
 
 def _own(proj, checks):
-    (proj / ".orch").mkdir(exist_ok=True)
-    (proj / ".orch" / "checks.json").write_text(json.dumps({"checks": checks}), encoding="utf-8")
+    health.recipes_path(proj).parent.mkdir(parents=True, exist_ok=True)
+    health.recipes_path(proj).write_text(json.dumps({"checks": checks}), encoding="utf-8")
 
 
 @pytest.fixture
@@ -188,9 +191,20 @@ def test_overview_skips_helper_tools_that_are_not_installed(proj, monkeypatch):
 
 def test_broken_checks_file_is_ignored(proj, monkeypatch):
     monkeypatch.setattr(health.shutil, "which", lambda b: None)
-    (proj / ".orch").mkdir(exist_ok=True)
-    (proj / ".orch" / "checks.json").write_text("{not json", encoding="utf-8")
+    health.recipes_path(proj).parent.mkdir(parents=True, exist_ok=True)
+    health.recipes_path(proj).write_text("{not json", encoding="utf-8")
     assert health.overview(proj, NOW) == []
+
+
+def test_a_committed_checks_file_is_never_run(proj, monkeypatch):
+    """Recipes only count from the local folder: one that came with the project files is ignored."""
+    monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}")
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch" / "checks.json").write_text(
+        json.dumps({"checks": {"x": {"command": ["x"]}}}), encoding="utf-8"
+    )
+    assert health.workspace_recipes(proj) == []
+    assert "local/" in harness.ORCH_IGNORE  # the place recipes do count is never committed
 
 
 def test_check_keeps_the_last_result(proj, tools):
