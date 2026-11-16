@@ -1080,6 +1080,50 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
     return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away (worktrees.on_closed)
 
 
+REVIEWER = "agent:reviewer"  # the Reviewer role (reviewer.py): acts for the owner, never as a person
+REVIEWER_VIA = "reviewer"
+ACCEPTED_LINE = "Accepted for you by the Reviewer: "
+SENT_BACK_LINE = "Sent back by the Reviewer: "
+
+
+def accepted_by_reviewer(root: Path, ticket: dict) -> bool:
+    """Done, and the line that made it Done is the Reviewer's (the owner may still send it back)."""
+    if ticket.get("status") != "done":
+        return False
+    for h in reversed(history.lines(root, ticket)):
+        if isinstance(h, dict) and re.fullmatch(r"Status \w+ -> done", str(h.get("text", ""))):
+            return h.get("by") == REVIEWER
+    return False
+
+
+def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
+    """The Reviewer accepts a ticket in Review for the owner (Review -> Done), only while the owner turned it
+    on (`workflow.reviewer`), every task is done with evidence and no question waits. The history says who did
+    it and why: a role acting for the owner, not a second approver (R4.1). The owner can send it back."""
+    if not config.reviewer_on(root):
+        raise Refused("The Reviewer is off here. Turn it on: orch config set workflow.reviewer on")
+    why = _one_line(reasons)
+
+    def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused(GENERAL_REFUSAL)
+        if ticket["status"] != "review":
+            raise Refused("This ticket is not in Review.")
+        _check_can_finish(ticket)
+        if _open_questions(ticket):
+            raise Refused("A question on this ticket still waits for an answer.")
+        ticket["status"] = "done"
+        ticket["waiting_on"] = None
+        add_history(ticket, REVIEWER, "Status review -> done", REVIEWER_VIA)
+        add_history(ticket, REVIEWER, ACCEPTED_LINE + why, REVIEWER_VIA)
+
+    return apply_op(root, tid, op, by=REVIEWER)[0]
+
+
+def _one_line(text: str, limit: int = 300) -> str:
+    return " ".join(str(text or "").split())[:limit]
+
+
 def ask_for_changes(
     root: Path,
     tid: str,
@@ -1092,8 +1136,11 @@ def ask_for_changes(
 ) -> dict:
     """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
     Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
-    automation host starts exactly one run for it (a person's pending input is what starts runs; #287)."""
-    if not by.startswith("human:") or agent_tool():
+    automation host starts exactly one run for it (a person's pending input is what starts runs; #287).
+    A ticket the Reviewer accepted for the person (Done) can be sent back the same way.
+    The Reviewer itself (by REVIEWER) sends a Review ticket back once when work is missing (reviewer.py)."""
+    role = by == REVIEWER
+    if not role and (not by.startswith("human:") or agent_tool()):
         raise Refused("Only a person can ask for changes.")
     note = (text or "").strip()
     if not note:
@@ -1101,27 +1148,35 @@ def ask_for_changes(
     if len(note) > 2000:
         raise Refused("A note for changes is at most 2000 characters.")
 
+    def may_send_back(ticket) -> bool:
+        return ticket["status"] == "review" or (not role and accepted_by_reviewer(root, ticket))
+
     def op(ticket):
-        if ticket["status"] != "review":
+        if not may_send_back(ticket):
             raise Refused("This ticket is not waiting for your review.")
-        ticket["checklist"].append(
-            {
-                "id": _next_id(ticket["checklist"], "c"),
-                "text": note,
-                "origin": "change_request",  # structured: the dashboard shows "You asked: <note>"
-                "done": False,
-                "evidence": [],
-            }
-        )
+        item = {"id": _next_id(ticket["checklist"], "c"), "text": note, "done": False, "evidence": []}
+        if not role:
+            item["origin"] = "change_request"  # structured: the dashboard shows "You asked: <note>"
+        ticket["checklist"].append(item)
         ticket["status"] = "ready"  # any wait the ticket has is not this review's: left as it is
-        add_history(ticket, by, "Asked for changes: " + note[:200], via)
+        line = SENT_BACK_LINE if role else "Asked for changes: "
+        add_history(ticket, by, line + note[:200], REVIEWER_VIA if role else via)
 
     from orch import runs  # runs imports tickets
 
-    if load(root, tid)["status"] != "review":
+    if not may_send_back(load(root, tid)):
         raise Refused("This ticket is not waiting for your review.")
     # Queue the note first, then commit the ticket: a failure of either leaves nothing half done.
-    item = runs.pending_add(root, tid, by, "message", note, via or _env_via(), pid, phone=phone)
+    item = runs.pending_add(
+        root,
+        tid,
+        by,
+        "event" if role else "message",
+        note,
+        REVIEWER_VIA if role else via or _env_via(),
+        pid,
+        phone=phone,
+    )
     try:
         return apply_op(root, tid, op, by=SYSTEM)[0]
     except BaseException:
