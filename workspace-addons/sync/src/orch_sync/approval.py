@@ -1,4 +1,4 @@
-"""Consent is local, content addressed, and never inferred from ticket text."""
+"""A peer's add-on value is used here only after a person allows it: content addressed, never inferred from ticket text."""
 
 import contextvars
 import hashlib
@@ -8,7 +8,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import addons, humanproof, syncgate, tickets
+from orch import addons, syncgate, tickets
 
 from . import cli, records, repo
 
@@ -26,7 +26,7 @@ def manifests():
 
 
 def canonical(value):
-    """The exact bytes digest() hashes (the sign step of allow / ignore shows these same bytes)."""
+    """The exact bytes digest() hashes."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
 
@@ -34,31 +34,24 @@ def digest(value):
     return hashlib.sha256(canonical(value)).hexdigest()
 
 
-HELD_KIND = "sync-held"
 MAX_HELD = 512  # held add-on changes in all tickets together (Opus hard3 #5): more pauses sync
 _TID = re.compile(r"t_[a-z0-9]{6,16}")
 
 
 def _block_ok(root, tid, data):
-    """A held block this core wrote (local1 MAC over the whole block) for exactly ticket `tid`."""
-    if not isinstance(data, dict) or data.get("ticket") != tid or not isinstance(data.get("addon"), str):
-        return False
-    body = {k: v for k, v in data.items() if k != "mac"}
-    return humanproof.local_ok(root, HELD_KIND, body, data.get("mac"))
+    """A held block (an old one may still carry a mac field: ignored) for exactly ticket `tid`."""
+    return isinstance(data, dict) and data.get("ticket") == tid and isinstance(data.get("addon"), str)
 
 
 LOCAL_EXT = "run/sync/local-ext.json"
-LOCAL_EXT_KIND = "sync-local-ext"
 LOCAL_EXT_SCHEMA = "orch.sync-local-ext/1"
 LOCAL_EXT_BYTES = 16 * 1024 * 1024
 
 
 def local_ext(root):
-    """(this machine's own add-on value digests per ticket, True) from the local1-signed record this core wrote
-    that is ALSO the current one pinned in the guarded home (humanproof.pin_ok: an older signed copy, e.g. the
-    empty first one, does not count); ({}, False) when it is missing, edited, planted, rolled back or unreadable.
-    The automation add-on reads the same record and refuses every add-on value of a ticket while it does not
-    verify (fail closed)."""
+    """(this machine's own add-on value digests per ticket, True) from the record this add-on wrote; ({}, False)
+    when it is missing or unreadable. The automation add-on reads the same record and refuses every add-on value
+    of a ticket while it is not there. Old records with mac or counter fields load as before (fields ignored)."""
     p = repo.safe(root, LOCAL_EXT)
     try:
         data = json.loads(p.read_text()) if p.is_file() and p.stat().st_size <= LOCAL_EXT_BYTES else None
@@ -67,42 +60,29 @@ def local_ext(root):
     if not isinstance(data, dict) or data.get("schema") != LOCAL_EXT_SCHEMA:
         return {}, False
     known = data.get("tickets")
-    body = {k: v for k, v in data.items() if k != "mac"}
-    if (
-        not isinstance(known, dict)
-        or not humanproof.local_ok(root, LOCAL_EXT_KIND, body, data.get("mac"))
-        or not humanproof.pin_ok(root, LOCAL_EXT_KIND, body)
-    ):
+    if not isinstance(known, dict):
         return {}, False
     return known, True
 
 
 def write_local_ext(root, known):
-    """Pin (guarded counter + digest), sign and write the record. False (nothing written) without a key or a
-    usable pin: automation then refuses. A crash between the pin and the write refuses too (fail closed)."""
+    """Write the record of this machine's own add-on values."""
     from .step import encoded, write
 
-    if humanproof.local_key(root) is None:
-        return False
-    body = humanproof.pin_next(root, LOCAL_EXT_KIND, {"schema": LOCAL_EXT_SCHEMA, "tickets": known})
-    mac = humanproof.local_sign(root, LOCAL_EXT_KIND, body) if body else None
-    if not mac:
-        return False
-    write(root, LOCAL_EXT, encoded({**body, "mac": mac}))
+    write(root, LOCAL_EXT, encoded({"schema": LOCAL_EXT_SCHEMA, "tickets": known}))
     return True
 
 
 def start_local_ext(root):
-    """Only when sync is first turned on here (core adopted this machine's tickets): an empty record. A record
-    that is later removed or broken is never started again (every synced ticket would look local): neither
-    while its file exists nor once a pin for it was ever made in the guarded home."""
-    if not os.path.lexists(repo.safe(root, LOCAL_EXT)) and humanproof.record_pin(root, LOCAL_EXT_KIND) == {}:
+    """Only when sync is first turned on here (core adopted this machine's tickets): an empty record, unless
+    one is already there."""
+    if not os.path.lexists(repo.safe(root, LOCAL_EXT)):
         write_local_ext(root, {})
 
 
 def held(root, tid=None):
-    """The held add-on changes this core wrote: of one ticket (its files only, never a scan of every block),
-    or of all. A planted, edited or unreadable file is no held change (it is removed: it can only be stale)."""
+    """The held add-on changes: of one ticket (its files only, never a scan of every block), or of all. An
+    unreadable or misshapen file is no held change (it is removed: it can only be stale)."""
     folder = repo.safe(root, "run/sync/held")
     if not folder.exists():
         return []
@@ -166,16 +146,14 @@ def filter_ticket(root, path, doc, local, remote):
                 since = previous.get("since", since)
             p.unlink(missing_ok=True)
         block["since"] = since
-        # Develop's model: a peer's value never enters this machine's ticket without a person (approve writes
-        # it); an approval is never replayed by a merge (B12/#540). The ignored row needs a signed record.
+        # A peer's value never enters this machine's ticket without a person (approve writes it); the choice
+        # is never replayed by a merge (B12/#540). The ignored row needs its record.
         if not records.ok(root, "ignore", f"{tid}:{name}:{block['hash']}", ignored.get(name)):
             if _held_count(root) >= MAX_HELD:
                 from .pause import Pause
 
                 raise Pause("Too many synced add-on changes wait for a person", [path])
-            mac = humanproof.local_sign(root, HELD_KIND, block)
-            if mac:  # unsigned (no key): no row, and the value still stays off this machine
-                write(root, f"run/sync/held/{tid}-{digest(block)}.json", encoded({**block, "mac": mac}))
+            write(root, f"run/sync/held/{tid}-{digest(block)}.json", encoded(block))
         if name in old:
             ext[name] = old[name]
         else:
@@ -202,7 +180,7 @@ def approve(root, tid, addon, args):
             raise repo.Refused("No single held change for this ticket and add-on")
         p, block = candidates[0]
         hashed = digest(block["value"])
-        # Fable B12: Ignore and Allow are different decisions with different proofs.
+        # Fable B12: Ignore and Allow are different decisions.
         kind = "ignore" if getattr(args, "ignore", False) else "allow"
         entry = records.make(
             root, kind, f"{tid}:{addon}:{hashed}", {"ticket": tid, "addon": addon, "hash": hashed}
@@ -223,9 +201,7 @@ def approve(root, tid, addon, args):
         else:
             ext[addon] = block["value"]
         document(path, encoded(doc))
-        # #540: an approval is used once, here (the value is written into this machine's ticket now); its
-        # record is a signed log whose id is spent at once, so no later merge or planted copy can replay it.
-        records.spend(root, entry)
+        # #540: the choice is used once, here (the value is written into this machine's ticket now).
         store = cli.read(root, "approved")
         if not isinstance(store.get(tid), dict):
             store[tid] = {}

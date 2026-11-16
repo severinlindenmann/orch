@@ -1,11 +1,9 @@
-import io
 import json
 import subprocess
 from types import SimpleNamespace
 
 import pytest
 from jsonschema import Draft202012Validator
-from orch import humanproof
 from test_step import ART, NOW, TICKET, at, run, save, success, ticket, tracked
 from test_two_machines import both, edit, hostile, load, machines, remote_sha
 
@@ -101,12 +99,14 @@ def test_deletion_pause_preserves_survivor(machines, path, keep):
     assert repo.safe(b, path).read_bytes() == before
 
 
-def proof(root, target, monkeypatch):
-    monkeypatch.setattr(humanproof, "guarded_home", lambda root: root.parent / "proof-home")
-    key = humanproof.human_key(root)
-    token = humanproof.mint(key, humanproof.new_payload("addon.act", target, "human:Pat"))
-    monkeypatch.setattr("sys.stdin", io.StringIO(token + "\n"))
-    return SimpleNamespace(proof_stdin=True, by=None)
+def plain_pause(root, body):
+    """A pause is a plain entry in state.json."""
+    return body
+
+
+def plain_args(*_args, **_kw):
+    """The arguments a plain `orch sync` choice carries (the choice just runs)."""
+    return SimpleNamespace(by=None)
 
 
 @pytest.mark.parametrize("keep", ["mine", "theirs"])
@@ -163,25 +163,14 @@ def test_ticket_theirs_preserves_history_and_sessions(machines, monkeypatch):
         m.setattr(step.merge, "merge_ticket", lambda *a, **k: None)
         assert run(b)["paused"]["files"] == [TICKET]
     assert step.merge.merge_ticket is original
-    result = pause.resolve(b, TICKET, "theirs", keep_theirs_proof(b, monkeypatch), now=NOW)
+    result = pause.resolve(b, TICKET, "theirs", plain_args(), now=NOW)
     assert not result.get("last_error"), result
     assert load(b)["title"] == "Remote title"
     assert shared in load(b)["history"]
-    assert remote not in load(b)["history"]
-    assert {**remote, "by": "agent:sync", "text": "(synced, not verified here) Remote claim"} in load(b)[
-        "history"
-    ]
+    assert remote in load(b)["history"]
     assert any(
         "Local title" in h["text"] and "my version before sync" in h["text"] for h in load(b)["history"]
     )
-
-
-def keep_theirs_proof(root, monkeypatch, path=TICKET):
-    import hashlib
-
-    theirs = repo.safe(root, "run/sync/theirs/" + path).read_bytes()
-    digest = hashlib.sha256(path.encode() + b"\0" + theirs).hexdigest()
-    return proof(root, "sync:keep-theirs:" + digest, monkeypatch)
 
 
 def test_ext_name_count_is_capped(machines):
@@ -207,13 +196,12 @@ def test_needs_commands_cannot_be_injected(machines):
     assert not approval.held(b)
     for row in needs.rows(b):
         assert "touch" not in row["cli"] and "touch" not in row["text"]
-    # A planted (unsigned) held file is no held change: no row at all.
-    block = {"ticket": "t_abc123", "addon": "a b;c", "value": 1, "hash": "h", "since": NOW}
+    # A planted held file without the shape of one is no held change: no row at all.
+    block = {"ticket": "t_other1", "addon": "a b;c", "value": 1, "hash": "h", "since": NOW}
     step.write(b, "run/sync/held/t_abc123-x.json", step.encoded(block))
     assert not [r for r in needs.rows(b) if r["kind"] == "sync:held"]
-    # A signed one whose name is no installed add-on's: the name never reaches the row (LOW-7); nothing to run.
-    mac = humanproof.local_sign(b, approval.HELD_KIND, block)
-    step.write(b, "run/sync/held/t_abc123-x.json", step.encoded({**block, "mac": mac}))
+    # One whose name is no installed add-on's: the name never reaches the row (LOW-7); nothing to run.
+    step.write(b, "run/sync/held/t_abc123-x.json", step.encoded({**block, "ticket": "t_abc123"}))
     held = [r for r in needs.rows(b) if r["kind"] == "sync:held"]
     assert "a b;c" not in held[0]["text"] and "an add-on not installed here" in held[0]["text"]
     assert shlex.split(held[0]["cli"]) == ["orch", "sync", "needs", "--json"] and "answer" not in held[0]
@@ -302,13 +290,9 @@ def test_public_visibility_warns_once(root, monkeypatch, capsys):
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
     monkeypatch.setattr(visibility, "remote_visibility", lambda url: "public")
     address = "https://github.com/owner/repository"
-    args = ["--dir", str(root), "set", "--mode", "remote", "--remote", address, "--public", "--proof-stdin"]
-    proof(
-        root, cli.remote_target(address, public=True), monkeypatch
-    )  # a public address: the person's own choice
+    args = ["--dir", str(root), "set", "--mode", "remote", "--remote", address, "--public"]
     assert cli.main(args) == 0
     assert "Anyone can read" in capsys.readouterr().err
-    proof(root, cli.remote_target(address, public=True), monkeypatch)
     assert cli.main(args) == 0
     assert "Anyone can read" not in capsys.readouterr().err
     assert cli.main(args + ["--kind", "team"]) == 2
@@ -343,7 +327,7 @@ def test_key_clash_need_respects_contract_with_long_titles(root, count):
     history.ensure_key(root)  # a pause is signed with the workspace key (sync on always makes it)
     candidates = [{"id": f"t_test{i:03}", "title": "Long title " * 20} for i in range(count)]
     state = {
-        "paused": pause.sign(  # made as core makes it; step.write never signs a pause it is given
+        "paused": plain_pause(
             root,
             {
                 "files": [f"tickets/{t['id']}.json" for t in candidates],
@@ -397,7 +381,7 @@ def test_keep_key_reserves_live_counter_when_resume_is_offline(machines, monkeyp
     save(b, "ticket-counter.json", {"last": current})
     config.set_code(b, "DM1")
     success(a)
-    remote = run(b)["paused"]["remote_sha"]
+    run(b)
     offline = bare.with_name("offline.git")
     original_run = step._run
 
@@ -411,7 +395,7 @@ def test_keep_key_reserves_live_counter_when_resume_is_offline(machines, monkeyp
             b,
             "DM1-5",
             "t_later1",
-            proof(b, f"sync:keep-key:DM1-5:t_later1:{remote}", m),
+            plain_args(),
             now=NOW,
         )
     assert result["last_error"] and not result.get("paused")
@@ -454,8 +438,7 @@ def test_visibility_never_persists_userinfo(root, monkeypatch):
     monkeypatch.setattr(repo, "validate_url", lambda url: None)
     monkeypatch.setattr(repo, "set_remote", lambda *a: None)
     monkeypatch.setattr(visibility, "remote_visibility", lambda url: "unknown")
-    proof(root, cli.remote_target(address), monkeypatch)
-    assert cli.main([*args, "--proof-stdin"]) == 0
+    assert cli.main(args) == 0
     assert cli.read(root, "visibility") == {"https://example.com/owner/repo": "unknown"}
 
 
@@ -486,12 +469,11 @@ def test_keep_key_remote_only_uses_verified_merge(machines, monkeypatch, winner)
     repo.git(a, "add", "--", local, evil)
     hostile(a, bare, ["commit", "-m", "forged remote key clash"])
     result = run(b)
-    remote = result["paused"]["remote_sha"]
     original_write, original_run = step.write, step._run
 
     def checked_write(root, path, data):
         if root == b and path == evil:
-            assert "wont_do" not in json.loads(data)["checklist"][0]
+            assert json.loads(data)["checklist"][0]["wont_do"] is True  # a plain field: merged as it came
         original_write(root, path, data)
         keys = [json.loads(p.read_bytes()).get("key") for p in (root / ".orch/tickets").glob("*.json")]
         assert len(keys) == len(set(keys))
@@ -507,9 +489,7 @@ def test_keep_key_remote_only_uses_verified_merge(machines, monkeypatch, winner)
 
     monkeypatch.setattr(step, "write", checked_write)
     monkeypatch.setattr(step, "_run", resume)
-    result = pause.keep_key(
-        b, "DM1-5", winner, proof(b, f"sync:keep-key:DM1-5:{winner}:{remote}", monkeypatch), now=NOW
-    )
+    result = pause.keep_key(b, "DM1-5", winner, plain_args(), now=NOW)
     monkeypatch.setattr(step, "_run", original_run)
     assert not result.get("paused") and not result.get("last_error"), result
     success(b)
@@ -548,14 +528,14 @@ def test_keep_key_live_counter_only_reserves_selected_numbers(machines, monkeypa
     )  # inside the jump cap
     repo.git(a, "add", "--", local, remote_only, "ticket-counter.json")
     hostile(a, bare, ["commit", "-m", "remote counter inflation"])
-    remote = run(b)["paused"]["remote_sha"]
+    run(b)
     # Inspect the reservation before the normal verified merge resumes.
     monkeypatch.setattr(step, "_run", lambda *args: cli.read(b, "state"))
     pause.keep_key(
         b,
         "DM1-5",
         "t_remote1",
-        proof(b, f"sync:keep-key:DM1-5:t_remote1:{remote}", monkeypatch),
+        plain_args(),
         now=NOW,
     )
     assert json.loads(repo.safe(b, local).read_bytes())["key"] == "DM1-99"
@@ -591,7 +571,7 @@ def test_any_unlisted_incoming_problem_blocks_choices(machines, monkeypatch, pro
         if command == "resolve":
             pause.resolve(b, ART, "theirs", now=NOW)
         else:
-            args = proof(b, f"sync:keep-key:DM1-13:t_first1:{remote}", monkeypatch)
+            args = plain_args()
             pause.keep_key(b, "DM1-13", "t_first1", args, now=NOW)
     assert not cli.read(b, "choices")
     if command == "resolve":
@@ -611,8 +591,7 @@ def test_keep_key_rechecks_incoming_before_reading_tickets(machines, monkeypatch
     for root, tid in [(a, "t_first1"), (b, "t_later1")]:
         save(root, f"tickets/{tid}.json", ticket() | {"id": tid, "key": "DM1-13"})
     success(a)
-    result = run(b)
-    remote = result["paused"]["remote_sha"]
+    remote = run(b)["paused"]["remote_sha"]
     if problem == "manifest":
         step.write(b, "run/sync/theirs.json", step.encoded({"remote_sha": "stale"}))
     elif problem == "local-general":
@@ -629,7 +608,7 @@ def test_keep_key_rechecks_incoming_before_reading_tickets(machines, monkeypatch
         )
         monkeypatch.setattr(incoming, "check", lambda *a, **kw: checked)
     before = repo.safe(b, "tickets/t_later1.json").read_bytes()
-    args = proof(b, f"sync:keep-key:DM1-13:t_first1:{remote}", monkeypatch)
+    args = plain_args()
     with pytest.raises(repo.Refused):
         pause.keep_key(b, "DM1-13", "t_first1", args, now=NOW)
     assert repo.safe(b, "tickets/t_later1.json").read_bytes() == before
@@ -661,8 +640,7 @@ def test_a_malformed_choice_store_counts_for_nothing(machines, files):
 
 def _history_pause(root, remote):
     state = cli.read(root, "state")
-    # made as core makes it (pause.sign); step.write never signs a pause it is given
-    state["paused"] = pause.sign(
+    state["paused"] = plain_pause(
         root,
         {
             "files": [],
@@ -676,7 +654,7 @@ def _history_pause(root, remote):
 
 
 def test_a_history_pause_has_a_row_and_clears_when_the_remote_changes(machines):
-    # No file to choose: a Needs row whose way out is take-remote (a person's proof, PR B), and the pause stays
+    # No file to choose: a Needs row whose way out is take-remote , and the pause stays
     # only while the remote is the commit it was about.
     from pathlib import Path
 
@@ -687,7 +665,7 @@ def test_a_history_pause_has_a_row_and_clears_when_the_remote_changes(machines):
     _history_pause(b, tip)
     rows = needs.rows(b)
     (row,) = [r for r in rows if r["kind"] == "sync:history"]
-    assert row["cli"] == "orch sync take-remote --proof-stdin" and row["tone"] == "warn"
+    assert row["cli"] == "orch sync take-remote" and row["tone"] == "warn"
     schema = json.loads((Path(__file__).resolve().parents[3] / "contracts/needs.schema.json").read_text())
     Draft202012Validator(schema).validate(rows)
     with pytest.raises(repo.Refused, match="not waiting"):
@@ -744,8 +722,8 @@ def test_case_clash_needs_row_and_keep_is_refused(machines):
 
 def test_case_clash_keep_local_name_asks_again_when_the_remote_changes(machines, monkeypatch):
     a, b, bare, _ = case_clash(machines)
-    remote = run(b)["paused"]["remote_sha"]
-    args = proof(b, pause.case_target(NEW_NAME, remote), monkeypatch)
+    run(b)
+    args = plain_args()
     save(a, NEW_NAME, b"the report, edited")
     repo.git(a, "add", "--", NEW_NAME)
     hostile(a, bare, ["commit", "-m", "edit"])
@@ -792,13 +770,10 @@ def counter_jump(machines, hostile_value):
     return a, b, tip
 
 
-def test_a_refused_counter_choice_never_uses_up_the_proof(machines, monkeypatch):
-    # LOW-4: reading the reviewed numbers ran after the proof was consumed; a refusal there burned the proof.
-    import sys
-
-    _, b, tip = counter_jump(machines, "key")
-    args = proof(b, f"sync:keep-mine-counter:{tip}", monkeypatch)
-    token = sys.stdin.getvalue()
+def test_a_refused_counter_choice_changes_nothing_and_can_be_made_again(machines, monkeypatch):
+    # LOW-4: reading the reviewed numbers runs before anything is written; a refusal there leaves the pause.
+    _, b, _tip = counter_jump(machines, "key")
+    args = plain_args()
 
     def refused(*_):
         raise pause.Pause("Document has a problem: tickets/t_far001.json", [])
@@ -807,7 +782,6 @@ def test_a_refused_counter_choice_never_uses_up_the_proof(machines, monkeypatch)
         m.setattr(step, "top_number", refused)
         with pytest.raises(pause.Pause):
             pause.resolve(b, "ticket-counter.json", "mine", args, now=NOW)
-    monkeypatch.setattr("sys.stdin", io.StringIO(token))
     result = pause.resolve(b, "ticket-counter.json", "mine", args, now=NOW)
     assert not result.get("paused") and not result.get("last_error"), result
 

@@ -10,16 +10,14 @@ from pathlib import Path
 from . import approval, cli, paths, pause
 
 
-def action(label, verb=None, target=None, *, sign=False, review=None, op=None, later=False, view=None):
+def action(label, verb=None, target=None, *, review=None, op=None, later=False, view=None):
     """One button of a row for the dashboard (`orch sync act <verb> -- <target>`, or a core op it already has).
-    sign = the click goes through the person's sign step; review = what that step shows (plain text)."""
+    review = the words the page shows for it (plain text)."""
     out = {"label": label}
     if verb:
         out.update(verb=verb, target=target)
     if op:
         out["op"] = op
-    if sign:
-        out["sign"] = True
     if review:
         from .act import plain
 
@@ -161,7 +159,7 @@ def rows(root):
     paused = pause.verified_pause(root, state)  # an edited or planted pause shows nothing
     if paused:
         if paused.get("kind") == "history":
-            # no file to choose: take the other computer's history (a person's proof), or it clears by itself
+            # no file to choose: take the other computer's history, or it clears by itself
             out.append(
                 row(
                     "history",
@@ -170,7 +168,7 @@ def rows(root):
                     "files stay as they are. Take the other computer's copy (Done, ticket numbers and add-on "
                     "changes are still checked here; files only you have stay), or wait for its next change.",
                     paused["since"],
-                    "orch sync take-remote --proof-stdin",
+                    "orch sync take-remote",
                     ["Take theirs", "Wait"],
                     tone="warn",
                 )
@@ -195,7 +193,7 @@ def rows(root):
                     key,
                     f"Two tickets have the same number {key}. Which keeps it?",
                     paused["since"],
-                    f"orch sync keep-key {shlex.quote(key)} <ticket-id> --proof-stdin",
+                    f"orch sync keep-key {shlex.quote(key)} <ticket-id>",
                     (
                         [f"{t['title'][: 77 - len(t['id'])]} ({t['id']})" for t in candidates]
                         if len(candidates) <= 8
@@ -218,8 +216,8 @@ def rows(root):
                         f'"{Path(case[path]).name}" except for capital letters. Keep your name, or rename '
                         "your file?",
                         paused["since"],
-                        f"orch sync resolve {shlex.quote(path)} --keep-local-name --proof-stdin "
-                        "(or --rename-local <new name> --proof-stdin)",
+                        f"orch sync resolve {shlex.quote(path)} --keep-local-name "
+                        "(or --rename-local <new name>)",
                         ["Keep my name", "Rename my file"],
                         title=Path(path).name,
                     )
@@ -249,7 +247,6 @@ def rows(root):
                         "Leave it out",
                         "leave-out",
                         path,
-                        sign=True,
                         review={
                             "title": f"Leave {Path(path).name} out of sync?",
                             "body": "It stays on this computer only.",
@@ -271,7 +268,6 @@ def rows(root):
                         "Keep mine",
                         "keep-mine",
                         path,
-                        sign=True,
                         review={
                             "title": f"Keep your version of “{name}”?",
                             "body": "The change from the other computer is set aside.",
@@ -284,7 +280,6 @@ def rows(root):
                         "Keep theirs",
                         "keep-theirs",
                         path,
-                        sign=True,
                         review={
                             "title": f"Keep the other computer’s version of “{name}”?",
                             "body": "The change made here is set aside.",
@@ -300,8 +295,7 @@ def rows(root):
                     key,
                     text,
                     paused["since"],
-                    f"orch sync resolve {shlex.quote(path)} --keep mine|theirs"
-                    + (" --proof-stdin" if path == "ticket-counter.json" else ""),
+                    f"orch sync resolve {shlex.quote(path)} --keep mine|theirs",
                     # a secret with no file to leave out has no choice to offer: a notice, not a question
                     None if secret and not any(acts) else ["Keep mine", "Keep theirs"],
                     title=Path(path).name,
@@ -347,7 +341,6 @@ def rows(root):
                         "Allow",
                         "allow",
                         f"{tid}:{first}",
-                        sign=True,
                         review={
                             "title": f"Allow {first} to run something on this ticket?",
                             "body": "The change from the other computer is used here.",
@@ -358,7 +351,6 @@ def rows(root):
                         "Ignore",
                         "ignore",
                         f"{tid}:{first}",
-                        sign=True,
                         review={
                             "title": f"Ignore this change of {first}?",
                             "body": "It is not used here. A different change asks again.",
@@ -407,7 +399,6 @@ def rows(root):
                         "Leave deleted",
                         "leave-deleted",
                         tid,
-                        sign=True,
                         review={
                             "title": "Leave this ticket deleted?",
                             "body": "It is removed on every computer that syncs.",
@@ -425,7 +416,7 @@ def rows(root):
                 "remote",
                 cli.UNCONFIRMED,
                 datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "orch sync set --mode remote --remote <address> --proof-stdin",
+                "orch sync set --mode remote --remote <address>",
                 None,
                 title="Sync",
                 tone="warn",
@@ -445,7 +436,6 @@ def rows(root):
                     action(
                         "Move",
                         op="private.move",
-                        sign=True,
                         review={
                             "title": "Move your orch files out of the team repository?",
                             "body": "Why: your tickets sit in your team’s repository, so everyone on the team sees each "

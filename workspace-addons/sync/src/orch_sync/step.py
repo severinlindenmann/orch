@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
-from orch import humanproof, procs, syncgate, tickets
+from orch import procs, syncgate, tickets
 from orch.errors import Refused as CoreRefused
 
 from . import cli, history, incoming, merge, paths, pause, records, repo
@@ -56,10 +56,6 @@ STATE = "run/sync/state.json"
 
 
 def write(root, relative, data):
-    if (
-        relative == STATE
-    ):  # keeps the pause only as this core signed it, never signs one (pause.seal / pause.sign)
-        data = encoded(pause.seal(root, json.loads(data)))
     p = repo.safe(root, relative)
     p.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -265,13 +261,15 @@ def stage(root, head, index, state, now):
                         state["skipped"].append(f"Ticket {Path(path).stem} has a problem and was not synced")
                 if path in old:
                     if paths.TICKET.fullmatch(path):
-                        # Only a person's signed, single-use record lets a missing ticket go (a deletion is
-                        # pushed to every machine); a planted or reused one restores the file as usual.
+                        # Only the person's record lets a missing ticket go (a deletion is pushed to every
+                        # machine); it is used once, then removed. Without it the file is restored as usual.
                         # bound to the very copy the person left deleted (its blob in HEAD)
                         allowed = cli.read(root, "allow-delete").get(Path(path).stem)
                         target = f"{Path(path).stem}:{old[path][1]}"
-                        if records.ok(root, "delete", target, allowed, single_use=True):
-                            records.spend(root, allowed)
+                        if records.ok(root, "delete", target, allowed):
+                            left = cli.read(root, "allow-delete")
+                            left.pop(Path(path).stem, None)
+                            write(root, "run/sync/allow-delete.json", encoded(left))
                             repo.git(root, "update-index", "--force-remove", "--", path, index=index)
                             continue
                         write(root, path, blob(root, old[path]))
@@ -364,8 +362,6 @@ def merge_document(root, path, base, local, remote, now):
             remote,
             local or {"id": remote["id"]},
             now=now,
-            person=humanproof.wont_verifier(root),
-            verdict=humanproof.verdict_verifier(root),
         )
     except Exception:  # noqa: BLE001 - an invalid merge always keeps both versions
         raise pause.Pause(f"Ticket cannot be merged: {path}", [path]) from None
@@ -397,7 +393,7 @@ def reach_gate(root, counters, keys, decisions):
         ).get("last", 0)
         reach = max(reach, chosen if type(chosen) is int else 0)
     if counter_choice and type(counter_choice.get("covers")) is int:
-        # A person's proven (signed) counter choice on a jump covers the incoming numbers they reviewed.
+        # A person's counter choice on a jump covers the incoming numbers they reviewed.
         reach = max(reach, counter_choice["covers"])
     if (counters[1] > max([counters[0], *keys[0]]) + COUNTER_JUMP and not counter_choice) or max(
         keys[1], default=0
@@ -459,7 +455,7 @@ def merged_tree(root, head, remote, index, now, first=False):
         # Fable A5: several merge bases make git build a virtual base by a text merge of JSON. None at all (a
         # remote that started a new history; not this machine's first join, and not a rewritten history whose
         # every file a person chose) has no base to judge changes by. A file-less pause with its own Needs row:
-        # take-remote (a person's proof), or it clears by itself when the remote changes.
+        # take-remote, or it clears by itself when the remote changes.
         raise pause.Pause("The two histories cannot be combined automatically", [], kind=pause.HISTORY)
     result = repo.git(
         root,
@@ -558,7 +554,7 @@ def taken_tree(root, head, remote, index, now):
     and verdict, remote-only history is demoted, held add-on values stay held; the counter only goes up; the
     reach gate, key renumbering (this machine's ids keep their keys), the tree checks and the deletion gate run
     as for a merge. Files only this machine has stay; nothing is removed. Returns (tree, merges): the tree is
-    exactly what the person's proof covers and what apply writes (apply replays `merges` under the locks)."""
+    exactly what apply writes (apply replays `merges` under the locks)."""
     local_rows, remote_rows = entries(root, head), entries(root, remote)
     keys = [[], []]
     for side, rows in enumerate((local_rows, remote_rows)):

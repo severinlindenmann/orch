@@ -1,5 +1,5 @@
-"""settings.json is plain JSON any process can write: remote mode uses its address only when it matches the local1
-record the person's signed set-remote / use-public choice wrote (cli.approve_address). Else no network call at all."""
+"""settings.json is plain JSON any process can write: remote mode uses its address only when it matches the
+record the person's set-remote / use-public choice wrote (cli.approve_address). Else no network call at all."""
 
 import hashlib
 import json
@@ -83,27 +83,31 @@ def test_a_record_for_another_address_is_refused(root, tmp_path, monkeypatch, pr
     refused(root, monkeypatch, a, b)
 
 
-@pytest.mark.parametrize("tamper", ["mac", "no-mac", "other-hash", "extra-key", "not-json", "list"])
+@pytest.mark.parametrize("tamper", ["other-hash", "no-hash", "not-json", "list"])
 def test_a_tampered_record_is_refused(root, tmp_path, monkeypatch, preview, tamper):
     remote = bare(tmp_path)
     assert set_remote(root, remote) == 0
     save(root)
     p = root / ".orch" / cli.ADDRESS
     record = json.loads(p.read_text())
-    assert set(record) == {"sha256", "counter", "mac"}
-    if tamper == "mac":
-        record["mac"] = ("A" if record["mac"][0] != "A" else "B") + record["mac"][1:]
-    elif tamper == "no-mac":
-        del record["mac"]
-    elif tamper == "other-hash":
+    assert set(record) == {"sha256"}  # a plain record: no mac, no counter
+    if tamper == "other-hash":
         record["sha256"] = "0" * 64
-    elif tamper == "extra-key":
-        record["remote"] = str(remote)
+    elif tamper == "no-hash":
+        del record["sha256"]
     p.write_text("{" if tamper == "not-json" else json.dumps([record] if tamper == "list" else record))
     refused(root, monkeypatch, remote)
 
 
-def test_the_signed_choice_syncs(root, tmp_path, monkeypatch, preview):
+def test_an_old_record_with_mac_and_counter_still_confirms(root, tmp_path, preview):
+    remote = bare(tmp_path)
+    assert set_remote(root, remote) == 0
+    p = root / ".orch" / cli.ADDRESS
+    p.write_text(json.dumps({**json.loads(p.read_text()), "counter": 3, "mac": "A" * 43}))
+    assert cli.address_confirmed(root, str(remote))
+
+
+def test_the_choice_syncs(root, tmp_path, monkeypatch, preview):
     remote = bare(tmp_path)
     assert set_remote(root, remote) == 0
     record = json.loads((root / ".orch" / cli.ADDRESS).read_text())
@@ -113,22 +117,20 @@ def test_the_signed_choice_syncs(root, tmp_path, monkeypatch, preview):
     success(root)
     assert has_state(remote)
     assert address_rows(root) == []
-    # how often stays unsigned and keeps the confirmation
+    # how often keeps the confirmation
     assert cli.main(["--dir", str(root), "set", "--interval", "5"]) == 0
     success(root)
     assert address_rows(root) == []
 
 
-def test_choosing_the_planted_address_again_is_signed_and_then_syncs(root, tmp_path, monkeypatch, preview):
+def test_choosing_the_planted_address_again_then_syncs(root, tmp_path, monkeypatch, preview):
     remote = bare(tmp_path)
     configure(root)
     save(root)
     plant(root, mode="remote", remote=str(remote))
-    # the dashboard's same-address shortcut (only how often, unsigned) does not apply to an unconfirmed address
-    target, review = act.proof_target(root, "set", str(remote), "15")
-    assert target == cli.remote_target(str(remote)) and review
+    assert not cli.address_confirmed(root, str(remote))  # the planted address is not the person's choice
     assert set_remote(root, remote) == 0
-    assert act.proof_target(root, "set", str(remote), "15") == (None, None)
+    assert cli.address_confirmed(root, str(remote))
     success(root)
     assert has_state(remote) and address_rows(root) == []
 
@@ -161,8 +163,8 @@ def test_a_history_pause_looks_at_a_planted_address_never(root, tmp_path, monkey
 
 
 @pytest.mark.parametrize("left", ["local", "off"])
-def test_leaving_remote_revokes_the_signed_address(root, tmp_path, monkeypatch, preview, left):
-    """Gate parity: the person chose A, then left remote; planting mode=remote with A again can't reuse that choice."""
+def test_leaving_remote_removes_the_address_record(root, tmp_path, monkeypatch, preview, left):
+    """The person chose A, then left remote; planting mode=remote with A again can't reuse that choice."""
     remote = bare(tmp_path)
     assert set_remote(root, remote) == 0
     save(root)
@@ -172,25 +174,6 @@ def test_leaving_remote_revokes_the_signed_address(root, tmp_path, monkeypatch, 
     if left == "off":
         repo.ensure(root)
     refused(root, monkeypatch, remote)
-
-
-def test_a_restored_older_record_confirms_nothing(root, tmp_path, monkeypatch, preview):
-    """Rollback: the agent copied the signed record for A, the person moved to B (or left remote); putting the old
-    copy back with remote=A is refused (the guarded pin names only the current record)."""
-    a, b = bare(tmp_path, "a.git"), bare(tmp_path, "b.git")
-    assert set_remote(root, a) == 0
-    save(root)
-    old = (root / ".orch" / cli.ADDRESS).read_text()
-    assert set_remote(root, b) == 0
-    (root / ".orch" / cli.ADDRESS).write_text(old)
-    plant(root, mode="remote", remote=str(a))
-    refused(root, monkeypatch, a)
-    assert (
-        cli.main(["--dir", str(root), "set", "--mode", "local"]) == 0
-    )  # revoked: the same copy still refused
-    (root / ".orch" / cli.ADDRESS).write_text(old)
-    plant(root, mode="remote", remote=str(a))
-    refused(root, monkeypatch, a)
 
 
 def test_an_unconfirmed_address_is_never_shown_as_the_persons(root, tmp_path, preview):
@@ -209,19 +192,6 @@ def test_an_unconfirmed_address_is_never_shown_as_the_persons(root, tmp_path, pr
     )
 
 
-def test_a_failed_revocation_stops_sync_and_says_so(root, tmp_path, monkeypatch, preview):
-    """N-1: when the guarded pin can't move, leaving remote is not reported as done, and sync stops anyway."""
-    from orch import humanproof
-
-    remote = bare(tmp_path)
-    assert set_remote(root, remote) == 0
-    save(root)
-    monkeypatch.setattr(humanproof, "pin_next", lambda *a, **k: None)
-    assert cli.main(["--dir", str(root), "set", "--mode", "local"]) != 0
-    assert not (root / ".orch" / cli.ADDRESS).exists()
-    assert cli.read(root, "settings")["mode"] == "local"  # stopped using the address before the refusal
-
-
 def test_moving_to_local_is_no_false_alarm(root, tmp_path, preview):
     """N-3: a person who chose an address and moved to local is not told about an address they did not choose."""
     remote = bare(tmp_path)
@@ -231,26 +201,10 @@ def test_moving_to_local_is_no_false_alarm(root, tmp_path, preview):
     assert st["unconfirmed"] is False and st["remote"] is None
 
 
-def test_an_unreadable_pin_is_no_successful_revocation(root, tmp_path, monkeypatch, preview):
-    """N-1 (record_pin None path): leaving remote while the pin can't be read is refused, never "Saved"."""
-    from orch import humanproof
-
-    remote = bare(tmp_path)
-    assert set_remote(root, remote) == 0
-    save(root)
-    monkeypatch.setattr(humanproof, "record_pin", lambda *a, **k: None)
-    assert cli.main(["--dir", str(root), "set", "--mode", "local"]) != 0
-    assert not (root / ".orch" / cli.ADDRESS).exists() and cli.read(root, "settings")["mode"] == "local"
-
-
-def test_a_planted_folder_at_the_record_still_moves_the_pin(root, tmp_path, preview):
-    """Leaving remote while run/sync/address.json is a planted folder: the error shows, and the pin moves anyway."""
-    from orch import humanproof
-
+def test_a_planted_folder_at_the_record_is_an_error_and_sync_stops(root, tmp_path, preview):
     assert set_remote(root, bare(tmp_path)) == 0
-    before = humanproof.record_pin(root, cli.ADDRESS_KIND)["counter"]
     record = root / ".orch" / cli.ADDRESS
     record.unlink()
     record.mkdir()
     assert cli.main(["--dir", str(root), "set", "--mode", "local"]) != 0
-    assert humanproof.record_pin(root, cli.ADDRESS_KIND)["counter"] == before + 1
+    assert cli.read(root, "settings")["mode"] == "local"  # stopped using the address before the error
