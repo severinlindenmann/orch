@@ -862,3 +862,9 @@ def test_the_next_stage_says_it_is_starting(ws, run, srv):
     row = _home_row(srv, order)
     assert row["phase"] == "started" and row["stage"] == "ship" and row["starting"] == "ship"
     assert "'Starting the ' + stageName(order, order.starting) + ' stage…'" in _page_js()
+
+
+def test_no_eta_or_due_line_without_a_time():
+    js = _page_js()
+    assert "...(o.eta ? [meta('ETA ' + when(o.eta))] : [])" in js
+    assert "...(order.due ? [meta('Due ' + when(order.due))] : [])" in js

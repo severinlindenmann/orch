@@ -1005,3 +1005,34 @@ def test_per_day_limit_only_warns_and_never_blocks(ws, run):
     assert (
         autopilot.day_status(ws, store, orchcli.tickets(ws))["used"] == 0
     )  # yesterday's work does not count
+
+
+def _plain_question(ws, order, text):
+    q = core(ws, "ask", order, text)
+    assert q["kind"] is None
+    return q["id"]
+
+
+def test_old_plain_questions_close_when_the_step_they_ask_about_is_done(ws, run):
+    order = run("idea", "Booking page")["order"]
+    draft_q = _plain_question(ws, order, "Who uses it?")
+    p = run("propose", order, "--file", "-", data=run_proposal())["question"]
+    core(ws, "answer", order, p, "Start", "--by", "human:anna")
+    later_q = _plain_question(ws, order, "Mark the build steps Done?")
+    run("next", order)  # consumes Start: the draft's question is closed, the newer one is not
+    qs = {q["id"]: q for q in core(ws, "ticket", "show", order)["questions"]}
+    assert qs[draft_q]["answer"].startswith("Taken back: ") and qs[draft_q]["answered_by"] == "agent:factory"
+    assert qs[later_q]["answer"] is None
+    finish_crew(ws, run, order, "booking-form")
+    stop_q = ask_stop(ws, run, order, "build")
+    core(ws, "answer", order, stop_q, "Send back", "--by", "human:anna")
+    run("next", order)
+    assert {q["id"]: q for q in core(ws, "ticket", "show", order)["questions"]}[later_q]["answer"] is None
+    q2 = ask_stop(ws, run, order, "build")
+    core(ws, "answer", order, q2, "Continue", "--by", "human:anna")
+    run("next", order)
+    qs = {q["id"]: q for q in core(ws, "ticket", "show", order)["questions"]}
+    assert qs[later_q]["answer"].startswith("Taken back: ")
+    assert (
+        qs[p]["answer"] == "Start" and qs[stop_q]["answer"] == "Send back"
+    )  # Factory's own questions are untouched

@@ -348,7 +348,7 @@
     section(primary, 'Results to check', orders.filter(o => results(o).length), o => resultsCard(o, true), 'No results waiting for you.');
     section(primary, 'Running', orders.filter(o => o.phase === 'started'), o => o.kind === 'autopilot'
       ? card(o.title, meta('Autopilot order'), p('Routine stops answered by your agent · Ship still asks you'), tail(link('What it decided', '#/autopilot')))
-      : card(o.title, stages(o), ...startingNote(o), budget(o), meta('ETA ' + when(o.eta)), tail(orderLink(o))), 'No running orders.');
+      : card(o.title, stages(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('ETA ' + when(o.eta))] : []), tail(orderLink(o))), 'No running orders.');
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     section(secondary, 'Shipped', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))), 'No shipped work recorded.');
     secondary.append(meta('Shipped orders are listed from the workspace record; shipment dates are not available yet.'));
@@ -450,7 +450,7 @@
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
     }
     const lineCard = card('The line', stages(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
-    const main = group('stack', lineCard, card('Time + budget', budget(order), meta('Due ' + when(order.due))));
+    const main = group('stack', lineCard, card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
     const crew = card('Crew now');
     for (const c of array(order.crew)) {
       const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
