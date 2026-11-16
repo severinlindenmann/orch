@@ -19,6 +19,7 @@ from orch import (
     nextstep,
     runs,
     runs_live,
+    runwatch,
     sharedfolder,
     term,
     tickets,
@@ -40,6 +41,8 @@ SUBCOMMANDS = (
     "event",
     "done",
     "input",
+    "list",
+    "screen",
     *cli_screen.SUBCOMMANDS,
 )
 
@@ -51,6 +54,8 @@ def add_parsers(sub, common) -> None:
         if name in cli_screen.SUBCOMMANDS:
             continue
         x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
+        if name == "list":
+            continue  # every run; no ticket
         x.add_argument(
             "ticket", nargs="?" if name in ("event", "done", "input") else "+" if name == "status" else None
         )
@@ -87,6 +92,13 @@ def add_parsers(sub, common) -> None:
         if name == "start":
             x.add_argument("--take-over", action="store_true", help="take over a claim nobody has written to")
             x.add_argument("--text", help="what to queue when the ticket is busy")
+        if name == "screen":
+            x.add_argument(
+                "--lines",
+                type=int,
+                default=runwatch.SCREEN_LINES,
+                help="how many of the last lines (at most 500)",
+            )
         if name == "argv":
             x.add_argument("--prompt-file", help="use this text as the prompt instead of the ticket summary")
     w = r.add_parser("_wrap", help=argparse.SUPPRESS)
@@ -224,6 +236,7 @@ def _status_of(root: Path, tid: str) -> tuple[dict, str]:
         # once per id). An agent's queued input is never in it.
         human = [i["id"] for i in runs.human_waiting(root, tid)]
         data = {"ticket": tid, "running": False, "pending": waiting, "human_pending_ids": human}
+        data.update(runwatch.describe(root, tid, rec))
         data["waiting_input"] = _waiting_input(root, tid)
         data["stop_held_ids"] = runs_live.stop_held(root, tid, human)  # a person stopped: no restart for them
         if waiting:  # input is really queued for a run
@@ -236,6 +249,8 @@ def _status_of(root: Path, tid: str) -> tuple[dict, str]:
         return data, text
     st = runs.state(rec)
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
+    watch = runwatch.describe(root, tid, rec)  # waiting on / idle since: the stuck signal a monitor reads
+    data.update(watch)
     data["waiting_input"] = _waiting_input(root, tid)
     if st == "alive" and rec.get("mode") == "live" and runs_live.hold_text(rec):
         data["hold"] = runs_live.hold_text(rec)  # why orch waits; gone when the hold clears
@@ -258,6 +273,8 @@ def _status_of(root: Path, tid: str) -> tuple[dict, str]:
         )
         if rec.get("mode") == "live":
             text += " " + runs_live.line(rec, root)
+        if extra := runwatch.line(watch):
+            text += "\n" + extra
     if shared := (data.get("shared_folder") or {}).get("line"):
         text += "\n" + shared  # one quiet line, as `orch ticket show` has it
     return data, text
@@ -370,14 +387,26 @@ def dispatch(args, root: Path) -> bool:
         _wrap_cmd(root, args.rest)
         return True
     if sub is None:
-        raise Refused("Say what to do: orch run start|status|send|take-back|attach|stop <ticket>")
+        raise Refused(
+            "Say what to do: orch run list, or orch run start|status|screen|send|attach|stop <ticket>"
+        )
+    if sub == "list":  # read-only: no cleanup, no writes
+        rows = runwatch.list_runs(root)
+        _out(args, {"runs": rows}, runwatch.list_text(rows))
+        return True
+    if sub == "screen":  # read-only: nothing is typed into the session
+        if not args.ticket:
+            raise Refused("Say which ticket: orch run screen <ticket>")
+        data = runwatch.screen(root, args.ticket, args.lines)
+        _out(args, data, "\n".join(data["lines"]))
+        return True
     if sub != "event":  # a hook must stay quiet; everything else first closes sessions idle for an hour
         with contextlib.suppress(Exception):
             runs_live.cleanup(root)
     by = args.by or tickets.current_actor()
     if not 1 <= len(by) <= 64 or any(ord(c) < 32 for c in by):
         raise Refused("--by must be 1 to 64 characters, e.g. agent:helper.")
-    tid = args.ticket or os.environ.get("ORCH_TICKET")
+    tid = args.ticket or tickets.resolve(root, os.environ.get("ORCH_TICKET"))  # a key works there too
     if sub == "event":
         data = _hook_input(args)
         runs_live.event(
@@ -391,7 +420,11 @@ def dispatch(args, root: Path) -> bool:
         tickets.load(root, tid)
         run_env = os.environ.get("ORCH_RUN")
         agent = bool(run_env or tickets.agent_tool())
-        if agent and os.environ.get("ORCH_TICKET") and os.environ["ORCH_TICKET"] != tid:
+        if (
+            agent
+            and os.environ.get("ORCH_TICKET")
+            and tickets.resolve(root, os.environ["ORCH_TICKET"]) != tid
+        ):
             raise Refused(f"This run works on {os.environ['ORCH_TICKET']}, not on {tid}.")
         text, n = runs_live.read_input(root, tid, run_env, agent)
         _out(args, {"ticket": tid, "items": n, "text": text}, text or f"Nothing new on {_name(root, tid)}.")

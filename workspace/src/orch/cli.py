@@ -1292,6 +1292,9 @@ _TICKET_ARGS = {
     ("ticket", "parent"),
     ("run", "ticket"),
     ("relay", "ticket"),
+    ("diag", "ticket"),
+    ("job", "ticket"),
+    ("chat", "ticket"),
 }
 
 
@@ -1300,12 +1303,16 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
     cmd = getattr(args, "cmd", None)
     if root is None:
         return
+    js = getattr(args, "json", False)
     for c, name in _TICKET_ARGS:
-        if c == cmd and isinstance(getattr(args, name, None), str):
+        val = getattr(args, name, None) if c == cmd else None
+        if isinstance(val, str):
+            setattr(args, name, tickets.resolve_cli(root, val, json_output=js))
+        elif isinstance(val, list):  # `orch run status A B ...`: every key in the list, not only a single one
             setattr(
                 args,
                 name,
-                tickets.resolve_cli(root, getattr(args, name), json_output=getattr(args, "json", False)),
+                [tickets.resolve_cli(root, v, json_output=js) if isinstance(v, str) else v for v in val],
             )
     on = getattr(args, "on", None)
     if cmd in ("ticket", "wait") and isinstance(on, str) and on.startswith("ticket:"):
