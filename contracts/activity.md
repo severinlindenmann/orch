@@ -554,9 +554,7 @@ prefix whose hash differs) is `changed`, reason `content`, not shown. Vectors `r
 **Readers (S2).** `orch record tail` shows the events of the verified view with a computed `checked` (false for
 `via: hook` and for every line of a legacy run, true otherwise; never stored), the cursor is the verified seq, and
 one marker per change of `(reason, changed, removed)`. `query` and `counts` use the same view; any run with changed,
-removed or unchecked lines makes `counts` `complete: false`. `run_model` has `complete` and `protected`: `protected`
-is false whenever the tool is not known from a checked line of orch's own collector (`via: log`, sealed; never a hook line); those
-runs show "Records from this helper can't be fully checked." (`record.UNPROTECTED_TEXT`). `--detail` takes the
+removed or unchecked lines makes `counts` `complete: false`. `run_model` has `complete`. `--detail` takes the
 `detail_hash` from the verified line that points at the file (never from the caller): a file with other bytes, or a
 sealed line that has a detail pointer but no `detail_hash`, is refused as `swapped` ("Details changed outside orch.");
 only a legacy run reads a detail with no hash.
@@ -621,8 +619,7 @@ only a legacy run reads a detail with no hash.
 
 The MAC turns "append a line" into "run code that loads orch's key". It does not stop:
 
-- **Code run as the same user.** An agent that executes code importing orch, or that reads `human.key` (there is no agent fence), can seal anything. Records from such helpers show a plain marker ("Records from this helper can't be fully
-  checked.").
+- **Code run as the same user.** An agent that executes code importing orch, or that reads `human.key` (there is no agent fence), can seal anything.
 - **Level 2** is the key held by a separate process or OS user that seals on request. Not built.
 - **Head deleted.** The head lives in the guarded home; deleting it (or leaving one of another key id) means "no
   head": a tail truncation of the run file is then not detected (the chain still verifies from genesis).
