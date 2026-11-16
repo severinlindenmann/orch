@@ -907,8 +907,8 @@ def stack(root: Path) -> list[dict]:
         order[t["id"]] = {k: v[0] for k, v in tasks.items()}
         if t.get("status") not in needs.OPEN:
             for q in t.get("questions") or []:
-                if q.get("answer") is not None or q.get("kind") not in (None, "plain"):
-                    continue  # an add-on's own question is its business
+                if q.get("answer") is not None:
+                    continue  # every open question is a card, an add-on's own too (Factory's Start?, ORCH-63)
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
