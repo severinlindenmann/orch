@@ -120,7 +120,7 @@ const SCREENS = [
   } },
   // ORCH-67: Settings' 'Open the style guide' opens /styleguide/ in a new tab with every section, clean (the real button
   // on the real dashboard server, files only). The style guide tab is checked here; the smoke test checks Settings.
-  { name: 'dashboard-style-guide', url: '/#settings', ...DASH, wait: '[data-key="settings-style-guide"]', async setup(p, base) {
+  { name: 'dashboard-style-guide', url: '/#settings/about', ...DASH, wait: '[data-key="settings-style-guide"]', async setup(p, base) {
     const [tab] = await Promise.all([p.waitForEvent('popup', { timeout: 15000 }), p.click('[data-key="settings-style-guide"]')]);
     const problems = [];
     tab.on('pageerror', e => problems.push(`uncaught: ${e.message}`));

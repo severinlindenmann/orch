@@ -521,10 +521,15 @@ def test_ran_today_counts_the_local_day_not_the_utc_date(ws, set_tz, monkeypatch
     runs = ws / ".orch" / "addons" / "automation"
     runs.mkdir(parents=True, exist_ok=True)
     # 6 runs on the local evening of 4 Nov (UTC 4 Nov 17:00-18:15), 6 after local midnight (UTC 4 Nov 23:00-23:15 ...)
-    lines = [{"ticket": "t_qtr00001", "at": f"2026-11-04T{17 + i // 4:02d}:{i % 4 * 15:02d}:00Z", "exit": 0} for i in range(6)]
+    lines = [
+        {"ticket": "t_qtr00001", "at": f"2026-11-04T{17 + i // 4:02d}:{i % 4 * 15:02d}:00Z", "exit": 0}
+        for i in range(6)
+    ]
     lines += [{"ticket": "t_qtr00001", "at": f"2026-11-04T23:{m:02d}:00Z", "exit": 0} for m in (0, 15)]
     (runs / "runs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in lines))
     v = build(ws, datetime(2026, 11, 4, 23, 20, tzinfo=UTC))  # 00:20 on 5 Nov in Zurich
-    assert "Ran" not in v["notice"]  # only 2 runs since local midnight; the 6 of the evening before are not today
+    assert (
+        "Ran" not in v["notice"]
+    )  # only 2 runs since local midnight; the 6 of the evening before are not today
     v = build(ws, datetime(2026, 11, 4, 22, 50, tzinfo=UTC))  # 23:50 on 4 Nov in Zurich: all 6 evening runs
     assert v["notice"].endswith("Ran 6 times today")
