@@ -241,6 +241,43 @@ def test_two_loopback_servers_keep_independent_sessions(live, monkeypatch):
         srv2.server_close()
 
 
+def test_two_people_signed_in_through_the_proxy_both_keep_working_across_a_restart(live, monkeypatch):
+    """The live case of 16 Nov (ORCH-59/ORCH-39): the owner's browser and a second browser (the manager's tool,
+    another device) sign in through the same proxy, the second one many times. Every sign-in hands out the SAME
+    session, so none ends the other; a restart of the server (an update) keeps it, so no tab is told "orch
+    restarted" and nobody has to sign in again. Only a sign-in link used twice ends the session."""
+    root, port = live
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: ran.append(argv) or R())
+
+    def sign_in():
+        tok = pagelaunch.write_launch_token(root, "dashboard")
+        st, ck, body = post(port, "/session", {"token": tok}, remote())
+        assert st == 200, body
+        return remote(ck.split(";")[0], **{"X-Orch-Page": json.loads(body)["secret"]})
+
+    owner = sign_in()
+    others = [sign_in() for _ in range(5)]  # the second browser signs in again and again
+    for who in (owner, *others):
+        st, _, body = post(port, "/api/act", {"op": "answer", "args": ANS}, who)
+        assert st == 200, body
+    old = SERVERS[port]
+    old.shutdown()
+    old.server_close()
+    new = _restart(port, root)  # e.g. `orch update` from a terminal: nobody clicked, nothing was handed over
+    try:
+        for who in (owner, others[-1]):
+            st, _, body = post(port, "/api/act", {"op": "answer", "args": ANS}, who)
+            assert st == 200 and b"restarted" not in body, body
+    finally:
+        new.shutdown()
+        new.server_close()
+
+
 def test_click_with_session_and_proxy_headers_acts(live, monkeypatch):
     root, port = live
     ran = []

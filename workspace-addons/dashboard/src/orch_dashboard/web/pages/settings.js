@@ -1076,7 +1076,11 @@ async function addonAct(control) {
 async function addonReview(id, control) {
   if (snapshot) return;
   const args = {addon:id, verb:control.dataset.verb, target:control.dataset.target};
+  // reading what the add-on would allow takes a few seconds: say so on the button, so the click is seen at once
+  const label = control.textContent;
+  locks.add('addon-act'); control.disabled = true; control.setAttribute('aria-busy', 'true'); control.textContent = 'Checking\u2026';
   const asked = await act('addon.act', {...args, review:true});
+  locks.delete('addon-act'); control.disabled = false; control.removeAttribute('aria-busy'); control.textContent = label;
   const got = asked.ok && asked.state?.act_answer?.addon === id ? asked.state.act_answer.answer : null;
   const key = typeof got?.target === 'string' ? (/:([0-9a-f]{64})$/.exec(got.target) || [])[1] : null;
   if (!got?.review || typeof got.review.title !== 'string' || !key) {
