@@ -503,7 +503,24 @@
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "text": { "type": "string" },
         "checklist": { "type": "array", "items": { "type": "string" } },
+        "ticket_card": { "$ref": "#/$defs/ticket_card" },
         "allow_token": { "type": "string", "pattern": "^ora_[A-Za-z0-9_-]{22}$", "description": "From an earlier permanent allow. Without it the receiver asks its person first." }
+      }
+    },
+    "ticket_card": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ticket", "title", "status", "summary", "question", "checklist", "done", "total"],
+      "description": "Only on a delegate sent with `orch relay delegate --full` (opt-in per send): the whole ticket as the same card a group shares (chat-groups.schema.json shared_ticket) without `rev`. Never the history, other questions, files or refs. At most 4096 bytes as compact UTF-8 JSON (the sender drops checklist items from the end to fit). The receiver keeps it as data in ext.relay.shared_card; an older receiver ignores the field.",
+      "properties": {
+        "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
+        "key": { "$ref": "#/$defs/display_key" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
+        "summary": { "type": "string", "maxLength": 280 },
+        "question": { "oneOf": [ { "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["question_id", "text"], "properties": { "question_id": { "type": "string", "pattern": "^q[0-9]{1,4}$" }, "text": { "type": "string", "minLength": 1, "maxLength": 500 } } } ] },
+        "checklist": { "type": "array", "maxItems": 20, "items": { "type": "object", "additionalProperties": false, "required": ["text", "done"], "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 200 }, "done": { "type": "boolean" } } } },
+        "done": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
       }
     },
     "start": {

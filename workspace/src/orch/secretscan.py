@@ -134,7 +134,7 @@ def _leaves(doc, path: str = "", top: bool = True):
     elif isinstance(doc, dict):
         for k, v in doc.items():
             if top and k in _ALLOW_FIELDS and isinstance(v, str) and _ALLOW_TOKEN.fullmatch(v):
-                continue  # the allow token the protocol sends on purpose; anything else under any name is scanned
+                continue  # the allow token sent on purpose; all else is scanned
             if isinstance(k, str) and k:
                 yield f"{path}.field name" if path else "field name", k
             yield from _leaves(v, f"{path}.{k}" if path else str(k), False)
