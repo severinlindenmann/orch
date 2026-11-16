@@ -138,11 +138,15 @@ function renderModels(view) {
     bars.append(bar);
   });
   for (const t of view.tickets) {
-    const item = node('div', undefined, 'row between');
+    // one line per ticket: the title is cut with an ellipsis, the tokens stay right-aligned on the same row
+    const item = node('div', undefined, 'list-row');
     item.setAttribute('role', 'listitem');
-    const name = node('div', undefined, 'truncate');
+    const name = node('div', undefined, 'grow');
     name.append(node('strong', t.key), node('div', t.title, 'meta truncate'));
-    item.append(name, node('span', t.parts.map(p => `${p.label} ${fmt(p.tokens)}`).join(' · ') || fmt(t.tokens), 'meta'));
+    const tokens = node('div', undefined, 'numeric');  // one short line per model, right-aligned
+    const parts = t.parts.length ? t.parts : [{ label: '', tokens: t.tokens }];
+    tokens.append(...parts.map(p => node('div', `${p.label} ${fmt(p.tokens)}`.trim(), 'meta truncate')));
+    item.append(name, tokens);
     rows.append(item);
   }
 }
