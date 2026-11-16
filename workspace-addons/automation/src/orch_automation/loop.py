@@ -77,7 +77,7 @@ def script_of(t: dict | None) -> str | None:
 
 
 def start_script(root: Path, t: dict, name: str) -> dict:
-    """{"result": "started"|"pending"|"failed", "reason"?}: the same gates as an agent start (sync approval)."""
+    """{"result": "started"|"pending"|"failed", "reason"?}: the same checks as an agent start (sync allow)."""
     refused = orchcli.sync_refusal(root, t["id"])
     if refused:
         return {"result": "failed", "reason": refused}

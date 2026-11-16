@@ -13,9 +13,9 @@ from orch_automation.runner import load_state
 
 
 @pytest.fixture(autouse=True)
-def approvals_here(tmp_path, monkeypatch):
-    """The per-computer approvals file, in this test's own folder (never the orch home)."""
-    monkeypatch.setattr(scripts, "_approvals_path", lambda: tmp_path / "approvals.json")
+def allowed_list_here(tmp_path, monkeypatch):
+    """The per-computer list of allowed scripts, in this test's own folder (never the orch home)."""
+    monkeypatch.setattr(scripts, "_allowed_path", lambda: tmp_path / "allowed.json")
 
 
 @pytest.fixture(autouse=True)
@@ -180,16 +180,16 @@ def test_a_script_not_allowed_here_runs_nothing_and_asks(ws, agent):
 
 
 def test_one_run_per_ticket_at_a_time(ws, person):
-    gate = ws / "gate"
+    go_on = ws / "go_on"
     slow = ws / "slow.py"
-    slow.write_text(f"import os, time\nwhile not os.path.exists({str(gate)!r}):\n    time.sleep(0.05)\n")
+    slow.write_text(f"import os, time\nwhile not os.path.exists({str(go_on)!r}):\n    time.sleep(0.05)\n")
     scripts.add(ws, "slow", [sys.executable, str(slow)])
     repeat_ticket(ws, "t_scr00004", "slow")
     s = Scheduler(ws)
     s.tick(T(8, 0))
     assert wait_for(lambda: scripts.busy(ws, "t_scr00004"))
     s.tick(T(8, 5))  # due again while the first still runs: nothing new
-    gate.write_text("")
+    go_on.write_text("")
     assert wait_for(lambda: not scripts.busy(ws, "t_scr00004") and history_rows(ws))
     time.sleep(0.5)
     assert len(history_rows(ws)) == 1

@@ -7,8 +7,8 @@ without a shell, in the workspace folder, in the background; its output goes to 
 and its exit code to runs.jsonl (the dashboard's run history). One run per ticket at a time.
 
 The trust rule of agent commands (contracts/local-files.md) holds here too: a script runs only if a person approved
-exactly that entry on this computer. Approvals are hashes (workspace path, name, command) in the orch home
-(`automation-script-approvals.json`), never in the workspace. `script add` by a person approves what they typed; an
+exactly that entry on this computer. The allowed entries are hashes (workspace path, name, command) in the orch home
+(`automation-script-allowed.json`), never in the workspace. `script add` by a person approves what they typed; an
 agent's entry waits until a person runs `script allow <name> --key <key>`. Any change asks again; any error = not approved.
 """
 
@@ -82,13 +82,13 @@ def defined(root: Path, name: object) -> bool:
     return isinstance(name, str) and name in load(root)
 
 
-# ---- approvals (orch home, per computer)
+# ---- allowed scripts (orch home, per computer)
 
 
-def _approvals_path() -> Path:
+def _allowed_path() -> Path:
     from orch import addons
 
-    return addons.home() / "automation-script-approvals.json"
+    return addons.home() / "automation-script-allowed.json"
 
 
 def key(root: Path, name: str, argv: list[str]) -> str:
@@ -97,14 +97,14 @@ def key(root: Path, name: str, argv: list[str]) -> str:
 
 def approved(root: Path, name: str, argv: list[str]) -> bool:
     try:
-        data = json.loads(_approvals_path().read_text(encoding="utf-8"))
+        data = json.loads(_allowed_path().read_text(encoding="utf-8"))
         return isinstance(data, list) and key(root, name, argv) in data
     except Exception:  # noqa: BLE001 - fail closed on anything
         return False
 
 
 def _approve(root: Path, name: str, argv: list[str]) -> None:
-    p = _approvals_path()
+    p = _allowed_path()
     try:
         data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else []
     except (OSError, ValueError):

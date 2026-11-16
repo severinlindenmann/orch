@@ -122,13 +122,13 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
 - **Automation scripts** (`[automation.scripts.<name>] command = ["prog", "arg", ...]`, automation add-on): a repeat
   that names a script (`ext.automation.script`, a name, never a command) runs that argv without a shell instead of an
   agent. Same trust rule as agent commands: it runs only if a person approved exactly that entry (workspace path, name,
-  argv) on this machine; approvals are hashes in the orch home (`automation-script-approvals.json`). `orch automation
+  argv) on this machine; the allowed entries are hashes in the orch home (`automation-script-allowed.json`). `orch automation
   script add` by a person approves what was typed; an agent's entry waits for `orch automation script allow <name> --key <key>`
   (a person only). An argv that cannot be shown in full (over 500 characters, control or odd characters) cannot be approved.
 - Shape: `agent-adapter.schema.json` `$defs/user_config`. Only `adapter`, `command`, `interactive` and `prompt`; nothing else.
 - `orch init` asks once which agent works here (found adapters + Other). Add-ons never ask.
 - **Invariant (9 Nov, git step 1): a settings-supplied agent command (`[agents.*]` with `command` or `interactive`) runs only if
-  this person approved exactly that entry on this machine.** Approvals live in the orch home (`agent-approvals.json`: a hash of
+  this person approved exactly that entry on this machine.** Approvals live in the orch home (`agent-allowed.json`: a hash of
   workspace path, name, adapter, command, interactive, prompt), never in the workspace, and do not depend on git, links or where the
   file came from. Anything else is not run (fail closed, also on any read error); a changed entry asks again. A built-in agent
   needs no approval; `[workspace] agent` naming an unapproved custom agent falls back to the person's default.
