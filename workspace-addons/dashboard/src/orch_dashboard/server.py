@@ -18,7 +18,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
 from . import actions, copychanges, diagapi, reffiles, selfupdate, ticketfiles
-from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
+from .data import (
+    forget_static,
+    load_addons,
+    load_chat_day,
+    load_chat_days,
+    load_links,
+    load_services,
+    load_state,
+)
 from .events import Revisions
 from .state_cache import StateCache
 from .views import ViewPuller
@@ -33,6 +41,7 @@ MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = (
     140 * 1024 * 1024
 )  # a new ticket with files: at most 100 MB of files (newticket.js) as base64, plus the text
+LEAN_OPS = ("chat.send_ws", "chat.sync_ws")
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -163,6 +172,19 @@ def _services_stamp():
 STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
 
 
+TYPING_OFF = (
+    "Typing into the helper's screen is off. "
+    "Turn on 'Let me type into the helper's screen' in Settings \u2192 Add-ons, on the page of the add-on that shows this screen."
+)
+
+
+def _typing_allowed(root) -> bool:
+    """The session_typing setting, a plain one (off unless the workspace turned it on)."""
+    from orch import config
+
+    return bool(config.focus_session_typing(root))  # an unreadable config file counts as off (the default)
+
+
 def _link_msg(session, name: str) -> bytes:
     from orch.pageproof import REVOKED_MSG
 
@@ -172,7 +194,7 @@ def _link_msg(session, name: str) -> bytes:
 
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
-RESTARTING_OPS = ("addon.set",)
+RESTARTING_OPS = ("addon.set", "addon.uninstall")
 REOPEN_EVERY = 30  # seconds between two "open the dashboard again" windows
 
 
@@ -430,6 +452,7 @@ class Handler(BaseHTTPRequestHandler):
 
             tid = parse_qs(self.path.partition("?")[2]).get("ticket", [""])[0]
             snap = termsession.snapshot(self.root, self.orch_bin, tid)
+            snap["typing_allowed"] = _typing_allowed(self.root)
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
@@ -451,6 +474,8 @@ class Handler(BaseHTTPRequestHandler):
             fresh = "fresh=1" in query.split(
                 "&"
             )  # the question card: the ticket as it is now, not a cached copy
+            if fresh:
+                forget_static()  # the add-on list too: a catalogue opened after a change made in the terminal
             state, age = self.server.state_cache.fresh() if fresh else self.server.state_cache.get()
             return self._send(
                 200, json.dumps(state).encode(), "application/json", {"X-State-Age-Ms": str(int(age * 1000))}
@@ -566,7 +591,6 @@ class Handler(BaseHTTPRequestHandler):
             "people.js",
             "look.js",
             "look-icons.js",
-            "look.css",
             "look-colors.css",
             "switcher.js",
             "blocks.js",
@@ -689,6 +713,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        if not _typing_allowed(self.root):  # the setting is checked here, not only hidden in the page
+            return self._send(403, TYPING_OFF.encode(), "text/plain; charset=utf-8")
         from . import termsession
 
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
@@ -865,8 +891,13 @@ class Handler(BaseHTTPRequestHandler):
         if code != 200:
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
-        state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
-        self.server.state_cache.invalidate(state)  # before the reply's own keys are added
+        if body.get("op") in LEAN_OPS:
+            # A workspace text changes no ticket: answer with the cached state at once (a full rebuild took 10 s on a
+            # big workspace and kept "Sending…" on screen), never as the new cache.
+            state = dict(self.server.state_cache.get()[0])
+        else:
+            state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+            self.server.state_cache.invalidate(state)  # before the reply's own keys are added
         if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
             state["chat_dm_result"] = extra
         if body.get("op") == "config.agent.test" and isinstance(

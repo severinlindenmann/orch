@@ -1,0 +1,1 @@
+[ { "v": 1, "at": "2026-11-05T09:12:08Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "tool.end", "text": "Done", "data": { "id": "toolu_01U1QBwX", "ok": true, "output": ["line one"], "source": "adapter" } } ]

@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 REGISTRY: dict[str, dict] = {}
-V2_NEEDS_SERVERS = {"V2-P6", "V2-M1"}  # v2 scenarios that start the local relay/publish servers
+V2_NEEDS_SERVERS = {"V2-P6", "V2-M1", "A22", "A23"}  # v2 scenarios that start the local relay/publish servers
 
 
 def scenario(sid: str, slow: bool = False, local_only: bool = False):
@@ -243,3 +243,10 @@ def kill_group(p: subprocess.Popen) -> None:
 
 def strip_ansi(s: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", s)
+
+
+def tool_python(bin_dir: Path) -> str:
+    shim = (bin_dir / "orch").resolve()
+    first = shim.read_text(errors="replace").splitlines()[0]
+    check(first.startswith("#!"), f"orch shim has no shebang: {first[:80]!r}")
+    return first[2:].strip().split()[0]

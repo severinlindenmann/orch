@@ -375,7 +375,7 @@ def cut_session(root: Path, tid: str, now=None) -> bool:
 # ---------------------------------------------------------------- what the person writes in the dashboard
 
 
-def say(root: Path, text: str, by: str | None = None, new: bool = False, proven: bool = False) -> dict:
+def say(root: Path, text: str, by: str | None = None, new: bool = False) -> dict:
     """The person writes in Chat from the dashboard: kept in the day file and the General history as theirs
     (by "you", via dashboard), queued as human input so the automation host starts the helper, and sent to
     the paired phones (only when a relay is connected: otherwise it stays local)."""
@@ -385,14 +385,13 @@ def say(root: Path, text: str, by: str | None = None, new: bool = False, proven:
     who = tickets.current_actor(by)
     if not who.startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
-    runs.require_signing(root)  # before ANY line is written: a refusal must leave nothing that looks saved
     gid = tickets.ensure_general(root, who)
     mid = relay.new_id()
     entry = record(root, mid, "you", tickets.PERSON_VIA, text, convo_start=new)
     tickets.apply_op(
         root, gid, lambda t: tickets.add_history(t, who, text, tickets.PERSON_VIA, chat=True), by=who
     )
-    runs.pending_add(root, gid, who, "message", text, tickets.PERSON_VIA, "p_" + mid[2:], proven=proven)
+    runs.pending_add(root, gid, who, "message", text, tickets.PERSON_VIA, "p_" + mid[2:])
     sent = None
     with contextlib.suppress(Refused, OSError):
         sent = relay.send_text(

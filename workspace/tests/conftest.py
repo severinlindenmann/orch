@@ -281,16 +281,10 @@ REAL_HOME_MODULES = (
     "test_install_kind",
     "test_winacl",
 )  # they test the home pairing itself
-REAL_PROOF_MODULES = (
-    "test_human_proof",
-    "test_humanproof",
-    "test_verdict_mac",
-    "test_cli_secret",
-    "test_insights_settings",
-)
+REAL_PROOF_MODULES = ("test_humanproof",)  # the guarded home itself
 
 
-def ensure_signing(root):
+def ensure_keys(root):
     """TEST HELPER: the workspace's local id and human key exist (a real proof needs both anyway)."""
     from orch import humanproof
     from orch.errors import Refused
@@ -305,12 +299,10 @@ def ensure_signing(root):
 
 
 def sign_done(root, tid, by="human:tester"):
-    """TEST HELPER: a ticket becomes Done the proven way (a person's verdict, signed and recorded in the
-    ledger). Fixtures never write "done" into a ticket file or call _write with it: that is Review."""
+    """TEST HELPER: a ticket becomes Done through a person's own Done (a plain status change)."""
     from orch import tickets
 
-    ensure_signing(root)
-    return tickets.set_status(root, tid, "done", by, proven=True)
+    return tickets.set_status(root, tid, "done", by)
 
 
 @pytest.fixture(autouse=True)
@@ -323,12 +315,13 @@ def _legacy_trust(request, monkeypatch):
     from orch import humanproof, tickets
     from orch.errors import Refused
 
-    def legacy(root, args, op, target, **kw):
-        if tickets.agent_tool():
-            return "agent:" + str(tickets.agent_tool())
-        who = tickets.current_actor(getattr(args, "by", None))
-        if who.startswith("human:"):
-            ensure_signing(
+    real_by = tickets.acting_by
+
+    def legacy(args):
+        who = real_by(args)
+        root = getattr(args, "orch_root", None)
+        if who.startswith("human:") and root is not None:
+            ensure_keys(
                 root
             )  # a person's Done is signed: the key and the local id exist, as after a real proof
         return who
@@ -344,29 +337,9 @@ def _legacy_trust(request, monkeypatch):
         os.chmod(home, 0o700)
         return home
 
-    monkeypatch.setattr(humanproof, "person_by", legacy)
-    monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)
+    monkeypatch.setattr(tickets, "acting_by", legacy)
     if not request.module.__name__.split(".")[-1].startswith(REAL_HOME_MODULES):
         monkeypatch.setattr(humanproof, "guarded_home", test_home)
-
-    def trusting(fn, proven_pos):
-        """TEST-ONLY, same trust as `legacy` above: a direct Python call as `human:` counts as the person's
-        proven verdict (key + ledger are real, only the proof ceremony is skipped)."""
-        real = fn
-
-        def call(*a, **kw):
-            ensure_signing(a[0])  # an agent finish under the grant is signed too: key + id exist after setup
-            if len(a) <= proven_pos and "proven" not in kw:
-                by = a[proven_pos - 1] if len(a) >= proven_pos else kw.get("by", "")
-                if isinstance(by, str) and by.startswith("human:"):
-                    kw["proven"] = True
-            return real(*a, **kw)
-
-        return call
-
-    monkeypatch.setattr(tickets, "set_status", trusting(tickets.set_status, 4))
-    monkeypatch.setattr(tickets, "patch", trusting(tickets.patch, 5))
-    monkeypatch.setattr(tickets, "accept_review", trusting(tickets.accept_review, 3))
 
 
 _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
@@ -385,26 +358,17 @@ def stray_tmux(under: str) -> list[str]:
 
 
 def seed_profiles(root, profiles):
-    """Test setup only: like a person's `profile set` of every new or body-changed profile (the production
-    write_profiles signs only the names it is told to)."""
+    """Test setup only, like `profile set`: the kind from the real file; "any command" for others."""
     import os
 
-    from orch import humanproof as hp
     from orch import keystore, secretrun
 
-    for p in profiles.values():  # like `profile set`: the kind from the real file; "any command" for others
+    for p in profiles.values():
         if p.get("run") and "kind" not in p and os.path.isabs(p["run"][0]):
             p["kind"] = secretrun.program_kind(os.path.realpath(p["run"][0]))
             if p["kind"] == "other" or p.get("real_home"):
                 p["any_command"] = True
-    try:
-        old = keystore.read_profiles(root)
-    except Exception:  # noqa: BLE001
-        old = {}
-    changed = frozenset(
-        n for n, p in profiles.items() if n not in old or hp.profile_body(old[n]) != hp.profile_body(p)
-    )
-    keystore.write_profiles(root, profiles, sign=changed)
+    keystore.write_profiles(root, profiles)
 
 
 # ---------------------------------------------------------------------------------------------- record MAC

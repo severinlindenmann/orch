@@ -16,7 +16,10 @@ struct QuestionCard: View {
         if let q = item.question {
             VStack(alignment: .leading, spacing: 12) {
                 if item.answer != nil {
-                    Text("Answered").themeFont(13).foregroundStyle(Theme.muted)
+                    HStack(spacing: 4) {
+                        Text("Answered")
+                        if let at = model.answerTime(for: q.id) { Text(at.formatted(date: .omitted, time: .shortened)) }
+                    }.themeFont(13).foregroundStyle(Theme.muted)
                 } else {
                     HStack(spacing: 6) {
                         if q.isAllow {
@@ -192,8 +195,10 @@ struct QuestionCard: View {
                 }
             }
             if model.answeredElsewhere.contains(q.id) {
-                Text("Answered on your computer")
-                    .themeFont(13).foregroundStyle(Theme.muted).frame(minHeight: 44, alignment: .leading)
+                HStack(spacing: 4) {
+                    Text("Answered on your computer")
+                    if let at = model.answeredElsewhereAt[q.id] { Text(at.formatted(date: .omitted, time: .shortened)) }
+                }.themeFont(13).foregroundStyle(Theme.muted).frame(minHeight: 44, alignment: .leading)
             }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("answered-\(q.id)")
             .accessibilityAction(named: showOther ? "Hide other options" : "Show other options") { if hasOptions { showOther.toggle() } }

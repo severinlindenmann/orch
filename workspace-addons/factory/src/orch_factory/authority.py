@@ -155,7 +155,7 @@ def entries(store, ticket, journal=None):
     journal = store.journal_read() if journal is None else journal
     rows = [r for r in journal if r["order"] == ticket["id"]]
     superseded = {r.get("q") for r in rows if r["type"] == "superseded"}
-    asked = {r["q"]: r for r in rows if r["type"] == "asked"}
+    asked = {r["q"]: r for r in rows if r["type"] == "asked" and "q" in r}  # an ask row has no q (ask.py)
     present = {q["id"] for q in ticket.get("questions", [])}
     for r in rows:
         if r["type"] != "superseded":

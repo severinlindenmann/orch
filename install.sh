@@ -1,6 +1,7 @@
 #!/bin/sh
 # orch installer (macOS / Linux): installs uv if missing, then orch.
 # ORCH_REPO / ORCH_REF override the source (default: GitHub main).
+# To leave: `orch uninstall` in a project (your tickets stay), then `uv tool uninstall orch-workspace`.
 # ORCH_INSTALL_KIND=test|dev (given by the person running this installer) marks a test or dev install; default normal.
 set -eu
 ORIG_PATH="$PATH"

@@ -602,14 +602,14 @@ def test_evidence_files_go_through_the_same_secret_gate(proj, run, new_ticket, c
 
 
 def test_no_upload_without_the_gate(proj, run, new_ticket, conn, monkeypatch):  # noqa: F811
-    """Every attachment kind goes through _gate: with the gate closed nothing reaches the relay."""
+    """Every attachment kind goes through _scan: with the check failing nothing reaches the relay."""
     tid = new_ticket("Gate closed")
     artifact(proj, tid, "a.txt", b"fine text")
     run("check", "add", tid, "Attach")
     src = proj / "p.txt"
     src.write_bytes(b"fine proof")
     assert run("check", "done", tid, "c1", "--file", str(src), "--role", "result")[0] == 0
-    monkeypatch.setattr(phone_view, "_gate", lambda *a, **k: False)
+    monkeypatch.setattr(phone_view, "_scan", lambda *a, **k: False)
     ticket = tickets.load(proj, tid)
     ticket["description"] = "See artifacts/a.txt"
     assert phone_view.attachments(proj, ticket, phone_view.load_state(proj)) == []
@@ -647,9 +647,9 @@ def test_a_file_without_a_stored_value_still_goes(proj, run, new_ticket, conn): 
 
 def test_an_unbuildable_value_hider_fails_closed(proj, new_ticket, monkeypatch):
     tid = new_ticket("No hider")
-    assert phone_view._gate(proj, tid, b"nothing secret here\n", "notes.txt", None) is True
+    assert phone_view._scan(proj, tid, b"nothing secret here\n", "notes.txt", None) is True
     monkeypatch.setattr(phone_view.phone_results, "value_hider", lambda root: None)
-    assert phone_view._gate(proj, tid, b"nothing secret here\n", "notes.txt", None) is False
+    assert phone_view._scan(proj, tid, b"nothing secret here\n", "notes.txt", None) is False
 
 
 @pytest.mark.parametrize("codec", ["utf-32", "utf-16", "utf-8"])
@@ -659,8 +659,8 @@ def test_the_needle_check_reads_the_file_the_way_the_scan_does(proj, new_ticket,
     keystore.add(proj, "db-cred", "token", value)
     tid = new_ticket("Needle codec")
     body = f"the new one is {value}, rotate it\n".encode(codec)
-    assert phone_view._gate(proj, tid, body, "notes.txt", None) is False
-    assert phone_view._gate(proj, tid, "nothing here\n".encode(codec), "notes.txt", None) is True
+    assert phone_view._scan(proj, tid, body, "notes.txt", None) is False
+    assert phone_view._scan(proj, tid, "nothing here\n".encode(codec), "notes.txt", None) is True
 
 
 @pytest.mark.parametrize(
@@ -675,7 +675,7 @@ def test_the_needle_check_sees_obfuscated_forms(proj, new_ticket, make):
     value = "Xk93-pq7Lm-4521-zQ"
     keystore.add(proj, "db-cred", "token", value)
     tid = new_ticket("Needle forms")
-    assert phone_view._gate(proj, tid, make(f"the value is {value} ok"), "notes.txt", None) is False
+    assert phone_view._scan(proj, tid, make(f"the value is {value} ok"), "notes.txt", None) is False
 
 
 def test_a_failing_value_hider_refuses_only_that_file(proj, new_ticket, monkeypatch):
@@ -685,4 +685,4 @@ def test_a_failing_value_hider_refuses_only_that_file(proj, new_ticket, monkeypa
         raise OSError("keystore unreadable")
 
     monkeypatch.setattr(phone_view.phone_results, "value_hider", boom)
-    assert phone_view._gate(proj, tid, b"nothing secret\n", "notes.txt", None) is False
+    assert phone_view._scan(proj, tid, b"nothing secret\n", "notes.txt", None) is False

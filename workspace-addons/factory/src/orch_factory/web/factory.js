@@ -76,13 +76,13 @@
   const embedded = () => { try { return window.top !== window; } catch (_) { return true; } };
   // Inside the dashboard a decision asks it to open its own question card for this order's open question (the page itself
   // never answers). Outside the dashboard, or with nothing open, it stays a link to the ticket.
-  function decide(order, label = 'Answer', primary = true) {
-    if (!embedded() || !order.open || !validId(order.id) || !validQuestion(order.open.q)) return ticket(order.id, label, primary);
+  function decide(order, label = 'Answer', primary = true, question = order.open?.q) {
+    if (!embedded() || !question || !validId(order.id) || !validQuestion(question)) return ticket(order.id, label, primary);
     const b = node('button', label, primary ? 'btn primary f-btn' : 'btn outline sm f-btn');
     b.type = 'button';
     b.addEventListener('click', () => {
       b.disabled = true;
-      window.parent.postMessage({type: 'orch.question', ticket: order.id, question: order.open.q}, location.origin);
+      window.parent.postMessage({type: 'orch.question', ticket: order.id, question}, location.origin);
       setTimeout(() => { b.disabled = false; }, 1500);
     });
     return b;
@@ -111,6 +111,31 @@
     const h1 = node('h1', title); h1.tabIndex = -1;
     return group('f-heading', group('stack', h1, meta(subtitle)), group('actions', ...actions));
   }
+  // The questions your helper asked on the order (the draft's open questions): one card each, its options and its
+  // suggestion shown, the answer given in the dashboard's own question card (the page never answers).
+  function questionCards(order) {
+    const rows = array(order.questions).filter(x => validQuestion(x?.q));
+    if (!rows.length) return [];
+    return rows.map(x => {
+      const c = card(x.text || 'A question for you');
+      if (array(x.options).length) c.append(meta('Options: ' + array(x.options).join(' · ')));
+      if (x.recommended) c.append(meta('Your agent suggests: ' + x.recommended));
+      c.append(tail(decide(order, 'Answer', true, x.q)));
+      c.classList.add('f-attention'); return c;
+    });
+  }
+  // The crew's results that wait for your Looks good: one card, one link per result (each opens its own ticket, where
+  // the check is your own click). Nothing is checked from here.
+  const results = order => array(order.results).filter(r => validId(r?.ticket));
+  function resultsCard(order, withOrder) {
+    const rows = results(order);
+    const c = card(order.title, node('h3', plural(rows.length, 'result', 'results') + ' built, waiting for your Looks good'),
+      group('stack', ...rows.map((r, i) => link((rows.length > 1 ? 'Look at ' : 'Look at the result: ') + text(r.title), '/#ticket/' + r.ticket, i === 0))),
+      ...(withOrder ? [tail(orderLink(order, 'Review order'))] : []));
+    c.classList.add('f-attention'); return c;
+  }
+  // The run goes on by itself; until its next step has started, say so instead of showing nothing.
+  const startingNote = order => order.starting ? [meta('Starting the ' + stageName(order, order.starting) + ' stage…')] : [];
   function answer(order) {
     return group('stack', group('actions', decide(order)), meta(embedded() && order.open ? 'Your answer opens in a card here, where orch confirms it\'s you.' : "You answer on the order's ticket, where orch confirms it's you."));
   }
@@ -193,17 +218,20 @@
       if (d.delivered === true || d.queued === true) asked.get(d.id)({ticket: d.ticket, delivered: d.delivered === true});
       else asked.get(d.id)({error: 'orch did not confirm that your message was saved.'});
     }
-    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+    else if (d.type === 'orch.ask.done' && ['delivered', 'queued', 'partial'].includes(d.state)) asked.get(d.id)({state: d.state, said: typeof d.said === 'string' ? d.said.slice(0, 300) : ''});
+    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
-  function askDashboard(message) {
+  function askDashboard(message, wait = 30000) {
     return new Promise(resolve => {
       const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
-      const timer = setTimeout(() => finish({error: ''}), 30000);  // an older dashboard never answers
+      const timer = setTimeout(() => finish({error: ''}), wait);  // an older dashboard never answers
       function finish(result) { clearTimeout(timer); asked.delete(id); resolve(result); }
       asked.set(id, finish);
       window.parent.postMessage({...message, id}, location.origin);
     });
   }
+  // Ask another workspace at a stop (816 A): one click; the dashboard runs the add-on's ask act as the person.
+  const askWorkspace = target => askDashboard({type: 'orch.ask', target}, 120000);
   const fileIdea = textValue => askDashboard({type: 'orch.idea', text: textValue});
   // Plan the run / Ask for changes on a draft: the dashboard sends the words to the agent on the order as YOUR message
   // (its own proven "send to the agent" click, the same as typing on the ticket) and starts the agent when none works.
@@ -258,13 +286,17 @@
       go.disabled = true; field.readOnly = true; fallback.hidden = true; say('Saving your idea…');
       const result = await fileIdea(idea);
       field.readOnly = false;
-      if (result.order) { field.value = ''; say(''); location.hash = '#/order/' + result.order + '/draft/1'; return; }
+      if (result.order) { field.value = ''; say(''); location.hash = '#/order/' + result.order + '/draft'; return; }
       go.disabled = false;
       say((result.error ? result.error + ' ' : "That didn't work. ") + 'Your idea is still here.');
       fallback.hidden = false;
     });
     el.append(field, group('row', go, fallback), status); el.classList.add('f-idea'); return el;
   }
+  // One idea box for the whole page: it is on screen before the order list has been read, and what you type in it
+  // stays when the list arrives.
+  let idea = null;
+  const theIdea = () => idea || (idea = ideaBox());
   function askRow(auto) {
     const asks = !auto?.on, row = group('setting-row f-ask');
     const input = node('input', null, 'switch'); input.type = 'checkbox'; input.checked = asks; input.setAttribute('aria-label', 'Ask me at every stop');
@@ -278,12 +310,12 @@
   }
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
-    const needing = orders.filter(o => o.open || draftWaiting(o));
+    const needing = orders.filter(o => o.open || draftWaiting(o) || results(o).length);
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
     view.append(heading('Factory', needing.length
       ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
       : 'Nothing in Factory waits for you right now. Your ideas and planned runs are below.'));
-    view.append(ideaBox(), askRow(auto));
+    view.append(theIdea(), askRow(auto));
     if (auto?.on) {
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
       const autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
@@ -300,7 +332,7 @@
     };
     section(primary, 'Drafts waiting for you', orders.filter(draftWaiting), o => {
       const c = card(o.title, meta('Read the draft, then plan the run or ask for changes.'),
-        tail(orderLink(o, 'Read draft', validVersion(o.draft_v) ? '/draft/' + o.draft_v : '')), draftActions(o, render));
+        tail(orderLink(o, 'Read draft', '/draft')), draftActions(o, render));
       c.classList.add('f-attention'); return c;
     }, 'No drafts waiting for you.');
     section(primary, 'Proposals waiting for Start', orders.filter(o => o.phase === 'proposed'), o => {
@@ -313,9 +345,10 @@
         tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
       c.classList.add('f-attention'); return c;
     }, 'No stops waiting for you.');
+    section(primary, 'Results to check', orders.filter(o => results(o).length), o => resultsCard(o, true), 'No results waiting for you.');
     section(primary, 'Running', orders.filter(o => o.phase === 'started'), o => o.kind === 'autopilot'
       ? card(o.title, meta('Autopilot order'), p('Routine stops answered by your agent · Ship still asks you'), tail(link('What it decided', '#/autopilot')))
-      : card(o.title, stages(o), budget(o), meta('ETA ' + when(o.eta)), tail(orderLink(o))), 'No running orders.');
+      : card(o.title, stages(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('ETA ' + when(o.eta))] : []), tail(orderLink(o))), 'No running orders.');
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     section(secondary, 'Shipped', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))), 'No shipped work recorded.');
     secondary.append(meta('Shipped orders are listed from the workspace record; shipment dates are not available yet.'));
@@ -374,6 +407,12 @@
         p('ETA ' + whenRange(time.eta_from, time.eta_to)), meta('Budget preset · ' + capital(b.preset)),
         meta('Active time cap: ' + duration(b.active_min_cap) + '. API spend is a target, not a cap.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
       card('Crew + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
+    for (const h of array(order.handover)) {
+      const tiles = group('actions', ...array(h.files).map(f => badge(f.split('/').pop())));
+      view.append(card(text(h.name) + ' does this', p(text(h.name) + ' makes ' + text(h.title) + (h.minutes ? ' · about ' + h.minutes + ' min' : '')), meta(h.why),
+        p('They get: this brief' + (array(h.files).length ? ' and ' + plural(array(h.files).length, 'file', 'files') + ':' : '')), ...(array(h.files).length ? [tiles] : []),
+        meta(text(h.name) + '’s time is not counted here. Everything else stays here, and ' + text(h.name) + ' allows it on their side.')));
+    }
     view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What Ship does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
     const assumptions = card('Assumptions');
     for (const a of array(data.assumptions)) assumptions.append(group('row', ...(a.uncertain ? [badge('Unsure')] : []), p(a.text)));
@@ -387,6 +426,20 @@
       node('h3','Handovers'), list(array(data.handovers).map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why)))));
     view.append(details);
   }
+  // A task handed to another workspace that nobody has picked up for a day: one click asks your helper to propose "Do it here instead".
+  const DAY = 24 * 3600 * 1000, handoverOpen = ['waiting_start', 'waiting_allow', 'queued'];
+  const waitedADay = w => handoverOpen.includes(w.state) && w.since && Date.now() - Date.parse(w.since) > DAY;
+  function doItHere(order, c) {
+    const button = node('button', 'Ask Helper to do it here', 'btn outline sm'); button.type = 'button';
+    const status = node('span', null, 'meta'); status.setAttribute('role', 'status');
+    button.addEventListener('click', async () => {
+      button.disabled = true; status.textContent = ' Sending…';
+      const result = await toAgent(order.id, 'Propose a change "Do it here instead" for the task "' + text(c.title) + '": ' + text(c.with.name) + ' has not finished it after a day.');
+      status.textContent = result.ticket ? ' Sent. Your helper proposes the change; you decide.' : ' That didn’t work. Nothing was sent.';
+      if (!result.ticket) button.disabled = false;
+    });
+    return group('actions', button, status);
+  }
   function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'No tiny changes recorded.')); }
   const statusWord = {open: 'open', todo: 'not started', doing: 'working', done: 'done', blocked: 'blocked'};
   function orderPage(order) {
@@ -396,14 +449,15 @@
       view.append(card('Autopilot order', p('Routine stops answered by your agent · Ship still asks you'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
     }
-    const lineCard = card('The line', stages(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
-    const main = group('stack', lineCard, card('Time + budget', budget(order), meta('Due ' + when(order.due))));
+    const lineCard = card('The line', stages(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
+    const main = group('stack', lineCard, card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
     const crew = card('Crew now');
     for (const c of array(order.crew)) {
-      const label = [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
+      const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
       const row = group('f-record f-crew');
       if (validId(c.ticket)) { const a = link(label + ' ↗', '/#ticket/' + c.ticket); a.className = 'f-crewlink'; a.title = c.title || ''; row.append(a); } else row.append(node('span', label));
       row.append(meta(c.title));
+      if (c.with && waitedADay(c.with) && embedded() && validId(order.id)) row.append(doItHere(order, c));
       crew.append(row);
     }
     if (!array(order.crew).length) crew.append(meta('No crew assigned yet.'));
@@ -415,7 +469,7 @@
     if (order.phase === 'draft') {  // the same rule as Factory home and the draft page (draftWaiting)
       const c = draftWaiting(order)
         ? card('Your draft is ready', meta('Read the draft, then plan the run or ask for changes.'),
-          tail(orderLink(order, 'Read draft', validVersion(order.draft_v) ? '/draft/' + order.draft_v : '')), draftActions(order, render))
+          tail(orderLink(order, 'Read draft', '/draft')), draftActions(order, render))
         : card('Draft', draftNote(order));
       if (draftWaiting(order)) c.classList.add('f-attention');
       aside.append(c);
@@ -424,6 +478,8 @@
       const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
     }
+    if (results(order).length) aside.append(resultsCard(order, false));
+    aside.append(...questionCards(order));
     if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
     const changes = card('Changes');
     for (const c of array(order.changes)) changes.append(group('f-record', badge(capital(c.state)), node('h3', c.title), meta('+' + text(c.adds_min) + ' min'), ...(c.state === 'open' ? [group('actions', decide(order))] : [])));
@@ -446,14 +502,94 @@
     if (validId(order.id) && imageName(value)) {
       const img = node('img'); img.alt = label + ' review image'; img.src = prefix + '/api/order/' + order.id + '/file/' + value.split('/').map(encodeURIComponent).join('/');
       img.addEventListener('error', () => img.replaceWith(meta(label + ' image unavailable.')), {once:true}); figure.append(img);
-    } else figure.append(p(value || 'No image supplied.'));
+    } else figure.append(meta(value ? 'Picture unavailable.' : 'No picture for this one yet.'));
     return figure;
   }
-  function stopPage(order, round) {
+  const picturesOf = item => [item.before, item.after].filter(imageName);
+  const askState = {queued: 'Queued', delivered: 'Delivered', answered: 'Answered', failed: 'Failed', partial: 'Partly sent', closed: 'Closed'};
+  const askPill = state => { const el = node('span', null, 'pill ' + ({answered: 'done', failed: 'needs', partial: 'needs', queued: 'todo'}[state] || 'working')); el.append(node('span', askState[state] || state)); return el; };
+  // "Maya says" / "Design's helper says": text from another workspace is data, shown as plain text and cut to a few lines.
+  function replyBlock(a, r, retry) {
+    const row = group('list-row', askPill('answered'), group('grow', node('strong', r.by === 'helper' ? a.ws_name + "'s helper says: " : a.ws_name + ' says: '), document.createTextNode(text(r.text)), ...(r.more ? [meta(' …more on the ask ticket')] : [])), meta(r.at ? when(r.at) : ''));
+    const add = node('button', 'Add to my comments', 'btn ghost sm'); add.type = 'button';
+    add.addEventListener('click', async () => {
+      const quoted = a.ws_name + ' wrote: "' + text(r.text).replace(/\s+/g, ' ') + '"';
+      try { await navigator.clipboard.writeText(quoted); add.textContent = 'Copied · paste it into your comments'; } catch (_) { add.textContent = 'Could not copy'; }
+    });
+    row.append(add);
+    return row;
+  }
+  function otherViews(order, stop, openAskDialog) {
+    const c = card('Other views', meta('They advise. You decide.'));
+    for (const a of array(stop.asks)) {
+      const replies = array(a.replies);
+      if (replies.length) for (const r of replies) c.append(replyBlock(a, r));
+      else {
+        const note = {queued: a.ws_name + ' is offline. Your question goes out when it is back.', failed: a.note || 'Not delivered to ' + a.ws_name + '.', partial: a.note || 'Only part of it reached ' + a.ws_name + '.', closed: 'Asked ' + a.ws_name + ' · closed when you answered', delivered: 'Asked ' + a.ws_name + ' · no answer yet'}[a.state] || 'Asked ' + a.ws_name;
+        const row = group('list-row', askPill(a.state), group('grow', document.createTextNode(note)), meta(a.at ? when(a.at) : ''));
+        if ((a.state === 'failed' || a.state === 'partial') && openAskDialog) { const again = node('button', 'Send again', 'btn outline sm'); again.type = 'button'; again.addEventListener('click', () => openAskDialog(a)); row.append(again); }
+        c.append(row);
+      }
+    }
+    return c;
+  }
+  // The dialog: who, exactly what leaves this computer (the line and the items you tick), a check for passwords and keys.
+  function askDialog(order, stop, reach) {
+    const items = array(stop.data?.items);
+    const d = node('dialog', null, 'dialog'); d.setAttribute('aria-labelledby', 'ask-title');
+    const select = node('select', null, 'input'); select.setAttribute('aria-label', 'Who');
+    for (const w of reach) { const o = node('option', w.name + (w.description ? ' · ' + w.description : '')); o.value = w.ws; select.append(o); }
+    const who = node('label', 'Who', 'field'); who.append(select);
+    const ticks = items.map((item, i) => {
+      const n = picturesOf(item).length;
+      const box = node('input'); box.type = 'checkbox'; box.checked = true;
+      const label = node('label', null, 'check-label'); label.append(box, document.createTextNode(' ' + text(item.title) + (n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : '')));
+      return {box, label, i, text: label.lastChild, suffix: n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : ''};
+    });
+    const checked = meta('Checking for passwords and keys…');
+    const preview = group('stack', meta('Reading what will be sent…'));
+    const problem = p(''); problem.hidden = true; problem.setAttribute('role', 'alert');
+    const cancel = node('button', 'Cancel', 'btn'); cancel.type = 'button'; cancel.addEventListener('click', () => d.close());
+    const send = node('button', 'Send', 'btn primary'); send.type = 'button'; send.disabled = true;
+    const close = node('div', null, 'row between'); close.append(node('h2', 'Ask another workspace'));
+    close.firstChild.id = 'ask-title';
+    d.append(close, who, node('h3', 'What leaves this computer'), preview, ...ticks.map(t => t.label),
+      p('Not sent: other orders, crew logs, budget, chat, anything you untick.'), checked, problem, group('actions actions-end', cancel, send));
+    // the check runs when the dialog opens, before Send: a file with a hit is shown unticked and disabled with its reason
+    read('/api/order/' + order.id + '/stop/' + stop.n + '/scan').then(scan => {
+      const hits = [];
+      // exactly what the add-on sends, built by the one function that sends it: card title, line, question, item texts
+      preview.replaceChildren(node('strong', text(scan.title)), p('“' + text(scan.line) + '”'), meta('Question: ' + text(scan.question)));
+      for (const row of array(scan.items)) { const t = ticks[row.i]; if (t) t.text.nodeValue = ' ' + text(row.check) + t.suffix; }
+      for (const row of array(scan.items)) {
+        const t = ticks[row.i]; const bad = array(row.files).filter(f => f.ok === false);
+        if (!t || !bad.length) continue;
+        t.box.checked = false; t.box.disabled = true;
+        for (const f of bad) { hits.push(f.name); t.label.append(node('strong', ' · not sent: ' + text(f.name) + ' ' + text(f.why || 'could not be checked'))); }
+      }
+      checked.textContent = hits.length ? 'Found in a picture: untick it or remove the password first.' : 'Checked for passwords and keys: nothing found.';
+      send.disabled = false;
+    }).catch(() => { checked.textContent = 'Could not check for passwords and keys now. Send checks again before anything leaves.'; send.disabled = false; });
+    send.addEventListener('click', async () => {
+      send.disabled = true; cancel.disabled = true; problem.hidden = true;
+      const picked = ticks.filter(t => t.box.checked).map(t => t.i);
+      const result = await askWorkspace(order.id + ':s' + stop.n + ':' + select.value + ':' + (picked.length ? picked.join(',') : '-'));
+      if (result.state) { d.close(); render(); return; }  // partial: the row on the stop says what went out
+      problem.textContent = result.error || 'It was not sent. Nothing left this computer. Try again.'; problem.hidden = false;
+      send.disabled = false; cancel.disabled = false;
+    });
+    d.addEventListener('close', () => d.remove());
+    document.body.append(d);
+    d.showModal();
+  }
+  function stopPage(order, round, reach = []) {
     const stop = array(order.stops).find(s => String(s.n) === round);
     if (!stop) throw new Error('Stop not found');
     const data = stop.data || {};
-    view.append(heading(stageName(order, stop.stage) + ' · stop review', order.title, orderLink(order)), meta([({open: 'Waiting for you', decided: 'Decided by your agent', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
+    const canAsk = stop.state === 'open' && embedded() && reach.length > 0 && validId(order.id);
+    const ask = canAsk ? node('button', 'Ask another workspace', 'btn outline sm f-btn') : null;
+    if (ask) { ask.type = 'button'; ask.addEventListener('click', () => askDialog(order, stop, reach)); }
+    view.append(heading(stageName(order, stop.stage) + ' · stop review', order.title, ...(ask ? [ask] : []), orderLink(order)), meta([({open: 'Waiting for you', decided: 'Decided by your agent', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
     for (const [index, item] of array(data.items).entries()) {
       const compare = group('f-compare', preview(order, 'Before', item.before), preview(order, 'After', item.after));
       const c = card(item.title, badge(tagWord(item.tag)), compare);
@@ -467,6 +603,8 @@
       if (item.recommend) c.append(meta('Your agent suggests: ' + item.recommend));
       c.append(meta('Review images and pins are view-only here. Add feedback on the order ticket.')); view.append(c);
     }
+    if (array(stop.asks).length) view.append(otherViews(order, stop, canAsk ? () => askDialog(order, stop, reach) : null));
+    if (stop.autopilot_waits) view.append(p('Autopilot waits for you on this stop, because you asked for a view.'));
     view.append(group('grid-2', card('Checked', list(data.checked)), card('Not checked', list(data.not_checked))),
       card('Changed during the run', list(data.changed_during_run)), answer(stop.state === 'open' ? order : {...order, open: null}));
   }
@@ -512,7 +650,11 @@
     const controllerForRequest = controller;
     const timeout = setTimeout(() => controllerForRequest.abort(), 15000);
     view.setAttribute('aria-busy', 'true'); notices.replaceChildren();
-    view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...['title','thumb','thumb'].map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; })));
+    const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
+    if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
+      // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
+      view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+    } else view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...skeletons(['title','thumb','thumb'])));
     try {
       // Always begin with home, including deep links, to get watcher/stale status.
       const homeData = await read('/api/home', signal);
@@ -527,19 +669,26 @@
         if (serial !== request) return;
         showNotices(homeData, data); draw = () => autopilot(data);
       } else {
-        const match = /^#\/order\/(t_[a-z0-9]{6,16})(?:\/(proposal)|\/(stop|draft)\/([1-9][0-9]*))?$/.exec(hash);
-        if (!match || !validId(match[1]) || (match[4] && !validVersion(match[4]))) throw new Error('Unknown route');
+        const match = /^#\/order\/(t_[a-z0-9]{6,16})(?:\/(proposal)|\/(stop)\/([1-9][0-9]*)|\/(draft)(?:\/([1-9][0-9]*))?)?$/.exec(hash);
+        if (!match || !validId(match[1]) || (match[4] && !validVersion(match[4])) || (match[6] && !validVersion(match[6]))) throw new Error('Unknown route');
         const order = await read('/api/order/' + match[1], signal);
         if (serial !== request) return;
         if (order.id !== match[1]) throw new Error('Order reference mismatch');
         showNotices(homeData, order);
         if (match[2]) draw = () => proposal(order);
-        else if (match[3] === 'stop') draw = () => stopPage(order, match[4]);
-        else if (match[3] === 'draft') {
-          const draft = await read('/api/order/' + match[1] + '/draft/' + match[4], signal);
+        else if (match[3] === 'stop') {
+          const reach = await read('/api/reach', signal).catch(() => []);  // empty when the relay is off: no button then
+          if (serial !== request) return;
+          draw = () => stopPage(order, match[4], array(reach));
+        }
+        else if (match[5] === 'draft') {
+          // without a version the newest one opens, and it moves on by itself when your helper files a newer one
+          const newest = array(order.drafts).reduce((n, x) => validVersion(x.v) ? Math.max(n, Number(x.v)) : n, 0);
+          const version = match[6] || String(newest || 1);
+          const draft = await read('/api/order/' + match[1] + '/draft/' + version, signal);
           if (serial !== request) return;
           showNotices(homeData, order, draft);
-          draw = () => view.append(heading(order.title, 'Draft · version ' + match[4], orderLink(order)), draftTabs(order, match[4]), node('pre', draft.text, 'card f-draft'), ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
+          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), node('pre', draft.text, 'card f-draft'), ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;

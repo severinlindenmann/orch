@@ -67,6 +67,31 @@ def validate(value, definition):
     errors = list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(value))
     if errors:
         raise Refused("The Factory data does not match " + definition + ": " + errors[0].message, "invalid")
+    if definition == "proposal":
+        for h in value.get("handovers") or []:
+            for f in (h.get("sends") or {}).get("files") or []:
+                if not handover_file_ok(f):
+                    raise Refused(
+                        "A hand-over file path may use only letters, digits, spaces, _ . / ( ) - "
+                        "(relative, no dot folders, no '..', no extra spaces): rename the file or pick another.",
+                        "invalid",
+                    )
+
+
+HANDOVER_FILE_CHARS = set(" _./()-")
+
+
+def handover_file_ok(f):
+    """Strict check of a hand-over file path, on top of the schema pattern (a JSON-schema `$` can match before a
+    trailing newline). An allowlist: letters and digits (umlauts too, R1.6), space and _ . / ( ) -; relative; no empty,
+    dot or '..' segment; no space at the start or end of the path or of a segment, no double space."""
+    if not isinstance(f, str) or not f or len(f) > 120 or "\n" in f or f != f.strip():
+        return False
+    if not all(c.isalnum() or c in HANDOVER_FILE_CHARS for c in f):
+        return False
+    if f.startswith("/") or "  " in f or ".." in f:
+        return False
+    return all(seg and seg == seg.strip() and not seg.startswith(".") for seg in f.split("/"))
 
 
 def no_links(path):

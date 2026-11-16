@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from conftest import ensure_signing
+from conftest import ensure_keys
 
 from orch import history, review, tickets
 from orch.errors import Refused
@@ -17,7 +17,7 @@ def _raw(root, tid):
 
 @pytest.fixture
 def tk(proj):
-    ensure_signing(proj)
+    ensure_keys(proj)
     t = tickets.create(proj, "Home layout", ME)
     return proj, t["id"]
 
@@ -139,7 +139,7 @@ def test_check_approve_makes_ticket_done(tk):
     assert item["id"] == f"core:review:{tid}"
     e = review.decide(root, tid, "review", "ok", by=ME, via="dashboard", digest=item["digest"])
     t = tickets.load(root, tid)
-    assert t["status"] == "done" and t["verdicts"]
+    assert t["status"] == "done" and "verdicts" not in t
     assert (
         e["card"]["kind"] == "check" and e["decision"]["action"] == "approve" and e["answer"] == "Looks good"
     )
@@ -278,6 +278,40 @@ def test_stack_lists_cards_checks_and_plain_questions(tk):
     q = review.decide(root, other, "q1", "ok", "Yes", by=ME, via="cli", digest=plain["digest"])
     assert q["answer"] == "Yes" and q["decision"]["picked"] == "Yes"
     assert {i["id"] for i in review.stack(root)} == ids - {f"core:q:{other}:q1"}
+
+
+def test_stack_groups_by_ticket_then_task_and_says_about(tk, monkeypatch):
+    root, tid = tk  # "Home layout"
+    other = tickets.create(root, "Round two", ME)["id"]
+    stamps = iter(f"2026-11-15T10:{i:02d}:00Z" for i in range(60))
+    monkeypatch.setattr(tickets, "now", lambda: next(stamps))
+    ids = {}
+
+    def ask(ticket, text, check=None):
+        _, q = tickets.ask(root, ticket, text, ["Yes", "No"], "Yes", "agent:claude", check=check)
+        ids[text] = f"core:q:{ticket}:{q['id']}"
+
+    _, c1 = tickets.check_add(root, tid, "Pick the " + "very long title " * 12, "agent:claude")
+    _, c2 = tickets.check_add(root, tid, "Header\ncolour", "agent:claude")
+    _, d1 = tickets.check_add(root, other, "Footer", "agent:claude")
+    ask(tid, "plain-1")  # oldest, no task
+    ask(other, "other-footer", d1["id"])  # the other ticket's first card is newer than plain-1
+    ask(tid, "t2-first", c2["id"])
+    ask(tid, "t1-late", c1["id"])
+    ask(tid, "plain-2")
+    ask(other, "other-plain")
+    items = review.stack(root)
+    assert [i["id"] for i in items] == [
+        ids[k] for k in ("t1-late", "t2-first", "plain-1", "plain-2", "other-footer", "other-plain")
+    ]
+    by_id = {i["id"]: i for i in items}
+    long = by_id[ids["t1-late"]]["about"]
+    assert len(long) <= review.ABOUT_MAX and long.endswith("\u2026") and long.startswith("Pick the very long")
+    assert by_id[ids["t2-first"]]["about"] == "Header colour"  # one line
+    assert "about" not in by_id[ids["plain-1"]] and "about" not in by_id[ids["other-plain"]]
+    assert by_id[ids["other-footer"]]["about"] == "Footer"
+    # about is not on the wire card and does not change the digest
+    assert "about" not in by_id[ids["t2-first"]]["card"]
 
 
 def test_summary_and_applies_now_block(tk):

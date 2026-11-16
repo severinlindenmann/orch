@@ -17,7 +17,6 @@
 .settings .permission-choices .agent-opt{border:1px solid var(--border);border-radius:12px;background:var(--surface);gap:12px;flex-wrap:wrap}
 .settings .permission-choices .sel{border-color:var(--text-muted);background:var(--surface-2)}
 .settings-addon-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-.settings .ad-row{border:1px solid var(--border)}
 .settings .ad-h{padding:16px;flex-wrap:wrap;gap:16px}
 .settings .ad-h>.grow{flex-basis:100%;display:grid;gap:12px}
 .settings .ad-h>.switch{margin-left:auto;width:auto;display:inline-flex;align-items:center;gap:8px}
@@ -27,8 +26,6 @@
 .shared-link{padding:16px 0;border-top:1px solid var(--border);overflow-wrap:anywhere}
 .shared-link .chip{justify-self:start;align-self:flex-start;width:fit-content}
 @media(max-width:760px){
-  .settings-layout{grid-template-columns:minmax(0,1fr);gap:20px}
-  .settings .settings-nav{flex-direction:row;overflow-x:auto;flex-wrap:nowrap}
   .settings-nav>*{flex-shrink:0}
   .settings-addon-grid,.settings .permission-choices{grid-template-columns:minmax(0,1fr)}
   .settings .agent-card{grid-template-columns:24px minmax(0,1fr) auto}
@@ -106,7 +103,7 @@
 .settings .sync-warn{margin:12px 16px 4px;padding:10px 12px;border-radius:var(--r1);background:var(--warning-soft);color:var(--warning);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-warn p{flex:1;min-width:180px;margin:0}
 .settings .sync-warn .row{flex-wrap:wrap;gap:8px}
-.settings .sync-details{padding:0 16px 14px;border-top:1px solid var(--border)}
+.settings .sync-details{border-top:1px solid var(--border)}
 .settings .sync-details ul{margin:8px 0 0;padding-left:18px;font-size:12px;color:var(--text-muted);display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
 @media(max-width:600px){.settings .sync-sub{padding-left:16px}}
 /* The sign step (a person's choice): both versions when there are two, who signs, then Sign. */
@@ -127,7 +124,6 @@
 /* SN-1: plain folder row, add-ons list, compact shared links (no Details toggles). */
 .settings .folder-row{align-items:flex-start}
 .settings .folder-row .folder-path{margin-top:4px}
-.settings .copies-details{padding:0 16px;border-top:1px solid var(--border)}
 .settings .sync-details{padding:12px 16px 14px}
 .settings .consent-details{margin:8px 0}
 .settings .ad-head{display:flex;justify-content:space-between;align-items:center;gap:12px}

@@ -56,11 +56,28 @@ test('typed letters are merged into one text item, other keys stay apart', () =>
   assert.deepEqual(JSON.parse(JSON.stringify(out)), [{t: 'hi'}, {k: 'Enter'}, {t: '!'}]);
 });
 
-test('typing state, ordered sends, batch limits and the waiting line are in term.js', () => {
+test('typing is a switch, never a click on the screen; sends stay ordered and batched', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_focus/web/term.js'), 'utf8');
-  assert.match(src, /Typing into the helper’s session/);
+  assert.match(src, /Let me type/);
   assert.match(src, /chain = chain\.then\(flush, flush\)/);
   assert.match(src, /items\.length < 40 && size \+ \(all\[0\]\.t \|\| ''\)\.length <= 12000/);
-  assert.match(src, /Your helper is waiting for an answer in its session/);
   assert.match(src, /status === 409/);
+  assert.doesNotMatch(src, /Click the screen to type/);
+  assert.doesNotMatch(src, /body\.addEventListener\('click'/);  /* a click on the screen starts nothing */
+  assert.match(src, /if \(!typing\) return;/);  /* keys go to the session only while "Let me type" is on */
+  assert.match(src, /snap\.typing_allowed === true/);  /* the switch exists only when the server says typing is allowed */
+});
+
+test('the strip shows the last line that says something, without frames or colour codes', () => {
+  const T = load();
+  const screen = '\x1b[32m⏺\x1b[0m Built the draft\n  ⎿  Test mail queued\n\nWaiting for the mail server…\n\n╭──────────╮\n│ >        │\n╰──────────╯\n';
+  assert.equal(T.lastLine(screen), 'Waiting for the mail server…');
+  assert.equal(T.lastLine('\n\n─────\n'), '');
+  assert.equal(T.lastLine('x'.repeat(300)).length, 160);
+});
+
+test('the yellow line quotes the question the helper asks on its screen', () => {
+  const T = load();
+  assert.equal(T.questionLine('Building…\nSend the test to the whole team? (y/n)\n> '), 'Send the test to the whole team? (y/n)');
+  assert.equal(T.questionLine('Working\nSome other line'), 'Some other line');
 });

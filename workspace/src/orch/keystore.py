@@ -675,15 +675,8 @@ def _toml(profiles: dict) -> str:
     return "\n".join(out)
 
 
-def write_profiles(
-    root: Path, profiles: dict, *, sign: frozenset = frozenset(), tombstone: frozenset = frozenset()
-) -> None:
-    """Replace profiles.toml (a person's action: the proof is the caller's job, slice 1.2). Names only.
-    ONLY the names in `sign` (the profile the person is setting right now, with proof) get a body MAC in the
-    guarded ledger, BEFORE the file is written. Every other profile is written back as it is and its ledger
-    entry is left untouched (an edited body stays unverified, a switch change never vouches for it); a
-    removed profile (`tombstone`, passed by the caller, whatever the file says) is tombstoned. What to sign is
-    never decided from the unverified file. An unreadable old file refuses the save (nothing is signed)."""
+def write_profiles(root: Path, profiles: dict) -> None:
+    """Replace profiles.toml. Names only. An unreadable old file refuses the save."""
     d = hp.key_dir(root)
     with hp._key_lock(d):
         _tighten_locked(d)
@@ -693,12 +686,6 @@ def write_profiles(
                 values.add(e["value"])
         _profile_check(profiles, values)
         read_profiles(root)  # Refused when damaged: never fall back to {}
-        for pn in sign:
-            if pn not in profiles:
-                raise Refused("The profile to sign is not in the profiles.")
-            hp.profile_sign(root, pn, profiles[pn])
-        for pn in tombstone:
-            hp.profile_sign(root, pn, None)
         hp._write_private(d / "profiles.toml", _toml(profiles))
 
 
@@ -717,16 +704,6 @@ def read_profiles(root: Path) -> dict:
         raise Refused("The profiles file is damaged.")
     profiles = raw.get("profile", {})
     _profile_check(profiles, set())
-    return profiles
-
-
-def read_verified_profiles(root: Path) -> dict:
-    """The profiles whose body carries a current MAC of a person (human key, guarded ledger). Any profile
-    without one, or with a body edited outside orch, is refused (fail closed, no legacy profiles)."""
-    profiles = read_profiles(root)
-    for pn, p in profiles.items():
-        if not hp.profile_verified(root, pn, p):
-            raise Refused("Refused: " + hp.PROFILE_CHANGED + ".")
     return profiles
 
 
