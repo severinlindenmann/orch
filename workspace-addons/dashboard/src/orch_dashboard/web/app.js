@@ -327,6 +327,12 @@ globalThis.addEventListener?.('message', e => {
   if ((e.origin !== location.origin && !chan) || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
+// An add-on page moved inside itself (ORCH-241): the address follows it without a history entry of its own (the
+// frame's move made one, so Back goes back inside the frame) and without drawing the page again.
+function followAddress(hash) {
+  history.replaceState(null, '', hash);
+  renderedRoute = route().hash;
+}
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
@@ -397,6 +403,7 @@ function render(arrived = new Set()) {
   reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (r.kind === 'review') mountReview(main);
+  if (r.kind === 'ticket') mountTicketTalk(main);
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
@@ -552,9 +559,17 @@ async function refresh() {
   const version = mutation;
   const connection = document.getElementById('connection');
   try {
-    const res = await fetch('/api/state', {cache:'no-store'});
+    // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
+    const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
     const next = await res.json();
+    if (next.unchanged && state) {
+      if (writing || version !== mutation) { refreshAgain = true; return; }
+      connection.hidden = true;
+      lastOk = Date.now();
+      paintUpdated();
+      return;
+    }
     if (writing || version !== mutation) { refreshAgain = true; return; }
     connection.hidden = true;
     lastOk = Date.now();

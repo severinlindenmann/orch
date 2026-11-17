@@ -76,8 +76,8 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   ctx.snapshot = false; ctx.state = {settings:{}, runs:{}};
   vm.runInContext('loadArtifacts = () => {}; inlineField = (t,f) => h("span", {"data-field":f}, String(t[f] || "")); addTaskRow = () => null; agentBar = () => null; sharedFolderLine = () => null; copyLine = () => null; liveSessionStrip = () => null; ticketFiles = () => null; addonRows = () => null; ticketLinks = () => null; linksCard = () => null; fieldSections = () => null; ticketHistoryPanel = () => null; artifactData.set("t1", {data:{files:[]}});', ctx);
   const tree = ctx.detail(t), all = nodes(tree), body = text(tree);
-  assert.ok(all.some(n => n.attrs.id === 'ticket-tab-tasks'), 'Steps tab exists');
-  assert.equal(text(all.find(n => n.attrs.id === 'ticket-tab-tasks')).replace(/\d+/g, '').trim(), 'Steps', 'owner fb: the tab says Steps, not Tasks');
+  assert.ok(all.some(n => n.attrs.id === 'ticket-tab-tasks'), 'Tasks tab exists');
+  assert.equal(text(all.find(n => n.attrs.id === 'ticket-tab-tasks')).replace(/\d+/g, '').trim(), 'Tasks', 'owner 17 Nov (ORCH-240): the to-do lines are tasks everywhere, the tab too');
   assert.ok(!/\bTasks\b/.test(body), 'no "Tasks" word on the ticket page');
   assert.deepEqual(all.filter(n => n.attrs.role === 'tab').map(n => n.attrs['data-tab']), ['overview', 'tasks', 'files', 'activity']);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
@@ -192,7 +192,9 @@ test('ORCH-157: a Group choice lists the tickets that have parts, and picking on
   const rows = [{id:'e', title:'Epic', status:'open'}, {id:'p1', title:'Part', parent:'e', status:'open'}, {id:'x', title:'Other', status:'open'}];
   const c = listCtx({tickets:() => rows});
   const sel = nodes(h('div', {}, c.ticketFilters())).find(n => n.attrs['data-key'] === 'ticket-group');
-  assert.ok(sel, 'a Group choice');
+  assert.ok(sel, 'a Part of choice');
+  assert.match(JSON.stringify(sel), /Part of/); assert.match(JSON.stringify(sel), /Any ticket/);  // owner 17 Nov (ORCH-240)
+  assert.doesNotMatch(JSON.stringify(sel), /All groups/);
   assert.deepEqual(c.filterTickets(rows, '', false, '', '', '', 'e').map(t => t.id), ['e', 'p1']);
   assert.equal(c.filterTickets(rows, '', false).length, 3);
 });
@@ -267,7 +269,7 @@ test('ORCH-236: a key typed without its dash finds the ticket ("dem36", "dem 36"
 test('ORCH-236 (owner, 17 Nov): no saved views: only the built-in chips, no + Save view', () => {
   const c = listCtx({URLSearchParams});
   const keys = nodes(c.viewChips()).map(n => n.attrs?.['data-key']).filter(Boolean);
-  assert.deepEqual(keys, ['view-chips', 'view-chip-all', 'view-chip-needs-you', 'view-chip-working', 'view-chip-backlog', 'view-chip-done-week']);
+  assert.deepEqual(keys, ['view-chips', 'view-chip-all', 'view-chip-needs-you', 'view-chip-this-week', 'view-chip-stuck', 'view-chip-working', 'view-chip-backlog', 'view-chip-done-week']);
   assert.doesNotMatch(listSrc, /Save view|orch\.tickets\.saved/);
 });
 test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an empty Add says so', () => {

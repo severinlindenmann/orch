@@ -44,3 +44,8 @@ Record counts include `unavailable: [{run, status, reason, message}]` and
 `complete: boolean`. The list is always present, empty when all inputs were
 read. If any run is unavailable or tampered, `complete` is false and that run
 is listed with the plain-language record message (activity.md, Integrity).
+
+`lost: {lines, reasons, errors}` (ORCH-189): hook lines of proven runs in the window that were not written
+(alerts/hook-lost-<day>.jsonl, `trimmed` left out), by reason and, for `hider_off`, by the error type that turned
+recording off (never its message). Insights says so when it is above 0: a record that counts nothing is then
+not "nothing was used".

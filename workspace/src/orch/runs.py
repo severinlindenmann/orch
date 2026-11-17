@@ -1030,10 +1030,10 @@ def _plan_first_plan(ticket: dict) -> list[str]:
         f"done-when (`orch ticket new --parent {tid}`), in order. Write the goal and what is not included: "
         f'orch ticket plan {tid} --goal "<goal>" --not-included "<what is not part of it>". '
         f'Then ask exactly ONE question: orch ask {tid} "{PLAN_READY}" --option "Start work" '
-        '--option "Change a step" --recommend "Start work", and stop. Start the steps only after the '
-        'answer is "Start work". If the answer is "Change a step" (or asks for any change), ask one more '
-        f'question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, then ask '
-        f'"{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
+        '--option "Change sub-tickets" --recommend "Start work", and stop. Start the steps only after '
+        'the answer is "Start work". If the answer is "Change sub-tickets" (or asks for any change), '
+        f'ask one more question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, '
+        f'then ask "{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
     ]
 
 
@@ -1106,8 +1106,11 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
             "fix typos and write a short clear title, a description (what this is about and why, 1 to 3 "
             "sentences, from their note), and a done-when line (what must be true when it is done; when they "
             "wrote one, keep it). Fill the owner and due date only where the person's text says them: "
+            "Also estimate the helper time in minutes and the cost in dollars at list price for the whole "
+            "ticket (shown on the ticket, next to what it really took): "
             f'orch ticket tidy {tid} "<short clear title>" --description "<what and why>" '
-            '--done-when "<one plain line>" [--owner <name>] [--due YYYY-MM-DD]. '
+            '--done-when "<one plain line>" --estimate-minutes <n> --estimate-cost <dollars> '
+            "[--owner <name>] [--due YYYY-MM-DD]. "
             "Their original title stays in the history. The steps come next, as tasks. "
             "Do this before you add tasks.",
         )

@@ -742,6 +742,9 @@ def _decision(q: dict, card: dict, verdict: str, picked, note) -> dict:
         "replaced_by": None,
     }
     d["summary"] = summary(d, card)
+    if action == "send_back" and card.get("kind") == "choice":
+        # own words on a question (as on Home's "Write your own"): the words are the answer
+        d["summary"] = _clip("; ".join(changes), 400)
     return d
 
 
@@ -936,7 +939,10 @@ def decide(
     d = _decision(q, card, verdict, picked, note)
     if digest is not None and tickets.question_digest(q) != digest:  # before a merge, not only at the write
         raise Refused(f"{key} changed after it was shown. Look at the question again, then answer.")
-    _merge_first(root, tid, q, d, by, via)
+    try:
+        _merge_first(root, tid, q, d, by, via)
+    except _merge_failed() as e:  # GitHub said no: the helper gets the reason and fixes it
+        d = _send_back_after_failed_merge(card, str(e))
     _, out = tickets.answer(
         root, tid, key, _plain_answer(q, d), by, via, expected_question_digest=digest, decision=d
     )
@@ -953,6 +959,23 @@ def merge_url(q: dict) -> str | None:
     if card.get("kind") != "link" or card.get("open") != url or card.get("ok_label") != "Merge":
         return None
     return url
+
+
+def _merge_failed():
+    from orch.ghmerge import MergeFailed
+
+    return MergeFailed
+
+
+def _send_back_after_failed_merge(card: dict, reason: str) -> dict:
+    """The Merge click was refused by GitHub: answer the card as sent back to the helper, with the reason as
+    the change to make (the helper then takes develop in, asks for a review or whatever the rule needs)."""
+    from orch.ghmerge import OPEN_IT
+
+    reason = _clip(reason.replace(OPEN_IT, "").strip(), 400)
+    out = _bare("send_back", None, [f"Merge failed on GitHub, please fix it: {reason}"], _note_bv(None))
+    out["summary"] = summary(out, card)
+    return out
 
 
 def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> None:

@@ -92,6 +92,10 @@ SHOWN = {
         "workspace/src/orch/relay.py",
         "apply_allow_answers",
     ): "t = history.shown_ticket(...); `raw` only for the proof (history.answer_proven)",
+    (
+        "workspace/src/orch/releasekeeper.py",
+        "deploy_answer",
+    ): "history.shown_ticket(root, ticket) when root is given (tests pass a recorded ticket)",
 }
 SHOWN_CALLS = ("shown_ticket", "shown_json", "shown_item")
 # The sync add-on is the merge authority: it reads and writes stored bytes by design (its readers of person

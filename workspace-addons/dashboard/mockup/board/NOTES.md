@@ -125,3 +125,20 @@ Save without starting shows "Saving…" on the button at once and then opens the
   needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
   says so in a notice.
 - Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).
+
+
+## Manager view (ORCH-189, owner approved 17 Nov)
+
+- `list.html`: Due column (red when past, amber today) and Time · cost column (helper time and money at list price);
+  quick views This week and Stuck; the Stuck pill also for an old question, no news for a day or past due.
+- `../insights/insights.html`: Helper time, Cost, Tickets finished, Stuck now and a By person table on top.
+- `../ticket/ticket-change.html`, `ticket-question.html`: Time · cost in Properties (the helper's first-run estimate
+  beside what it took so far).
+## ORCH-240 (17 Nov, owner's words)
+
+- The filter "Group" is now "Part of", with "Any ticket" for no choice; the list column "Steps" is "Tasks".
+- The to-do lines of a ticket are "tasks" everywhere ("+ Add task", "2 of 5 tasks", "Added a task"); the
+  sub-tickets of a plain ticket are headed "Sub-tickets".
+- The board fits at 1440: lanes shrink to 210 px, empty lanes to 76 px, empty Won't do and Superseded lanes
+  are hidden until they hold a card. A sub-ticket with its own card is not listed again in its parent's card.
+- On the phone the List/Board switch shows too; the Board is lanes side by side that you swipe.

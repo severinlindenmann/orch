@@ -22,6 +22,12 @@ from orch.errors import Refused
 PR_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}")
 # gh reads these before its own sign-in; a helper's environment may set them for a helper account
 TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+
+
+class MergeFailed(Refused):
+    """GitHub (or the pull request itself) refused the merge: the review card sends it back to the helper."""
+
+
 OPEN_IT = "Open the pull request and merge it there."
 JQ_VIEW = '[.state, (.reviewDecision // ""), .headRefOid] | @tsv'
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -278,6 +284,21 @@ def head_of(url: str) -> str:
     return head
 
 
+def _unfinished_checks(gh: str, url: str) -> str | None:
+    """Plain words when the pull request's checks have not all passed yet ("3 of 18 checks still running",
+    "1 check failed: lint"), read now at GitHub; None when they passed, there are none (a repository without
+    checks), or GitHub could not be read (GitHub's own rules then decide)."""
+    try:
+        v = _gh(gh, ["pr", "view", url, "--json", "statusCheckRollup"], 15)
+        rollup = (json.loads(v.stdout) if v.returncode == 0 else {}).get("statusCheckRollup")
+    except (ValueError, AttributeError, Refused):
+        return None
+    if not isinstance(rollup, list) or not rollup:
+        return None
+    tone, words = checks_state(rollup)
+    return None if tone == "done" else words
+
+
 def merge(url: str, head: str, add_review: bool = True) -> dict:
     """Merge the pull request at `url` as the person signed in to gh, only while its newest commit is still
     `head` (what the card showed). Returns {"login", "already"}: already is True when it was merged before (a
@@ -299,7 +320,13 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
     if state != "OPEN":
         raise Refused("The pull request is closed on GitHub, so it cannot be merged. Open it to see why.")
     if now != head:
-        raise Refused(CHANGED)
+        raise MergeFailed(CHANGED)
+    unfinished = _unfinished_checks(gh, url)
+    if unfinished:  # say it plainly instead of GitHub's "base branch policy prohibits the merge"
+        raise Refused(
+            f"Its checks have not all passed yet ({unfinished}), so nothing was merged. "
+            "The card stays: click Merge again when they are green."
+        )
     if (
         add_review and review == "REVIEW_REQUIRED"
     ):  # the branch rules want a review: the click is the person's, on THIS commit
@@ -311,6 +338,6 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
         )  # fmt: skip
     done = _gh(gh, ["pr", "merge", url, "--merge", "--match-head-commit", head], 25)
     if done.returncode != 0:
-        raise Refused(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
+        raise MergeFailed(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
     ghlimit.count("merge", url)  # the person's own click never waits, but it uses up the hour too
     return {"login": login, "already": False}
