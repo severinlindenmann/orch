@@ -15,6 +15,8 @@ from .runner import sdir
 
 NOT_LISTENING = "Not listening: the relay is not set up here"
 PAUSE_OFF = 60  # seconds to sleep when the relay is off
+QUICK = 5.0  # a long poll that answered sooner than this did not wait (ORCH-266: a stream of restarts)
+BACKOFF_FIRST, BACKOFF_MAX = 2.0, 30.0  # the pause after such an answer, doubled each time it repeats
 
 
 def path(root: Path) -> Path:
@@ -40,8 +42,9 @@ def _write(root: Path, **kw) -> None:
 
 
 class Listener:
-    def __init__(self, root: Path, wake: threading.Event, wait: int = 30):
-        self.root, self.wake, self.wait = root, wake, wait
+    def __init__(self, root: Path, wake: threading.Event, wait: int = 30, clock=time.monotonic):
+        self.root, self.wake, self.wait, self.clock = root, wake, wait, clock
+        self.backoff = BACKOFF_FIRST
 
     def step(self) -> float:
         """One poll. Sets `wake` when an arrival is not handled yet. Returns seconds to pause before the next."""
@@ -49,7 +52,9 @@ class Listener:
             _write(self.root, listening=False, note=NOT_LISTENING, at=time.time())
             return PAUSE_OFF
         cursor = read(self.root).get("cursor")
+        began = self.clock()
         r = orchcli.relay_since(self.root, cursor if isinstance(cursor, int) else 0, self.wait)
+        quick = self.wait >= QUICK and self.clock() - began < QUICK
         if r is None or r.get("warning"):  # unreachable relay: the CLI answers at once with the saved list
             _write(
                 self.root,
@@ -68,7 +73,11 @@ class Listener:
         )
         if any(isinstance(i, dict) and i.get("seen") is False for i in r.get("items") or []):
             self.wake.set()
-        return 0
+        if not quick:
+            self.backoff = BACKOFF_FIRST
+            return 0
+        pause, self.backoff = self.backoff, min(self.backoff * 2, BACKOFF_MAX)
+        return pause  # it answered at once: wait a little longer each time, never a stream of commands
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():

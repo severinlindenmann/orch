@@ -866,10 +866,12 @@ def test_results_waiting_for_your_looks_good_are_one_card_on_factory(ws, run, sr
     )  # in "Waits for you"
 
 
-def test_the_next_stage_says_it_is_starting(ws, run, srv):
+def test_the_next_stage_says_it_is_starting(ws, run, srv, monkeypatch):
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: True)  # with the watcher off, that is the reason
     order, _ = started(ws, run)
     run("next", order)
-    assert _home_row(srv, order)["starting"] is None  # the first stage: nothing was finished yet
+    row = _home_row(srv, order)  # the first stage too (ORCH-277): right after Start nothing else says it
+    assert row["starting"] == "build" and row["waiting"] == {"kind": "starting"}
     finish_crew(ws, run, order, "booking-form")
     q = ask_stop(ws, run, order, "build")
     core(ws, "answer", order, q, "Continue", "--by", "human:anna")
@@ -942,3 +944,128 @@ def test_home_has_no_empty_sections():
         check=True,
     ).stdout
     assert json.loads(words) == ["", "drafts", "drafts or stops", "drafts, stops or running orders"]
+
+
+# ORCH-277: a started order that says Running while nobody works says why instead
+
+
+def test_a_started_order_says_why_nothing_works(ws, run, srv, monkeypatch):
+    from test_flow import edit
+
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: True)
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    edit(ws, tid, lambda t: t.update(status="active"))
+    assert _home_row(srv, order)["waiting"] is None  # a crew helper works on it
+    edit(ws, tid, lambda t: t.update(status="ready"))
+    assert _home_row(srv, order)["waiting"] == {"kind": "idle"}
+    until = "2026-11-17T20:25:00+01:00"
+    edit(ws, tid, lambda t: t.update(status="waiting", waiting_on={"kind": "time", "until": until}))
+    assert _home_row(srv, order)["waiting"] == {"kind": "time", "task": "Booking form", "until": until}
+    edit(ws, tid, lambda t: t.update(status="waiting", waiting_on={"kind": "external", "ref": "a reply"}))
+    assert _home_row(srv, order)["waiting"] == {"kind": "ticket", "task": "Booking form"}
+    edit(ws, tid, lambda t: t.update(questions=[{"id": "q1", "text": "Which colour?", "answer": None}]))
+    assert _home_row(srv, order)["waiting"] == {"kind": "you", "task": "Booking form"}
+    assert get(srv, f"/api/order/{order}")[1]["waiting"] == {"kind": "you", "task": "Booking form"}
+
+
+def test_a_start_core_refused_says_why_and_the_watcher_off_says_so(ws, run, srv, monkeypatch):
+    from orch_factory import watch
+
+    order, _ = started(ws, run)
+    (ws / "fail-run").write_text(
+        "t_x waits in line: the computer is very busy. It starts by itself when that passes."
+    )
+    assert watch.once(ws) == []
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: True)
+    w = _home_row(srv, order)["waiting"]
+    assert w["kind"] == "held" and w["since"]
+    assert w["why"] == "the computer is very busy. It starts by itself when that passes."  # no ticket id
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: False)
+    assert _home_row(srv, order)["waiting"]["kind"] == "held"  # the refusal is the better reason
+    (ws / "fail-run").unlink()
+    assert len(watch.once(ws)) == 1  # started now: the reason is gone
+    assert watch.held(Store(ws)) == {}
+    assert _home_row(srv, order)["waiting"] == {"kind": "watcher"}
+
+
+def test_the_page_words_why_nothing_works():
+    js = _page_js()
+    assert "function waitWords(order)" in js
+    assert "card(o.title, stages(o), ...waitNote(o), ...startingNote(o)" in js  # Factory home
+    assert "card('The line', stages(order), ...waitNote(order)" in js  # the order page
+    assert "(waitWords(order) ? 'Waiting' : 'Running')" in js
+    for words in (
+        "Nothing moves on until you answer",
+        "'Waiting until ' + when(w.until)",
+        "Your helper has not started yet",
+        "the Factory watcher is off",
+        "No helper is working on it right now",
+    ):
+        assert words in js
+
+
+# ORCH-277: a parked order can be started from its page
+
+
+def test_a_parked_order_is_asked_again_and_the_persons_start_starts_it(ws, run, srv, proposal):
+    parked = run("idea", "Parked")["order"]
+    q = run("propose", parked, "--file", "-", data=proposal)["question"]
+    core(ws, "answer", parked, q, "Not now", "--by", "human:anna")
+    assert _home_row(srv, parked)["phase"] == "parked"
+    out = run("act", "start", parked, "--by", "human:anna")
+    assert out["order"] == parked and out["question"] != q
+    row = _home_row(srv, parked)
+    assert row["phase"] == "proposed" and row["open"]["q"] == out["question"]
+    run("act", "start", parked, "--by", "human:anna", code=2)  # not parked any more
+    core(ws, "answer", parked, out["question"], "Start", "--by", "human:anna")
+    assert _home_row(srv, parked)["phase"] == "started"
+    assert run("next", parked)["step"] == "start-crew"
+
+
+def test_only_a_person_starts_a_parked_order_and_only_a_parked_one(ws, run, proposal):
+    parked = run("idea", "Parked")["order"]
+    q = run("propose", parked, "--file", "-", data=proposal)["question"]
+    assert (
+        run("act", "start", parked, "--by", "human:anna", code=2)["code"] == "conflict"
+    )  # still waits for you
+    core(ws, "answer", parked, q, "Not now", "--by", "human:anna")
+    assert run("act", "start", parked, "--by", "agent:worker", code=2)["code"] == "refused"
+    assert run("act", "start", parked, code=2)["code"] == "refused"
+
+
+def test_a_parked_order_page_has_a_start_button():
+    js = _page_js()
+    assert "if (order.phase === 'parked') aside.append(parkedCard(order));" in js
+    assert "askDashboard({type: 'orch.start', order: order.id})" in js
+    assert "card('Saved for later'" in js
+
+
+def test_manifest_declares_the_start_act():
+    import tomllib
+    from pathlib import Path
+
+    m = tomllib.loads((Path(pageapi.__file__).with_name("orch-addon.toml")).read_text())
+    assert m["acts"]["start"]["who"] == "people"
+
+
+def test_held_words_carry_no_ticket_ids():
+    assert pageapi._held_words("ORCH-12 waits in line: the disk is almost full. It starts by itself.") == (
+        "the disk is almost full. It starts by itself."
+    )
+    assert "ORCH-3" not in pageapi._held_words(
+        "3 helpers are working at once. ORCH-3 waits in line and starts."
+    )
+
+
+def test_the_line_also_says_what_moves_the_order_on():
+    js = _page_js()
+    for words in (
+        "Your answer moves it on.",
+        "It goes on by itself then.",
+        "Start orch on this computer again",
+        "Factory starts your helper again in a few minutes.",
+        "starting it again did not help",
+    ):
+        assert words in js

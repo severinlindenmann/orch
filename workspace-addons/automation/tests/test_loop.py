@@ -696,3 +696,22 @@ def test_loop_asks_core_for_the_health_checks_once_a_minute_without_a_ticket(ws)
     assert len(asked) == 1 and asked[0]["by"] is None
     s.tick(T(10, 1))
     assert len([c for c in calls(ws) if c["args"][:2] == ["doctor", "soon"]]) == 2
+
+
+def test_failed_wake_start_is_retried_a_few_times_then_left(ws):
+    """ORCH-255: a passed wake time must not leave the ticket without a helper after one failed start."""
+    (ws / "noagent").write_text("")
+    add_ticket(
+        ws, "t_wake021", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"}
+    )
+    s = Scheduler(ws)
+    s.tick(T(8))
+    assert load_state(ws)["t_wake021"]["wake_tries"] == 0
+    s.tick(T(8, 3))  # too soon
+    assert load_state(ws)["t_wake021"]["wake_tries"] == 0
+    (ws / "ended-t_wake021").write_text("")  # no run holds the ticket
+    for minute in (6, 12, 18, 24, 30):
+        s.tick(T(8, minute))
+    assert load_state(ws)["t_wake021"]["wake_tries"] == 3  # three retries, then only Try again / Continue
+    (ws / "noagent").unlink()
+    assert s.tick(T(9)) == []  # left alone: a person presses Continue

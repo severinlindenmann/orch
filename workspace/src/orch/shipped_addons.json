@@ -105,6 +105,13 @@
     "writes": [
      "ext.factory"
     ]
+   },
+   "start": {
+    "summary": "Ask again to start an order saved for later (you press Start)",
+    "who": "people",
+    "writes": [
+     "ext.factory"
+    ]
    }
   },
   "agents_block": "skills/orch-factory/AGENTS-block.md",
