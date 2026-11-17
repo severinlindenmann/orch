@@ -1476,7 +1476,7 @@ def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict
     """The person's environment for one orch call, and the descriptors to pass to it (pass_fds) and close after;
     for Renew/Replace with a grant that only a signed-in page session gets (orch.renew.person_only refuses
     these calls without it, whatever --by says). The grant goes through an inherited pipe, never the child's
-    environment (on Linux another process of the same user reads it there). A status poll gets a short signed
+    environment (on Linux another process of the same user reads it there). A status poll gets a short keyed
     read-only grant, so a poll leaves no file behind."""
     env = human_env(root, orch_bin)
     fds: tuple[int, ...] = ()
