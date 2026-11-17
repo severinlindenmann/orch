@@ -1307,7 +1307,7 @@ const openChanges = t => array(t.checklist).filter(c => !c.done && !c.wont_do &&
 const stripHelperPill = helper => { const p = window.UI.helperPill(helper.state, helper.word); p.dataset.key = 'status-helper-' + helper.state; return p; };
 function ticketStripModel(t, run, fresh) {
   const q = questions(t)[0], at = t.updated_at ? time(t.updated_at) : '';
-  // the pill and its word come from the kit's one rule (ORCH-71): Focus shows the same for the same ticket
+  // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
   const s = window.UI.ticketState(t, run?.running ? window.DashHelpers.helperState(run, t) : null);
   const m = sentence => ({pill:s.pill, word:s.word, helper:s.helper || undefined, sentence});
   if (t.status === 'done') {
