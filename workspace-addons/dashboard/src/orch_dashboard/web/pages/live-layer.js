@@ -106,11 +106,11 @@ function liveLayerPage() {
 function liveLayerName() {
   return addonLabel(liveLayerPage());
 }
-// A session the layer can show: a ticket of this workspace (sessions without a ticket come with their own task).
+// A session the layer can show: a ticket of this workspace, named by its key (ORCH-12), never its raw id (sessions without a ticket come with their own task).
 function liveLayerSession(key) {
   const t = array(state?.tickets).find(x => x.id === key || x.key === key);
   if (!t) return null;
-  return {key:typeof t.key === 'string' && t.key ? t.key : t.id, id:t.id, title:clean(t.title) || 'Untitled', running:!!state.runs?.[t.id]?.running};
+  return {key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(t.title) || 'Untitled', running:!!state.runs?.[t.id]?.running};
 }
 // What Open shows when nothing was open yet: the first working helper.
 function liveLayerFirst() {
@@ -158,9 +158,9 @@ function livePlaceMenu(where, inPane) {
 function livePane(key, where, s) {
   const sess = liveLayerSession(key), name = liveLayerName();
   const title = sess ? sess.title : 'This session has ended';
-  return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'aria-label':(sess ? sess.key + ', ' : '') + title},
+  return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
     h('header', {className:'live-ph'},
-      sess ? h('span', {className:'key'}, sess.key) : null,
+      sess?.key ? h('span', {className:'key'}, sess.key) : null,
       h('span', {className:'live-pt', title}, title),
       h('span', {className:'live-ctl'},
         where === 'full' ? null : liveBtn('btn icon sm ghost', 'menu', 'Where ' + name + ' sits', where === 'right' ? 'dock-right' : 'dock-bottom', {'data-menu':'pane', 'aria-expanded':String(s.menu === 'pane'), 'data-key':'live-pane-place'}),

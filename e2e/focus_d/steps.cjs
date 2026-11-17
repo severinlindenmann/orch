@@ -119,6 +119,7 @@ async function livePreview(page) {
     st.settings = { ...(st.settings || {}), focus_preview_on: true };
     const first = (st.tickets || [])[0];
     if (first) st.runs = { ...(st.runs || {}), [first.id]: { running: true, state: 'alive' } };
+    if (first && !first.key) first.key = 'ORCH-238';  // the test ticket has no key; the pane shows the key, never the raw id
     route.fulfill({ response: res, json: st });
   });
   await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
@@ -141,6 +142,8 @@ async function layer(page, dash, width) {
   await page.click('[data-key="live-open"]');
   await page.waitForSelector(panel('bottom'), { timeout: 5000 });
   await page.waitForSelector('[data-key="live-pane"] [data-key="live-open-ticket"]');
+  if (await page.$eval('[data-key="live-pane"] .live-ph', el => /\bt_[A-Za-z0-9]+/.test(el.textContent))) throw new Error('the pane shows the raw ticket id');
+  if (!await page.$eval('[data-key="live-pane"] .key', el => el.textContent.trim() === 'ORCH-238')) throw new Error('the pane does not show the ticket key');
   // the page changes, the layer stays (the same element, never painted again)
   await page.$eval('[data-key="live-panel"]', el => { el.dataset.kept = '1'; });
   for (const hash of ['#tickets', '#review', '#home']) {
