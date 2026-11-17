@@ -373,6 +373,64 @@ def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | Non
     }
 
 
+MIN_FOR_RANGE = 3  # finished tickets needed before a range means anything
+
+
+def _quantile(values: list[float], q: float) -> float:
+    v = sorted(values)
+    pos = (len(v) - 1) * q
+    lo = int(pos)
+    hi = min(lo + 1, len(v) - 1)
+    return v[lo] + (v[hi] - v[lo]) * (pos - lo)
+
+
+def _round_minutes(m: float) -> int:
+    step = 5 if m >= 10 else 1
+    return max(1, int(round(m / step) * step))
+
+
+def estimate_range(root: Path, environ: Mapping[str, str] | None = None) -> dict | None:
+    """ORCH-297: the range shown before Start, a program's answer from this workspace's own finished tickets
+    (no AI call): the middle half (25th to 75th percentile) of helper time and of cost. None while fewer than
+    MIN_FOR_RANGE finished tickets have a recorded time. {"minutes": [lo, hi], "cost": [lo, hi] | None, "n": n}."""
+    root = Path(root)
+    cache = _load_cache(root)
+    before = json.dumps(cache, sort_keys=True)
+    mins: list[float] = []
+    costs: list[float] = []
+    for t in tickets.list_all(root):
+        if t.get("status") != "done" or not t.get("sessions"):
+            continue
+        r = _scan(root, t, environ, cache, set())
+        if r["seconds"] >= 60:
+            mins.append(r["seconds"] / 60)
+            if r["cost"] > 0:
+                costs.append(r["cost"])
+    if json.dumps(cache, sort_keys=True) != before:
+        _save_cache(root, cache)
+    if len(mins) < MIN_FOR_RANGE:
+        return None
+    lo, hi = _round_minutes(_quantile(mins, 0.25)), _round_minutes(_quantile(mins, 0.75))
+    if hi <= lo:
+        hi = lo + (5 if lo >= 10 else 1)
+    cost = None
+    if len(costs) >= MIN_FOR_RANGE:
+        c_lo, c_hi = round(_quantile(costs, 0.25), 2), round(_quantile(costs, 0.75), 2)
+        cost = [c_lo, max(c_hi, c_lo)]
+    return {"minutes": [lo, hi], "cost": cost, "n": len(mins)}
+
+
+def range_words(rng: object) -> str:
+    """ "about 20-40 min · $1.00-$3.00" for estimate_range's answer; "" for none."""
+    if not isinstance(rng, dict) or not isinstance(rng.get("minutes"), list) or len(rng["minutes"]) != 2:
+        return ""
+    lo, hi = rng["minutes"]
+    time = f"{lo}-{hi} min" if hi < 60 else f"{duration(lo * 60)} to {duration(hi * 60)}"
+    cost = rng.get("cost")
+    extra = f" · {money(cost[0])}-{money(cost[1])}" if cost and cost[1] > 0 else ""
+    return f"about {time}{extra}"
+
+
 def _short(v: int) -> str:
     return f"{v / 1_000_000:.1f}M" if v >= 1_000_000 else f"{v / 1000:.1f}k" if v >= 1000 else str(v)
 
