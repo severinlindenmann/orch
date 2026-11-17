@@ -74,8 +74,6 @@
 .view-chips{flex-wrap:wrap;gap:8px;align-items:center}
 .view-chip{text-decoration:none;min-height:32px;padding:4px 12px;font:inherit;font-size:13px;cursor:pointer}
 .view-chip.active{background:var(--accent-soft,var(--surface-3));color:var(--text);border-color:var(--border-strong)}
-.view-chip.add{border-style:dashed;background:none}
-.view-chip.add[disabled]{opacity:.5;cursor:default}
 .board .kanban-col.col-collapsed{flex:0 0 76px;min-width:76px;max-width:76px;min-height:0;max-height:none}
 .board .kanban-col.col-collapsed .col-head{flex-direction:column;align-items:flex-start;gap:4px}
 .board .kanban-col.col-collapsed .board-none{display:none}
