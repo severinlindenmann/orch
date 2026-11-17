@@ -358,3 +358,14 @@ def test_long_title_cut_on_screen_is_still_a_persons_words():
          "text": f'#ticket/t_cccccc: word from the never-list on screen: Bot in "{title[:60]}"'}  # fmt: skip
     assert daily.person_words(f, [title])
     assert not daily.person_words(dict(f, text='x: Bot in "Bot"'), [title])
+
+
+def test_settings_pages_keep_no_text_and_no_report_picture():
+    assert not browser.keep_text("#settings", "Logins and keys")
+    assert not browser.keep_text("#settings/addons/lessons", "x")
+    assert browser.keep_text("#home", "What needs you: 2 tickets")
+    assert not browser.keep_text("#home", "token = ghp_" + "a" * 36)  # orch's secret scan finds it
+    big = dict(BIG, route="#settings", key="pageerror|#settings|x", shot="/s/set.png")
+    small = dict(SMALL1, route="#settings/agent", key="slow|#settings/agent|phone", shot="/s/set2.png")
+    reps = daily.build_reports([big, small, SMALL2], [])
+    assert reps[0]["pictures"] == [] and reps[1]["pictures"] == ["/s/c.png"]

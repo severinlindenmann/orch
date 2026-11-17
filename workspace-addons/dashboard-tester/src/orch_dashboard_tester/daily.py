@@ -34,7 +34,7 @@ CORE_ROUTES = ["#home", "#tickets", "#review", "#chat", "#settings"]
 
 HELPER_BRIEF = """You look at the dashboard of this workspace for orch release {version} like the person who uses it.
 Today's daily look saved a picture of every page at 1280, 1920 and 390 px and the text of each page in
-{folder} (shots/ and texts/). Read them; do not open the dashboard and never click anything.
+{folder} (shots/ and texts/; settings pages have no text). Read them; do not open the dashboard and never click anything.
 
 Look for: wrong or unclear words, steps that seem to need more than one click, things that look broken or cut off,
 pages that are hard to read at phone width. The daily look already reports page errors, slow and empty pages,
@@ -137,7 +137,7 @@ class World:
     def browse(self, routes: list[str]) -> dict:
         from . import browser
 
-        return browser.look(self.launch_url(), routes, words.load(), self.out)
+        return browser.look(self.launch_url(), routes, words.load(), self.out, self.root)
 
     def send(self, rep: dict) -> tuple[str | None, str]:
         """One report through `orch report problem`, kept on this computer (not shared). (ref, how)."""
@@ -214,12 +214,19 @@ def person_words(f: dict, titles: list[str]) -> bool:
     return len(shown) >= 8 and any(shown in t or t in shown for t in titles)
 
 
+def picture_ok(f: dict) -> bool:
+    """A picture goes into a report only for a page that is not a settings page."""
+    from .browser import private_page
+
+    return bool(f.get("shot")) and not private_page(str(f.get("route") or ""))
+
+
 def build_reports(new: list[dict], back: list[tuple[dict, dict]]) -> list[dict]:
     """Big findings one per report, small ones (and every 'still there') together in one report."""
     reps, smalls = [], []
     for f in new:
         if f.get("severity") == "big":
-            reps.append({"keys": [f["key"]], "pictures": [f["shot"]] if f.get("shot") else [],
+            reps.append({"keys": [f["key"]], "pictures": [f["shot"]] if picture_ok(f) else [],
                          "what": f"Dashboard tester: {f['text']} ({f.get('viewport', '')} width).",
                          "expected": "The page shows its content within a few seconds, with no error.",
                          "more": f"Found by the daily dashboard look ({stamp()}). Page {f.get('route')}."})  # fmt: skip
@@ -229,13 +236,13 @@ def build_reports(new: list[dict], back: list[tuple[dict, dict]]) -> list[dict]:
     for f in smalls:
         lines.append(f"- {f['text']} ({f.get('viewport', '')})")
         keys.append(f["key"])
-        if f.get("shot") and f["shot"] not in pics:
+        if picture_ok(f) and f["shot"] not in pics:
             pics.append(f["shot"])
     for f, old in back:
         after = old.get("ticket_key") or old.get("ticket") or old.get("ref")
         lines.append(f"- Still there after {after} was finished: {f['text']}")
         keys.append(f["key"])
-        if f.get("shot") and f["shot"] not in pics:
+        if picture_ok(f) and f["shot"] not in pics:
             pics.append(f["shot"])
     if lines:
         what = f"Dashboard tester found {len(lines)} small problem(s) in the daily look: " + "; ".join(

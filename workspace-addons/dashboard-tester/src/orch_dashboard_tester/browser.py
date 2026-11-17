@@ -173,7 +173,25 @@ def error_finding(e: dict, vp: dict, shots: Path) -> dict:
             "text": f"{e['route']}: {what}{e['text']}"}  # fmt: skip
 
 
-def look(launch_url: str, routes: list[str], never: list[str], out: Path) -> dict:
+def private_page(route: str) -> bool:
+    """Settings (logins and keys, phone, people): no saved text and no picture in a report."""
+    return route == "#settings" or route.startswith("#settings/")
+
+
+def keep_text(route: str, text: str, root: Path | None = None) -> bool:
+    """A page text is kept for a later helper only when it is not a settings page and orch's secret scan
+    finds nothing in it (no scan to ask = not kept)."""
+    if private_page(route):
+        return False
+    try:
+        from orch import secretscan
+
+        return not secretscan.find(text, root)
+    except Exception:  # noqa: BLE001 - no core, or the scan could not run: keep nothing
+        return False
+
+
+def look(launch_url: str, routes: list[str], never: list[str], out: Path, root: Path | None = None) -> dict:
     """One pass. `launch_url` is the one-time sign-in link (http://host:port/#launch=...). Pictures go to
     out/shots, page texts to out/texts. Returns {"findings": [...], "timings": [...]}."""
     from playwright.sync_api import sync_playwright
@@ -233,7 +251,7 @@ def look(launch_url: str, routes: list[str], never: list[str], out: Path) -> dic
                         page.screenshot(path=str(shot))
                     timings.append({"route": route, "viewport": vp["name"], "ms": ms})
                     pr = _probe(page, never)
-                    if pr and pr.get("text"):
+                    if pr and pr.get("text") and keep_text(route, pr["text"], root):
                         (texts / f"{vp['name']}-{slug(route)}.txt").write_text(pr["text"], encoding="utf-8")
                     findings += findings_for(route, vp, ms, pr, str(shot))
                 cur["route"] = None
