@@ -49,4 +49,24 @@ final class ToolAlertTests: XCTestCase {
         let first = try XCTUnwrap(cases.first?["messages"] as? [[String: Any]]).map(phoneMessage)
         XCTAssertEqual(ToolAlertRules.rows(first, workspaceId: "ws_other00001"), [])
     }
+
+    /// The phone checks the contract's limits itself (Models.swift ToolAlert.isValid).
+    func testLimitsOfTheContractAreChecked() {
+        let ok = ToolAlert(name: "claude", label: "Claude Code login", kind: "login", state: "soon",
+                           endsAt: "2026-11-20T21:24:00Z", stops: ["ORCH-12", "ORCH-14"])
+        XCTAssertTrue(ok.isValid)
+        func bad(_ a: ToolAlert, _ why: String) { XCTAssertFalse(a.isValid, why) }
+        bad(ToolAlert(name: "Claude", label: "x", kind: "login", state: "soon"), "name must be a-z0-9-")
+        bad(ToolAlert(name: String(repeating: "a", count: 33), label: "x", kind: "login", state: "soon"), "name too long")
+        bad(ToolAlert(name: "a", label: String(repeating: "x", count: 61), kind: "login", state: "soon"), "label over 60")
+        bad(ToolAlert(name: "a", label: "  ", kind: "login", state: "soon"), "blank label")
+        bad(ToolAlert(name: "a", label: "Two\nlines", kind: "login", state: "soon"), "control character in label")
+        bad(ToolAlert(name: "a", label: "Rtl\u{202e}x", kind: "login", state: "soon"), "bidi override in label")
+        bad(ToolAlert(name: "a", label: "x", kind: "login", state: "soon", stops: (1...21).map { "ORCH-\($0)" }), "more than 20 tickets")
+        bad(ToolAlert(name: "a", label: "x", kind: "login", state: "soon", stops: ["ORCH-1", "ORCH-1"]), "same ticket twice")
+        bad(ToolAlert(name: "a", label: "x", kind: "login", state: "soon", stops: ["a title that is no key"]), "not a display key")
+        bad(ToolAlert(name: "a", label: "x", kind: "login", state: "soon", endsAt: "tomorrow"), "end date is no UTC time")
+        bad(ToolAlert(name: "a\n", label: "x", kind: "login", state: "soon"), "line break after the name")
+        bad(ToolAlert(name: "a", label: "x", kind: "login", state: "soon", stops: ["ORCH-1\n"]), "line break after a key")
+    }
 }

@@ -7,6 +7,7 @@ after `--` (or as `--flag=value`) so it can never be read as an option. The dash
 from __future__ import annotations
 
 import base64
+import contextlib
 import getpass
 import json
 import os
@@ -96,8 +97,19 @@ AGENT = re.compile(r"[a-z][a-z0-9-]{1,31}")
 MAX_COMMAND = 500
 MAX_TASK = 500
 PERMISSIONS = ("ask", "auto", "full")
-PATCH_KEYS = ("title", "status", "owner", "due", "note", "done_when", "summary")
-STATUSES = ("open", "ready", "active", "waiting", "review", "done")
+PATCH_KEYS = (
+    "title",
+    "status",
+    "waiting_on",
+    "superseded_by",
+    "owner",
+    "due",
+    "note",
+    "done_when",
+    "summary",
+)
+STATUSES = ("open", "ready", "active", "waiting", "review", "done", "dropped")
+TICKET_REF = re.compile(r"t_[a-z0-9]{6,16}|[A-Za-z][A-Za-z0-9]{0,15}-[0-9]{1,9}")
 
 
 class BadRequest(Exception):
@@ -373,6 +385,23 @@ def _ticket_patch(a):
             raise BadRequest("That is not a status.")
         if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
             raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
+        # ORCH-152: the board's Waiting lane waits until a time; Superseded names the ticket that replaces it.
+        # The core checks the rest (a real time, a ticket that exists, only with dropped).
+        if (
+            k == "waiting_on"
+            and v is not None
+            and not (
+                isinstance(v, dict)
+                and set(v) == {"kind", "until"}
+                and v["kind"] == "time"
+                and isinstance(v["until"], str)
+            )
+        ):
+            raise BadRequest("A wait from the board is a time.")
+        if k == "superseded_by" and v is not None and not (isinstance(v, str) and TICKET_REF.fullmatch(v)):
+            raise BadRequest("That is not a ticket.")
+        if k in ("waiting_on", "superseded_by"):
+            continue
         if k not in ("status", "due"):
             _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
@@ -1412,16 +1441,18 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         target, _ = addon_review_target(root, orch_bin, argv, args["addon"])
         if target != args.get("seen"):
             raise BadRequest("This changed after you opened it. Nothing was changed; open it again.")
+    env, fds = _person_env(root, orch_bin, op, session)
     try:
-        r = _run(
+        r = _run_with_fds(
             [*argv0(orch_bin), *argv],
+            fds,
             check=False,
             cwd=root,
             capture_output=True,
             text=True,
             timeout=_op_timeout(op, args),
             stdin=subprocess.DEVNULL,
-            env=_person_env(root, orch_bin, op, session),
+            env=env,
         )
     except subprocess.TimeoutExpired:
         if op == "addon.set" and args.get("on") is True:  # the install may still finish on its own
@@ -1519,20 +1550,35 @@ PERSON_GRANT_OPS = frozenset(
 )
 
 
-def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> dict:
-    """The person's environment for one orch call; for Renew/Replace with a one-time grant that only a signed-in
-    page session gets (orch.renew.person_only refuses these calls without it, whatever --by says)."""
+def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict, tuple[int, ...]]:
+    """The person's environment for one orch call, and the descriptors to pass to it (pass_fds) and close after;
+    for Renew/Replace with a grant that only a signed-in page session gets (orch.renew.person_only refuses
+    these calls without it, whatever --by says). The grant goes through an inherited pipe, never the child's
+    environment (on Linux another process of the same user reads it there). A status poll gets a short keyed
+    read-only grant, so a poll leaves no file behind."""
     env = human_env(root, orch_bin)
+    fds: tuple[int, ...] = ()
     if op in PERSON_GRANT_OPS:
         if not session:
             raise NeedsPerson(SIGNIN)
         from orch import renew
 
         try:
-            env[renew.GRANT_ENV] = renew.grant(root)
+            fd = renew.hand_over(env, renew.GRANT_ENV, renew.grant(root, reading=op == "logins.status"))
         except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
             raise Unavailable("orch cannot renew logins in this workspace.") from None
-    return env
+        fds = () if fd is None else (fd,)
+    return env, fds
+
+
+def _run_with_fds(cmd, fds: tuple[int, ...], **kw):
+    """_run with the person's grant pipe inherited; the parent's end is closed whatever happens."""
+    try:
+        return _run(cmd, **kw, **({"pass_fds": fds} if fds else {}))
+    finally:
+        for fd in fds:
+            with contextlib.suppress(OSError):
+                os.close(fd)
 
 
 LOGIN_INPUT_OPS = {  # op: (argv after the name, what the value is called in a refusal)
@@ -1557,16 +1603,18 @@ def login_input(
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     words = ["logins", "renew", name, *tail] if op == "logins.code" else ["logins", "replace", name]
+    env, fds = _person_env(root, orch_bin, op, session)
     try:
-        r = _run(
+        r = _run_with_fds(
             [*argv0(orch_bin), *words, "--by", actor(root), "--json"],
+            fds,
             check=False,
             cwd=root,
             capture_output=True,
             text=True,
             input=value,
             timeout=90,
-            env=_person_env(root, orch_bin, op, session),
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return 504, "That took too long. Please try again.", None

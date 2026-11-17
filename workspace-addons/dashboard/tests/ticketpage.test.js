@@ -102,6 +102,28 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   c.snapshot = true;
   assert.equal(nodes(c.ticketBringBackRow({id:'t_abc123', bring_back:b})).filter(n => n.tag === 'button').length, 0);
 });
+test('Send back on the ticket page opens a real text box: label above, no repeated placeholder, Ctrl+Enter sends (ORCH-183)', async () => {
+  const sent = [];
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), value:'', append(...kids) { this.children.push(...kids); }, replaceChildren(...kids) { this.children = kids; }, focus() {}, click() { this.onclick?.(); }});
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), render() {}, moveTicket:() => Promise.resolve(), ticketOf:() => ({revision:1}), act:async (op, args) => { sent.push(args.text); return {ok:true}; }});
+  const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
+  const editor = c.ticketChangesEditor({id:'t_abc123', status:'review'});
+  nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back')).onclick();
+  const box = nodes(editor).find(n => n.tag === 'textarea'), label = nodes(editor).find(n => n.tag === 'label');
+  assert.ok(box, 'a text box with room for a few lines');
+  assert.equal(box.attrs.rows, 3);
+  assert.equal(box.attrs.placeholder, undefined, 'the label is not repeated inside the box');
+  assert.equal(label.attrs.for, box.attrs.id, 'the label names the box');
+  assert.ok(label.children.includes('What should change?'));
+  const send = nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back') && n.attrs.className.includes('primary'));
+  box.value = 'Use the new logo'; box.oninput();
+  const key = (k, mods = {}) => box.onkeydown({key:k, preventDefault() {}, ...mods});
+  key('Enter');
+  assert.deepEqual(sent, [], 'Enter makes a new line');
+  key('Enter', {ctrlKey:true}); await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(sent, ['Use the new logo']);
+  assert.ok(send);
+});
 test('Accept shows the reviewed tip and sends the full tip with the Done (B13g)', () => {
   const moves = [];
   const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});

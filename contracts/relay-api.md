@@ -340,14 +340,23 @@ relay itself): the schema shape and the canonical `text` hold (body is only `tex
 `ticket_view`, an `update` or any other field is refused, so a group-routed message never carries it); `type` is `text`; `to`
 is exactly `phones` (a `ph_…` or a workspace is refused); `reply_to` is a question THIS sender sent (`404` for any other id,
 unknown included, so no id is confirmed; a phone cannot send the field at all, `POST /v1/phone/send` has no such field, it is
-ignored, and the stored text never carries it); the question is a `q<n>` question (a `review-<n>` or `proposal-…` question, or
-any other id → `403 not_allowed`); that question was itself sent to `phones` (one sent to a single `ph_…` or a
+ignored, and the stored text never carries it); the question is a `q<n>` question or a review round (`review-<n>` with
+`body.review` true; a `proposal-…` question or any other id → `403 not_allowed`); that question was itself sent to `phones` (one sent to a single `ph_…` or a
 workspace → `403 not_allowed`); `ticket` equals the question's `ticket` and `key`, when given, its `key`; a phone answer
 for that question is already stored → `409 already_answered`; at most one `taken_back` per `reply_to` (another message id
 `409 conflict`; the same id again is the normal `200 duplicate`). The relay keeps the take-back with the question: a later
 `POST /v1/phone/answer` for it is `409 taken_back` (nothing stored) and `open_questions` of `/v1/phone/workspaces`,
 `GET /v1/phone/questions` and the Needs list no longer count it. Stored and listed like any text, but never pushed, never in
 the text push budget, never unread. Messages without `taken_back` stay byte-identical (RULE A).
+
+*Settled in orch (the same text, sent by the workspace itself).* The workspace also sends this text, once per question, for a
+question to `phones` that was settled on the workspace and that the relay still lists: answered in orch (CLI, dashboard; not a
+phone or subscriber answer, which the relay already holds) → reason `Answered in orch`; a review round whose ticket left Review
+or moved to a newer round → `Review finished in orch`; an open question of a ticket that was dropped → `Ticket dropped`, that is
+done → `Ticket done`, whose ticket file is gone → `Ticket removed`; a take-back that never reached the relay → its own reason.
+Fixed reasons only: never the answer, a name or any other ticket text. The workspace checks every question it sent to `phones`,
+so questions settled before this existed close too, at most 20 per pull. A `403` (an older relay that does not take review
+rounds yet), `408`, `429` or `5xx` is tried again after 6 hours; any other `4xx` is final and only logged. Proposal questions are not closed this way.
 
 *Phone (vectors/taken-back-v1.json `phone`; built by G3c).* On a `taken_back` text whose `reply_to` is a question the phone
 shows, the card leaves Needs, the Review stack and the Chats "Needs your OK" row at once; no bubble, not unread. An unknown
@@ -427,13 +436,15 @@ stored message id (the cursor). Text is plain text, never HTML.
 | `update` | the same, `kind` = `question` | **Questions** |
 | `question` | a `question` a workspace sent to `phones` | **Questions** |
 | `answered` | the `answer` to such a question (from a phone or a subscriber) | **Questions** |
+| `closed` | a `taken_back` text ("Question taken back") a workspace sent to `phones`: the question was taken back or settled in orch | **Questions** |
 | `text` | a text without `body.update` a workspace sent to `phones` | always |
 
 Fields: `{v, id, type, workspace: {id, name}, ticket, key, at}` on every event (`ticket`/`key` may be `null`), plus:
 `update` → `kind, title, text, ticket_view`; `text` → `text`; `question` → `question_id` (= `id`), `text`, `title`,
 `options`, `answerable` (this subscriber may answer and no one has yet), `answered` (`null`, or `{answer, answered_by}`
 at read time); `answered` → `question_id` (the question's id), `answer`, `answered_by` (a display name: the phone's name,
-or `<name> (system)`). `ticket_view` = a smaller copy of the message's `body.ticket_view`, else `null`: `{title, status,
+or `<name> (system)`). `closed` → `question_id` (the question's id), `reason` (the take-back reason, e.g. `Answered in orch`; a
+`text` event is not made for it; only for a question stored after the subscriber was made, like `answered`). `ticket_view` = a smaller copy of the message's `body.ticket_view`, else `null`: `{title, status,
 agent, summary, done, total, refs: [{kind, title, url}], files}`, no checklist and no history; `files` (`[{name, size,
 blob_id}]`, the image and file attachments) only when **Files** is on, else `[]`.
 

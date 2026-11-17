@@ -24,6 +24,19 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(addons, "active", lambda root: {"relay": {}} if box["relay_on"] else {})
     monkeypatch.setattr(phone_view, "_paired", lambda root: list(box["phones"]))
     monkeypatch.setattr(health, "last", lambda root: box["doc"])
+    box["recipes"] = None  # None: the checks this workspace has are the ones the case names
+    monkeypatch.setattr(
+        health,
+        "recipes",
+        lambda root: (
+            box["recipes"]
+            if box["recipes"] is not None
+            else [
+                {"name": i["name"], "label": i.get("label", i["name"]), "kind": i.get("kind", "login")}
+                for i in ((box["doc"] or {}).get("items") or [])
+            ]
+        ),
+    )
     (tmp_path / ".orch" / "secrets").mkdir(parents=True)
     state = tmp_path / ".orch" / "secrets" / "tool-alerts.json"
     monkeypatch.setattr(phone_alerts, "_state_path", lambda root: state)
@@ -94,6 +107,38 @@ def test_secret_in_label_is_never_sent(tmp_path, wired):
     wired["doc"]["items"] = [{**case["items"][0], "label": "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"}]
     assert phone_alerts.sync(tmp_path, now=NOW, tz=UTC) == []
     assert wired["sent"] == [] and wired["logged"]
+
+
+def test_label_and_kind_come_from_the_known_check_not_the_saved_row(tmp_path, wired):
+    case = VECTORS["workspace"][0]
+    _seed(wired, case)
+    row = case["items"][0]
+    wired["recipes"] = [{"name": row["name"], "label": "Real tool", "kind": "key"}]
+    wired["doc"]["items"] = [{**row, "label": "CALL +41 79 000 00 00 NOW", "kind": "connection"}]
+    phone_alerts.sync(tmp_path, now=NOW, tz=UTC)
+    a = wired["sent"][0]["body"]["tool_alert"]
+    assert a["label"] == "Real tool key" and a["kind"] == "key"
+
+
+def test_a_row_without_a_known_check_is_not_sent(tmp_path, wired):
+    case = VECTORS["workspace"][0]
+    _seed(wired, case)
+    wired["recipes"] = []  # a helper wrote a row for a check this workspace does not have
+    assert phone_alerts.sync(tmp_path, now=NOW, tz=UTC) == [] and wired["sent"] == []
+
+
+@pytest.mark.parametrize(
+    "raw, want",
+    [
+        ("Mail me@example.com tool", "Mail tool login"),
+        ("Wiki wiki.internal.corp", "Wiki login"),
+        ("https://evil.example/x?a=1", "wired login"),  # nothing left: the check's name is used
+        ("Server 10.0.0.5 check", "Server check login"),
+        ("Claude 2.1", "Claude 2.1 login"),  # a version number is not a host name
+    ],
+)
+def test_label_has_no_address_or_host_name(raw, want):
+    assert phone_alerts.label({"name": "wired", "label": raw, "kind": "login"}) == want
 
 
 def test_relay_refusal_is_logged_not_raised(tmp_path, wired, monkeypatch):

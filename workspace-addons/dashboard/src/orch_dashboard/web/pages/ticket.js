@@ -667,7 +667,7 @@ function ticketFileEntries(t) {
 }
 function fileEntry(t, group, file) {
   const kind = viewerKind(file.name);
-  const role = group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
+  const role = attachedInput(t).has(file.name) ? 'Attached by you' : group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
   const at = file.mtime ? createdText(file.mtime) : '';
   return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, created:at,
     title:titleOf(file), named:!!oneLineTitle(file.title),
@@ -699,9 +699,11 @@ function ticketFileActions(t, kind, file) {
     h('a', {className:'btn ghost sm', href:fileUrl(t.id, kind, file.name, true), download:file.name.split('/').pop()}, 'Download'),
     ticketButton('Copy link for this computer', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}));
 }
+// ORCH-185: a picture shows itself in its row (the badge stays under it until it has loaded).
+const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name), alt:'', loading:'lazy'});
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
-    h('span', {className:'file-type' + (shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), shownThumb(t, kind, file)),
+    (picture => h('span', {className:'file-type' + (picture || shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), picture ? fileThumbImage(t, kind, file) : shownThumb(t, kind, file)))(viewerKind(file.name) === 'image' && !snapshot),
     h('div', {className:'grow'}, h('p', {className:'file-name'}, titleOf(file)), oneLineTitle(file.title) ? h('p', {className:'meta file-real-name'}, shortName(file)) : null, h('p', {className:'meta'}, fileMeta(file))),
     ticketFileActions(t, kind, file));
 }
@@ -1111,7 +1113,9 @@ function ticketChangesEditor(t) {
   const open = ticketButton('Send back', 'outline sm', () => {
     locks.add(key);
     let sending = false;
-    const input = h('input', {type:'text', className:'input', placeholder:'What should change?', 'aria-label':'What should change?'});
+    // A real text box (ORCH-183): a few lines, its label above it (not repeated inside), Ctrl/Cmd+Enter sends.
+    const fid = 'ticket-changes-text-' + t.id;
+    const input = h('textarea', {className:'input', id:fid, rows:3});
     const close = () => { if (sending) return; locks.delete(key); host.replaceChildren(row); open.focus(); };
     const send = ticketButton('Send back', 'primary sm', async () => {
       if (!input.value.trim() || sending) return;
@@ -1126,9 +1130,9 @@ function ticketChangesEditor(t) {
     input.oninput = () => { send.disabled = sending || !input.value.trim(); };
     input.onkeydown = e => {
       if (e.key === 'Escape') { e.preventDefault(); close(); }
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send.click(); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); send.click(); }
     };
-    host.replaceChildren(h('label', {className:'ticket-ask-label'}, 'What should change?'), h('div', {className:'ticket-ask-line'}, input, send, cancel)); input.focus();
+    host.replaceChildren(h('div', {className:'stack-sm'}, h('label', {className:'ticket-ask-label', for:fid}, 'What should change?'), input, h('div', {className:'row'}, send, cancel))); input.focus();
   });
   row.append(...[done, open, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }

@@ -419,6 +419,28 @@ fn event_of(
                 e["text"] = body["text"].as_str().unwrap_or("").into();
                 e["ticket_view"] = view_subset(&body["ticket_view"], k.files);
                 Some(e)
+            } else if body["taken_back"].is_object() {
+                // A question the workspace closed (taken back, answered in orch, review ended, ticket dropped).
+                if !k.questions {
+                    return Ok(None);
+                }
+                // Only a question this subscriber could have seen: stored after it was made (as for answers).
+                let seen = c
+                    .query_row(
+                        "SELECT 1 FROM messages WHERE id=?1 AND type='question' AND to_addr='phones'
+                           AND from_addr=?2 AND stored_at>=?3",
+                        params![m.reply_to, m.from, s.created_at],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if !seen {
+                    return Ok(None);
+                }
+                let mut e = base("closed", &m.from);
+                e["question_id"] = m.reply_to.clone().into();
+                e["reason"] = body["taken_back"]["reason"].as_str().unwrap_or("").into();
+                Some(e)
             } else {
                 let mut e = base("text", &m.from);
                 e["text"] = body["text"].as_str().unwrap_or("").into();
