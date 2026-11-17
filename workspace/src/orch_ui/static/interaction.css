@@ -29,12 +29,15 @@ dialog.ui-closing::backdrop{animation:ui-fade var(--ui-exit) reverse forwards}
 .ui-toast [role=status]{max-width:500px;flex:1;min-width:0}
 .ui-toast .btn{flex:none;white-space:nowrap}
 .ui-calendar{width:360px}
+/* ORCH-185: a small calendar, not the 480 px dialog width (dialog.dialog is more specific than the line above) */
+dialog.ui-calendar{width:min(340px,calc(100% - 32px));padding:16px}
+dialog.ui-calendar .row.between h3{margin:0;font-size:15px}
 .ui-quick{margin-top:12px;gap:8px;flex-wrap:wrap}
 .ui-time{margin-top:12px;gap:8px;align-items:center}
 .ui-time[hidden]{display:none}
 .ui-week,.ui-days{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
 .ui-week{font-size:11px;text-align:center;margin:16px 0 6px;color:var(--text-muted,#666)}
-.ui-days .btn{padding:8px;min-width:0}
+.ui-days .btn{padding:6px;min-width:0}
 .ui-days [data-today=true]{box-shadow:inset 0 0 0 1px var(--brand,#61d5b8);font-weight:700}
 .ui-days [aria-pressed=true]{background:var(--brand-soft,#173c33);outline:1px solid var(--brand,#61d5b8)}
 input[role=switch]:focus-visible{outline-offset:4px}

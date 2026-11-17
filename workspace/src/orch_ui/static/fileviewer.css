@@ -38,6 +38,7 @@ dialog.fv>.ui-overlay-close{position:absolute;top:16px;right:24px;margin:0;z-ind
 .fv-strip{display:flex;gap:8px}
 .fv-thumb{width:48px;height:36px;padding:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--bg);cursor:pointer}
 .fv-thumb.on{border-color:var(--brand);outline:2px solid var(--brand);outline-offset:1px}
+.file-type.has-thumb>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .fv-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .fv-tablewrap,.fv-sheet-body{flex:1;min-height:0;display:flex;flex-direction:column}
 .fv-sheet{flex:1;min-height:0;display:flex;flex-direction:column}

@@ -98,5 +98,6 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 - New ticket: text typed and then closed with Cancel, Esc or Back is kept and comes back the next time with "Your unsent text from before is back. Discard".
 - New ticket: an added picture shows a small thumbnail in its file row (kit `.thumbnail`).
-- Date picker (kit): today is marked with a ring and `aria-current="date"`.
+- Date picker (kit): today is marked with a ring and `aria-current="date"`; it opens as a small 340 px popup, not the 480 px dialog width.
+- `new.html` and `new.js` show the draft line with Discard and the picture thumbnail.
 - Board: a sub-ticket that has its own card in the same column is no longer listed again inside its parent's card; sub-tickets in other columns still are.

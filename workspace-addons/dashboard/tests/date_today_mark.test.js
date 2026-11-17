@@ -28,3 +28,6 @@ test('only today gets the mark in the month grid', () => {
   assert.equal(marked[0].attrs['aria-current'], 'date');
   assert.match(css, /\.ui-days \[data-today=true\]/);
 });
+test('ORCH-185: the calendar is a small popup, not the 480 px dialog width', () => {
+  assert.match(css, /dialog\.ui-calendar\{width:min\(340px,calc\(100% - 32px\)\);padding:16px\}/);
+});

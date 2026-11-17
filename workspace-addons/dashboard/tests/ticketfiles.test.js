@@ -102,3 +102,13 @@ test('ORCH-184: the Result card and the Files tab agree: a file a step proved is
   assert.doesNotMatch(card, /No result file/);
   assert.match(card, /3 files/);
 });
+test('ORCH-185: a picture shows itself in its row; its viewer says it was attached by you', () => {
+  const c = ctx(), t = {id:'t_one', status:'active', history:[{by:'human:lume', text:'Attached hero.png'}]};
+  c.t = t;
+  const row = nodes(vm.runInContext("ticketFileRow(t, 'artifacts', {name:'hero.png', size:99})", c));
+  const img = row.find(n => n.tag === 'img');
+  assert.ok(img && /name=hero\.png|n=hero\.png/.test(img.attrs.src));
+  assert.ok(row.some(n => /has-thumb/.test(n.attrs?.className || '')));
+  assert.equal(vm.runInContext("fileEntry(t, {kind:'artifacts'}, {name:'hero.png', size:99}).role", c), 'Attached by you');
+  assert.equal(vm.runInContext("fileEntry(t, {kind:'artifacts'}, {name:'report.md', size:9}).role", c), 'Result');
+});
