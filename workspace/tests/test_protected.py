@@ -142,7 +142,7 @@ def test_a_skip_question_must_say_where_it_would_run(proj):
         proj,
         t["id"],
         "Mark step c1 as won't do?",
-        ["Yes, skip it", "No, run it in CI"],
+        ["yes", "No, run it in CI"],
         "No, run it in CI",
         "agent:x",
         check="c1",
