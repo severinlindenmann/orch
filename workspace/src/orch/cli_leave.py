@@ -6,6 +6,7 @@ person's orch home, newest first, and keeps the person's data (tickets, settings
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import shutil
@@ -26,7 +27,28 @@ def _out(args, data, text: str) -> None:
 
 
 def add_parsers(sub, common) -> None:
-    sub.add_parser("doctor", parents=[common], help="show what is wrong with orch here (read-only)")
+    d = sub.add_parser("doctor", parents=[common], help="show what is wrong with orch here (read-only)")
+    dsub = d.add_subparsers(dest="doctor_cmd", metavar="<command>")
+    p = dsub.add_parser(
+        "pass", parents=[common], help="the scheduled health checks and clean-up, once now (makes tickets)"
+    )
+    p.add_argument("--dry-run", action="store_true", help="only say what it would clean up and open")
+    p.add_argument("--no-cleanup", action="store_true", help="checks only")
+    p.add_argument("--simulate", help=argparse.SUPPRESS)  # tests: a JSON file of probe results
+    dsub.add_parser("soon", parents=[common], help="start a pass in the background when one is due")
+    p = dsub.add_parser("setup", parents=[common], help="turn the scheduled checks on here from a JSON file")
+    p.add_argument("file", nargs="?", help="the setup (JSON); without it: show the one in use")
+    p.add_argument("--off", action="store_true", help="turn the scheduled checks off on this computer")
+    p = dsub.add_parser(
+        "clean", parents=[common], help="list (or with --apply remove) finished copies and old test folders"
+    )
+    p.add_argument("--apply", action="store_true")
+    p = dsub.add_parser("remove-temp", parents=[common], help="delete temp folders your own mktemp made")
+    p.add_argument("paths", nargs="+")
+    p = dsub.add_parser(
+        "stop-pids", parents=[common], help="stop exactly these processes and prove they are gone"
+    )
+    p.add_argument("pids", nargs="+")
     sub.add_parser("uninstall", parents=[common], help="take orch out of this folder (your tickets stay)")
 
 
@@ -169,6 +191,11 @@ def doctor(root: Path) -> dict:
                     "Run: orch diag inspect",
                 )
             )
+        from orch import doctorpass
+
+        late = doctorpass.overdue_row(root)
+        if late:
+            rows.append(late)
     problems = [r for r in rows if not r["ok"]]
     return {"ok": not problems, "problems": len(problems), "checks": rows}
 
@@ -334,8 +361,93 @@ def _uninstall_text(root: Path, res: dict) -> str:
     return "\n".join(out)
 
 
+def _pass_text(res: dict) -> str:
+    out = [*res["cleaned"]]
+    for o in res["opened"]:
+        out.append(f"opened {o['ticket']}: {o['title']}" if o["ticket"] else f"would open: {o['title']}")
+    if res["hold"]:
+        out.append(f"automatic helper starts {res['hold']} (disk {res['disk_free_gb']} GB free)")
+    out.append(
+        f"{len(res['problems'])} problem(s), {len(res['opened'])} ticket(s) opened, "
+        f"{len(res['kept'])} already open; disk {res['disk_free_gb']} GB free"
+    )
+    return "\n".join(out)
+
+
+def _doctor_sub(args, root: Path) -> None:
+    from orch import doctorpass
+
+    cmd = args.doctor_cmd
+    if cmd == "pass":
+        sim = None
+        if args.simulate:
+            sim = json.loads(Path(args.simulate).read_text(encoding="utf-8"))
+        res = doctorpass.run_pass(root, sim=sim, apply=not args.dry_run, cleanup=not args.no_cleanup)
+        _out(args, res, _pass_text(res))
+    elif cmd == "soon":
+        started = doctorpass.soon(root)
+        _out(
+            args, {"started": started}, "A pass started in the background." if started else "No pass is due."
+        )
+    elif cmd == "setup":
+        if args.off:
+            was = doctorpass.remove_setup(root)
+            _out(args, {"on": False, "was_on": was}, "The scheduled health checks are off on this computer.")
+            return
+        if args.file:
+            try:
+                doc = json.loads(Path(args.file).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                raise Refused(f"The setup file cannot be read as JSON ({e}).") from None
+            cfg = doctorpass.save_setup(root, doc)
+            _out(
+                args,
+                {"on": True, "setup": cfg},
+                f"The scheduled health checks are on: every {cfg['every_min']} minutes while orch runs here.",
+            )
+            return
+        cfg = doctorpass.setup(root)
+        _out(
+            args,
+            {"on": cfg is not None, "setup": cfg},
+            json.dumps(cfg, indent=2)
+            if cfg
+            else "The scheduled health checks are not set up on this computer.",
+        )
+    elif cmd == "clean":
+        cfg = doctorpass.setup(root)
+        if cfg is None:
+            raise Refused(
+                "Nothing to clean: the scheduled checks are not set up here. Run: orch doctor setup <file>"
+            )
+        lines = doctorpass.clean(cfg, apply=args.apply)
+        _out(args, {"cleaned": lines, "applied": args.apply}, "\n".join(lines) or "Nothing to clean up.")
+    elif cmd == "remove-temp":
+        res = doctorpass.remove_temp(root, args.paths)
+        _out(
+            args,
+            {"items": res},
+            "\n".join(
+                f"{r['path']}: {r['result']}" + (f" ({r['why']})" if r.get("why") else "") for r in res
+            ),
+        )
+        if any(r["result"] in ("refused", "failed") for r in res):
+            args._exit = 1  # some were refused or still run
+    elif cmd == "stop-pids":
+        res = doctorpass.stop_pids(args.pids)
+        _out(
+            args,
+            {"items": res},
+            "\n".join(f"{r['pid']}: {r['result']}" + (f" ({r['why']})" if r.get("why") else "") for r in res),
+        )
+        if any(r["result"] in ("refused", "STILL RUNNING") for r in res):
+            args._exit = 1  # some were refused or still run
+
+
 def dispatch(args, root: Path) -> bool:
-    if args.cmd == "doctor":
+    if args.cmd == "doctor" and getattr(args, "doctor_cmd", None):
+        _doctor_sub(args, root)
+    elif args.cmd == "doctor":
         res = doctor(root)
         _out(args, res, _doctor_text(res))
     elif args.cmd == "uninstall":
