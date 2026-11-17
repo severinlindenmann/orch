@@ -242,6 +242,21 @@ def _arm_resume(root: Path, session) -> None:
         pagelaunch.arm_restart(root)  # the other page server hands its tabs over too (#705)
 
 
+def _client_gone(sock) -> bool:
+    """True when the page of an event stream has closed. The page sends nothing after its request, so a socket that
+    can be read now holds only the end of the connection."""
+    if sock is None:
+        return False
+    try:
+        import select
+        import socket
+
+        ready, _, _ = select.select([sock], [], [], 0)
+        return bool(ready) and sock.recv(1, socket.MSG_PEEK) == b""
+    except (OSError, ValueError):
+        return True
+
+
 class Handler(BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
@@ -924,8 +939,10 @@ class Handler(BaseHTTPRequestHandler):
                 with revisions.condition:
                     rev = revisions.rev
                     if rev == last:
-                        revisions.condition.wait(timeout=max(0, 15 - (time.monotonic() - ping)))
+                        revisions.condition.wait(timeout=min(1, max(0, 15 - (time.monotonic() - ping))))
                         rev = revisions.rev
+                if rev == last and _client_gone(getattr(self, "connection", None)):
+                    break  # a closed or reloaded page gives its place back within a second, not at the next ping
                 if rev != last:
                     self.wfile.write(f"event: rev\ndata: {rev}\n\n".encode())
                     self.wfile.flush()

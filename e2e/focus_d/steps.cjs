@@ -179,6 +179,8 @@ async function staysOpen(page, dash) {
   await previewOn(page);
   await page.goto(dash + '/#tickets');  // a deep link
   await mainHasText(page);
+  // the steps share one browser: start with the layer at the bar, not where step 10 left it (it is kept per browser)
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
   await page.reload();  // reload keeps the page
   await mainHasText(page);
   if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('reload left the page');
@@ -253,9 +255,9 @@ async function layer(page, dash, width) {
   const panel = m => `#live-dock[data-mode="${m}"] .live-panel[data-mode="${m}"]`;
   const press = async key => { await page.keyboard.press(key); await page.waitForTimeout(50); };
   await livePreview(page);
+  // start with nothing kept, without an extra page load (the reload below must keep what this step chose)
+  await page.addInitScript(() => { try { if (!sessionStorage.getItem('fd10')) { localStorage.removeItem('orch.live.layer'); sessionStorage.setItem('fd10', '1'); } } catch (e) { /* none */ } });
   await page.goto(dash + '/#home');
-  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
-  await page.reload();
   await mainHasText(page);
   // the bar: the bar task's #live-bar when it is there, else the layer's own minimal bar
   await page.waitForSelector('#live-dock[data-mode="bar"] :is(#live-bar, [data-key="live-bar"])', { timeout: 10000 });
