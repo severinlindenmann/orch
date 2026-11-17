@@ -1,5 +1,6 @@
 """Each doctor check detects its problem on a fixture, and says ok / cannot_check otherwise."""
 
+import json
 import os
 import time
 
@@ -97,6 +98,22 @@ def test_no_heartbeat_says_progress_unknown_not_hung(proj):
     assert one(proj, "no_heartbeat")["verdict"] == "ok"
 
 
+def test_no_heartbeat_leaves_out_a_live_session_that_waits_at_its_prompt(proj):
+    """r-1117-1015-ws: ten helpers waiting for checks or the person (live state idle) were listed all day."""
+    tid = stuck(proj)
+    rec = runs._new_record(tid, "agent:claude", "claude", "live", tickets.load(proj, tid), None, proj)
+    rec["pid"] = os.getpid()
+    rec["pid_started"] = runs.procs.pid_started(os.getpid())
+    rec["renewed_at"] = rec["started_at"] = runs._iso(time.time() - 3600)
+    for waiting in ("idle", "attention"):
+        rec["live"] = {"state": waiting, "since": runs._iso(time.time() - 3000)}
+        runs._write(proj, rec)
+        assert one(proj, "no_heartbeat")["verdict"] == "ok"
+    rec["live"] = {"state": "working", "since": runs._iso(time.time() - 3000)}
+    runs._write(proj, rec)
+    assert one(proj, "no_heartbeat")["verdict"] == "problem"
+
+
 def test_waiting_for_permission(proj):
     tid = stuck(proj)
     rec = runs._new_record(tid, "agent:claude", "claude", "live", tickets.load(proj, tid), None, proj)
@@ -117,6 +134,35 @@ def test_ticket_op_refused_repeatedly(proj):
     diag.log("ticket.op_refused", "warn", root=proj, ticket="t_aaaaaa", op="done", guard="closed_ticket")
     c = one(proj, "ticket_op_refused")
     assert c["verdict"] == "problem" and "t_aaaaaa done: refused 3x" in c["evidence"][0]
+
+
+def _refused_at(proj, at: float, guard: str, ticket="t_bbbbbb"):
+    d = diag._folder(proj)
+    line = {"v": 1, "at": diag_collect._iso(at), "src": "cli", "lvl": "info", "ev": "ticket.op_refused",
+            "ticket": ticket, "kv": {"op": "op", "guard": guard}}  # fmt: skip
+    diag._append(d, "cli", diag_collect._iso(at)[:10], (json.dumps(line) + "\n").encode())
+
+
+def test_ticket_op_refused_clears_an_hour_after_the_writer_stopped(proj):
+    """r-1117-1015-ws: refusals on a closed ticket that stopped at 01:00 still showed at 10:15."""
+    now = time.time()
+    for m in (200, 185, 170, 155, 140):
+        _refused_at(proj, now - m * 60, "closed_ticket")
+    assert one(proj, "ticket_op_refused", now=now)["verdict"] == "ok"
+    for m in (30, 20, 10):
+        _refused_at(proj, now - m * 60, "closed_ticket")
+    c = one(proj, "ticket_op_refused", now=now)
+    assert c["verdict"] == "problem"
+    assert c["evidence"] == ["t_bbbbbb: refused 3x in the last hour (guard closed_ticket)"]
+
+
+def test_ticket_op_refused_does_not_count_write_conflicts_or_mix_guards(proj):
+    now = time.time()
+    for m in (30, 20, 10):
+        _refused_at(proj, now - m * 60, "conflict")
+    _refused_at(proj, now - 60, "Refused")
+    _refused_at(proj, now - 50, "closed_ticket")
+    assert one(proj, "ticket_op_refused", now=now)["verdict"] == "ok"
 
 
 def test_hook_lines_missing(proj):
@@ -169,6 +215,23 @@ def test_diag_dropped(proj):
     diag._drop("write")
     c = one(proj, "diag_dropped")
     assert c["verdict"] == "problem" and "1 dropped" in c["evidence"][0]
+
+
+def test_diag_dropped_only_counts_the_last_hour(proj):
+    """r-1117-1015-ws: a burst of dropped dashboard events at 08:30 kept the check red at 10:15."""
+    now = time.time()
+    d = diag._folder(proj)
+    for ago, n in ((7200, 40), (5400, 2)):
+        at = diag_collect._iso(now - ago)
+        line = {"v": 1, "at": at, "src": "ui", "lvl": "warn", "ev": "diag.dropped", "kv": {"count": n}}
+        diag._append(d, "ui", at[:10], (json.dumps(line) + "\n").encode())
+    c = one(proj, "diag_dropped", now=now)
+    assert c["verdict"] == "ok" and "42 earlier today" in c["fact"]
+    at = diag_collect._iso(now - 120)
+    line = {"v": 1, "at": at, "src": "ui", "lvl": "warn", "ev": "diag.dropped", "kv": {"count": 5}}
+    diag._append(d, "ui", at[:10], (json.dumps(line) + "\n").encode())
+    c = one(proj, "diag_dropped", now=now)
+    assert c["verdict"] == "problem" and c["evidence"] == [f"5 dropped in the last hour, last {at}"]
 
 
 def test_optional_parts_stay_invisible_while_off(proj, run):

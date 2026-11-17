@@ -247,6 +247,10 @@ If work remains, leave it visible (open steps, a log line).
 
 Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colours from the list, never invent an id. If a person already chose a field, orch refuses it: leave it. All of it is optional: if one is refused or fails, skip it; it is never a blocker for the work.
 
+**Screenshot a page or file** (never start a browser yourself: it can pop a keychain password window on the person's screen)
+
+    orch shot <address or html file> --width 1280,1920,390 --out <folder>    # one picture per width, prints the paths
+
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.
 - Plans may change. There are no signing or planning gates.
