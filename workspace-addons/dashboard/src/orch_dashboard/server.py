@@ -26,6 +26,7 @@ from .data import (
     load_links,
     load_services,
     load_state,
+    patch_settings,
     patch_ticket,
 )
 from .events import Revisions
@@ -45,6 +46,22 @@ MAX_BIG_BODY = (
 LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose")
 # ops that name a ticket but change more than it (settings, add-ons, the workspace): answered with a full build
 WIDE_OPS = ("addon.act", "addon.set", "addon.uninstall", "addon.start", "update.start")
+# Settings choices that change only what Settings (or the phone switch) shows: answered at once with the Settings
+# values read again, the full build follows in the background (ORCH-227: a choice took 4 to 12 s to show)
+SETTINGS_OPS = (
+    "config.permissions",
+    "config.agent",
+    "live.set",
+    "workflow.set",
+    "reviewer.set",
+    "release_merge.set",
+    "diag.set",
+    "typing.set",
+    "update.auto",
+    "copies.set",
+    "mobile.set",
+    "mobile.hours",
+)
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -740,9 +757,23 @@ class Handler(BaseHTTPRequestHandler):
             if fresh:
                 forget_static()  # the add-on list too: a catalogue opened after a change made in the terminal
             state, age = self.server.state_cache.fresh() if fresh else self.server.state_cache.get()
-            return self._send(
-                200, json.dumps(state).encode(), "application/json", {"X-State-Age-Ms": str(int(age * 1000))}
-            )
+            rev = str(state.get("rev") or "")
+            hdr = {"X-State-Age-Ms": str(int(age * 1000))}
+            have = parse_qs(query).get("have", [""])[0]
+            if (
+                rev and not fresh and have == rev
+            ):  # the page holds this revision: a few bytes, not the whole state
+                return self._send(
+                    200, json.dumps({"unchanged": True, "rev": rev}).encode(), "application/json", hdr
+                )
+            body = json.dumps(state).encode()
+            if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                import gzip
+
+                body = gzip.compress(body, 3)
+                hdr["Content-Encoding"] = "gzip"
+                hdr["Vary"] = "Accept-Encoding"
+            return self._send(200, body, "application/json", hdr)
         if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
             from .data import load_chat_contacts, load_chat_thread
 
@@ -1156,6 +1187,9 @@ class Handler(BaseHTTPRequestHandler):
             # A workspace text changes no ticket: answer with the cached state at once (a full rebuild took 10 s on a
             # big workspace and kept "Sending…" on screen), never as the new cache.
             state = dict(self.server.state_cache.get()[0])
+        elif state is None and body.get("op") in SETTINGS_OPS:
+            state = patch_settings(self.root, self.orch_bin, self.server.state_cache.get()[0], body.get("op"))
+            self.server.state_cache.quick(state)  # before the reply's own keys are added
         elif (
             state is None
             and isinstance(tid, str)

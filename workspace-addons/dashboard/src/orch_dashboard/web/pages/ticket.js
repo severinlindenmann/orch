@@ -805,13 +805,6 @@ function ticketTaskOutcome(task) {
   const ev = array(task.evidence).slice(-1)[0];
   return window.DashHelpers.outcome(task) + (ev?.at ? ' · ' + window.DashHelpers.stamp(ev.at, Date.now()) : '') + (ev?.by ? ' — ' + ticketActor(ev.by) : '');
 }
-function focusTicketAnswer() {
-  const card = main.querySelector('.next-question');
-  if (!card) return;
-  card.scrollIntoView({block:'center', behavior:'smooth'});
-  const target = card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button');
-  target?.focus({preventScroll:true});
-}
 // A small chip per proof worth opening: a file opens its preview, a PR or web address opens in a new tab.
 function taskProofChips(t, task) {
   const chips = uniqueBy(array(task.evidence), ev => proofKey(t, ev)).map(ev => {
@@ -981,6 +974,19 @@ function phoneEntry(tid, entry) {
   return h('div', {className:'phone-entry'}, p.text ? h('p', {}, clean(p.text)) : null, body);
 }
 // Ticket-only controls bind properties: the shared h() serializes attributes.
+// The header Answer button (ORCH-234): it only scrolled to the question card, which stands above every tab and so was
+// in view already, and focused it without a ring: nothing a person could see. It now opens the same answer window as
+// Answer in the ticket list (openNeed). Without a waiting question for this ticket it brings the card to the middle
+// and focuses its first answer (no fade: the page never animates needs-you, see test_views).
+function focusTicketAnswer(id, trigger) {
+  const need = (typeof needsList === 'function' ? needsList() : []).find(n => n && n.ticket === id && window.DashHelpers.needAction(n).kind === 'answer');
+  if (need) { openNeed(need, trigger); return 'window'; }
+  const card = main.querySelector('.next-question');
+  if (!card) return '';
+  card.scrollIntoView({block:'center', behavior:'smooth'});
+  card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button')?.focus({preventScroll:true});
+  return 'card';
+}
 function ticketButton(label, cls, click, attrs = {}) {
   const node = h('button', {type:'button', className:'btn ' + cls, 'data-key':'ticket-button-' + label, ...attrs}, label);
   node.onclick = click;
@@ -1525,7 +1531,7 @@ function ticketProperties(t, parent) {
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
     h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)),
-      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Helper strength', modelField(t)),
+      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t), field('Helper strength', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
     linksCard(t),
@@ -1565,7 +1571,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     // Reopen puts it back in To do (ORCH-235): Working is only shown while a helper runs
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'ready'), {'data-key':'ticket-reopen'}));
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
-    else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', focusTicketAnswer, {'data-key':'ticket-answer'})); }
+    else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', e => focusTicketAnswer(t.id, e?.currentTarget), {'data-key':'ticket-answer'})); }
     else if (kidsDone) actions.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'}));
     else if (fresh) actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'}));
     else if (ticketPaused(t, run)) actions.push(ticketButton('Resume', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'}));
@@ -1678,6 +1684,11 @@ function detail(t) {
       h('div', {className:'stack ticket-side'}, ticketProperties(t, parent), fieldSections(t)))));
 }
 
+// ORCH-189: Time · cost, only when the helper estimated it or worked on it (read-only).
+function costValue(t) {
+  const text = window.DashHelpers.costLine(t);
+  return text ? h('span', {className:'meta', 'data-key':'ticket-cost'}, text) : null;
+}
 const MULTILINE = ['note', 'done_when'];
 const FIELD_LABEL = {title:'title', owner:'owner', due:'due date', note:'what you asked', done_when:'what done looks like'};
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};

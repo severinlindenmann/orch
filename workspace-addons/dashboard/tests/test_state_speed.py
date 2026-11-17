@@ -140,6 +140,12 @@ if a[:2] == ["check", "add"]:  # the click: a task added to the ticket file
     t["revision"] = t.get("revision", 0) + 1
     f.write_text(json.dumps(t))
     print(json.dumps({{"ok": True}})); sys.exit(0)
+if a[:3] == ["config", "set", "workspace.permissions"]:  # a Settings choice
+    (root / ".orch" / "perm.txt").write_text(a[3])
+    print(json.dumps({{"ok": True}})); sys.exit(0)
+if a[:3] == ["config", "get", "workspace.permissions"]:
+    f = root / ".orch" / "perm.txt"
+    print(json.dumps({{"workspace.permissions": f.read_text() if f.exists() else "auto"}})); sys.exit(0)
 if a[:2] == ["ticket", "show"]:
     print((root / ".orch" / "tickets" / (a[2] + ".json")).read_text()); sys.exit(0)
 if a[:2] == ["review", "list"]:
@@ -221,6 +227,34 @@ def test_a_click_answers_at_once_with_its_change_while_helpers_work(ws, click_se
         stop.set()
         for t in helpers:
             t.join()
+
+
+def test_a_settings_choice_answers_at_once_with_the_new_choice(ws, click_server):
+    """Report r-1117-1256-ws (ORCH-227): 'Asks first' or '8 h' showed the old choice for 4 to 12 s, because every
+    Settings choice waited for a full build. Now the answer holds the Settings values read again, at once, and
+    the full build follows in the background."""
+    from .test_act import post
+
+    srv, base, _builds = click_server
+    urllib.request.urlopen(base + "/api/state", timeout=30).read()  # a warm server
+    assert srv.revisions.join()
+    times = []
+    for mode in ("ask", "auto", "ask"):
+        t = time.monotonic()
+        code, body, _ = post(base, {"op": "config.permissions", "args": {"mode": mode}})
+        times.append(time.monotonic() - t)
+        assert code == 200, body
+        assert json.loads(body)["settings"]["permissions"] == mode, "the answer holds the new choice"
+    assert max(times) < CLICK_LIMIT, (
+        f"choices took {[round(x, 2) for x in times]} s (a build takes {CLICK_BUILD} s)"
+    )
+    rev = srv.revisions.rev
+    end = time.monotonic() + 3 * CLICK_BUILD + 2
+    while srv.revisions.rev == rev and time.monotonic() < end:
+        time.sleep(0.05)
+    assert srv.revisions.rev != rev, "the background build was published"
+    served = json.loads(urllib.request.urlopen(base + "/api/state", timeout=30).read())
+    assert served["settings"]["permissions"] == "ask"
 
 
 def _assets(html):
