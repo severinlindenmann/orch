@@ -1006,4 +1006,5 @@ def counts(root: Path, args) -> dict:
         },
         "unavailable": unavailable,
         "complete": not unavailable,
+        "lost": record.lost_in(root, day_from, day_to),
     }

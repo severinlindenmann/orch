@@ -144,18 +144,28 @@ def test_not_now_merges_nothing(tk, run, gh):
     assert _q(root, tid)["decision"]["action"] == "dont"
 
 
-def test_refused_merge_saves_no_answer_and_can_be_clicked_again(tk, run, gh):
+def test_refused_merge_is_sent_back_to_the_helper_with_the_reason(tk, run, gh):
     root, tid = tk
     assert _ask(run, tid)[0] == 0
-    gh.merge_rc, gh.merge_err = 1, "X Pull request acme/app#12 is not mergeable: checks are failing.\n"
+    gh.merge_rc, gh.merge_err = (
+        1,
+        "X Pull request acme/app#12 is not mergeable: the base branch policy prohibits the merge.\n",
+    )
     code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
-    assert code == 2
-    assert "GitHub did not merge it: Pull request acme/app#12 is not mergeable" in out + err
-    assert "Open the pull request and merge it there." in out + err
-    assert _q(root, tid)["answer"] is None
-    gh.merge_rc = 0
-    assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
-    assert len(gh.merges) == 2 and _q(root, tid)["answer"] is not None
+    assert code == 0, out + err
+    q = _q(root, tid)
+    assert q["answer"] is not None and q["decision"]["action"] == "send_back"
+    change = q["decision"]["changes"][0]
+    assert "Merge failed on GitHub, please fix it:" in change and "base branch policy prohibits" in change
+    assert "Open the pull request and merge it there." not in change
+    assert len(gh.merges) == 1
+
+
+def test_only_a_person_merge_refusal_still_refuses(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", "agent:claude")
+    assert code == 2 and _q(root, tid)["answer"] is None
 
 
 def test_running_checks_hold_the_merge_and_save_no_answer(tk, run, gh):

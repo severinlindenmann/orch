@@ -41,7 +41,7 @@
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
     els.stopL.textContent = running ? 'Pause work' : 'Continue';
     els.stop.setAttribute('aria-label', running ? 'Pause work' : 'Continue');
-    els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
+    els.compose.hidden = S.state.tab >= 2 || (v.state === 'done' && !running);  /* a done ticket is a read-only board unless a helper runs on it; a ticket in Check takes messages (ORCH-247) */
     S.views.compose.renderWaiting(v);
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
@@ -139,7 +139,7 @@
       if (!tab || tab.hidden) return;
       S.state.tab = onScreen ? 0 : i;
       els.review.hidden = !S.state.view || !window.FocusHelpers.reviewBarShown(S.state.view);
-      els.compose.hidden = S.state.view?.state === 'done' || S.state.tab >= 2 || (S.state.view?.ticket.status === 'review' && !S.state.changesRequested);
+      els.compose.hidden = S.state.tab >= 2 || (S.state.view?.state === 'done' && !S.state.view?.run.running);
       [...els.tabs, ...(els.screenTab ? [els.screenTab] : [])].forEach(b => { const on = b === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; });
       if (screen) screen.place(onScreen);
       try { localStorage.setItem('focus-tab', onScreen ? 'screen' : ''); } catch (e) { /* not kept */ }
