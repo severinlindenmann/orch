@@ -1,5 +1,7 @@
 """ORCH-49: orch picks Sonnet or Opus for a ticket's helper before it starts; a person can change it.
-ORCH-82: most tickets start on Sonnet, hard ones on Opus; a ticket moves up (helper or two failed checks)."""
+ORCH-82: most tickets start on Sonnet, hard ones on Opus; a ticket moves up (helper or two failed checks).
+ORCH-257: Haiku and Fable are a person's choice only (orch never picks them); a Fable ticket works the drafts
+way."""
 
 import json
 import os
@@ -39,6 +41,9 @@ def _t(title, **kw):
         (_t("Add a new feature to the board"), "opus"),
         (_t("Write a concept for the inbox"), "opus"),
         (_t("Draft a new Home page"), "opus"),
+        (_t("Redesign the Home page"), "opus"),  # ORCH-257: never Fable by itself
+        (_t("Three drafts for the new settings page"), "opus"),
+        (_t("A quick fast small tweak"), "sonnet"),  # never Haiku by itself
         (_t("Publish the report page"), "opus"),
         (_t("Migrate the ticket files"), "opus"),
         (_t("The export test is flaky"), "opus"),
@@ -96,12 +101,15 @@ def test_orchs_own_routine_ticket_starts_on_sonnet_despite_its_long_note():
 
 
 def test_pick_is_only_ever_sonnet_or_opus():
-    for title in ("", "x", "Use Fable for this", "haiku please", "a" * 5000):
-        assert modelpick.pick(_t(title))[0] in modelpick.MODELS
+    """ORCH-257 (owner 17 Nov): orch never picks Fable or Haiku by itself; only a person chooses them."""
+    titles = ("", "x", "Use Fable for this", "haiku please", "a" * 5000, "Make me three new mockups of Home",
+              "Redesign the inbox", "A concept for sync", "Fable drafts", "fast haiku typo")  # fmt: skip
+    for title in titles:
+        assert modelpick.pick(_t(title))[0] in modelpick.PICKED == ("sonnet", "opus")
 
 
 def test_an_unknown_stored_model_counts_as_none():
-    assert modelpick.chosen(_t("x", model={"name": "fable", "by": "human:t"})) is None
+    assert modelpick.chosen(_t("x", model={"name": "gpt", "by": "human:t"})) is None
     assert modelpick.label(_t("x")) is None
 
 
@@ -131,7 +139,7 @@ def test_oneshot_puts_the_model_before_the_prompt_separator(proj):
 def test_orch_picks_again_while_no_person_chose(proj):
     t = tickets.create(proj, "Fix a typo", "human:t")
     runs.plan(proj, t["id"], agent="claude", mode="live", hooks_file="h.json")
-    tickets.edit(proj, t["id"], None, "human:t", fields={"note": "and redesign the whole page"})
+    tickets.edit(proj, t["id"], None, "human:t", fields={"note": "and rework the whole page layout"})
     assert runs.plan(proj, t["id"], agent="claude", mode="live", hooks_file="h.json")["model"] == "opus"
     assert tickets.load(proj, t["id"])["model"]["name"] == "opus"
 
@@ -273,12 +281,13 @@ def test_no_live_session_means_the_next_start_switches(proj):
     assert runs_live.switch_model(proj, tid, "fable", "orch") is False
 
 
-def test_only_a_person_sets_the_model_and_only_sonnet_or_opus(proj):
+def test_only_a_person_sets_the_model_and_only_a_known_one(proj):
     t = tickets.create(proj, "x", "human:t")
     with pytest.raises(Refused, match="Only a person"):
-        tickets.set_model(proj, t["id"], "opus", "agent:claude")
-    with pytest.raises(Refused, match="sonnet, opus or auto"):
-        tickets.set_model(proj, t["id"], "fable", "human:t")
+        tickets.set_model(proj, t["id"], "fable", "agent:claude")
+    with pytest.raises(Refused, match="haiku, sonnet, opus, fable or auto"):
+        tickets.set_model(proj, t["id"], "gpt", "human:t")
+    assert tickets.set_model(proj, t["id"], "fable", "human:t")["model"] == {"name": "fable", "by": "human:t"}
     with pytest.raises(Refused):
         tickets.edit(proj, t["id"], None, "human:t", fields={"model": "opus"})
 
@@ -314,3 +323,73 @@ def test_a_helper_moves_up_only_its_own_ticket(proj, run, monkeypatch):
     assert tickets.load(proj, other)["model"]["name"] == "sonnet"
     code, out = run("ticket", "model", mine, "up", "--why", "the plan needs a new design")[:2]
     assert code == 0 and tickets.load(proj, mine)["model"]["name"] == "opus"
+
+
+# ORCH-257: Fable as a ticket model, and the drafts way of working.
+
+
+def test_cli_fable_and_show(proj, run):
+    t = tickets.create(proj, "Fix the footer", "human:t")
+    code, out = run("ticket", "model", t["id"], "fable", "--by", "human:severin")[:2]
+    assert code == 0 and "Model: Fable (chosen by severin). It applies from the next start." in out
+    assert "Model: Fable (chosen by severin)" in run("ticket", "show", t["id"])[1]
+    p = runs.plan(proj, t["id"], agent="claude", mode="oneshot")
+    assert p["argv"][p["argv"].index("--model") + 1] == "fable"
+
+
+def test_orch_never_picks_fable_and_up_never_changes_a_persons_fable(proj, run):
+    t = tickets.create(proj, "Make a new mockup of the inbox", "human:t")
+    assert tickets.pick_model(proj, t["id"], "orch") == "opus"
+    tickets.set_model(proj, t["id"], "fable", "human:t")
+    assert tickets.pick_model(proj, t["id"], "orch") == "fable"  # a person's choice stays
+    t2, moved = tickets.move_up(proj, t["id"], "the plan needs a new design", "agent:claude")
+    assert not moved and t2["model"]["name"] == "fable"
+    code, out = run("ticket", "model", t["id"], "up", "--why", "hard work")[:2]
+    assert code == 0 and "already runs on Fable" in out
+
+
+def test_a_persons_haiku_runs_and_a_helper_asks_before_moving_up(proj, run):
+    t = tickets.create(proj, "Sort the list", "human:t")
+    code, out = run("ticket", "model", t["id"], "haiku", "--by", "human:severin")[:2]
+    assert code == 0 and "Model: Haiku (chosen by severin)" in out
+    p = runs.plan(proj, t["id"], agent="claude", mode="oneshot")
+    assert p["argv"][p["argv"].index("--model") + 1] == "haiku"
+    with pytest.raises(Refused, match="A person chose Haiku"):
+        tickets.move_up(proj, t["id"], "the plan needs a new design", "agent:claude")
+    with pytest.raises(Refused, match="Only a person"):
+        tickets.set_model(proj, t["id"], "haiku", "agent:claude")
+
+
+def test_a_fable_ticket_starts_the_drafts_way(proj):
+    t = tickets.create(proj, "Make me a new mockup of focus mode", "human:t")
+    tickets.set_model(proj, t["id"], "fable", "human:severin")
+    text = runs.plan(proj, t["id"], agent="claude", mode="oneshot")["argv"][-1]
+    assert "runs on Fable" in text and f"at least {runs.DRAFTS_MIN} clearly different drafts" in text
+    assert "realistic data" in text and "on Opus" in text and "side by side" in text
+    assert f'orch ask {t["id"]} "<question>" --choose' in text and "artifacts/<draft-c>.html" in text
+    other = tickets.create(proj, "Fix a typo on the Home page", "human:t")
+    assert "runs on Fable" not in runs.plan(proj, other["id"], agent="claude", mode="oneshot")["argv"][-1]
+
+
+def test_a_persons_fable_switches_a_live_session_with_the_drafts_way(proj, run, monkeypatch):
+    from orch import runs_live
+
+    tid = _sonnet_ticket(proj)
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    rec["live"] = {"state": "working", "since": tickets.now()}
+    runs._write(proj, rec)
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
+    monkeypatch.setattr(runs_live, "tmux", lambda root, *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(runs_live, "_hold_reason", lambda *a, **k: None)
+    code, out = run("ticket", "model", tid, "fable", "--by", "human:severin")[:2]
+    assert code == 0 and "The running helper switches when its turn ends." in out
+    assert runs.read(proj, tid)["model_switch"]["to"] == "fable"
+    (item,) = runs.undelivered(proj, tid)
+    assert item["text"].startswith("Model set to Fable. Go on with the ticket. This ticket runs on Fable")
+    assert runs_live._model_line(runs.read(proj, tid), proj) == "/model fable"
+
+
+def test_usage_counts_fable_as_its_own_family():
+    from orch import usage
+
+    assert usage.family("claude-fable-5-2") == "fable"

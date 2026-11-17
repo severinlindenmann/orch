@@ -265,21 +265,6 @@ def a0(e):
     e._addons = True
 
 
-@scenario("A1")
-def a1(e):
-    raise Skip("dashboard browser scenario (another lane)")
-
-
-@scenario("A2")
-def a2(e):
-    raise Skip("dashboard browser scenario (another lane)")
-
-
-@scenario("A3")
-def a3(e):
-    raise Skip("dashboard snapshot publish needs browser check (another lane)")
-
-
 def _fake_agent(e, ws: Path, interval: int = 2) -> Path:
     """Fake agent: records start/end with the ticket id from the prompt, takes 3 s."""
     log = e.tmp / f"fake-agent-{ws.name}.log"
