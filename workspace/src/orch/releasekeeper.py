@@ -23,7 +23,7 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            settings and data changes listed) and a deploy card asked (production: the owner's go; on "Deploy
            now" a helper ticket gets the prepared program), the highlights as a short note on the role ticket,
            the release worktree removed -> idle.
-Every pass also runs the security check (secreview.py, ORCH-317): pull requests that touch the servers, sign-in,
+Every pass also runs the security check (secreview.py, ORCH-317): pull requests touching the servers, sign-in,
 secrets or what leaves this computer get a security review helper by themselves, and the idle phase cuts
 nothing until each of them in the release has an OK.
 A release pull request the keeper did not cut is only watched. `orch github release-hold "<why>"` stops
