@@ -464,7 +464,7 @@ STAYS = {  # words split by spaces; each one is a regular expression
     " passwords? tokens? keys? security merge[sd]? wipe reset migrat(e|ion)",
 }
 STAYS_RE = {k: re.compile(rf"(?<![\w-])({'|'.join(v.split())})(?![\w-])", re.I) for k, v in STAYS.items()}
-MONEY_SIGN = re.compile(r"[$€£]")
+MONEY_MARK = re.compile(r"[$€£]")
 ROUTINE_TEXT_MAX = 2000
 PLAIN_TEXT = re.compile(r"[\x20-\x7e\n\t]*")  # printable ASCII only
 ROUTINE_WHY = (
@@ -493,7 +493,7 @@ def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tupl
     text = unicodedata.normalize("NFKC", text)
     if not PLAIN_TEXT.fullmatch(text) or len(text) > ROUTINE_TEXT_MAX:  # look-alikes, hidden marks: fail safe
         return False, "not plain short text"
-    hits = [k for k, rx in STAYS_RE.items() if rx.search(text) or (k == "money" and MONEY_SIGN.search(text))]
+    hits = [k for k, rx in STAYS_RE.items() if rx.search(text) or (k == "money" and MONEY_MARK.search(text))]
     if hits:
         return False, "names " + ", ".join(hits)
     return True, ROUTINE_WHY
