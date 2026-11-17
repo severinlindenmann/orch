@@ -831,3 +831,19 @@ def test_orch185_note_edit_history_carries_old_and_new_text(proj, new_ticket):
     assert lines[1].endswith("…)") and len(lines[1]) < 500
     assert tickets.history_line(lines[0]) == "Changed the note"
     assert tickets.history_line("Edited note") == "Changed the note"
+
+
+def test_a_wait_until_a_date_keeps_what_it_waits_for(proj, new_ticket, validate):
+    """ORCH-235: Waiting has a date and, when a person gave one, a reason; a blank reason is left out."""
+    tid = new_ticket()
+    rev = read(proj, tid).get("revision", 0)
+    wait = {"kind": "time", "until": "2030-01-01T08:00:00Z", "ref": " The price list "}
+    data = {"status": "waiting", "waiting_on": wait}
+    tickets.patch(proj, tid, rev, json.dumps(data), "human:t")
+    t = read(proj, tid)
+    validate(t)
+    assert t["waiting_on"] == {"kind": "time", "until": "2030-01-01T08:00:00Z", "ref": "The price list"}
+    blank = tickets.waiting_value("time", "  ", "2030-01-01T08:00:00Z")
+    assert blank == {"kind": "time", "until": "2030-01-01T08:00:00Z"}
+    with pytest.raises(Refused):
+        tickets.waiting_value("time", "x" * 201, "2030-01-01T08:00:00Z")

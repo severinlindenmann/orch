@@ -97,3 +97,56 @@ test('Needs you: the strip names the agent that asked (as Home does), not always
   assert.match(text(strip), /Manager asks: Build the new card look\?/);
   assert.doesNotMatch(text(strip), /Helper asks/);
 });
+// ORCH-235 (bug hunt 17 Nov): one word per state, a move by a person never says a helper ran, an epic offers Done.
+const stripOf = (c, t) => nodes(c.detail({...base, ...t})).find(n => /(^| )strip( |$)/.test(n.attrs.className || ''));
+test('a wait for a date reads Waiting with its date and reason, never Needs you', () => {
+  const c = ctx();
+  const strip = stripOf(c, {status:'waiting', waiting_on:{kind:'time', until:'2030-01-07T08:00:00Z', ref:'The price list'}});
+  assert.ok(nodes(strip).some(n => /(^| )pill (.* )?todo( |$)/.test(n.attrs.className || '')));
+  assert.match(text(strip), /Waiting/);
+  assert.match(text(strip), /Waits until .*2030.* · The price list\./);
+  assert.doesNotMatch(text(strip), /Needs you/);
+  const none = stripOf(c, {status:'waiting', waiting_on:null});
+  assert.match(text(none), /Waiting, with no date or reason given\./);
+  const asks = stripOf(c, {status:'waiting', waiting_on:{kind:'question', ref:'q1'}, questions:[{id:'q1', text:'Which day?'}]});
+  assert.match(text(asks), /Needs you/);
+});
+test('a ticket a person moved to Check says who moved it, not that a helper finished', () => {
+  const c = ctx();
+  const byHand = stripOf(c, {status:'review', history:[{at:'2026-11-17T12:59:00Z', by:'human:Anna', text:'Patched status (status ready -> review)'}]});
+  assert.match(text(byHand), /Moved to Check by Anna/);
+  assert.doesNotMatch(text(byHand), /Helper finished/);
+  const byHelper = stripOf(c, {status:'review', history:[{at:'2026-11-17T12:59:00Z', by:'agent:claude', text:'Status active -> review'}]});
+  assert.match(text(byHelper), /Helper finished/);
+});
+test('an epic whose sub-tickets are all done offers Mark Done; with one open it does not', () => {
+  const kids = s => [{id:'t_k1', parent:'t_one', status:'done', title:'A'}, {id:'t_k2', parent:'t_one', status:s, title:'B'}];
+  let moved = null;
+  const c = ctx({tickets:() => kids('done'), moveTicket:(id, status) => { moved = [id, status]; }});
+  const strip = stripOf(c, {status:'ready', epic:true, sessions:[{id:'s'}]});
+  assert.match(text(strip), /All 2 sub-tickets are done/);
+  const mark = nodes(strip).find(n => n.tag === 'button' && text(n) === 'Mark Done');
+  assert.ok(mark, 'a Mark Done button'); mark.onclick();
+  assert.deepEqual(moved, ['t_one', 'done']);
+  const open = stripOf(ctx({tickets:() => kids('active')}), {status:'ready', epic:true, sessions:[{id:'s'}]});
+  assert.ok(!nodes(open).some(n => n.tag === 'button' && text(n) === 'Mark Done'));
+});
+test('Reopen puts a Done ticket back in To do, not Working', () => {
+  let moved = null;
+  const c = ctx({moveTicket:(id, status) => { moved = status; }});
+  nodes(stripOf(c, {status:'done'})).find(n => n.tag === 'button' && text(n) === 'Reopen').onclick();
+  assert.equal(moved, 'ready');
+});
+test('the ticket page menu offers Waiting and Superseded and leaves out the lane it is in', () => {
+  const c = ctx({MOVE_CHOICES:helpers.MOVE_CHOICES});
+  const keys = nodes(c.detail({...base, status:'ready'})).map(n => n.attrs['data-key']).filter(k => /^ticket-move-/.test(k || ''));
+  assert.deepEqual(keys, ['open', 'active', 'blocked', 'review', 'done', 'dropped', 'superseded'].map(l => 'ticket-move-' + l));
+});
+test('waitWords: a date with a reason, another ticket, the outside, nothing', () => {
+  const w = (waiting_on, all) => helpers.waitWords({waiting_on}, all || [], v => 'at ' + v);
+  assert.equal(w({kind:'time', until:'X', ref:'The price list'}), 'Waits until at X · The price list');
+  assert.equal(w({kind:'time', until:'X'}), 'Waits until at X');
+  assert.equal(w({kind:'ticket', ref:'t_abc123'}, [{id:'t_abc123', key:'DM-4'}]), 'Waits for DM-4');
+  assert.equal(w({kind:'external', ref:'the supplier'}), 'Waits: the supplier');
+  assert.equal(w(null), '');
+});

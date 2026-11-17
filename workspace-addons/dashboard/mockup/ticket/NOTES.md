@@ -172,3 +172,15 @@ A feature wish (ORCH-81, owner pick A, 16 Nov; `&about=feature`): the button kee
 - Activity: a note edit keeps its own row with "Was: … → Now: …" (at most 200 characters each).
 - Picture viewer (kit): a picture gets the tall window and a smaller header at 700 px and wider, so a 640 × 480 picture is shown whole.
 - `ticket-working.html` shows the attached picture (thumbnail, "attached by you") under What you asked and an Activity row with Was/Now. The picture viewer says "Attached by you" for such a file.
+
+## ORCH-235 (17 Nov): one word per ticket state
+
+### ticket-waiting.html
+
+- A ticket that waits for a date or the outside says Waiting (never Needs you), with its date and what it waits for:
+  "Waits until Mon 09:00 · The price list from the supplier". Needs you stays for a helper's open question.
+- The product's ⋯ menu offers every board lane except Needs you (Backlog, To do, Working, Waiting, Check, Done,
+  Won't do, Superseded); Waiting asks for the date and, optionally, what it waits for.
+- Check after a move by a person reads "Moved to Check by Anna 14:23", never "Helper finished".
+- An epic whose sub-tickets are all done says so and offers Mark Done; Done with open sub-tickets asks first
+  ("Mark Done anyway" or Cancel).
