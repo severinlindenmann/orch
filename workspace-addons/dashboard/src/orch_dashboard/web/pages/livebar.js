@@ -1,0 +1,191 @@
+'use strict';
+// The live bar (draft D, ORCH-337): one calm row under every page while the Preview switch is on. Needs-you chips
+// (orange) and pinned chips first, then quiet counts (working, in line, idle) that open a list with search. It never
+// wraps: when the row is too narrow it folds step by step into counts (kit .lbar, data-fold). The dashboard names no
+// add-on: the live page is found by its live_session capability (pages/live.js).
+//
+// Data: the helpers of the state API (runs + tickets, the same one state word as Home). Pinning is not stored by orch
+// yet (the wall builds it): until then the pinned ids are read from this browser only (LIVEBAR_PINS).
+//
+// Mount: the bar is one element (#live-bar). It sits at the end of .shell-body by default; a page that keeps a layer
+// across page changes moves it with LiveBar.mount(host) and the bar stays the same element (its open list included).
+const LIVEBAR_PINS = 'orch.live.pins';
+const LIVEBAR_LISTS = {
+  wait: {sym:'◆', word:'need you', head:'Needs you'},
+  pin: {sym:'', word:'pinned', head:'Pinned'},
+  run: {sym:'●', word:'working', head:'Working'},
+  queue: {sym:'◷', word:'in line', head:'In line'},
+  idle: {sym:'◐', word:'idle', head:'Idle'},
+  more: {sym:'', word:'more', head:'More sessions'},
+};
+const LIVEBAR_SEARCH_FROM = 9;  // a list this long gets a search box (draft D)
+
+// One session per ticket with a helper: {id, key, title, s: wait|run|queue|idle, word, pin}. helperState is the
+// dashboard's one state word (helpers.js); a run that waits for a free place (hold) is "in line".
+function liveBarModel(tickets, runs, pins, helperState) {
+  const pinned = new Set(Array.isArray(pins) ? pins : []), out = [];
+  for (const t of Array.isArray(tickets) ? tickets : []) {
+    if (!t || !t.id || t.status === 'dropped') continue;
+    const run = runs && runs[t.id], hs = run ? helperState(run, t) : null;
+    let s = null, word = '';
+    if (hs) {
+      s = hs.state === 'you' ? 'wait' : hs.state === 'idle' ? 'idle' : hs.state === 'waiting' ? 'queue' : 'run';
+      word = s === 'wait' ? 'Needs you' : s === 'queue' ? 'In line' : hs.word;
+    } else if (run && run.hold) { s = 'queue'; word = 'In line'; }
+    if (!s) continue;
+    out.push({id:String(t.id), key:typeof t.key === 'string' ? t.key : '', title:String(t.title || ''), s, word, pin:pinned.has(String(t.id))});
+  }
+  const rank = {wait:0, run:1, queue:2, idle:3};
+  out.sort((a, b) => rank[a.s] - rank[b.s] || (b.pin ? 1 : 0) - (a.pin ? 1 : 0));
+  return out;
+}
+// Which sessions a list (or a chip group) holds. Needs you wins over pinned; pinned is taken out of the counts.
+function liveBarIn(o, l) {
+  const w = o.s === 'wait';
+  return l === 'wait' ? w : l === 'pin' ? o.pin && !w : !w && !o.pin && (l === 'more' || o.s === l);
+}
+// "1 session", "2 sessions"
+function liveBarSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); }
+// The words of a count at a fold: "3 working", "Pinned (1)", "More (20)"; compact: the number alone.
+function liveBarCountText(l, n, compact) {
+  if (compact) return String(n);
+  return l === 'pin' ? 'Pinned (' + n + ')' : l === 'more' ? 'More (' + n + ')' : n + ' ' + LIVEBAR_LISTS[l].word;
+}
+
+if (typeof module === 'object' && module.exports) {
+  module.exports = {liveBarModel, liveBarIn, liveBarSessions, liveBarCountText, LIVEBAR_LISTS};
+} else {
+  (() => {
+    const bar = {el:null, host:null, list:'', q:'', sig:'', fold:0};
+    const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
+    const pins = () => { try { return JSON.parse(localStorage.getItem(LIVEBAR_PINS) || '[]'); } catch (e) { return []; } };
+    const phone = () => window.matchMedia('(max-width: 720px)').matches;
+    const link = (a, o) => '#addon/' + encodeURIComponent(a.name) + '/t/' + encodeURIComponent(o.id);
+    const label = o => o.key || o.title;
+    const sym = (s, text) => h('span', {className:'lbar-sym', 'data-s':s, 'aria-hidden':'true'}, text);
+
+    function chip(a, o) {
+      return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + o.id, title:o.title + ' · ' + o.word},
+        sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)));
+    }
+    function count(all, l, compact) {
+      const n = all.filter(o => liveBarIn(o, l)).length;
+      if (!n) return null;
+      const head = l === 'pin' ? iconEl('pinned') : l === 'more' ? null : sym(l, LIVEBAR_LISTS[l].sym);
+      return h('button', {type:'button', className:'lbar-cnt', 'data-lbar-list':l, 'data-key':'lbar-cnt-' + l, 'aria-expanded':String(bar.list === l),
+        'aria-haspopup':'true', 'aria-label':compact || l === 'pin' || l === 'more' ? LIVEBAR_LISTS[l].head + ': ' + liveBarSessions(n) : null},
+        compact && l === 'more' ? iconEl('more') : head, h('span', {}, liveBarCountText(l, n, compact)), compact ? null : iconEl('up'));
+    }
+    function group(a, g, text, list) {
+      return h('span', {className:'lbar-g', 'data-g':g, role:'group', 'aria-label':g === 'pin' ? 'Pinned' : text},
+        h('span', {className:'lbar-l'}, g === 'pin' ? iconEl('pinned') : text), list.map(o => chip(a, o)));
+    }
+    function sessionsRow(a, all, fold) {
+      if (fold >= 3) {
+        const lists = fold >= 4 ? ['wait', 'more'] : ['wait', 'pin', 'run', 'queue', 'idle'];
+        const counts = lists.map(l => count(all, l, true)).filter(Boolean);
+        return counts.length ? counts : [h('span', {className:'lbar-l'}, 'All calm')];
+      }
+      const need = all.filter(o => liveBarIn(o, 'wait')), pin = all.filter(o => liveBarIn(o, 'pin'));
+      return [group(a, 'wait', need.length ? 'Needs you' : 'All calm', need),
+        pin.length ? (fold >= 1 ? count(all, 'pin') : group(a, 'pin', '', pin)) : null,
+        ...(fold >= 2 ? [count(all, 'more')] : ['run', 'queue', 'idle'].map(l => count(all, l)))].filter(Boolean);
+    }
+    function rows(a, all) {
+      const q = bar.q.trim().toLowerCase();
+      const list = all.filter(o => liveBarIn(o, bar.list) && (!q || (o.key + ' ' + o.title).toLowerCase().includes(q)));
+      return list.length ? list.map(o => h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id},
+        h('span', {className:'lbar-st', 'data-s':o.s}, h('span', {className:'lbar-sym', 'aria-hidden':'true'}, LIVEBAR_LISTS[o.s].sym), o.word),
+        h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.title)))
+        : [h('p', {className:'meta'}, 'No session matches.')];
+    }
+    function pop(a, all) {
+      if (!bar.list) return null;
+      const n = all.filter(o => liveBarIn(o, bar.list)).length;
+      if (!n) { bar.list = ''; bar.q = ''; return null; }
+      const head = LIVEBAR_LISTS[bar.list].head;
+      return h('div', {className:'lbar-pop', role:'dialog', 'aria-label':head, 'data-key':'lbar-pop'},
+        h('p', {className:'lbar-pop-h'}, head + ' (' + n + ')'),
+        n >= LIVEBAR_SEARCH_FROM ? h('input', {className:'input', type:'search', placeholder:'Search these sessions', 'aria-label':'Search these sessions',
+          autocomplete:'off', value:bar.q, 'data-lbar-q':'1'}) : null,
+        h('div', {className:'lbar-list', 'data-lbar-rows':'1'}, rows(a, all)));
+    }
+    function build(a, all, fold) {
+      return h('div', {id:'live-bar', className:'lbar', role:'group', 'aria-label':addonLabel(a) + ' bar', 'data-fold':String(fold)},
+        h('a', {className:'lbar-home', href:'#addon/' + encodeURIComponent(a.name), 'data-key':'lbar-home', title:addonLabel(a) + ' start page'}, addonLabel(a)),
+        h('nav', {className:'lbar-sw', 'aria-label':'Sessions'}, sessionsRow(a, all, fold)),
+        h('span', {className:'lbar-end'}),
+        pop(a, all));
+    }
+    function place() {
+      const el = bar.el; if (!el) return;
+      const tab = document.getElementById('tabbar');
+      el.style.setProperty('--lbar-bottom', tab && tab.offsetHeight ? tab.offsetHeight + 'px' : '0px');
+      const p = el.querySelector('.lbar-pop'), b = bar.list && el.querySelector('[data-lbar-list="' + bar.list + '"]');
+      if (p && b) {
+        const x = b.getBoundingClientRect().left - el.getBoundingClientRect().left;
+        p.style.left = Math.max(8, Math.min(x, el.clientWidth - p.offsetWidth - 8)) + 'px';
+      }
+    }
+    function paint(force) {
+      const a = liveAddon(), on = typeof livePreviewOn === 'function' && livePreviewOn() && !!a;
+      const host = bar.host?.isConnected ? bar.host : document.querySelector('.shell-body');
+      if (!on || !host) {
+        if (bar.el) { bar.el.remove(); bar.el = null; bar.sig = ''; }
+        delete document.body.dataset.liveBar;
+        return;
+      }
+      const all = liveBarModel(state.tickets, state.runs, pins(), window.DashHelpers.helperState);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, bar.list, phone(), window.innerWidth]);
+      if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
+      bar.sig = sig;
+      const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';
+      const caret = focusKey === 'q' ? active.selectionStart : null;
+      let fold = phone() ? 3 : 0, el = build(a, all, fold);
+      if (bar.el) bar.el.replaceWith(el); else host.append(el);
+      if (el.parentNode !== host) host.append(el);
+      bar.el = el;
+      for (let sw = el.querySelector('.lbar-sw'); fold < 4 && sw.scrollWidth > sw.clientWidth + 1; sw = el.querySelector('.lbar-sw')) {
+        const next = build(a, all, ++fold); el.replaceWith(next); el = bar.el = next;
+      }
+      bar.fold = fold;
+      document.body.dataset.liveBar = '1';
+      place();
+      if (focusKey) {
+        const t = focusKey === 'q' ? el.querySelector('[data-lbar-q]') : el.querySelector('[data-key="' + focusKey + '"]');
+        if (t) { t.focus(); if (caret != null) t.setSelectionRange(caret, caret); }
+      }
+    }
+    function toggle(l) {
+      bar.list = bar.list === l ? '' : l; bar.q = '';
+      paint(true);
+      const q = bar.el?.querySelector('[data-lbar-q]');
+      if (q) q.focus(); else bar.el?.querySelector('.lbar-row')?.focus();
+    }
+    function close(back) {
+      if (!bar.list) return;
+      const l = bar.list; bar.list = ''; bar.q = ''; paint(true);
+      if (back) bar.el?.querySelector('[data-lbar-list="' + l + '"]')?.focus();
+    }
+    document.addEventListener('click', e => {
+      const b = e.target.closest?.('[data-lbar-list]');
+      if (b && bar.el?.contains(b)) { toggle(b.dataset.lbarList); return; }
+      if (bar.list && (!bar.el?.contains(e.target) || e.target.closest('a'))) close(false);
+    });
+    document.addEventListener('input', e => {
+      if (!e.target.matches?.('[data-lbar-q]') || !bar.el?.contains(e.target)) return;
+      bar.q = e.target.value;
+      const a = liveAddon(), box = bar.el.querySelector('[data-lbar-rows]');
+      if (a && box) box.replaceChildren(...rows(a, liveBarModel(state.tickets, state.runs, pins(), window.DashHelpers.helperState)));
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && bar.list && bar.el?.contains(document.activeElement)) { e.stopPropagation(); close(true); } }, true);
+    let frame = 0;
+    window.addEventListener('resize', () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => paint(true)); });
+    window.paintLiveBar = paint;
+    window.LiveBar = {
+      // Move the bar into another host (a mount point that survives page changes); it stays the same element.
+      mount(host) { bar.host = host || null; if (bar.el && host) host.append(bar.el); paint(true); },
+      model: liveBarModel,
+    };
+  })();
+}
