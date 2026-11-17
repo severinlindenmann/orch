@@ -247,7 +247,7 @@ function dueCell(t) {
   const today = !late && String(t.due).slice(0, 10) === new Date(now()).toLocaleDateString('sv');
   return h('span', {className:late ? 'bad' : today ? 'warn' : ''}, dueText(t));
 }
-function spendCell(t) { return h('span', {className:'meta'}, window.DashHelpers.spendWords(t.spend) || '–'); }
+function spendCell(t) { const words = window.DashHelpers.spendWords(t.spend); return h('span', {className:'meta', title:words ? undefined : 'Not recorded'}, words || '–'); }
 // One table row (a ticket or a part under its parent). `section` is the group it sits in.
 function treeBranch(rows, index, section) {
   const row = rows[index], t = row.ticket;
