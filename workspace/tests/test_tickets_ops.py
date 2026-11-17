@@ -903,8 +903,8 @@ def test_due_words_for_a_time():
     assert label("2026-11-15T18:30", "active", now) == "Due 18:30"
     assert label("2026-11-15T09:00", "active", now) == "Late since 09:00"
     assert label("2026-11-15T09:00", "done", now) == "Due 09:00"
-    assert label("2026-11-16T18:30", "open", now) == "Due Mon 18:30"
-    assert label("2026-11-14T18:30", "open", now) == "Late since Sat 18:30"
+    assert label("2026-11-16T18:30", "open", now) == "Due Mon 16 Nov, 18:30"
+    assert label("2026-11-14T18:30", "open", now) == "Late since Sat 14 Nov, 18:30"
     assert label("2026-11-15", "open", now) is None and label(None, "open", now) is None
 
 

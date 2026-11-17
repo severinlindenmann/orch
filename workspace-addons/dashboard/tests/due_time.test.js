@@ -5,10 +5,10 @@ const now = new Date(2026, 10, 15, 12, 0); // Sun 15 Nov 2026, 12:00
 
 test('a due with a time: Due 18:30 today, Due Mon 18:30 on another day, Late since once it has passed', () => {
   assert.equal(dueWords('2026-11-15T18:30', 'active', now), 'Due 18:30');
-  assert.equal(dueWords('2026-11-16T18:30', 'open', now), 'Due Mon 18:30');
+  assert.equal(dueWords('2026-11-16T18:30', 'open', now), 'Due Mon 16 Nov, 18:30');
   assert.equal(dueWords('2026-12-01T09:05', 'open', now), 'Due 1 Dec 2026, 09:05');
   assert.equal(dueWords('2026-11-15T09:00', 'active', now), 'Late since 09:00');
-  assert.equal(dueWords('2026-11-14T18:30', 'review', now), 'Late since Sat 18:30');
+  assert.equal(dueWords('2026-11-14T18:30', 'review', now), 'Late since Sat 14 Nov, 18:30');
   assert.equal(dueWords('2026-11-15T09:00', 'done', now), 'Due 09:00', 'a closed ticket is never late');
 });
 
