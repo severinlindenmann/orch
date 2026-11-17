@@ -805,13 +805,6 @@ function ticketTaskOutcome(task) {
   const ev = array(task.evidence).slice(-1)[0];
   return window.DashHelpers.outcome(task) + (ev?.at ? ' · ' + window.DashHelpers.stamp(ev.at, Date.now()) : '') + (ev?.by ? ' — ' + ticketActor(ev.by) : '');
 }
-function focusTicketAnswer() {
-  const card = main.querySelector('.next-question');
-  if (!card) return;
-  card.scrollIntoView({block:'center', behavior:'smooth'});
-  const target = card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button');
-  target?.focus({preventScroll:true});
-}
 // A small chip per proof worth opening: a file opens its preview, a PR or web address opens in a new tab.
 function taskProofChips(t, task) {
   const chips = uniqueBy(array(task.evidence), ev => proofKey(t, ev)).map(ev => {
@@ -858,7 +851,8 @@ function taskRows(t) {
       reason.value = taskMenus.get(menuKey) || '';
       const form = h('form', {className:'stack', hidden:!isOpen, 'data-key':formKey},
         window.DashHelpers.resolved(task) ? null : reason,
-        h('button', {type:'submit', className:'btn outline sm'}, window.DashHelpers.resolved(task) ? 'Open again' : "Won't do"));
+        h('button', {type:'submit', className:'btn outline sm'}, window.DashHelpers.resolved(task) ? 'Open again' : "Won't do"),
+        taskEditRow(t, task, i));
       const closeMenu = () => { taskMenus.delete(menuKey); locks.delete(formKey); form.hidden = true; more.setAttribute('aria-expanded', 'false'); more.focus(); };
       reason.addEventListener('input', () => taskMenus.set(menuKey, reason.value));
       form.addEventListener('focusin', () => locks.add(formKey));
@@ -893,6 +887,36 @@ function taskRows(t) {
         taskProofChips(t, task)), h('span', {className:'meta task-word'}, taskWord(task)), menu);
   });
 }
+// ORCH-236: a task can be renamed, moved up or down and removed from its "..." menu (orch check edit / move / remove;
+// a removed task stays in the history).
+async function taskAct(op, args) {
+  const result = await act(op, args);
+  if (!result.ok) window.orch.toast(changeError(result), 'error');
+  render();
+  return result;
+}
+function taskRename(t, task) {
+  const {d, actions} = dialog('Rename task');
+  const input = h('input', {className:'input', 'aria-label':'Task', maxlength:500, 'data-key':'task-rename-input'});
+  input.value = task.text || '';
+  const save = ticketButton('Save', 'primary', async () => {
+    const text = input.value.trim(); if (!text || save.disabled) { input.focus(); return; }
+    if (text === task.text) { window.orch.close(d); return; }
+    save.disabled = true;
+    const result = await act('check.edit', {ticket:t.id, check:task.id, text, was:task.text});
+    if (result.ok) window.orch.close(d); else { save.disabled = false; window.orch.toast(changeError(result), 'error'); }
+  });
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } };
+  actions.append(save); d.append(input, actions); window.orch.open(d); input.focus();
+}
+function taskEditRow(t, task, i) {
+  const list = array(t.checklist), before = list[i - 1], after = list[i + 1];
+  return h('div', {className:'row wrap', 'data-key':'task-edit-' + task.id},
+    ticketButton('Rename', 'ghost sm', () => taskRename(t, task), {'data-key':'task-rename-' + task.id}),
+    before?.id ? ticketButton('Move up', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:before.id, after:task.id}), {'data-key':'task-up-' + task.id}) : null,
+    after?.id ? ticketButton('Move down', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:task.id, after:after.id}), {'data-key':'task-down-' + task.id}) : null,
+    ticketButton('Remove', 'ghost sm', () => { taskMenus.delete(t.id + ':' + task.id); locks.delete('task-menu-' + task.id); taskAct('check.remove', {ticket:t.id, check:task.id}).then(r => { if (r.ok) window.orch.toast('Removed. It stays in the Activity.', 'ok'); }); }, {'data-key':'task-remove-' + task.id}));
+}
 // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
 function addTaskRow(t, scope) {
   if (snapshot) return null;
@@ -910,7 +934,8 @@ function addTaskRow(t, scope) {
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const text = input.value.trim();
-    if (!text || send.disabled) return;
+    if (send.disabled) return;
+    if (!text) { window.orch.toast('Type the task first.', 'error'); input.focus(); return; }
     send.disabled = true;
     const result = await act('check.add', {ticket:t.id, text});
     send.disabled = false;
@@ -949,6 +974,19 @@ function phoneEntry(tid, entry) {
   return h('div', {className:'phone-entry'}, p.text ? h('p', {}, clean(p.text)) : null, body);
 }
 // Ticket-only controls bind properties: the shared h() serializes attributes.
+// The header Answer button (ORCH-234): it only scrolled to the question card, which stands above every tab and so was
+// in view already, and focused it without a ring: nothing a person could see. It now opens the same answer window as
+// Answer in the ticket list (openNeed). Without a waiting question for this ticket it brings the card to the middle
+// and focuses its first answer (no fade: the page never animates needs-you, see test_views).
+function focusTicketAnswer(id, trigger) {
+  const need = (typeof needsList === 'function' ? needsList() : []).find(n => n && n.ticket === id && window.DashHelpers.needAction(n).kind === 'answer');
+  if (need) { openNeed(need, trigger); return 'window'; }
+  const card = main.querySelector('.next-question');
+  if (!card) return '';
+  card.scrollIntoView({block:'center', behavior:'smooth'});
+  card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button')?.focus({preventScroll:true});
+  return 'card';
+}
 function ticketButton(label, cls, click, attrs = {}) {
   const node = h('button', {type:'button', className:'btn ' + cls, 'data-key':'ticket-button-' + label, ...attrs}, label);
   node.onclick = click;
@@ -1468,7 +1506,7 @@ function ticketAnswerNodes(t, plainRow) {
     .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
 }
-const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
+const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
 function ticketProperties(t, parent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
@@ -1513,7 +1551,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   if (!snapshot) {
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'active'), {'data-key':'ticket-reopen'}));
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
-    else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', focusTicketAnswer, {'data-key':'ticket-answer'})); }
+    else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', e => focusTicketAnswer(t.id, e?.currentTarget), {'data-key':'ticket-answer'})); }
     else if (fresh) actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'}));
     else if (ticketPaused(t, run)) actions.push(ticketButton('Resume', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'}));
     if (menu) actions.push(menu);
