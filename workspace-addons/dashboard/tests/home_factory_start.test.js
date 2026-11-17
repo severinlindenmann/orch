@@ -16,9 +16,9 @@ const words = n => nodes(n).flatMap(x => x.children || []).filter(x => typeof x 
 // The shape render.start_text writes (workspace-addons/factory/src/orch_factory/render.py).
 const TEXT = "Start 'Services: see and manage background jobs'? ~10 h · target $4 · you're needed for ~15 min. " +
   "Goal: See the workspace's background jobs in the dashboard and start, stop or restart each with one click. " +
-  "Done means: The owner has seen the mockup; The Services tab lists the five examples. Stops: mockup, ship. " +
-  "Steps: Mockup of the Services tab (designer); The add-on with its commands (builder). Crew: designer claude, builder claude. " +
-  "Cap: 13 h active. Ship: Merges into the develop line on green checks (undo: Turn the add-on off). (Proposal 1)";
+  "Done means: The owner has seen the mockup; The Services tab lists the five examples. I will pause at: mockup, ship. " +
+  "Steps: Mockup of the Services tab (designer); The add-on with its commands (builder). Who works on it: designer claude, builder claude. " +
+  "Time limit: 13 h active. What goes live: Merges into the develop line on green checks (undo: Turn the add-on off). (Proposal 1)";
 
 function ctx(question, extra = {}) {
   const acts = [];
