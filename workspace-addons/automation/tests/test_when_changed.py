@@ -104,3 +104,27 @@ def test_cli_sets_and_clears_the_change(ws, repo, capsys):
     assert tk(ws, "t_chg00005")["ext"]["automation"]["when_changed"] == "proj@develop"
     assert cli.main([*base, "--when-changed", "off"]) == 0
     assert "when_changed" not in tk(ws, "t_chg00005")["ext"]["automation"]
+
+
+def test_packed_remote_and_worktree_refs_are_read_from_the_files(ws, repo):
+    head = git(repo, "rev-parse", "develop").stdout.strip()
+    git(repo, "update-ref", "refs/remotes/origin/develop", head)
+    assert change_mark(ws, "proj@origin/develop") == head  # loose remote ref
+    git(repo, "pack-refs", "--all")
+    assert change_mark(ws, "proj@origin/develop") == head  # packed
+    assert change_mark(ws, "proj@develop") == head
+    assert change_mark(ws, "proj@HEAD") == head
+    git(repo, "worktree", "add", "-q", str(ws / "wt"), "-b", "side")
+    assert change_mark(ws, "wt@origin/develop") == head  # a worktree reads the shared refs
+    assert change_mark(ws, "wt@HEAD") == head
+
+
+def test_a_folders_git_settings_never_run_anything(ws, repo):
+    hit = ws / "hit"
+    hook = ws / "evil.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {hit}\n")
+    hook.chmod(0o755)
+    git(repo, "config", "core.fsmonitor", str(hook))
+    git(repo, "config", "core.hooksPath", str(ws))
+    assert change_mark(ws, "proj@develop")
+    assert not hit.exists()

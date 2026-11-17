@@ -124,39 +124,85 @@ def change_of(t: dict | None) -> str | None:
     return w if isinstance(w, str) and CHANGE_RE.match(w) and ".." not in w.split("@")[0].split("/") else None
 
 
-def change_mark(root: Path, spec: str) -> str | None:
-    """The commit the ref names now, read by git without network and without changing anything. None when the folder
-    is not a git project inside the workspace or the ref is unknown (then the repeat waits; nothing is started)."""
-    import subprocess
+HEX_RE = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 
+
+def _git_dir(folder: Path) -> tuple[Path, Path] | None:
+    """(this checkout's git folder, the shared one holding refs) of a project folder; read from files only."""
+    dot = folder / ".git"
+    try:
+        if dot.is_file():  # a worktree or submodule: "gitdir: <path>"
+            line = dot.read_text(encoding="utf-8", errors="replace").strip()
+            if not line.startswith("gitdir:"):
+                return None
+            gd = (folder / line[7:].strip()).resolve()
+        elif dot.is_dir():
+            gd = dot.resolve()
+        else:
+            return None
+        common = gd
+        cf = gd / "commondir"
+        if cf.is_file():
+            common = (gd / cf.read_text(encoding="utf-8", errors="replace").strip()).resolve()
+        return (gd, common) if gd.is_dir() and common.is_dir() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _read_ref(gd: Path, common: Path, ref: str, depth: int = 0) -> str | None:
+    """A full ref name to a commit id: the loose file (per-worktree for HEAD), else packed-refs; follows "ref: "."""
+    if depth > 5:
+        return None
+    for base in (gd, common) if ref == "HEAD" or not ref.startswith("refs/") else (common,):
+        f = base / ref
+        try:
+            if f.is_file() and f.resolve().is_relative_to(base):
+                text = f.read_text(encoding="utf-8", errors="replace").strip()
+                if text.startswith("ref: "):
+                    return _read_ref(gd, common, text[5:].strip(), depth + 1)
+                return text if HEX_RE.match(text) else None
+        except (OSError, ValueError):
+            return None
+    try:
+        for line in (common / "packed-refs").read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.split(" ", 1)
+            if len(parts) == 2 and parts[1].strip() == ref and HEX_RE.match(parts[0]):
+                return parts[0]
+    except OSError:
+        pass
+    return None
+
+
+def change_mark(root: Path, spec: str) -> str | None:
+    """The commit the ref names now, read from the git files themselves: no git program, no network, nothing
+    changed (a folder's git settings never run anything; ORCH-348 security review). None when the folder is not a
+    git project inside the workspace or the ref is unknown (then the repeat waits; nothing is started)."""
     m = CHANGE_RE.match(spec)
-    if not m:
+    if not m or ".." in m[2].split("/") or ".." in m[1].split("/"):
         return None
     folder = (root / m[1]).resolve()
     if not folder.is_dir() or not folder.is_relative_to(root.resolve()):
         return None
-    try:
-        r = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(folder),
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                "--end-of-options",
-                m[2] + "^{commit}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            stdin=subprocess.DEVNULL,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+    dirs = _git_dir(folder)
+    if not dirs:
         return None
-    sha = r.stdout.strip()
-    return sha if r.returncode == 0 and len(sha) in (40, 64) else None
+    ref = m[2]
+    names = (
+        [ref]
+        if ref == "HEAD" or ref.startswith("refs/")
+        else [
+            f"refs/{ref}",
+            f"refs/tags/{ref}",
+            f"refs/heads/{ref}",
+            f"refs/remotes/{ref}",
+            f"refs/remotes/{ref}/HEAD",
+        ]
+    )  # git's own order for a short name
+    for name in names:
+        sha = _read_ref(*dirs, name)
+        if sha:
+            return sha
+    return None
 
 
 def record_last_run(root: Path, t: dict, now: datetime, by: str | None = None) -> None:
