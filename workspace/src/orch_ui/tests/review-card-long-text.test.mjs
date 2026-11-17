@@ -18,3 +18,10 @@ test('a cut copy of the question is not shown above the full question', () => {
   assert.match(js, /if\(!cut\)h\.append\(el\('h3','',it\.title\)\)/);
   assert.match(js, /it\.text&&\(cut\|\|it\.text!==it\.title\)/);
 });
+
+// ORCH-329: a doc box leads with a headline, bar, chips, flow, chart or diff; long text sits behind Details.
+test('doc box draws the glance formats and folds long text', () => {
+  const js = readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8');
+  for (const k of ['doc-headline', 'doc-progress', 'doc-chips', 'doc-flow', 'doc-chart', 'doc-diff', 'doc-details']) assert.match(js, new RegExp(k));
+  assert.match(css, /\.doc-details summary/);
+});

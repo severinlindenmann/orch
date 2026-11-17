@@ -124,11 +124,21 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    (title, a ticket key chip, the number on the right) and a small footer. Text only via textContent. */
 UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
  if(st&&st.text){const tone=st.tone==='failed'?'failed':st.tone==='working'?'working':'done',s=el('p','pill doc-status '+tone);s.append(UI.statusIcon(tone==='failed'?'needs':tone),el('span','',st.text));d.append(s)}
+ if(p.headline)d.append(el('p','doc-headline',p.headline));
+ if(p.progress&&p.progress.total>0){const g=el('div','doc-progress'),b=el('div','progress'),f=el('span');f.style.width=Math.round(p.progress.done/p.progress.total*100)+'%';b.append(f);g.append(b,el('span','meta',p.progress.done+' of '+p.progress.total+' steps done'));d.append(g)}
+ if(Array.isArray(p.chips)&&p.chips.length){const r=el('div','doc-chips');const T={ok:'success',warn:'warning',bad:'danger',info:'info'};p.chips.forEach(c=>r.append(el('span','chip '+(T[c.tone]||'info'),c.text)));d.append(r)}
+ if(Array.isArray(p.flow)&&p.flow.length){const r=el('div','doc-flow');p.flow.forEach((t,i)=>{if(i)r.append(el('span','doc-arrow','→'));r.append(el('span','doc-box',t))});d.append(r)}
+ if(p.chart&&Array.isArray(p.chart.bars)){const max=Math.max(...p.chart.bars.map(b=>Math.abs(b.value)),1),r=el('div','doc-chart');r.setAttribute('role','img');r.setAttribute('aria-label',p.chart.bars.map(b=>b.label+' '+b.value+(p.chart.unit||'')).join(', '));
+   p.chart.bars.forEach(b=>{const row=el('div','doc-bar'),t=el('div','progress'),f=el('span');f.style.width=Math.round(Math.abs(b.value)/max*100)+'%';t.append(f);row.append(el('span','',b.label),t,el('b','',b.value+(p.chart.unit||'')));r.append(row)});d.append(r)}
+ if(Array.isArray(p.diff)&&p.diff.length){const r=el('div','doc-diff');p.diff.forEach(l=>r.append(el('div','doc-line '+(l.op==='+'?'add':'del'),l.op+' '+l.text)));d.append(r)}
  if(p.heading)d.append(el(hTag||'h4','',p.heading));(p.paras||[]).forEach(x=>d.append(el('p','',x)));
  if(Array.isArray(p.rows)&&p.rows.length){const ul=el('ul','doc-rows');p.rows.forEach(r=>{if(!r||!r.title)return;const li=el('li','doc-row');li.append(el('span','doc-row-title',r.title));
    if(r.key)li.append(el('span','chip doc-row-key',r.key));if(r.n)li.append(el('span','doc-row-n','#'+r.n));ul.append(li)});d.append(ul)}
  if(p.steps){const ol=el('ol');p.steps.forEach(x=>ol.append(el('li','',x)));d.append(ol)}
- if(p.foot)d.append(el('p','doc-foot',p.foot));return d};
+ if(p.foot)d.append(el('p','doc-foot',p.foot));
+ if(Array.isArray(p.details)&&p.details.length){const dt=el('details','doc-details');dt.append(el('summary','','Details'));p.details.forEach(x=>dt.append(el('p','',x)));
+   dt.addEventListener('pointerdown',e=>e.stopPropagation());d.append(dt)}
+ return d};
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
  let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
  Object.assign(pins,o.pins);Object.entries(o.answered||{}).forEach(([id,a])=>{const it=items.find(x=>x.id===id);if(it)ans[id]={verdict:a.verdict,note:a.note||null,item:it}});
@@ -159,7 +169,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
  const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
  /* previews */
- const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||(p.paras||[]).length||(p.steps||[]).length);return true};
+ const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||p.headline||p.chart||p.flow||p.diff||(p.chips||[]).length||p.progress||(p.paras||[]).length||(p.steps||[]).length);return true};
  const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');fr.addEventListener('load',()=>fr.classList.remove('loading'),{once:true});return fr};
  const buildPreview=(it,big)=>{const p=it.preview||{},f=document.createDocumentFragment();
   if(p.type==='compare'){f.append(buildCompare(it,big));return f}

@@ -109,8 +109,61 @@ def _drop_empty(d: dict, keys: tuple) -> None:
 # A doc box may carry a little structure (ORCH-183, a merge card): a status line with a tone, rows with a
 # short key and a number, and a small footer. The phone gets them as plain paras and steps (wire_card), so
 # its schema stays unchanged.
-DOC_EXTRA = {"status", "rows", "foot"}
+# Glance formats (ORCH-329): headline (one sentence), progress {done, total}, chips [{text, tone}], flow
+# (up to 6 short boxes), chart {unit?, bars: [{label, value}]}, diff [{op: + or -, text}], details (long text
+# kept behind a click). They are plain data for the card; the phone gets them as paras and steps too.
+DOC_EXTRA = {"status", "rows", "foot", "headline", "progress", "chips", "flow", "chart", "diff", "details"}
 STATUS_TONES = ("done", "working", "failed")
+CHIP_TONES = ("ok", "warn", "bad", "info")
+
+
+def _glance(pv: dict, where: str) -> None:
+    if "headline" in pv:
+        _text(pv["headline"], "headline", 200, required=True)
+    pr = pv.get("progress")
+    if pr is not None and (
+        not isinstance(pr, dict)
+        or set(pr) != {"done", "total"}
+        or not all(isinstance(pr[k], int) and not isinstance(pr[k], bool) and 0 <= pr[k] <= 1000 for k in pr)
+        or pr["done"] > pr["total"]
+    ):
+        raise Refused(f"{where}.progress is {{done, total}} with done at most total.")
+    chips = pv.get("chips", [])
+    if not isinstance(chips, list) or len(chips) > 8:
+        raise Refused(f"{where}.chips is a list of at most 8 chips.")
+    for c in chips:
+        if not isinstance(c, dict) or set(c) - {"text", "tone"} or c.get("tone", "info") not in CHIP_TONES:
+            raise Refused(f"{where}.chips: each chip is {{text, tone: {'|'.join(CHIP_TONES)}}}.")
+        _text(c.get("text"), "chips.text", 60, required=True)
+    flow = pv.get("flow", [])
+    if not isinstance(flow, list) or len(flow) > 6:
+        raise Refused(f"{where}.flow is a list of at most 6 short boxes.")
+    for f in flow:
+        _text(f, "flow", 40, required=True)
+    ch = pv.get("chart")
+    if ch is not None:
+        bars = ch.get("bars") if isinstance(ch, dict) and set(ch) <= {"unit", "bars"} else None
+        if not isinstance(bars, list) or not 1 <= len(bars) <= 12:
+            raise Refused(f"{where}.chart is {{unit?, bars: 1-12 of {{label, value}}}}.")
+        for b in bars:
+            ok = isinstance(b, dict) and set(b) == {"label", "value"}
+            if not ok or isinstance(b["value"], bool) or not isinstance(b["value"], (int, float)):
+                raise Refused(f"{where}.chart: each bar is {{label, value}} with a number.")
+            _text(b["label"], "chart.label", 40, required=True)
+        if "unit" in ch:
+            _text(ch["unit"], "chart.unit", 20, required=True)
+    diff = pv.get("diff", [])
+    if not isinstance(diff, list) or len(diff) > 30:
+        raise Refused(f"{where}.diff is a list of at most 30 lines.")
+    for d in diff:
+        if not isinstance(d, dict) or set(d) != {"op", "text"} or d["op"] not in ("+", "-"):
+            raise Refused(f"{where}.diff: each line is {{op: + or -, text}}.")
+        _text(d["text"], "diff.text", 200, required=True)
+    det = pv.get("details", [])
+    if not isinstance(det, list) or len(det) > 50:
+        raise Refused(f"{where}.details is a list of at most 50 texts.")
+    for t in det:
+        _text(t, "details", 2000, required=True)
 
 
 def _doc_extra(pv: dict, where: str) -> None:
@@ -119,6 +172,7 @@ def _doc_extra(pv: dict, where: str) -> None:
         if not isinstance(st, dict) or set(st) != {"tone", "text"} or st["tone"] not in STATUS_TONES:
             raise Refused(f"{where}.status is {{tone: {'|'.join(STATUS_TONES)}, text}}.")
         _text(st["text"], "status", 200, required=True)
+    _glance(pv, where)
     rows = pv.get("rows", [])
     if not isinstance(rows, list) or len(rows) > 50:
         raise Refused(f"{where}.rows is a list of at most 50 rows.")
@@ -139,12 +193,24 @@ def _plain_doc(p: dict) -> dict:
     if not DOC_EXTRA & set(p):
         return p
     q = {k: v for k, v in p.items() if k not in DOC_EXTRA}
-    paras = ([p["status"]["text"]] if isinstance(p.get("status"), dict) else []) + list(p.get("paras") or [])
+    paras = [p["status"]["text"]] if isinstance(p.get("status"), dict) else []
+    paras += [p["headline"]] if p.get("headline") else []
+    pr = p.get("progress")
+    paras += [f"{pr['done']} of {pr['total']} steps done"] if isinstance(pr, dict) else []
+    paras += [", ".join(c["text"] for c in p.get("chips") or [])] if p.get("chips") else []
+    paras += [" → ".join(p["flow"])] if p.get("flow") else []
+    paras += list(p.get("paras") or [])
     rows = [
         r["title"] + (f" (#{r['n']}" + (f", {r['key']}" if r.get("key") else "") + ")" if r.get("n") else "")
         for r in p.get("rows") or []
     ]
+    rows += [
+        f"{b['label']}: {b['value']}{(p['chart'].get('unit') or '')}"
+        for b in (p.get("chart") or {}).get("bars", [])
+    ]
+    rows += [f"{d['op']} {d['text']}" for d in p.get("diff") or []]
     paras += [p["foot"]] if p.get("foot") else []
+    paras += list(p.get("details") or [])
     if paras:
         q["paras"] = paras[:50]
     if rows or p.get("steps"):
@@ -863,15 +929,38 @@ def _parent_line(ticket: dict, root: Path | None) -> str:
     return _clip(f"Part of: {name}", 300) if name else ""
 
 
+def _short(text: str, limit: int) -> str:
+    """The first sentence of a text, at most `limit` characters."""
+    text = " ".join(text.split())
+    first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
+    return _clip(first, limit)
+
+
+def _checks_chips(ticket: dict) -> list[dict]:
+    """One chip for the commands that passed and one for those that failed (from the steps' evidence)."""
+    ok = bad = 0
+    for c in ticket.get("checklist") or []:
+        for ev in (c.get("evidence") or []) if isinstance(c, dict) else []:
+            if isinstance(ev, dict) and (ev.get("type") or ev.get("kind")) == "command":
+                if isinstance(ev.get("exit"), int) and ev["exit"] != 0:
+                    bad += 1
+                else:
+                    ok += 1
+    out = [{"text": f"{ok} check{'s' if ok != 1 else ''} ran fine", "tone": "ok"}] if ok else []
+    return out + ([{"text": f"{bad} check{'s' if bad != 1 else ''} failed", "tone": "bad"}] if bad else [])
+
+
 def check_card(ticket: dict, root: Path | None = None) -> dict:
-    """A Check result as a card: the summary, Done when, the parent ticket (with `root`), every step with its
-    evidence (note, what was run, pull request) and the parts of Done when no step covers. No preview when
-    there is nothing to show (an empty box)."""
-    steps = []
+    """A Check result as a card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
+    the short step titles. Everything long (the summary, Done when, the parent, each step's evidence) sits
+    behind a Details click. No preview when there is nothing to show (an empty box)."""
+    steps, titles, done, total = [], [], 0, 0
     for c in ticket.get("checklist") or []:
         if not isinstance(c, dict):
             continue
         state = "Won't do" if c.get("wont_do") else "Done" if c.get("done") else "Open"
+        total, done = total + (state != "Won't do"), done + (state == "Done")
+        titles.append(_clip(f"{state}: {c.get('text', '')}", 120))
         said = _step_evidence(c)
         steps.append(_clip(f"{state}: {c.get('text', '')}" + (f" — {said}" if said else ""), 1200))
     summary_text = str(ticket.get("summary") or "").strip()
@@ -902,11 +991,20 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     if files:
         card["files"] = files
     if steps or paras:
-        card["preview"] = {"type": "doc", "heading": "What was done"}
-        if paras:
-            card["preview"]["paras"] = paras
-        if steps:
-            card["preview"]["steps"] = steps[:50]
+        pv: dict = {"type": "doc"}
+        if summary_text:
+            pv["headline"] = _short(summary_text, 200)
+        if total:
+            pv["progress"] = {"done": done, "total": total}
+        chips = _checks_chips(ticket)
+        if uncovered:
+            chips.append({"text": "Done when not fully covered", "tone": "warn"})
+        if chips:
+            pv["chips"] = chips
+        if titles:
+            pv["steps"] = titles[:50]
+        pv["details"] = (paras + steps)[:50]
+        card["preview"] = pv
     return card
 
 
