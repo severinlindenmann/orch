@@ -106,6 +106,52 @@ def _drop_empty(d: dict, keys: tuple) -> None:
             del d[k]
 
 
+# A doc box may carry a little structure (ORCH-183, a merge card): a status line with a tone, rows with a
+# short key and a number, and a small footer. The phone gets them as plain paras and steps (wire_card), so
+# its schema stays unchanged.
+DOC_EXTRA = {"status", "rows", "foot"}
+STATUS_TONES = ("done", "working", "failed")
+
+
+def _doc_extra(pv: dict, where: str) -> None:
+    st = pv.get("status")
+    if st is not None:
+        if not isinstance(st, dict) or set(st) != {"tone", "text"} or st["tone"] not in STATUS_TONES:
+            raise Refused(f"{where}.status is {{tone: {'|'.join(STATUS_TONES)}, text}}.")
+        _text(st["text"], "status", 200, required=True)
+    rows = pv.get("rows", [])
+    if not isinstance(rows, list) or len(rows) > 50:
+        raise Refused(f"{where}.rows is a list of at most 50 rows.")
+    for r in rows:
+        if not isinstance(r, dict) or not set(r) <= {"title", "key", "n"} or "title" not in r:
+            raise Refused(f"{where}.rows: each row is {{title, key?, n?}}.")
+        _text(r["title"], "rows.title", 300, required=True)
+        if "key" in r:
+            _text(r["key"], "rows.key", 20, required=True)
+        if "n" in r and (not isinstance(r["n"], int) or isinstance(r["n"], bool) or not 0 < r["n"] < 10**9):
+            raise Refused(f"{where}.rows: n is a positive number.")
+    if "foot" in pv:
+        _text(pv["foot"], "foot", 200, required=True)
+
+
+def _plain_doc(p: dict) -> dict:
+    """A doc box with status, rows or foot as the phone schema knows it: those become paras and steps."""
+    if not DOC_EXTRA & set(p):
+        return p
+    q = {k: v for k, v in p.items() if k not in DOC_EXTRA}
+    paras = ([p["status"]["text"]] if isinstance(p.get("status"), dict) else []) + list(p.get("paras") or [])
+    rows = [
+        r["title"] + (f" (#{r['n']}" + (f", {r['key']}" if r.get("key") else "") + ")" if r.get("n") else "")
+        for r in p.get("rows") or []
+    ]
+    paras += [p["foot"]] if p.get("foot") else []
+    if paras:
+        q["paras"] = paras[:50]
+    if rows or p.get("steps"):
+        q["steps"] = (rows + list(p.get("steps") or []))[:50]
+    return q
+
+
 def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) -> dict:
     """Check one preview; every file reference found is appended to refs as (dict, key)."""
     if depth > 2 or not isinstance(pv, dict):
@@ -113,8 +159,8 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
     t = pv.get("type")
     if t not in PREVIEW_TYPES:
         raise Refused(f"{where}: preview type must be one of {', '.join(PREVIEW_TYPES)}.")
-    _only(pv, _PV_KEYS[t], where)
-    _drop_empty(pv, ("alt", "heading", "note"))
+    _only(pv, _PV_KEYS[t] | (DOC_EXTRA if t == "doc" else set()), where)
+    _drop_empty(pv, ("alt", "heading", "note", "foot"))
     if t in ("page", "img"):
         _file_name(pv.get("src"), f"{where}.src")
         refs.append((pv, "src"))
@@ -122,6 +168,7 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
             _text(pv.get("alt"), "alt", 200)
     elif t == "doc":
         _text(pv.get("heading"), "heading", 200)
+        _doc_extra(pv, where)
         for key in ("paras", "steps"):
             items = pv.get(key, [])
             if not isinstance(items, list) or len(items) > 50:
@@ -403,6 +450,8 @@ def wire_card(card: dict, refs: dict) -> dict:
         return {"file": None, "why": r if r in _WHY else "held_back"}
 
     def pv(p):
+        if p.get("type") == "doc":
+            p = _plain_doc(p)
         o = {}
         for k, v in p.items():
             if v is None or v == "" or (k == "before" and p.get("type") == "options"):

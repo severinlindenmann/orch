@@ -9,7 +9,11 @@ function reviewCards() { return array(state?.review?.cards).map(reviewPlainCard)
 function reviewPlainCard(c) {
   const p = c && typeof c.text === 'string' ? window.DashHelpers?.factoryStart?.(c.text) : null;
   if (!p) return c;
-  return {...c, text:p.goal + (p.meta ? '\n' + p.meta : ''), card:{...(c.card || {}), title:"Start '" + p.title + "'?"}};
+  // Home's own buttons (owner 17 Nov, choice B): Not now, Change it, Start, none filled; each answers with Factory's word.
+  const answers = (window.DashHelpers.factoryStartOptions?.(c.options) || []).map(o => ({label:o.label, picked:o.answer}));
+  const card = {...(c.card || {}), title:"Start '" + p.title + "'?"};
+  if (answers.length) delete card.preview;  // the buttons are the answers: no second list of them on the card
+  return {...c, text:p.goal + (p.meta ? '\n' + p.meta : ''), card, ...(answers.length ? {answers} : {})};
 }
 function reviewAnswered() { return array(state?.review?.answered); }
 // The cards of the stack: every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
@@ -23,6 +27,8 @@ function reviewSubtitle() {
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
 function reviewWord(answer) {
   const it = answer.item || {}, note = answer.note || {};
+  const own = Array.isArray(it.answers) && it.answers.find(x => x.picked === note.picked);
+  if (answer.verdict === 'ok' && own) return own.label;
   if (answer.verdict === 'ok') return note.picked ? 'Use ' + note.picked : it.okLabel || 'Looks good';
   if (answer.verdict === 'no') return it.preview?.type === 'options' ? 'None' : it.kind === 'check' ? 'Sent back' : "Don't do";
   return 'Sent back';

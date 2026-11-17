@@ -872,7 +872,7 @@ def create(
         raise Refused("A title needs 1 to 200 characters.")
     parent_ticket = None
     if parent is not None:
-        # the parent must exist (cycles are impossible: it is set only here)
+        # the parent must exist (a new ticket has no children, so no loop; set_parent checks loops later)
         parent_ticket = load(root, parent)
     fields = fields or {}
     for k, v in fields.items():
@@ -1680,6 +1680,82 @@ def edit(
             add_history(ticket, by, text)
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+PARENT_DEPTH = 50  # a parent chain longer than this is broken data: never followed further
+
+
+def set_parent(root: Path, tid: str, parent: str | None, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-156: put a ticket that already exists under another one (an epic, a release) or take it out
+    (`parent` None or empty). Refused: itself, a ticket that does not exist, or one of its own sub-tickets
+    (a loop). One history line on the ticket and one on each parent it joins or leaves."""
+    me = load(root, tid)
+    new = None
+    if isinstance(parent, str) and parent.strip():
+        if parent.strip() in (me["id"], me.get("key")):
+            raise Refused("A ticket cannot be part of itself.")
+        new = load(root, parent.strip())
+        by_id = {t["id"]: t for t in list_all(root)}
+        seen, cur = set(), new
+        while cur is not None and cur["id"] not in seen and len(seen) < PARENT_DEPTH:
+            if cur["id"] == me["id"]:
+                raise Refused(
+                    f"{_parent_words(new)} is inside this ticket already, so it cannot hold this ticket."
+                )
+            seen.add(cur["id"])
+            cur = by_id.get(str(cur.get("parent") or ""))
+    old_id = me.get("parent")
+    if (new["id"] if new else None) == (old_id or None):
+        return me  # nothing changes: no write, no history line
+    try:
+        old = load(root, old_id) if old_id else None
+    except (Refused, OSError, ValueError):
+        old = None  # a parent that is gone: taking the ticket out still works
+
+    def op(ticket):
+        if new is None:
+            ticket.pop("parent", None)
+            add_history(ticket, by, "Taken out of " + (_parent_words(old) if old else str(old_id)))
+        else:
+            ticket["parent"] = new["id"]
+            add_history(ticket, by, "Put under " + _parent_words(new))
+
+    t = apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    me_words = _parent_words(t)
+    for other, words in ((old, f"{me_words} moved out"), (new, f"{me_words} added")):
+        if other is None:
+            continue
+        try:  # the parent's line is a courtesy: the ticket itself is already saved
+            apply_op(root, other["id"], lambda p, w=words: add_history(p, by, w), by=by)
+        except (Refused, OSError, ValueError):
+            pass
+    return t
+
+
+LANE_RE = re.compile(r"^[a-z][a-z_]{0,23}$")
+MAX_ORDER = 500
+
+
+def set_lane_order(root: Path, lane: str, ids: list[str], by: str) -> list[dict]:
+    """ORCH-156: the order of the tickets inside one board lane (To do, Backlog ...), first to last. Each
+    listed ticket keeps {lane, n}; the board uses it only while the ticket is still in that lane, so a ticket
+    that moves on needs no clean-up. Only tickets whose place changed are written (no history line: the order
+    is how the board shows them, not news about the work). Returns the tickets that changed."""
+    if not isinstance(lane, str) or not LANE_RE.match(lane):
+        raise Refused("A lane is a short name such as todo or backlog.")
+    if not ids:
+        raise Refused("Name the tickets of the lane, first to last.")
+    if len(ids) > MAX_ORDER:
+        raise Refused(f"At most {MAX_ORDER} tickets can be put in order at once.")
+    if len(set(ids)) != len(ids):
+        raise Refused("A ticket is named twice; name each ticket once.")
+    now_at = [load(root, tid).get("lane_order") for tid in ids]  # every ticket exists before any write
+    changed = []
+    for n, (tid, was) in enumerate(zip(ids, now_at, strict=True), start=1):
+        want = {"lane": lane, "n": n}
+        if was != want:
+            changed.append(apply_op(root, tid, lambda t, w=want: t.__setitem__("lane_order", w), by=by)[0])
+    return changed
 
 
 LONG_NOTE = (
