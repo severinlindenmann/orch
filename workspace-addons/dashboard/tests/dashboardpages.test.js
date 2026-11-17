@@ -756,3 +756,10 @@ test('ORCH-184: a line recorded under the computer login names the person, not t
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(src, /checked by ' \+ ticketActor\(ev\.by\)/);
 });
+
+test('ORCH-158: the shared ticket word for a new ticket is Backlog, not To do', () => {
+  const { ticketState } = require('./kit_state.js');
+  assert.equal(ticketState({status:'open'}).word, 'Backlog');
+  assert.equal(ticketState({status:'ready'}).word, 'To do');
+  assert.equal(ticketState({status:'dropped'}).word, "Won't do");
+});

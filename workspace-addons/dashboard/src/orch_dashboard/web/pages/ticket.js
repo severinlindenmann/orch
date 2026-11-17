@@ -350,12 +350,6 @@ function startAddonField(control) {
   input.setAttribute('aria-label', f.title);
   host.replaceChildren(input, el('span', 'hint', 'Enter saves · Esc cancels'));
   input.focus();
-  if (MULTILINE.includes(field)) {
-    // Show the whole note: grow with the text, and start at the top instead of the end.
-    const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight + 2, window.innerHeight * 0.6) + 'px'; };
-    grow(); input.setSelectionRange(input.value.length, input.value.length); input.scrollTop = 0;
-    input.addEventListener('input', grow);
-  }
   let done = false;
   const finish = save => { if (done) return; done = true; end(save ? input.value.trim() : null); };
   input.addEventListener('keydown', event => {
@@ -1673,6 +1667,14 @@ function startInline(control) {
   locks.add(key);
   host.replaceChildren(input, el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'));
   input.focus();
+  if (MULTILINE.includes(field)) {
+    // Show the whole note: grow with the text, and start at the top instead of the end.
+    const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight + 2, window.innerHeight * 0.6) + 'px'; };
+    const top = () => { grow(); input.scrollTop = 0; window.scrollTo(window.scrollX, window.scrollY); };
+    input.setSelectionRange(input.value.length, input.value.length);
+    top(); requestAnimationFrame(top); setTimeout(top, 150);
+    input.addEventListener('input', grow);
+  }
   let done = false;
   const finish = async save => {
     if (done) return;
