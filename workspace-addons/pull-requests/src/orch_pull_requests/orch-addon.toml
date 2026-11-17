@@ -1,18 +1,39 @@
 # Pull requests (GitHub plan ORCH-146): the merge queue (ORCH-168) and the per-ticket "Merge when green" switch
-# (ORCH-166). `queue add` starts the runner, which ends when the queue is empty; the background service (orch start)
-# looks at the switched-on tickets every minute and puts their ready pull requests in the queue.
+# (ORCH-166) and the Pull requests page with live checks on tickets (ORCH-165). `queue add` starts the runner, which
+# ends when the queue is empty; the background service (orch start) reads the linked repositories every minute (one
+# read-only GitHub call each), keeps each ticket's pull request state current and puts the ready pull requests of
+# switched-on tickets in the queue.
 schema = "orch.addon/1"
 orch_api = 1
 name = "pull-requests"
 version = "0.2.0"
-description = "Merge queue: pull requests wait in line and are merged in groups after one run of the checks."
+description = "Open pull requests with their checks, live on each ticket; merge when green and the merge queue."
 run = "orch_pull_requests"
 skill = "skills/orch-pull-requests"
 agents_block = "skills/orch-pull-requests/AGENTS-block.md"
 gitignore = [".orch/addons/pull-requests/"]
 ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/addons/pull-requests/ext.schema.json
-background = true                          # orch pull-requests start|stop|status: the Merge when green watcher
+background = true                          # orch pull-requests start|stop|status: the reader and Merge when green watcher
 
 [ticket_fields]
 section = "Pull requests"
 schema = "ext.schema.json"
+show_on_card = ["checks"]
+
+[dashboard]
+label = "Pull requests"
+icon = "check"
+order = 25
+subtitle = "Open pull requests of the repositories your tickets link, with their checks."
+
+[[ticket_links]]
+kind = "github-pr"
+label = "Pull request"
+icon = "link"
+match = "https://github.com/*/*/pull/*"
+statuses = ["open", "draft", "checks running", "checks failed", "conflict", "behind", "blocked", "ready to merge", "merged", "closed"]
+
+[acts.refresh]
+summary = "Look up the ticket's pull requests and their checks"
+who = "anyone"
+writes = ["refs", "ext.pull-requests"]
