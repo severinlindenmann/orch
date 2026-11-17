@@ -1,0 +1,1134 @@
+{
+ "about": "Tool warning on the phone (contracts/tool-alert.md, ORCH-47). valid / invalid: messages that pass / fail message.schema.json. workspace: what `orch` sends on an inbox pull given the last check (items = orch.health/1 items, checked_at defaults to now = 2026-11-17T08:00:00Z), relay_on, the paired phones and what was sent before (sent: name -> {state, ends_at}); send = the bodies, in item order, local time UTC. Ticket titles in items never travel. phone: messages as GET /v1/phone/messages lists them (newest first) -> the rows the workspace view shows (newest warning first; tone bad = renew/unreachable, warn = soon) and how many chat bubbles stay.",
+ "now": "2026-11-17T08:00:00Z",
+ "tz": "UTC",
+ "workspace_id": "ws_pilatus001",
+ "valid": [
+  {
+   "name": "soon",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    }
+   }
+  },
+  {
+   "name": "renew-chosen",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000002",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login stopped working. Helpers stopped on 2 tickets and start no new work: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "renew",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": true
+     }
+    }
+   }
+  },
+  {
+   "name": "unreachable-connection",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000003",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Company wiki connection cannot be reached. Check it on your computer.",
+     "tool_alert": {
+      "name": "wiki",
+      "label": "Company wiki connection",
+      "kind": "connection",
+      "state": "unreachable",
+      "ends_at": null,
+      "stops": [],
+      "no_new_work": false
+     }
+    }
+   }
+  },
+  {
+   "name": "key-stopped",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000004",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Payments key stopped working. Helpers stopped on 1 ticket: ORCH-7. Renew it on your computer.",
+     "tool_alert": {
+      "name": "payments",
+      "label": "Payments key",
+      "kind": "key",
+      "state": "renew",
+      "ends_at": null,
+      "stops": [
+       "ORCH-7"
+      ],
+      "no_new_work": false
+     }
+    }
+   }
+  },
+  {
+   "name": "works-again",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000005",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login works again.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "works",
+      "ends_at": "2026-12-17T21:24:00Z",
+      "stops": [],
+      "no_new_work": false
+     }
+    }
+   }
+  }
+ ],
+ "invalid": [
+  {
+   "name": "with-ticket",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000010",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    },
+    "ticket": "t_abc123def"
+   }
+  },
+  {
+   "name": "with-key",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000011",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    },
+    "key": "ORCH-12"
+   }
+  },
+  {
+   "name": "with-reply-to",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000012",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    },
+    "reply_to": "m_aaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "name": "to-one-workspace",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000013",
+    "from": "ws_pilatus001",
+    "to": "ws_other00001",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    }
+   }
+  },
+  {
+   "name": "extra-body-field",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000014",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     },
+     "update": {
+      "kind": "note"
+     }
+    }
+   }
+  },
+  {
+   "name": "secret-field",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000015",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false,
+      "token": "abc"
+     }
+    }
+   }
+  },
+  {
+   "name": "label-two-lines",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000016",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude\nCode",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    }
+   }
+  },
+  {
+   "name": "text-two-lines",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000017",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "line one\nline two",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    }
+   }
+  },
+  {
+   "name": "unknown-state",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000018",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "expired",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    }
+   }
+  },
+  {
+   "name": "stops-titles",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000019",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       {
+        "key": "ORCH-12",
+        "title": "x"
+       }
+      ],
+      "no_new_work": false
+     }
+    }
+   }
+  },
+  {
+   "name": "ends-at-local",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000020",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T22:24:00+01:00",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    }
+   }
+  },
+  {
+   "name": "missing-name",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_alert00000000021",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-17T08:00:00Z",
+    "body": {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    }
+   }
+  }
+ ],
+ "workspace": [
+  {
+   "name": "soon-first-time",
+   "relay_on": true,
+   "phones": [
+    "ph_iphone0001"
+   ],
+   "sent": {},
+   "items": [
+    {
+     "name": "claude",
+     "label": "Claude Code",
+     "kind": "login",
+     "state": "soon",
+     "ends_at": "2026-11-20T21:24:00Z",
+     "helper": "claude",
+     "chosen": true,
+     "stops": [
+      {
+       "id": "t_orch12xx",
+       "key": "ORCH-12",
+       "title": "A ticket title that never travels"
+      },
+      {
+       "id": "t_orch14xx",
+       "key": "ORCH-14",
+       "title": "A ticket title that never travels"
+      }
+     ],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "send": [
+    {
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "soon",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "no-phone-paired",
+   "relay_on": true,
+   "phones": [],
+   "sent": {},
+   "items": [
+    {
+     "name": "claude",
+     "label": "Claude Code",
+     "kind": "login",
+     "state": "soon",
+     "ends_at": "2026-11-20T21:24:00Z",
+     "helper": "claude",
+     "chosen": true,
+     "stops": [
+      {
+       "id": "t_orch12xx",
+       "key": "ORCH-12",
+       "title": "A ticket title that never travels"
+      },
+      {
+       "id": "t_orch14xx",
+       "key": "ORCH-14",
+       "title": "A ticket title that never travels"
+      }
+     ],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "send": []
+  },
+  {
+   "name": "relay-off",
+   "relay_on": false,
+   "phones": [
+    "ph_iphone0001"
+   ],
+   "sent": {},
+   "items": [
+    {
+     "name": "claude",
+     "label": "Claude Code",
+     "kind": "login",
+     "state": "soon",
+     "ends_at": "2026-11-20T21:24:00Z",
+     "helper": "claude",
+     "chosen": true,
+     "stops": [
+      {
+       "id": "t_orch12xx",
+       "key": "ORCH-12",
+       "title": "A ticket title that never travels"
+      },
+      {
+       "id": "t_orch14xx",
+       "key": "ORCH-14",
+       "title": "A ticket title that never travels"
+      }
+     ],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "send": []
+  },
+  {
+   "name": "same-again",
+   "relay_on": true,
+   "phones": [
+    "ph_iphone0001"
+   ],
+   "sent": {
+    "claude": {
+     "state": "soon",
+     "ends_at": "2026-11-20T21:24:00Z"
+    }
+   },
+   "items": [
+    {
+     "name": "claude",
+     "label": "Claude Code",
+     "kind": "login",
+     "state": "soon",
+     "ends_at": "2026-11-20T21:24:00Z",
+     "helper": "claude",
+     "chosen": true,
+     "stops": [
+      {
+       "id": "t_orch12xx",
+       "key": "ORCH-12",
+       "title": "A ticket title that never travels"
+      },
+      {
+       "id": "t_orch14xx",
+       "key": "ORCH-14",
+       "title": "A ticket title that never travels"
+      }
+     ],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "send": []
+  },
+  {
+   "name": "stops-changed-only",
+   "relay_on": true,
+   "phones": [
+    "ph_iphone0001"
+   ],
+   "sent": {
+    "claude": {
+     "state": "soon",
+     "ends_at": "2026-11-20T21:24:00Z"
+    }
+   },
+   "items": [
+    {
+     "name": "claude",
+     "label": "Claude Code",
+     "kind": "login",
+     "state": "soon",
+     "ends_at": "2026-11-20T21:24:00Z",
+     "helper": "claude",
+     "chosen": true,
+     "stops": [],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "send": []
+  },
+  {
+   "name": "soon-to-renew",
+   "relay_on": true,
+   "phones": [
+    "ph_iphone0001"
+   ],
+   "sent": {
+    "claude": {
+     "state": "soon",
+     "ends_at": "2026-11-20T21:24:00Z"
+    }
+   },
+   "items": [
+    {
+     "name": "claude",
+     "label": "Claude Code",
+     "kind": "login",
+     "state": "renew",
+     "ends_at": "2026-11-20T21:24:00Z",
+     "helper": "claude",
+     "chosen": true,
+     "stops": [
+      {
+       "id": "t_orch12xx",
+       "key": "ORCH-12",
+       "title": "A ticket title that never travels"
+      },
+      {
+       "id": "t_orch14xx",
+       "key": "ORCH-14",
+       "title": "A ticket title that never travels"
+      }
+     ],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "send": [
+    {
+     "text": "The Claude Code login stopped working. Helpers stopped on 2 tickets and start no new work: ORCH-12, ORCH-14. Renew it on your computer.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "renew",
+      "ends_at": "2026-11-20T21:24:00Z",
+      "stops": [
+       "ORCH-12",
+       "ORCH-14"
+      ],
+      "no_new_work": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "works-never-warned",
+   "relay_on": true,
+   "phones": [
+    "ph_iphone0001"
+   ],
+   "sent": {},
+   "items": [
+    {
+     "name": "claude",
+     "label": "Claude Code",
+     "kind": "login",
+     "state": "works",
+     "ends_at": "2026-12-17T21:24:00Z",
+     "helper": "claude",
+     "chosen": true,
+     "stops": [],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "send": []
+  },
+  {
+   "name": "works-after-warning",
+   "relay_on": true,
+   "phones": [
+    "ph_iphone0001"
+   ],
+   "sent": {
+    "claude": {
+     "state": "renew",
+     "ends_at": "2026-11-20T21:24:00Z"
+    }
+   },
+   "items": [
+    {
+     "name": "claude",
+     "label": "Claude Code",
+     "kind": "login",
+     "state": "works",
+     "ends_at": "2026-12-17T21:24:00Z",
+     "helper": "claude",
+     "chosen": true,
+     "stops": [],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "send": [
+    {
+     "text": "The Claude Code login works again.",
+     "tool_alert": {
+      "name": "claude",
+      "label": "Claude Code login",
+      "kind": "login",
+      "state": "works",
+      "ends_at": "2026-12-17T21:24:00Z",
+      "stops": [],
+      "no_new_work": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "connection-and-key",
+   "relay_on": true,
+   "phones": [
+    "ph_iphone0001"
+   ],
+   "sent": {},
+   "items": [
+    {
+     "name": "wiki",
+     "label": "Company wiki",
+     "kind": "connection",
+     "state": "unreachable",
+     "ends_at": null,
+     "helper": null,
+     "chosen": false,
+     "stops": [],
+     "renew": false,
+     "key": null
+    },
+    {
+     "name": "payments",
+     "label": "Payments key",
+     "kind": "key",
+     "state": "renew",
+     "ends_at": null,
+     "helper": null,
+     "chosen": false,
+     "stops": [
+      {
+       "id": "t_orch7xx",
+       "key": "ORCH-7",
+       "title": "A ticket title that never travels"
+      }
+     ],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "send": [
+    {
+     "text": "The Company wiki connection cannot be reached. Check it on your computer.",
+     "tool_alert": {
+      "name": "wiki",
+      "label": "Company wiki connection",
+      "kind": "connection",
+      "state": "unreachable",
+      "ends_at": null,
+      "stops": [],
+      "no_new_work": false
+     }
+    },
+    {
+     "text": "The Payments key stopped working. Helpers stopped on 1 ticket: ORCH-7. Renew it on your computer.",
+     "tool_alert": {
+      "name": "payments",
+      "label": "Payments key",
+      "kind": "key",
+      "state": "renew",
+      "ends_at": null,
+      "stops": [
+       "ORCH-7"
+      ],
+      "no_new_work": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "stale-check",
+   "relay_on": true,
+   "phones": [
+    "ph_iphone0001"
+   ],
+   "sent": {},
+   "items": [
+    {
+     "name": "claude",
+     "label": "Claude Code",
+     "kind": "login",
+     "state": "soon",
+     "ends_at": "2026-11-20T21:24:00Z",
+     "helper": "claude",
+     "chosen": true,
+     "stops": [
+      {
+       "id": "t_orch12xx",
+       "key": "ORCH-12",
+       "title": "A ticket title that never travels"
+      },
+      {
+       "id": "t_orch14xx",
+       "key": "ORCH-14",
+       "title": "A ticket title that never travels"
+      }
+     ],
+     "renew": false,
+     "key": null
+    }
+   ],
+   "checked_at": "2026-11-17T06:00:00Z",
+   "send": []
+  }
+ ],
+ "phone": [
+  {
+   "name": "one-soon",
+   "messages": [
+    {
+     "message": {
+      "schema": "orch.msg/1",
+      "id": "m_alert00000000001",
+      "from": "ws_pilatus001",
+      "to": "phones",
+      "type": "text",
+      "created_at": "2026-11-17T08:00:00Z",
+      "body": {
+       "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+       "tool_alert": {
+        "name": "claude",
+        "label": "Claude Code login",
+        "kind": "login",
+        "state": "soon",
+        "ends_at": "2026-11-20T21:24:00Z",
+        "stops": [
+         "ORCH-12",
+         "ORCH-14"
+        ],
+        "no_new_work": false
+       }
+      }
+     },
+     "workspace_name": "Pilatus"
+    }
+   ],
+   "rows": [
+    {
+     "name": "claude",
+     "tone": "warn",
+     "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer."
+    }
+   ],
+   "bubbles": 0
+  },
+  {
+   "name": "newest-wins",
+   "messages": [
+    {
+     "message": {
+      "schema": "orch.msg/1",
+      "id": "m_alert00000000002",
+      "from": "ws_pilatus001",
+      "to": "phones",
+      "type": "text",
+      "created_at": "2026-11-17T09:00:00Z",
+      "body": {
+       "text": "The Claude Code login stopped working. Helpers stopped on 2 tickets and start no new work: ORCH-12, ORCH-14. Renew it on your computer.",
+       "tool_alert": {
+        "name": "claude",
+        "label": "Claude Code login",
+        "kind": "login",
+        "state": "renew",
+        "ends_at": "2026-11-20T21:24:00Z",
+        "stops": [
+         "ORCH-12",
+         "ORCH-14"
+        ],
+        "no_new_work": true
+       }
+      }
+     },
+     "workspace_name": "Pilatus"
+    },
+    {
+     "message": {
+      "schema": "orch.msg/1",
+      "id": "m_alert00000000001",
+      "from": "ws_pilatus001",
+      "to": "phones",
+      "type": "text",
+      "created_at": "2026-11-17T08:00:00Z",
+      "body": {
+       "text": "The Claude Code login ends on Friday 20 November at 21:24. After that helpers stop on 2 tickets: ORCH-12, ORCH-14. Renew it on your computer.",
+       "tool_alert": {
+        "name": "claude",
+        "label": "Claude Code login",
+        "kind": "login",
+        "state": "soon",
+        "ends_at": "2026-11-20T21:24:00Z",
+        "stops": [
+         "ORCH-12",
+         "ORCH-14"
+        ],
+        "no_new_work": false
+       }
+      }
+     },
+     "workspace_name": "Pilatus"
+    }
+   ],
+   "rows": [
+    {
+     "name": "claude",
+     "tone": "bad",
+     "text": "The Claude Code login stopped working. Helpers stopped on 2 tickets and start no new work: ORCH-12, ORCH-14. Renew it on your computer."
+    }
+   ],
+   "bubbles": 0
+  },
+  {
+   "name": "works-removes",
+   "messages": [
+    {
+     "message": {
+      "schema": "orch.msg/1",
+      "id": "m_alert00000000003",
+      "from": "ws_pilatus001",
+      "to": "phones",
+      "type": "text",
+      "created_at": "2026-11-17T10:00:00Z",
+      "body": {
+       "text": "The Claude Code login works again.",
+       "tool_alert": {
+        "name": "claude",
+        "label": "Claude Code login",
+        "kind": "login",
+        "state": "works",
+        "ends_at": "2026-12-17T21:24:00Z",
+        "stops": [],
+        "no_new_work": false
+       }
+      }
+     },
+     "workspace_name": "Pilatus"
+    },
+    {
+     "message": {
+      "schema": "orch.msg/1",
+      "id": "m_alert00000000002",
+      "from": "ws_pilatus001",
+      "to": "phones",
+      "type": "text",
+      "created_at": "2026-11-17T09:00:00Z",
+      "body": {
+       "text": "The Claude Code login stopped working. Helpers stopped on 2 tickets and start no new work: ORCH-12, ORCH-14. Renew it on your computer.",
+       "tool_alert": {
+        "name": "claude",
+        "label": "Claude Code login",
+        "kind": "login",
+        "state": "renew",
+        "ends_at": "2026-11-20T21:24:00Z",
+        "stops": [
+         "ORCH-12",
+         "ORCH-14"
+        ],
+        "no_new_work": true
+       }
+      }
+     },
+     "workspace_name": "Pilatus"
+    }
+   ],
+   "rows": [],
+   "bubbles": 0
+  },
+  {
+   "name": "two-things",
+   "messages": [
+    {
+     "message": {
+      "schema": "orch.msg/1",
+      "id": "m_alert00000000004",
+      "from": "ws_pilatus001",
+      "to": "phones",
+      "type": "text",
+      "created_at": "2026-11-17T09:30:00Z",
+      "body": {
+       "text": "The Payments key stopped working. Helpers stopped on 1 ticket: ORCH-7. Renew it on your computer.",
+       "tool_alert": {
+        "name": "payments",
+        "label": "Payments key",
+        "kind": "key",
+        "state": "renew",
+        "ends_at": null,
+        "stops": [
+         "ORCH-7"
+        ],
+        "no_new_work": false
+       }
+      }
+     },
+     "workspace_name": "Pilatus"
+    },
+    {
+     "message": {
+      "schema": "orch.msg/1",
+      "id": "m_alert00000000005",
+      "from": "ws_pilatus001",
+      "to": "phones",
+      "type": "text",
+      "created_at": "2026-11-17T09:00:00Z",
+      "body": {
+       "text": "The Company wiki connection cannot be reached. Check it on your computer.",
+       "tool_alert": {
+        "name": "wiki",
+        "label": "Company wiki connection",
+        "kind": "connection",
+        "state": "unreachable",
+        "ends_at": null,
+        "stops": [],
+        "no_new_work": false
+       }
+      }
+     },
+     "workspace_name": "Pilatus"
+    }
+   ],
+   "rows": [
+    {
+     "name": "payments",
+     "tone": "bad",
+     "text": "The Payments key stopped working. Helpers stopped on 1 ticket: ORCH-7. Renew it on your computer."
+    },
+    {
+     "name": "wiki",
+     "tone": "bad",
+     "text": "The Company wiki connection cannot be reached. Check it on your computer."
+    }
+   ],
+   "bubbles": 0
+  },
+  {
+   "name": "malformed-ignored",
+   "messages": [
+    {
+     "message": {
+      "schema": "orch.msg/1",
+      "id": "m_alert00000000006",
+      "from": "ws_pilatus001",
+      "to": "phones",
+      "type": "text",
+      "created_at": "2026-11-17T09:00:00Z",
+      "body": {
+       "text": "The X login stopped working.",
+       "tool_alert": {
+        "name": "x",
+        "state": "renew"
+       }
+      }
+     },
+     "workspace_name": "Pilatus"
+    }
+   ],
+   "rows": [],
+   "bubbles": 0
+  },
+  {
+   "name": "other-workspace-ticket-text-ignored",
+   "messages": [
+    {
+     "message": {
+      "schema": "orch.msg/1",
+      "id": "m_alert00000000007",
+      "from": "ws_pilatus001",
+      "to": "phones",
+      "type": "text",
+      "created_at": "2026-11-17T09:00:00Z",
+      "body": {
+       "text": "Ordinary chat text"
+      }
+     },
+     "workspace_name": "Pilatus"
+    }
+   ],
+   "rows": [],
+   "bubbles": 1
+  }
+ ]
+}
