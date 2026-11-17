@@ -16,15 +16,24 @@ except ImportError:  # standalone use without orch: nothing runs
     start_detached = None
 
 
-def start_update(root: Path, orch_bin, env, session=None, start=None) -> tuple[int, str]:
-    """The person clicked Update: run `orch update` detached. `session` is the page session to keep open
-    across the restart; a request without a page session is refused by the caller before this runs."""
+BUILDS = ("release", "development")
+
+
+def start_update(
+    root: Path, orch_bin, env, session=None, start=None, to: str | None = None
+) -> tuple[int, str]:
+    """The person clicked Update (or Switch to release / development build: `to`): run `orch update` detached,
+    the same update either way. `session` is the page session to keep open across the restart; a request
+    without a page session is refused by the caller before this runs."""
     if pagelaunch is None:
         return 503, "Updating is not available in this install."
+    if to is not None and to not in BUILDS:
+        return 400, "Choose release or development build."
     if session is not None:
         pagelaunch.write_resume_cookie(root, session.server, session.cookie, session.secret)
     try:
-        pid = (start or start_detached)(["update"], orch_bin=orch_bin, cwd=root, env=env)
+        argv = ["update", "--to", to] if to else ["update"]
+        pid = (start or start_detached)(argv, orch_bin=orch_bin, cwd=root, env=env)
     except OSError:
         return 503, "The update could not be started. Please try again."
     _record_update(root, pid)
@@ -39,10 +48,27 @@ def update_info() -> dict:
         data = dict(updateinfo.info())
         data["source"] = f"{addons.repo()} ({addons.ref()})"[:200]
         data["ref"] = addons.ref()[:100]
+        data["build"] = build()
         data["auto"] = autoupdate_status()
         return data
     except Exception:  # noqa: BLE001 - never an error page for a version line
         return {}
+
+
+_BUILD: list[str] = []
+
+
+def build() -> str | None:
+    """'release' or 'development' (where this orch came from), or None without orch. Read once per process:
+    a switch reinstalls orch and restarts this server."""
+    if not _BUILD:
+        try:
+            from orch import addons
+
+            _BUILD.append(addons.build())
+        except Exception:  # noqa: BLE001 - never an error page for a version line
+            return None
+    return _BUILD[0]
 
 
 def ticket_release(root: Path, tid: str) -> dict | None:

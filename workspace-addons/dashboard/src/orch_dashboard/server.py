@@ -887,11 +887,16 @@ class Handler(BaseHTTPRequestHandler):
 
                 if not session:
                     raise actions.NeedsPerson(actions.SIGNIN)
+                args = body.get("args") or {}
+                to = args.get("to") if isinstance(args, dict) else None
+                if to is not None and to not in update.BUILDS:
+                    raise actions.BadRequest("Choose release or development build.")
                 code, text = update.start_update(
                     self.root,
                     self.orch_bin,
                     actions.human_env(self.root, self.orch_bin),
                     session=self.session,
+                    to=to,
                 )
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
             if body.get("op") in RESTARTING_OPS and session:
