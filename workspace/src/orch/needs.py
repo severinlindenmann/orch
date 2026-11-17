@@ -264,7 +264,7 @@ def addon_rows(root: Path, name: str, m: dict) -> list[dict]:
 
 
 def _option_labels(q: dict) -> list[str]:
-    """One short line per option: "A Title" when a card option has its own title (the id alone says nothing)."""
+    """One short line per option: "A Title" when a card option has its own title."""
     pv = (q.get("card") or {}).get("preview") or {}
     titles = {o.get("id"): o.get("title") for o in pv.get("options") or [] if isinstance(o, dict)}
     out = []
