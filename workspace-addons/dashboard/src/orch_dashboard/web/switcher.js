@@ -49,17 +49,17 @@
 
   function item(w) {
     const L = window.OrchLook;
-    // The row follows the gallery (.sw-item): name with one grey sub-label under it ("Current", "Not running" or the
-    // type), and one thing on the right (who waits, else the tick on the current one). The name ends with "…" when long.
+    // The row follows the gallery (.sw-item): the name gets the whole row width and wraps to a second line when long
+    // (manager review 17 Nov: a cut name cannot tell two workspaces apart). Under it one grey line holds the state
+    // ("Current", "Not running" or the type) and who waits ("1 needs you"); the right side only has the tick on the current one.
     // The current row shows the same name as the box above it (the display name), not the folder name.
     const label = w.here && typeof L.name === 'function' && L.name() ? L.name() : w.name;
-    const sub = w.here ? 'Current' : !w.url ? 'Not running' : typeof w.type === 'string' && w.type.trim() ? w.type : null;
-    const details = n('span', {className: 'grow sw-item-details'},
-      n('span', {className: 'ws-item-name'}, label), sub ? n('span', {className: 'meta'}, sub) : null);
+    const state = w.here ? 'Current' : !w.url ? 'Not running' : typeof w.type === 'string' && w.type.trim() ? w.type : null;
     const needs = Number.isInteger(w.needs) && w.needs > 0
       ? n('span', {className: 'sw-needs'}, w.needs + (w.needs === 1 ? ' needs you' : ' need you')) : null;
-    const status = n('span', {className: 'sw-item-status'},
-      needs || (w.here ? n('span', {className: 'sw-tick', 'aria-hidden': 'true'}, '✓') : null));
+    const sub = state || needs ? n('span', {className: 'meta'}, state, state && needs ? ' · ' : null, needs) : null;
+    const details = n('span', {className: 'grow sw-item-details'}, n('span', {className: 'ws-item-name'}, label), sub);
+    const status = w.here ? n('span', {className: 'sw-item-status'}, n('span', {className: 'sw-tick', 'aria-hidden': 'true'}, '✓')) : null;
     // Running workspaces on this computer are links (switching = opening their dashboard); the current one and stopped ones are not.
     const attrs = {className: 'sw-item' + (w.here || w.url ? '' : ' off'), role: 'menuitem', 'data-testid': 'ws-item'};
     if (w.here) Object.assign(attrs, {'aria-current': 'true'});
