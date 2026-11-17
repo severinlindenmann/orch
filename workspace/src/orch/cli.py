@@ -347,7 +347,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager", "triage"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "tokens", "github", "manager", "triage"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -439,7 +439,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x = sub.add_parser("work-check", parents=[common], help="say so when files changed without a ticket")
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
-    x = sub.add_parser("usage", parents=[common], help="tokens per model and per ticket (read-only)")
+    x = sub.add_parser("tokens", parents=[common], help="tokens per model and per ticket (read-only)")
     x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
     x = sub.add_parser("triage", parents=[common], help="list the tickets that need a look (read-only)")
     x.add_argument(
@@ -964,7 +964,7 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "work-check":
         workcheck.run(root, args.json)
-    elif cmd == "usage":
+    elif cmd == "tokens":
         from orch import usage
 
         data = usage.workspace_usage(root, max(args.days, 1))

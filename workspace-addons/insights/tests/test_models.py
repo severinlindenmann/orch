@@ -68,7 +68,7 @@ def test_route(server, fake_orch):
     assert code == 200
     assert json.loads(body)["moved_text"] == "1 of 4 tickets moved up to Opus"
     assert json.loads((fake_orch.parent / "call.json").read_text())["args"] == [
-        "usage",
+        "tokens",
         "--days",
         "30",
         "--json",
