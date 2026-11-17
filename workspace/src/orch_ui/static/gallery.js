@@ -72,7 +72,7 @@ document.getElementById('g-density')?.addEventListener('change',e=>{document.doc
 if(window.UI?.date){const v=document.getElementById('g-due'),t=document.getElementById('g-due-toggle');if(v&&t)window.UI.date(v,t,null,{time:true});}
 
 {const host=document.querySelector('#w-formats');if(host&&UI.docBox){const box=(name,when,pv)=>{const c=document.createElement('section'),t=document.createElement('p');c.className='card pad stack';t.className='sample-label';t.textContent=name+' · '+when;c.append(t,UI.docBox(pv,'h4'));host.append(c)};
- box('Result','work is finished',{headline:'Works on Mac. Linux was tested with a stand-in only.',progress:{done:5,total:5},chips:[{text:'17 tests passed',tone:'ok'},{text:'CI job: you push',tone:'warn'}],steps:['Done: Record format','Done: Commands'],details:['Every step with its proof.']});
+ box('Result','work is finished',{headline:'Works on Mac. Linux was tested with a stand-in only.',progress:{done:5,total:5},chips:[{text:'17 tests passed',tone:'ok'},{text:'CI job: you push',tone:'warn'}],steps:['Done: Record format','Done: Commands'],details:['Every step with what was run.']});
  box('Chart','numbers: speed, cost, usage',{headline:'Page load is 2.4 s faster.',chart:{unit:' s',bars:[{label:'Before',value:4.2},{label:'After',value:1.8}]}});
  box('Flow','how something works, max 6 boxes',{headline:'A phone message reaches a ticket.',flow:['Phone','Relay','Workspace','Ticket']});
  box('Changes','what wording or files changed',{headline:'One button word changes.',chips:[{text:'3 files',tone:'info'}],diff:[{op:'-',text:'Approve'},{op:'+',text:'Looks good'}]});

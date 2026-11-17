@@ -178,7 +178,7 @@ a choice: `--describe "A=Keeps the menu as it is"`.
 - Many items or a comparison: a table. Something failed: say what, where and what you need, in 2 lines. A page to try: `--link` with `--open`.
 Write the card as a JSON file and pass it with `--file card.json` on `--draft` or `--plan`:
     {"headline": "Page load is 2.4 s faster.", "progress": {"done": 5, "total": 5},
-     "chips": [{"text": "17 tests passed", "tone": "ok"}], "flow": ["Phone", "Relay", "Ticket"],
+     "chips": [{"text": "17 tests passed", "tone": "ok"}], "flow": ["Idea", "Build", "Ticket"],
      "chart": {"unit": " s", "bars": [{"label": "Before", "value": 4.2}, {"label": "After", "value": 1.8}]},
      "diff": [{"op": "-", "text": "Approve"}, {"op": "+", "text": "Looks good"}], "details": ["Long text here."]}
 Chip tones: ok, warn, bad, info. Use only the fields you need. Add a screenshot (`--before`/`--after`) whenever the work has something to look at.
