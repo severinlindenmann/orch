@@ -40,8 +40,10 @@
       [...(question.options || [])].sort((a, b) => Number(!!b.suggested) - Number(!!a.suggested)).forEach(option => {
         const node = button('', 'btn qoption' + (option.suggested ? ' suggested' : ''), () => choose(option.text, {immediate: question.oneTap === true && question.kind == null}));
         node.append(make('span', '', option.text));
-        if (option.suggested) node.append(make('span', 'suggested-label', 'Suggested'));
-        options.append(node);
+        const row = make('span', 'qopt');
+        row.append(node);
+        if (option.suggested) row.append(make('span', 'suggested-label', 'Suggested'));
+        options.append(row);
       });
       const editor = make('form', 'qeditor');
       editor.hidden = true;

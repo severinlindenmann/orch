@@ -90,7 +90,13 @@ const href = id => '#ticket/' + encodeURIComponent(id);
 const questions = t => array(t.questions).filter(q => q.answer == null);
 const activeTicket = t => !['done', 'dropped'].includes(t.status);
 const overdue = t => window.DashHelpers.dueLate(t.due, t.status, now());
-const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.due ? date(t.due) : '');  // "Due 18:30" / "Late since 18:30", else the day
+// ORCH-185: a day-only due says which day: "Fri 20 Nov" (the year only when it is not this year), never a bare "Fri".
+const dueDay = value => {
+  const d = parse(value); if (!d) return '';
+  if (String(value).slice(0, 10) === today()) return 'today';
+  return d.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short', ...(d.getFullYear() !== now().getFullYear() ? {year:'numeric'} : {})}).replace(',', '');
+};
+const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.due ? dueDay(t.due) : '');  // "Due 18:30" / "Late since 18:30", else the day
 const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
 const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
 const statusWord = t => window.DashHelpers.statusWord(t.status, t.started);
@@ -275,8 +281,8 @@ function route() {
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|agent|phone|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
-  if (settingsHash && !snapshot && state?.settings) { const [tab, addon] = (settingsHash[1] || 'general').split('/'); return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
+  const settingsHash = /^#settings(?:\/(general|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
@@ -347,7 +353,7 @@ function render(arrived = new Set()) {
   const wait = document.getElementById('topbar-wait');
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
     const ages = array(state.tickets).filter(t => t.status !== 'done' && questions(t).length).map(t => Date.parse(t.updated_at)).filter(Number.isFinite);
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
+    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · longest wait ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
   }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
@@ -577,6 +583,20 @@ function dialog(title, cls = 'dialog', lock = '') {
 }
 document.getElementById('new-ticket').hidden = snapshot;
 document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
+// Keyboard shortcuts (persona test F6): "/" goes to the ticket search, "n" opens New ticket. Never while typing or with a window open.
+function shortcutFor(e, typing, windowOpen) {
+  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || typing || windowOpen) return '';
+  return e.key === '/' ? 'search' : e.key === 'n' ? 'new' : '';
+}
+document.addEventListener('keydown', e => {
+  const t = e.target, typing = !!(t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || '')));
+  const what = shortcutFor(e, typing, !!document.querySelector('dialog[open]'));
+  if (!what || snapshot) return;
+  e.preventDefault();
+  if (what === 'new') { ticketForm(); return; }
+  const focusSearch = () => document.querySelector('[data-key="ticket-search"]')?.focus();
+  if (route().kind !== 'tickets') { location.hash = '#tickets'; setTimeout(focusSearch, 0); } else focusSearch();
+});
 document.getElementById('open-agent').hidden = snapshot;
 document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
 document.getElementById('report-problem').hidden = snapshot;
@@ -816,6 +836,7 @@ main.addEventListener('click', async event => {
   if (action === 'view') {
     ticketView = control.dataset.view === 'board' ? 'board' : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
+    writeTicketAddress();
     render(); return;
   }
   if (action === 'board-more') { if (boardMore.has('done')) boardMore.delete('done'); else boardMore.add('done'); render(); return; }

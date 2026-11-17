@@ -20,7 +20,7 @@ def _line(r: dict) -> str:
     extra = ""
     ans = r.get("answer")
     if ans and ans["options"]:
-        extra = "  [" + " | ".join(ans["options"]) + "]"
+        extra = "  [" + " | ".join(ans.get("labels") or ans["options"]) + "]"
     elif r.get("cli"):
         extra = f"  ({r['cli']})"
     stale = "  (not up to date)" if r.get("stale") else ""

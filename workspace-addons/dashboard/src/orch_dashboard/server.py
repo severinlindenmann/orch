@@ -988,6 +988,27 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("op") == "ticket.new" and isinstance(extra, dict) and isinstance(extra.get("id"), str):
             # the new ticket's id: the New ticket window opens it by id, never by guessing from the title
             state["created"] = {"id": extra["id"][:40]}
+        steps = extra.get("steps") if body.get("op") == "ticket.new" and isinstance(extra, dict) else None
+        if isinstance(steps, dict):  # ORCH-185: the tickets of an epic made in the same request, by position
+            made, failed = steps.get("made"), steps.get("failed")
+            state["steps"] = {
+                "made": [
+                    {
+                        "index": m["index"],
+                        "id": str(m.get("id"))[:40],
+                        "attached": {
+                            "failed": [str(x)[:100] for x in (m.get("attached") or {}).get("failed", [])[:10]]
+                        },
+                    }
+                    for m in (made if isinstance(made, list) else [])[:50]
+                    if isinstance(m, dict) and type(m.get("index")) is int
+                ],
+                "failed": [
+                    {"index": f["index"], "message": str(f.get("message"))[:300]}
+                    for f in (failed if isinstance(failed, list) else [])[:50]
+                    if isinstance(f, dict) and type(f.get("index")) is int
+                ],
+            }
         if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
             att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
             state["attached"] = {
