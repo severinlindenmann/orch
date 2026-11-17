@@ -1155,7 +1155,7 @@ function ticketTalk(host, tid) {
   host.append(dock, box);
   const composer = window.UI.composer(box, {label:'Add to this ticket', placeholder:'Write what is new, paste a screenshot or drop files…',
     sendLabel:ticketTalkLabel(ticketOf(tid), state.runs?.[tid]), interrupt:false, accept:TALK_TYPES, maxFiles:TALK_FILES, maxBytes:TALK_FILE_MAX, maxLength:TALK_TYPED_MAX,
-    hint:'Text files and pictures, up to 25 MB each · Cmd/Ctrl+V pastes a screenshot · Cmd/Ctrl+Enter sends',
+    hint:'Text files and pictures · Cmd/Ctrl+V pastes a screenshot · Cmd/Ctrl+Enter sends', sendStyle:'outline',  // the page keeps its one filled button (Start, Watch live)
     acceptError:'Only text files and pictures can be added.', emptyError:'Write something or add a file.',
     dropTarget:host, dropLabel:'Drop to add to this ticket', sendingText:'Sending…',
     onSend:async message => { const result = await ticketTalkSend(tid, message); render(); return result; }});
