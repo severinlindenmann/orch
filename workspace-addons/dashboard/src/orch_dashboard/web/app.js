@@ -181,7 +181,22 @@ function hashKind(hash) {
   const k = String(hash || '').split('?')[0].replace(/^#/, '').split('/')[0];
   return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : k === 'settings' ? 'settings' : ['addon', 'open', 'chat', 'general'].includes(k) ? 'page' : 'home';
 }
+// #addon/<name> of an add-on that is installed but off: say so and offer the switch (ORCH-242), not a bare 404.
+function offAddonName(hash) {
+  const m = /^#addon\/([a-z][a-z0-9-]{1,31})(?:[/#?]|$)/.exec(hash || '');
+  const row = m && array(state?.settings?.addons).find(a => a && a.name === m[1]);
+  return row && !row.active && !addons().some(a => a.name === m[1]) ? m[1] : null;
+}
 function notFoundPage() {
+  const off = offAddonName(location.hash);
+  if (off) {
+    const label = capitalise(off);
+    return fragment(heading(label + ' is turned off', 'Turn it on in Settings to use this page.'),
+      h('div', {className:'state-frame', 'data-key':'addon-off'}, h('section', {className:'card pad stack'},
+        h('p', {className:'muted'}, label + ' is turned off, so it has no page right now.'),
+        h('div', {className:'actions row'}, h('a', {className:'btn primary sm', href:'#settings/addons/' + encodeURIComponent(off)}, 'Open ' + label + ' settings'),
+          h('a', {className:'btn ghost sm', href:'#home'}, 'Go to Home')))));
+  }
   return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
     h('div', {className:'state-frame', 'data-key':'not-found'}, h('section', {className:'card error-hero'},
       h('span', {className:'error-number', 'aria-hidden':'true'}, '404'),
@@ -323,6 +338,12 @@ globalThis.addEventListener?.('message', e => {
   if ((e.origin !== location.origin && !chan) || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
+// An add-on page moved inside itself (ORCH-241): the address follows it without a history entry of its own (the
+// frame's move made one, so Back goes back inside the frame) and without drawing the page again.
+function followAddress(hash) {
+  history.replaceState(null, '', hash);
+  renderedRoute = route().hash;
+}
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
@@ -331,7 +352,7 @@ function render(arrived = new Set()) {
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? 'Page not found' : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -393,6 +414,7 @@ function render(arrived = new Set()) {
   reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (r.kind === 'review') mountReview(main);
+  if (r.kind === 'ticket') mountTicketTalk(main);
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
@@ -547,9 +569,17 @@ async function refresh() {
   const version = mutation;
   const connection = document.getElementById('connection');
   try {
-    const res = await fetch('/api/state', {cache:'no-store'});
+    // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
+    const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
     const next = await res.json();
+    if (next.unchanged && state) {
+      if (writing || version !== mutation) { refreshAgain = true; return; }
+      connection.hidden = true;
+      lastOk = Date.now();
+      paintUpdated();
+      return;
+    }
     if (writing || version !== mutation) { refreshAgain = true; return; }
     connection.hidden = true;
     lastOk = Date.now();
@@ -687,19 +717,19 @@ main.addEventListener('change', async event => {
   if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
   const most = event.target.closest('[data-key="settings-live-max"]');
   if (most) {
-    if (snapshot || settingsBusy.has('live')) return;
+    if (snapshot) return;
     const v = most.value === 'none' ? null : Number(most.value);
-    const result = await settingsSend('live.set', {max:v}, 'live');
-    if (result.ok) window.orch.toast(v ? 'Up to ' + v + ' helpers at once.' : 'No limit: any number of helpers at once.', 'ok');
+    const result = await settingsChoose('live', v, () => settingsSend('live.set', {max:v}, 'live'));
+    if (result?.ok) window.orch.toast(v ? 'Up to ' + v + ' helpers at once.' : 'No limit: any number of helpers at once.', 'ok');
     return;
   }
   const perm = event.target.closest('[data-settings-permissions]');
   if (perm) {
-    if (snapshot || settingsBusy.has('permissions')) return;
+    if (snapshot) return;
     const mode = perm.dataset.settingsPermissions;
     const send = async () => {
-      const result = await settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions');
-      if (result.ok) window.orch.toast('Saved. New helper runs use ' + capitalise(mode) + '.', 'ok');
+      const result = await settingsChoose('permissions', mode, () => settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions'));
+      if (result?.ok) window.orch.toast('Saved. New helper runs use ' + capitalise(mode) + '.', 'ok');
     };
     if (mode !== 'full') { await send(); return; }
     perm.checked = false;  // stays on the old choice until the person says Yes
@@ -822,7 +852,15 @@ main.addEventListener('click', async event => {
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
     if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;
-    const send = () => settingsSend('addon.set', {name:addon.name, on:!addon.active}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
+    const send = async () => {
+      // Turning off: the link and the page go at once, not after the services restart (ORCH-242).
+      const before = state.addons;
+      const wasActive = addon.active;
+      if (wasActive) { state.addons = array(before).filter(a => a.name !== addon.name); addon.active = false; }
+      const result = await settingsSend('addon.set', {name:addon.name, on:!wasActive}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
+      if (!result.ok && wasActive) { state.addons = before; addon.active = true; render(); }
+      return result;
+    };
     if (addon.active) await send();
     else settingsConfirm('Turn on ' + capitalise(addon.name) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
     return;

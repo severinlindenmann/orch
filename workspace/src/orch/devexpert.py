@@ -639,7 +639,8 @@ def handle_review(root: Path, role_key: str, lines: list[str], st: dict, t: date
         tk = tickets.create(
             root, title, BY,
             fields={"note": f"{REVIEW_NOTE} Role ticket: {role_key}.",
-                    "done_when": "Every finding is fixed, proposed as a ticket, or named as no action"},
+                    "done_when": "Every finding is fixed, proposed as a ticket, or named as no action",
+                    "model_hint": "small"},
         )  # fmt: skip
     except Refused as e:
         return [f"could not open a review ticket: {e}"]

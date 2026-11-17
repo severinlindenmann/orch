@@ -86,6 +86,27 @@ def test_add_choose_with_files_and_suggest(tk, run):
     assert "preview" not in opts[2]
 
 
+def test_drafts_card_three_pages_side_by_side(tk, run):
+    """ORCH-257: the card a Fable ticket ends with (runs.drafts_text): three HTML drafts from the ticket's
+    files folder, each a page tile on one choose card, one suggested."""
+    root, tid = tk
+    folder = root / ".orch" / "tickets" / tid / "artifacts"
+    folder.mkdir(parents=True, exist_ok=True)
+    for x in "abc":
+        (folder / f"draft-{x}.html").write_text(f"<!doctype html><a href='#s2'>Next</a><p id='s2'>{x}</p>")
+    code, out, err = _add(
+        run, tid, "--choose", "Focus mode", "--option", "A=One column:artifacts/draft-a.html",
+        "--option", "B=Two panes:artifacts/draft-b.html", "--option", "C=Chat first:artifacts/draft-c.html",
+        "--describe", "A=Everything in one list", "--suggest", "B", "--then", "I build the one you pick.",
+    )  # fmt: skip
+    assert code == 0, out + err
+    q = json.loads(out)
+    assert q["options"] == ["A", "B", "C"] and q["recommended"] == "B"
+    opts = q["card"]["preview"]["options"]
+    assert [o["preview"]["type"] for o in opts] == ["page", "page", "page"]
+    assert all(o["preview"]["src"].startswith("reviewed/") for o in opts)
+
+
 def test_add_before_after_file_link_and_plan(tk, run):
     root, tid = tk
     (root / "o.png").write_bytes(b"\x89PNG\r\n\x1a\n1")
@@ -181,6 +202,23 @@ def test_answer_choose_picked_and_change_again(tk, run):
     )
     assert code == 0, out + err
     assert json.loads(out)["decision"]["replaces"] == qid
+
+
+def test_answer_choose_in_own_words_is_the_answer_not_a_send_back(tk, run):
+    """ORCH-246: words on a question with options are the person's answer, as on Home's "Write your own"."""
+    root, tid = tk
+    code, out, _ = _add(
+        run, tid, "--choose", "Which?", "--option", "A=One", "--option", "B=Two", "--then", "x"
+    )
+    qid = json.loads(out)["id"]
+    note = json.dumps({"changes": ["Neither: use a drop-down."]})
+    code, out, err = run(
+        "review", "answer", tid, qid, "--verdict", "talk", "--note", note, "--by", ME, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out)["decision"]["summary"] == "Neither: use a drop-down."
+    q = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == qid)
+    assert "Send back" not in str(q["answer"]) and "drop-down" in str(q["answer"])
 
 
 def test_answer_digest_changed(tk, run):

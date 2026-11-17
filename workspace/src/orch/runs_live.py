@@ -125,6 +125,13 @@ def records(root: Path) -> list[dict]:
     return out
 
 
+def _status(root: Path, tid: str) -> str | None:
+    try:
+        return tickets.load(root, tid).get("status")
+    except Exception:  # noqa: BLE001 - a ticket that cannot be read is not held back
+        return None
+
+
 def _finished(root: Path, tid: str) -> bool:
     """True when the ticket is in Review, Done or Dropped: its session no longer needs a slot."""
     with contextlib.suppress(Exception):
@@ -724,11 +731,11 @@ def _model_line(rec: dict, root: Path) -> str | None:
     return tmpl.replace("{model}", to)
 
 
-def switch_model(root: Path, tid: str, model: str, by: str) -> bool:
-    """The ticket moved up while a live session runs: at its next turn end orch types the adapter's fixed
-    model line, then the notice for one fixed message saying so (the reason stays in the history only: no
-    caller's words go into the session). True when a live session will switch; False when none runs or its
-    tool cannot switch (then the next start uses the new model)."""
+def switch_model(root: Path, tid: str, model: str, by: str, up: bool = True) -> bool:
+    """The ticket moved up (or a person chose another model, up=False) while a live session runs: at its
+    next turn end orch types the adapter's fixed model line, then the notice for one fixed message saying so
+    (the reason stays in the history only: no caller's words go into the session). True when a live session
+    will switch; False when none runs or its tool cannot switch (then the next start uses the new model)."""
     if model not in modelpick.MODELS:
         return False
     with runs.locked(root, tid):
@@ -739,7 +746,11 @@ def switch_model(root: Path, tid: str, model: str, by: str) -> bool:
             return False
         rec["model_switch"] = {"to": model, "at": tickets.now()}
         runs._write(root, rec)
-    send(root, tid, by, f"Model moved up to {modelpick.LABELS[model]}. Go on with the ticket.")
+    said = "moved up to" if up else "set to"
+    text = f"Model {said} {modelpick.LABELS[model]}. Go on with the ticket."
+    if model == "fable":
+        text += " " + runs.drafts_text(tid)
+    send(root, tid, by, text)
     return True
 
 
@@ -1283,7 +1294,7 @@ def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dic
         return {"id": item["id"], "delivered": 0, "queued": True, "state": "none"}
     n = deliver(root, tid) if rec.get("mode") == "live" else 0
     rec = runs.read(root, tid) or rec
-    if not n and rec.get("mode") == "live" and rec.get("submit"):
+    if not n and rec.get("mode") == "live" and rec.get("submit") and not rec["submit"].get("stale"):
         # the wrapper's watcher typed the notice between our queueing and our deliver(): a notice is out and
         # not yet taken, and the agent reads everything waiting when it takes it, so this input is sent too
         n = 1
@@ -1737,6 +1748,8 @@ def start_waiting(root: Path) -> list[str]:
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
         if not items or runs.read(root, tid):
             continue
+        if _status(root, tid) in ("done", "dropped"):
+            continue  # a Done ticket never gets a run by itself (ORCH-247); the person starts it by hand
         with contextlib.suppress(Exception):
             runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)

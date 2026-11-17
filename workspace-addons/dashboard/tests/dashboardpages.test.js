@@ -27,7 +27,7 @@ test('board parts span columns, accept keys, and ignore children summaries and a
     const c = context(items);
     if (!useHelpers) c.window = {DashHelpers:{...helpers, childrenOf:undefined, parentOf:undefined}};
     const card = c.boardCard(items[0]);
-    assert.match(JSON.stringify(card), /Steps · 0 of 3 done/);
+    assert.match(JSON.stringify(card), /Sub-tickets · 0 of 3 done/);
     assert.equal(nodes(card, n => n.attrs?.className === 'board-part').length, 3);
     assert.match(JSON.stringify(c.boardCard(items[1])), /Sub-ticket of Parent/);
     assert.doesNotMatch(JSON.stringify(c.boardCard(items[3], true)), /Sub-ticket of Parent/);
@@ -163,7 +163,7 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const LIVE_MAX_CHOICES'), end = src.indexOf('function shareCard');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
-  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsPending:new Map(), settingsSaving:() => null, settingsText:(tag, a, t) => h(tag, a, t)});
   vm.runInContext(src.slice(start, end), c);
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
   const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join(' ');
@@ -177,6 +177,48 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   assert.match(text(four), /When 4 helpers are working, the next one waits in line/);
   assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:99}), n => n.tag === 'select')[0].value, 'none');
   assert.ok(src.includes("permissionsCard(settings), helpersAtOnceCard(settings)]"), 'sits on the Helper tab');
+});
+
+test('ORCH-227: a Settings choice shows at once with Saving…, a second click while it saves is sent after it', async () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  let renders = 0;
+  const c = vm.createContext({h, snapshot:false, render:() => { renders++; }});
+  vm.runInContext(src.slice(src.indexOf('const settingsBusy'), src.indexOf('const addonOpen')), c);
+  vm.runInContext(src.slice(src.indexOf('const FULL_WARNING'), src.indexOf('// What helpers need')), c);
+  vm.runInContext(src.slice(src.indexOf('const LIVE_MAX_CHOICES'), src.indexOf('function shareCard')), c);
+  const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+  const checked = card => all(card, n => n.tag === 'input' && n.checked)[0]?.attrs.value;
+  const saving = (card, key) => all(card, n => n.attrs?.['data-key'] === 'settings-saving-' + key).length;
+  const choose = vm.runInContext('settingsChoose', c), busy = vm.runInContext('settingsBusy', c);
+  // the server answers slowly: the clicked choice is drawn at once, with Saving…, never the old one
+  const sent = [];
+  let finish;
+  const send = mode => () => { busy.add('permissions'); sent.push(mode); return new Promise(done => { finish = () => { busy.delete('permissions'); done({ok:true}); }; }); };
+  const first = choose('permissions', 'ask', send('ask'));
+  const card = vm.runInContext('permissionsCard', c)({permissions:'auto'});
+  assert.equal(checked(card), 'ask', 'the click shows at once');
+  assert.equal(saving(card, 'permissions'), 1, 'with Saving…');
+  assert.equal(all(card, n => n.tag === 'input' && n.attrs.disabled).length, 0, 'a second click is possible');
+  // a second click while the first saves is kept and sent after it; the last click wins
+  assert.equal(await choose('permissions', 'full', send('full')), null);
+  assert.equal(checked(vm.runInContext('permissionsCard', c)({permissions:'auto'})), 'full');
+  finish();
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(sent, ['ask', 'full']);
+  finish();
+  await first;
+  const after = vm.runInContext('permissionsCard', c)({permissions:'full'});
+  assert.equal(checked(after), 'full'); assert.equal(saving(after, 'permissions'), 0, 'no Saving… once saved');
+  // a failed save falls back to what the server says
+  const failed = choose('live', 4, () => Promise.resolve({ok:false}));
+  await failed;
+  assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:null}), n => n.tag === 'select')[0].value, 'none');
+  // Helpers at once shows the picked number at once too
+  choose('live', 6, () => new Promise(() => {}));
+  const live = vm.runInContext('helpersAtOnceCard', c)({live_max:null});
+  assert.equal(all(live, n => n.tag === 'select')[0].value, '6'); assert.equal(saving(live, 'live'), 1);
+  assert.ok(renders > 0);
 });
 
 test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote shown plainly (no Details)', () => {
@@ -641,7 +683,7 @@ test('the Automation page heading is the add-on menu name, not a second name', (
 test('ticket page: brief heading, Repeats in Properties, plain values with a pencil, no Edit text (UX round 5)', () => {
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(ticket, /h\('h2', \{\}, 'What you asked'\)/);
-  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\)\), addonPropertyRows\(t\)/);
+  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\)\), costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
   assert.match(ticket, /'Set a due date'/);
   assert.match(ticket, /iconEl\('pencil'\)/);
   assert.doesNotMatch(ticket, /'Helper: '/);
@@ -742,17 +784,32 @@ test('ORCH-158: the edit button has a name, and a long note opens whole', () => 
   assert.match(ticket, /open \? 'Show less' : 'Show all'/);
 });
 
-test('ORCH-185: a sub-ticket shown as its own card in the column is not also listed inside its parent card', () => {
+test('ORCH-185/240: a sub-ticket with its own card anywhere on the board is not also listed inside its parent card', () => {
   const items = [{id:'p', key:'PIL-2', title:'Parent', status:'open'}, {id:'a', key:'PIL-10', title:'First', parent:'p', status:'open'},
     {id:'c', key:'PIL-12', title:'Third', parent:'p', status:'waiting'}];
   const c = context(items);
   const board = c.board();
   const openColumn = nodes(board, n => n.attrs?.['data-status'] === 'open')[0];
   assert.equal(nodes(openColumn, n => n.tag === 'article').length, 2, 'parent and First once each, as cards');
-  const listed = nodes(openColumn, n => n.attrs?.className === 'board-part').map(n => JSON.stringify(n));
-  assert.equal(listed.length, 1, 'only Third (another column) is listed inside the parent card');
-  assert.match(listed[0], /Third/);
-  assert.doesNotMatch(listed[0], /First/);
+  assert.equal(nodes(openColumn, n => n.attrs?.className === 'board-part').length, 0, 'Third has its own card in Needs you: not listed twice');
+  assert.match(JSON.stringify(openColumn), /0 of 2 done/, 'the parent card still says how far its sub-tickets are');
+  assert.ok(nodes(board, n => n.tag === 'article' && n.attrs?.['data-ticket'] === 'c').length === 1, 'Third is its own card, once');
+});
+test('ORCH-240: a sub-ticket hidden by a cut-short lane is still listed inside its parent card', () => {
+  const done = [1, 2, 3, 4].map(n => ({id:'d' + n, key:'PIL-' + (20 + n), title:'Done ' + n, status:'done'}));
+  const items = [{id:'p', key:'PIL-2', title:'Parent', status:'open'}, ...done, {id:'k', key:'PIL-30', title:'Kid', parent:'p', status:'done'}];  // Kid is 5th in Done
+  const board = context(items).board();
+  const openColumn = nodes(board, n => n.attrs?.['data-status'] === 'open')[0];
+  const kidCard = nodes(board, n => n.tag === 'article' && n.attrs?.['data-ticket'] === 'k').length;
+  const listed = nodes(openColumn, n => n.attrs?.className === 'board-part');
+  assert.equal(kidCard, 0, 'Kid is cut off in the Done lane (3 shown, then Show more)');
+  assert.equal(listed.length, 1, 'so the parent card still lists it');
+});
+test('ORCH-240: empty Won\'t do and Superseded lanes take no room on the board', () => {
+  const board = context([{id:'a', key:'PIL-1', title:'A', status:'open'}]).board();
+  const lanes = nodes(board, n => n.attrs?.['data-status']).map(n => n.attrs['data-status']);
+  assert.ok(!lanes.includes('dropped') && !lanes.includes('superseded'));
+  assert.ok(lanes.includes('done') && lanes.includes('ready'), 'the other empty lanes stay as drop targets');
 });
 test('home: a ticket in Review that also asks a question counts once, and the title equals the rows the page counts (ORCH-184)', () => {
   const items = [{id:'a', title:'T a', status:'review'}, {id:'b', title:'T b', status:'review'}, {id:'c', title:'T c', status:'waiting'}];

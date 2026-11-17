@@ -836,11 +836,23 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
                 "Changed " + f + (f" (now {STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
             )
     if m := re.fullmatch(r"Added check (c\d+)", t):
-        return "Added a step" + task(m.group(1))
+        return "Added a task" + task(m.group(1))
     if m := re.fullmatch(r"Check (c\d+) done", t):
         return "Finished a task" + task(m.group(1))
     if m := re.fullmatch(r"Marked (c\d+) as won't do", t):
         return "Marked as won't do" + task(m.group(1))
+    # ORCH-240: never a raw task id ("Reopened c1") in the Activity
+    if m := re.fullmatch(r"Reopened (c\d+)(?: \(old evidence: .*\))?", t, re.DOTALL):
+        return "Opened a task again" + task(m.group(1))
+    if m := re.fullmatch(r"Renamed (c\d+)(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
+        return "Renamed a task" + task(m.group(1))
+    if m := re.fullmatch(r"Linked (c\d+) to Done when", t):
+        return "Linked a task to Done when" + task(m.group(1))
+    removed = r"Removed step c\d+ '(.*)' \((?:was done|was open)(?:; evidence: .*)?\)"
+    if m := re.fullmatch(removed, t, re.DOTALL):
+        return f"Removed a task: {m.group(1)}"
+    if re.fullmatch(r"Title changed(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
+        return "Changed the title"
     if m := re.fullmatch(r"Set ext\.([a-z][a-z0-9-]*)", t):
         return f"Updated {addon(m.group(1))} settings"
     if m := re.fullmatch(r"Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?", t):
@@ -1598,9 +1610,9 @@ def _when_words(at: datetime, now: datetime) -> str:
 
 
 def due_label(due: str | None, status: str = "open", now: datetime | None = None) -> str | None:
-    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 18:30" (another day), "Late since
-    18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day wording).
-    Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
+    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 16 Nov, 18:30" (another day),
+    "Late since 18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day
+    wording). Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
     if not due or "T" not in str(due):
         return None
     try:
@@ -1609,7 +1621,10 @@ def due_label(due: str | None, status: str = "open", now: datetime | None = None
         return None
     now = now or datetime.now()
     late = at < now and status not in ("done", "dropped")
-    return f"{'Late since' if late else 'Due'} {_when_words(at, now)}"
+    words = _when_words(at, now)
+    if 0 < abs((at.date() - now.date()).days) < 7:  # ORCH-240: which Monday? the day of the month too
+        words = f"{at.strftime('%a')} {at.day} {at.strftime('%b')}, {at.strftime('%H:%M')}"
+    return f"{'Late since' if late else 'Due'} {words}"
 
 
 QUIET_HOURS = 6  # a working ticket with no history line for this long is "quiet" (fixed, no setting: R4.4)
@@ -1641,6 +1656,65 @@ def quiet_since(ticket: dict, now: datetime | None = None) -> str | None:
     if (now or datetime.now(UTC)) - newest[0] <= timedelta(hours=QUIET_HOURS):
         return None
     return newest[0].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+STUCK_HOURS = (
+    24  # a question unanswered or a Working ticket without news this long counts as stuck (fixed: R4.4)
+)
+
+
+def overdue(ticket: dict, now: datetime | None = None) -> bool:
+    """Past its due date (local time like the due itself): a date-only due from the next day on, a due with a
+    time from that minute on; never for a finished or dropped ticket."""
+    due = ticket.get("due")
+    if not isinstance(due, str) or not due or ticket.get("status") in ("done", "dropped"):
+        return False
+    now = now or datetime.now()
+    try:
+        if "T" in due:
+            return datetime.strptime(due, "%Y-%m-%dT%H:%M") < now.replace(tzinfo=None)
+        return datetime.strptime(due, "%Y-%m-%d").date() < now.date()
+    except ValueError:
+        return False
+
+
+def _utc(text: object) -> datetime | None:
+    if not isinstance(text, str):
+        return None
+    try:
+        at = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=UTC)
+
+
+def stuck_why(ticket: dict, now: datetime | None = None) -> str | None:
+    """ORCH-189, the one Stuck rule beside a stuck helper (which only the run knows): "question" when a
+    question has waited more than STUCK_HOURS, "quiet" when a Working ticket had no news that long, "overdue"
+    past its due date; None otherwise and for finished, dropped or in-Review tickets. Read-only, nothing is
+    stored."""
+    status = ticket.get("status")
+    if status in ("done", "dropped", "review"):
+        return None
+    if now is None:
+        utc_now, local = datetime.now(UTC), None
+    elif now.tzinfo is None:  # a plain time is taken as UTC here and as local time for the due date
+        utc_now, local = now.replace(tzinfo=UTC), now
+    else:
+        utc_now, local = now.astimezone(UTC), now.astimezone().replace(tzinfo=None)
+    limit = timedelta(hours=STUCK_HOURS)
+    for q in ticket.get("questions") or []:
+        if not isinstance(q, dict) or q.get("answer") is not None or q.get("taken_back"):
+            continue
+        sent = _utc(q.get("sent_at") or q.get("at"))
+        if sent is not None and utc_now - sent > limit:
+            return "question"
+    since = quiet_since(ticket, utc_now)
+    if since and utc_now - (_utc(since) or utc_now) > limit:
+        return "quiet"
+    if overdue(ticket, local):
+        return "overdue"
+    return None
 
 
 def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
@@ -1719,16 +1793,22 @@ def edit(
 
     def op(ticket):
         if title is not None:
-            if title != ticket.get("title"):
+            before = ticket.get("title")
+            if title != before:
                 ticket.pop("title_auto", None)  # a person's (or anyone's) own title is final
             ticket["title"] = title
-            add_history(ticket, by, "Title changed")
+            # ORCH-240: the Activity shows what the title was and is now
+            line = "Title changed"
+            if title != before:
+                line += f" (was: {_edit_snip(before)} | now: {_edit_snip(title)})"
+            add_history(ticket, by, line)
         was = {k: ticket.get(k) for k in fields}
         for k, v in fields.items():
             _set_field(ticket, k, v)
         if fields:
             text = "Edited " + ", ".join(sorted(fields))
-            if len(fields) == 1 and next(iter(fields)) in ("note", "done_when"):
+            # ORCH-240: owner and due keep their old and new value too
+            if len(fields) == 1 and next(iter(fields)) in ("note", "done_when", "owner", "due"):
                 k = next(iter(fields))
                 text += f" (was: {_edit_snip(was[k])} | now: {_edit_snip(ticket.get(k))})"  # ORCH-185
             add_history(ticket, by, text)
@@ -1934,14 +2014,55 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
+def estimate_words(est: object) -> str:
+    """ "about 45 min · $2.00" for a stored estimate; "" for none."""
+    if not isinstance(est, dict):
+        return ""
+    m, cost = est.get("minutes"), est.get("cost")
+    parts = []
+    if isinstance(m, int) and not isinstance(m, bool) and m > 0:
+        parts.append((f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min")
+    if isinstance(cost, int | float) and not isinstance(cost, bool) and cost >= 0:
+        parts.append(f"${cost:,.2f}")
+    return "about " + " · ".join(parts) if parts else ""
+
+
+def _estimate(minutes: object, cost: object) -> dict | None:
+    """ORCH-189: the helper's own estimate from its first run (helper minutes, dollars at list price)."""
+    if minutes is None and cost is None:
+        return None
+    if minutes is not None and (
+        not isinstance(minutes, int) or isinstance(minutes, bool) or not 0 < minutes <= 100_000
+    ):
+        raise Refused("An estimate needs whole minutes between 1 and 100000.")
+    if cost is not None and (
+        not isinstance(cost, int | float) or isinstance(cost, bool) or not 0 <= cost <= 100_000
+    ):
+        raise Refused("An estimated cost needs dollars between 0 and 100000.")
+    out: dict = {}
+    if minutes is not None:
+        out["minutes"] = minutes
+    if cost is not None:
+        out["cost"] = round(float(cost), 2)
+    return out
+
+
 def tidy(
-    root: Path, tid: str, title: str, by: str, fields: dict | None = None, description: str | None = None
+    root: Path,
+    tid: str,
+    title: str,
+    by: str,
+    fields: dict | None = None,
+    description: str | None = None,
+    estimate: dict | None = None,
 ) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
     filled only where still empty, and the agent's description (what and why, its own field, never the
-    person's note) when there is none yet. Once."""
+    person's note) when there is none yet, and the helper's time and cost estimate (ORCH-189: made in the same
+    first run, shown on the ticket) when there is none yet. Once."""
     title = title.strip()
+    est = _estimate((estimate or {}).get("minutes"), (estimate or {}).get("cost"))
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
     description = (description or "").strip() or None
@@ -1956,7 +2077,11 @@ def tidy(
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
         edited = any(  # someone renamed it after it was created: that title is theirs, tidy leaves it
-            str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED) == "Title changed"
+            re.fullmatch(
+                r"Title changed(?: \(was: .* \| now: .*\))?",
+                str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED),
+                re.DOTALL,
+            )
             for h in history.lines(root, ticket)
         )
         if title != old and not edited:
@@ -1973,19 +2098,24 @@ def tidy(
             ticket["description"] = description
             ticket["description_by"] = by[:100]
             add_history(ticket, by, f"Description written by {by[:100]}")
-        if (title == old or edited) and not filled and not wrote:
+        estimated = bool(est and not ticket.get("estimate"))
+        if estimated:
+            ticket["estimate"] = {**est, "by": by[:100], "at": now()}
+            add_history(ticket, by, "Estimate: " + estimate_words(est))
+        if (title == old or edited) and not filled and not wrote and not estimated:
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]
 
 
 def set_model(root: Path, tid: str, name: str, by: str) -> dict:
-    """A person's model for this ticket's helper (sonnet or opus), or auto: orch picks again next start."""
+    """A person's model for this ticket's helper (haiku, sonnet, opus or fable), or auto: orch picks again
+    next start. Haiku and Fable come only from here: orch never picks them (owner 17 Nov, ORCH-257)."""
     from orch import modelpick
 
     name = (name or "").strip().lower()
     if name not in (*modelpick.MODELS, "auto"):
-        raise Refused("Pick sonnet, opus or auto.")
+        raise Refused("Pick haiku, sonnet, opus, fable or auto.")
     if not _is_person(by):
         raise Refused(
             f'Only a person picks the model. Ask instead: orch ask {tid} "Run this ticket on Opus?" '
@@ -2042,7 +2172,7 @@ def pick_model(root: Path, tid: str, by: str) -> str:
 def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
     """Move a ticket orch put on Sonnet up to Opus (the helper when its plan shows design, security or
     several parts; orch after two failed checks on one step). One history line says why. A person's choice
-    is never changed. Returns (ticket, moved): moved False when it already runs on Opus."""
+    is never changed. Returns (ticket, moved): moved False when it already runs on Opus or Fable."""
     from orch import modelpick
 
     why = " ".join(clean_untrusted(why or "", 200).split())
@@ -2053,13 +2183,13 @@ def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
     def op(ticket):
         cur = modelpick.chosen(ticket)
         if cur and modelpick.by_person(ticket):
-            if cur["name"] == "opus":
+            if cur["name"] in modelpick.STRONG:
                 return
             raise Refused(
                 f"A person chose {modelpick.LABELS[cur['name']]} for this ticket. Ask instead: "
                 f'orch ask {tid} "Move this ticket up to Opus? {why[:80]}" --option yes --option no'
             )
-        if cur and cur["name"] == "opus":
+        if cur and cur["name"] in modelpick.STRONG:
             return
         ticket["model"] = {
             "name": "opus",
@@ -2071,8 +2201,8 @@ def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
         out["moved"] = True
 
     t = load(root, tid)
-    if (modelpick.chosen(t) or {}).get("name") == "opus":
-        return t, False  # already on Opus: nothing to write
+    if (modelpick.chosen(t) or {}).get("name") in modelpick.STRONG:
+        return t, False  # already on Opus or Fable: nothing to write
     t = apply_op(root, tid, op, by=by)[0]
     return t, out["moved"]
 
@@ -2476,7 +2606,7 @@ def _up_after_failures(root: Path, tid: str, item: dict) -> None:
 
     t = load(root, tid)
     cur = modelpick.chosen(t)
-    if not cur or cur["name"] != "sonnet" or modelpick.by_person(t):
+    if not cur or cur["name"] not in modelpick.SMALL or modelpick.by_person(t):
         return
     step = " ".join(str(item.get("text") or "").split())[:80]
     why = f'two checks failed on the step "{step}"' if step else "two checks failed on one step"
@@ -2511,8 +2641,10 @@ def check_edit(
         item = _item(t, cid)
         _person_only(by, item, tid, cid)
         if text is not None:
+            before = item.get("text")
             item["text"] = text.strip()
-            add_history(t, by, f"Renamed {cid}")
+            # ORCH-240: the Activity shows the old and the new task text
+            add_history(t, by, f"Renamed {cid} (was: {_edit_snip(before)} | now: {_edit_snip(item['text'])})")
         if covers is not None:
             item["covers"] = covers
             if text is None:
@@ -3521,6 +3653,13 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
         sessions = t.setdefault("sessions", [])
         for s in sessions:
             if s.get("agent") == agent and s.get("host") == host:
+                if s.get("id") != sid and valid_session_id(s.get("id")):
+                    # keep the replaced conversation so a person can read or continue it later
+                    old = [e for e in s.get("earlier") or [] if isinstance(e, dict) and e.get("id") != sid]
+                    old.insert(0, {"id": s["id"], "last_used": s.get("last_used")})
+                    s["earlier"] = old[:20]
+                elif s.get("earlier"):
+                    s["earlier"] = [e for e in s["earlier"] if e.get("id") != sid]
                 s["id"], s["last_used"] = sid, now()
                 break
         else:
