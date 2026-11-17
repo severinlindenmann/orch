@@ -476,3 +476,28 @@ def test_an_early_helper_that_moved_after_the_reminder_is_not_restarted(proj, ne
     tickets.log(proj, tid, "Started on the first task.", "agent:generic")
     assert _actions(tend.run(proj, now=_later(6))) == []
     assert starts == []
+
+
+# ---------------------------------------------------------------- ORCH-266: Home says why nothing starts
+
+
+def test_line_status_says_why_tickets_wait(proj, new_ticket, monkeypatch):
+    assert runs_live.line_status(proj) is None  # nothing waits: Home shows nothing
+    a = new_ticket("a")
+    _queue(proj, a)
+    monkeypatch.setattr(
+        runs_live, "_pressure", lambda root: "the computer is very busy (54 'orch record tail' at once)"
+    )
+    st = runs_live.line_status(proj)
+    assert st == {
+        "waiting": [a],
+        "why": "the computer is very busy (54 'orch record tail' at once)",
+        "limit": None,
+    }
+    monkeypatch.setattr(runs_live, "_pressure", lambda root: None)
+    monkeypatch.setattr(runs_live, "_full", lambda root: 3)
+    assert runs_live.line_status(proj) == {
+        "waiting": [a], "why": "3 helpers are working at once, the most you allowed", "limit": 3,
+    }  # fmt: skip
+    monkeypatch.setattr(runs_live, "_full", lambda root: None)
+    assert runs_live.line_status(proj)["why"] is None  # only the short pause between starts: no reason shown

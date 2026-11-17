@@ -977,3 +977,53 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
   .split-view[data-picked] .split-list,.split-view:not([data-picked]) .split-panel{display:none}
   .split-facts>div{grid-template-columns:minmax(0,1fr);gap:var(--s1)}
 }
+
+/* ---- Live bar (draft D, ORCH-337): one calm row under every page. Groups with a small label: needs-you chips
+   (orange), pinned chips, then quiet counts that open a list with search. It never wraps: data-fold says how far it
+   folded (0 every chip, 1 pinned as a count, 2 the counts as one More, 3 symbols and counts, 4 needs you and More).
+   Fixed under the page beside the side bar; at phone width above the tab bar (--lbar-bottom, set by the page).
+   .lbar-sample shows it inline in the gallery. ---- */
+.lbar{position:fixed;left:var(--sidebar-width);right:0;bottom:var(--lbar-bottom,0px);z-index:40;display:flex;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-height:var(--s8);padding:var(--s2) var(--s4);border-top:1px solid var(--border-strong);background:var(--sidebar);color:var(--text)}
+.lbar.lbar-docked{position:relative;left:auto;right:auto;bottom:auto;z-index:auto}
+.lbar-chip[aria-current=true]{background:var(--surface-3);color:var(--text)}
+.lbar.lbar-sample{position:relative;left:auto;right:auto;bottom:auto;z-index:auto;border:1px solid var(--border);border-radius:var(--r2)}
+.lbar-home{display:inline-flex;flex:none;align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border-radius:var(--r1);color:var(--text);font-weight:600;white-space:nowrap;text-decoration:none}
+.lbar-home:hover{background:var(--surface-2)}
+.lbar-sw{display:flex;flex:1 1 0;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-width:0;overflow:hidden}
+.lbar[data-fold="3"] .lbar-sw,.lbar[data-fold="4"] .lbar-sw{gap:var(--s1)}
+.lbar-g{display:inline-flex;flex:none;gap:var(--s1);align-items:center}
+.lbar-l{display:inline-flex;align-items:center;margin-right:var(--s1);font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap}
+.lbar-g[data-g=wait] .lbar-l{color:var(--needs-you);font-weight:600}
+.lbar-chip,.lbar-cnt{display:inline-flex;flex:none;gap:var(--s2);align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);line-height:16px;white-space:nowrap;text-decoration:none;cursor:pointer;transition:background var(--dur-fast) ease}
+.lbar-chip:hover,.lbar-cnt:hover{background:var(--surface-2);color:var(--text)}
+.lbar-chip[data-s=wait]{color:var(--needs-you)}
+.lbar-chip:focus-visible,.lbar-cnt:focus-visible{outline-offset:-2px}  /* the row hides overflow: the ring goes inside */
+.lbar-cnt[aria-expanded=true]{background:var(--surface-3);color:var(--text)}
+.lbar-sym{font-family:var(--font-mono);color:var(--text-muted)}
+[data-s=wait]>.lbar-sym,.lbar-sym[data-s=wait]{color:var(--needs-you)}
+[data-s=run]>.lbar-sym,.lbar-sym[data-s=run]{color:var(--working)}
+.lbar .ic{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lbar-end{display:inline-flex;flex:none;gap:var(--s1);align-items:center}
+.lbar-end:empty{display:none}
+.lbar-pop{position:absolute;left:var(--s3);bottom:calc(100% + var(--s2));z-index:6;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:var(--s2);width:min(420px,calc(100vw - var(--s5)));max-height:min(60vh,480px);padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);font-size:var(--fs-body)}
+.lbar-pop-h{margin:0;font-weight:600}
+.lbar-list{display:grid;align-content:start;gap:var(--s1);min-height:0;overflow:auto;overscroll-behavior:contain}
+.lbar-row{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:var(--s2);align-items:center;min-height:var(--s7);padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface);color:var(--text);text-decoration:none}
+.lbar-row:hover{background:var(--surface-2)}
+.lbar-row .lbar-st{display:inline-flex;gap:var(--s1);align-items:center;font-size:var(--fs-meta);font-weight:600;color:var(--text-muted);white-space:nowrap}
+.lbar-row .lbar-st[data-s=wait]{color:var(--needs-you)}
+.lbar-row .lbar-st[data-s=run]{color:var(--working)}
+.lbar-key{font-family:var(--font-mono);font-size:var(--fs-meta);color:var(--text-muted);white-space:nowrap}
+.lbar-rn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lbar-pop .meta{margin:0}
+body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
+html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
+.lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
+@media(max-width:720px){
+  .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
+  .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
+  html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
+  body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
+}
+@media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
+.lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
