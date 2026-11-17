@@ -959,6 +959,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .lbar-chip,.lbar-cnt{display:inline-flex;flex:none;gap:var(--s2);align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);line-height:16px;white-space:nowrap;text-decoration:none;cursor:pointer;transition:background var(--dur-fast) ease}
 .lbar-chip:hover,.lbar-cnt:hover{background:var(--surface-2);color:var(--text)}
 .lbar-chip[data-s=wait]{color:var(--needs-you)}
+.lbar-chip:focus-visible,.lbar-cnt:focus-visible{outline-offset:-2px}  /* the row hides overflow: the ring goes inside */
 .lbar-cnt[aria-expanded=true]{background:var(--surface-3);color:var(--text)}
 .lbar-sym{font-family:var(--font-mono);color:var(--text-muted)}
 [data-s=wait]>.lbar-sym,.lbar-sym[data-s=wait]{color:var(--needs-you)}
@@ -978,9 +979,12 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .lbar-rn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lbar-pop .meta{margin:0}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
+html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
+.lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
   .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
+  html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
   body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
