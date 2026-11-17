@@ -7,7 +7,8 @@
 //   - a missing window global the pages need (EXPECT_GLOBALS), e.g. window.FocusHelpers when helpers.js throws at load.
 // A page that throws at load must never reach develop (#525 lost holdText; nothing caught it).
 // Then it runs the UX checks of the master gallery (workspace/src/orch_ui/tests/ux_checks.cjs: self-test first, then
-// sideways scroll, target size, focus mark, reduced motion, text contrast).
+// sideways scroll, target size, focus mark, reduced motion, text contrast), and the click-through of the new Focus
+// (e2e/focus_d/clickthrough.cjs: its ready steps at three widths).
 //
 //   node e2e/focus_insights_smoke.cjs        (exit 0 = all screens clean)
 'use strict';
@@ -54,4 +55,9 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
     const r = require('node:child_process').spawnSync(process.execPath, [ux, ...extra], { stdio: 'inherit' });
     if (r.status !== 0) process.exit(1);
   }
+  // The click-through of the new Focus (draft D, e2e/focus_d): every ready step at 1280, 1920 and 390.
+  const out = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'focus-d-'));
+  const ct = require('node:child_process').spawnSync(process.execPath, [require('node:path').join(__dirname, 'focus_d', 'clickthrough.cjs'), '--out', out], { stdio: 'inherit' });
+  require('node:fs').rmSync(out, { recursive: true, force: true });
+  if (ct.status !== 0) process.exit(1);
 })().catch(e => { console.error(e); process.exit(1); });

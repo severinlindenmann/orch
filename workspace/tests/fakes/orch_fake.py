@@ -212,7 +212,7 @@ def record_counts(argv, scenario):
         if scenario == "empty"
         else "examples/counts/valid-answer.json"
     )
-    out({**answer, "unavailable": [], "complete": True})
+    out({**answer, "unavailable": [], "complete": True, "lost": {"lines": 0, "reasons": {}, "errors": {}}})
 
 
 # --- job ---

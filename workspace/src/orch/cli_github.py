@@ -8,6 +8,13 @@
     orch github expert [--dry-run] [--known <problem>=<ticket>]
         the Development expert's read-only pass over CI, pull requests and tickets (devexpert.py); off until
         `orch config set github.dev_expert <role ticket>` and `github.dev_expert_repo <owner/name>`
+    orch github release [--dry-run] [--known-red "<job>=<ticket>"]
+        one pass of the release keeper (releasekeeper.py): green develop -> release pull request -> Merge card
+        -> merged by the switch or the owner's click -> orch update here -> deploy prepared, production
+        only on the owner's go; off until github.release_keeper, github.release_repo and
+    github.release_clone are set orch github release-hold "<why>" | off     stop cutting new releases (a
+    running one goes on) / lift it orch github release-deployed <server>[,<server>]=<commit>   write down
+    what production runs after a deploy
 
 The limits are settings: `orch config set github.merge_per_hour 12` (also pr_, comment_, other_per_hour).
 """
@@ -47,6 +54,43 @@ def add_parsers(sub, common) -> None:
         metavar="PROBLEM=TICKET",
         help="a red problem that already has its ticket, e.g. nightly-ci=ORCH-32 (no second ticket)",
     )
+    r = g.add_parser("release", parents=[common], help="one pass of the release keeper")
+    r.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    r.add_argument(
+        "--known-red",
+        dest="known_red",
+        action="append",
+        metavar="JOB=TICKET",
+        help="a job that is red for a known reason while that ticket is open: named, never a blocker",
+    )
+    hd = g.add_parser("release-hold", parents=[common], help="stop cutting releases (off lifts it)")
+    hd.add_argument("why", help='why, in a few words, or "off"')
+    dp = g.add_parser("release-deployed", parents=[common], help="write down what production runs")
+    dp.add_argument("spec", metavar="SERVER=COMMIT", help="e.g. relay=58e00713 or relay,publish=<commit>")
+
+
+def _release(args, root: Path | None) -> None:
+    from orch import releasekeeper as rk
+
+    if root is None:
+        raise Refused("Run this inside an orch workspace.")
+    if args.sub == "release":
+        res = rk.run(root, dry_run=args.dry_run, known=rk.parse_known(args.known_red))
+        print(json.dumps(res, indent=2, default=str) if args.json else rk.text(res, args.dry_run))
+    elif args.sub == "release-hold":
+        v = rk.set_hold(root, args.why)
+        data = {"hold": v}
+        msg = (
+            f"No new release is cut until the hold is lifted: {v}"
+            if v
+            else "Hold lifted: releases are cut again."
+        )
+        print(json.dumps(data) if args.json else msg)
+    else:
+        by = getattr(args, "by", None) or "by hand"
+        got = rk.record_deployed(root, args.spec, by)
+        msg = f"Written down: {' and '.join(got['parts'])} runs {got['sha'][:8]} in production."
+        print(json.dumps(got) if args.json else msg)
 
 
 def _when(secs) -> str:
@@ -58,6 +102,9 @@ def _when(secs) -> str:
 def dispatch(args, root: Path | None) -> bool:
     if getattr(args, "cmd", None) != "github":
         return False
+    if args.sub in ("release", "release-hold", "release-deployed"):
+        _release(args, root)
+        return True
     if args.sub == "expert":
         from orch import devexpert
 

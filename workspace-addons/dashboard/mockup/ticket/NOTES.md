@@ -154,7 +154,7 @@ the Working strip in `../sweep/d-ticket-states.html`; master: `.strip-plain`, `.
 
 A feature wish (ORCH-81, owner pick A, 16 Nov; `&about=feature`): the button keeps "Report a problem"; the dialog starts with a switch "A problem" / "A feature wish". For a wish the words become "What do you want?" / "Why would it help?", the page picture and ticket text rows are hidden (off), and Report ready says "Your feature wish is saved on this computer." with only Close: a wish is sorted first, never handed to a helper from here. The relay admin page marks a shared wish with a "Feature wish" chip.
 
-- Properties: **Model** (ORCH-49). orch picks Sonnet or Opus before each start (shown as "Let orch decide (Opus)", the reason in the tooltip); a person picks Sonnet or Opus, or hands it back. Applies from the next start. Shown in `ticket-working.html`.
+- Properties: **Model** (ORCH-49). orch picks Sonnet or Opus before each start (shown as "Let orch decide (Opus)", the reason in the tooltip); a person picks Haiku, Sonnet, Opus or Fable, or hands it back. A running helper switches when its turn ends, else it applies from the next start. Haiku (fastest) and Fable (drafts) are only ever a person's choice (owner 17 Nov, ORCH-257); a ticket on Fable ends with one card of three or more drafts side by side. Shown in `ticket-working.html`.
 - A question with a card (16 Nov, ORCH-65; `ticket-question.html#card-question`): the question text and the card's pictures together (Today first on a choice, the suggested option marked), "Look and answer" opens Review at that card; the top line names the agent that asked ("Manager asks: …", the agent's own name), "Helper" only when none is known.
 
 ## Released or only merged (ORCH-87, 17 Nov)
@@ -172,3 +172,17 @@ A feature wish (ORCH-81, owner pick A, 16 Nov; `&about=feature`): the button kee
 - Activity: a note edit keeps its own row with "Was: … → Now: …" (at most 200 characters each).
 - Picture viewer (kit): a picture gets the tall window and a smaller header at 700 px and wider, so a 640 × 480 picture is shown whole.
 - `ticket-working.html` shows the attached picture (thumbnail, "attached by you") under What you asked and an Activity row with Was/Now. The picture viewer says "Attached by you" for such a file.
+
+## Add to this ticket (ORCH-238, 17 Nov)
+`ticket-working.html` shows the card at the top of the story: the helper's live screen (kit `.session-dock.in-card`,
+read only) above the shared composer (`kit/composer.js`). A person writes what is new, pastes screenshots or adds
+files; one click puts the files on the ticket and tells the helper (starts one when none runs; Send back in Review).
+It is the ticket page's own box, separate from Focus (owner answer on ORCH-238).
+## ORCH-240 (17 Nov, owner's words)
+
+- The tab and card are "Tasks"; sub-tickets of a plain ticket are headed "Sub-tickets"; epic sub-tickets show
+  their ticket number.
+- Overview lists files by their real name with extension, newest first like the Files tab.
+- Activity names the task (never "c1") and shows "Was: … → Now: …" for title, owner, due and task renames.
+- Owner box suggests the workspace's people and warns on a new name; a past due day shows a hint;
+  "Due Mon 16 Nov, 18:30" within a week.

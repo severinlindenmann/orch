@@ -571,13 +571,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
     x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
+    x.add_argument("--estimate-minutes", type=int, help="your estimate of the helper time, in whole minutes")
+    x.add_argument("--estimate-cost", type=float, help="your estimate of the cost in dollars at list price")
     x = t.add_parser(
         "model",
         parents=[common],
-        help="the model of this ticket's helper: sonnet, opus or auto (a person); up --why (the helper)",
+        help="the model of this ticket's helper: haiku, sonnet, opus, fable or auto (a person); "
+        "up --why (the helper)",
     )
     x.add_argument("id")
-    x.add_argument("name", choices=("sonnet", "opus", "auto", "up"))
+    x.add_argument("name", choices=("haiku", "sonnet", "opus", "fable", "auto", "up"))
     x.add_argument("--why", help="with up: why the work needs Opus, in a few plain words")
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
@@ -1152,9 +1155,11 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, f'Title written: "{t["title"]}"')
     elif cmd == "ticket" and sub == "tidy":
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description)
+        est = {"minutes": args.estimate_minutes, "cost": args.estimate_cost}
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est)
         _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "model" and args.name == "up":
+        from orch import modelpick
         from orch import runs_live as _live
 
         tid = tickets.resolve(root, args.id)
@@ -1169,7 +1174,7 @@ def run(args: argparse.Namespace) -> None:
         _out(
             args,
             t,
-            "It already runs on Opus."
+            f"It already runs on {modelpick.LABELS[(modelpick.chosen(t) or {}).get('name') or 'opus']}."
             if not moved
             else "Moved up to Opus. "
             + (
@@ -1183,11 +1188,20 @@ def run(args: argparse.Namespace) -> None:
 
         if args.why:
             raise Refused("--why goes with up only.")
+        from orch import runs_live as _live
+
         t = tickets.set_model(root, args.id, args.name, by())
+        # a person's choice reaches a running helper at its next turn end (owner 17 Nov: no /model by hand)
+        live = args.name in modelpick.MODELS and _live.switch_model(root, t["id"], args.name, by(), up=False)
         _out(
             args,
             t,
-            f"Model: {modelpick.label(t)}. It applies from the next start."
+            f"Model: {modelpick.label(t)}. "
+            + (
+                "The running helper switches when its turn ends."
+                if live
+                else "It applies from the next start."
+            )
             if modelpick.label(t)
             else "orch picks the model again on the next start.",
         )
