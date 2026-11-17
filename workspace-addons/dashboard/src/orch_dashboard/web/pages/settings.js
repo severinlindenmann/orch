@@ -994,12 +994,14 @@ function shownAddon() {
   const r = route();
   return r.kind === 'addon' && !(r.id === SYNC && syncNative()) ? r.id : null;
 }
-// Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> without a navigation.
+// The address names a tab like its label: Helper is #settings/helper, Contacts is #settings/contacts.
+const SETTINGS_TAB_ADDRESS = {agent:'helper', phone:'contacts'};
+// Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> (one history entry, so Back returns to the tab before).
 function settingsGo(tab) {
   settingsTab = tab;
   settingsAddon = null;
   settingsReview = null;
-  history.replaceState(null, '', '#settings/' + tab);
+  if (location.hash !== '#settings/' + (SETTINGS_TAB_ADDRESS[tab] || tab)) history.pushState(null, '', '#settings/' + (SETTINGS_TAB_ADDRESS[tab] || tab));
   render();
 }
 function addonBody(a, res) {
