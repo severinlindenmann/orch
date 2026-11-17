@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const helpers = require('../src/orch_dashboard/web/helpers.js');
 const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/tickets.js'), 'utf8');
 const part = src.slice(src.indexOf('const TRIAGE_LANES'), src.indexOf('function ticketNotFound'));
 
@@ -28,7 +29,7 @@ function context(list, result, snapshot = false) {
   ctx.iconEl = name => ({icon:name});
   ctx.href = id => '#ticket/' + id;
   ctx.changeError = r => 'Refused: ' + r.text;
-  ctx.window = {orch:{toast:(text, kind) => ctx.toasts.push([text, kind])}};
+  ctx.window = {orch:{toast:(text, kind) => ctx.toasts.push([text, kind])}, DashHelpers:helpers};
   ctx.act = async (op, args) => { ctx.acts.push([op, args]); if (result.ok) ctx.list = [...ctx.list, {id:'t_new123', title:'Triage 17 Nov', status:'active'}]; return result; };
   vm.createContext(ctx); vm.runInContext(part, ctx); return ctx;
 }
@@ -38,6 +39,9 @@ const DEMO = [{id:'a', status:'open'}, {id:'b', status:'active'}, {id:'c', statu
 test('lanes follow the board: backlog, working, needs you, check, done, superseded', () => {
   const ctx = context(DEMO, {ok:true});
   assert.deepEqual(DEMO.map(t => ctx.triageLane(t)), ['backlog', 'working', 'needs-you', 'check', 'done', 'superseded']);
+  assert.equal(ctx.triageLane({status:'waiting', waiting_on:{kind:'time', until:'2026-12-01'}}), 'waiting');
+  assert.equal(ctx.triageLane({status:'dropped'}), 'wont-do');
+  assert.equal(ctx.triageLane({status:'ready'}), 'todo');
 });
 
 test('the menu shows each lane with tickets and its count; closed lanes start unticked', () => {

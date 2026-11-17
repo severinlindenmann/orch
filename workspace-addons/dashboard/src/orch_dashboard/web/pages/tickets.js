@@ -494,12 +494,11 @@ function list() {
 const TRIAGE_LANES = [['backlog', 'Backlog'], ['todo', 'To do'], ['working', 'Working'], ['needs-you', 'Needs you'], ['waiting', 'Waiting'],
   ['check', 'Check'], ['done', 'Done'], ['wont-do', "Won't do"], ['superseded', 'Superseded']];
 const triagePicked = new Set(['backlog', 'todo', 'working', 'needs-you', 'waiting', 'check']);
+// The board's own lane rule (DashHelpers.laneOf, ORCH-152), named with the lane ids core triage takes.
+const TRIAGE_ID = {open:'backlog', ready:'todo', active:'working', waiting:'needs-you', blocked:'waiting', review:'check', done:'done', dropped:'wont-do', superseded:'superseded'};
 function triageLane(t) {
-  const s = t.status || 'open';
-  if (s === 'dropped') return t.superseded_by ? 'superseded' : 'wont-do';
-  if (s === 'done') return 'done';
-  if ((t.questions || []).some(q => q && q.answer == null) || (s === 'waiting' && (t.waiting_on || {}).kind === 'question')) return 'needs-you';
-  return {open:'backlog', ready:'todo', active:'working', waiting:'waiting', review:'check'}[s] || 'backlog';
+  const asks = (t.questions || []).some(q => q && q.answer == null);
+  return TRIAGE_ID[window.DashHelpers.laneOf(t, t.status, asks)] || 'backlog';
 }
 function triageCounts() {
   const n = Object.fromEntries(TRIAGE_LANES.map(([id]) => [id, 0]));
