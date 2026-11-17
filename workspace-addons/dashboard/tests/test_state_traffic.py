@@ -1,32 +1,27 @@
-"""The page asks for the state all the time: an unchanged state costs no body (304), a changed one goes out gzipped."""
+"""The page asks for the state all the time: an unchanged state costs a few bytes, a changed one goes out gzipped."""
 
 import gzip
 import json
-import urllib.error
 import urllib.request
 
 
-def _open(base, headers=None):
-    req = urllib.request.Request(base + "/api/state", headers=headers or {})
+def _open(base, headers=None, query=""):
+    req = urllib.request.Request(base + "/api/state" + query, headers=headers or {})
     return urllib.request.urlopen(req, timeout=30)
 
 
-def test_unchanged_state_answers_304_without_a_body(act_server):
+def test_unchanged_state_answers_a_few_bytes(act_server):
     with _open(act_server) as r:
-        tag = r.headers["ETag"]
-        assert json.loads(r.read())["rev"]
-    try:
-        _open(act_server, {"If-None-Match": tag})
-        raise AssertionError("expected 304")
-    except urllib.error.HTTPError as e:
-        assert e.code == 304
-        assert e.read() == b""
+        rev = json.loads(r.read())["rev"]
+    with _open(act_server, query="?have=" + rev) as r:
+        raw = r.read()
+    assert json.loads(raw) == {"unchanged": True, "rev": rev}
+    assert len(raw) < 200
 
 
 def test_other_revision_gets_the_full_state(act_server):
-    with _open(act_server, {"If-None-Match": '"old-rev"'}) as r:
-        assert r.status == 200
-        assert json.loads(r.read())
+    with _open(act_server, query="?have=old-rev") as r:
+        assert "unchanged" not in json.loads(r.read())
 
 
 def test_state_is_gzipped_when_the_browser_accepts_it(act_server):
