@@ -1,7 +1,7 @@
 // Workspace switcher rows (switcher.js), report r-1117-0829-ws: the name block used a class the kit does not style
 // (ws-item-details), so a long name never ended with "…" and ran under the "✓ Current" / "1 needs you" labels.
 // Every class a row uses must exist in the kit, and a row follows the gallery: one grey line under the name,
-// one thing on the right.
+// the name on the full row width.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -34,9 +34,10 @@ function load(workspaces, displayName = 'ORCH Development') {
 const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join('');
 const classes = n => typeof n === 'string' ? [] : [...n.className.split(/\s+/).filter(Boolean), ...(n.children || []).flatMap(classes)];
 
+const LONG = 'customer-support-team-emea-de1'; // 30 characters
 const LIST = [
   {name: 'workspace-orch', here: true, needs: 1, url: 'http://127.0.0.1:8788/'},
-  {name: 'a-workspace-with-a-very-long-folder-name', needs: 0, url: 'http://127.0.0.1:8790/'},
+  {name: LONG, needs: 0, url: 'http://127.0.0.1:8790/'},
   {name: 'Rigi', needs: 2},
 ];
 
@@ -47,28 +48,34 @@ test('every class a switcher row uses is styled by the kit', () => {
   }
 });
 
-test('the name sits in the shrinking details block, so a long name ends with "…"', () => {
-  for (const [, details] of load(LIST)) {
+test('the name gets the whole row width and wraps instead of being cut (manager review 17 Nov)', () => {
+  assert.equal(LONG.length, 30);
+  for (const row of load(LIST)) {
+    const details = row[1];
     assert.ok(details.className.split(' ').includes('sw-item-details'));
-    assert.ok(details.className.split(' ').includes('grow'));
     assert.equal(details.children[0].className, 'ws-item-name');
+    // nothing else shares the row with the name except the small tick on the current one
+    const right = row.slice(2).filter(Boolean);
+    assert.ok(right.every(r => text(r) === '✓'), 'only the tick sits right of the name');
   }
-  assert.match(css, /\.sw-item-details\{[^}]*min-width:0[^}]*display:grid/);
+  const [, long] = load(LIST);
+  assert.equal(text(long[1].children[0]), LONG); // the full name is in the page, not shortened
+  const rule = css.match(/\.ws-item-name\{([^}]*)\}/)[1];
+  assert.doesNotMatch(rule, /nowrap|ellipsis/);
+  assert.match(rule, /overflow-wrap:anywhere/);
+  assert.match(rule, /line-clamp:2/);
 });
 
-test('one grey line under the name, one thing on the right (as in the gallery)', () => {
+test('state and who waits share the grey line under the name', () => {
   const [cur, other, stopped] = load(LIST);
-  assert.equal(text(cur[1]), 'ORCH DevelopmentCurrent'); // same name as the box above it
-  assert.equal(cur[2].children.length, 1);
-  assert.equal(text(cur[2]), '1 needs you');
-  assert.equal(text(other[1]), 'a-workspace-with-a-very-long-folder-name');
-  assert.equal(other[2].children.length, 0); // nobody waits: no "0 need you"
-  assert.equal(text(stopped[1]), 'RigiNot running');
-  assert.equal(text(stopped[2]), '2 need you');
+  assert.equal(text(cur[1]), 'ORCH DevelopmentCurrent · 1 needs you'); // same name as the box above it
+  assert.equal(text(other[1]), LONG); // running, nobody waits: no "0 need you"
+  assert.equal(text(stopped[1]), 'RigiNot running · 2 need you');
 });
 
-test('the current workspace without anyone waiting shows the tick on the right', () => {
-  const [cur] = load([{name: 'workspace-orch', here: true, needs: 0}]);
+test('the current workspace shows the tick on the right, others nothing', () => {
+  const [cur, other] = load(LIST);
   assert.equal(text(cur[2]), '✓');
   assert.equal(cur[2].children[0].className, 'sw-tick');
+  assert.equal(other.length > 2 && other[2] ? text(other[2]) : '', '');
 });
