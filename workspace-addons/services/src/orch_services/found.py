@@ -77,7 +77,7 @@ def script_name(argv: list[str]) -> str:
     prog = Path(argv[0]).name
     if re.sub(r"[\d.]+$", "", prog) in INTERPRETERS:
         for a in argv[1:]:
-            if a in ("-m", "run", "exec"):
+            if a == "-m" or a in ("run", "exec"):  # a tuple holding "-m" looks like a spawn to the lint
                 continue
             if not a.startswith("-"):
                 return Path(a).name

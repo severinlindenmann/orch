@@ -160,12 +160,14 @@
   function waitWords(order) {
     const w = order.waiting, task = w && w.task ? ' · ' + text(w.task) : '';
     if (!w || typeof w !== 'object' || w.kind === 'starting') return '';
-    if (w.kind === 'you') return 'Nothing moves on until you answer' + task;
-    if (w.kind === 'time' && parseWhen(w.until)) return 'Waiting until ' + when(w.until) + task;
-    if (w.kind === 'time' || w.kind === 'ticket') return 'Waiting for another task to finish' + task;
-    if (w.kind === 'held') return 'Your helper has not started yet' + (w.why ? ': ' + noIso(w.why) : '');
-    if (w.kind === 'watcher') return 'Nothing moves on: the Factory watcher is off';
-    return 'No helper is working on it right now';
+    // one line: why nothing moves, then what moves it on (owner, ORCH-277)
+    if (w.kind === 'you') return 'Nothing moves on until you answer' + task + '. Your answer moves it on.';
+    if (w.kind === 'time' && parseWhen(w.until)) return 'Waiting until ' + when(w.until) + task + '. It goes on by itself then.';
+    if (w.kind === 'time' || w.kind === 'ticket') return 'Waiting for another task to finish' + task + '. It goes on by itself then.';
+    if (w.kind === 'held') return 'Your helper has not started yet' + (w.why ? ': ' + noIso(w.why) : '.');
+    if (w.kind === 'watcher') return 'Nothing moves on: the Factory watcher is off. Start orch on this computer again to move it on.';
+    if (w.kind === 'stuck') return 'No helper is working on it, and starting it again did not help. Write to your helper on the order to move it on.';
+    return 'No helper is working on it right now. Factory starts your helper again in a few minutes.';
   }
   const waitNote = order => { const words = waitWords(order); return words ? [meta(words)] : []; };
   function answer(order) {

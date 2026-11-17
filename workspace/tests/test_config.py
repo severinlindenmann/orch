@@ -280,6 +280,29 @@ def test_reserved_config(proj, section, key, default, valid):
     assert getter(proj) == default
 
 
+def test_focus_preview_is_off_by_default_and_switches_both_ways(proj, run):
+    """The Preview switch for the new Focus: off by default (today's Focus), on and off with one setting."""
+    assert config.focus_preview_on(proj) is False
+    assert config.focus_preview_on(None) is False
+    assert run("config", "get", "focus.preview")[1].strip() == "False"
+    code, out, _ = run("config", "set", "focus.preview", "on")
+    assert code == 0 and "the new Focus (Preview)" in out
+    assert config.focus_preview_on(proj) is True
+    assert json.loads(run("config", "get", "focus.preview", "--json")[1]) == {"focus.preview": True}
+    code, out, _ = run("config", "set", "focus.preview", "off")
+    assert code == 0 and "today's Focus" in out
+    assert config.focus_preview_on(proj) is False
+    assert run("config", "set", "focus.preview", "maybe")[0] == 2
+
+
+def test_focus_preview_unreadable_or_wrong_value_counts_as_off(proj):
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch" / "config.toml").write_text('[focus]\npreview = "yes"\n')
+    assert config.focus_preview_on(proj) is False
+    (proj / ".orch" / "config.toml").write_text("[focus\npreview = true\n")
+    assert config.focus_preview_on(proj) is False
+
+
 def test_focus_session_typing_is_a_plain_setting(proj, run):
     assert run("config", "get", "focus.session_typing")[1].strip() == "False"
     code, out, _ = run("config", "set", "focus.session_typing", "on")

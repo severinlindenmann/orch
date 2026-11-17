@@ -1057,3 +1057,15 @@ def test_held_words_carry_no_ticket_ids():
     assert "ORCH-3" not in pageapi._held_words(
         "3 helpers are working at once. ORCH-3 waits in line and starts."
     )
+
+
+def test_the_line_also_says_what_moves_the_order_on():
+    js = _page_js()
+    for words in (
+        "Your answer moves it on.",
+        "It goes on by itself then.",
+        "Start orch on this computer again",
+        "Factory starts your helper again in a few minutes.",
+        "starting it again did not help",
+    ):
+        assert words in js

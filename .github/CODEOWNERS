@@ -1,0 +1,4 @@
+# ORCH-305 (owner 17 Nov): a change to a CI workflow waits until the owner approves it. The develop branch rule
+# asks for a code owner's review; orch's Merge card adds it with the owner's own login when they click Merge.
+/.github/workflows/ @severinlindenmann
+/.github/CODEOWNERS @severinlindenmann

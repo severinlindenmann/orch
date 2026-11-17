@@ -42,6 +42,10 @@ CROWDED_AT = 4  # with no limit set: this many open sessions make idle ones on f
 IDLE_SECONDS = 60 * 60
 FINISHED_IDLE_SECONDS = 10 * 60  # a session on a ticket in Review, Done or Dropped closes after this
 LOAD_STOP = 30.0  # no new helper while the 1-minute load average is above this (also with no limit set)
+LOAD_PER_CORE = 2.5  # ... or above this many per core, when that is higher (a big machine takes more)
+CPU_BUSY = 0.6  # ... and only while the running programs really use this share of all cores: a stream of
+#                 short commands raises the load with almost no work (ORCH-266), that alone holds nothing
+STORM_AT = 20  # this many copies of one command at once are named in the reason
 DISK_STOP_GB = 5.0  # ... or while less than this much disk is free
 PACE_SECONDS = 30  # with no limit set: at most one new helper in this time, the rest wait in line
 HARD_EXTRA = 4  # most sessions over a set limit that finished tickets or check waiters may keep open
@@ -214,11 +218,66 @@ def _full(root: Path) -> int | None:
     return None
 
 
+def _processes() -> list[tuple[float, str]] | None:
+    """(CPU %, command line) of every program on this computer (`ps`), None when that cannot be read."""
+    try:
+        r = subprocess.run(
+            ["ps", "-A", "-o", "%cpu=,command="], capture_output=True, text=True, timeout=5, check=False
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    out = []
+    for line in r.stdout.splitlines() if r.returncode == 0 else []:
+        head, _, cmd = line.strip().partition(" ")
+        with contextlib.suppress(ValueError):
+            out.append((float(head.replace(",", ".")), cmd.strip()))
+    return out or None
+
+
+def _command_name(cmd: str) -> str:
+    """A short name for a command line, never its arguments: `orch record tail` for orch, else the program."""
+    words = cmd.split()
+    for i, w in enumerate(words):
+        if os.path.basename(w) == "orch":
+            sub = [x for x in words[i + 1 : i + 3] if re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", x)]
+            return " ".join(["orch", *sub])
+    return os.path.basename(words[0])[:40] if words else "?"
+
+
+def _storm(procs: list[tuple[float, str]]) -> tuple[str, int] | None:
+    """The command with the most copies running at once, when that is STORM_AT or more."""
+    counts: dict[str, int] = {}
+    for _, cmd in procs:
+        name = _command_name(cmd)
+        counts[name] = counts.get(name, 0) + 1
+    name, n = max(counts.items(), key=lambda kv: kv[1], default=("", 0))
+    return (name, n) if n >= STORM_AT else None
+
+
+def _load_words() -> str | None:
+    """'the computer is very busy' while the load is high AND the programs really use the cores; a high load
+    from a stream of short commands is not work and holds nothing. Unknown CPU use: the load alone counts."""
+    try:
+        load = os.getloadavg()[0]
+    except (OSError, AttributeError):
+        return None
+    cores = os.cpu_count() or 1
+    if load <= max(LOAD_STOP, LOAD_PER_CORE * cores):
+        return None
+    procs = _processes()
+    if procs is not None and sum(c for c, _ in procs) / (100.0 * cores) < CPU_BUSY:
+        return None
+    storm = _storm(procs or [])
+    if storm:
+        return f"the computer is very busy ({storm[1]} '{storm[0]}' at once)"
+    return "the computer is very busy"
+
+
 def _pressure(root: Path) -> str | None:
     """Plain reason the machine cannot take another helper now (load or disk), else None."""
-    with contextlib.suppress(OSError, AttributeError):
-        if os.getloadavg()[0] > LOAD_STOP:
-            return "the computer is very busy"
+    words = _load_words()
+    if words:
+        return words
     with contextlib.suppress(OSError):
         if shutil.disk_usage(root).free / 2**30 < DISK_STOP_GB:
             return "the disk is almost full"
