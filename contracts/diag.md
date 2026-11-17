@@ -107,7 +107,7 @@ helpers per pass on the new tickets.
 | `ui.error` | `kind` (`error` or `rejection`), `what` (the error class or name, cut), `file`, `line`, `col` (script file name, no query) |
 | `ui.console_error` | `what` (first argument's type, never its text), `n` (arguments) |
 | `ui.fetch` | `route` (path without query, ids folded to `:id`), `method`, `status`, `ms`, `outcome` (`ok`, `error`, `cancelled`, `failed`) |
-| `ui.action` | `id` (the button's `data-action`), `route` |
+| `ui.action` | `id` (the button's `data-action`; an add-on button: `addon-<verb>`, a schedule that came by sync: `sync-allow`), `route` |
 | `ui.route` | `from`, `to` (the page hash with ids folded to `:id`) |
 | `ui.state` | `client_rev`, `server_rev` (revision hashes, 12 chars), `cache_age_ms` (`X-State-Age-Ms` of the last state read) |
 | `ui.env` | `w`, `h`, `zoom`, `browser`, `assets` (the dashboard version the page loaded), `touch`; once per page load |
