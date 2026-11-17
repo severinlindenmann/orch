@@ -231,3 +231,20 @@ def test_a_service_whose_program_is_gone_can_still_be_stopped_and_removed(cli, w
     code, out = jrun(cli, "start", "web")
     assert code == 2 and "Could not find the program gone-program-zz" in out["error"]
     assert jrun(cli, "remove", "web")[0] == 0 and not p.exists()
+
+
+def test_a_secret_in_the_command_is_refused_and_never_shown(cli, ws, fake):
+    token = "sk-ant-api03-" + "Zx9Yw8Vu" * 6
+    code, out = jrun(cli, "add", "Bot", "--id", "bot", "--", "python3", "bot.py", "--token", token)
+    assert code == 2 and "orch secret exec" in out["error"] and token not in json.dumps(out)
+    assert not (ws / ".orch/addons/services/services/bot.json").exists() and "bot" not in fake.entries
+    _add(cli)  # a record edited by hand afterwards: the word is hidden in every answer
+    p = ws / ".orch/addons/services/services/web.json"
+    rec = json.loads(p.read_text(encoding="utf-8"))
+    rec["command"] = ["python3", "bot.py", token]
+    p.write_text(json.dumps(rec), encoding="utf-8")
+    code, out = jrun(cli, "list")
+    assert out["services"][0]["command"] == ["python3", "bot.py", "••••••"]
+    for argv in (("start", "web"), ("act", "stop", "--", "web")):
+        code, out = jrun(cli, *argv)
+        assert code == 0 and token not in json.dumps(out)

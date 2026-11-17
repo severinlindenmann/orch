@@ -112,7 +112,7 @@ def _row(root: Path, rec: dict, st: drivers.Status | None) -> dict:
         "auto": bool(rec.get("auto")),
         "made_by": rec.get("made_by"),
         "port": rec.get("port"),
-        "command": rec["command"],
+        "command": _masked_command(root, rec["command"]),
         "cwd": rec.get("cwd", "."),
     }
     if running and st and st.pid:
@@ -138,6 +138,32 @@ def _rows(root: Path) -> tuple[list[dict], int, str | None]:
                 st = None
         rows.append(_row(root, r, st))
     return rows, bad, note
+
+
+# ---------------------------------------------------------------- secrets
+
+
+def _no_secret(root: Path, rec: dict) -> None:
+    """A new service's name and command must not hold a secret (they are shown in list, log and the page)."""
+    try:
+        from orch import secretscan
+    except ImportError:  # the core is always there (python -m under orch); never a silent pass
+        raise Refused("Could not check the command for secrets. Update orch and try again.") from None
+    if secretscan.find("\n".join([rec["name"], *rec["command"]]), root):
+        raise Refused(
+            "The name or command holds a secret. Leave it out and read it inside the command with orch secret exec."
+        )
+
+
+def _masked_command(root: Path, argv: list[str]) -> list[str]:
+    """The command words for output; a word with a secret (a record edited by hand) is shown as ••••••."""
+    try:
+        from orch import secretscan
+
+        hits = {h["line"] for h in secretscan.find("\n".join(argv), root)}
+    except Exception:  # noqa: BLE001 - never a pass: hide every word but the program
+        return [argv[0], *(MASK for _ in argv[1:])]
+    return [MASK if (i + 1) in hits else a for i, a in enumerate(argv)]
 
 
 # ---------------------------------------------------------------- log lines
@@ -246,6 +272,7 @@ def cmd_add(args, root: Path) -> int:
         if not re.fullmatch(r"[a-z][a-z0-9-]{1,31}", args.addon):
             raise Refused(f"'{args.addon}' is not an add-on name. Use the name orch addon list shows.")
         rec["made_by"] = {"addon": args.addon}
+    _no_secret(root, rec)
     drv = _driver()
     wid = _workspace_id(root)
     spec = _spec(root, rec, wid)
