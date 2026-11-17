@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 
 from . import orchcli
-from .render import clean, render
+from .render import clean, earlier_renders, render
 from .store import Refused, Store, digest, validate
 
 FOLDERS = {
@@ -134,6 +134,13 @@ def expected(order, kind, rel, h, data):
     return text, options, action
 
 
+def asked_as_frozen(q, kind, data, n, text, options):
+    """The question shows what Factory renders from its frozen file, in today's words or any earlier wording
+    (render.EARLIER_START_LABELS): a release that changes card words never disowns questions asked before it."""
+    shown = (q.get("text"), list(q.get("options") or []))
+    return shown == (text, options) or shown in earlier_renders(kind, data, n)
+
+
 def answered_at(ticket, q):
     """When a person answered: the core's own history line for that answer (never a Factory file)."""
     want = f"Answered {q['id']}: {q['answer']}"
@@ -214,11 +221,10 @@ def entries(store, ticket, journal=None):
             raise Refused("A frozen Factory file is not valid: " + str(error), "tampered") from None
         if q.get("action") != action:
             raise Refused("A Factory question no longer matches its journal.", "tampered")
-        if q.get("text") != text or list(q.get("options") or []) != options:
+        n = int(re.search(r"(\d+)\.json$", row["file"])[1])
+        if not asked_as_frozen(q, row["kind"], data, n, text, options):
             raise Refused("A Factory question's text does not match its frozen file.", "tampered")
-        result.append(
-            {"q": q, "row": row, "data": data, "n": int(re.search(r"(\d+)\.json$", row["file"])[1])}
-        )
+        result.append({"q": q, "row": row, "data": data, "n": n})
     leads = {e["row"]["kind"] for e in result if e["row"]["kind"] in LEAD}
     if len(leads) > 1:
         raise Refused("This order has both run and autopilot questions.", "tampered")
