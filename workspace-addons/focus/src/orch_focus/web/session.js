@@ -50,7 +50,7 @@
     for (const r of rows) {
       const view = h('div', {class: 'meta', hidden: true});
       const label = (TOOL[r.agent] || r.agent) + ' · ' + (stamp(r.last_used) || 'earlier') + (r.title ? ' · ' + r.title : '');
-      const btn = h('button', {class: 'btn ghost xs', text: r.readable ? 'Show' : 'Not on this computer', disabled: !r.readable, onclick: async () => {
+      const btn = h('button', {class: 'btn ghost xs', text: 'Show', onclick: async () => {
         if (!view.hidden) { view.hidden = true; btn.textContent = 'Show'; return; }
         let x = null;
         try { const q = await fetch(S.P + '/api/t/' + TID + '/sessions?session=' + encodeURIComponent(r.id)); x = q.ok ? await q.json() : null; } catch (e) { x = null; }
@@ -63,7 +63,7 @@
         const a = await S.act('session.continue', {ticket: TID, session: r.id});
         if (a.ok) { toast('Your next message continues this conversation.', 'ok'); earlierAt = 0; earlier(box); } else toast(a.message || 'Could not switch.', 'err');
       }});
-      box.append(h('div', {class: 'fx-session-fact'}, h('span', {class: 'muted', text: label + (r.current ? ' (in use)' : '')}), h('span', {}, btn, go)), view);
+      box.append(h('p', {class: 'meta', text: label + (r.current ? ' (in use)' : '') + (r.readable ? '' : ' (not on this computer)')}), ...(r.readable ? [h('div', {class: 'fx-session-fact'}, btn, go || h('span'))] : []), view);
     }
     box.hidden = false;
   }
