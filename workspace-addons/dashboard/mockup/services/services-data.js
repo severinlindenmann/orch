@@ -126,7 +126,7 @@ const keep=draw=>{const k=document.activeElement?.dataset?.k;draw();if(k){const 
 const param=(k,v)=>{const u=new URL(location.href);if(v==null)u.searchParams.delete(k);else u.searchParams.set(k,v);history.replaceState(null,'',u)};
 /* the Empty and Error views, from the master state component */
 const fillStates=()=>{const e=document.querySelector('[data-view="empty"]'),x=document.querySelector('[data-view="error"]');
- if(e){const a=h('a',{class:'btn outline sm',href:'../chat/chat.html'},'Ask the helper');const box=window.UI.state({kind:'empty',title:'No services yet',text:'When a ticket needs something to keep running on this computer, it shows up here.'});box.append(a);e.replaceChildren(box)}
+ if(e){const a=h('a',{class:'btn outline sm',href:'../chat/chat.html'},'Chat');const box=window.UI.state({kind:'empty',title:'No services yet',text:'When a ticket needs something to keep running on this computer, it shows up here.'});box.append(a);e.replaceChildren(box)}
  if(x)x.replaceChildren(window.UI.state({kind:'error',title:'Could not read the services on this computer',text:'Nothing was changed. Your services keep running as they were.',action:{label:'Try again',onClick:()=>{const u=new URL(location.href);u.searchParams.set('state','loaded');location.href=u.href}}}))};
 window.servicesDemo={data,WORD,stateLine,question,get,act,h,pill,madeBy,logBox,facts,autoSwitch,autoWords,btn,mainButton,stateButtons,logBtn,removeRow,about,toLog,counts,summary,order,keep,param,fillStates,on:f=>listeners.push(f)};
 })();
