@@ -27,14 +27,25 @@ def pr(n, files, head=None, draft=False):
     }
 
 
-SAFE = pr(1, ["workspace/src/orch/cli.py", "docs/x.md"])
-RELAY = pr(2, ["relay/src/subs.rs", "workspace/src/orch/relay.py"])
+def change(n, files, head=None, pr_no=True):
+    return {
+        "sha": f"{n}" * 40,
+        "files": files,
+        "pr": n if pr_no else None,
+        "head": (head or f"h{n}") if pr_no else None,
+        "title": f"Merge pull request #{n} from x/y",
+        "url": f"https://github.com/x/y/pull/{n}",
+    }
+
+
+SAFE = change(1, ["workspace/src/orch/cli.py", "docs/x.md"])
+RELAY = change(2, ["relay/src/subs.rs", "workspace/src/orch/relay.py"])
 
 
 def go(tmp_path, **sim):
     sim.setdefault("heads", {"develop": DEV, "main": MAIN, "unreleased": UN})
     sim.setdefault("last_release", 30)
-    sim.setdefault("merged_prs", [SAFE, RELAY])
+    sim.setdefault("changes", [SAFE, RELAY])
     st = json.loads(json.dumps(sim.pop("state", {})))
     cfg = rk.Cfg(None, keeper="ORCH-79", repo="x/y", clone=str(tmp_path), run_dir=tmp_path)
     w = rk.World(None, cfg, json.loads(json.dumps(sim)))
@@ -126,7 +137,7 @@ def test_every_ok_lets_the_release_go_on(tmp_path):
 
 
 def test_no_matched_pull_request_changes_nothing(tmp_path):
-    out = go(tmp_path, merged_prs=[SAFE, pr(2, ["docs/a.md"])])
+    out = go(tmp_path, changes=[SAFE, change(2, ["docs/a.md"])])
     assert not any("security" in x for x in out["lines"]) and out["state"]["security"]["prs"] == {}
 
 
@@ -188,16 +199,43 @@ def test_an_open_pull_request_gets_its_review_before_the_merge(tmp_path):
     out = go(
         tmp_path,
         heads={"develop": DEV, "main": MAIN, "unreleased": []},
-        merged_prs=[],
+        changes=[],
         open_prs=[pr(9, ["publish/src/a.rs"]), pr(10, ["relay/x.rs"], draft=True)],
     )
     assert out["did"] == ["security-review:#9"]  # a draft waits until it is ready
     assert out["lines"][-1] == "develop has nothing main does not have"
 
 
-def test_an_unreleased_pull_request_older_than_the_list_is_read_alone(tmp_path):
-    out = go(tmp_path, merged_prs=[SAFE], pr_files={"2": RELAY})
+def test_a_squash_merge_is_tied_to_its_pull_request_by_github(tmp_path):
+    squash = change(2, ["relay/src/subs.rs"], pr_no=False)
+    found = {"pr": 2, "head": "h2", "title": "Relay fix", "url": "https://github.com/x/y/pull/2"}
+    out = go(tmp_path, changes=[SAFE, squash], pr_for_commit={squash["sha"]: found})
+    assert out["did"] == ["security-review:#2"] and out["state"]["security"]["prs"]["2"]["sha"] == "h2"
+
+
+def test_a_matched_change_with_no_pull_request_holds(tmp_path):
+    out = go(tmp_path, changes=[SAFE, change(2, ["relay/src/subs.rs"], pr_no=False)])
+    assert out["did"] == []
+    assert out["lines"][-1] == (
+        "waits for every security OK: 22222222 (changes relay/src/subs.rs but no pull request with its "
+        "merged commit was found)"
+    )
+
+
+def test_a_rename_out_of_a_matched_path_still_counts(tmp_path):
+    # git's list without rename detection names both the old and the new path
+    out = go(tmp_path, changes=[change(2, ["pkg/auth.py", "pkg/access.py"])])
     assert out["did"] == ["security-review:#2"]
+
+
+def test_an_open_pull_request_with_a_cut_file_list_counts_as_matched(tmp_path):
+    many = pr(9, [f"docs/p{i}.md" for i in range(secgate.TRUNCATED)])
+    out = go(tmp_path, heads={"develop": DEV, "main": MAIN, "unreleased": []}, changes=[], open_prs=[many])
+    assert out["did"] == ["security-review:#9"]
+
+
+def test_ci_workflow_tests_are_never_left_out():
+    assert secgate.matched([".github/workflows/tests/run.yml"], secgate.DEFAULT_PATHS) != []
 
 
 def test_a_review_that_ended_twice_without_a_verdict_holds_and_says_so(tmp_path):
@@ -218,7 +256,7 @@ def test_a_failed_github_read_holds_the_cut(tmp_path, monkeypatch):
     def boom(self):
         raise Refused("gh pr list: network down")
 
-    monkeypatch.setattr(rk.World, "merged_prs", boom)
+    monkeypatch.setattr(rk.World, "changes", boom)
     out = go(tmp_path)
     assert out["lines"][0] == "security check could not run: gh pr list: network down"
     assert out["lines"][-1] == "waits for every security OK: the security check could not run"
@@ -252,11 +290,13 @@ def test_a_person_records_a_verdict_for_the_reviewed_head(tmp_path, monkeypatch)
 
     root = tmp_path / "ws"
     (root / ".orch").mkdir(parents=True)
-    _keeper_state(root, entry())
+    _keeper_state(root, entry(sha="a2b2c2d" + "0" * 33))
     monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: None)
     monkeypatch.setattr(tickets, "log", lambda *a, **k: {})
-    res = secgate.verdict(root, 2, "ok", "  nothing High or Medium;  one Low  ", "human:owner")
-    assert res["sha"] == "h2" and res["line"] == "nothing High or Medium; one Low"
+    with pytest.raises(Refused, match="Give the commit you reviewed"):
+        secgate.verdict(root, 2, "ok", "fine", "human:owner", "abcdef0")
+    res = secgate.verdict(root, 2, "ok", "  nothing High or Medium;  one Low  ", "human:owner", "a2b2c2d")
+    assert res["sha"].startswith("a2b2c2d") and res["line"] == "nothing High or Medium; one Low"
     assert secgate.read_verdicts(root)["2"]["verdict"] == "ok"
 
 
@@ -268,8 +308,49 @@ def test_only_the_review_helper_of_that_pull_request_records_it(tmp_path, monkey
     _keeper_state(root, entry())
     monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_other")
     with pytest.raises(Refused, match="Only the security review helper"):
-        secgate.verdict(root, 2, "ok", "fine", "agent:claude")
+        secgate.verdict(root, 2, "ok", "fine", "agent:claude", "h2")
     with pytest.raises(Refused, match="not waiting for a security review"):
-        secgate.verdict(root, 5, "ok", "fine", "human:owner")
+        secgate.verdict(root, 5, "ok", "fine", "human:owner", "h2")
     with pytest.raises(Refused, match="one line"):
-        secgate.verdict(root, 2, "ok", "   ", "human:owner")
+        secgate.verdict(root, 2, "ok", "   ", "human:owner", "h2")
+
+
+# ---------------------------------------------------------------- reading the release from git
+
+
+def test_changes_reads_every_change_since_main_from_git(tmp_path):
+    import subprocess
+
+    repo = tmp_path / "clone"
+    repo.mkdir()
+
+    def git(*a):
+        return subprocess.run(
+            ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *a],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "auth.py").write_text("x = 1\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "start")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    git("checkout", "-q", "-b", "feature")
+    git("mv", "pkg/auth.py", "pkg/access.py")
+    git("commit", "-q", "-m", "rename")
+    head = git("rev-parse", "HEAD")
+    git("checkout", "-q", "main")
+    git("merge", "-q", "--no-ff", "feature", "-m", "Merge pull request #5 from x/feature")
+    (repo / "README").write_text("y\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "Direct change (#6)")
+    git("update-ref", "refs/remotes/origin/develop", "HEAD")
+    cfg = rk.Cfg(None, keeper="ORCH-79", repo="x/y", clone=str(repo), run_dir=tmp_path)
+    got = rk.World(None, cfg).changes()
+    assert [c["pr"] for c in got] == [None, 5]  # newest first; a "(#6)" in a subject is no proof
+    assert got[1]["head"] == head and got[1]["url"] == "https://github.com/x/y/pull/5"
+    assert sorted(got[1]["files"]) == ["pkg/access.py", "pkg/auth.py"]
+    assert got[0]["files"] == ["README"]

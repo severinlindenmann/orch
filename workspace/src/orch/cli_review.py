@@ -85,6 +85,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("pr", type=int, help="the pull request number")
     x.add_argument("word", choices=("ok", "problems"), help="ok: nothing High or Medium left; else problems")
     x.add_argument("why", help="one line: the worst finding, or what was checked")
+    x.add_argument("--sha", required=True, metavar="COMMIT", help="the commit you reviewed (from the brief)")
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -567,7 +568,9 @@ def _verdict(args, root: Path) -> None:
 def _security(args, root: Path) -> None:
     from orch import secgate
 
-    res = _guard(secgate.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by))
+    res = _guard(
+        secgate.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by), args.sha
+    )
     words = "OK: the release may include it" if res["verdict"] == "ok" else "problems: releases wait"
     _out(args, res, f"Pull request #{res['pr']}: security review {words}. {res['line']}")
 

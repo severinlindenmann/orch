@@ -75,6 +75,7 @@ DONE = {"done", "dropped", "wontdo", "archived"}
 STATE_MAX = 512 * 1024
 NOTE_MAX = 1900
 TITLE_MAX = 90
+MERGE_LINE = re.compile(r"^Merge pull request #(\d+) from \S")  # GitHub's own merge commit subject
 RELEASE_MERGE = re.compile(r"Release \d+: merge main")
 DEPLOY_ASK = "changed the"  # words of the deploy card, found again in the answer
 
@@ -435,14 +436,55 @@ class World:
             ]
         )
 
-    _PR_FIELDS = "number,title,url,headRefOid,isDraft,files"
+    _PR_FIELDS = "number,title,url,headRefOid,isDraft,files"  # open pull requests (security gate)
 
-    def merged_prs(self) -> list[dict]:
-        """The pull requests merged into develop lately, with their files (security gate)."""
+    def changes(self) -> list[dict]:
+        """Every first-parent change on develop since main (after heads() fetched): {sha, files, pr, head,
+        title, url}. files is git's full list with renames as both names; pr and head come from GitHub's merge
+        line ("Merge pull request #N from ...", head = the second parent), else None (security gate)."""
         if self.sim is not None:
-            return list(self.sim.get("merged_prs") or [])
-        args = ["pr", "list", "--repo", self.cfg.repo, "--state", "merged", "--base", "develop"]
-        return self._gh_json([*args, "--limit", "60", "--json", self._PR_FIELDS]) or []
+            return list(self.sim.get("changes") or [])
+        lg = self._git("log", "--first-parent", "--format=%H%x1f%P%x1f%s", "origin/main..origin/develop")
+        if lg.returncode != 0:
+            raise Refused("git log could not read what develop has since main")
+        out = []
+        for ln in lg.stdout.splitlines():
+            p = ln.split("\x1f")
+            if len(p) != 3 or not p[1].split():
+                continue
+            sha, parents, subject = p[0], p[1].split(), p[2]
+            d = self._git("diff", "--no-renames", "--name-only", "-z", parents[0], sha)
+            if d.returncode != 0:
+                raise Refused(f"git diff could not read the change {sha[:8]}")
+            m = MERGE_LINE.match(subject)
+            pr = int(m[1]) if m and len(parents) == 2 else None
+            out.append(
+                {
+                    "sha": sha,
+                    "files": [x for x in d.stdout.split("\0") if x],
+                    "pr": pr,
+                    "head": parents[1] if pr else None,
+                    "title": subject[:120],
+                    "url": f"https://github.com/{self.cfg.repo}/pull/{pr}" if pr else None,
+                }
+            )
+        return out
+
+    def pr_for_commit(self, sha: str) -> dict:
+        """The pull request GitHub merged as this very commit (a squash or rebase merge): {pr, head, title,
+        url}, or {} when there is none."""
+        if self.sim is not None:
+            return dict((self.sim.get("pr_for_commit") or {}).get(sha) or {})
+        rows = self._gh_json(["api", f"repos/{self.cfg.repo}/commits/{sha}/pulls"]) or []
+        for r in rows if isinstance(rows, list) else []:
+            if isinstance(r, dict) and r.get("merge_commit_sha") == sha and r.get("number"):
+                return {
+                    "pr": int(r["number"]),
+                    "head": ((r.get("head") or {}).get("sha")),
+                    "title": str(r.get("title") or "")[:120],
+                    "url": r.get("html_url"),
+                }
+        return {}
 
     def open_prs(self) -> list[dict]:
         """The open pull requests into develop, with their files (security gate)."""
@@ -450,11 +492,6 @@ class World:
             return list(self.sim.get("open_prs") or [])
         args = ["pr", "list", "--repo", self.cfg.repo, "--state", "open", "--base", "develop"]
         return self._gh_json([*args, "--limit", "60", "--json", self._PR_FIELDS]) or []
-
-    def pr_files(self, num: int) -> dict:
-        if self.sim is not None:
-            return (self.sim.get("pr_files") or {}).get(str(num)) or {"number": num, "files": []}
-        return self._gh_json(["pr", "view", str(num), "--repo", self.cfg.repo, "--json", self._PR_FIELDS])
 
     def security_verdicts(self) -> dict:
         if self.sim is not None:
@@ -1124,9 +1161,8 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     out: list[str] = []
     h = w.heads()
-    nums = {int(m[1]) for u in h["unreleased"] if (m := re.search(r"#(\d+)", u["subject"]))}
     try:  # every pass, so a review starts while a pull request is still open
-        sec_lines, sec_holds = secgate.tend(w, st, role, sorted(nums))
+        sec_lines, sec_holds = secgate.tend(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
         sec_lines, sec_holds = [f"security check could not run: {e}"], ["the security check could not run"]
     out += sec_lines
@@ -1273,6 +1309,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + [f"on hold: {hold}"]
     if sec_holds:
         return out + ["waits for every security OK: " + ", ".join(sec_holds)]
+    nums = {int(m[1]) for u in un if (m := re.search(r"#(\d+)", u["subject"]))}
     urgent = sorted(nums & w.urgent())
     last = max([x for x in (w.last_release_at(), ts(st.get("last_cut_at"))) if x], default=None)
     gap_h = (now() - last).total_seconds() / 3600 if last else 999
