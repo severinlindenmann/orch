@@ -105,6 +105,99 @@ async function previewSwitch(page, dash) {
   await noSideways(page);
 }
 
+// The new page with Preview on, for the steps after step 3: the same dressing of the page's state as previewSwitch
+// (the live-session add-on and the setting), plus the one ticket of the test workspace marked as having a working helper.
+async function livePreview(page) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    const first = (st.tickets || [])[0];
+    if (first) st.runs = { ...(st.runs || {}), [first.id]: { running: true, state: 'alive' } };
+    route.fulfill({ response: res, json: st });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+}
+
+// Step 10: the layer in every place, kept across a page change and a reload.
+async function layer(page, dash, width) {
+  const phone = width <= 720;
+  const panel = m => `#live-dock[data-mode="${m}"] .live-panel[data-mode="${m}"]`;
+  const press = async key => { await page.keyboard.press(key); await page.waitForTimeout(50); };
+  await livePreview(page);
+  await page.goto(dash + '/#home');
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.reload();
+  await mainHasText(page);
+  await page.waitForSelector('#live-dock[data-mode="bar"] [data-key="live-bar"]', { timeout: 10000 });
+  if (await page.$('[data-key="live-panel"]')) throw new Error('the layer opened by itself');
+  // open from the bar: at the bottom, the page stays usable behind it
+  await page.click('[data-key="live-open"]');
+  await page.waitForSelector(panel('bottom'), { timeout: 5000 });
+  await page.waitForSelector('[data-key="live-pane"] [data-key="live-open-ticket"]');
+  // the page changes, the layer stays (the same element, never painted again)
+  await page.$eval('[data-key="live-panel"]', el => { el.dataset.kept = '1'; });
+  for (const hash of ['#tickets', '#review', '#home']) {
+    await page.evaluate(h => { location.hash = h; }, hash);
+    await mainHasText(page);
+  }
+  if (!await page.$('[data-key="live-panel"][data-kept="1"]')) throw new Error('the layer did not stay open when the page changed');
+  // place: right (a phone has no right; it stays at the bottom)
+  await page.click('[data-key="live-place"]');
+  await page.waitForSelector('[data-key="live-place-menu"]');
+  const right = await page.$('[data-key="live-place-menu"] [data-mode="right"]');
+  if (phone && right) throw new Error('a phone offers the right edge');
+  if (!phone) {
+    await right.click();
+    await page.waitForSelector(panel('right'), { timeout: 5000 });
+    const [box, main] = await page.evaluate(() => [document.querySelector('.live-panel').getBoundingClientRect().left,
+      document.querySelector('#content').getBoundingClientRect().right]);
+    if (main > box + 1) throw new Error('the right panel covers the page');
+  } else await press('Escape');
+  const docked = phone ? 'bottom' : 'right';
+  // full screen; Esc goes back one step at a time: full screen, the panel, the bar
+  await page.click('[data-key="live-full"]');
+  await page.waitForSelector(panel('full'), { timeout: 5000 });
+  await press('Escape');
+  await page.waitForSelector(panel(docked), { timeout: 5000 });
+  await press('Escape');
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  if (await page.$('[data-key="live-panel"]')) throw new Error('Esc left the panel open');
+  // Open brings it back where it was; minimise leaves only the bar
+  await page.click('[data-key="live-open"]');
+  await page.waitForSelector(panel(docked), { timeout: 5000 });
+  await page.click('[data-key="live-min"]');
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  // closed to the side: a slim edge; it opens where it was last
+  await page.click('[data-key="live-place"]');
+  await page.click('[data-key="live-place-menu"] [data-mode="side"]');
+  await page.waitForSelector('#live-dock[data-mode="side"] [data-key="live-edge"]', { timeout: 5000 });
+  if (await page.$('[data-key="live-bar"]')) throw new Error('the bar still shows with the layer closed to the side');
+  await page.click('[data-key="live-edge"]');
+  await page.waitForSelector(panel(docked), { timeout: 5000 });
+  // size by keyboard, then a reload: same place, same size
+  await page.focus('[data-live-grip]');
+  await press(phone ? 'ArrowUp' : 'ArrowLeft');
+  await press(phone ? 'ArrowUp' : 'ArrowLeft');
+  const size = () => page.$eval('.live-panel', (el, w) => Math.round(w ? el.offsetWidth : el.offsetHeight), !phone);
+  const before = await size();
+  await page.reload();
+  await mainHasText(page);
+  await page.waitForSelector(panel(docked), { timeout: 10000 });
+  const after = await size();
+  if (Math.abs(after - before) > 1) throw new Error(`the size was not kept (${before} px before the reload, ${after} px after)`);
+  // the picture: the place menu open, as in draft D
+  await page.click('[data-key="live-place"]');
+  await page.waitForSelector('[data-key="live-place-menu"]');
+  await noSideways(page);
+}
+
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -188,10 +281,15 @@ const STEPS = [
   },
   {
     n: 10, pic: 'fd-10-layer', area: 'layer', title: 'The layer at the bottom, on the right, full screen, to the bar, to the side',
-    feature: [7], waits: T.layer,
-    do: ['Open a session from the bar.', 'Use Place: bottom, right, full screen.', 'Minimise it to the bar, then put it to the side.'],
-    see: ['Each place works and the page stays usable behind it.', 'Minimise leaves only the bar; to the side leaves a slim edge.',
-      'The layer opens where it was last.'],
+    feature: [7],
+    do: ['Open a session from the bar.', 'Change to Tickets, Review and Home.', 'Use Place: bottom, right, full screen; press Esc twice.',
+      'Open it again, minimise it to the bar, then put it to the side and open it from the edge.', 'Make it larger, then reload the page.'],
+    see: ['Each place works and the page stays usable behind it; on a phone there is no right.', 'The layer stays open while the page changes.',
+      'Esc goes back one step: full screen, then the panel, then the bar.',
+      'Minimise leaves only the bar; to the side leaves a slim edge.', 'After the reload the layer opens where it was last, at the same size.'],
+    async run({ page, dash, width }) {
+      await layer(page, dash, width);
+    },
     draft: { q: '?page=home&mode=right&menu=pos' },
   },
   {
@@ -312,4 +410,4 @@ const STEPS = [
   },
 ];
 
-module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText };
+module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText, livePreview };
