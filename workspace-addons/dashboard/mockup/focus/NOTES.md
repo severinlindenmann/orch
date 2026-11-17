@@ -182,3 +182,11 @@ Final component validation: the requested `node base/scripts/qa-components.cjs 1
 ## Focus draft D: the agreed Focus mockup (ORCH-251, ORCH-262, 17 Nov)
 focus-v4d.html (script focus-v4d.js) is the one Focus mockup the owner picked: the live wall of sessions (Needs you as a big card, working tiles, idle rows, zoom into one) with a bar under every dashboard page that opens into a layer (right, bottom, split or full screen), chat or terminal per session, the result widgets and the Features sheet. Demo data and a simulated terminal; picks stay in this browser. It is the visual source of truth for building the new Focus behind the Preview switch.
 The earlier drafts (v2, layer v3, v4 A/B/C) were removed once D was chosen; they live in the git history of PR 1262.
+
+## The Preview switch for the new Focus (ORCH-264, 17 Nov)
+
+focus-preview.html
+- What Focus shows while Settings > Add-ons > Focus > Preview is on: an empty shell with the Preview tag and a way back. The wall, bar and layer of draft D fill it in later tasks.
+
+../settings/addon-detail-focus.html
+- New row Preview: "Try the new Focus", off by default.
