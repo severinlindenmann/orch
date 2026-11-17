@@ -12,9 +12,10 @@ def test_toasts_name_the_ticket_and_the_helper():
     assert "toast(result.ok ? (op === 'run.start' ? 'Started'" not in app
 
 
-def test_history_says_step_not_task():
+def test_history_says_task_not_step():
+    # owner 17 Nov (ORCH-240): the to-do lines of a ticket are "tasks" everywhere
     helpers = (WEB / "helpers.js").read_text()
-    assert "'Finished a task" not in helpers and "'Finished a step" in helpers
+    assert "'Finished a step" not in helpers and "'Finished a task" in helpers
 
 
 def test_tab_counts_are_body_size_grey_not_mono():
