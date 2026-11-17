@@ -75,6 +75,7 @@ class Replay:
 
     def required(self) -> list[str]:
         req = self.data.get("required")
+        self.fallback = self.data.get("requiredFrom") == "default branch"
         return list(req) if isinstance(req, list) else []  # a recorded case lists its base branch's
 
     def look(self) -> tuple[list, str]:
@@ -153,11 +154,11 @@ class Live:
         v = self.view()
         return None if v is None else v.get("isDraft")
 
-    def required(self) -> list[str]:
-        base = self.base or (self.view() or {}).get("baseRefName") or ""
-        rules = self.gh_json("api", f"repos/{self.repo}/rules/branches/{base}") if base else None
+    def _rules(self, branch: str) -> list[str]:
+        """The required checks of `branch`'s rules; Refused when GitHub did not say."""
+        rules = self.gh_json("api", f"repos/{self.repo}/rules/branches/{branch}") if branch else None
         if not isinstance(rules, list):
-            raise Refused(f"could not read the rules of the base branch {base or '(unknown)'}")
+            raise Refused(f"could not read the rules of the branch {branch or '(unknown)'}")
         out: list[str] = []
         for r in rules:
             if isinstance(r, dict) and r.get("type") == "required_status_checks":
@@ -165,6 +166,22 @@ class Live:
                     if isinstance(c, dict) and c.get("context") and c["context"] not in out:
                         out.append(c["context"])
         return out
+
+    def required(self) -> list[str]:
+        """The required checks of the branch the pull request goes INTO. A branch without any of its own (a
+        release into main) falls back to the repository's default branch's (self.fallback): the pull
+        request must report each of them, a skipped one counts as GitHub counts it, and one must pass."""
+        self.fallback = False
+        base = self.base or (self.view() or {}).get("baseRefName") or ""
+        own = self._rules(base)
+        if own:
+            return own
+        repo = self.gh_json("api", f"repos/{self.repo}")
+        default = repo.get("default_branch") if isinstance(repo, dict) else None
+        if not isinstance(default, str) or not default or default == base:
+            return []
+        self.fallback = True
+        return self._rules(default)
 
     def look(self) -> tuple[list, str]:
         v = self.view()
@@ -290,9 +307,13 @@ def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) 
     hard = [f"{n} {s}" for n, s in rows if s not in ("SUCCESS", "SKIPPED")]
     if hard:
         return Verdict(False, ", ".join(hard), rows)
-    missing = [r for r in required if not any(n == r and s == "SUCCESS" for n, s in rows)]
+    fallback = getattr(src, "fallback", False)  # the base branch has none: the default branch's count
+    passing = ("SUCCESS", "SKIPPED") if fallback else ("SUCCESS",)
+    missing = [r for r in required if not any(n == r and s in passing for n, s in rows)]
     if missing:
         return Verdict(False, "required check(s) not SUCCESS: " + ", ".join(missing), rows)
+    if fallback and not any(n in required and s == "SUCCESS" for n, s in rows):
+        return Verdict(False, "none of the required checks ran (all skipped)", rows)
     if src.is_draft() is not False:
         return Verdict(False, "the pull request is a draft (or unreadable)", rows)
     ok = sum(1 for _, s in rows if s == "SUCCESS")
@@ -300,7 +321,11 @@ def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) 
     return Verdict(
         True,
         f"{ok} checks SUCCESS, {skipped} path-filtered job(s) SKIPPED; "
-        f"all required checks SUCCESS ({', '.join(required)})",
+        + (
+            f"the base branch has no required checks: the default branch's passed ({', '.join(required)})"
+            if fallback
+            else f"all required checks SUCCESS ({', '.join(required)})"
+        ),
         rows,
     )
 

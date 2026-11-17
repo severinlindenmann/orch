@@ -34,6 +34,8 @@ REPLAYS = [
     ("required-check-missing", False, "still waiting"),
     ("other-repo-skipped", False, "b SKIPPED"),
     ("other-repo-green", True, "all 1 checks SUCCESS"),
+    ("release-into-main", True, "the base branch has no required checks: the default branch's passed"),
+    ("release-into-main-red", False, "FAILURE"),
 ]
 
 
@@ -362,3 +364,51 @@ def test_after_taking_develop_in_only_githubs_merge_commit_is_taken(monkeypatch)
     assert live([HEAD]).update_branch(HEAD) is None  # a plain push on top
     assert live(["e" * 40, base_tip]).update_branch(HEAD) is None  # a merge, but not of the checked commit
     assert live([HEAD, base_tip], base_has_it=False).update_branch(HEAD) is None  # merged something else
+
+
+def _rules(*names):
+    return [{"type": "required_status_checks",
+             "parameters": {"required_status_checks": [{"context": n} for n in names]}}]  # fmt: skip
+
+
+def _live_with_rules(monkeypatch, base, rules: dict, default="develop"):
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+    src = prwait.Live(PR)
+    src.base = base
+    answers = {f"repos/acme/app/rules/branches/{b}": r for b, r in rules.items()}
+    answers["repos/acme/app"] = {"default_branch": default}
+    src.gh_json = lambda *args: answers.get(args[1])
+    return src
+
+
+def test_required_checks_are_those_of_the_branch_the_pull_request_goes_into(monkeypatch):
+    rules = {"develop": _rules("ci", "words"), "main": [{"type": "deletion"}], "next": _rules("ci")}
+    into_next = _live_with_rules(monkeypatch, "next", rules)
+    assert into_next.required() == ["ci"] and into_next.fallback is False
+    into_develop = _live_with_rules(monkeypatch, "develop", rules)
+    assert into_develop.required() == ["ci", "words"] and into_develop.fallback is False
+
+
+def test_a_pull_request_into_main_falls_back_to_the_default_branchs_checks(monkeypatch):
+    src = _live_with_rules(
+        monkeypatch, "main", {"develop": _rules("ci", "words"), "main": [{"type": "deletion"}]}
+    )
+    assert src.required() == ["ci", "words"] and src.fallback is True
+    lone = _live_with_rules(monkeypatch, "main", {"main": []}, default="main")
+    assert lone.required() == [] and lone.fallback is False  # no rules anywhere: every check must be SUCCESS
+
+
+def test_into_main_a_skipped_required_check_passes_but_not_all_skipped():
+    case = _case("release-into-main")
+    for c in case["polls"][0]["checks"]:
+        if c["name"] in case["required"]:
+            c["state"], c["bucket"] = "SKIPPED", "skipping"
+    v = prwait.wait(prwait.Replay(case))
+    assert not v.green and "none of the required checks ran" in v.why
+
+
+def test_into_main_a_missing_required_check_is_waited_for():
+    case = _case("release-into-main")
+    case["polls"][0]["checks"] = [c for c in case["polls"][0]["checks"] if c["name"] != case["required"][0]]
+    v = prwait.wait(prwait.Replay(case))
+    assert not v.green and "still waiting" in v.why
