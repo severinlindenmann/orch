@@ -93,3 +93,11 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 - `list.html`: up to 720 px the table gives way to grouped short rows (master `.short-group`): number and title, one fact, Answer where you are needed, else steps n/m or an Idle chip. The List/Board switch shows only on wide screens.
 - `list.html`, `../home/home.html`, `../review/review.html`, `../ticket/ticket-working.html`: the phone bottom bar (master `.tabbar`) Home, Tickets, Review with the one needs-you number, More opens the side menu.
+
+
+## Triage button (ORCH-151, 17 Nov)
+
+- `board.html`, `list.html`: a Triage button beside the page title. It opens a small menu that says what happens; Start triage opens a dated Triage ticket and starts one
+  helper that goes through every open ticket (brings it up to date, groups related ones, closes what is no longer
+  needed). Shown only while open tickets exist, never on a shared copy; a second click while a Triage ticket is open
+  says so in a notice.

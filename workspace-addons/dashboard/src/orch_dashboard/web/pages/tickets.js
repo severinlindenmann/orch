@@ -381,12 +381,24 @@ function list() {
 // ORCH-151: one helper goes through every open ticket (orch triage --start); it opens the new Triage ticket.
 const TRIAGE_OPEN = ['open', 'ready', 'active', 'waiting', 'review'];
 function triageButton() {
-  if (snapshot || !tickets().some(t => TRIAGE_OPEN.includes(t.status))) return null;
-  return h('button', {type:'button', className:'btn outline sm', 'data-key':'triage', title:'A helper goes through every open ticket: brings it up to date, groups related ones and closes what is no longer needed.', onclick:startTriage}, iconEl('spark'), 'Triage');
+  const open = tickets().filter(t => TRIAGE_OPEN.includes(t.status)).length;
+  if (snapshot || !open) return null;
+  // Starting a helper is never a one-click accident (UX D2/M1): the menu says what happens, then Start triage.
+  return h('details', {className:'menu', 'data-key':'triage'}, h('summary', {className:'btn outline sm'}, iconEl('spark'), 'Triage'),
+    h('div', {className:'menu-pop', role:'dialog', 'aria-label':'Triage'},
+      h('p', {className:'menu-title'}, 'A helper goes through ' + (open === 1 ? 'the open ticket' : 'all ' + open + ' open tickets')),
+      h('p', {className:'meta'}, 'It brings each one up to date, groups related ones and closes what is no longer needed. Every change gets a line on its ticket.'),
+      triageStart()));
+}
+function triageStart() {
+  const node = button('Start triage', 'outline sm', startTriage);
+  node.setAttribute('data-key', 'triage-start');
+  return node;
 }
 async function startTriage(e) {
   if (typeof changeUnavailable === 'function' && changeUnavailable()) return;
   const btn = e?.currentTarget; if (btn) btn.disabled = true;
+  btn?.closest?.('details')?.removeAttribute('open');
   const known = new Set(tickets().map(t => t.id));
   const result = await act('triage.start', {});
   if (btn) btn.disabled = false;

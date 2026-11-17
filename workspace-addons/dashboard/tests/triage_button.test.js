@@ -11,6 +11,7 @@ function context(list, result, snapshot = false) {
   const ctx = {snapshot, list, acts:[], toasts:[], location:{hash:'#tickets'}};
   ctx.tickets = () => ctx.list;
   ctx.h = (tag, attrs, ...kids) => ({tag, attrs, kids});
+  ctx.button = (text, cls, click) => ({tag:'button', text, cls, click, attrs:{}, setAttribute(k, v) { this.attrs[k] = v; }});
   ctx.iconEl = name => ({icon:name});
   ctx.href = id => '#ticket/' + id;
   ctx.changeError = r => 'Refused: ' + r.text;
@@ -22,9 +23,13 @@ function context(list, result, snapshot = false) {
 test('the button shows only with open tickets and never on a shared copy', () => {
   assert.equal(context([{id:'a', status:'done'}], {ok:true}).triageButton(), null);
   assert.equal(context([{id:'a', status:'ready'}], {ok:true}, true).triageButton(), null);
-  const btn = context([{id:'a', status:'ready'}], {ok:true}).triageButton();
-  assert.equal(btn.attrs['data-key'], 'triage');
-  assert.ok(btn.kids.includes('Triage'));
+  const menu = context([{id:'a', status:'ready'}, {id:'b', status:'open'}], {ok:true}).triageButton();
+  assert.equal(menu.attrs['data-key'], 'triage');
+  assert.ok(menu.kids[0].kids.includes('Triage'));
+  const pop = menu.kids[1];
+  assert.match(pop.kids[0].kids[0], /all 2 open tickets/);  // it says what happens before the helper starts
+  assert.equal(pop.kids[2].attrs['data-key'], 'triage-start');
+  assert.equal(typeof pop.kids[2].click, 'function');  // a real click handler, never an onclick attribute string
 });
 
 test('a click starts triage and opens the new Triage ticket', async () => {
