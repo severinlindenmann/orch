@@ -79,6 +79,10 @@ orch counts every GitHub write on this computer, all workspaces and helpers toge
 
 Exit 0: write now. Exit 2: no room within an hour; do not write, say so in the ticket and try later. See the counts with `orch github writes`. The limits per hour are settings, e.g. `orch config set github.merge_per_hour 12` (also `github.pr_per_hour`, `github.comment_per_hour`, `github.other_per_hour`).
 
+**Checks run again**
+
+`orch ref wait` runs a check once more by itself when it failed only by timeout or network error, before it says red, and counts it (that rerun takes an "other" write slot). A real failure is never retried. See which checks were run again, most often first: `orch github retries [--days 30]`. A check retried 3 times or more keeps failing: a ticket for its test, not another rerun by hand.
+
 **The Development expert (a repeating automation, no AI call)**
 
     orch github expert [--dry-run] [--known nightly-ci=<ticket>]
