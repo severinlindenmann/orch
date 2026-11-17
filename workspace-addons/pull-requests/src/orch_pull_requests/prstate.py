@@ -155,9 +155,28 @@ def main_pr(rows: list[dict]) -> dict | None:
     return max(open_ or rows, key=lambda r: r.get("number") or 0)
 
 
+# What ext.pull-requests stores: the words a person reads under the ticket's Details (read-only fields, so the
+# shown word is the stored one; ext.schema.json lists the same words)
+CHECKS_SHOWN = {"passed": "Passed", "running": "Running", "failed": "Failed", "none": "No checks"}
+MERGE_SHOWN = {
+    "ready": "Ready to merge",
+    "blocked": "Blocked",
+    "behind": "Behind its base",
+    "conflict": "Has a conflict",
+    "draft": "Draft",
+    "unknown": "Not known yet",
+    "merged": "Merged",
+    "closed": "Closed",
+}
+
+
 def ext_of(rows: list[dict]) -> dict | None:
-    """ext.github for a ticket (ext.schema.json), or None when it links no readable pull request."""
+    """ext.pull-requests for a ticket (ext.schema.json), or None when it links no readable pull request."""
     r = main_pr(rows)
     if r is None:
         return None
-    return {"pr": f"#{r['number']}", "checks": r["checks"]["word"], "merge": r["merge"]}
+    return {
+        "pr": f"#{r['number']}",
+        "checks": CHECKS_SHOWN[r["checks"]["word"]],
+        "merge": MERGE_SHOWN[r["merge"]],
+    }

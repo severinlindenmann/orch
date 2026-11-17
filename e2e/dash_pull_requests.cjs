@@ -86,7 +86,7 @@ test('Ticket page: the pull request link and Details show the live state', {time
   for (const size of [SIZES[0], SIZES[2]]) {
     await withPage(chromium, size, 'loaded', async page => {
       await page.goto(BASE + '/#ticket/' + GH.ticket.id);
-      await page.getByRole('heading', {name: 'Invoice CSV export'}).first().waitFor();
+      await page.getByText('Invoice CSV export').first().waitFor();
       await page.getByText('Checks failed', {exact: true}).first().waitFor();   // the link's live state
       const fields = page.locator('.addon-fields');
       for (const word of ['#418', 'Failed', 'Blocked']) await fields.getByText(word, {exact: true}).waitFor();

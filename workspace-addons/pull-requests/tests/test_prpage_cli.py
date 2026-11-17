@@ -101,8 +101,8 @@ def test_the_core_accepts_the_refresh_answer(tmp_path):
     assert t2["ext"]["pull-requests"] == {
         "merge_when_green": "on",
         "pr": "#1",
-        "checks": "passed",
-        "merge": "behind",
+        "checks": "Passed",
+        "merge": "Behind its base",
     }
     assert not poll.differs(t2, poll.answer(t2, data))
     again = tickets.merge_refresh(

@@ -80,6 +80,6 @@ def test_main_pr_is_the_newest_open_one():
         prstate.row("acme/app", gql_pr(9, state="MERGED")),
         prstate.row("acme/app", gql_pr(4, checks=[run_("a", conclusion="FAILURE")])),
     ]
-    assert prstate.ext_of(rows) == {"pr": "#4", "checks": "failed", "merge": "ready"}
-    assert prstate.ext_of([rows[1]]) == {"pr": "#9", "checks": "passed", "merge": "merged"}
+    assert prstate.ext_of(rows) == {"pr": "#4", "checks": "Failed", "merge": "Ready to merge"}
+    assert prstate.ext_of([rows[1]]) == {"pr": "#9", "checks": "Passed", "merge": "Merged"}
     assert prstate.ext_of([]) is None

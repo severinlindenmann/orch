@@ -119,9 +119,9 @@ under the ticket's Details; set with `orch ticket set <ticket> pull-requests.mer
   (env `ORCH_PULL_REQUESTS_CACHED=1`: answer from prs.json), and only when what it shows differs. The answer sets
   each pull request link's `status` (`open`, `draft`, `checks running`, `checks failed`, `conflict`, `behind`,
   `blocked`, `ready to merge`, `merged`, `closed`), its `title` when the link has none, and `ext.pull-requests`
-  `pr` / `checks` (`passed` · `running` · `failed` · `none`) / `merge` (`ready` · `blocked` · `behind` · `conflict` ·
-  `draft` · `unknown` · `merged` · `closed`) of the ticket's newest open pull request (read only fields under
-  Details). A person's Refresh or a helper (no env) reads GitHub first. Checks follow the core waiter's words: only
+  `pr` / `checks` (`Passed` · `Running` · `Failed` · `No checks`) / `merge` (`Ready to merge` · `Blocked` · `Behind
+  its base` · `Has a conflict` · `Draft` · `Not known yet` · `Merged` · `Closed`) of the ticket's newest open pull
+  request: read-only fields under Details that store the shown words. A person's Refresh or a helper (no env) reads GitHub first. Checks follow the core waiter's words: only
   SUCCESS passes, SKIPPED is fine, an unexpanded matrix job is left out, anything else finished is a failure.
 - `orch pull-requests view --json`: the page (orch.addon-view/1, read only, no GitHub call): three counts (Open,
   Checks failed, Ready to merge), one table per repository (Pull request with branch and author, Ticket, Checks,

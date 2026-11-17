@@ -46,7 +46,7 @@ def test_nothing_changed_means_no_refresh(prws):
         prws,
         "t_aaaaa1",
         [{"url": PR.format(1), "status": "ready to merge", "title": "Change 1"}],
-        ext={"pull-requests": {"pr": "#1", "checks": "passed", "merge": "ready"}},
+        ext={"pull-requests": {"pr": "#1", "checks": "Passed", "merge": "Ready to merge"}},
     )
     poll.once(prws, fetch=FakeGitHub({"acme/app": [gql_pr(1)]}))
     assert refreshes(prws) == []
@@ -63,7 +63,7 @@ def test_answer_is_the_refresh_contract(prws):
         {"url": PR.format(1) + "/", "status": "ready to merge"},
         {"url": PR.format(4), "status": "merged", "title": "Change 4"},
     ]
-    assert res["ext"] == {"pull-requests": {"pr": "#1", "checks": "passed", "merge": "ready"}}
+    assert res["ext"] == {"pull-requests": {"pr": "#1", "checks": "Passed", "merge": "Ready to merge"}}
     for item in res["refs"]:
         assert len(item["status"]) <= 24
 

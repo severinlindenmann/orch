@@ -324,19 +324,19 @@
      "options": [
       {
        "label": "Passed",
-       "value": "passed"
+       "value": "Passed"
       },
       {
        "label": "Running",
-       "value": "running"
+       "value": "Running"
       },
       {
        "label": "Failed",
-       "value": "failed"
+       "value": "Failed"
       },
       {
        "label": "No checks",
-       "value": "none"
+       "value": "No checks"
       }
      ],
      "read_only": true,
@@ -349,35 +349,35 @@
      "options": [
       {
        "label": "Ready to merge",
-       "value": "ready"
+       "value": "Ready to merge"
       },
       {
        "label": "Blocked",
-       "value": "blocked"
+       "value": "Blocked"
       },
       {
        "label": "Behind its base",
-       "value": "behind"
+       "value": "Behind its base"
       },
       {
        "label": "Has a conflict",
-       "value": "conflict"
+       "value": "Has a conflict"
       },
       {
        "label": "Draft",
-       "value": "draft"
+       "value": "Draft"
       },
       {
        "label": "Not known yet",
-       "value": "unknown"
+       "value": "Not known yet"
       },
       {
        "label": "Merged",
-       "value": "merged"
+       "value": "Merged"
       },
       {
        "label": "Closed",
-       "value": "closed"
+       "value": "Closed"
       }
      ],
      "read_only": true,

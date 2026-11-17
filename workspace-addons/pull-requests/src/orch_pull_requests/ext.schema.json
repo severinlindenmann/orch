@@ -29,42 +29,26 @@
       "title": "Checks",
       "readOnly": true,
       "enum": [
-        "passed",
-        "running",
-        "failed",
-        "none"
-      ],
-      "x-labels": {
-        "passed": "Passed",
-        "running": "Running",
-        "failed": "Failed",
-        "none": "No checks"
-      }
+        "Passed",
+        "Running",
+        "Failed",
+        "No checks"
+      ]
     },
     "merge": {
       "type": "string",
       "title": "Merge",
       "readOnly": true,
       "enum": [
-        "ready",
-        "blocked",
-        "behind",
-        "conflict",
-        "draft",
-        "unknown",
-        "merged",
-        "closed"
-      ],
-      "x-labels": {
-        "ready": "Ready to merge",
-        "blocked": "Blocked",
-        "behind": "Behind its base",
-        "conflict": "Has a conflict",
-        "draft": "Draft",
-        "unknown": "Not known yet",
-        "merged": "Merged",
-        "closed": "Closed"
-      }
+        "Ready to merge",
+        "Blocked",
+        "Behind its base",
+        "Has a conflict",
+        "Draft",
+        "Not known yet",
+        "Merged",
+        "Closed"
+      ]
     }
   },
   "additionalProperties": false
