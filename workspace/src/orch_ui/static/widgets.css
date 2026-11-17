@@ -954,7 +954,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .split-panel:focus{outline:none}
 .split-panel:focus-visible{box-shadow:inset var(--focus-ring)}
 .split-facts{display:grid;gap:var(--s3);margin:0}
-.split-facts>div{display:grid;grid-template-columns:136px minmax(0,1fr);gap:var(--s3);align-items:baseline}
+.split-facts>div{display:grid;grid-template-columns:112px minmax(0,1fr);gap:var(--s3);align-items:center}
 .split-facts dt{color:var(--text-muted);font-size:var(--fs-meta)}
 .split-facts dd{margin:0;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;overflow-wrap:anywhere}
 .split-facts dd>label{gap:var(--s2)}
