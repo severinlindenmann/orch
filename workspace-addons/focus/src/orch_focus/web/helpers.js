@@ -82,23 +82,57 @@
   function holdText(v) {
     return v && v.run && v.run.running === true && typeof v.hold === 'string' ? v.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   }
-  /* The one source for the session's words: pill, feed headline, and whether work is shown as happening now
-     ("Now:" marks and the "Waiting for the first step…" row). pill null: not started, the ticket's own status word. */
-  const HELPER_KEY = {working: ['running', 'Working', true], starting: ['running', 'Starting', true], you: ['waiting-for-you', 'Waits for you', false],
-    waiting: ['paused', 'On hold', false], idle: ['paused', 'Idle', false], stuck: ['paused', 'Stuck', false]};
-  function sessionState(v) {
-    const t = v.ticket || {}, run = v.run || {};
-    if (v.state === 'done') return {key: 'finished', pill: 'Done', headline: 'Work completed', active: false};
-    /* a running helper: the core's one state word (ORCH-61), the same as the dashboard's Home and ticket page */
-    const hs = run.running === true && run.helper && HELPER_KEY[run.helper.state];
-    if (hs) return {key: hs[0], pill: hs[1], headline: hs[2] ? 'The work is taking shape' : String(run.helper.detail || hs[1]), active: hs[2], detail: String(run.helper.detail || '')};
-    if ((t.questions || []).some(q => q.answer == null)) return {key: 'waiting-for-you', pill: 'Needs you', headline: '', active: false};
-    if (v.state === 'needs') return {key: 'waiting-for-you', pill: 'Needs you', headline: run.running === true ? 'The work is taking shape' : 'Work so far', active: run.running === true};
-    if (v.state === 'working') return {key: 'running', pill: 'Working', headline: 'The work is taking shape', active: true};
-    if (v.state === 'waiting') return {key: 'paused', pill: 'Paused', headline: 'Paused', active: false};
-    if (t.status === 'review') return {key: 'stopped', pill: 'Ready for review', headline: 'Work so far', active: false};
-    if (t.started || run.run) return {key: 'paused', pill: 'Paused', headline: 'Paused', active: false};
-    return {key: 'stopped', pill: null, headline: 'Work so far', active: false};
+  /* The helper's state while one runs: the core's word (ORCH-61), or from the view when an older core sends none. */
+  const HELPER_STATES = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck'];
+  function helperOf(v) {
+    const run = (v && v.run) || {};
+    if (run.running !== true) return null;
+    if (run.helper && HELPER_STATES.includes(run.helper.state)) return {state: run.helper.state, detail: String(run.helper.detail || '')};
+    return {state: v.attention || v.state === 'needs' ? 'you' : v.state === 'waiting' ? 'idle' : 'working', detail: ''};
+  }
+  /* The ticket's one state, the same pill and word as the ticket page (kit rule UI.ticketState, ORCH-71). */
+  function ticketState(v, rule) {
+    rule = rule || (root.UI && root.UI.ticketState);
+    const t = (v && v.ticket) || {};
+    return rule ? rule({...t, status: v && v.state === 'done' ? 'done' : t.status}, helperOf(v)) : null;
+  }
+  /* The session's words: pill (the ticket page's word), feed headline, and whether work is shown as happening now
+     ("Now:" marks and the "Waiting for the first step…" row). */
+  function sessionState(v, rule) {
+    const t = v.ticket || {}, run = v.run || {}, s = ticketState(v, rule), hs = helperOf(v);
+    const pill = s ? s.word : null, detail = hs ? hs.detail : '';
+    if (v.state === 'done') return {key: 'finished', pill, headline: 'Work completed', active: false};
+    if (hs && ['working', 'starting'].includes(hs.state) && !(t.questions || []).some(q => q.answer == null)) return {key: 'running', pill, headline: 'The work is taking shape', active: true, detail};
+    if (hs && hs.state !== 'you' && !(t.questions || []).some(q => q.answer == null)) return {key: 'paused', pill, headline: detail || pill || 'Work so far', active: false, detail};
+    if ((t.questions || []).some(q => q.answer == null)) return {key: 'waiting-for-you', pill, headline: '', active: false, detail};
+    if (v.state === 'needs' || (hs && hs.state === 'you')) return {key: 'waiting-for-you', pill, headline: run.running === true ? 'The work is taking shape' : 'Work so far', active: run.running === true, detail};
+    if (t.status === 'review') return {key: 'stopped', pill, headline: 'Work so far', active: false};
+    if (t.started || run.run) return {key: 'paused', pill, headline: 'Work so far', active: false};
+    return {key: 'stopped', pill, headline: 'Work so far', active: false};
+  }
+  /* The header line under nothing but the title, as on the ticket page: ORCH-n, the state pill, "Step 3 of 4 · 52 min".
+     key is empty when the ticket has no number yet (never the internal id). */
+  function headerLine(v, rule) {
+    const t = (v && v.ticket) || {}, run = (v && v.run) || {};
+    const key = typeof t.key === 'string' && t.key && !/^t_/.test(t.key) ? t.key : '';
+    const tasks = (t.checklist || []).filter(c => c && !c.wont_do), doing = tasks.findIndex(c => !c.done && c.state === 'doing');
+    const n = doing >= 0 ? doing : tasks.findIndex(c => !c.done);
+    const hs = helperOf(v), state = ticketState(v, rule);
+    const row = {state: hs ? hs.state : 'working', detail: hs ? hs.detail : '',
+      step: tasks.length && n >= 0 && v.state !== 'done' ? {n: n + 1, of: tasks.length} : null,
+      minutes: hs && Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
+      idle: hs && Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null};
+    return {key, state, row};
+  }
+  /* One result as a plain line: what it is, what came out, and Open (no kinds, no commands, no file names). */
+  const FALLBACK = {command: 'Check ran', commit: 'Change saved', pr: 'Pull request', url: 'Link'};
+  function resultLine(item) {
+    const c = (item && item.c) || {}, ev = (item && item.ev) || {};
+    const short = text => text.length > 160 ? text.slice(0, 157).trimEnd() + '…' : text;
+    const what = cleanOutcome(ev.title) || cleanOutcome(c.text) || 'Result';
+    const out = cleanOutcome(ev.summary) || (ev.type === 'note' ? cleanOutcome(ev.text || ev.ref) : '') ||
+      (ev.type === 'file' ? plainFileName(ev.ref) : FALLBACK[ev.type] || '');
+    return {what: short(what), outcome: short(out.replace(/\s+/g, ' '))};
   }
   /* The ticket list row's small line: the actual next step only when it says more than the action chip. */
   function nextStepText(t, action) {
@@ -120,6 +154,6 @@
     const asking = (t.questions || []).some(q => q.answer == null) || (v && v.state === 'needs');
     return t.status === 'review' && !asking && !(v && v.run && v.run.running);
   }
-  root.FocusHelpers = {reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, dashCountText, attentionText, nextNeeding, listOrder, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
+  root.FocusHelpers = {helperOf, ticketState, headerLine, resultLine, reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, dashCountText, attentionText, nextNeeding, listOrder, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);

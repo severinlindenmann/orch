@@ -201,7 +201,7 @@ let ticketView = 'list';
 try { if (localStorage.getItem('orch.tickets.view') === 'board') ticketView = 'board'; } catch (_) { /* no storage: the list */ }
 const boardMore = new Set();
 const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'}, viewChips(),
-  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
+  h('div', {className:'view-toggle wide-only', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
 function boardCard(t, nested = false, column = '') {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
   const parts = boardChildren(tickets(), t);
@@ -304,19 +304,75 @@ function ticketTable(visible) {
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:4}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
     if (!folded) for (const {i} of roots) body.push(treeBranch(rows, i, status));
   }
-  return h('div', {className:'table-wrap', 'data-key':'ticket-table'}, h('table', {className:'ticket-table'},
+  return h('div', {className:'table-wrap wide-only', 'data-key':'ticket-table'}, h('table', {className:'ticket-table'},
     h('thead', {}, h('tr', {}, [searchHead(visible.length), 'Steps', 'Last change'].map(label => h('th', {scope:'col'}, label)), h('th', {scope:'col'}, h('span', {className:'sr-only'}, 'Actions')))),
     h('tbody', {}, body)));
+}
+// Phone (ORCH-73, owner 16 Nov): the same groups as short rows (master UI.shortGroup), never a squeezed table.
+// One row: number and title, one fact, one thing on the right (Answer where the person is needed, else steps n/m or an
+// Idle/Stuck chip). A group shows its first PHONE_ROWS rows, then "n more".
+const PHONE_ROWS = 5, phoneMore = new Set();
+const SHORT_ICON = {waiting:'needs', review:'check', active:'working', blocked:'todo', open:'todo', done:'done'};
+function shortFact(t, row) {
+  const ago = iso => iso && window.DashHelpers.ago ? window.DashHelpers.ago(iso, Date.now()) : '';
+  if (questions(t).length && shown(t).status !== 'done') return 'Question' + (ago(t.updated_at) ? ' · ' + ago(t.updated_at) : '');
+  if (changesPending(t)) return 'Changes to add';
+  const waits = waitsLine(t)?.textContent;
+  if (waits) return waits;
+  if (t.quiet_since) return window.DashHelpers.quietWords(t.quiet_since, now());
+  const helper = helperChip(t);
+  if (helper?.line) return helper.line;
+  if (row.parentMissing && typeof parentLine === 'function') { const step = parentLine(t)?.textContent; if (step) return step; }
+  const at = shown(t).status === 'done' ? t.done_at || t.updated_at : t.updated_at;
+  return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
+}
+function shortSide(t, row, status) {
+  if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {
+    event.stopPropagation();
+    const need = needsList().find(x => x.ticket === t.id);
+    if (need) openNeed(need, event.currentTarget); else location.hash = href(t.id);
+  });
+  const helper = helperChip(t);
+  if (helper) return helper.chip;
+  const tasks = array(t.checklist), total = tasks.length || row.children || 0;
+  if (!total) return null;
+  const done = tasks.length ? tasks.filter(window.DashHelpers.resolved).length : row.done || 0;
+  const pill = h('span', {className:'pill ' + ({active:'working', done:'done', waiting:'needs'}[status] || ''), title:window.DashHelpers.stepsText(done, total)});
+  if (window.UI?.statusIcon) pill.append(window.UI.statusIcon(SHORT_ICON[status] || 'todo'));
+  pill.append(done + '/' + total);
+  return pill;
+}
+function phoneList(visible) {
+  const groups = ticketGroups(visible), out = [];
+  for (const status of GROUP_ORDER) {
+    const group = groups.find(g => g.status === status), rows = window.DashHelpers.treeRows(group.tickets);
+    const roots = rows.filter(row => row.depth === 0);
+    if (!roots.length) continue;
+    const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups, folded = folds.has(status);
+    const shownRows = rows.filter(row => row.depth <= 1), all = phoneMore.has(status), cut = all ? shownRows : shownRows.slice(0, PHONE_ROWS);
+    const sec = window.UI.shortGroup({key:'short-' + status, title:group.title, icon:SHORT_ICON[status], count:group.tickets.length, folded,
+      onToggle:() => { if (folded) folds.delete(status); else folds.add(status); render(); },
+      rows:cut.map(row => ({key:typeof row.ticket.key === 'string' ? row.ticket.key : '', title:clean(row.ticket.title), href:href(row.ticket.id), child:row.depth > 0,
+        fact:shortFact(row.ticket, row), side:shortSide(row.ticket, row, status), dataKey:'short-' + row.ticket.id})),
+      more:cut.length < shownRows.length ? {label:(shownRows.length - cut.length) + ' more', onClick:() => { phoneMore.add(status); render(); }} : null});
+    sec.querySelectorAll('.short-row').forEach(rowEl => rowEl.addEventListener('click', e => {
+      if (e.target.closest('a,button')) return;
+      const link = rowEl.querySelector('a.short-title'); if (link) location.hash = link.getAttribute('href');
+    }));
+    sec.querySelector('.card-h button')?.setAttribute('data-key', 'short-toggle-' + status);
+    out.push(sec);
+  }
+  return h('div', {className:'phone-only short-list', 'data-key':'ticket-short'}, out);
 }
 function list() {
   const visible = filteredTickets();
   const needN = typeof needsYouTotal === 'function' ? needsYouTotal() : 0;
   const top = [heading('Tickets', 'Every ticket, from To do to Done.', {actions:needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null}), viewToggle()];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
-  if (ticketView === 'board' && tickets().length) return fragment(top, board());
+  if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {className:'wide-only', 'data-key':'board-wide'}, board()), window.UI?.shortGroup ? phoneList(visible) : null);
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
     h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
-    h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : ticketTable(visible));
+    h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));
 }
 function ticketNotFound() {
   return fragment(h('section', {className:'not-found', 'data-key':'not-found'}, iconEl('search'), heading("We couldn't find that ticket", 'It may have been dropped or the link is old.'), h('div', {className:'row ticket-not-found'},
