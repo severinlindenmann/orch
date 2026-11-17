@@ -262,11 +262,10 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const openOverview=()=>{if(overlay)closeOverlay();const v=el('div','swipe-viewer swipe-overview');v.setAttribute('role','dialog');v.setAttribute('aria-label','All cards');
   const b=el('div','swipe-viewer-bar'),x=btn('btn ghost icon sm',[ic('x',18)],'Close');x.onclick=()=>{closeOverlay();render()};
   const k=Object.keys(ans).length;b.append(x,el('strong','','All cards · '+(items.length-k)+' waiting'));
+  /* a short list: ticket, question, age, state; one click opens that card */
   const tile=i=>{const it=items[i],a=ans[it.id],t=btn('swipe-ov'+(i===idx?' current':'')+(a?' answered':''),[]);
-   const th=el('span','swipe-ov-thumb');const p=it.preview||{},pv=p.type==='compare'?p.after:p.type==='options'?(p.options[0]||{}).preview:p;th.append(buildPreview({title:it.title,preview:pv||{}},false));
-   const m=el('span','swipe-meta'),kd=el('span','swipe-kind');kd.append(ic(it.icon||'file',12),it.kindLabel||it.kind);m.append(kd);if(it.need&&!a)m.append(el('span','swipe-need',it.need));
    const st=el('span','swipe-ov-state '+(a?a.verdict:later.has(it.id)?'later':'wait'),a?ansWord(a):later.has(it.id)?'Later':i===idx?'Now':'Waiting');
-   t.append(th,m,el('span','swipe-ov-title',it.title),st);t.onclick=()=>jump(i);return t};
+   t.append(el('span','swipe-ov-key',it.ticket||''),el('span','swipe-ov-title',it.text||it.title),el('span','swipe-ov-age',it.when||''),st);t.onclick=()=>jump(i);return t};
   const order=waiting().concat(items.map((_,i)=>i).filter(i=>ans[items[i].id]));
   /* grouped by ticket (the round), then by task ("About: ..."); cards without a task come last under their ticket */
   const tk=new Map();order.forEach(i=>{const it=items[i],key=it.group?'g:'+it.group:it.ticketId||it.ticket||'';let t=tk.get(key);if(!t){t={title:it.group||it.ticketTitle,key:it.group?'':it.ticket,tasks:new Map(),plain:[],rows:[]};tk.set(key,t)}t.rows.push(i);

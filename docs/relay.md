@@ -42,7 +42,7 @@ The phone shows one line per ticket (the newest update) and the whole list when 
 ## Other systems that listen (subscribers)
 
 In the relay admin, **Subscribers** lets another system follow your workspaces: a team chat bot, a script, a monitoring
-tool or another agent. You pick what it can see (groups and/or single workspaces), what it receives (Updates, Questions,
+tool or a helper. You pick what it can see (groups and/or single workspaces), what it receives (Updates, Questions,
 Results, Files) and whether it may answer questions (off by default: read-only). It sees what your phones would see from
 those workspaces, nothing else. You get a link with a secret token once; **Rotate link** replaces it, **Remove** stops it.
 - **Pull:** `curl -s "<link>/events"` gives what it missed (oldest first, `next` for the next page); `curl -N "<link>/stream"`
