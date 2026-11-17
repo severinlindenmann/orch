@@ -131,10 +131,7 @@ const blockedTitle = items => items.filter(ticketWaitsOnly).every(t => t.waiting
 // "Waits for ORCH-56" under a ticket that waits for another one; "Waits until 18:00" for a time.
 function waitsLine(t) {
   if (!ticketWaitsOnly(t)) return null;
-  const w = t.waiting_on || {};
-  let text = '';
-  if (w.kind === 'ticket' && w.ref) { const other = tickets().find(o => o.id === w.ref || (o.key && String(o.key).toLowerCase() === String(w.ref).toLowerCase())); text = 'Waits for ' + (other ? other.key || clean(other.title) : 'another ticket'); }
-  else if (w.until) text = 'Waits until ' + (window.UI?.stamp ? window.UI.stamp(w.until) : w.until);
+  const text = clean(window.DashHelpers.waitWords(t, tickets(), window.UI?.stamp));
   return text ? h('p', {className:'meta ticket-sub', 'data-key':'waits-' + t.id}, text) : null;
 }
 function boardParentLine(t) {
@@ -178,7 +175,7 @@ function ticketFilters() {
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
   const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
   const all = tickets(), heads = all.filter(t => all.some(c => c.parent === t.id || (c.parent && c.parent === t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
-  const group = heads.length || ticketGroup ? ticketSelect('Group', 'ticket-group', [['', 'All groups'], ...heads.map(t => [t.id, clean(t.title).slice(0, 40)])], ticketGroup, value => { ticketGroup = value; render(); }) : null;
+  const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, clean(t.title).slice(0, 40)])], ticketGroup, value => { ticketGroup = value; render(); }) : null;
   return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];
 }
 function clearTicketFilters() {
@@ -237,7 +234,7 @@ function helperChip(t) {
 function stepsCell(t, row) {
   const tasks = array(t.checklist), total = tasks.length || row.children || 0, done = tasks.length ? tasks.filter(window.DashHelpers.resolved).length : row.done || 0;
   if (!total) return h('span', {className:'meta'}, '–');
-  return h('div', {className:'step-progress', title:window.DashHelpers.stepsText(done, total)}, h('div', {className:'progress', role:'progressbar', 'aria-label':'Steps done', 'aria-valuemin':0, 'aria-valuemax':total, 'aria-valuenow':done}, widthSpan(Math.round(done / total * 100))),
+  return h('div', {className:'step-progress', title:window.DashHelpers.stepsText(done, total)}, h('div', {className:'progress', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':0, 'aria-valuemax':total, 'aria-valuenow':done}, widthSpan(Math.round(done / total * 100))),
     h('span', {className:'meta steps-count'}, done + '/' + total));
 }
 // ORCH-189: the due day (red when past, amber today) and helper time · money at list price; "–" when none.
@@ -247,7 +244,7 @@ function dueCell(t) {
   const today = !late && String(t.due).slice(0, 10) === new Date(now()).toLocaleDateString('sv');
   return h('span', {className:late ? 'bad' : today ? 'warn' : ''}, dueText(t));
 }
-function spendCell(t) { return h('span', {className:'meta'}, window.DashHelpers.spendWords(t.spend) || '–'); }
+function spendCell(t) { const words = window.DashHelpers.spendWords(t.spend); return h('span', {className:'meta', title:words ? undefined : 'Not recorded'}, words || '–'); }
 // One table row (a ticket or a part under its parent). `section` is the group it sits in.
 function treeBranch(rows, index, section) {
   const row = rows[index], t = row.ticket;
@@ -289,7 +286,7 @@ let ticketView = 'list';
 try { if (localStorage.getItem('orch.tickets.view') === 'board') ticketView = 'board'; } catch (_) { /* no storage: the list */ }
 const boardMore = new Set();
 const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'}, viewChips(),
-  h('div', {className:'view-toggle wide-only', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
+  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
 function boardCard(t, nested = false, column = '', here = null) {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
   const parts = boardChildren(tickets(), t);
@@ -299,28 +296,32 @@ function boardCard(t, nested = false, column = '', here = null) {
     ticketAttentionChip(t, column), waitsLine(t), replacedLine(t),
     !nested ? boardParentLine(t) : null,
     parts.length ? h('div', {className:'board-parts'},
-      h('p', {className:'meta'}, (t.release ? 'Release · ' : t.epic ? 'Epic · ' : 'Steps · ') + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
+      h('p', {className:'meta'}, (t.release ? 'Release · ' : t.epic ? 'Epic · ' : 'Sub-tickets · ') + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
       parts.filter(part => !(here && here.has(part.id))).map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'part-title'}, window.DashHelpers.keyTag(part, h), clean(part.title)), ticketAttentionChip(part)))) : null,
     changesLine(t),
-    tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Steps done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length))) : null,
+    tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length))) : null,
     ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'who'}, h('span', {className:'avatar', 'aria-hidden':'true'}, initials(t.owner)), name(t.owner)) : null, t.due ? h('span', {className:'due' + (overdue(t) && String(t.due).includes('T') ? ' bad' : '')}, dueText(t)) : null, quietLine(t), whenLine(t)));
 }
 const COLUMN_EMPTY = {open:'New tickets land here', ready:'Nothing picked to do next', active:'No helper is working right now', waiting:'No questions for you. All clear',
   blocked:'Nothing waits for a date', review:'Nothing to check', done:'Finished tickets land here', dropped:'Nothing set aside', superseded:'Nothing replaced by another ticket'};
 // ORCH-152: the lanes a card can move to from its menu (Needs you comes only from a helper's question).
-const BOARD_MOVES = window.DashHelpers.LANES.filter(([lane]) => lane !== 'waiting');
+const BOARD_MOVES = window.DashHelpers.MOVE_CHOICES;
 const CAPPED_LANES = ['done', 'dropped', 'superseded'];  // long lanes at the end: 3 cards, then "Show N more"
 const boardLane = t => window.DashHelpers.laneOf(t, shown(t).status, questions(t).length > 0);
 function board() {
   // Won't do and Superseded tickets are hidden everywhere else; the board shows them in their own lanes.
   const dropped = filterTickets(ticketParents(array(state?.tickets).filter(t => t.status === 'dropped')), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView(), ticketGroup);
   const visible = sorted([...filteredTickets(), ...dropped]);
-  const cols = window.DashHelpers.LANES.map(([status, label]) => {
+  // ORCH-240: a sub-ticket with its own card anywhere on the board is not listed again inside its parent's card
+  // (ORCH-185 did this per lane only). A lane cut short ("Show 3 more") hides cards, so nothing there counts as shown.
+  const lanes = window.DashHelpers.LANES.map(([status, label]) => {
     const mine = window.DashHelpers.laneSorted(visible.filter(t => boardLane(t) === status), status);  // ORCH-156: the person's order
-    const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth), shownHere = new Set();  // ORCH-185: a sub-ticket shown as its own card here is not listed again inside its parent's card
+    const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth);
     const capped = CAPPED_LANES.includes(status) && roots.length > 3 && !String(ticketSearch).trim();  // a search shows every hit
-    const cap = capped && !boardMore.has(status) ? 3 : roots.length;
-    if (cap >= roots.length) mine.forEach(t => shownHere.add(t.id));  // a lane cut short ("Show 3 more") hides cards, so nothing there counts as shown
+    return {status, label, mine, rows, roots, capped, cap:capped && !boardMore.has(status) ? 3 : roots.length};
+  }).filter(l => l.mine.length || !['dropped', 'superseded'].includes(l.status));  // ORCH-240: empty set-aside lanes take no room
+  const shownHere = new Set(lanes.flatMap(l => l.cap >= l.roots.length ? l.mine.map(t => t.id) : []));
+  const cols = lanes.map(({status, label, mine, rows, roots, capped, cap}) => {
     const branch = row => h('div', {className:'board-family', 'data-key':'family-' + row.ticket.id}, boardCard(row.ticket, row.depth > 0, status, shownHere),
       rows.filter(child => child.depth === row.depth + 1 && [row.ticket.id, row.ticket.key].includes(child.ticket.parent)).map(branch));
     return h('section', {className:'kanban-col' + (mine.length ? '' : ' col-collapsed'), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
@@ -394,7 +395,13 @@ function waitChoices(now = new Date()) {
 const utcStamp = d => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
 function askWaitUntil(t, from) {
   const {d, actions} = dialog('Wait until when?');
-  const done = until => { window.orch.close(d); return moveTicket(t.id, 'waiting', false, {data:{waiting_on:{kind:'time', until:utcStamp(until)}}}); };
+  // ORCH-235: what it waits for (optional), shown on the ticket next to the date
+  const why = h('input', {className:'input', type:'text', maxLength:200, id:'wait-why-' + t.id, 'data-key':'wait-why', placeholder:'For example: the price list from the supplier'});
+  const done = until => {
+    window.orch.close(d);
+    const reason = why.value.trim(), wait = {kind:'time', until:utcStamp(until), ...(reason ? {ref:reason} : {})};
+    return moveTicket(t.id, 'waiting', false, {data:{waiting_on:wait}});
+  };
   const input = h('input', {className:'input', type:'datetime-local', id:'wait-until-' + t.id, 'data-key':'wait-until'});
   const error = h('p', {className:'meta bad', role:'alert', hidden:true});
   const quick = h('div', {className:'row wrap'}, waitChoices().map(([label, at]) => { const when = window.UI?.stamp ? window.UI.stamp(at) : ''; return button(when ? when.charAt(0).toUpperCase() + when.slice(1) : label, 'outline sm', () => done(at)); }));
@@ -404,7 +411,8 @@ function askWaitUntil(t, from) {
     done(at);
   });
   actions.append(save);
-  d.append(h('div', {className:'stack'}, h('p', {className:'meta'}, clean(t.title)), quick,
+  d.append(h('div', {className:'stack'}, h('p', {className:'meta'}, clean(t.title)),
+    h('label', {className:'field', for:why.id}, 'What does it wait for?', why), quick,
     h('label', {className:'field', for:input.id}, 'Or pick a day and time', input), error,
     h('p', {className:'meta'}, 'On that day it shows on Home again.')), actions);
   d.showModal();
@@ -431,7 +439,26 @@ function askReplacedBy(t, from) {
 const movePending = new Map();
 // Optimistic: the card moves and the notice (with Undo) shows at once; a failed save puts the card back.
 // `extra`: more arguments of the change (Accept on a ticket in Review sends the review tip it showed).
+/* ORCH-235: Done on a ticket whose sub-tickets are not all finished asks once (no typed word): "Mark Done anyway"
+   or Cancel. Resolves true to go on. */
+function confirmOpenKids(t, open) {
+  return new Promise(resolve => {
+    const {d, actions} = dialog('Mark Done with open sub-tickets?');
+    let yes = false;
+    d.addEventListener('close', () => resolve(yes));
+    const names = open.slice(0, 3).map(k => k.key || clean(k.title)).join(', ') + (open.length > 3 ? ' and ' + (open.length - 3) + ' more' : '');
+    actions.append(button('Mark Done anyway', 'primary', () => { yes = true; window.orch.close(d); }));
+    d.append(h('div', {className:'stack'}, h('p', {className:'meta'}, clean(t.title)),
+      h('p', {}, (open.length === 1 ? '1 sub-ticket is' : open.length + ' sub-tickets are') + ' not done yet: ' + names + '.')), actions);
+    d.showModal();
+  });
+}
 function moveTicket(id, status, undoing = false, extra = {}) {
+  if (status === 'done' && !undoing && extra.quiet !== true && !extra.kids_ok) {
+    const t = ticketOf(id), open = t && t.status !== 'done' && window.DashHelpers?.childrenOf ? window.DashHelpers.childrenOf(tickets(), t).filter(activeTicket) : [];
+    if (open.length && !snapshot) return confirmOpenKids(t, open).then(yes => yes ? moveTicket(id, status, false, {...extra, kids_ok:true}) : undefined);
+  }
+  if ('kids_ok' in extra) { extra = {...extra}; delete extra.kids_ok; }
   const quiet = extra.quiet === true;  // the caller shows one toast for a whole batch
   if ('quiet' in extra) { extra = {...extra}; delete extra.quiet; }
   if (status === 'done' && !extra.review_tip) extra = {...extra, review_tip:'none'}; // this view showed no review tip
@@ -520,7 +547,7 @@ function ticketTable(visible) {
     body.push(h('tr', {className:'group-row', 'data-key':'week-total'}, h('th', {colSpan:3}, h('span', {className:'meta'}, 'This week')),
       h('th', {className:'numeric'}, h('span', {className:'meta'}, window.DashHelpers.spendWords(total) || '–')), h('th', {colSpan:2})));
   }
-  const heads = [[searchHead(visible.length), ''], ['Due', ''], ['Steps', ''], ['Time · cost', 'numeric'], ['Last change', '']];
+  const heads = [[searchHead(visible.length), ''], ['Due', ''], ['Tasks', ''], ['Time · cost', 'numeric'], ['Last change', '']];
   return h('div', {className:'table-wrap wide-only', 'data-key':'ticket-table'}, h('table', {className:'ticket-table'},
     h('thead', {}, h('tr', {}, heads.map(([label, cls]) => h('th', {scope:'col', className:cls || null}, label)), h('th', {scope:'col'}, h('span', {className:'sr-only'}, 'Actions')))),
     h('tbody', {}, body)));
@@ -591,7 +618,8 @@ function list() {
   const pill = needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null;
   const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(pill, triageButton())}), viewToggle()];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
-  if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {className:'wide-only', 'data-key':'board-wide'}, board()), window.UI?.shortGroup ? phoneList(visible) : null);
+  // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
+  if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
     h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
     h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));

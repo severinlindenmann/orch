@@ -23,6 +23,7 @@ from orch import (
     ghlimit,
     history,
     nextstep,
+    releasekeeper,
     report_tickets,
     tickets,
 )
@@ -48,11 +49,13 @@ KEYS = (
     "diag.enabled",
     "diag.report_tickets",
     "focus.session_typing",
+    "focus.preview",
     "update.auto",
     *config.INSIGHTS_KEYS,
     *ghlimit.SETTING_KEYS,
     "github.dev_expert",
     "github.dev_expert_repo",
+    *releasekeeper.SETTING_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
@@ -298,6 +301,7 @@ def _config(args, root: Path) -> None:
             "diag.enabled": lambda: config.diag_enabled(root),
             "diag.report_tickets": lambda: report_tickets.enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
+            "focus.preview": lambda: config.focus_preview_on(root),
             "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
@@ -306,6 +310,7 @@ def _config(args, root: Path) -> None:
             **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
             "github.dev_expert": lambda: devexpert.role(root),
             "github.dev_expert_repo": lambda: devexpert.repo(root),
+            **{key: (lambda k=key: releasekeeper.get(root, k)) for key in releasekeeper.SETTING_KEYS},
         }
         if args.key:
             key = args.key
@@ -339,6 +344,15 @@ def _config(args, root: Path) -> None:
             {args.key: v},
             f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
         )
+    elif args.sub == "set" and args.key in releasekeeper.SETTING_KEYS:
+        # the release keeper pushes, dispatches, sources github.release_env and reads production: only a
+        # person points it somewhere (turning a setting off is fine for anyone)
+        if args.value.strip().lower() not in ("off", "none", "") and not _actor(args).startswith("human:"):
+            raise Refused(
+                f"Only a person sets {args.key}. Ask the owner to run: orch config set {args.key} ..."
+            )
+        v = releasekeeper.set_setting(root, args.key, args.value)
+        _out(args, {args.key: v}, f"Saved: {args.key} = {v}." if v else f"Cleared: {args.key}.")
     elif args.sub == "set" and args.if_current is not None:
         raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
@@ -415,6 +429,15 @@ def _config(args, root: Path) -> None:
             args,
             {"focus.session_typing": value},
             "Saved: typing into the helper's screen is " + ("on." if value else "off."),
+        )
+    elif args.sub == "set" and args.key == "focus.preview":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = config.set_focus_preview(root, args.value == "on")
+        _out(
+            args,
+            {"focus.preview": value},
+            "Saved: Focus shows " + ("the new Focus (Preview)." if value else "today's Focus."),
         )
     elif args.sub == "set" and args.key == "update.auto":
         if args.value not in ("on", "off"):

@@ -179,6 +179,8 @@ def _status_cmd(data, args) -> str:
 
 def _ref_wait(data, args) -> str:
     """Says the verdict again: the last line is all a caller that reads through a pipe sees (PR 978)."""
+    if data and data[-1].get("status") == "owner merges":
+        return "GREEN; it changes a CI workflow, so the owner merges it with the Merge card: no push by hand"
     if data and all(o.get("ok") for o in data):
         merged = all(o.get("status") == "merged" for o in data)
         return "GREEN" + (
@@ -275,6 +277,7 @@ HINTS = {
     "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
     "review accepted": "orch needs",
     "github expert": "orch ticket list  (a red run opened a top ticket)",
+    "github release": "orch ticket list  (a red run opened a top ticket)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",

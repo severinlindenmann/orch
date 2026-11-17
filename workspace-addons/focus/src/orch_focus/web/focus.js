@@ -46,7 +46,7 @@
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
-    els.stop.hidden = (asking && !running) || (!running && !hasStarted);
+    els.stop.hidden = false;  /* ORCH-255: Continue shows in every state while no helper runs (Pause while it does) */
     els.fresh.disabled = t.manager ? asking : running || asking || !hasStarted;  /* the Manager starts fresh any time (ORCH-147) */
     els.review.hidden = !window.FocusHelpers.reviewBarShown(v);
     els.complete.hidden = v.state !== 'done';

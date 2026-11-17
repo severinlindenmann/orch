@@ -11,8 +11,11 @@ const dash = fs.readFileSync(path.join(__dirname, '../../dashboard/src/orch_dash
 
 const view = (ticket, run = {}, state = 'stopped') => ({state, ticket: {questions: [], checklist: [], ...ticket}, run});
 const CASES = [
-  ['not started', view({status: 'open'}), 'To do'],
-  ['started before, no helper now', view({status: 'open', started: true}), 'To do'],
+  ['not started', view({status: 'open'}), 'Backlog'],  // ORCH-158: open is Backlog
+  ['started before, no helper now', view({status: 'open', started: true}), 'Backlog'],
+  ['to do', view({status: 'ready'}), 'To do'],
+  // ORCH-235: a wait for a date is Waiting, as the board's lane says
+  ['waits for a date', view({status: 'waiting', waiting_on: {kind: 'time', until: '2030-01-07T08:00:00Z'}}), 'Waiting'],
   ['working', view({status: 'active'}, {running: true, helper: {state: 'working'}}, 'working'), 'Working'],
   ['starting', view({status: 'active'}, {running: true, helper: {state: 'starting'}}, 'working'), 'Starting'],
   ['idle helper', view({status: 'active'}, {running: true, helper: {state: 'idle', detail: 'Nothing running for 8 min'}}, 'waiting'), 'Idle'],

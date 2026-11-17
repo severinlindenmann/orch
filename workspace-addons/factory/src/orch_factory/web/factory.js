@@ -154,7 +154,22 @@
     c.classList.add('f-attention'); return c;
   }
   // The run goes on by itself; until its next step has started, say so instead of showing nothing.
-  const startingNote = order => order.starting ? [meta('Starting the ' + stageName(order, order.starting) + ' stage…')] : [];
+  const startingNote = order => order.starting && !waitWords(order) ? [meta('Starting the ' + stageName(order, order.starting) + ' stage…')] : [];
+  // Why no helper works on a started run right now (ORCH-277): the server says what holds it, the page words it.
+  // "starting" is said by startingNote; null = a helper works on it.
+  function waitWords(order) {
+    const w = order.waiting, task = w && w.task ? ' · ' + text(w.task) : '';
+    if (!w || typeof w !== 'object' || w.kind === 'starting') return '';
+    // one line: why nothing moves, then what moves it on (owner, ORCH-277)
+    if (w.kind === 'you') return 'Nothing moves on until you answer' + task + '. Your answer moves it on.';
+    if (w.kind === 'time' && parseWhen(w.until)) return 'Waiting until ' + when(w.until) + task + '. It goes on by itself then.';
+    if (w.kind === 'time' || w.kind === 'ticket') return 'Waiting for another task to finish' + task + '. It goes on by itself then.';
+    if (w.kind === 'held') return 'Your helper has not started yet' + (w.why ? ': ' + noIso(w.why) : '.');
+    if (w.kind === 'watcher') return 'Nothing moves on: the Factory watcher is off. Start orch on this computer again to move it on.';
+    if (w.kind === 'stuck') return 'No helper is working on it, and starting it again did not help. Write to your helper on the order to move it on.';
+    return 'No helper is working on it right now. Factory starts your helper again in a few minutes.';
+  }
+  const waitNote = order => { const words = waitWords(order); return words ? [meta(words)] : []; };
   function answer(order) {
     return group('stack', group('actions', decide(order)), meta(embedded() && order.open ? 'Your answer opens in a card here, where orch confirms it\'s you.' : "You answer on the order's ticket, where orch confirms it's you."));
   }
@@ -241,7 +256,8 @@
     }
     else if (d.type === 'orch.ask.done' && ['delivered', 'queued', 'partial'].includes(d.state)) asked.get(d.id)({state: d.state, said: typeof d.said === 'string' ? d.said.slice(0, 300) : ''});
     else if (d.type === 'orch.looksgood.done') asked.get(d.id)({moved: Number.isInteger(d.moved) ? d.moved : 0});
-    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed' || d.type === 'orch.looksgood.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+    else if (d.type === 'orch.start.done' && validQuestion(d.question)) asked.get(d.id)({question: d.question});
+    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed' || d.type === 'orch.looksgood.failed' || d.type === 'orch.start.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
   function askDashboard(message, wait = 30000) {
     return new Promise(resolve => {
@@ -259,6 +275,23 @@
   // (its own proven "send to the agent" click, the same as typing on the ticket) and starts the agent when none works.
   const PLAN_TEXT = 'Now plan the run: propose the whole run for this order (orch factory propose).';
   const toAgent = (order, words) => askDashboard({type: 'orch.send', ticket: order, text: words});
+  // Start on a parked order (ORCH-277): one click asks the dashboard to run the add-on's start act as YOU; Factory asks
+  // the same proposal again and the dashboard opens that question in its own card, where you press Start.
+  function parkedCard(order) {
+    const c = card('Saved for later', meta('You said Not now to this run. Start it when you are ready.'));
+    if (!embedded() || !validId(order.id)) { c.append(meta('Open Factory in the dashboard to start it with one click.')); return c; }
+    const go = node('button', 'Start', 'btn primary'); go.type = 'button';
+    const status = node('p', null, 'meta'); status.setAttribute('role', 'status'); status.hidden = true;
+    go.addEventListener('click', async () => {
+      go.disabled = true; status.hidden = true;
+      const result = await askDashboard({type: 'orch.start', order: order.id});
+      go.disabled = false;
+      if (result.question) { render(); return; }
+      status.textContent = (result.error ? result.error + ' ' : "That didn't work. ") + 'Nothing was changed.'; status.hidden = false;
+    });
+    c.append(tail(go), status);
+    return c;
+  }
   function draftActions(order, onSent) {
     const box = group('stack f-draft-actions');
     if (!validId(order.id)) return box;
@@ -388,7 +421,7 @@
     const running = orders.filter(o => o.phase === 'started');
     section(primary, 'Running', running, o => o.kind === 'autopilot'
       ? card(o.title, meta('Autopilot order'), p('Routine stops answered by your agent · Ship still asks you'), tail(link('What it decided', '#/autopilot')))
-      : card(o.title, stages(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('ETA ' + when(o.eta))] : []), tail(orderLink(o))));
+      : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('ETA ' + when(o.eta))] : []), tail(orderLink(o))));
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     const shipped = orders.filter(o => o.phase === 'shipped');
     section(secondary, 'Shipped', shipped, o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))));
@@ -489,15 +522,15 @@
     return group('actions', button, status);
   }
   function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'No tiny changes recorded.')); }
-  const statusWord = {open: 'open', todo: 'not started', doing: 'working', done: 'done', blocked: 'blocked'};
+  const statusWord = {open: 'open', todo: 'not started', doing: 'working', active: 'working', waiting: 'waiting', done: 'done', blocked: 'blocked'};
   function orderPage(order) {
-    const phase = order.phase === 'started' ? 'Running' : capital(order.phase);
+    const phase = order.phase === 'started' ? (waitWords(order) ? 'Waiting' : 'Running') : capital(order.phase);
     view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'ETA ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
     if (order.kind === 'autopilot') {
       view.append(card('Autopilot order', p('Routine stops answered by your agent · Ship still asks you'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
     }
-    const lineCard = card('The line', stages(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
+    const lineCard = card('The line', stages(order), ...waitNote(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
     const main = group('stack', lineCard, card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
     const crew = card('Crew now');
     for (const c of array(order.crew)) {
@@ -522,6 +555,7 @@
       if (draftWaiting(order)) c.classList.add('f-attention');
       aside.append(c);
     }
+    if (order.phase === 'parked') aside.append(parkedCard(order));
     if (order.open) {
       const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);

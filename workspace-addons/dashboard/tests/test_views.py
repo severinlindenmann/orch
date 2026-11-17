@@ -373,6 +373,12 @@ def test_accordion_fields_pass_the_check():
     assert check_view(_acc_view()) is not None
 
 
+def test_a_switch_may_say_what_it_turns_on():
+    v = _acc_view()
+    v["blocks"][0]["items"][0]["toggle"]["text"] = "Repeats"
+    assert check_view(v) is not None
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -380,6 +386,8 @@ def test_accordion_fields_pass_the_check():
         lambda i: i["actions"][0]["action"].update(command="rm"),
         lambda i: i["actions"][0]["action"]["args"].update(x="<b>"),
         lambda i: i["toggle"].update(on="yes"),
+        lambda i: i["toggle"].update(text="x" * 25),
+        lambda i: i["toggle"].update(text=""),
         lambda i: i["tickets"][0].update(id="../x"),
         lambda i: i["detail"][0].update(html="<b>"),
         lambda i: i["detail"].extend([{"label": "x"}] * 12),
@@ -634,7 +642,7 @@ def test_v1_home_and_ticket_controls():
     for old in ("Jump to", "status-jumps", "board-jump", "boardCol"):
         assert old not in tickets
     css = (WEBDIR / "pages" / "tickets.css").read_text()
-    assert ".board .kanban-col{display:block" in css
+    assert ".board .kanban-col{flex:0 0 82%" in css  # ORCH-240: phone lanes side by side, swiped
     # Reduced motion for Home comes from the kit (motion.css switches every animation and transition off).
     assert 'href="kit/motion.css"' in (WEBDIR / "index.html").read_text()
 

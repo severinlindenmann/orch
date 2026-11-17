@@ -178,3 +178,15 @@ Final component validation: the requested `node base/scripts/qa-components.cjs 1
 - UX round item 4 (owner: focus-one-ticket): when something needs the person, Focus opens on the next ticket that needs them (oldest question, then oldest result), with "See everything on Home" and "Live now and areas" beside it. The start page (Live now, areas, jobs) shows when nothing waits.
 
 - Fix wave b6 (15 Nov): "Watch live" on a running ticket (agent bar and the ticket's "Live session" card) opens Focus on that ticket (`#addon/focus/t/<ticket>`, Live tab is the default). The card's terminal commands sit behind one small "Copy command" menu. "Tickets in focus" lists tickets a helper is working on first, then the most recently updated. Home: the phone-mode "ended" notice is one toast (then marked seen); the sidebar shows "Pick your name" (opens the person menu) until a person is chosen.
+
+## Focus draft D: the agreed Focus mockup (ORCH-251, ORCH-262, 17 Nov)
+focus-v4d.html (script focus-v4d.js) is the one Focus mockup the owner picked: the live wall of sessions (Needs you as a big card, working tiles, idle rows, zoom into one) with a bar under every dashboard page that opens into a layer (right, bottom, split or full screen), chat or terminal per session, the result widgets and the Features sheet. Demo data and a simulated terminal; picks stay in this browser. It is the visual source of truth for building the new Focus behind the Preview switch.
+The earlier drafts (v2, layer v3, v4 A/B/C) were removed once D was chosen; they live in the git history of PR 1262.
+
+## The Preview switch for the new Focus (ORCH-264, 17 Nov)
+
+focus-preview.html
+- What Focus shows while Settings > Add-ons > Focus > Preview is on: an empty shell with the Preview tag and a way back. The wall, bar and layer of draft D fill it in later tasks.
+
+../settings/addon-detail-focus.html
+- New row Preview: "Try the new Focus", off by default.

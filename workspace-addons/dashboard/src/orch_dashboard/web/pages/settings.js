@@ -281,7 +281,10 @@ function copiesCard(settings) {
 // the sync add-on's own verbs on the ONE generic op: `orch sync act status|check|set|now|use-public -- <target>`.
 // The address and the choice come only from the person's clicks here; choices that decide for the person are signed.
 const SYNC = 'sync';
-const SYNC_WHERE = [['off', 'Off'], ['local', 'On this computer only'], ['remote', 'Another computer or your own storage']];
+// Each choice says what it does in one line below it (bug hunt 17 Nov: three bare choices).
+const SYNC_WHERE = [['off', 'Off', 'No copy is kept.'],
+  ['local', 'On this computer only', 'A spare copy here, updated when something changes. Nothing leaves this computer.'],
+  ['remote', 'Another computer or your own storage', 'A copy in a private place you own, such as a GitHub repository. You give its address next.']];
 const SYNC_EVERY = [['5', '5 min'], ['15', '15 min'], ['60', '1 hour']];
 const SYNC_PUBLIC = 'This sync address is public. Anyone can read your tickets.';
 const SYNC_STATUS = {synced:['ok', 'Last synced'], never:['', 'Not synced yet'], offline:['', 'Offline, will sync when connected'], syncing:['live', 'Syncing…'], paused:['you', 'Paused, review below']};
@@ -406,11 +409,12 @@ function syncCard(settings) {
   if (!syncUi.loading && !syncUi.timer) queueMicrotask(syncLoad);  // then every 15 s while Settings is open
   const cur = syncNow(), saved = syncSaved(card), changed = !!card && !syncSame(cur, saved), off = !card || syncUi.busy;
   const paused = card?.shown === 'paused', blocked = paused || !!card?.public;
-  const radios = SYNC_WHERE.map(([value, label]) => {
+  const radios = SYNC_WHERE.map(([value, label, says]) => {
     const radio = h('input', {type:'radio', name:'sync-where', value, 'data-sync-where':value, 'data-key':'sync-where-' + value, disabled:off});
-    radio.checked = cur.where === value;
+    radio.checked = !!card && cur.where === value;  // no choice is shown before the real status is read (ORCH-287)
     radio.addEventListener('change', () => { syncUi.draft = {...syncNow(), where:value}; render(); });
-    return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio, h('span', {}, label));
+    return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio,
+      h('span', {className:'radio-text'}, h('span', {}, label), h('span', {className:'meta', 'data-key':'sync-where-says-' + value}, says)));
   });
   const addr = h('input', {type:'text', className:'input mono', id:'sync-addr', 'data-key':'sync-addr', 'data-settings-field':'sync-addr', value:cur.addr, placeholder:'https://github.com/your-name/orch-copy', spellcheck:'false', autocomplete:'off', disabled:off});
   addr.addEventListener('input', () => { syncUi.draft = {...syncNow(), addr:addr.value}; syncUi.check = null; render(); });
@@ -459,10 +463,15 @@ function syncCard(settings) {
   const details = card && card.mode !== 'off' ? h('div', {className:'sync-details', id:'sync-details', 'data-key':'sync-details'},
     h('ul', {}, h('li', {'data-key':'sync-last-error'}, syncLastError(card)), notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
   return wrap([
-    h('div', {className:'sync-head'}, h('h3', {}, 'Sync'), card && card.mode !== 'off' ? syncStatusLine(card) : null),
+    // On the Sync page its heading already says Sync: the card does not repeat it (bug hunt 17 Nov).
+    (() => {
+      const own = route().kind !== 'addon', status = card && card.mode !== 'off' ? syncStatusLine(card) : null;
+      return own || status ? h('div', {className:'sync-head'}, own ? h('h3', {}, 'Sync') : null, status) : null;
+    })(),
     paused && card.mode !== 'off' ? syncPausedHelp(card) : null,
     warn,
     h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
+    card ? null : h('p', {className:'meta', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…'),
     remoteBox, review, details]);
 }
 async function syncSave() {
@@ -542,7 +551,7 @@ function everydayCard(settings, phoneAddon) {
   const row = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow set-ctl'}, value), snapshot ? null : action);
   return h('div', {className:'stack', 'data-key':'settings-everyday'}, h('h2', {className:'set-sub'}, 'Everyday settings'), h('div', {className:'card'},
     row('Helper', chosen ? chosen.label : 'No helper chosen yet', go('agent', 'Manage', 'settings-everyday-helper'), 'settings-everyday-helper-row'),
-    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
+    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' + (window.mobileEndWords && state.mobile_mode.ends_at ? ' · until ' + window.mobileEndWords(state.mobile_mode.ends_at) : '') : 'Off · switches off by itself after ' + state.mobile_mode.default_hours + ' h') : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
 }
 // Phone & workspaces (draft settings-phone): 1. the relay connection, 2. phones (paired on the relay admin page) + delivery,
 // then the workspaces this one may talk to. Everything comes from the relay add-on's saved connection (no network).
@@ -600,6 +609,8 @@ function addonDetailPage(addon) {
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
+    addon.page?.live_session === true && addon.active && typeof state.settings?.focus_preview_on === 'boolean' ? row('Preview', h('div', {}, settingsText('p', {}, 'Try the new ' + label), settingsText('p', {className:'meta'}, 'Still being built. Turn it off to go back to today\u2019s ' + label + '.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.focus_preview_on, 'aria-label':'Try the new ' + label, 'data-action':'live-preview', 'data-key':'addon-detail-live-preview', disabled:snapshot || settingsBusy.has('live-preview')}, state.settings.focus_preview_on ? 'On' : 'Off'), 'addon-detail-live-preview-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
@@ -980,13 +991,20 @@ globalThis.orchFrameChan = () => { const r = route(); return r.kind === 'page' ?
 // its files, pictures, answers or ticket pages (api/, page/, kit/, web/, or any name with a dot): those can carry
 // content an agent made (ORCH-186 review H1).
 const frameEntry = path => /^[A-Za-z0-9_\/-]{0,300}$/.test(path) && !/^(api|page|kit|web)(\/|$)/i.test(path) && !path.includes('//');
+// The shown page moved inside itself (frame-at, ORCH-241): while the address is the one it moved to, the frame keeps
+// the address it was opened with, so drawing the page again never reloads it. {id, hash, pass, src}
+// Only while that same frame is still on screen: a new frame (back from another page) opens at the address's place.
+let frameKeep = null;
+const frameShown = () => document.querySelector('iframe.embed[data-key="embed"]');
 function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
   const shipped = !!addons().find(a => a.name === r.id)?.shipped, base = '/addon/' + r.id + '/' + r.path;
   const entry = shipped && frameEntry(r.path), p = entry ? framePass(r.id) : null;
   if (entry && !p) { const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; return wait; }
-  const src = entry ? base + '#orch-frame=' + p.pass + '&orch-file=' + p.file + '&orch-chan=' + p.chan + (r.inner ? '&' + r.inner : '') : base + (r.inner ? '#' + r.inner : '');
+  const kept = entry && frameKeep && frameKeep.id === r.id && frameKeep.hash === r.hash && frameKeep.pass === p.pass && frameShown()?.getAttribute('src') === frameKeep.src ? frameKeep.src : null;
+  if (!kept) frameKeep = null;
+  const src = kept || (entry ? base + '#orch-frame=' + p.pass + '&orch-file=' + p.file + '&orch-chan=' + p.chan + (r.inner ? '&' + r.inner : '') : base + (r.inner ? '#' + r.inner : ''));
   const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', sandbox:shipped ? SHIPPED_SANDBOX : 'allow-scripts'});  // allow alone: both log a warning (ORCH-186)
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
@@ -995,9 +1013,10 @@ function pageFrame(r) {
 }
 // The shown shipped add-on page asks to open another of its places (a link, or a fresh pass after a reload or an
 // expired one): the dashboard opens it, so the new page gets a pass. A link to the dashboard's own page moves it.
+// A move inside the page itself (frame-at) only changes the address: the frame is not loaded again.
 globalThis.addEventListener?.('message', e => {
   const d = e.data, r = route();
-  if (snapshot || e.origin !== 'null' || !d || (d.orch !== 'frame-go' && d.orch !== 'frame-top') || r.kind !== 'page') return;
+  if (snapshot || e.origin !== 'null' || !d || !['frame-go', 'frame-top', 'frame-at'].includes(d.orch) || r.kind !== 'page') return;
   const frame = document.querySelector('iframe.embed[data-key="embed"]');
   if (!frame || e.source !== frame.contentWindow || !addons().find(a => a.name === r.id)?.shipped) return;
   const hash = typeof d.hash === 'string' && /^[A-Za-z0-9_\/-]{0,200}$/.test(d.hash) ? d.hash : null;
@@ -1005,6 +1024,15 @@ globalThis.addEventListener?.('message', e => {
   if (d.orch === 'frame-top') { if (hash && d.chan && d.chan === globalThis.orchFrameChan()) location.hash = '#' + hash; return; }
   const prefix = '/addon/' + r.id + '/', rel = typeof d.path === 'string' && d.path.startsWith(prefix) ? d.path.slice(prefix.length) : null;
   if (rel === null || rel.startsWith('/') || !frameEntry(rel)) return;  // only the add-on's own page gets opened with a pass
+  if (d.orch === 'frame-at') {  // only the page that had the code, and only a place on the page that is shown
+    if (!d.chan || d.chan !== globalThis.orchFrameChan() || rel !== r.path) return;
+    const at = '#addon/' + r.id + (rel ? '/' + rel : '') + (hash ? '#' + hash : '');
+    if (location.hash === at) return;
+    const src = frame.getAttribute('src') || '';
+    try { followAddress(at); } catch (_) { return; }  // the browser may refuse many address changes in a row
+    frameKeep = {id:r.id, hash:at, pass:/#orch-frame=([A-Za-z0-9_-]+)&/.exec(src)?.[1] || null, src};  // the pass the frame really has
+    return;
+  }
   if (d.fresh && d.chan && d.chan === globalThis.orchFrameChan()) {  // new passes only for the page that had the code
     if (Date.now() - (frameFresh.get(r.id) || 0) < 5000) return;
     frameFresh.set(r.id, Date.now()); framePasses.delete(r.id);

@@ -181,7 +181,22 @@ function hashKind(hash) {
   const k = String(hash || '').split('?')[0].replace(/^#/, '').split('/')[0];
   return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : k === 'settings' ? 'settings' : ['addon', 'open', 'chat', 'general'].includes(k) ? 'page' : 'home';
 }
+// #addon/<name> of an add-on that is installed but off: say so and offer the switch (ORCH-242), not a bare 404.
+function offAddonName(hash) {
+  const m = /^#addon\/([a-z][a-z0-9-]{1,31})(?:[/#?]|$)/.exec(hash || '');
+  const row = m && array(state?.settings?.addons).find(a => a && a.name === m[1]);
+  return row && !row.active && !addons().some(a => a.name === m[1]) ? m[1] : null;
+}
 function notFoundPage() {
+  const off = offAddonName(location.hash);
+  if (off) {
+    const label = capitalise(off);
+    return fragment(heading(label + ' is turned off', 'Turn it on in Settings to use this page.'),
+      h('div', {className:'state-frame', 'data-key':'addon-off'}, h('section', {className:'card pad stack'},
+        h('p', {className:'muted'}, label + ' is turned off, so it has no page right now.'),
+        h('div', {className:'actions row'}, h('a', {className:'btn primary sm', href:'#settings/addons/' + encodeURIComponent(off)}, 'Open ' + label + ' settings'),
+          h('a', {className:'btn ghost sm', href:'#home'}, 'Go to Home')))));
+  }
   return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
     h('div', {className:'state-frame', 'data-key':'not-found'}, h('section', {className:'card error-hero'},
       h('span', {className:'error-number', 'aria-hidden':'true'}, '404'),
@@ -277,6 +292,11 @@ function accept(next) {
   render(first ? new Set() : arrived);
 }
 function route() {
+  const r = pageRoute();
+  // The Preview switch (the live-session add-on's settings): on, its addresses show the new live page (pages/live.js)
+  return r.kind === 'page' && typeof livePreviewOn === 'function' && livePreviewOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
+}
+function pageRoute() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   // The Notes page is gone: its "What changed" is on Home, and old note links land there.
@@ -323,15 +343,21 @@ globalThis.addEventListener?.('message', e => {
   if ((e.origin !== location.origin && !chan) || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
+// An add-on page moved inside itself (ORCH-241): the address follows it without a history entry of its own (the
+// frame's move made one, so Back goes back inside the frame) and without drawing the page again.
+function followAddress(hash) {
+  history.replaceState(null, '', hash);
+  renderedRoute = route().hash;
+}
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
   if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
-  if (r.kind === 'page' && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
+  if ((r.kind === 'page' || r.kind === 'live') && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? 'Page not found' : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -370,7 +396,7 @@ function render(arrived = new Set()) {
   if (newTicket && newTicket.className !== newCls) newTicket.className = newCls;
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
-  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
+  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' || r.kind === 'live' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
   const needsWords = window.DashHelpers.needsYou(needCount), contactsAddon = addons().find(a => a.dashboard?.panel === 'phone' && a.dashboard);
   // The needs-you number sits on Review (the page that lists exactly those questions and results), not on Home (ORCH-63)
@@ -390,7 +416,7 @@ function render(arrived = new Set()) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
@@ -791,6 +817,13 @@ main.addEventListener('click', async event => {
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
+  if (action === 'live-preview') {
+    if (settingsBusy.has('live-preview')) return;
+    const on = state.settings?.focus_preview_on !== true;
+    const result = await settingsSend('focus_preview.set', {on}, 'live-preview'), label = addonLabel(addons().find(a => a.page?.live_session === true));
+    if (result.ok) window.orch.toast(on ? label + ' now shows the new ' + label + ' (Preview).' : label + ' is back to today\u2019s ' + label + '.', 'ok');
+    return;
+  }
   if (action === 'session-typing') {
     if (settingsBusy.has('session-typing')) return;
     const on = state.settings?.typing_on !== true;
@@ -831,7 +864,15 @@ main.addEventListener('click', async event => {
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
     if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;
-    const send = () => settingsSend('addon.set', {name:addon.name, on:!addon.active}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
+    const send = async () => {
+      // Turning off: the link and the page go at once, not after the services restart (ORCH-242).
+      const before = state.addons;
+      const wasActive = addon.active;
+      if (wasActive) { state.addons = array(before).filter(a => a.name !== addon.name); addon.active = false; }
+      const result = await settingsSend('addon.set', {name:addon.name, on:!wasActive}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
+      if (!result.ok && wasActive) { state.addons = before; addon.active = true; render(); }
+      return result;
+    };
     if (addon.active) await send();
     else settingsConfirm('Turn on ' + capitalise(addon.name) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
     return;

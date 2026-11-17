@@ -125,6 +125,18 @@ def free_port(used: set[int]) -> int:
     raise RuntimeError("no free port in 18000-18999")
 
 
+def wait_for(fn, secs: float = 30, step: float = 0.1):
+    """Wait for a condition with a time limit: fn's first truthy value, or None after secs. Use this instead of a
+    fixed sleep (a fixed sleep is slow on a fast machine and too short on a loaded runner)."""
+    end = time.time() + secs
+    while time.time() < end:
+        v = fn()
+        if v:
+            return v
+        time.sleep(step)
+    return None
+
+
 def wait_http(url: str, secs: float = 30) -> bool:
     end = time.time() + secs
     while time.time() < end:
