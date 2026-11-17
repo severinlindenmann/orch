@@ -218,7 +218,7 @@ def test_gate_red_opens_a_ticket(tmp_path, capsys):
         prs=pr(checks=bad),
         heads={"develop": DEV, "main": MAIN, "unreleased": UN3},
     )
-    assert out["did"] == ["ticket:Release 31 gate is red: macos"]
+    assert out["did"] == ["ticket:Release 31 checks are red: macos"]
 
 
 def test_gate_red_and_develop_moved_closes_and_recuts(tmp_path, capsys):
@@ -918,7 +918,6 @@ def test_only_the_asked_question_answered_by_a_person_counts():
     assert rk.deploy_answer(t, 31, "q7") is None  # a look-alike question is not the card
     t = {"questions": [{**q, "answered_by": "human:t"}]}
     assert rk.deploy_answer(t, 31, "q7") == "Deploy now"
-    assert rk.deploy_answer(t, 31, "q7", proven=lambda tk, qq: False) is None  # a synced answer
 
 
 def test_an_agents_deploy_now_opens_no_ticket(tmp_path):

@@ -6,12 +6,12 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
   idle     develop has unreleased pull requests and the last release is MIN_GAP_H (3) hours ago or more, or
            one of them carries the GitHub label urgent: the candidate is develop's head. Covered already
            when the nightly runs of the release workflows on that very commit are green; else the keeper
-           dispatches them itself -> testing. Runs are judged job by job: the roll-up job (gate) and
+           dispatches them itself -> testing. Runs are judged job by job: the roll-up job (ROLLUP_JOBS) and
            known-red jobs (--known-red <job>=<ticket>, while that ticket is open) neither block nor wait;
            they are named in the highlights.
   testing  every run on the candidate green -> cut: branch release/part<N>-<MMDD> from the candidate in
            its own worktree, merge main with -s ours (tree equals develop), push, open the pull request
-           into main -> gate. A red run -> one top ticket (a helper starts at once) and the candidate is
+           into main -> its checks. A red run -> one top ticket (a helper starts at once) and the candidate is
            skipped until develop moves.
   gate     the release pull request's checks: green -> the Merge card on the role ticket (orch ask
            --merge --release) -> card. Red -> one top ticket; when develop moves past it the old pull
@@ -800,14 +800,6 @@ class World:
 
         self.act(f"note:{text[:80]}", go)
 
-    def proven(self, ticket: dict, q: dict) -> bool:
-        """The answer was made on this computer (never a synced one): history.answer_proven."""
-        if self.sim is not None:
-            return q.get("proven", True) is True
-        from orch import history
-
-        return history.answer_proven(self.root, ticket, q)
-
     def ask(self, args: list[str]):
         """A question on the role ticket through `orch ask` (the same card a helper makes)."""
         return self.orch(["ask", *args, "--by", BY])
@@ -897,7 +889,8 @@ class World:
                     self.cfg.repo,
                     "--delete-branch",
                     "--comment",
-                    "Closed by the release keeper: develop moved past a red gate; the release is cut again.",
+                    "Closed by the release keeper: develop moved past its red checks; the release is cut "
+                    "again.",
                 ]
             )
             if rel.get("wt") and Path(rel["wt"]).exists():
@@ -1007,8 +1000,6 @@ def release_body(n: int, sha: str, unreleased: list[dict], rows: list[dict], rep
     lines += [
         "",
         f"Cut by the orch release keeper after green {signal} on this commit. Release merge, no new code.",
-        "",
-        "\U0001f916 Generated with [Claude Code](https://claude.com/claude-code)",
     ]
     return "\n".join(lines)
 
@@ -1120,30 +1111,31 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             waiting = not_reported(p.get("statusCheckRollup"), req or REQUIRED_FALLBACK)
             if waiting:
                 return out + [
-                    f"release {rel['n']}: gate checks still running (not reported yet: {', '.join(waiting)})"
+                    f"release {rel['n']}: release checks still running "
+                    f"(not reported yet: {', '.join(waiting)})"
                 ]
             ignore = frozenset(w.known_red()) | ROLLUP_JOBS
             g = checks_green(p.get("statusCheckRollup"), ignore)
             if g == "pending":
-                return out + [f"release {rel['n']}: gate checks still running"]
+                return out + [f"release {rel['n']}: release checks still running"]
             if g == "red":
                 bad = ", ".join(failed_checks(p.get("statusCheckRollup"), ignore)) or "see the pull request"
                 if h["develop"] != rel["sha"] and not open_red_ticket(
-                    w.tickets(), f"Release {rel['n']} gate"
+                    w.tickets(), f"Release {rel['n']} checks"
                 ):
                     w.close_release(rel)
                     st["release"] = None
                     st["skip_sha"] = None
                     return out + [
-                        f"release {rel['n']}: gate was red, develop moved and the fix ticket is closed: "
+                        f"release {rel['n']}: checks were red, develop moved and the fix ticket is closed: "
                         "closed the pull request; cut again next pass"
                     ]
                 return out + red(
                     w,
                     st,
                     role,
-                    f"Release {rel['n']} gate is red: {bad}"[:120],
-                    f"Release {rel['n']} gate",
+                    f"Release {rel['n']} checks are red: {bad}"[:120],
+                    f"Release {rel['n']} checks",
                     f"The release pull request {p.get('url')} into main is red on: {bad}. Fix it on "
                     "develop (a normal pull request); the release keeper closes this release and cuts it "
                     "again once develop "
@@ -1170,7 +1162,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                     f"release {rel['n']}: the Merge card was refused: {(r.stderr or r.stdout).strip()[:200]}"
                 ]
             rel["phase"] = "card"
-            out.append(f"release {rel['n']}: gate green, Merge card on the role ticket")
+            out.append(f"release {rel['n']}: checks green, Merge card on the role ticket")
         if rel["phase"] == "card":
             r = w.act("tend-releases", lambda: tend_releases(w))
             p = w.pr(rel["pr"]) if r is not None or w.sim is not None else p
@@ -1292,7 +1284,7 @@ def cut_now(w: World, st: dict, h: dict) -> list[str]:
     if not got:
         return [f"release {rel['n']}: cut failed (see the log)"]
     rel.update(phase="gate", pr=got["number"], url=got["url"], wt=got["wt"], main_before=h["main"])
-    return [f"release {rel['n']}: cut, pull request {got['url']}; gate next"]
+    return [f"release {rel['n']}: cut, pull request {got['url']}; its checks next"]
 
 
 def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
@@ -1377,7 +1369,7 @@ def _asked_id(r) -> str | None:
 
 
 def deploy_answered(w: World, st: dict, role: str, dep: dict) -> list[str]:
-    ans = deploy_answer(w.ticket(role), dep["n"], dep.get("qid"), w.proven)
+    ans = deploy_answer(w.ticket(role), dep["n"], dep.get("qid"), w.root if w.sim is None else None)
     parts = dep["what"].split(" and ")
     if ans == "Deploy now" and dep.get("sha") and all(w.running(x, dep["sha"]) for x in parts):
         st["deploy"] = None  # deployed by hand between the card and the answer: no second production deploy
@@ -1474,18 +1466,21 @@ def helper_steps(prep: dict, script: str | None = None) -> str:
     return "".join(lines)
 
 
-def deploy_answer(ticket: dict, n: int, qid: str | None = None, proven=None) -> str | None:
+def deploy_answer(ticket: dict, n: int, qid: str | None = None, root: Path | None = None) -> str | None:
     """A person's answer to the deploy card: the very question the keeper asked (its id; the words only for a
-    card asked before ids were kept), answered by a human: on this computer. Anything else is no answer:
-    "Deploy now" leads to production, so an agent's or a synced answer never counts."""
+    card asked before ids were kept), answered by a human:. Anything else is no answer: "Deploy now" leads to
+    production, so an agent's answer never counts, and with `root` the ticket is read through
+    history.shown_ticket, where an answer this computer cannot prove (a synced one) is not a human: one."""
+    if root is not None:
+        from orch import history
+
+        ticket = history.shown_ticket(root, ticket)
     for q in ticket.get("questions") or []:
         if qid is not None and q.get("id") != qid:
             continue
         if qid is None and f"Release {n} {DEPLOY_ASK}" not in (q.get("text") or ""):
             continue
         if not q.get("answer") or not str(q.get("answered_by") or "").startswith("human:"):
-            continue
-        if proven is not None and not proven(ticket, q):
             continue
         return q["answer"]
     return None
