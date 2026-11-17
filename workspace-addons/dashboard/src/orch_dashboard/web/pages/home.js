@@ -596,7 +596,7 @@ function lineBanner() {
   return h('div', {className:'banner attn', role:'status', 'data-key':'start-line'},
     h('div', {className:'grow'}, h('strong', {}, 'No helper starts right now: ' + why + '.'),
       h('p', {}, n + (n === 1 ? ' ticket waits' : ' tickets wait') + ' in line and ' + (n === 1 ? 'starts by itself' : 'start by themselves') + ' when that passes: ', loginTicketLinks(list))),
-    line.limit ? h('a', {className:'btn outline sm', href:'#settings/agent', 'data-key':'start-line-limit'}, 'Allow more helpers') : null);
+    line.limit ? h('a', {className:'btn outline sm', href:'#settings/helper', 'data-key':'start-line-limit'}, 'Allow more helpers') : null);
 }
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further
 // question, result to check and change to add (one button each); the notes that need no answer are one quiet line.

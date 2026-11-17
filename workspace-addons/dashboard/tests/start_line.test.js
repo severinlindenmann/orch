@@ -32,7 +32,7 @@ test('busy computer: one banner with the reason and the waiting tickets', () => 
 test('the helper limit: the banner offers one click to allow more', () => {
   const v = banner({waiting:['t_aaaaaa'], why:'3 helpers are working at once, the most you allowed', limit:3});
   assert.match(text(v), /1 ticket waits in line and starts by itself/);
-  assert.equal(all(v, n => n.attrs?.href === '#settings/agent').length, 1);
+  assert.equal(all(v, n => n.attrs?.href === '#settings/helper').length, 1);
 });
 
 test('no reason, nothing waiting, an unknown ticket or a snapshot: no banner', () => {
