@@ -101,6 +101,10 @@ def label(cmd: str) -> str:
     words = [w for w in cmd.split() if "=" not in w or w.startswith("-")]  # drops leading VAR=value
     if not words:
         return "a command"
+    if _base(words[0]) == "orch" and words[1:3] == ["github", "wait"]:
+        kind = next((w for w in words[3:] if not w.startswith("-")), "")
+        if kind in ("merge", "pr", "comment", "other"):  # waits for GitHub's write limit, not for checks
+            return f"the GitHub {'merge' if kind == 'merge' else kind} limit"
     if _base(words[0]) == "orch" and words[1:3] in (["ref", "wait"], ["github", "wait"]):
         return "the pull request checks"
     for (
