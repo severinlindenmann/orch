@@ -12,7 +12,7 @@ from pathlib import Path
 
 from orch import net, relay, tickets
 from orch.errors import Refused
-from orch.text import clean_untrusted
+from orch.text import at_word, clean_untrusted
 
 SENT_LOG = ("run", "relay", "sent.jsonl")  # under .orch/, which is not tracked by git
 SENT_MAX = 400  # lines kept in the sent log
@@ -26,8 +26,8 @@ KINDS = {
 
 
 def plain(text, limit: int = 120) -> str:
-    one = " ".join(clean_untrusted(str(text), limit * 2).replace("<", "").replace(">", "").split())
-    return one[:limit].rstrip() or "-"
+    one = " ".join(clean_untrusted(str(text), limit * 2 + 1).replace("<", "").replace(">", "").split())
+    return at_word(one, limit) or "-"
 
 
 def _size(n) -> str:
@@ -230,6 +230,20 @@ def fold(rows: list[tuple[str, dict, tuple]]) -> list[tuple[str, dict]]:
     return out
 
 
+def _question_state(root: Path, entry: dict) -> str:
+    """"Answered" or "Taken back" for a question the ticket has moved on from, else "" (it stays "Question")."""
+    rec = net.read_json(relay._asked_path(root), {}).get(entry.get("id"))
+    if not isinstance(rec, dict) or not isinstance(rec.get("ticket"), str):
+        return ""
+    with contextlib.suppress(Refused, OSError, ValueError):
+        for q in tickets.load(root, rec["ticket"]).get("questions") or []:
+            if isinstance(q, dict) and q.get("id") == rec.get("question_id"):
+                if q.get("answer") is not None:
+                    return "Answered"
+                return "Taken back" if isinstance(q.get("taken_back"), dict) else ""
+    return ""
+
+
 def view(root: Path) -> dict:
     now = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     out: dict = {"schema": "orch.addon-view/1", "generated_at": now, "blocks": []}
@@ -296,6 +310,7 @@ def view(root: Path) -> dict:
         to_phones: bool = False,
         auto: bool = False,
         about: str = "",
+        state: str = "",
     ) -> tuple[str, dict, tuple]:
         if auto and re.fullmatch(r"Tasks:\s*-?", line):
             line = "No tasks yet"  # an empty task list is said in words, never as a bare "Tasks:"
@@ -316,7 +331,7 @@ def view(root: Path) -> dict:
         else:
             item["subtitle"] = plain(" · ".join(x for x in (_stamp(at), line) if x), 200)
             if type_ != "text":
-                item["chips"] = [{"label": KINDS[type_]}]
+                item["chips"] = [{"label": state or KINDS[type_]}]
         return at, item, (title, arrow, type_, line, extra)
 
     for m in _received(root):
@@ -348,6 +363,7 @@ def view(root: Path) -> dict:
                 e["to"] == "phones",
                 auto,
                 _about(root, e.get("ticket"), e.get("about")),
+                _question_state(root, e) if e["type"] == "question" else "",
             )
         )
     rows.sort(key=lambda r: r[0], reverse=True)

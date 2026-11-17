@@ -63,3 +63,15 @@ def clean_untrusted(text: str, limit: int = 2000) -> str:
     if cut != -1:
         text = text[:cut]
     return text[:limit]
+
+
+def at_word(text: str, limit: int) -> str:
+    """`text` cut to at most `limit` characters at a whole word, with an ellipsis when something was left out."""
+    if len(text) <= limit:
+        return text
+    cut = text[: max(limit - 1, 0)]
+    if text[len(cut)].isspace():
+        head = cut
+    else:
+        head = cut.rsplit(None, 1)[0] if len(cut.split()) > 1 else cut  # one long word: cut inside it
+    return head.rstrip(" ,;:.-–—") + "\u2026"

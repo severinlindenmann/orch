@@ -2455,3 +2455,34 @@ def test_question_times_sent_at_and_answered_at(proj, monkeypatch):
     tickets.answer(proj, tid, "q1", "yes", "human:tester", "phone")
     q = tickets.load(proj, tid)["questions"][0]
     assert q["answered_at"].endswith("Z") and q["answered_at"] >= first and q["via"] == "phone"
+
+
+def test_view_long_rows_end_at_a_word_and_answered_questions_say_answered(proj, run, rel):
+    """ORCH-138: no row is cut mid-word without an ellipsis, and a question the ticket has answered shows
+    "Answered" instead of "Question"."""
+    from orch import net, relay, relay_view, tickets
+
+    connect(run, rel)
+    tid = json.loads(run("ticket", "new", "Write the report", "--json")[1])["id"]
+    t = tickets.load(proj, tid)
+    t["questions"] = [{"id": "q1", "text": "Is this done?", "answer": "yes"}]
+    tickets.save(proj, t)
+    net.write_json(relay._asked_path(proj), {"m_ans000000001": {"ticket": tid, "question_id": "q1"}}, True)
+    words = "Replace a key opens the hidden key field at once and shows what to do next. " * 3
+    for mid, qtext in (("m_ans000000001", "Is this done?"), ("m_ans000000002", words)):
+        relay_view.record_sent(
+            proj,
+            {
+                "id": mid,
+                "to": "phones",
+                "type": "question",
+                "ticket": tid,
+                "created_at": "2026-11-04T10:00:00Z" if mid.endswith("1") else "2026-11-04T10:05:00Z",
+                "body": {"question_id": "q1" if mid.endswith("1") else "q2", "title": "T", "text": qtext},
+            },
+        )
+    items = json.loads(run("relay", "view", "--json")[1])["blocks"][0]["items"]
+    by_text = {("Is this done?" in i["subtitle"]): i for i in items}
+    assert by_text[True]["chips"] == [{"label": "Answered"}]
+    assert by_text[False]["chips"] == [{"label": "Question"}]  # asked, no answer yet
+    assert by_text[False]["subtitle"].endswith("…") and not by_text[False]["subtitle"].endswith("a…")
