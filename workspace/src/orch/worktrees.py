@@ -801,7 +801,7 @@ def _add_copy(
         return None, "git could not read the copy's branch; try again"
     made_branch = rc == 1
     if bring_back:
-        # The branch the work goes back to and the commit it starts from are recorded (signed) BEFORE
+        # The branch the work goes back to and the commit it starts from are recorded (guarded store) BEFORE
         # anything is made: a detached HEAD or an unusable store is a plain reason, never a half-made copy.
         rc, origin, _ = _git(["symbolic-ref", "-q", "HEAD"], top, read_only=True, filters=False)
         if rc != 0 or not origin.startswith("refs/heads/"):
@@ -870,7 +870,7 @@ def _add_copy(
 # (instruction files, the agent tools' settings, skills) are links to the workspace's own, so the agent reads
 # the same instructions as in the workspace; orch writes its own local instruction file there.
 # The work is handed over with a pull request: orch never merges these copies back (no review tip, no
-# approval, no bring-back). A project copy goes only when nothing is lost: see _remove_multi.
+# person's go-ahead card, no bring-back). A project copy goes only when nothing is lost: see _remove_multi.
 
 MULTI_MAX = 12  # projects in one copy folder: more is not a workspace of a few projects side by side
 _PROJECT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
