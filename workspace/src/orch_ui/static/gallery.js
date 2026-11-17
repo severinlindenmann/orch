@@ -26,6 +26,10 @@ q('#w-loading').append(UI.state({kind:'loading'}));
  /* a plain question (orch ask --option Export --option Download): no pictures, so plain rows (ORCH-110) */
  items.push({id:'g3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'WS-4',ticketId:'t_name',ticketTitle:'Export button',when:'today 22:51',title:'Which name for the export?',then:'The helper uses the name you pick.',
   preview:{type:'options',options:[{id:'Export',title:'Export',suggested:true},{id:'Download',title:'Download',text:'Says what happens on a phone.'}]}});
+ /* a Check result with its own files as tiles; Send back opens the words box, no Comment (ORCH-183) */
+ items.push({id:'g4',kind:'check',kindLabel:'Check',icon:'check',ticket:'WS-5',ticketId:'t_cat',ticketTitle:'Spring catalogue',when:'today 10:24',title:'Spring catalogue: review the result',why:'The helper says this is ready for your check.',okLabel:'Looks good',then:'The ticket is done.',
+  files:[{label:'Catalogue page',type:'page',src:'samples/sample-page.html'},{label:'Cover photo',type:'img',src:'demo-image.svg'}],
+  preview:{type:'doc',heading:'What was done',paras:['In short: the catalogue and the cover photo are ready.'],steps:['Done: Make the catalogue — 2 pages']}});
  UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true});
  const e={id:'core:q:T-1:q4',ticket:'T-1',by:'Severin',via:'phone',at:Date.now()-36e5,card:{kind:'choice',title:'Home: which layout?',preview:{type:'options',options:[{id:'A',title:'As today',preview:pg('A','Cards.')},{id:'B',title:'Recent changes first',preview:pg('B','Changes.')}]}},
   decision:{action:'use_with_changes',picked:'B',changes:['Dates on the left'],summary:'Use B with 1 change',words:{text:'Take B, but dates on the left.'},pins:[{n:1,on:'option B',x:40,y:55,text:'Dates here'}]}};

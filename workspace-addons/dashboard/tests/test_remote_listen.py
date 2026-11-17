@@ -126,10 +126,10 @@ def test_nothing_is_trusted_on_the_remote_port_before_sign_in(live, host):
     """A name of this computer in Host proves nothing on the remote port: any computer can send it."""
     _root, _port, rport = live
     h = outside(rport, host=f"{host}:{rport}")
-    assert req(rport, "GET", "/api/state", h)[0] == 421
-    assert req(rport, "GET", "/view/t_abc123/x.png", h)[0] == 421
+    assert req(rport, "GET", "/api/state", h)[0] == 401
+    assert req(rport, "GET", "/view/t_abc123/x.png", h)[0] == 401
     forged = {**h, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"}
-    assert req(rport, "GET", "/view/t_abc123/artifacts/x.png", forged)[0] == 421
+    assert req(rport, "GET", "/view/t_abc123/artifacts/x.png", forged)[0] == 401
     assert req(rport, "GET", "/", h)[0] == 200  # the page shell (no data), so the sign-in can run
     st, _, body = req(rport, "POST", "/api/act", h, {"op": "answer", "args": ANS})
     assert st == 403 and body.decode().startswith("Sign in to ")
@@ -156,7 +156,7 @@ def test_reached_from_an_outside_address(live):
         pytest.skip("this computer has no address besides loopback")
     cookie, _ = sign_in(root, rport, at=ip)
     assert req(rport, "GET", "/api/state", outside(rport, cookie), at=ip)[0] == 200
-    assert req(rport, "GET", "/api/state", outside(rport, host=f"127.0.0.1:{rport}"), at=ip)[0] == 421
+    assert req(rport, "GET", "/api/state", outside(rport, host=f"127.0.0.1:{rport}"), at=ip)[0] == 401
 
 
 def test_a_busy_remote_port_leaves_the_dashboard_local_and_says_why(ws):

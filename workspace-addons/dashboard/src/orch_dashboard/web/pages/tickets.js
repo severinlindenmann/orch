@@ -243,7 +243,7 @@ function boardCard(t, nested = false, column = '', here = null) {
   const parts = boardChildren(tickets(), t);
   return h('article', {className:'card ticket-card' + (nested ? ' board-child' : ''), 'data-col':column || null, draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
     h('div', {className:'row'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t)),
-      snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', BOARD_MOVES)))),
+      snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', BOARD_MOVES), laneOrderItems(t, column)))),
     ticketAttentionChip(t, column), waitsLine(t), replacedLine(t),
     !nested ? boardParentLine(t) : null,
     parts.length ? h('div', {className:'board-parts'},
@@ -264,7 +264,7 @@ function board() {
   const dropped = filterTickets(ticketParents(array(state?.tickets).filter(t => t.status === 'dropped')), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView(), ticketGroup);
   const visible = sorted([...filteredTickets(), ...dropped]);
   const cols = window.DashHelpers.LANES.map(([status, label]) => {
-    const mine = visible.filter(t => boardLane(t) === status);
+    const mine = window.DashHelpers.laneSorted(visible.filter(t => boardLane(t) === status), status);  // ORCH-156: the person's order
     const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth), shownHere = new Set();  // ORCH-185: a sub-ticket shown as its own card here is not listed again inside its parent's card
     const capped = CAPPED_LANES.includes(status) && roots.length > 3 && !String(ticketSearch).trim();  // a search shows every hit
     const cap = capped && !boardMore.has(status) ? 3 : roots.length;
@@ -283,6 +283,42 @@ function replacedLine(t) {
   if (t.status !== 'dropped' || !t.superseded_by) return null;
   const other = ticketOf(t.superseded_by);
   return h('p', {className:'meta ticket-sub', 'data-key':'replaced-' + t.id}, 'Replaced by ', other ? h('a', {href:href(other.id)}, other.key || clean(other.title)) : 'another ticket');
+}
+/* ORCH-156: the order inside a lane. The whole lane is sent first to last (every card keeps its place); the cards
+   move at once and go back when the save fails. `before`: the card it lands above, null = the end of the lane. */
+function laneTickets(lane) {
+  return window.DashHelpers.laneSorted(sorted(array(state?.tickets).filter(t => boardLane(t) === lane)), lane);
+}
+function orderInLane(id, lane, before) {
+  if (snapshot || !lane || locks.has('order-' + lane) || changeUnavailable()) return Promise.resolve();
+  const was = laneTickets(lane).map(t => t.id), ids = window.DashHelpers.laneReorder(was, id, before);
+  if (ids.join() === was.join()) return Promise.resolve();
+  const old = new Map(array(state.tickets).map(t => [t.id, t.lane_order]));
+  const place = new Map(ids.map((x, i) => [x, {lane, n:i + 1}]));
+  state.tickets = state.tickets.map(t => place.has(t.id) ? {...t, lane_order:place.get(t.id)} : t);
+  locks.add('order-' + lane); render();
+  return act('ticket.order', {lane, tickets:ids}).then(result => {
+    locks.delete('order-' + lane);
+    if (!result.ok) {
+      state.tickets = state.tickets.map(t => place.has(t.id) ? {...t, lane_order:old.get(t.id)} : t);
+      window.orch.toast(changeError(result), 'error');
+    }
+    render();
+  });
+}
+// Move up / Move down in the card menu: the same order by keyboard, no dragging needed.
+function laneStep(id, lane, step) {
+  const ids = laneTickets(lane).map(t => t.id), at = ids.indexOf(id);
+  if (at < 0) return Promise.resolve();
+  if (step < 0) return at > 0 ? orderInLane(id, lane, ids[at - 1]) : Promise.resolve();
+  return at < ids.length - 1 ? orderInLane(id, lane, ids[at + 2] ?? null) : Promise.resolve();
+}
+function laneOrderItems(t, lane) {
+  if (!lane) return null;
+  const ids = laneTickets(lane).map(x => x.id), at = ids.indexOf(t.id);
+  if (at < 0 || ids.length < 2) return null;
+  return [['up', 'Move up', at > 0], ['down', 'Move down', at < ids.length - 1]].filter(x => x[2]).map(([dir, label]) =>
+    h('button', {type:'button', className:'menu-item', role:'menuitem', 'data-action':'lane-' + dir, 'data-ticket':t.id, 'data-lane':lane, 'data-key':'lane-' + dir + '-' + t.id}, label));
 }
 /* ORCH-152: a move to a lane. Waiting asks for the date it waits until, Superseded for the ticket that replaces it;
    every other lane moves at once (with Undo). */
