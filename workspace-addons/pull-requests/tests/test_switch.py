@@ -291,7 +291,7 @@ def test_start_says_plainly_when_the_add_on_is_not_on(ws, monkeypatch):
     assert not (store.folder(ws) / "watch.log").exists()  # nothing was started
 
 
-def test_the_queue_gate_decides_base_branch_reviews_and_login(ws):
+def test_the_queue_check_decides_base_branch_reviews_and_login(ws):
     """runner.admit (ORCH-181): never into main, never with changes requested; the entry carries base and login."""
     ticket(ws, 1, 2, 3)
     gh = FakeGitHub({1: {}, 2: {"base": "main"}, 3: {"review": "CHANGES_REQUESTED"}})

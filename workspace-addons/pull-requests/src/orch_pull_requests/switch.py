@@ -136,7 +136,7 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
             if why:
                 out["skipped"].append((url, why))
                 continue
-            try:  # the queue's own gate: allowed base branch, no changes requested, the merging login
+            try:  # the queue's own check: allowed base branch, no changes requested, the merging login
                 got = admit(root, gh, url)
             except Refused as e:
                 out["skipped"].append((url, str(e)))
