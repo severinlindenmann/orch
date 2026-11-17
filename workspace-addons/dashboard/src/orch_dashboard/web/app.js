@@ -101,7 +101,7 @@ const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.d
 const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
 const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
 // A ticket that only waits (a date, another ticket, the outside) says Waiting, not Needs you; Superseded says so.
-const statusWord = t => { const lane = window.DashHelpers.laneOf(t, t.status, questions(t).length > 0); return lane === 'blocked' ? 'Waiting' : lane === 'superseded' ? 'Superseded' : window.DashHelpers.statusWord(t.status, t.started); };
+const statusWord = t => { const lane = window.DashHelpers.laneOf(t, t.status, questions(t).length > 0); return lane === 'blocked' ? 'Waiting' : lane === 'superseded' ? 'Superseded' : window.DashHelpers.changesAsked(t) ? 'Changes asked' : window.DashHelpers.statusWord(t.status, t.started); };
 const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
 const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
 const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };

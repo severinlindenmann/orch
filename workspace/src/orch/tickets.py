@@ -38,10 +38,23 @@ STATUS_WORDS = {
 }
 
 
+def changes_asked(t: dict) -> bool:
+    """True while a person's Send back is still open: the ticket is back on the list (Ready) and a task
+    made from their words (origin change_request) is neither done nor set aside. Derived, never stored:
+    Undo and finishing the task clear it by themselves."""
+    return t.get("status") == "ready" and any(
+        c.get("origin") == "change_request" and not c.get("done") and not c.get("wont_do")
+        for c in t.get("checklist") or []
+    )
+
+
 def status_word(t: dict) -> str:
-    """The word for a ticket's status; a dropped ticket another ticket replaces says Superseded."""
+    """The word for a ticket's status; a dropped ticket another ticket replaces says Superseded; a ticket
+    a person sent back and that is not yet worked says Changes asked."""
     if t.get("status") == "dropped" and t.get("superseded_by"):
         return "Superseded"
+    if changes_asked(t):
+        return "Changes asked"
     return STATUS_WORDS.get(t.get("status"), str(t.get("status")))
 
 
