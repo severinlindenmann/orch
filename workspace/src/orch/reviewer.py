@@ -11,6 +11,11 @@ concept, technical) wait for his answer. A program decides from facts, never a m
 - **Send it back to the helper** when work is missing (a pull request not merged, checks not green, a task
   without evidence). Once per ticket: reviews never loop (R4.5).
 
+It also answers small, routine questions for the owner (ORCH-176, `answer_routine`): a plain question with
+the helper's recommended option, open 30 minutes, that names no concept, words, look, money, production or
+anything that cannot be undone. A word hit leaves it for the owner (fail safe). Its own switch, which only a
+person turns on: `workflow.reviewer_answers`.
+
 Off until the owner turns it on (`orch config set workflow.reviewer on`). Nothing happens while automation is
 paused. Each ticket is decided once per change: the state file remembers the ticket's revision after the
 decision, so a quiet ticket gets no second line. No AI call: a repeating automation script runs the pass.
@@ -361,10 +366,14 @@ def _send_back(root: Path, tid: str, why: str) -> dict:
 def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     """One pass: {"off", "paused", "actions": [{ticket, key, verdict, why, done}]}. dry_run only says it."""
     facts_of = facts_of or pr_facts
-    if not config.reviewer_on(root):
-        return {"off": True, "paused": False, "actions": []}
+    answers_on = config.reviewer_answers_on(root)
+    if not config.reviewer_on(root) and not answers_on:
+        return {"off": True, "paused": False, "actions": [], "answers": []}
     if brake.paused(root) is not None:
-        return {"off": False, "paused": True, "actions": []}
+        return {"off": False, "paused": True, "actions": [], "answers": []}
+    answers = answer_routine(root, dry_run) if answers_on else []
+    if not config.reviewer_on(root):
+        return {"off": False, "paused": False, "actions": [], "answers": answers}
     state = _read_state(root)
     actions = []
     in_review = set()
@@ -406,7 +415,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
                         continue
                 state[tid].pop("rev", None)
         _write_state(root, state)
-    return {"off": False, "paused": False, "actions": actions}
+    return {"off": False, "paused": False, "actions": actions, "answers": answers}
 
 
 VERDICT_WORDS = {
@@ -426,7 +435,92 @@ def text(result: dict, dry_run: bool = False) -> str:
     for a in result["actions"]:
         word = VERDICT_WORDS[a["verdict"]]
         lines.append(f"{a['key']}: {'would be ' if dry_run else ''}{word}: {a['why']}")
+    for a in result.get("answers") or []:
+        if a["routine"]:
+            word = "would be answered for you" if dry_run or not a["done"] else "answered for you"
+            lines.append(f"{a['key']} {a['question']}: {word}: {a['answer']}")
+        elif dry_run:
+            lines.append(f"{a['key']} {a['question']}: left for you: {a['why']}")
     return "\n".join(lines) or "Nothing in Review to look at."
+
+
+# ------------------------------------------------------------------ routine questions (ORCH-176)
+
+ROUTINE_WAIT = 30 * 60  # seconds open before the Reviewer answers (the owner, when awake, sees it first)
+# What stays with the owner (owner, ORCH-176: "Not included: concept, words, money, production"), by words in
+# the question, its options or the ticket title. A hit only leaves the question for the owner (fails safe).
+STAYS = {  # words split by spaces; each one is a regular expression
+    "concept": "concepts? commands? settings? features? options? workflows? rules? roles? plans? designs?"
+    r" approach(es)? behaviou?rs? should\s(a|the)\s(person|user|owner)",
+    "words": "word(s|ing)? texts? names? renamed? labels? titles? messages? copy phrases? terms? nouns?",
+    "look": "looks? pictures? screenshots? layouts? pages? screens? colou?rs? visual ui ux 1280 390 1920"
+    " mockups? style icons? cards? show(s|n|ing)? boards? columns? buttons? dialogs? tabs? menus? lists?"
+    " filters? panels? widths? dashboard phone",
+    "money": "costs? prices? pay paid money budget credits? subscriptions? accounts? billing invoices?",
+    "production": "production prod deploy(s|ed|ment)? releases? servers? relay publish(ed|ing)? main"
+    " customers? public outside users? send email vps",
+    "cannot be undone": "delete[sd]? remov(e|es|ed|ing) drop(s|ped)? irreversible undo(ne)? force secrets?"
+    " passwords? tokens? keys? security merge[sd]? wipe reset migrat(e|ion)",
+}
+STAYS_RE = {k: re.compile(rf"(?<![\w-])({'|'.join(v.split())})(?![\w-])", re.I) for k, v in STAYS.items()}
+MONEY_SIGN = re.compile(r"[$€£]")
+ROUTINE_WHY = (
+    "routine: a plain question with the helper's recommendation, no concept, words, look, money or production"
+)
+
+
+def _asked_at(root: Path, ticket: dict, qid: str) -> float | None:
+    for h in history.lines(root, ticket):
+        if isinstance(h, dict) and str(h.get("text", "")).startswith(f"Asked {qid},"):
+            return _at(h.get("at"))
+    return None
+
+
+def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tuple[bool, str]:
+    """(True, why) when the Reviewer may answer this question for the owner, else (False, why it stays)."""
+    now = time.time() if now is None else now
+    if ticket.get("general") is True:
+        return False, "a Chat question"
+    if q.get("answer") is not None or q.get("taken_back") is not None:
+        return False, "already settled"
+    if q.get("card") is not None or q.get("action") is not None:
+        return False, "a card for you to see"
+    if q.get("kind") not in (None, "plain"):
+        return False, "an add-on's own question"
+    opts = q.get("options") or []
+    if len(opts) < 2 or q.get("recommended") not in opts:
+        return False, "no recommended option"
+    asked = _asked_at(root, ticket, q["id"])
+    if asked is None or now - asked < ROUTINE_WAIT:
+        return False, "asked less than 30 minutes ago"
+    text = " ".join([str(q.get("text") or ""), *map(str, opts), str(ticket.get("title") or "")])
+    hits = [k for k, rx in STAYS_RE.items() if rx.search(text) or (k == "money" and MONEY_SIGN.search(text))]
+    if hits:
+        return False, "names " + ", ".join(hits)
+    return True, ROUTINE_WHY
+
+
+def answer_routine(root: Path, dry_run: bool = False, now: float | None = None) -> list[dict]:
+    """Every open question on a working ticket: answer the routine ones for the owner. Returns
+    [{ticket, key, question, routine, why, answer, done}]."""
+    out = []
+    for t in tickets.list_all(root):
+        if t.get("status") in ("done", "dropped"):
+            continue
+        for q in t.get("questions") or []:
+            if q.get("answer") is not None:
+                continue
+            ok, why = routine(root, t, q, now)
+            row = {"ticket": t["id"], "key": t.get("key") or t["id"], "question": q["id"], "routine": ok,
+                   "why": why, "answer": q.get("recommended") if ok else None, "done": False}  # fmt: skip
+            if ok and not dry_run:
+                try:
+                    tickets.answer_for_owner(root, t["id"], q["id"], tickets.question_digest(q), why)
+                    row["done"] = True
+                except Refused as e:  # changed under us: look again next pass
+                    row["routine"], row["why"], row["answer"] = False, str(e), None
+            out.append(row)
+    return out
 
 
 # ------------------------------------------------------------------ what was accepted for the owner
@@ -469,7 +563,21 @@ def accepted(root: Path, since: str) -> list[dict]:
                 continue
             txt = str(h.get("text") or "")
             at = _at(h.get("at"))
-            if txt.startswith(tickets.ACCEPTED_LINE) and at is not None and (start is None or at >= start):
+            if at is None or (start is not None and at < start):
+                continue
+            if txt.startswith(tickets.ANSWERED_LINE):
+                out.append(
+                    {
+                        "ticket": t["id"],
+                        "key": t.get("key") or t["id"],
+                        "title": t.get("title") or "",
+                        "at": h.get("at"),
+                        "why": "answered " + txt[len(tickets.ANSWERED_LINE) :],
+                        "sent_back": False,
+                        "answer": True,
+                    }
+                )
+            elif txt.startswith(tickets.ACCEPTED_LINE):
                 out.append(
                     {
                         "ticket": t["id"],
@@ -487,9 +595,16 @@ def accepted(root: Path, since: str) -> list[dict]:
 def accepted_text(rows: list[dict], word: str = "today") -> str:
     if not rows:
         return f"Nothing was accepted for you {word}."
-    head = f"Accepted for you {word}: {_n('ticket', len(rows))}"
-    lines = [
-        f"- {r['key']} {r['title']}: {r['why']}" + (" (you sent it back)" if r["sent_back"] else "")
-        for r in rows
-    ]
-    return "\n".join([head, *lines])
+    acc = [r for r in rows if not r.get("answer")]
+    ans = [r for r in rows if r.get("answer")]
+    out = []
+    if acc:
+        out.append(f"Accepted for you {word}: {_n('ticket', len(acc))}")
+        out += [
+            f"- {r['key']} {r['title']}: {r['why']}" + (" (you sent it back)" if r["sent_back"] else "")
+            for r in acc
+        ]
+    if ans:
+        out.append(f"Answered for you {word}: {_n('question', len(ans))}")
+        out += [f"- {r['key']} {r['title']}: {r['why']}" for r in ans]
+    return "\n".join(out)
