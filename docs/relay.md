@@ -51,6 +51,8 @@ those workspaces, nothing else. You get a link with a secret token once; **Rotat
   shown once (`X-Orch-Signature`). It retries after 1 min, 5 min, 30 min, 2 h and 6 h, then marks it **Failing** until you
   press **Try again now**. **Send test event** checks the address. Private or local addresses are refused.
 - **Activity** shows every call, stream, answer and push attempt of the last 30 days.
+- **Closed questions:** a question answered in orch, a review that ended there or a question of a dropped or done ticket
+  arrives as a `closed` event (`question_id`, `reason`, e.g. `Answered in orch`), never with the answer itself.
 
 Details and the event format: `contracts/relay-api.md` (Subscribers), `contracts/subscriber-event.schema.json`.
 
