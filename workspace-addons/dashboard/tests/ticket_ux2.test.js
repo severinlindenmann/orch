@@ -94,7 +94,7 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(/Start helper/.test(fresh) && !/Resume/.test(fresh), 'tasks typed before any helper ran: Start helper, not Resume');
 });
 
-test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch pick, and a change sends ticket.model', async () => {
+test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, and a change sends ticket.model', async () => {
   const sent = [];
   const ctx = {window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : [],
     clean:v => String(v ?? ''), el:(tag, cls, txt) => h(tag, {className:cls}, txt), act:async (op, a) => { sent.push([op, a]); return {ok:true}; }};
@@ -102,7 +102,7 @@ test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch pick, an
   const picked = ctx.modelField({id:'t1', model:{name:'opus', by:'orch', why:'it mentions design'}});
   assert.equal(picked.tag, 'select');
   assert.deepEqual(picked.children.map(o => o.attrs.value), ['auto', 'sonnet', 'opus']);
-  assert.equal(text(picked.children[0]), 'Let orch pick (Opus)');
+  assert.equal(text(picked.children[0]), 'Let orch decide (Opus)');
   assert.equal(picked.value, 'auto');
   assert.match(picked.attrs.title, /Opus \(picked by orch: it mentions design\)/);
   const mine = ctx.modelField({id:'t1', model:{name:'sonnet', by:'human:severin'}});
@@ -161,4 +161,103 @@ test('ORCH-62: a chip only for an Idle or Stuck helper, with how long nothing ra
 test('ORCH-62: an open question reads "Question: ..." under the title', () => {
   const c = listCtx();
   assert.match(text(c.ticketNext({id:'q', status:'waiting', questions:[{text:'Start the run?'}]})), /^Question: /);
+});
+
+test('ORCH-156: Properties has Part of: epics first, never itself or a ticket inside it; a change sends ticket.edit with parent', async () => {
+  const sent = [];
+  const me = {id:'t_me', key:'WS-5', title:'Lanes', status:'active', revision:4};
+  const all = [me, {id:'t_old', key:'WS-1', title:'Plain', status:'open'}, {id:'t_epic', key:'WS-2', title:'Ticket flow', status:'open', epic:true},
+    {id:'t_kid', key:'WS-6', title:'Inside me', status:'open', parent:'t_me'}, {id:'t_grand', key:'WS-7', title:'Deeper', status:'open', parent:'t_kid'},
+    {id:'t_closed', key:'WS-3', title:'Closed', status:'done'}];
+  const ctx = {window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : [],
+    clean:v => String(v ?? ''), el:(tag, cls, txt) => h(tag, {className:cls}, txt), tickets:() => all, ticketOf:id => all.find(t => t.id === id),
+    act:async (op, a) => { sent.push([op, a]); return {ok:true}; }};
+  vm.createContext(ctx); vm.runInContext(ticketSrc, ctx); ctx.snapshot = false;
+  const select = ctx.partOfField(me, null);
+  assert.equal(select.tag, 'select');
+  assert.deepEqual(select.children.map(o => o.attrs.value), ['', 't_epic', 't_old']);
+  assert.equal(text(select.children[1]), 'WS-2 Ticket flow (epic)');
+  assert.equal(select.value, '');
+  select.value = 't_epic'; await select.onchange();
+  assert.equal(JSON.stringify(sent.pop()), JSON.stringify(['ticket.edit', {ticket:'t_me', parent:'t_epic', if_revision:4}]));
+  const under = ctx.partOfField({...me, parent:'t_epic'}, all[2]);
+  assert.equal(under.value, 't_epic');
+  under.value = ''; await under.onchange();
+  assert.equal(sent.pop()[1].parent, null);
+});
+test('ORCH-157: a Group choice lists the tickets that have parts, and picking one keeps only that group', () => {
+  const rows = [{id:'e', title:'Epic', status:'open'}, {id:'p1', title:'Part', parent:'e', status:'open'}, {id:'x', title:'Other', status:'open'}];
+  const c = listCtx({tickets:() => rows});
+  const sel = nodes(h('div', {}, c.ticketFilters())).find(n => n.attrs['data-key'] === 'ticket-group');
+  assert.ok(sel, 'a Group choice');
+  assert.deepEqual(c.filterTickets(rows, '', false, '', '', '', 'e').map(t => t.id), ['e', 'p1']);
+  assert.equal(c.filterTickets(rows, '', false).length, 3);
+});
+test('ORCH-157: the Backlog view keeps only backlog tickets', () => {
+  const c = listCtx();
+  assert.deepEqual(c.filterTickets([{id:'a', status:'open'}, {id:'b', status:'active'}], '', false, '', '', 'backlog').map(t => t.id), ['a']);
+});
+
+test('ORCH-156: a lane keeps the person\'s order; Move up / Move down and a drop send the whole lane first to last', async () => {
+  const sent = [];
+  const st = {runs:{}, tickets:[
+    {id:'a', title:'A', status:'ready'}, {id:'b', title:'B', status:'ready'}, {id:'c', title:'C', status:'ready'}, {id:'x', title:'X', status:'open'}]};
+  const c = listCtx({state:st, sorted:l => l.slice(), locks:new Set(), changeUnavailable:() => false, changeError:r => r.text,
+    act:async (op, a) => { sent.push([op, a]); return {ok:true}; }, render(){}, window:{DashHelpers:helpers, UI:{...kitWindow(), ...require('./kit_state.js')}, orch:{toast(){}}}});
+  assert.deepEqual(c.laneTickets('ready').map(t => t.id), ['a', 'b', 'c']);
+  await c.laneStep('c', 'ready', -1);
+  assert.equal(JSON.stringify(sent.pop()), JSON.stringify(['ticket.order', {lane:'ready', tickets:['a', 'c', 'b']}]));
+  assert.deepEqual(c.laneTickets('ready').map(t => t.id), ['a', 'c', 'b'], 'the cards move at once');
+  await c.laneStep('a', 'ready', 1);
+  assert.deepEqual(sent.pop()[1].tickets, ['c', 'a', 'b']);
+  await c.orderInLane('b', 'ready', 'c');  // dropped on C: lands above it
+  assert.deepEqual(sent.pop()[1].tickets, ['b', 'c', 'a']);
+  await c.orderInLane('b', 'ready', 'b');  // dropped on itself: nothing is sent
+  await c.laneStep('b', 'ready', -1);  // already first
+  assert.equal(sent.length, 0);
+  const items = [...c.laneOrderItems(st.tickets.find(t => t.id === 'b'), 'ready').map(text)];
+  assert.deepEqual(items, ['Move down']);
+  assert.equal(c.laneOrderItems(st.tickets.find(t => t.id === 'x'), 'open'), null, 'one card alone: no order choices');
+});
+test('ORCH-156: a failed save puts the cards back and says why', async () => {
+  const toasts = [];
+  const st = {runs:{}, tickets:[{id:'a', title:'A', status:'ready'}, {id:'b', title:'B', status:'ready'}]};
+  const c = listCtx({state:st, sorted:l => l.slice(), locks:new Set(), changeUnavailable:() => false, changeError:r => r.text,
+    act:async () => ({ok:false, text:'Saving did not work.'}), render(){}, window:{DashHelpers:helpers, UI:{...kitWindow(), ...require('./kit_state.js')}, orch:{toast:(...x) => toasts.push(x)}}});
+  await c.laneStep('b', 'ready', -1);
+  assert.deepEqual(c.laneTickets('ready').map(t => t.id), ['a', 'b']);
+  assert.deepEqual(toasts[0], ['Saving did not work.', 'error']);
+});
+
+// ---- ORCH-236 (bug hunt round 2 on the Tickets page and the ticket page)
+test('ORCH-236: the Needs you view lists exactly what the Needs you number counts', () => {
+  const items = [{id:'q', status:'waiting', questions:[{id:'q1', text:'Which?'}]}, {id:'r', status:'review'},
+    {id:'d', status:'done', bring_back:{state:'waiting'}}, {id:'a', status:'active', bring_back:{state:'waiting'}}, {id:'w', status:'active'}];
+  const c = listCtx({tickets:() => items});
+  const rows = [{id:'core:q', ticket:'q', answer:{question:'q1'}}];
+  const counted = helpers.needsYouCount(rows, items.filter(t => t.status === 'review'));
+  assert.equal(items.filter(t => c.inView(t, 'needs-you')).length, counted, 'header number = filter rows');
+});
+test('ORCH-236: a key typed without its dash finds the ticket ("dem36", "dem 36"); 36 is still exact', () => {
+  const c = listCtx();
+  const items = [{id:'a', key:'DEM-36', title:'Big'}, {id:'b', key:'DEM-136', title:'Other'}];
+  const hits = q => c.filterTickets(items, q, false).map(t => t.id).join();
+  assert.equal(hits('dem36'), 'a');
+  assert.equal(hits('DEM 36'), 'a');
+  assert.equal(hits('dem-36'), 'a');
+  assert.equal(hits('36'), 'a');
+});
+test('ORCH-236 (owner, 17 Nov): no saved views: only the built-in chips, no + Save view', () => {
+  const c = listCtx({URLSearchParams});
+  const keys = nodes(c.viewChips()).map(n => n.attrs?.['data-key']).filter(Boolean);
+  assert.deepEqual(keys, ['view-chips', 'view-chip-all', 'view-chip-needs-you', 'view-chip-working', 'view-chip-backlog', 'view-chip-done-week']);
+  assert.doesNotMatch(listSrc, /Save view|orch\.tickets\.saved/);
+});
+test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an empty Add says so', () => {
+  assert.match(ticketSrc, /act\('check\.edit', \{ticket:t\.id, check:task\.id, text, was:task\.text\}\)/);
+  assert.match(ticketSrc, /taskAct\('check\.move', \{ticket:t\.id, check:before\.id, after:task\.id\}\)/, 'up = the one above moves after this one');
+  assert.match(ticketSrc, /taskAct\('check\.move', \{ticket:t\.id, check:task\.id, after:after\.id\}\)/);
+  assert.match(ticketSrc, /taskAct\('check\.remove', \{ticket:t\.id, check:task\.id\}\)/);
+  assert.match(ticketSrc, /if \(!text\) \{ window\.orch\.toast\('Type the task first\.', 'error'\)/);
+  assert.match(ticketSrc, /\['activity', 'Activity', ticketHistoryEntries\(t, 'All'\)\.length\]/, 'the tab count is every entry, not the People/Helper choice');
 });

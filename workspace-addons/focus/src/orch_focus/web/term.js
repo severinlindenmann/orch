@@ -216,7 +216,7 @@
         while (all.length && items.length < 40 && size + (all[0].t || '').length <= 12000) { size += (all[0].t || '').length; items.push(all.shift()); }
         if (!items.length) items.push(all.shift());
         try {
-          const r = await fetch('/api/term/keys', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Orch-Page': secret}, body: JSON.stringify({ticket: TID, items})});
+          const r = await fetch('/api/term/keys', {method: 'POST', headers: secret ? {'Content-Type': 'application/json', 'X-Orch-Page': secret} : {'Content-Type': 'application/json'}, body: JSON.stringify({ticket: TID, items})});
           if (r.status === 403) {
             const text = (await r.text()).slice(0, 200);
             if (/is off/.test(text)) typingAllowed = false; else canType = false;

@@ -131,7 +131,9 @@ def test_exit_code_recipe_reads_nothing_the_command_prints(monkeypatch, code, wa
         ("t", {"command": ["t"] * 10}, False),
         ("T!", {"command": ["t"]}, False),
         ("t", {"command": ["t"], "label": "x\nInjected"}, False),
-        ("t", {"command": ["t"], "works": "a.b"}, False),
+        ("t", {"command": ["t"], "works": "a.b"}, True),  # a short path (ORCH-48)
+        ("t", {"command": ["t"], "works": "a..b"}, False),
+        ("t", {"command": ["t"], "how": "x\nInjected"}, False),
         ("wiki", {"command": ["t"], "kind": "connection"}, True),
         ("pay", {"command": ["t"], "kind": "key"}, True),
         ("t", {"command": ["t"], "kind": "secret"}, False),  # only login, connection or key
@@ -181,6 +183,7 @@ def test_overview_names_the_tickets_that_stop_and_leaks_nothing(proj, run, new_t
         "stops",
         "renew",
         "key",
+        "how",
     }
     assert r["renew"] is True and r["key"] is None  # orch can start the Claude Code sign-in (ORCH-46)
     assert HIDDEN not in json.dumps(rows)
@@ -234,7 +237,7 @@ def test_check_keeps_the_last_result(proj, tools):
     doc = health.check(proj, NOW)
     assert doc["checked_at"] == "2026-11-16T12:00:00Z"
     assert health.last(proj) == doc
-    assert HIDDEN not in (proj / ".orch" / "run" / "health.json").read_text(encoding="utf-8")
+    assert HIDDEN not in health._path(proj).read_text(encoding="utf-8")
 
 
 def test_command_text_and_json(proj, run, new_ticket, tools):
@@ -245,7 +248,7 @@ def test_command_text_and_json(proj, run, new_ticket, tools):
     assert code == 0, err
     label = adapters.load("claude")["label"]
     assert out.startswith(f"The {label} login no longer works. The helper cannot go on with 1 ticket: ")
-    assert "Plan the newsletter" in out and "orch logins renew claude" in out + err
+    assert "Plan the newsletter" in out and "Renew or Replace on the dashboard warning" in out + err
     assert HIDDEN not in out + err
     code, out, err = run("logins", "--json")
     doc = json.loads(out)
@@ -352,3 +355,83 @@ def test_a_recipe_is_a_login_unless_it_says_otherwise():
     assert health._recipe("t", {"command": ["t"]})["kind"] == "login"
     assert health._recipe("t", {"command": ["t"], "kind": "key"})["kind"] == "key"
     assert all(r["kind"] == "login" for r in health.helper_recipes())
+
+
+# ------------------------------------------------------------------------------------------ ORCH-48
+
+
+def test_a_path_reads_every_item_and_the_earliest_end(monkeypatch):
+    doc = {
+        "profiles": [{"valid": True, "until": "2026-11-20T00:00:00Z"}, {"valid": True, "until": 1794950697}]
+    }
+    _answers(monkeypatch, json.dumps(doc))
+    r = {"command": ["t", "s"], "works": "profiles.*.valid", "ends": "profiles.*.until"}
+    assert health.ask("/bin/t", r) == (True, "2026-11-17T21:24:57Z")
+    doc["profiles"][1]["valid"] = False
+    _answers(monkeypatch, json.dumps(doc))
+    assert health.ask("/bin/t", r)[0] is False
+    _answers(monkeypatch, json.dumps({"profiles": []}))
+    assert health.ask("/bin/t", r)[0] is None  # nothing set: cannot tell
+
+
+def test_codex_is_checked_by_its_exit_code_and_says_what_to_do():
+    rec = {r["name"]: r for r in health.helper_recipes()}["codex"]
+    assert rec["command"][1:] == ["login", "status"] and rec["works"] is None
+    assert "codex login" in rec["how"]
+
+
+def test_known_tools_only_when_installed_and_set_up(proj, monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for k in ("XDG_CONFIG_HOME", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "DATABRICKS_CONFIG_FILE"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}")
+    assert health.known_recipes() == []  # installed, but never set up here
+    (tmp_path / ".config" / "gh").mkdir(parents=True)
+    (tmp_path / ".config" / "gh" / "hosts.yml").write_text("x")
+    (tmp_path / ".databrickscfg").write_text("x")
+    got = {r["name"]: r for r in health.known_recipes()}
+    assert set(got) == {"github", "databricks"} and "gh auth login" in got["github"]["how"]
+    monkeypatch.setattr(health.shutil, "which", lambda b: None)
+    assert health.known_recipes() == []  # set up, but the tool is gone
+
+
+def test_add_and_remove_an_own_check(proj):
+    r = health.add_recipe(proj, "wiki", {"label": "Wiki", "command": ["wikictl", "ping"], "how": "Ask IT"})
+    assert r["how"] == "Ask IT" and [x["name"] for x in health.workspace_recipes(proj)] == ["wiki"]
+    with pytest.raises(Refused):
+        health.add_recipe(proj, "bad", {"command": ["bash", "-c", "x"]})
+    with pytest.raises(Refused):
+        health.add_recipe(proj, "github", {"command": ["gh", "x"]})  # a built-in name
+    assert health.remove_recipe(proj, "wiki") and not health.remove_recipe(proj, "wiki")
+
+
+def test_connections_read_only_the_state_word(proj, monkeypatch):
+    out = (
+        "Checking MCP server health…\n"
+        f"wiki: https://x.example/mcp - ✔ Connected {HIDDEN}\n"
+        "mail: npx mail-mcp - ! Needs authentication\n"
+        "other: x - ✘ Failed to connect\n"
+        "unlisted: x - ✔ Connected\n"
+    )
+    _answers(monkeypatch, out)
+    got = health._conn_states(proj, "/bin/claude", ["mcp", "list"], ["wiki", "mail", "other"])
+    assert got == {"wiki": "connected", "mail": "needs authentication", "other": "failed"}
+
+
+def test_line_says_what_to_do_when_orch_cannot_renew():
+    row = {"label": "GitHub", "state": "renew", "ends_at": None, "stops": [], "chosen": False}
+    assert cli_health.line({**row, "how": "Run: gh auth login"}).endswith(
+        "no longer works. Run: gh auth login"
+    )
+    assert cli_health.line({**row, "how": "x", "renew": True}).endswith("Renew it.")
+
+
+def test_logins_add_and_remove_command(proj, run):
+    code, out, _ = run(
+        "logins", "add", "wiki", "--label", "Wiki", "--command", "wikictl ping", "--how", "Ask IT"
+    )
+    assert code == 0 and "Wiki" in out
+    code, out, err = run("logins", "add", "bad", "--command", "bash -c x")
+    assert code == 2
+    code, out, _ = run("logins", "remove", "wiki")
+    assert code == 0 and "no longer checks wiki" in out

@@ -6,15 +6,39 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'To do', ready: 'To do', active: 'Working', waiting: 'Needs you', review: 'Check', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'Backlog', ready: 'To do', active: 'Working', waiting: 'Needs you', review: 'Check', done: 'Done', dropped: "Won't do"};
   /* The ONE source of status words and order (board columns, Home, ticket page, Move to, history, lists).
-     Lifecycle order. "ready" is the same place as "open" (no separate word); "waiting" shows as "Needs you". */
-  const STATUS_ORDER = ['open', 'active', 'waiting', 'review', 'done'];
-  const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'To do';
-  const columnOf = status => status === 'ready' ? 'open' : status;
+     Lifecycle order. New tickets land in Backlog ("open"); To do ("ready") is what comes next, and paused or sent-back
+     work; "waiting" shows as "Needs you". ORCH-152 (owner, 17 Nov): Backlog, To do, Waiting, Won't do, Superseded. */
+  const STATUS_ORDER = ['open', 'ready', 'active', 'waiting', 'review', 'done'];
+  const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'Backlog';
+  const columnOf = status => status;
   const STATUS_CHOICES = STATUS_ORDER.map(s => [s, STATUS_WORD[s]]);
-  // "Move to" offers four places; Waiting is decided by the agent.
-  const MOVE_CHOICES = STATUS_CHOICES.filter(([s]) => s !== 'waiting');
+  // "Move to" offers these places; Needs you and Waiting are decided by the agent (or the board's Waiting lane).
+  const MOVE_CHOICES = [...STATUS_CHOICES.filter(([s]) => s !== 'waiting'), ['dropped', STATUS_WORD.dropped]];
+  /* The board's lanes, left to right. "blocked" = Waiting: waits for a date, another ticket or the outside, with no
+     open question. "superseded" = Won't do because another ticket replaces it (superseded_by). */
+  const LANES = [['open', 'Backlog'], ['ready', 'To do'], ['active', 'Working'], ['waiting', 'Needs you'], ['blocked', 'Waiting'],
+    ['review', 'Check'], ['done', 'Done'], ['dropped', "Won't do"], ['superseded', 'Superseded']];
+  /* The lane of a ticket. `status` is the status as shown (a live helper that needs the person shows as waiting);
+     `asks` is true while the ticket has an open question. */
+  function laneOf(t, status, asks) {
+    const s = status || (t && t.status) || 'open';
+    if (s === 'dropped') return t && t.superseded_by ? 'superseded' : 'dropped';
+    if (s === 'done') return 'done';
+    if (asks) return 'waiting';
+    if (s === 'waiting') return ((t && t.waiting_on) || {}).kind === 'question' ? 'waiting' : 'blocked';
+    return STATUS_WORD[s] ? s : 'open';
+  }
+  /* What a move to a lane writes: {status[, waiting_on | superseded_by]}, or null when the lane needs more first
+     (Waiting asks for a date, Superseded for the ticket that replaces it). */
+  function laneMove(lane, extra) {
+    const x = extra || {};
+    if (lane === 'blocked') return x.until ? {status: 'waiting', waiting_on: {kind: 'time', until: x.until}} : null;
+    if (lane === 'superseded') return x.by ? {status: 'dropped', superseded_by: x.by} : null;
+    if (lane === 'dropped') return {status: 'dropped', superseded_by: null};
+    return STATUS_WORD[lane] ? {status: lane} : null;
+  }
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status', done_when: 'the Done when line'};
 
@@ -63,12 +87,17 @@
 
   /* A task finished by the agent is written twice (orch's own "Check c1 done" and the agent's own note): both read
      "Finished a task: ...". Within two minutes the longer of two equal-or-prefix lines stays, once. Original order kept. */
+  /* ORCH-185: the old and new text of a note edit, when the line carries them ("Edited note (was: ... | now: ...)"). */
+  function historyChange(entry) {
+    const m = /^Edited (note|done_when) \(was: ([\s\S]*) \| now: ([\s\S]*)\)$/.exec(String((entry && entry.text) || '').trim());
+    return m ? {field: m[1], was: m[2], now: m[3]} : null;
+  }
   function dedupeHistory(entries, checklist) {
     const list = Array.isArray(entries) ? entries : [], drop = new Set(), last = [];
     const order = list.map((e, i) => [e, i]).sort((a, b) => (Date.parse(a[0] && a[0].at) || 0) - (Date.parse(b[0] && b[0].at) || 0) || a[1] - b[1]);
     for (const [e] of order) {
       const line = historyLine(e, checklist), at = Date.parse(e && e.at) || 0;
-      const dup = last.find(p => Math.abs(at - p.at) <= 120000 && (p.line === line || line.startsWith(p.line + ':') || p.line.startsWith(line + ':')));
+      const dup = last.find(p => !(historyChange(e) && historyChange(p.e)) && Math.abs(at - p.at) <= 120000 && (p.line === line || line.startsWith(p.line + ':') || p.line.startsWith(line + ':')));
       if (!dup) { last.push({e, line, at}); continue; }
       if (line.length > dup.line.length) { drop.add(dup.e); Object.assign(dup, {e, line, at}); } else drop.add(e);
     }
@@ -99,7 +128,7 @@
     if ((m = /^Moved (c\d+) after c\d+$/.exec(text))) return 'Moved a task' + task(m[1]);
     if ((m = /^Created under (.+)$/.exec(text))) return 'Created under ' + m[1];
     if (/^Created/.test(text)) return /under /.test(text) ? 'Created as a sub-ticket' : 'Ticket created';
-    if ((m = /^Edited (.+)$/.exec(text))) {
+    if ((m = /^Edited ([a-z_, ]+?)(?: \(was: [\s\S]* \| now: [\s\S]*\))?$/.exec(text)) || (m = /^Edited (.+)$/.exec(text))) {
       const parts = m[1].split(/,\s*/).map(f => FIELD_WORD[f.trim()] || f.trim());
       return 'Changed ' + (parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]);
     }
@@ -132,6 +161,14 @@
   }
 
   /* Who a history line is about: "You" for the current person, the display name otherwise. */
+  /* A person's name for a "by": a line recorded under the computer's login ("human:lume") is the person who picked
+     their name in "You: ..." (people.me), never the login (ORCH-184). Agents and other people keep their own name. */
+  function personName(by, st) {
+    const b = String(by || '').replace(/^(?:agent|human):/, ''), s = st || {};
+    const me = s.people && s.people.me;
+    return /^human:/.test(String(by || '')) && me && s.login && b === s.login ? me : b;
+  }
+
   function historyWho(by, me) {
     const b = String(by || '');
     if (me && b === me) return 'You';
@@ -327,6 +364,35 @@
     return arr(all).find(p => p && p.id !== t.id && matchesTicket(t.parent, p)) ||
       arr(all).find(p => p && p.id !== t.id && arr(p.children).includes(t.id)) || null;
   }
+  /* ORCH-156: the tickets a ticket can be put under ("Part of" in Edit ticket): not itself, not one of its own
+     sub-tickets (a loop), not closed (its current parent stays listed). Releases, epics, then tickets that already
+     hold others, then the rest; newest first inside each group. */
+  function parentChoices(all, t) {
+    const list = arr(all).filter(x => x && x.id), inside = new Set([t.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const x of list) if (!inside.has(x.id) && list.some(p => inside.has(p.id) && matchesTicket(x.parent, p))) { inside.add(x.id); grew = true; }
+    }
+    const current = parentOf(list, t), holds = new Set(list.map(x => (parentOf(list, x) || {}).id).filter(Boolean));
+    const rank = x => x.release ? 0 : x.epic ? 1 : holds.has(x.id) ? 2 : 3;  // ORCH-37: releases first
+    return list.filter(x => !inside.has(x.id) && (!['done', 'dropped'].includes(x.status) || (current && x.id === current.id)))
+      .sort((x, y) => rank(x) - rank(y) || creationOrder(y, x));
+  }
+  /* ORCH-156: the order inside one board lane. A ticket the person placed in this lane (lane_order) keeps its
+     place; tickets that came in since (no place in this lane) stay on top in the order given, newest news first. */
+  const lanePlace = (t, lane) => t && t.lane_order && t.lane_order.lane === lane && Number.isFinite(t.lane_order.n) ? t.lane_order.n : null;
+  function laneSorted(list, lane) {
+    const all = arr(list), fresh = all.filter(t => lanePlace(t, lane) == null);
+    const placed = all.filter(t => lanePlace(t, lane) != null).map((t, i) => [t, i]).sort((x, y) => lanePlace(x[0], lane) - lanePlace(y[0], lane) || x[1] - y[1]).map(x => x[0]);
+    return [...fresh, ...placed];
+  }
+  /* The lane's ids after `moved` goes right before `before` (null: to the end of the lane). */
+  function laneReorder(ids, moved, before) {
+    if (moved === before) return arr(ids).slice();  // dropped onto itself: nothing moves
+    const rest = arr(ids).filter(id => id !== moved), at = before == null ? -1 : rest.indexOf(before);
+    rest.splice(at < 0 ? rest.length : at, 0, moved);
+    return rest;
+  }
   const plainFileName = value => String(value || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/^./, c => c.toUpperCase());
   const cleanOutcome = value => String(value || '').replace(/\b\d+(?:\.\d+)?\s*(?:[KMGT]?i?B|bytes?)\b/gi, '').replace(/(?:[\w-]+\/)*[\w-]+\.(?:md|txt|html?|csv|json|pdf|png|jpe?g|webp)\b/gi, name => plainFileName(name)).replace(/^[\s✓✔·—,:;-]+|[\s·—,:;-]+$/g, '').replace(/\s+/g, ' ').trim();
   const resolved = task => !!(task.done || task.wont_do);
@@ -401,12 +467,12 @@
 
   /* A Factory start question (kind factory:start) in a few lines for Home (ORCH-60). The question's text is the frozen
      proposal Factory wrote ("Start '<title>'? ~10 h · target $5 · you're needed for ~15 min. Goal: … . Done means: …
-     Cap: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
+     Time limit: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
      text is not in that shape (the card then shows the question as it always did). */
   function factoryStart(text) {
     const m = /^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: /s.exec(String(text || ''));
     if (!m) return null;
-    const head = m[2].split(' · '), cap = /\. Cap: (.+?) active\. /.exec(String(text))?.[1];
+    const head = m[2].split(' · '), cap = /\. Time limit: (.+?) active\. /.exec(String(text))?.[1];
     const usd = head.map(x => /^target \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
     const owner = head.map(x => /^you're needed for ~(.+)$/.exec(x)?.[1]).find(Boolean);
     const meta = ['Runs about ' + head[0], owner ? 'needs you for about ' + owner : '', usd ? 'about $' + usd : '', cap ? 'up to ' + cap + ' of helper time' : ''];
@@ -432,6 +498,27 @@
     const q = arr(ticket && ticket.questions).find(x => x && x.answer == null && x.text);
     const text = q ? String(q.text).replace(/\s+/g, ' ').trim() : '';
     return text.length > 90 ? text.slice(0, 89) + '…' : text;
+  }
+
+  /* When a ticket was finished: the history entry that marked it done, else done_at, else the last change. Every page
+     (Home, Tickets, the board, the ticket) takes the day and time from here, so one ticket never has two dates (ORCH-184). */
+  function doneAt(ticket) {
+    const t = ticket || {}, event = arr(t.history).slice().reverse().find(e => e && (e.kind === 'done' || /(?:->|to) done\b|^Done\b/i.test(e.text || '')));
+    return (event && event.at) || t.done_at || t.completed_at || t.updated_at || '';
+  }
+
+  /* When a ticket's question was asked: the time Home shows for it (the oldest open row of that ticket), else the last
+     change. Home, Tickets and the ticket page say the same wait (ORCH-184). */
+  function askedAt(ticket, rows) {
+    const id = ticket && ticket.id, times = arr(rows).filter(r => r && r.ticket === id && Number.isFinite(Date.parse(r.since))).map(r => Date.parse(r.since));
+    return times.length ? new Date(Math.min(...times)).toISOString() : (ticket && ticket.updated_at) || '';
+  }
+
+  /* Is phone mode on right now? A mode whose end time has passed is over, whatever the last state said (ORCH-184). */
+  function mobileOn(mm, nowMs) {
+    if (!mm || !mm.on) return false;
+    const end = mm.ends_at ? Date.parse(mm.ends_at) : NaN;
+    return !(Number.isFinite(end) && end <= (Number(nowMs) || Date.now()));
   }
 
   /* One state per ticket: a ticket the agent cannot go on with (live state attention) is Waiting, never Working. */
@@ -641,5 +728,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  return {historyChange, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });

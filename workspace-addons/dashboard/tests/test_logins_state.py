@@ -3,11 +3,29 @@ secret, and Check again runs `orch logins --json`."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from orch import health  # imported first, so the isolation fixture fakes its real home
 
 from orch_dashboard.actions import BadRequest, build_argv
 from orch_dashboard.data import load_logins, load_state
+
+
+@pytest.fixture
+def ws(ws, tmp_path, monkeypatch):
+    """The shared workspace, moved where a guarded orch home pairs with it: the check is kept there
+    (ORCH-46 security review), never in .orch/run."""
+    import shutil
+
+    from orch import addons
+
+    acct = tmp_path / "acct"
+    (acct / ".orch-test" / "home").mkdir(parents=True)
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))
+    return Path(shutil.copytree(ws, acct / ".orch-test" / ws.name))
+
 
 ROW = {
     "name": "claude",
@@ -67,3 +85,23 @@ def test_the_renew_step_fields_pass_only_when_they_are_plain(ws):
     first, second = load_logins(ws)["items"]
     assert first["renew"] is True and first["key"] == "PAYMENTS_KEY"
     assert "renew" not in second and "key" not in second
+
+
+def test_a_check_a_helper_wrote_into_the_project_is_never_shown(ws):
+    """ORCH-46 security review: a helper can write .orch/run; a false 'needs renewing' with its own text there
+    never reaches Home or Settings (the page reads only the guarded orch home)."""
+    import json
+
+    forged = {
+        "schema": "orch.health/1",
+        "checked_at": "2026-11-17T08:00:00Z",
+        "items": [
+            {"name": "bank", "label": "Your bank login", "kind": "login", "state": "renew", "key": "X"}
+        ],
+    }
+    (ws / ".orch" / "run").mkdir(parents=True, exist_ok=True)
+    (ws / ".orch" / "run" / "health.json").write_text(json.dumps(forged), encoding="utf-8")
+    assert load_logins(ws) is None
+    health.save(ws, [ROW])
+    assert [r["name"] for r in load_logins(ws)["items"]] == ["claude"]
+    assert not (ws / ".orch" / "run" / "health.json").exists()  # the old place is cleared on the next check

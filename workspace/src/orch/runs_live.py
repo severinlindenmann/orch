@@ -9,9 +9,11 @@ own hooks call `orch run event --kind idle`, a generic agent calls
 `orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
 once (workspace.live_max) sets a limit; then a start waits in line for a slot. A session idle (or
 waiting for a person) for an hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review,
-Done or Dropped, and such a session does not count toward the limit), or on a ticket Done for that long,
-is closed on the next `orch run` call (there is no daemon); its session id stays on the ticket, so the next
-start continues it.
+Done or Dropped, and such a session does not count toward the limit, nor does one idle while it only waits for
+pull request checks), or on a ticket Done for that long,
+is closed on the next `orch run` call (there is no daemon), but never while it runs a wait on pull request
+checks (that wait merges on green, ORCH-221); its session id stays on the ticket, so the next start
+continues it.
 Nothing here reads the screen to decide anything, with one exception: a run still "starting" (no hook has
 fired) is checked against the adapter's live.screens (a screen the tool shows before it is up). The run's
 own wrapper passes the harmless first-run ones (theme, notes, trust of the `orch init` folder) with the
@@ -42,7 +44,7 @@ FINISHED_IDLE_SECONDS = 10 * 60  # a session on a ticket in Review, Done or Drop
 LOAD_STOP = 30.0  # no new helper while the 1-minute load average is above this (also with no limit set)
 DISK_STOP_GB = 5.0  # ... or while less than this much disk is free
 PACE_SECONDS = 30  # with no limit set: at most one new helper in this time, the rest wait in line
-HARD_EXTRA = 4  # most sessions over a set limit that finished tickets may keep open
+HARD_EXTRA = 4  # most sessions over a set limit that finished tickets or check waiters may keep open
 WHERE_TO_CHANGE = "Settings > Helper > Helpers at once"
 FINISHED = ("review", "done", "dropped")
 PASTE_DELAY = 0.3
@@ -131,22 +133,52 @@ def _finished(root: Path, tid: str) -> bool:
 
 
 def live_all(root: Path) -> list[dict]:
-    """Every alive live run except the hidden General ticket's."""
+    """Every alive live run except the hidden General (Chat) and Manager tickets': they never take a slot."""
     return [
         r
         for r in records(root)
-        if r.get("mode") == "live" and runs.state(r) == "alive" and not tickets.is_general(root, r["ticket"])
+        if r.get("mode") == "live"
+        and runs.state(r) == "alive"
+        and not tickets.is_general(root, r["ticket"])
+        and not tickets.is_manager(root, r["ticket"])
     ]
+
+
+def _only_waits_for_checks(rec: dict) -> bool:
+    """Idle at its prompt and every command it still runs is a wait on pull request checks (orch ref wait,
+    orch github wait): it uses no machine to speak of, so it does not hold a slot (ORCH-148)."""
+    if (rec.get("live") or {}).get("state") != "idle":
+        return False
+    from orch import runwatch  # runwatch imports this module
+
+    with contextlib.suppress(Exception):
+        return runwatch.only_waits_for_checks(rec.get("agent_pid"))
+    return False
+
+
+def _runs_check_wait(rec: dict) -> bool:
+    """The agent runs a wait on pull request checks (orch ref wait, orch github wait) right now. The tool
+    says idle once it put the wait in the background and ended its turn, but the wait still merges on green
+    and wakes it: such a session is not closed for being idle (ORCH-221). The wait ends by its own timeout."""
+    from orch import runwatch  # runwatch imports this module
+
+    with contextlib.suppress(Exception):
+        return runwatch.runs_check_wait(rec.get("agent_pid"))
+    return False
 
 
 def live_alive(root: Path) -> list[dict]:
     """Live runs that count against the limit. A session that is idle or waiting for a person on a ticket in
-    Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS); a working or starting
-    one does."""
+    Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS), nor does one idle
+    while it only waits for pull request checks; a working or starting one does. Both stay under the
+    hard ceiling in _full (the limit plus HARD_EXTRA)."""
     return [
         r
         for r in live_all(root)
-        if not ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
+        if not (
+            ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
+            or _only_waits_for_checks(r)
+        )
     ]
 
 
@@ -163,8 +195,8 @@ def _crowded(root: Path) -> bool:
 
 
 def _full(root: Path) -> int | None:
-    """The limit that was hit (a set limit, or that plus HARD_EXTRA for sessions on finished tickets), else
-    None."""
+    """The limit that was hit (a set limit, or that plus HARD_EXTRA for sessions on finished tickets or that
+    only wait for checks), else None."""
     n = max_live(root)
     if n is None:
         return None
@@ -210,6 +242,11 @@ def _held(root: Path, by: str = "agent:tend") -> str | None:
         return why
     if by.startswith("human:"):
         return None
+    from orch import limitstop
+
+    limit = limitstop.held_words(root)  # ORCH-179: it would only stop on the limit again
+    if limit:
+        return limit
     return "other helpers are just starting" if _too_soon(root) else None
 
 
@@ -262,7 +299,7 @@ def start_live(
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
-    hit = None if mine else _full(root)
+    hit = None if mine or tickets.is_manager(root, tid) else _full(root)  # the Manager never waits in line
     held = None if (mine or hit) else _held(root, by)
     if held:
         _queue_for_slot(root, tid, by, busy_text, priority)
@@ -1415,6 +1452,8 @@ def stop_hidden(root: Path) -> list[str]:
     with contextlib.suppress(Exception):
         if (g := tickets.general_id(root)) is not None:
             ids.append(g)
+        if (m := tickets.manager_id(root)) is not None:
+            ids.append(m)
     d = runs.run_dir(root) / "pending"
     with contextlib.suppress(OSError):
         ids += [f.stem for f in sorted(d.glob("t_*.jsonl")) if f.is_file() and not f.is_symlink()]
@@ -1490,6 +1529,10 @@ def cleanup(root: Path) -> list[str]:
                 continue
         if st != "alive" or live.get("state") not in ("idle", "attention") or runs.undelivered(root, tid):
             continue
+        if tickets.is_manager(root, tid):
+            continue  # ORCH-147: the Manager is always on; only the person stops it or starts it fresh
+        if _runs_check_wait(rec):
+            continue  # it waits for pull request checks on purpose: a close would kill the merge (ORCH-221)
         try:
             idle = time.time() - runs._parse(live["since"])
         except (KeyError, ValueError):

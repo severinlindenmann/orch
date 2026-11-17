@@ -26,10 +26,18 @@ q('#w-loading').append(UI.state({kind:'loading'}));
  /* a plain question (orch ask --option Export --option Download): no pictures, so plain rows (ORCH-110) */
  items.push({id:'g3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'WS-4',ticketId:'t_name',ticketTitle:'Export button',when:'today 22:51',title:'Which name for the export?',then:'The helper uses the name you pick.',
   preview:{type:'options',options:[{id:'Export',title:'Export',suggested:true},{id:'Download',title:'Download',text:'Says what happens on a phone.'}]}});
+ /* a Check result with its own files as tiles; Send back opens the words box, no Comment (ORCH-183) */
+ items.push({id:'g4',kind:'check',kindLabel:'Check',icon:'check',ticket:'WS-5',ticketId:'t_cat',ticketTitle:'Spring catalogue',when:'today 10:24',title:'Spring catalogue: review the result',why:'The helper says this is ready for your check.',okLabel:'Looks good',then:'The ticket is done.',
+  files:[{label:'Catalogue page',type:'page',src:'samples/sample-page.html'},{label:'Cover photo',type:'img',src:'demo-image.svg'}],
+  preview:{type:'doc',heading:'What was done',paras:['In short: the catalogue and the cover photo are ready.'],steps:['Done: Make the catalogue — 2 pages']}});
  UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true});
  const e={id:'core:q:T-1:q4',ticket:'T-1',by:'Severin',via:'phone',at:Date.now()-36e5,card:{kind:'choice',title:'Home: which layout?',preview:{type:'options',options:[{id:'A',title:'As today',preview:pg('A','Cards.')},{id:'B',title:'Recent changes first',preview:pg('B','Changes.')}]}},
   decision:{action:'use_with_changes',picked:'B',changes:['Dates on the left'],summary:'Use B with 1 change',words:{text:'Take B, but dates on the left.'},pins:[{n:1,on:'option B',x:40,y:55,text:'Dates here'}]}};
- q('#w-decision').append(UI.appliesNow([e]),UI.answerRecord(e));}
+ /* ORCH-172: tiles about 344x216; a click or Enter opens one large (UI.reviewViewer); ticket key and title on every card */
+ const sf=(x,r)=>'samples/'+String(r).split('/').pop();
+ const e2={id:'core:q:T-2:q1',ticket:'T-2',ticket_key:'DM1-14',ticket_title:'Opening hours poster',by:'Severin',via:'dashboard',at:Date.now()-72e5,card:{kind:'draft',title:'New opening hours poster',preview:{type:'compare',before:{type:'img',src:'reviewed/aa/sample-poster.svg'},after:{type:'img',src:'reviewed/aa/sample-poster.svg'}}},decision:{action:'approve',summary:'Looks good'}};
+ const e3={id:'core:review:T-3',ticket:'T-3',ticket_key:'DM1-15',ticket_title:'Customer survey summary',text:'Is the survey summary ready to send?',by:'Severin',via:'dashboard',at:Date.now()-9e6,card:{kind:'check',preview:{type:'doc',heading:'What was done',paras:['Read all 112 answers from 1 to 12 November and grouped them by topic. Most customers praise the friendly team; 29 ask for Sunday opening.','Wrote a one-page summary with the five biggest points and a proposal to try Sunday 9 to 13 for four weeks.','Smaller points: waiting time on Saturday, oat milk, a second card reader.']}},decision:{action:'approve',summary:'Looks good'}};
+ q('#w-decision').append(UI.appliesNow([e]),UI.answerRecord(e),UI.answerRecord(e2,{fileUrl:sf,ticketHref:()=>'#kit'}),UI.answerRecord(e3,{ticketHref:()=>'#kit'}));}
 q('#w-sheet').onclick=()=>{const p=document.createElement('p');p.textContent='Side sheet over the current page. Escape closes it.';UI.sheet('Summary notes',p)};
 q('#w-toast').onclick=()=>UI.toast('Answered: Newsletter logo',()=>UI.toast('Undone'));q('#w-toast-err').onclick=()=>UI.toast('Could not reach your storage',null,'error')}
 {

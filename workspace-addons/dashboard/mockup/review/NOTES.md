@@ -1,11 +1,15 @@
 # Review (15 Nov 2026)
 
 - `review.html` is the Review page of the dashboard (`#review`, product: `web/pages/review.js` + the kit's `review.js`): heading "Review" with
-  the count, the deck, and the "All cards" list beside it (hidden below 1100 px). Same demo cards as the approved draft
+  the count, the deck, and the "All cards" list beside it (hidden below 1440 px since ORCH-172, so the card gets the page width at 1280). Same demo cards as the approved draft
   (`proposals/swipe-review/`, left untouched).
 - Reached from Home: "Review all" in the needs-you block (`home/home.html`). It is not in the sidebar.
 - The topbar "New ticket" is an outline button here; the answer is the primary action.
-- The product page also has the Waiting / Answered switch above the deck (kit `UI.reviewPage`); this static page shows the Waiting side only.
+- Waiting / Answered switch above the deck as in the product (kit `UI.reviewPage`). 17 Nov (ORCH-172): Answered shows the master's
+  `UI.answerRecord`: ticket key and title (a link) on every card, the question as title when the card has none, tiles about
+  344x216 (twice the old 172x108), a click or Enter on a tile opens it large (`UI.reviewViewer`: fits the width, tall
+  pictures scroll, words in full in short lines, arrows go to the other tiles). No empty "Reviewed" tile. The waiting
+  card's question text keeps lines of at most 75 characters.
 - No Decisions tab: the ticket page shows card answers under its questions ("Earlier answers"), with "What applies now" on top: `../ticket/ticket-answers.html`.
 - No extra chip on a card: an answer is a plain click.
 - 16 Nov (ORCH-65): cards carry the whole question text, a marked suggestion ("Suggested: Build it" on the card and under
@@ -18,3 +22,11 @@
   title and its description: no dark frame, no empty picture box, no zoom, and the letter chip only for short ids (A, B).
 - 16 Nov (ORCH-77): "Accepted for you" card under "All cards" (the Reviewer's Done-for-you tickets of today): ticket link, the why line, a Send back button that asks for a short note, or "Sent back". Hidden when nothing was accepted. It stays on a phone width (below the deck) while the All cards aside hides. Settings > General has the switch "Accept small finished work for me".
 - 17 Nov (ORCH-79): Settings > General has the switch "Merge releases without my click" under "Accept small finished work for me" (off by default; only the owner turns it on). On: a release Merge card with every check green merges by itself and the card shows as answered by the release keeper.
+- 17 Nov (ORCH-183, persona test): Send back on a Check result opens the "What should change?" box (it never goes
+  out without words) and the separate Comment button is left out there; an answer waits 6 s before it is saved, so
+  Undo takes it back for real (after that Undo is off and the toast says it is already saved); the "What was done"
+  box is as tall as its words, with the result's own pictures, pages and PDFs as tiles under it; the card gives up
+  height so the answers and Later stay on screen at 1440x900 and 390x844; "Done when is not fully covered" says what
+  to do; a Factory proposal shows its title, goal and time like Home.
+- 17 Nov (ORCH-183, owner choice B): a Factory start on Review has Home's buttons Not now, Change it, Start (Start last), all
+  outlined, in place of the three answers; the arrow keys do not answer it.

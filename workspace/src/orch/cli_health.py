@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 
-from orch import health, history, net, nextstep, renew
+from orch import health, history, net, nextstep, renew, tickets
+from orch.errors import Refused
 
 NONE_SET = "Nothing here tells orch whether it works."
 
@@ -36,6 +38,18 @@ def add_parsers(sub, common) -> None:
     how.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)  # the background worker
     k = acts.add_parser("replace", parents=[common], help=argparse.SUPPRESS)  # a key: new value on stdin
     k.add_argument("name")
+    # ORCH-48: a workspace's own check for any other tool, one entry (health.add_recipe)
+    a = acts.add_parser("add", parents=[common], help=argparse.SUPPRESS)
+    a.add_argument("name")
+    a.add_argument("--command", required=True, dest="check_command", help=argparse.SUPPRESS)
+    a.add_argument("--label", help=argparse.SUPPRESS)
+    a.add_argument("--works", help=argparse.SUPPRESS)
+    a.add_argument("--ends", help=argparse.SUPPRESS)
+    a.add_argument("--kind", choices=health.KINDS, help=argparse.SUPPRESS)
+    a.add_argument("--key", help=argparse.SUPPRESS)
+    a.add_argument("--how", help=argparse.SUPPRESS)
+    d = acts.add_parser("remove", parents=[common], help=argparse.SUPPRESS)
+    d.add_argument("name")
 
 
 def line(r: dict) -> str:
@@ -46,12 +60,15 @@ def line(r: dict) -> str:
     n = len(r["stops"])
     on = "; ".join(f"{t['key']} {t['title']}".strip() for t in r["stops"])
     work = f"{n} ticket{'' if n == 1 else 's'}: {on}"
+    how = f" {r['how']}" if r.get("how") and not r.get("renew") else ""
     if r["state"] == "renew":
         text = f"The {label} {kind} ran out {when}." if when else f"The {label} {kind} no longer works."
         text += f" The helper cannot go on with {work}." if n else ""
-        return text + (" No new work starts until it is renewed." if r["chosen"] else " Renew it.")
+        text += " No new work starts until it is renewed." if r["chosen"] else "" if how else " Renew it."
+        return text + how
     if r["state"] == "soon":
-        return f"The {label} {kind} runs out {when}." + (f" The helper then stops on {work}." if n else "")
+        text = f"The {label} {kind} runs out {when}." + (f" The helper then stops on {work}." if n else "")
+        return text + how
     if r["state"] == "works":
         return f"The {label} {kind} works until {when}." if when else f"The {label} {kind} works."
     return f"{label} did not answer, so orch cannot tell whether its {kind} works."
@@ -60,8 +77,7 @@ def line(r: dict) -> str:
 RENEW_SAYS = {
     "none": "No sign-in was started for this login.",
     "starting": "The sign-in is starting.",
-    "link": "Open this link and sign in: {link}\n"
-    "If the page shows a code, paste it with: orch logins renew {name} --code -",
+    "link": "Open this link and sign in: {link}\nIf the page shows a code, paste it in the Renew window.",
     "checking": "orch is checking the login.",
     "done": "The login is renewed.",
     "failed": "The sign-in did not finish. Press Renew to try again.",
@@ -74,7 +90,7 @@ AGAIN = "The tool did not take that code. Copy the whole code from the sign-in p
 
 def renew_line(st: dict) -> str:
     if st.get("state") == "link" and st.get("again"):
-        return AGAIN + f"\nPaste it with: orch logins renew {st.get('name') or ''} --code -"
+        return AGAIN
     text = RENEW_SAYS.get(st.get("state"), RENEW_SAYS["failed"]).format(
         link=st.get("link") or "", name=st.get("name") or ""
     )
@@ -94,18 +110,42 @@ def dispatch(args, root: Path) -> bool:
     if action == "renew":
         if args.worker:
             raise SystemExit(renew.work(root, args.name))
+        by = tickets.acting_by(args)  # renew.person_only: only with the dashboard's one-time grant
         if args.code is not None:
-            st = renew.code(root, args.name, _stdin_line() if args.code == "-" else args.code)
+            renew.person_only(root, by)  # before anything is read
+            if args.code != "-":
+                raise Refused("The code goes on stdin, never on the command line: --code -")
+            st = renew.code(root, args.name, _stdin_line(), by=by)
         elif args.status:
-            st = renew.status(root, args.name)
+            st = renew.status(root, args.name, by=by)
         elif args.cancel:
-            st = renew.cancel(root, args.name)
+            st = renew.cancel(root, args.name, by=by)
         else:
-            st = renew.start(root, args.name)
+            st = renew.start(root, args.name, by=by)
         _out(args, st, renew_line(st))
         return True
+    if action == "add":
+        try:
+            command = shlex.split(args.check_command)
+        except ValueError:
+            command = []
+        doc = {"label": args.label, "command": command, "works": args.works, "ends": args.ends}
+        doc |= {"kind": args.kind, "key": args.key, "how": args.how}
+        r = health.add_recipe(root, args.name, doc)
+        _out(
+            args, {"added": r["name"], "label": r["label"]}, f"orch now checks {r['label']} with the others."
+        )
+        return True
+    if action == "remove":
+        gone = health.remove_recipe(root, args.name)
+        text = f"orch no longer checks {args.name}." if gone else f"There is no own check called {args.name}."
+        _out(args, {"removed": args.name if gone else None}, text)
+        return True
     if action == "replace":
-        res = renew.replace_key(root, args.name, sys.stdin.read().removesuffix("\n").removesuffix("\r"))
+        by = tickets.acting_by(args)
+        renew.person_only(root, by)  # before the value is read
+        value = sys.stdin.read(65537)
+        res = renew.replace_key(root, args.name, value, by=by)
         ok = res["state"] in ("works", "soon")
         text = "The new key is in and works." if ok else "The new key is in, but the check still fails."
         if res.get("went_on"):

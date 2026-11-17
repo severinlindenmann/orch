@@ -320,10 +320,14 @@ def _private_dir(p: Path, stop: Path) -> None:
     chain = [c for c in [p, *p.parents] if c != stop and stop in c.parents][::-1]
     for c in chain:
         if not c.exists() and not c.is_symlink():
-            c.mkdir(mode=0o700)
-            if POSIX:
-                c.chmod(0o700)
-            winacl.set_private(c, True)
+            try:
+                c.mkdir(mode=0o700)
+            except FileExistsError:  # another process or thread made it just now: it is checked below
+                pass
+            else:
+                if POSIX:
+                    c.chmod(0o700)
+                winacl.set_private(c, True)
         _check_dir(c)
 
 

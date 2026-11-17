@@ -23,6 +23,7 @@ from orch import (
     cli_job,
     cli_leave,
     cli_look,
+    cli_manager,
     cli_needs,
     cli_record,
     cli_report,
@@ -30,6 +31,7 @@ from orch import (
     cli_run,
     cli_screen,
     cli_secret,
+    cli_shot,
     cli_status,
     diag,
     diag_incident,
@@ -202,6 +204,15 @@ def _lookup(root: Path | None, tid: str) -> dict | None:
         return None
 
 
+def _ticket_name(root: Path, tid: str) -> str:
+    """KEY title, or the id alone when that ticket cannot be read here."""
+    try:
+        o = tickets.load(root, tid)
+    except (Refused, OSError, ValueError, KeyError):
+        return tid
+    return (f"{o['key']} " if o.get("key") else "") + str(o.get("title") or tid)
+
+
 def _show(t: dict, root: Path) -> str:
     t = history.shown_ticket(root, t)  # every person field as this machine can prove it (idempotent)
     open_q = [q for q in t["questions"] if q["answer"] is None]
@@ -210,9 +221,9 @@ def _show(t: dict, root: Path) -> str:
     if t.get("summary"):
         out.append(t["summary"])
     d, n = tickets.checks_done(t)
-    out.append(
-        f"Status: {tickets.STATUS_WORDS[t['status']]}" + (f" - {_progress(t)}" if _progress(t) else "")
-    )
+    out.append(f"Status: {tickets.status_word(t)}" + (f" - {_progress(t)}" if _progress(t) else ""))
+    if t["status"] == "dropped" and t.get("superseded_by"):
+        out.append(f"Replaced by: {_ticket_name(root, t['superseded_by'])}")
     if n and d == n:
         out.append(
             f"✓ All done · {_progress(t)}"
@@ -237,6 +248,8 @@ def _show(t: dict, root: Path) -> str:
         for k, label in (("changed", "Changed"), ("why", "Why"), ("not_included", "Not included")):
             if t["outcome"].get(k):
                 out.append(f"{label}: {t['outcome'][k]}")
+    if t.get("release"):
+        out.append("Release: the epics and tickets under it ship together")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(
@@ -333,7 +346,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager", "triage"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -427,6 +440,15 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     x = sub.add_parser("usage", parents=[common], help="tokens per model and per ticket (read-only)")
     x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
+    x = sub.add_parser("triage", parents=[common], help="list the tickets that need a look (read-only)")
+    x.add_argument(
+        "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
+    )
+    x.add_argument(
+        "--lanes",
+        help="lanes to go through, e.g. backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded "
+        "(default: every lane except Done, Won't do and Superseded)",
+    )
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
@@ -466,6 +488,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help="an epic: its sub-tickets (--parent) are the work; a run goes through them in order",
     )
     x.add_argument(
+        "--release",
+        action="store_true",
+        help="a release: the epics and tickets that ship together go under it (--parent)",
+    )
+    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -482,6 +509,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("status", parents=[common])
     x.add_argument("id")
     x.add_argument("status", choices=tickets.STATUSES)
+    x.add_argument(
+        "--superseded-by",
+        metavar="TICKET",
+        help="with dropped: the ticket that replaces this one (Superseded)",
+    )
     x.add_argument("--shown-tip", help=argparse.SUPPRESS)  # the review tip the person's page showed
     x = t.add_parser("edit", parents=[common])
     x.add_argument("id")
@@ -494,7 +526,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x.add_argument("--note", help="a free note (empty clears)")
     x.add_argument("--done-when", help="what should be true when it is done (empty clears)")
+    x.add_argument(
+        "--parent", metavar="ID", help="put it under this ticket, e.g. an epic (empty takes it out)"
+    )
+    x.add_argument(
+        "--release", choices=("yes", "no"), help="yes marks it as a release, no takes the mark off"
+    )
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
+    x = t.add_parser("order", parents=[common], help="the order of the tickets in one board lane")
+    x.add_argument("lane", help="the lane, e.g. todo or backlog")
+    x.add_argument("ids", nargs="+", metavar="ID", help="the tickets of the lane, first to last")
     x = t.add_parser("set", parents=[common], help="set an add-on field, e.g. marketing.budget 2400")
     x.add_argument("id")
     x.add_argument("field", metavar="ADDON.FIELD")
@@ -768,10 +809,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_record.add_parsers(sub, common)
     cli_secret.add_parsers(sub, common)
     cli_screen.add_parsers(sub, common)
+    cli_shot.add_parsers(sub, common)
     cli_config.add_parsers(sub, common)
     cli_github.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
     cli_chat.add_parsers(sub, common)
+    cli_manager.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
     notes = []
     if addon_lines:
@@ -922,6 +965,20 @@ def run(args: argparse.Namespace) -> None:
 
         data = usage.workspace_usage(root, max(args.days, 1))
         _out(args, data, usage.text(data))
+    elif cmd == "triage":
+        from orch import triage
+
+        if args.start:
+            r = triage.start(root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes))
+            how = "a helper started on it" if r["started"] else f"it waits for a helper ({r['why']})"
+            _out(
+                args,
+                r,
+                f"Opened {r['ticket']} with {r['open']} tickets, {r['findings']} worth a look: {how}.",
+            )
+        else:
+            res = triage.collect(root, lanes=triage.parse_lanes(args.lanes))
+            _out(args, res, triage.list_text(res))
     elif cmd == "update":
         if not args.project_only:  # first: with another ORCH_HOME there is nothing to update
             addons.tool_env_change_ok()
@@ -973,7 +1030,12 @@ def run(args: argparse.Namespace) -> None:
         or cli_github.dispatch(args, root)
     ):
         pass
-    elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root):
+    elif (
+        cli_chat.dispatch(args, root)
+        or cli_look.dispatch(args, root)
+        or cli_shot.dispatch(args, root)
+        or cli_manager.dispatch(args, root)
+    ):
         pass
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(
@@ -986,6 +1048,7 @@ def run(args: argparse.Namespace) -> None:
             title_auto=args.title_auto,
             plan_first=args.plan_first,
             epic=args.epic,
+            release=args.release,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -1023,7 +1086,7 @@ def run(args: argparse.Namespace) -> None:
         who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
         looked = _looked_at_this(root, args, args.id, args.status, person)
         hint = tickets.recheck_hint(root, args.id, args.status, who)
-        t = tickets.set_status(root, args.id, args.status, who)
+        t = tickets.set_status(root, args.id, args.status, who, superseded_by=args.superseded_by)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         if not hint and who.startswith("agent:"):
@@ -1035,16 +1098,34 @@ def run(args: argparse.Namespace) -> None:
         text = (
             tickets.REVIEW_MESSAGE
             if args.status == "done" and t["status"] == "review"
-            else shown.get("notice") or f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}"
+            else shown.get("notice") or f"{t['title']} - {tickets.status_word(t)}"
         )
         _out(args, shown, text)
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
-        if args.title is None and not fields:
-            raise Refused("Say what to change: --title, --owner, --due, --note or --done-when.")
-        t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
+        if args.title is None and not fields and args.parent is None and args.release is None:
+            raise Refused(
+                "Say what to change: --title, --owner, --due, --note, --done-when, --parent or --release."
+            )
+        if args.parent is not None:  # first, so a refused parent changes nothing else
+            t = tickets.set_parent(root, args.id, args.parent, by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other fields follow it
+        if args.release is not None:
+            t = tickets.set_release(root, args.id, args.release == "yes", by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other changes follow it
+        if args.title is not None or fields:
+            t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
         _out(args, t, f"Saved (revision {t['revision']}).")
+    elif cmd == "ticket" and sub == "order":
+        changed = tickets.set_lane_order(root, args.lane, args.ids, by())
+        _out(
+            args,
+            {"lane": args.lane, "order": args.ids, "changed": [t["id"] for t in changed]},
+            f"Order saved for {len(args.ids)} tickets ({len(changed)} moved).",
+        )
     elif cmd == "ticket" and sub == "set":
         _ticket_set(args, root, by)
     elif cmd == "ticket" and sub == "summary":
@@ -1541,6 +1622,7 @@ def _ticket_set(args, root: Path, by) -> None:
 _TICKET_ARGS = {
     *{(c, "id") for c in ("ticket", "check", "log", "ask", "answer", "ref", "ext", "wait")},
     ("ticket", "parent"),
+    ("ticket", "ids"),  # orch ticket order <lane> <id> ...
     ("run", "ticket"),
     ("relay", "ticket"),
     ("diag", "ticket"),

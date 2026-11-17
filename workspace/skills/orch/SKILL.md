@@ -56,7 +56,8 @@ In a live session, when you see `New input on orch ticket <id>` or `Your task fo
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
 Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, reminds a helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
-The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes stay in Review with one line why; `--dry-run` only says it. What it accepted: `orch review accepted [--since yesterday]`.
+The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes, or a part of Done when that no task covers, stay in Review with one line why; `--dry-run` only says it. When the person also turned on `workflow.reviewer_answers`, the same pass answers a plain question for them with your recommended option after 30 minutes, unless it names concept, words, look, money, production or something that cannot be undone; so recommend the option you would pick. What it accepted and answered: `orch review accepted [--since yesterday]`.
+Its second look (only when the person also turned on `workflow.reviewer_look`): bigger work it leaves waits in line, and one helper on the small model checks each Done-when part and the pictures, then decides each ticket with `orch review verdict <ticket> accept|back|leave "<one line>" --point "<point>: shown"` (only for tickets in that line; never for your own ticket).
 Releases (for a script that repeats, only when the person turned on `workflow.release_merge` in Settings): a release Merge card made with `orch ask ... --merge --release` is merged for the person by `orch review tend-releases` once every check of its pull request is green; otherwise the person clicks Merge. `--dry-run` only says it.
 
 **Finish a step**
@@ -179,10 +180,19 @@ orch only records the wait. An add-on may wake the ticket when it is due; if non
 
 **Sub-tickets**
 
-    orch ticket new "<title>" --parent <id>      # set only when creating; the parent must exist
+    orch ticket new "<title>" --parent <id>      # a new ticket under a parent; the parent must exist
+    orch ticket edit <id> --parent <epic>        # put a ticket that already exists under an epic (--parent "" takes it out)
     orch ticket tree <id>
+    orch ticket order <lane> <id> <id> ...       # the order of tickets inside one board lane (todo, backlog ...), first to last
 
 Read the parent first, work only in yours, keep it at most 3 levels deep. Close the sub-tickets before the parent.
+
+**Tidy the tickets** (triage)
+
+    orch triage [--lanes backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded]   # read-only list of what needs a look
+    orch triage --start [--lanes ...]   # one dated Triage ticket with that list, and one helper on it (never two at once)
+
+On a Triage ticket, follow its note: change tickets yourself, one 'Triage:' line on each, every change in the summary.
 
 **Plan big work**
 
@@ -246,6 +256,10 @@ If work remains, leave it visible (open steps, a log line).
     orch look set --icon <id> --color <token>     # fit the folder name and what the work is about
 
 Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colours from the list, never invent an id. If a person already chose a field, orch refuses it: leave it. All of it is optional: if one is refused or fails, skip it; it is never a blocker for the work.
+
+**Screenshot a page or file** (never start a browser yourself: it can pop a keychain password window on the person's screen)
+
+    orch shot <address or html file> --width 1280,1920,390 --out <folder>    # one picture per width, prints the paths
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.

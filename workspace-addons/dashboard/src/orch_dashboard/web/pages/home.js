@@ -20,7 +20,7 @@ function parentLine(t) {
   const parent = ticketOf(t.parent || tickets().find(p => array(p.children).includes(t.id))?.id);
   return parent ? h('p', {className:'meta'}, parent.epic ? 'Part of the epic ' : 'Sub-ticket of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
 }
-const finishedAt = t => parse(t.done_at || t.completed_at || t.updated_at);
+const finishedAt = t => parse(window.DashHelpers.doneAt(t));
 
 function ticketRow(t) {
   const at = finishedAt(t);
@@ -407,10 +407,13 @@ function clearOldButton() {
   return b;
 }
 function attentionSummary(groups, failed, results, changes) {
+  // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
+  // (failed starts, notes without a question, changes to add) follows "also", so title, subtitle and rows agree (ORCH-184)
   const questionsAsked = groups.filter(g => g.row.answer?.question).length, other = groups.length - questionsAsked + failed.length;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
-  return [part(questionsAsked, 'question', 'questions'), part(other, 'thing to look at', 'things to look at'),
-    part(results, 'result to check', 'results to check'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
+  const counted = [part(questionsAsked, 'question', 'questions'), part(results, 'result to check', 'results to check')].filter(Boolean).join(' · ');
+  const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
+  return counted && extra ? counted + ' · also ' + extra : counted || extra;
 }
 function homeSection(key, title, body, count = '', more = null) {
   return h('section', {className:'home-section', 'data-key':key, id:key === 'needs-you' ? key : null},
@@ -449,9 +452,9 @@ function needsToday() {
   const needs = live.filter(r => !window.DashHelpers.isNotice(r) && !window.DashHelpers.isBringBack(r));
   const failed = tickets().map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
   const groups = homeNeeds(needs), all = tickets();
-  const review = all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id));
+  const review = all.filter(t => t.status === 'review');  // each result to check is one row and one count, like the Review page cards
   const changes = all.filter(t => t.bring_back?.state === 'waiting');
-  const asked = groups.length + failed.length, results = all.filter(t => t.status === 'review');
+  const asked = groups.length + failed.length, results = review;
   // what helpers need: a login that runs out soon is a row of Home's list and counts in Home's title only (as drawn: the
   // menu badges count questions and results, which the Review page holds); the stopped ones are the banner
   const logins = loginWarnings();
@@ -485,8 +488,7 @@ function autoUpdateNote() {
 }
 // "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first.
 function doneAt(t) {
-  if (typeof t.done_at === 'string' && t.done_at) return t.done_at;
-  return (typeof ticketDoneEvent === 'function' ? ticketDoneEvent(t)?.at : '') || t.updated_at || t.created_at || '';
+  return window.DashHelpers.doneAt(t) || t.created_at || '';
 }
 function changedWords(t) {
   const o = typeof outcomeOf === 'function' ? outcomeOf(t) : {}, first = String(o.changed || o.why || '').split('\n')[0].trim();
@@ -548,11 +550,21 @@ function loginAction(item, key, quiet = false) {
   control.dataset.key = key + '-check';
   return control;
 }
+// A tool orch cannot renew itself says the one step the person takes (ORCH-48).
+// (page scope: Settings uses it too). Nothing when a Renew or Replace button is there, or it works.
+function loginHowText(item) {
+  return item && item.state !== 'works' && !item.renew && !item.key && typeof item.how === 'string' ? item.how : '';
+}
+function loginHow(item) {
+  const how = loginHowText(item);
+  return how ? h('p', {className:'meta', 'data-key':'login-how-' + item.name}, how) : null;
+}
 function loginSoonRow(item) {
   const key = 'login-soon-' + item.name, n = item.stops.length;
   return h('div', {className:'card-row', 'data-key':key, 'data-login':'soon'},
     h('div', {className:'grow'}, h('p', {}, h('strong', {}, 'The ' + clean(window.DashHelpers.needName(item)) + ' ends on ' + window.DashHelpers.needEnds(item) + '.')),
-      n ? h('p', {className:'meta'}, 'After that helpers stop on ' + n + (n === 1 ? ' ticket: ' : ' tickets: '), loginTicketLinks(item.stops)) : null),
+      n ? h('p', {className:'meta'}, 'After that helpers stop on ' + n + (n === 1 ? ' ticket: ' : ' tickets: '), loginTicketLinks(item.stops)) : null,
+      loginHow(item)),
     loginAction(item, key));
 }
 function loginBanner(stopped) {
@@ -563,7 +575,7 @@ function loginBanner(stopped) {
     const item = stopped[0], name = clean(window.DashHelpers.needName(item));
     return h('div', {className:'banner error', role:'alert', 'data-key':'login-stopped', 'data-login':'stopped'},
       h('div', {className:'grow'}, h('strong', {}, 'The ' + name + (item.state === 'unreachable' ? ' cannot be reached' : ' stopped working')),
-        lead ? h('p', {}, lead + (n ? ': ' : '.'), n ? loginTicketLinks(list) : null) : null),
+        lead ? h('p', {}, lead + (n ? ': ' : '.'), n ? loginTicketLinks(list) : null) : null, loginHow(item)),
       loginAction(item, 'login-stopped-' + item.name));
   }
   const names = stopped.map(i => clean(window.DashHelpers.needName(i))).join(' · ');

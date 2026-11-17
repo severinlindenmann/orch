@@ -42,16 +42,17 @@ def _evidence(tid: str, rid: str) -> list[str]:
     rec = {
         "run": rid,
         "process": "alive",
-        "heartbeat_age_s": 1800,
+        "heartbeat_age_s": 3600,
         "live_state": "attention",
         "live_since": "2026-11-16T22:00:00Z",
     }
     alive = {"now": now, "collected": {"runs": {"data": {"runs": {tid: rec}}}}}
+    working = {"now": now, "collected": {"runs": {"data": {"runs": {tid: {**rec, "live_state": "working"}}}}}}
     out = []
     for mod, snap in (
         (run_gone_ticket_working, gone),
         (dead_lock_holder, gone),
-        (no_heartbeat, alive),
+        (no_heartbeat, working),
         (waiting_for_permission, alive),
     ):
         out += mod.check(snap)["evidence"]
