@@ -217,7 +217,8 @@ elif args[0] == "log":
 elif args[:2] == ["run", "start"]:
     load(args[2])
     if (root / "fail-run").exists():
-        print(json.dumps({"error": "No agent.", "code": "not_available"}))
+        said = (root / "fail-run").read_text().strip()
+        print(json.dumps({"error": said if len(said) > 1 else "No agent.", "code": "not_available"}))
         sys.exit(2)
     with (root / "runs.jsonl").open("a") as stream:
         stream.write(

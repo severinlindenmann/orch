@@ -858,3 +858,19 @@ def test_rename_title_owner_and_task_keep_old_and_new_text(proj, run, new_ticket
     run("check", "add", tid, "Write the test")
     run("check", "edit", tid, "c1", "Write two tests")
     assert read(proj, tid)["history"][-1]["text"] == "Renamed c1 (was: Write the test | now: Write two tests)"
+
+
+def test_a_wait_until_a_date_keeps_what_it_waits_for(proj, new_ticket, validate):
+    """ORCH-235: Waiting has a date and, when a person gave one, a reason; a blank reason is left out."""
+    tid = new_ticket()
+    rev = read(proj, tid).get("revision", 0)
+    wait = {"kind": "time", "until": "2030-01-01T08:00:00Z", "ref": " The price list "}
+    data = {"status": "waiting", "waiting_on": wait}
+    tickets.patch(proj, tid, rev, json.dumps(data), "human:t")
+    t = read(proj, tid)
+    validate(t)
+    assert t["waiting_on"] == {"kind": "time", "until": "2030-01-01T08:00:00Z", "ref": "The price list"}
+    blank = tickets.waiting_value("time", "  ", "2030-01-01T08:00:00Z")
+    assert blank == {"kind": "time", "until": "2030-01-01T08:00:00Z"}
+    with pytest.raises(Refused):
+        tickets.waiting_value("time", "x" * 201, "2030-01-01T08:00:00Z")

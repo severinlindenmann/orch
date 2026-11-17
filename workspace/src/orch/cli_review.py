@@ -228,11 +228,17 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
             )
         head = args.merge_head = ghmerge.head_of(args.open)  # the click merges exactly this commit
         # what the person decides on, read for the pinned commit; never a helper's own file in its place
-        card["preview"] = merge_preview(root, args.open, head, ghmerge.summary(args.open, head))
+        wf = args.merge_workflow = ghmerge.workflow_check(args.open, head)  # ORCH-305: CI workflow files
+        card["preview"] = merge_preview(root, args.open, head, ghmerge.summary(args.open, head), wf)
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
         card.setdefault(
             "why",
-            "Your click merges it on GitHub with your own GitHub login."
+            (
+                "It changes a CI workflow, so GitHub waits for you to approve it: your click approves "
+                "this exact version and merges it with your own GitHub login."
+                if wf
+                else "Your click merges it on GitHub with your own GitHub login."
+            )
             + (
                 " When you allowed it in Settings, it merges by itself once every check is green."
                 if getattr(args, "release", False)
@@ -263,14 +269,28 @@ def _pr_tickets(root: Path, repo_url: str) -> dict[int, list[str]]:
     return out
 
 
-def merge_preview(root: Path, url: str, head: str, info: dict | None) -> dict:
+def _with_workflow(pv: dict, wf: dict | None) -> dict:
+    """ORCH-305: a pull request that changes a CI workflow says the check of those lines first (the reason
+    the owner is asked) and lists the workflow files before any other row."""
+    if not wf:
+        return pv
+    pv["paras"] = [ghmerge.workflow_words(wf), *(pv.get("paras") or [])]
+    rows = [{"title": f"{f['name']} (+{f['add']} −{f['del']})"[:200]} for f in wf["files"][:5]]
+    if len(wf["files"]) > 5:
+        rows.append({"title": f"and {len(wf['files']) - 5} more workflow files"})
+    pv["rows"] = rows + (pv.get("rows") or [])
+    return pv
+
+
+def merge_preview(root: Path, url: str, head: str, info: dict | None, wf: dict | None = None) -> dict:
     """A merge card's box (ORCH-183, owner 17 Nov, after a design challenge): the checks as a status line,
     "What goes out · N changes" with one row per pull request (GitHub's title first, its ticket key and
     number beside it), the commits that are no pull request merge, and the exact version as a small footer.
-    The address itself is the card's Open link, not its content. Without GitHub's answer only the version."""
+    The address itself is the card's Open link, not its content. Without GitHub's answer only the version.
+    `wf` (ghmerge.workflow_check): the CI workflow check goes first (_with_workflow)."""
     foot = f"Exact version: {head[:7]}"
     if not info:
-        return {"type": "doc", "heading": "Pull request", "foot": foot}
+        return _with_workflow({"type": "doc", "heading": "Pull request", "foot": foot}, wf)
     when = datetime.now().strftime("%H:%M")
     tone, words = info["checks"]
     names = _pr_tickets(root, url.rsplit("/pull/", 1)[0])
@@ -306,7 +326,7 @@ def merge_preview(root: Path, url: str, head: str, info: dict | None) -> dict:
         pv["paras"] = paras
     if rows:
         pv["rows"] = rows
-    return pv
+    return _with_workflow(pv, wf)
 
 
 def has_card_flags(args) -> bool:
@@ -319,6 +339,8 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         raise Refused("A card needs --then: what happens after the answer.")
     card, options, suggest, _title = _guard(build_card, root, args)
     links = _guard(links_of, getattr(args, "ref", None) or [])
+    if getattr(args, "merge_workflow", None) and len(links or []) < LINKS_MAX:  # ORCH-305: the diff itself
+        links = [*(links or []), {"label": "Workflow changes", "url": args.open + "/files"}]
     card, shown = _guard(review.prepare_card, root, tid, card)
     action = None
     if getattr(args, "merge", False):

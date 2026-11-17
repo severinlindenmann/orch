@@ -576,10 +576,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser(
         "model",
         parents=[common],
-        help="the model of this ticket's helper: sonnet, opus or auto (a person); up --why (the helper)",
+        help="the model of this ticket's helper: haiku, sonnet, opus, fable or auto (a person); "
+        "up --why (the helper)",
     )
     x.add_argument("id")
-    x.add_argument("name", choices=("sonnet", "opus", "auto", "up"))
+    x.add_argument("name", choices=("haiku", "sonnet", "opus", "fable", "auto", "up"))
     x.add_argument("--why", help="with up: why the work needs Opus, in a few plain words")
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
@@ -1158,6 +1159,7 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est)
         _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "model" and args.name == "up":
+        from orch import modelpick
         from orch import runs_live as _live
 
         tid = tickets.resolve(root, args.id)
@@ -1172,7 +1174,7 @@ def run(args: argparse.Namespace) -> None:
         _out(
             args,
             t,
-            "It already runs on Opus."
+            f"It already runs on {modelpick.LABELS[(modelpick.chosen(t) or {}).get('name') or 'opus']}."
             if not moved
             else "Moved up to Opus. "
             + (
@@ -1186,11 +1188,20 @@ def run(args: argparse.Namespace) -> None:
 
         if args.why:
             raise Refused("--why goes with up only.")
+        from orch import runs_live as _live
+
         t = tickets.set_model(root, args.id, args.name, by())
+        # a person's choice reaches a running helper at its next turn end (owner 17 Nov: no /model by hand)
+        live = args.name in modelpick.MODELS and _live.switch_model(root, t["id"], args.name, by(), up=False)
         _out(
             args,
             t,
-            f"Model: {modelpick.label(t)}. It applies from the next start."
+            f"Model: {modelpick.label(t)}. "
+            + (
+                "The running helper switches when its turn ends."
+                if live
+                else "It applies from the next start."
+            )
             if modelpick.label(t)
             else "orch picks the model again on the next start.",
         )
@@ -1470,6 +1481,29 @@ def _ref_merge(args, root: Path, who: str) -> None:
     _out(args, {"merged": True, "already": got["already"], "url": url}, line)
 
 
+def _owner_merges(root: Path, t: dict, url: str, who: str, carded: list):
+    """ORCH-305 (owner 17 Nov, option A): GitHub holds a pull request that changes a CI workflow until the
+    owner approves it, so on green it is not merged here: one Merge card for the owner is made instead, with
+    the check of the workflow lines (ghmerge.workflow_check), and the owner's click approves and merges it
+    with their own login. The answer is the reason prwait gives for not merging; None (no workflow file)
+    lets the merge go on."""
+    from orch import ghmerge
+
+    def check(head: str) -> str | None:
+        if ghmerge.workflow_check(url, head) is None:
+            return None
+        key = t.get("key") or t["id"]
+        ns = build_parser().parse_args(
+            ["ask", t["id"], f"Merge the CI workflow change of {key}?", "--link", "CI workflow change",
+             "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]
+        )  # fmt: skip
+        _, q = cli_review.ask_card(ns, root, t["id"], who)
+        carded.append(q["id"])
+        return f"it changes a CI workflow, so the owner merges it with the Merge card {q['id']} on {key}"
+
+    return check
+
+
 def _ref_wait(args, root: Path, who: str) -> None:
     """Wait for the ticket's pull requests' checks one after the other, without an AI call (prwait). Each
     verdict goes on the ticket (a history line and the reference's state); with --merge each one is merged on
@@ -1502,7 +1536,15 @@ def _ref_wait(args, root: Path, who: str) -> None:
         raise Refused("--timeout is a number of minutes, at least 1.")
     done = []
     for url in urls:
-        o = prwait.run_one(url, args.merge, timeout=args.timeout * 60)
+        carded: list[str] = []
+        o = prwait.run_one(
+            url,
+            args.merge,
+            timeout=args.timeout * 60,
+            before_merge=_owner_merges(root, t, url, who, carded) if args.merge else None,
+        )
+        if carded and o.status == "held":  # green, and the owner's Merge card is made: no hand push
+            o.status = "owner merges"
         done.append(o)
         if not args.json:
             for name, state in o.verdict.checks if o.verdict else []:

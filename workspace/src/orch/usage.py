@@ -17,7 +17,7 @@ from orch import adapters, modelpick, tickets
 from orch.session_ids import valid_session_id
 
 SCHEMA = "orch.usage/1"
-FAMILIES = ("opus", "sonnet", "haiku")
+FAMILIES = ("opus", "sonnet", "haiku", "fable")
 CACHE_NAME = "usage-cache.json"
 
 
@@ -390,7 +390,7 @@ def duration(seconds: object) -> str:
 
 def money(cost: object) -> str:
     v = float(cost) if isinstance(cost, int | float) and not isinstance(cost, bool) else 0.0
-    return f"${v:,.2f}"
+    return f"${v:,.2f}" if round(v, 2) > 0 else "–"  # nothing recorded is not "free"
 
 
 def text(data: dict, top: int = 5) -> str:

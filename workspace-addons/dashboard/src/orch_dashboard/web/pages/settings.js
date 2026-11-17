@@ -281,7 +281,10 @@ function copiesCard(settings) {
 // the sync add-on's own verbs on the ONE generic op: `orch sync act status|check|set|now|use-public -- <target>`.
 // The address and the choice come only from the person's clicks here; choices that decide for the person are signed.
 const SYNC = 'sync';
-const SYNC_WHERE = [['off', 'Off'], ['local', 'On this computer only'], ['remote', 'Another computer or your own storage']];
+// Each choice says what it does in one line below it (bug hunt 17 Nov: three bare choices).
+const SYNC_WHERE = [['off', 'Off', 'No copy is kept.'],
+  ['local', 'On this computer only', 'A spare copy here, updated when something changes. Nothing leaves this computer.'],
+  ['remote', 'Another computer or your own storage', 'A copy in a private place you own, such as a GitHub repository. You give its address next.']];
 const SYNC_EVERY = [['5', '5 min'], ['15', '15 min'], ['60', '1 hour']];
 const SYNC_PUBLIC = 'This sync address is public. Anyone can read your tickets.';
 const SYNC_STATUS = {synced:['ok', 'Last synced'], never:['', 'Not synced yet'], offline:['', 'Offline, will sync when connected'], syncing:['live', 'Syncing…'], paused:['you', 'Paused, review below']};
@@ -406,11 +409,12 @@ function syncCard(settings) {
   if (!syncUi.loading && !syncUi.timer) queueMicrotask(syncLoad);  // then every 15 s while Settings is open
   const cur = syncNow(), saved = syncSaved(card), changed = !!card && !syncSame(cur, saved), off = !card || syncUi.busy;
   const paused = card?.shown === 'paused', blocked = paused || !!card?.public;
-  const radios = SYNC_WHERE.map(([value, label]) => {
+  const radios = SYNC_WHERE.map(([value, label, says]) => {
     const radio = h('input', {type:'radio', name:'sync-where', value, 'data-sync-where':value, 'data-key':'sync-where-' + value, disabled:off});
-    radio.checked = cur.where === value;
+    radio.checked = !!card && cur.where === value;  // no choice is shown before the real status is read (ORCH-287)
     radio.addEventListener('change', () => { syncUi.draft = {...syncNow(), where:value}; render(); });
-    return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio, h('span', {}, label));
+    return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio,
+      h('span', {className:'radio-text'}, h('span', {}, label), h('span', {className:'meta', 'data-key':'sync-where-says-' + value}, says)));
   });
   const addr = h('input', {type:'text', className:'input mono', id:'sync-addr', 'data-key':'sync-addr', 'data-settings-field':'sync-addr', value:cur.addr, placeholder:'https://github.com/your-name/orch-copy', spellcheck:'false', autocomplete:'off', disabled:off});
   addr.addEventListener('input', () => { syncUi.draft = {...syncNow(), addr:addr.value}; syncUi.check = null; render(); });
@@ -459,10 +463,15 @@ function syncCard(settings) {
   const details = card && card.mode !== 'off' ? h('div', {className:'sync-details', id:'sync-details', 'data-key':'sync-details'},
     h('ul', {}, h('li', {'data-key':'sync-last-error'}, syncLastError(card)), notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
   return wrap([
-    h('div', {className:'sync-head'}, h('h3', {}, 'Sync'), card && card.mode !== 'off' ? syncStatusLine(card) : null),
+    // On the Sync page its heading already says Sync: the card does not repeat it (bug hunt 17 Nov).
+    (() => {
+      const own = route().kind !== 'addon', status = card && card.mode !== 'off' ? syncStatusLine(card) : null;
+      return own || status ? h('div', {className:'sync-head'}, own ? h('h3', {}, 'Sync') : null, status) : null;
+    })(),
     paused && card.mode !== 'off' ? syncPausedHelp(card) : null,
     warn,
     h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
+    card ? null : h('p', {className:'meta', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…'),
     remoteBox, review, details]);
 }
 async function syncSave() {

@@ -103,6 +103,17 @@ def test_refused_start_is_retried(ws, run):
     assert len(watch.once(ws)) == 1
 
 
+def test_a_refused_start_keeps_its_reason_until_a_start_goes_through(ws, run):
+    order, _ = started(ws, run)
+    (ws / "fail-run").write_text("The computer is very busy.")
+    assert watch.once(ws) == []
+    assert watch.held(Store(ws))[order]["why"] == "The computer is very busy."
+    assert watch.once(ws) == []  # tried again on the next pass, the reason stays
+    assert watch.held(Store(ws))[order]["why"] == "The computer is very busy."
+    (ws / "fail-run").unlink()
+    assert len(watch.once(ws)) == 1 and watch.held(Store(ws)) == {}
+
+
 def test_autopilot_stop_wakes_once(ws, run):
     autopilot_order(ws, run)
     order, _ = started(ws, run)
