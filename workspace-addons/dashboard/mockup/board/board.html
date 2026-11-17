@@ -20,7 +20,7 @@
 
 <div class="shell-body">
 <header class="topbar">
- <div class="tb-title"><h1>Tickets</h1><span class="count-n tb-dyn" id="total" aria-label="tickets in total">11</span>
+ <div class="tb-title"><h1>Tickets</h1><span class="count-n tb-dyn" id="total" aria-label="tickets in total">14</span>
   <a class="wait-link tb-dyn" id="wait" href="#col-needs" data-jump="needs"><span class="sdot" style="--c:var(--warning)"></span><span><span id="waitn">2</span> need you</span></a></div>
  <details class="menu topbar-chip"><summary class="chip outline"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2h6a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M11 18h2"/></svg>Phone until 10:50</summary><div class="menu-pop"><p class="menu-title">Questions go to your phone until 10:50</p><p class="meta">This computer stays awake meanwhile.</p><button class="btn menu-item" type="button">Keep on for 4 hours</button><button class="btn menu-item" type="button">Turn off</button></div></details><div class="topbar-actions"><span class="updated tb-dyn" id="updated" aria-live="polite">Updated just now</span><a class="btn ghost sm" href="../chat/chat.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"/></svg>Ask the helper</a><a class="btn outline sm" href="../board/new.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</a></div>
  <span class="loadbar" aria-hidden="true"></span>
@@ -42,36 +42,43 @@
 
  <!-- LOADED -->
  <div class="board" id="board">
-  <section class="col" id="col-todo" data-col="todo" style="--ci:0" aria-labelledby="h-todo">
-   <header class="col-h"><h2 id="h-todo" title="To do yet"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/></svg>To do</h2><span class="count-n" data-count="todo">4</span><a class="btn ghost icon xs add" href="../board/new.html" aria-label="New ticket"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></a></header>
+  <section class="col" id="col-backlog" data-col="backlog" style="--ci:0" aria-labelledby="h-backlog">
+   <header class="col-h"><h2 id="h-backlog" title="New tickets land here"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/></svg>Backlog</h2><span class="count-n" data-count="backlog">3</span><a class="btn ghost icon xs add" href="../board/new.html" aria-label="New ticket"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></a></header>
    <div class="col-body">
-    <article class="tcard" data-state="todo" data-person="Anna" data-ref="t_ceu9qj">
+    <article class="tcard" data-state="backlog" data-person="Anna" data-ref="t_ceu9qj">
      <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-18</span> Set up the weekly sales report</a>
      <div class="tc-line">2 steps planned</div>
      <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">Added yesterday</span><span class="when">Due 18:30</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Set up the weekly sales report"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
+    <article class="tcard" data-state="backlog" data-person="Ben" data-ref="t_3lhp1y">
+     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-20</span> Thank-you notes for our top customers</a>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Thank-you notes for our top customers"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <article class="tcard" data-state="backlog" data-person="Ben" data-ref="t_8yfw3d">
+     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-21</span> Answer customer emails from last week</a>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Answer customer emails from last week"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <p class="col-empty" data-empty="New tickets land here">New tickets land here</p>
+   </div>
+  </section>
+
+  <section class="col" id="col-todo" data-col="todo" style="--ci:1" aria-labelledby="h-todo">
+   <header class="col-h"><h2 id="h-todo" title="Picked to do next"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/></svg>To do</h2><span class="count-n" data-count="todo">1</span></header>
+   <div class="col-body">
     <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_05uo1r">
      <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-19</span> Redesign the logo</a>
      <div class="tc-line"><span>Paused</span><span class="bar"><i style="--v:50%"></i></span><span class="n">1 of 2 steps</span></div>
      <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">2 days ago</span><span class="when warn">Late since 09:00</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Redesign the logo"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
-    <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_3lhp1y">
-     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-20</span> Thank-you notes for our top customers</a>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span></div>
-     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Thank-you notes for our top customers"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
-    </article>
-    <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_8yfw3d">
-     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-21</span> Answer customer emails from last week</a>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span></div>
-     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Answer customer emails from last week"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
-    </article>
-    <p class="col-empty" data-empty="Nothing to start. Add a ticket with +">Nothing to start. Add a ticket with +</p>
+    <p class="col-empty" data-empty="Nothing picked to do next">Nothing picked to do next</p>
    </div>
   </section>
 
-  <section class="col" id="col-working" data-col="working" style="--ci:1" aria-labelledby="h-working">
+  <section class="col" id="col-working" data-col="working" style="--ci:2" aria-labelledby="h-working">
    <header class="col-h"><h2 id="h-working" title="A helper is on it"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>Working</h2><span class="count-n" data-count="working">3</span></header>
    <div class="col-body">
     <article class="tcard" data-state="working" data-person="Anna" data-ref="t_9w3xrs">
@@ -96,7 +103,7 @@
    </div>
   </section>
 
-  <section class="col" id="col-needs" data-col="needs" style="--ci:2" aria-labelledby="h-needs">
+  <section class="col" id="col-needs" data-col="needs" style="--ci:3" aria-labelledby="h-needs">
    <header class="col-h"><h2 id="h-needs" title="A helper asked you something"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M10 10a2 2 0 1 1 3 1.7c-.6.4-1 .8-1 1.6M12 16.5h.01"/></svg>Needs you</h2><span class="count-n" data-count="needs">1</span></header>
    <div class="col-body">
     <article class="tcard" data-state="needs" data-person="Ben" data-ref="t_rpcqdr">
@@ -109,7 +116,19 @@
    </div>
   </section>
 
-  <section class="col" id="col-check" data-col="check" style="--ci:3" aria-labelledby="h-check">
+  <section class="col" id="col-waiting" data-col="waiting" style="--ci:4" aria-labelledby="h-waiting">
+   <header class="col-h"><h2 id="h-waiting" title="Waits for a date, another ticket or someone outside"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>Waiting</h2><span class="count-n" data-count="waiting">1</span></header>
+   <div class="col-body">
+    <article class="tcard" data-state="waiting" data-person="Anna" data-ref="t_w8kq2m">
+     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-22</span> Send the December invoices</a>
+     <div class="tc-line">Waits until Mon 09:00</div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">Added Tue</span></div>
+    </article>
+    <p class="col-empty" data-empty="Nothing waits for a date">Nothing waits for a date</p>
+   </div>
+  </section>
+
+  <section class="col" id="col-check" data-col="check" style="--ci:5" aria-labelledby="h-check">
    <header class="col-h"><h2 id="h-check" title="Ready for your look"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Check</h2><span class="count-n" data-count="check">1</span></header>
    <div class="col-body">
     <article class="tcard" data-state="check" data-person="Anna" data-ref="t_bjv2j0">
@@ -122,7 +141,7 @@
    </div>
   </section>
 
-  <section class="col" id="col-done" data-col="done" style="--ci:4" aria-labelledby="h-done">
+  <section class="col" id="col-done" data-col="done" style="--ci:6" aria-labelledby="h-done">
    <button class="rail" type="button" id="rail" aria-expanded="false" aria-controls="col-done" aria-label="Show Done, 2 tickets"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg><span class="count-n" data-count="done">2</span><span class="v">Done</span></button>
    <header class="col-h"><h2 id="h-done" title="Finished work"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>Done</h2><span class="count-n" data-count="done">2</span><button class="btn ghost icon xs collapse-done" type="button" id="collapse" aria-label="Hide Done" style="margin-left:auto"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></header>
    <div class="col-body">
@@ -141,6 +160,29 @@
     <p class="col-empty" data-empty="Finished tickets land here">Finished tickets land here</p>
    </div>
   </section>
+
+  <section class="col" id="col-wontdo" data-col="wontdo" style="--ci:7" aria-labelledby="h-wontdo">
+   <header class="col-h"><h2 id="h-wontdo" title="Set aside"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8 12h8"/></svg>Won't do</h2><span class="count-n" data-count="wontdo">1</span></header>
+   <div class="col-body">
+    <article class="tcard" data-state="wontdo" data-person="Ben" data-ref="t_x2dr7c">
+     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-8</span> Print flyers for the street fair</a>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">3 days ago</span></div>
+    </article>
+    <p class="col-empty" data-empty="Nothing set aside">Nothing set aside</p>
+   </div>
+  </section>
+
+  <section class="col" id="col-superseded" data-col="superseded" style="--ci:8" aria-labelledby="h-superseded">
+   <header class="col-h"><h2 id="h-superseded" title="Another ticket does this work"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>Superseded</h2><span class="count-n" data-count="superseded">1</span></header>
+   <div class="col-body">
+    <article class="tcard" data-state="superseded" data-person="Anna" data-ref="t_p4ns0v">
+     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-10</span> Weekly sales numbers by email</a>
+     <div class="tc-line">Replaced by <a href="../ticket/ticket-copy.html">ORCH-18</a></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">Yesterday</span></div>
+    </article>
+    <p class="col-empty" data-empty="Nothing replaced by another ticket">Nothing replaced by another ticket</p>
+   </div>
+  </section>
  </div>
 
  <!-- LOADING -->
@@ -151,7 +193,7 @@
   <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width:32px;height:32px;color:var(--brand)"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/></svg>
   <h2 id="empty-h">No tickets yet</h2>
   <p>Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.</p>
-  <div class="flow" aria-hidden="true"><span>To do</span>→<span>Working</span>→<span>Needs you</span>→<span>Check</span>→<span>Done</span></div>
+  <div class="flow" aria-hidden="true"><span>Backlog</span>→<span>To do</span>→<span>Working</span>→<span>Needs you</span>→<span>Check</span>→<span>Done</span></div>
   <a class="btn primary" href="../board/new.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</a>
   <div class="ex" aria-label="Examples"><a class="chip" href="../board/board.html?new=1&amp;idea=pdf">Summarise a PDF</a><a class="chip" href="../board/board.html?new=1&amp;idea=email">Draft an email</a><a class="chip" href="../board/board.html?new=1&amp;idea=offers">Compare two offers</a></div>
  </section>
@@ -164,10 +206,14 @@
  <a class="menu-item" id="m-open" role="menuitem" href="#">Open ticket</a>
  <div class="sep"></div>
  <p class="eyebrow">Move to</p>
+ <button class="menu-item" type="button" role="menuitemradio" data-move="backlog">Backlog</button>
  <button class="menu-item" type="button" role="menuitemradio" data-move="todo">To do</button>
  <button class="menu-item" type="button" role="menuitemradio" data-move="working">Working</button>
+ <button class="menu-item" type="button" role="menuitemradio" data-move="waiting">Waiting</button>
  <button class="menu-item" type="button" role="menuitemradio" data-move="check">Check</button>
  <button class="menu-item" type="button" role="menuitemradio" data-move="done">Done</button>
+ <button class="menu-item" type="button" role="menuitemradio" data-move="wontdo">Won't do</button>
+ <button class="menu-item" type="button" role="menuitemradio" data-move="superseded">Superseded</button>
  <div class="sep"></div>
  <section><p class="meta" style="margin:12px 0 8px">Reference</p><p>Reference <span class="mono" id="m-ref"></span></p></section>
 </div>
@@ -180,7 +226,7 @@
 (()=>{const q=document.querySelector('#q'),person=document.querySelector('#person'),root=document.documentElement;
 root.dataset.state=new URLSearchParams(location.search).get('state')||'loaded';
 const params=new URLSearchParams(location.search);q.value=params.get('q')||'';person.value=params.get('person')||'';const view=params.get('view');const filter=()=>{document.querySelectorAll('.tcard').forEach(c=>c.hidden=!(c.textContent.toLowerCase().includes(q.value.toLowerCase())&&(!person.value||c.dataset.person===person.value)&&(!view||view==='working'&&c.dataset.state==='working'||view==='done-week'&&c.dataset.state==='done'||view==='needs-you'&&(c.dataset.state==='needs'||c.dataset.state==='check'||c.dataset.ref==='t_4ksrp6'))));document.querySelectorAll('.col').forEach(c=>{const n=c.querySelectorAll('.tcard:not([hidden])').length;c.querySelector('.count-n').textContent=n;c.classList.toggle('is-empty',!n)});document.querySelector('#clear').hidden=!q.value&&!person.value};q.oninput=person.onchange=filter;document.querySelector('#clear').onclick=()=>{q.value=person.value='';filter()};
-document.querySelector('#skel').innerHTML=Array.from({length:5},()=>'<div class="sk-col"><div class="sk-card skeleton"></div><div class="sk-card skeleton"></div></div>').join('');
+document.querySelector('#skel').innerHTML=Array.from({length:9},()=>'<div class="sk-col"><div class="sk-card skeleton"></div><div class="sk-card skeleton"></div></div>').join('');
 document.querySelectorAll('.tc-more').forEach(b=>b.remove());
 filter();document.querySelector('#waitn').textContent='3';document.querySelector('#nav-count').textContent='3';
 })();</script><script src="../home/demo-data.js"></script><script src="../../../../workspace/src/orch_ui/static/state-controls.js"></script></body></html>

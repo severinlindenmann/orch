@@ -1135,7 +1135,7 @@ html[data-state=loading] :where(body.mk-board-board-html) .toolbar .jump,html[da
 :where(body.mk-board-board-html) .pc a:hover,:where(body.mk-board-board-html).pc a:hover{background:var(--surface-3);color:var(--text)}
 :where(body.mk-board-board-html) .pc a[aria-current],:where(body.mk-board-board-html).pc a[aria-current]{background:var(--brand-soft);color:var(--brand)}
 :where(body.mk-board-board-html,body.mk-focus-focus-help-html,body.mk-focus-focus-html) .toasts,:where(body.mk-board-board-html,body.mk-focus-focus-help-html,body.mk-focus-focus-html).toasts{bottom:64px}
-:where(body.mk-board-board-html) .board-page .board,:where(body.mk-board-board-html).board-page .board{grid-template-columns:repeat(5,minmax(200px,1fr))!important;overflow-x:auto;padding-bottom:16px}
+:where(body.mk-board-board-html) .board-page .board,:where(body.mk-board-board-html).board-page .board{grid-template-columns:repeat(9,minmax(200px,1fr))!important;overflow-x:auto;padding-bottom:16px}
 :where(body.mk-board-board-html) .board-page .col[data-col=done] .col-h,:where(body.mk-board-board-html).board-page .col[data-col=done] .col-h,:where(body.mk-board-board-html) .board-page .col[data-col=done] .col-body,:where(body.mk-board-board-html).board-page .col[data-col=done] .col-body{display:flex!important;visibility:visible!important}
 :where(body.mk-board-board-html) .board-page .col[data-col=done] .col-body,:where(body.mk-board-board-html).board-page .col[data-col=done] .col-body{display:block!important}
 :where(body.mk-board-board-html) .board-page .col[data-col=done],:where(body.mk-board-board-html).board-page .col[data-col=done]{width:auto!important;min-width:200px}

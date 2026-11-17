@@ -275,7 +275,7 @@ function askWaitUntil(t, from) {
   const done = until => { window.orch.close(d); return moveTicket(t.id, 'waiting', false, {data:{waiting_on:{kind:'time', until:utcStamp(until)}}}); };
   const input = h('input', {className:'input', type:'datetime-local', id:'wait-until-' + t.id, 'data-key':'wait-until'});
   const error = h('p', {className:'meta bad', role:'alert', hidden:true});
-  const quick = h('div', {className:'row wrap'}, waitChoices().map(([label, at]) => button(label + ' ' + (window.UI?.stamp ? window.UI.stamp(at) : ''), 'outline sm', () => done(at))));
+  const quick = h('div', {className:'row wrap'}, waitChoices().map(([label, at]) => { const when = window.UI?.stamp ? window.UI.stamp(at) : ''; return button(when ? when.charAt(0).toUpperCase() + when.slice(1) : label, 'outline sm', () => done(at)); }));
   const save = button('Wait', 'primary', () => {
     const at = input.value ? new Date(input.value) : null;
     if (!at || Number.isNaN(at.getTime()) || at <= new Date()) { error.textContent = 'Pick a day and time in the future.'; error.hidden = false; input.focus(); return; }
