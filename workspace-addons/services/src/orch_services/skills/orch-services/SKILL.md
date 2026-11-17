@@ -4,6 +4,11 @@ description: Use when a ticket needs something to keep running in the background
 ---
 # orch services
 
+## When to use
+- Something should keep running in the background for a ticket: a web preview, a local server, a watcher, a bot.
+- The person asks what is running here, or wants a service started, stopped, restarted or its log read.
+- Not for a one-off command (run it yourself) and not for repeating a ticket at a time (that is automation).
+
 A service is a command that should keep running: orch writes one small record for it and hands it to this computer's
 own service tool (on a Mac the login items list, on Linux the user's service manager). It runs under the person's own
 account, writes its output to a log file in this workspace and comes back after a crash. "Starts by itself" means it
