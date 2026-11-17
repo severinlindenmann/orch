@@ -9,7 +9,7 @@
    "order": 10,
    "panel": "repeats"
   },
-  "description": "Starts agent runs at a set time, on a repeat, and when the phone or another workspace sends work.",
+  "description": "Starts helper runs at a set time, on a repeat, and when the phone or another workspace sends work.",
   "gitignore": [],
   "name": "automation",
   "needs": true,
@@ -88,7 +88,7 @@
    "label": "Factory",
    "order": 15
   },
-  "description": "Turn an idea into finished work: your agent proposes the run, you press Start.",
+  "description": "Turn an idea into finished work: your helper proposes the run, you press Start.",
   "gitignore": [],
   "name": "factory",
   "needs": true,
@@ -130,7 +130,7 @@
    "label": "Focus",
    "order": 20
   },
-  "description": "A live page for one ticket: watch the agent work, answer its questions, send it a message.",
+  "description": "A live page for one ticket: watch the helper work, answer its questions, send it a message.",
   "gitignore": [],
   "name": "focus",
   "needs": true,
@@ -228,7 +228,7 @@
    "order": 50,
    "subtitle": "Keep another copy of tickets and their files."
   },
-  "description": "Keeps a copy of tickets and their files, never secrets or private files, on this computer or a remote. Off any time.",
+  "description": "Keeps a copy of tickets and files on this computer, another computer or your own storage. Never secrets.",
   "gitignore": [],
   "name": "sync",
   "needs": true,
