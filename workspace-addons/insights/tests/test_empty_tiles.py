@@ -62,8 +62,9 @@ def test_unmeasured_services_show_no_number():
     data = run({"count": 0, "known": False})
     for tile in (data["tiles"][1], data["services"]):
         assert "Not measured yet" in tile and "|0|" not in tile + "|"
+    # services seen in use are a true count even when the full list is unknown: one number, never "Not measured yet"
     used = run({"count": 2, "known": False})["services"]
-    assert "Not measured yet" in used and "2 services used by your helpers" in used
+    assert used.startswith("Connected services|2|") and "Not measured yet" not in used and "there may be more" in used
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node missing")
@@ -71,3 +72,29 @@ def test_measured_services_show_the_count():
     assert run({"count": 3, "known": True})["services"].startswith(
         "Connected services|3|Used by your helpers"
     )
+
+
+MODELS = r"""
+const fs = require('fs'), vm = require('vm');
+const src = fs.readFileSync(process.argv[1], 'utf8');
+const start = src.indexOf('function modelsEmptyText');
+const end = src.indexOf('\nfunction renderModels', start);
+if (start < 0 || end < 0) { console.log(JSON.stringify({missing: true})); process.exit(0); }
+const ctx = vm.createContext({});
+vm.runInContext(src.slice(start, end), ctx);
+const [view, runs] = JSON.parse(process.argv[2]);
+console.log(JSON.stringify({text: vm.runInContext('modelsEmptyText(' + JSON.stringify(view) + ',' + JSON.stringify(runs) + ')', ctx)}));
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node missing")
+def test_runs_without_tokens_never_say_no_model_use():
+    """ORCH-232: 5 runs recorded but no tokens must not read "No model use in the last 30 days"."""
+    def text(runs):
+        out = subprocess.run(["node", "-e", MODELS, str(JS), json.dumps([{"empty": True, "text": "No model use in the last 30 days."}, runs])],
+                             capture_output=True, text=True, check=True).stdout
+        data = json.loads(out)
+        assert not data.get("missing"), "insights.js needs modelsEmptyText() right before renderModels()"
+        return data["text"]
+    assert text(5) == "Token use isn’t recorded for these runs yet."
+    assert text(0) == "No model use in the last 30 days."
