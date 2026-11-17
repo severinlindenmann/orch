@@ -427,6 +427,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
+    u.add_argument(
+        "--to",
+        choices=("release", "development"),
+        help="switch to the release or to the development build (the official source)",
+    )
 
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
@@ -913,6 +918,10 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "update":
         if not args.project_only:  # first: with another ORCH_HOME there is nothing to update
             addons.tool_env_change_ok()
+        if args.to:
+            if args.project_only or args.after_install:
+                raise Refused("--to goes with a plain orch update.")
+            addons.switch_to(args.to)
         if not args.project_only and not args.after_install and not args.json:
             from orch import updateinfo
 

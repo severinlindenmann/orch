@@ -882,6 +882,22 @@ def test_settings_update_button_needs_a_session_and_starts_the_detached_update(l
     assert started["argv"] == ["update"]
 
 
+def test_switch_build_is_one_click_through_the_same_update(live, monkeypatch):
+    # issue 957: Switch to release / development build runs the same detached `orch update`, with --to
+    root, port = live
+    from orch_dashboard import update
+
+    started = {}
+    monkeypatch.setattr(update, "start_detached", lambda argv, **kw: started.update(argv=argv) or 4344)
+    st, _, _ = post(port, "/api/act", {"op": "update.start", "args": {"to": "development"}})
+    assert st == 403 and not started  # a person's click only
+    ck = session(root, port)
+    st, _, _ = post(port, "/api/act", {"op": "update.start", "args": {"to": "feat/evil"}}, {"Cookie": ck})
+    assert st == 400 and not started
+    st, _, _ = post(port, "/api/act", {"op": "update.start", "args": {"to": "development"}}, {"Cookie": ck})
+    assert st == 202 and started["argv"] == ["update", "--to", "development"]
+
+
 def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
     _, port = live
     from orch import updateinfo

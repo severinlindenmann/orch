@@ -143,9 +143,18 @@ def current_label() -> str:
     """What `orch --version` and `orch status` print."""
     try:
         got = installed()
-        return label(got["release"], got["sha"], addons.ref())
+        text = label(got["release"], got["sha"], addons.ref())
     except Exception:  # noqa: BLE001
-        return f"orch {addons._orch_version()}"
+        text = f"orch {addons._orch_version()}"
+    return text + build_words()
+
+
+def build_words() -> str:
+    """' (development build)' when this orch is not a release, so nobody mistakes one for the other."""
+    try:
+        return "" if addons.build() == "release" else " (development build)"
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def release_now(sha: str | None) -> int | None:

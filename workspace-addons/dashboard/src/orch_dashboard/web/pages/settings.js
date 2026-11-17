@@ -651,12 +651,12 @@ function updLoad(force = false) {
     if (route().kind === 'settings') render();
   });
 }
-async function updStart() {
+async function updStart(to) {
   const was = updUi.info?.installed;
   updUi.from = was?.release || was?.label || null; updUi.phase = 'running'; updUi.reason = ''; render();
   try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
   let res = null;
-  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:{}})}); } catch (e) { /* the server may already be restarting */ }
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' ? {to} : {}})}); } catch (e) { /* the server may already be restarting */ }
   if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }
@@ -672,6 +672,19 @@ if (typeof window !== 'undefined' && window.addEventListener) window.addEventLis
   if (d.state === 'finished') updLoad(true);
 });
 function updButton(text, key, fn) { const b = button(text, 'primary', fn); b.dataset.key = key; return b; }
+// Where this orch came from (issue 957): "Release" or "Development build" on the Installed line, and one click to switch.
+// The switch is the same detached `orch update` as the Update button, with --to (the official source at that branch).
+function buildLine(info, phase) {
+  const dev = info?.build === 'development';
+  if (info?.build !== 'release' && !dev) return null;
+  const idle = phase === 'idle' || phase === 'failed';
+  return [
+    h('span', {className:dev ? 'badge needs' : 'badge', 'data-key':'update-build'}, dev ? 'Development build' : 'Release'),
+    idle && !snapshot ? settingsText('p', {className:'meta', 'data-key':'update-build-note'}, dev
+      ? 'Not yet tested as a release. orch installs the newest release and restarts. Your helpers keep their work.'
+      : 'Want the newest changes before they are tested as a release? orch installs the development build and restarts. Your helpers keep their work.') : null,
+    idle && !snapshot ? h('div', {className:'row'}, (() => { const b = button(dev ? 'Switch to release' : 'Switch to development build', 'outline sm', () => updStart(dev ? 'release' : 'development')); b.dataset.key = 'update-switch'; return b; })()) : null];
+}
 function updNum(v) { return typeof v === 'number' ? 'orch ' + v : String(v || ''); }
 function aboutPanel() {
   if (settingsTab === 'about') updLoad();  // the check runs when the tab is open, not on every Settings page
@@ -708,7 +721,7 @@ function aboutPanel() {
         info.source ? settingsText('span', {className:'meta'}, 'From ' + info.source) : null) : null];
   }
   return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
-    line('Installed', settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…'))),
+    line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…')), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
     // About sits with the version (ORCH-89: it was under General)

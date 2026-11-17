@@ -1278,10 +1278,18 @@ def load_state(
         "settings": settings,  # only the live local server: it holds the folder path
         # Home: the note after an automatic update (new version and what changed, or why it failed); live page only
         "auto_update_note": _auto_update_note() if with_settings else None,
+        # Where this orch came from ('release' / 'development'): the top bar marks a development build; live page only
+        "build": _build() if with_settings else None,
     }
     add_warmth(root, tickets, state["runs"])
     state["rev"] = state_rev(state)
     return state
+
+
+def _build() -> str | None:
+    from . import update
+
+    return update.build()
 
 
 def _auto_update_note() -> dict | None:
