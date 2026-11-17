@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import adapters, safegit, skills
+from orch import adapters, harness, safegit, skills
 
 
 @pytest.fixture(autouse=True)
@@ -152,6 +152,31 @@ def test_does_not_replace_a_users_own_orch_folder(proj, run):
     code, _, err = run("init")
     assert code == 2 and "not orch's" in err
     assert (proj / ".agents/skills/orch/SKILL.md").read_text(encoding="utf-8") == "mine"
+
+
+def test_replaces_a_marker_less_copy_of_an_older_orch(proj, run):
+    assert run("init")[0] == 0
+    d = proj / ".agents/skills/orch-dashboard"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\nname: orch-dashboard\ndescription: older\n---\nolder text", encoding="utf-8")
+    target = proj / ".orch/harness/skills/orch-dashboard"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("---\nname: orch-dashboard\n---\nnew", encoding="utf-8")
+    harness.link_skill(proj, ".agents/skills", "orch-dashboard")
+    assert (d / "SKILL.md").read_text(encoding="utf-8").endswith("new")
+    kept = list((proj / ".orch/harness/replaced-skills").glob("orch-dashboard-*/SKILL.md"))
+    assert kept and "older text" in kept[0].read_text(encoding="utf-8")
+
+
+def test_users_own_orch_dash_folder_is_still_refused(proj, run):
+    assert run("init")[0] == 0
+    d = proj / ".agents/skills/orch-mine"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("mine", encoding="utf-8")
+    (proj / ".orch/harness/skills/orch-mine").mkdir(parents=True)
+    with pytest.raises(harness.Refused):
+        harness.link_skill(proj, ".agents/skills", "orch-mine")
+    assert (d / "SKILL.md").read_text(encoding="utf-8") == "mine"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink setup")

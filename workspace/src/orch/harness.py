@@ -802,6 +802,36 @@ def _same(a: Path, b: Path) -> bool:
         return False
 
 
+def _is_legacy_orch_skill(dest: Path, root: Path) -> bool:
+    """A plain folder an older orch copied (no marker): an orch-* name, a SKILL.md whose own name is the folder's,
+    no link inside, not tracked by the team's git. Anything else is the user's."""
+    if not dest.name.startswith("orch-") or not dest.is_dir():
+        return False
+    skill = dest / "SKILL.md"
+    try:
+        if is_link(skill) or not skill.is_file():
+            return False
+        head = skill.read_text(encoding="utf-8").split("---", 2)
+        if len(head) < 3 or f"name: {dest.name}" not in head[1].splitlines():
+            return False
+        for dp, dns, fns in os.walk(dest, followlinks=False):
+            if any(is_link(Path(dp) / n) for n in (*dns, *fns)):
+                return False
+        rel = dest.relative_to(root).as_posix()
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    return not _tracked(root, rel)
+
+
+def _set_aside_legacy(dest: Path, root: Path) -> None:
+    """Move the old folder under .orch/harness/replaced-skills so nothing is lost."""
+    import time
+
+    keep = harness_dir(root) / "replaced-skills"
+    keep.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(dest), str(keep / f"{dest.name}-{time.strftime('%Y%m%d-%H%M%S')}"))
+
+
 def link_skill(root: Path, where: str, name: str, target: Path | None = None) -> None:
     """<where>/<name> -> .orch/harness/skills/<name> (or target). Never replaces a folder or file that is not orch's."""
     target = target or harness_dir(root) / "skills" / name
@@ -831,6 +861,8 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
             if any(dest.iterdir()):
                 raise Refused(f"{dest} holds files that are not orch's; orch will not replace it.")
             dest.rmdir()
+        elif _is_legacy_orch_skill(dest, root):
+            _set_aside_legacy(dest, root)  # an older orch copied it without a marker: keep a copy, then replace
         else:
             raise Refused(f"{dest} is not orch's; orch will not replace it. Nothing was changed there.")
     _link_dir(dest, target)
