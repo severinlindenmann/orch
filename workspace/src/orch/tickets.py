@@ -1711,7 +1711,7 @@ def stuck_why(ticket: dict, now: datetime | None = None) -> str | None:
     for q in ticket.get("questions") or []:
         if not isinstance(q, dict) or q.get("answer") is not None or q.get("taken_back"):
             continue
-        sent = _utc(q.get("sent_at") or q.get("at"))
+        sent = _utc(q.get("asked_at") or q.get("sent_at") or q.get("at"))
         if sent is not None and utc_now - sent > limit:
             return "question"
     since = quiet_since(ticket, utc_now)
