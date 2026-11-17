@@ -183,7 +183,8 @@ def test_a_report_of_an_open_ticket_joins_it(proj, run):
     assert res["joined"][0]["ticket"] == other["id"]
     seen = report_tickets.load_state(proj)["seen"][made["ref"]]
     assert seen["ticket"] == other["id"] and seen["joined"] is True
-    assert any(made["ref"] in h.get("text", "") for h in tickets.load(proj, other["id"])["history"])
+    texts = [h.get("text", "") for h in tickets.load(proj, other["id"])["history"]]
+    assert any(made["ref"] in x for x in texts) and not any("blank list" in x for x in texts)
 
 
 @pytest.mark.parametrize("state,joins", [("merged", True), ("released", False)])
