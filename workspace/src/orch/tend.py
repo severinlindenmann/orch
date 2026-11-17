@@ -45,7 +45,7 @@ EARLY_TURN_SECONDS = 5 * 60  # the first turn ended this soon after the start: i
 EARLY_IDLE_MINUTES = 3  # such a helper gets the message this soon
 EARLY_RESTART_MINUTES = 5  # ... and is started fresh when nothing changed this long after it
 RESTART_MINUTES = 10  # at least this long after the message (and idle the full limit), nothing changed: fresh
-END_WAITING_MINUTES = 5  # quiet this long while the ticket waits on a time or ticket (not a person) and sessions are full
+END_WAITING_MINUTES = 5  # quiet this long, waiting on a time or ticket (not a person), sessions full
 END_FINISHED_MINUTES = 10  # quiet this long on a Done/Dropped ticket, or in Review when full
 BEFORE_LIMIT = 5 * 60  # a stuck helper starts fresh this long before any `orch run` call closes it silently
 GONE = ("done", "dropped")  # nothing is left: no reason to keep the session warm
@@ -229,7 +229,7 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
             continue
         kinds = [w["kind"] for w in waits if w.get("kind") in WAIT_KINDS]
         if kinds:
-            # a person may still answer (a mockup round): that session keeps its hour even when full (ORCH-254)
+            # a person may still answer (a mockup round): that session keeps its hour, full or not (ORCH-254)
             if quiet >= (END_WAITING_MINUTES * 60 if crowded and "person" not in kinds else limit):
                 what = ", ".join(w["what"] for w in waits if w.get("kind") in WAIT_KINDS)
                 out.append({**row, "action": "end", "why": "waiting", "waits": what})
