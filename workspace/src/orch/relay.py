@@ -1448,19 +1448,123 @@ def send_taken_back(root: Path, tid: str, q: dict) -> str | None:
 
     if "relay" not in addons.active(root) or not isinstance(q.get("taken_back"), dict):
         return None
-    found = _taken_back_asked(root, tid, q["id"])
     reason = _one_line(q["taken_back"].get("reason"), TAKEN_BACK_REASON_MAX)
-    if found is None or reason is None:
+    found = _taken_back_asked(root, tid, q["id"])
+    return None if found is None else _send_closed(root, found[0], tid, reason)
+
+
+REASON_ANSWERED = "Answered in orch"
+REASON_REVIEW = "Review finished in orch"
+REASON_DROPPED = "Ticket dropped"
+REASON_DONE = "Ticket done"
+REASON_GONE = "Ticket removed"
+CLOSE_MAX = 20  # closing texts per pull: a workspace with many stale cards clears them over a few pulls
+CLOSE_RETRY = 6 * 3600  # seconds before a close an older relay refused (403) is tried again
+_NOT_ON_RELAY = ("phone", "subscriber", "relay")  # answers that came over the relay: it knows them already
+
+
+def _close_reason(rec: dict, qmid: str, t: dict | None, reviews: dict) -> str | None:
+    """Why the phone card of this asked question closes now, else None (still open, or the relay knows)."""
+    if t is None:
+        return REASON_GONE
+    if rec.get("review"):
+        cur = reviews.get(t["id"]) if isinstance(reviews, dict) else None
+        live = isinstance(cur, dict) and cur.get("open") and cur.get("msg") == qmid
+        return None if live and t.get("status") == "review" else REASON_REVIEW
+    q = next((x for x in t.get("questions", []) if x.get("id") == rec.get("question_id")), None)
+    if not isinstance(q, dict):
         return None
-    qmid = found[0]
+    if isinstance(
+        q.get("taken_back"), dict
+    ):  # taken back before the phones were told (or that send was lost)
+        return _one_line(q["taken_back"].get("reason"), TAKEN_BACK_REASON_MAX)
+    if q.get("answer") is not None:
+        return None if q.get("via") in _NOT_ON_RELAY else REASON_ANSWERED
+    if t.get("status") == "dropped":
+        return REASON_DROPPED
+    if t.get("status") == "done":
+        return REASON_DONE
+    return None
+
+
+def sync_closed(root: Path, now: float | None = None) -> list[str]:
+    """Close phone cards whose question is settled here (relay-api.md "Question taken back"). The relay lists
+    a question to the phones as open until a phone (or subscriber) answers it or the workspace takes it back,
+    so a question answered in orch (dashboard, CLI), a review round that ended in orch (Accept, Ask for
+    changes, the ticket moved on), or a question of a dropped or done ticket stayed on the phone for good.
+    For each of those this sends the same one taken-back text with a fixed reason (REASON_*): never the
+    answer, never a name. Once per question: the message id is fixed in the asked record before the send.
+    Works on every asked record, so cards that went stale before this existed clear too, at most CLOSE_MAX
+    per pull.
+    Proposal questions are not closed here. Best effort; returns the message ids sent."""
+    from orch import addons, phone_view  # addons imports relay
+
+    if "relay" not in addons.active(root):
+        return []
+    at = time.time() if now is None else now
+    reviews = phone_view.load_state(root).get("reviews") or {}
+    sent: list[str] = []
+    cache: dict[str, dict | None] = {}
+    for qmid, rec in list(net.read_json(_asked_path(root), {}).items()):
+        if len(sent) >= CLOSE_MAX:
+            break
+        if not (
+            isinstance(rec, dict)
+            and rec.get("to") == "phones"
+            and isinstance(rec.get("ticket"), str)
+            and not rec.get("proposal")
+            and not isinstance(rec.get("taken_back_msg"), dict)
+            and float(rec.get("close_after") or 0) <= at
+        ):
+            continue
+        qid = str(rec.get("question_id"))
+        if not (re.fullmatch(r"q\d+", qid) or (rec.get("review") and re.fullmatch(r"review-\d{1,4}", qid))):
+            continue
+        tid = rec["ticket"]
+        if tid not in cache:
+            try:  # no such ticket any more: its card closes; a file that can't be read now waits
+                cache[tid] = tickets.load(root, tid) if tickets.ticket_path(root, tid).exists() else None
+            except (Refused, OSError, ValueError, KeyError):
+                cache[tid] = {}
+        t = cache[tid]
+        if t == {}:
+            continue
+        reason = _close_reason(rec, qmid, t, reviews)
+        if reason is not None and (mid := _send_closed(root, qmid, tid, reason, at)) is not None:
+            sent.append(mid)
+    return sent
+
+
+def _send_closed(root: Path, qmid: str, tid: str, reason: str | None, at: float | None = None) -> str | None:
+    """The one "Question taken back" text for the question we sent as message `qmid` (see send_taken_back).
+    `at` given (the sweep): a 403 (an older relay that closes only plain questions), 408, 429, a 5xx or no
+    status frees the record again, to be tried after CLOSE_RETRY seconds; any other 4xx (answered first,
+    taken back already, not ours) is final, only logged. A freed send is kept (`taken_back_retry`) and the
+    next try sends the very same message (id, time, reason): when the unclear first post was stored after
+    all, the relay answers "duplicate" instead of a 409 for a new id."""
+    if reason is None:
+        return None
 
     def claim(asked):
-        rec = asked[qmid]
+        rec = asked.get(qmid)
+        if not isinstance(rec, dict):
+            return None
         if not isinstance(rec.get("taken_back_msg"), dict):
-            rec["taken_back_msg"] = {"id": new_id(), "created_at": tickets.now()}
+            old = rec.pop("taken_back_retry", None)
+            if not (
+                isinstance(old, dict)
+                and isinstance(old.get("id"), str)
+                and isinstance(old.get("created_at"), str)
+                and isinstance(old.get("reason"), str)
+            ):
+                old = {"id": new_id(), "created_at": tickets.now(), "reason": reason}
+            rec["taken_back_msg"] = old
+            rec.pop("close_after", None)
         return rec["taken_back_msg"]
 
-    fixed = _asked_edit(root, claim)
+    if (fixed := _asked_edit(root, claim)) is None:
+        return None
+    reason = fixed.get("reason") if isinstance(fixed.get("reason"), str) else reason
     try:
         sent = _message(
             root,
@@ -1476,6 +1580,18 @@ def send_taken_back(root: Path, tid: str, q: dict) -> str | None:
             log_send_failure(root, f"taken back {fixed['id']} not sent yet", "kept for the next try")
     except (Refused, OSError) as exc:
         log_send_failure(root, f"taken back {fixed['id']} failed", exc)
+        status = getattr(exc, "status", None)
+        final = isinstance(status, int) and 400 <= status < 500 and status not in (403, 408, 429)
+        if at is not None and not final:  # an older relay (403), busy (429) or a server fault: later again
+
+            def free(asked):
+                rec = asked.get(qmid)
+                if isinstance(rec, dict) and rec.get("taken_back_msg") == fixed:
+                    rec["taken_back_retry"] = rec.pop("taken_back_msg")
+                    rec["close_after"] = at + CLOSE_RETRY
+
+            _asked_edit(root, free)
+            return None
     return fixed["id"]
 
 
@@ -2714,6 +2830,7 @@ def sync_phone_views(root: Path) -> None:
         phone_view.sync_light(root)
         phone_view.sync_reviews(root)
         phone_view.sync_cards(root)
+        sync_closed(root)
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
         send_working(root)
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
