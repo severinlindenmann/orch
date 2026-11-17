@@ -1313,6 +1313,9 @@ def load_logins(root: Path) -> dict | None:
             row["renew"] = True
         if isinstance(r.get("key"), str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", r["key"]):
             row["key"] = r["key"]
+        # ORCH-48: what the person does to renew when orch cannot start the sign-in (plain text, one line)
+        if isinstance(r.get("how"), str) and re.fullmatch(r"[^\x00-\x1f\x7f<>]{1,160}", r["how"]):
+            row["how"] = r["how"]
         row["stops"] = [
             {"id": t.get("id"), "key": t.get("key"), "title": t.get("title")}
             for t in (r.get("stops") or [])

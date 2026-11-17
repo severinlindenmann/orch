@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -36,6 +37,18 @@ def add_parsers(sub, common) -> None:
     how.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)  # the background worker
     k = acts.add_parser("replace", parents=[common], help=argparse.SUPPRESS)  # a key: new value on stdin
     k.add_argument("name")
+    # ORCH-48: a workspace's own check for any other tool, one entry (health.add_recipe)
+    a = acts.add_parser("add", parents=[common], help=argparse.SUPPRESS)
+    a.add_argument("name")
+    a.add_argument("--command", required=True, dest="check_command", help=argparse.SUPPRESS)
+    a.add_argument("--label", help=argparse.SUPPRESS)
+    a.add_argument("--works", help=argparse.SUPPRESS)
+    a.add_argument("--ends", help=argparse.SUPPRESS)
+    a.add_argument("--kind", choices=health.KINDS, help=argparse.SUPPRESS)
+    a.add_argument("--key", help=argparse.SUPPRESS)
+    a.add_argument("--how", help=argparse.SUPPRESS)
+    d = acts.add_parser("remove", parents=[common], help=argparse.SUPPRESS)
+    d.add_argument("name")
 
 
 def line(r: dict) -> str:
@@ -46,12 +59,15 @@ def line(r: dict) -> str:
     n = len(r["stops"])
     on = "; ".join(f"{t['key']} {t['title']}".strip() for t in r["stops"])
     work = f"{n} ticket{'' if n == 1 else 's'}: {on}"
+    how = f" {r['how']}" if r.get("how") and not r.get("renew") else ""
     if r["state"] == "renew":
         text = f"The {label} {kind} ran out {when}." if when else f"The {label} {kind} no longer works."
         text += f" The helper cannot go on with {work}." if n else ""
-        return text + (" No new work starts until it is renewed." if r["chosen"] else " Renew it.")
+        text += " No new work starts until it is renewed." if r["chosen"] else "" if how else " Renew it."
+        return text + how
     if r["state"] == "soon":
-        return f"The {label} {kind} runs out {when}." + (f" The helper then stops on {work}." if n else "")
+        text = f"The {label} {kind} runs out {when}." + (f" The helper then stops on {work}." if n else "")
+        return text + how
     if r["state"] == "works":
         return f"The {label} {kind} works until {when}." if when else f"The {label} {kind} works."
     return f"{label} did not answer, so orch cannot tell whether its {kind} works."
@@ -103,6 +119,21 @@ def dispatch(args, root: Path) -> bool:
         else:
             st = renew.start(root, args.name)
         _out(args, st, renew_line(st))
+        return True
+    if action == "add":
+        try:
+            command = shlex.split(args.check_command)
+        except ValueError:
+            command = []
+        doc = {"label": args.label, "command": command, "works": args.works, "ends": args.ends}
+        doc |= {"kind": args.kind, "key": args.key, "how": args.how}
+        r = health.add_recipe(root, args.name, doc)
+        _out(args, {"added": r["name"], "label": r["label"]}, f"orch now checks {r['label']} with the others.")
+        return True
+    if action == "remove":
+        gone = health.remove_recipe(root, args.name)
+        text = f"orch no longer checks {args.name}." if gone else f"There is no own check called {args.name}."
+        _out(args, {"removed": args.name if gone else None}, text)
         return True
     if action == "replace":
         res = renew.replace_key(root, args.name, sys.stdin.read().removesuffix("\n").removesuffix("\r"))

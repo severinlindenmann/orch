@@ -17,7 +17,7 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
         got = json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes())
         if name == "connections":  # W2b 1.10: only the settings locations (inventory.md)
             assert {a: set(v) for a, v in got["adapters"].items()} == {
-                "claude": {"mcp_settings"},
+                "claude": {"mcp_settings", "connection_check"},  # ORCH-48: is each connection answering
                 "codex": {"mcp_settings"},
             }
         elif name == "capabilities":  # W2b 1.8: what the record can learn from the tool's stream

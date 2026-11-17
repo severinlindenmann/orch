@@ -120,6 +120,14 @@
           "description": "null = no live mode; runs are oneshot."
         },
         "deny": {"type": "object", "additionalProperties": false, "description": "Ignored (deny rules removed 16 Nov, #945).", "properties": {"format": {"enum": ["patterns/1", "none"]}, "note": {"type": "string", "maxLength": 400}}},
+        "connection_check": {
+          "type": "object", "required": ["list"], "additionalProperties": false,
+          "description": "Optional, built-in adapters only (ORCH-48). How orch asks the tool whether each outside connection set in this workspace answers: the tool's own list command, run in the workspace folder, printing one line per connection as '<name>: <where> - <mark> <state>'. orch reads only the state word (connected, needs authentication, failed) of the connections the inventory names and nothing else of the output.",
+          "properties": {
+            "list": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Arguments after the detect binary. Fixed words only." },
+            "sign_in": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional. What the person does when a connection needs signing in again; {name} = the connection's name." }
+          }
+        },
         "mcp_settings": {
           "type": "array", "maxItems": 8,
           "description": "Optional. Where the tool keeps its own connection (MCP) settings, read only (inventory.md, source harness). {home} = the account's home folder, {folder} = the workspace folder.",
@@ -189,16 +197,17 @@
           "description": "Optional. Tool hook event (before/after a tool call, after a failed one) -> exactly `orch record hook` (activity.md, The hook entry is narrow): the tool's own hook payload with its tool-call id goes to the record. In the same settings blob as reminder_hooks (one --settings: per-run hooks file for live, inline for oneshot), for every tool, absolute interpreter like reminder_hooks. The command always exits 0."
         },
         "login": {
-          "type": "object", "required": ["status", "logged_in"], "additionalProperties": false,
-          "description": "Optional, built-in adapters only. How orch learns when the tool's login on this computer runs out: the tool's own status command, which must print one JSON object. orch keeps two facts from it (logged in or not, the end time) and nothing else of the output.",
+          "type": "object", "required": ["status"], "additionalProperties": false,
+          "description": "Optional, built-in adapters only. How orch learns when the tool's login on this computer runs out: the tool's own status command. With logged_in it must print one JSON object and orch keeps two facts from it (logged in or not, the end time); without, its exit code alone answers (0 = works) and its output is never read.",
           "properties": {
             "status": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Arguments after the detect binary. Fixed words only, no placeholders." },
-            "logged_in": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Field of the JSON answer that is true while the login works." },
+            "logged_in": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Optional. Field of the JSON answer that is true while the login works. Absent = the exit code answers." },
             "ends": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Optional. Field with the end time (an ISO time, or seconds or milliseconds since 1970). Absent = the tool tells no end time: no early warning." },
             "renew": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Optional (with links). The tool's own sign-in step, arguments after the detect binary. orch runs it in the background from the warning's Renew (renew.py): it hands the person only the sign-in link and passes a code the sign-in page shows to the tool's input. Nothing else of its output is kept." },
-            "links": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^https://[a-z0-9.-]+/$" }, "description": "Required with renew. How the sign-in link starts; any other link the tool prints is never shown." }
+            "links": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^https://[a-z0-9.-]+/$" }, "description": "Required with renew. How the sign-in link starts; any other link the tool prints is never shown." },
+            "how": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional (ORCH-48). What the person does to renew when orch cannot start the sign-in itself; shown on the warning." }
           },
-          "dependentRequired": { "renew": ["links"], "links": ["renew"] }
+          "dependentRequired": { "renew": ["links"], "links": ["renew"], "ends": ["logged_in"] }
         },
         "reminder": {
           "type": "object", "required": ["settings_file", "output"], "additionalProperties": false,

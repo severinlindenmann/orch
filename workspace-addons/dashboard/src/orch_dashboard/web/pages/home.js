@@ -548,11 +548,17 @@ function loginAction(item, key, quiet = false) {
   control.dataset.key = key + '-check';
   return control;
 }
+// A tool orch cannot renew itself says the one step the person takes (ORCH-48).
+function loginHow(item) {
+  const how = window.DashHelpers.needHow(item);
+  return how ? h('p', {className:'meta', 'data-key':'login-how-' + item.name}, how) : null;
+}
 function loginSoonRow(item) {
   const key = 'login-soon-' + item.name, n = item.stops.length;
   return h('div', {className:'card-row', 'data-key':key, 'data-login':'soon'},
     h('div', {className:'grow'}, h('p', {}, h('strong', {}, 'The ' + clean(window.DashHelpers.needName(item)) + ' ends on ' + window.DashHelpers.needEnds(item) + '.')),
-      n ? h('p', {className:'meta'}, 'After that helpers stop on ' + n + (n === 1 ? ' ticket: ' : ' tickets: '), loginTicketLinks(item.stops)) : null),
+      n ? h('p', {className:'meta'}, 'After that helpers stop on ' + n + (n === 1 ? ' ticket: ' : ' tickets: '), loginTicketLinks(item.stops)) : null,
+      loginHow(item)),
     loginAction(item, key));
 }
 function loginBanner(stopped) {
@@ -563,7 +569,7 @@ function loginBanner(stopped) {
     const item = stopped[0], name = clean(window.DashHelpers.needName(item));
     return h('div', {className:'banner error', role:'alert', 'data-key':'login-stopped', 'data-login':'stopped'},
       h('div', {className:'grow'}, h('strong', {}, 'The ' + name + (item.state === 'unreachable' ? ' cannot be reached' : ' stopped working')),
-        lead ? h('p', {}, lead + (n ? ': ' : '.'), n ? loginTicketLinks(list) : null) : null),
+        lead ? h('p', {}, lead + (n ? ': ' : '.'), n ? loginTicketLinks(list) : null) : null, loginHow(item)),
       loginAction(item, 'login-stopped-' + item.name));
   }
   const names = stopped.map(i => clean(window.DashHelpers.needName(i))).join(' · ');

@@ -231,6 +231,8 @@ HINTS = {
     "logins": _logins,
     "logins renew": _logins_renew,
     "logins replace": _logins_replace,
+    "logins add": "orch logins",
+    "logins remove": "orch logins",
     "pause": "turn it back on with: orch resume",
     "resume": "orch needs",
     "wait": "keep working on other tickets: orch ticket list",

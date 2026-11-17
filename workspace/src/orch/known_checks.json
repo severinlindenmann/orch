@@ -1,0 +1,20 @@
+{
+  "_doc": "Other tools a helper often needs (health.known_recipes, ORCH-48). Same entry as a workspace's own check (orch logins add), plus set_if / env_if: the check only runs when the tool is installed AND one of these settings files exists or environment names is set, so an unused tool never warns. No end date from these tools: orch says only whether the login works.",
+  "checks": {
+    "github": {
+      "label": "GitHub",
+      "command": ["gh", "auth", "status"],
+      "set_if": ["{config}/gh/hosts.yml", "{appdata}/GitHub CLI/hosts.yml"],
+      "env_if": ["GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"],
+      "how": "Open a terminal on this computer and run: gh auth login"
+    },
+    "databricks": {
+      "label": "Databricks",
+      "command": ["databricks", "auth", "profiles", "--output", "json"],
+      "works": "profiles.*.valid",
+      "set_if": ["{home}/.databrickscfg"],
+      "env_if": ["DATABRICKS_CONFIG_FILE"],
+      "how": "Open a terminal on this computer and run: databricks auth login"
+    }
+  }
+}

@@ -131,7 +131,9 @@ def test_exit_code_recipe_reads_nothing_the_command_prints(monkeypatch, code, wa
         ("t", {"command": ["t"] * 10}, False),
         ("T!", {"command": ["t"]}, False),
         ("t", {"command": ["t"], "label": "x\nInjected"}, False),
-        ("t", {"command": ["t"], "works": "a.b"}, False),
+        ("t", {"command": ["t"], "works": "a.b"}, True),  # a short path (ORCH-48)
+        ("t", {"command": ["t"], "works": "a..b"}, False),
+        ("t", {"command": ["t"], "how": "x\nInjected"}, False),
         ("wiki", {"command": ["t"], "kind": "connection"}, True),
         ("pay", {"command": ["t"], "kind": "key"}, True),
         ("t", {"command": ["t"], "kind": "secret"}, False),  # only login, connection or key
@@ -181,6 +183,7 @@ def test_overview_names_the_tickets_that_stop_and_leaks_nothing(proj, run, new_t
         "stops",
         "renew",
         "key",
+        "how",
     }
     assert r["renew"] is True and r["key"] is None  # orch can start the Claude Code sign-in (ORCH-46)
     assert HIDDEN not in json.dumps(rows)
