@@ -188,11 +188,13 @@ def apply_agent_files(root: Path) -> list[str]:
     return done
 
 
-def apply_copy_files(root: Path, work: Path) -> None:
+def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = frozenset()) -> None:
     """apply_agent_files for a separate copy of the project (git worktree) at `work`: the same skill links and
     local instruction files, but the links point at the WORKSPACE's harness (the copy has no .orch/harness) and
     the instruction file imports the copy's own .orch-harness/AGENTS.orch.md (written from the workspace's). The excludes live in the shared .git/info/exclude of the
-    repository, already written for the workspace. One refused link does not stop the others."""
+    repository, already written for the workspace. One refused link does not stop the others. `linked`: top-level
+    names in `work` that orch made links to the workspace's own entries (a copy of several projects): the skills
+    there are the workspace's, nothing is written through them."""
     from orch import adapters
 
     sk = harness.harness_dir(root) / "skills"
@@ -208,7 +210,12 @@ def apply_copy_files(root: Path, work: Path) -> None:
                 return False
         return True
 
+    def via_link(rel: str) -> bool:
+        return Path(rel).parts[0] in linked
+
     for where in _skill_places(root):
+        if via_link(where):
+            continue
         if not plain(where):
             refused = refused or Refused(f"{work / where} is a link; orch will not write through it.")
             continue
@@ -223,7 +230,7 @@ def apply_copy_files(root: Path, work: Path) -> None:
                 refused = refused or e
     for sh in _shared_skills(root):
         for where in _skill_places(root)[1:]:
-            if not plain(where):
+            if via_link(where) or not plain(where):
                 continue
             try:
                 harness.link_skill(work, where, sh.name, sh)
@@ -231,6 +238,8 @@ def apply_copy_files(root: Path, work: Path) -> None:
                 refused = refused or e
     for n in detected_agents(root):
         for fn, line in ((adapters.load(n).get("files") or {}).get("instructions_link") or {}).items():
+            if via_link(fn):
+                continue
             if plain(fn):
                 harness.write_local_file(work, fn, line, harness_root=root)
             else:

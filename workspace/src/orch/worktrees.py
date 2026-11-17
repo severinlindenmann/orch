@@ -417,6 +417,10 @@ def work_dir(entry: dict) -> Path:
     processes can write). NOTE for all readers of `ticket.work.folders`: it is a record for people (branch,
     base, sub, host); no code resolves a path from it. Paths come from path_for() and the registry only."""
     top = Path(entry["path"])
+    if "project" in entry:  # a copy of one of several projects: the agent starts in the folder holding them
+        if not _safe_project(entry["project"]) or top.name != entry["project"]:
+            raise Refused("The saved folder of this copy is not usable.")
+        return top.parent
     sub = entry.get("sub") or ""
     if not _safe_sub(sub):
         raise Refused("The saved folder of this copy is not usable.")
@@ -453,6 +457,7 @@ def registry(root: Path) -> dict:
             and isinstance(p.get("path"), str)
             and isinstance(p.get("branch"), str)
             and _safe_sub(p.get("sub"))
+            and ("project" not in p or _safe_project(p.get("project")))
         ]
         if paths:
             out[tid] = {"paths": paths, "created_at": v.get("created_at")}
@@ -468,7 +473,13 @@ def _save_registry(root: Path, reg: dict) -> None:
 
 def count(root: Path) -> int:
     """How many registered copy folders currently exist (not vanished registry paths)."""
-    return sum(Path(e["path"]).is_dir() for v in registry(root).values() for e in v["paths"])
+    n = 0
+    for v in registry(root).values():
+        if _is_multi(v["paths"]):  # one copy folder, however many projects it holds
+            n += Path(v["paths"][0]["path"]).parent.is_dir()
+        else:
+            n += sum(Path(e["path"]).is_dir() for e in v["paths"])
+    return n
 
 
 @contextlib.contextmanager
@@ -503,7 +514,11 @@ def is_orch_copy(path: Path) -> bool:
                 continue
             mine = (base / parts[0] / parts[1]).resolve()
             ent = registry(main).get(parts[1])
-            if ent and any(Path(e["path"]).resolve() == mine for e in ent["paths"]):
+            if ent and any(
+                Path(e["path"]).resolve() == mine
+                or ("project" in e and Path(e["path"]).resolve() == mine / e["project"])
+                for e in ent["paths"]
+            ):
                 return True
         except (OSError, ValueError, RuntimeError):
             continue
@@ -517,6 +532,10 @@ def _mine(root: Path, ticket: str, e: dict) -> bool:
     try:
         want = path_for(addons.workspace_id(root) or "", ticket, addons.home(root))
         p = Path(e["path"])
+        if "project" in e:  # one project's copy inside the ticket's copy folder
+            if not _safe_project(e["project"]):
+                return False
+            return p.resolve() == (want / e["project"]).resolve() and p.is_dir() and is_orch_copy(want)
         return p.resolve() == want.resolve() and p.is_dir() and is_orch_copy(p)
     except (Refused, OSError, RuntimeError, KeyError):
         return False
@@ -692,7 +711,9 @@ def _create(root: Path, ticket: str) -> tuple[dict | None, str]:
 
 
 def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
-    """Make the copy of this ticket (lock held by the caller). (registry entry, "") or (None, why)."""
+    """Make the copy of this ticket (lock held by the caller). (registry entry, "") or (None, why).
+    A workspace folder that is not a git project but holds git projects one folder down gets the
+    several-projects copy instead (_create_multi)."""
     wid = addons.workspace_id(root, create=True)
     try:
         dest = path_for(wid or "", ticket, addons.home(root))
@@ -702,13 +723,42 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
     if repo is None:
         if safegit.hostile_history(root):
             return None, HISTORY_NOTE
-        return None, "This folder is not a git project with at least one commit."
+        projects, why = _projects(root) if _not_git(root) else ([], "")
+        if projects:
+            return _create_multi(root, ticket, dest, projects)
+        return None, why or "This folder is not a git project with at least one commit."
     top, rel, head = repo
     try:
         dest.resolve().relative_to(top)
         return None, "The copy would be inside the project."
     except ValueError:
         pass
+    why = _copies_folder(root, dest)
+    if why:
+        return None, why
+    if dest.exists() or dest.is_symlink():
+        _git(
+            ["worktree", "prune"], top, filters=False
+        )  # a copy somebody deleted by hand is still on git's list
+        if dest.exists() or dest.is_symlink():
+            return None, "That copy folder is already there."
+    entry, why = _add_copy(root, ticket, top, rel, head, dest, bring_back=True)
+    if entry is None:
+        return None, why
+    made_branch = entry.pop("_made", False)
+    try:
+        reg = registry(root)
+        mine = reg.setdefault(ticket, {"paths": [], "created_at": tickets.now()})
+        mine["paths"] = [p for p in mine["paths"] if p.get("path") != entry["path"]] + [entry]
+        _save_registry(root, reg)
+    except OSError as e:
+        _drop_partial(top, dest, entry["branch"], made_branch, head)
+        return None, f"orch cannot write its list of copies: {e}"
+    return entry, ""
+
+
+def _copies_folder(root: Path, dest: Path) -> str:
+    """<copies base>/<ws8> for `dest`, with `.owner` naming this workspace: "" or why it cannot be used."""
     folder = dest.parent
     owner = folder / ".owner"
     try:
@@ -717,27 +767,32 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
         folder.mkdir(exist_ok=True)
         _remember_copies(root, folder)
         if owner.is_symlink():
-            return None, "orch cannot use that folder for copies."
+            return "orch cannot use that folder for copies."
         if owner.is_file():
             if owner.read_text(encoding="utf-8").strip() != str(root.resolve()):
-                return None, "Another workspace uses the same copy folder."
+                return "Another workspace uses the same copy folder."
         else:
             _write_copies_owner(folder, str(root.resolve()))
     except OSError as e:
         # the copies folder is a sibling of the orch folder: when that parent is not writable (the folder is a
         # mount point, or ORCH_HOME=/x) there is nowhere to put copies; say so in plain words
-        return None, (
+        return (
             f"orch cannot make its copies folder next to {addons.home(root).parent} "
             f"({e.strerror or type(e).__name__}). Put orch's folder in a place you can write beside."
         )
     except Refused as e:
-        return None, f"orch cannot make the copy folder: {e}"
-    if dest.exists() or dest.is_symlink():
-        _git(
-            ["worktree", "prune"], top, filters=False
-        )  # a copy somebody deleted by hand is still on git's list
-        if dest.exists() or dest.is_symlink():
-            return None, "That copy folder is already there."
+        return f"orch cannot make the copy folder: {e}"
+    return ""
+
+
+def _add_copy(
+    root: Path, ticket: str, top: Path, rel: str, head: str, dest: Path, bring_back: bool
+) -> tuple[dict | None, str]:
+    """`git worktree add` of the project at `top` into `dest` on branch orch/<ticket>, filled without the
+    project's tracked .orch. `bring_back`: the work goes back by orch's merge on Done, so the branch it goes
+    back to and the commit it starts from are recorded (signed) first, and the project must be on a branch.
+    (entry, "") with `_made` (this call made the branch) for the caller to pop, or (None, why); a failure
+    takes back what this call made."""
     branch = f"orch/{ticket}"
     rc, _, _ = _git(
         ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], top, read_only=True, filters=False
@@ -745,22 +800,23 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
     if rc not in (0, 1):  # a timeout or a git that failed is not "no branch": never start a new round on it
         return None, "git could not read the copy's branch; try again"
     made_branch = rc == 1
-    # The branch the work goes back to and the commit it starts from are recorded (signed) BEFORE anything
-    # is made: a detached HEAD or an unusable store is a plain reason, never a half-made copy.
-    rc, origin, _ = _git(["symbolic-ref", "-q", "HEAD"], top, read_only=True, filters=False)
-    if rc != 0 or not origin.startswith("refs/heads/"):
-        return None, "Your project is not on a branch right now: switch to a branch first."
+    if bring_back:
+        # The branch the work goes back to and the commit it starts from are recorded (signed) BEFORE
+        # anything is made: a detached HEAD or an unusable store is a plain reason, never a half-made copy.
+        rc, origin, _ = _git(["symbolic-ref", "-q", "HEAD"], top, read_only=True, filters=False)
+        if rc != 0 or not origin.startswith("refs/heads/"):
+            return None, "Your project is not on a branch right now: switch to a branch first."
 
-    def record(r):
-        if made_branch:
-            r.clear()  # a new branch starts a new round: nothing of an earlier one applies
-        r.setdefault("origin_branch", origin)
-        r.setdefault("base", head)
+        def record(r):
+            if made_branch:
+                r.clear()  # a new branch starts a new round: nothing of an earlier one applies
+            r.setdefault("origin_branch", origin)
+            r.setdefault("base", head)
 
-    try:
-        _copy_authority(root, ticket, record)
-    except (OSError, ValueError, Refused) as e:
-        return None, f"orch cannot record the copy: {e}"
+        try:
+            _copy_authority(root, ticket, record)
+        except (OSError, ValueError, Refused) as e:
+            return None, f"orch cannot record the copy: {e}"
     add = [
         "worktree",
         "add",
@@ -802,16 +858,194 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
         return None, f"git could not fill the copy: {err.splitlines()[-1] if err else 'unknown error'}"
     start = dest / rel if rel else dest
     start.mkdir(parents=True, exist_ok=True)
-    entry = {"path": str(dest), "branch": branch, "base": head, "sub": rel}
+    return {"path": str(dest), "branch": branch, "base": head, "sub": rel, "_made": made_branch}, ""
+
+
+# ---------------------------------------------------------------- a folder that holds several git projects
+#
+# The workspace folder is not a git project, but git projects sit one folder down (ORCH Development: the code
+# and a dev kit side by side). The ticket's copy folder (path_for) is then a plain folder orch makes, with one
+# copy per project inside it under the project's own folder name, each on branch orch/<ticket> from the
+# project's current commit. The agent starts in the copy folder. The workspace's other top-level entries
+# (instruction files, the agent tools' settings, skills) are links to the workspace's own, so the agent reads
+# the same instructions as in the workspace; orch writes its own local instruction file there.
+# The work is handed over with a pull request: orch never merges these copies back (no review tip, no
+# approval, no bring-back). A project copy goes only when nothing is lost: see _remove_multi.
+
+MULTI_MAX = 12  # projects in one copy folder: more is not a workspace of a few projects side by side
+_PROJECT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+
+
+def _safe_project(name) -> bool:
+    return isinstance(name, str) and bool(_PROJECT.fullmatch(name)) and name not in (".", "..")
+
+
+def _is_multi(paths: list[dict] | None) -> bool:
+    """The registry lines of a ticket are a several-projects copy (every line names its project)."""
+    return bool(paths) and all(_safe_project(e.get("project")) for e in paths)
+
+
+def _multi_ticket(root: Path, ticket: str) -> bool:
+    return _is_multi((registry(root).get(ticket) or {}).get("paths"))
+
+
+def _not_git(root: Path) -> bool:
+    """git itself says this folder is in no git project (a timeout, a git failure or a repository without a
+    commit is NOT that: a workspace that is a git project never gets the several-projects copy)."""
+    rc, _, err = _git(["rev-parse", "--is-inside-work-tree"], root, read_only=True, filters=False)
+    return rc not in (0, 124, 125, 127) and "not a git repository" in err.lower()
+
+
+def _has_git(d: Path) -> bool:
+    return os.path.lexists(d / ".git")
+
+
+def _projects(root: Path) -> tuple[list[tuple[str, Path, str]], str]:
+    """The git projects one folder down from a workspace folder that is not one: [(name, top, HEAD)], sorted
+    by name, and why there are none. A folder counts when it is the top of its own git project with a commit
+    (not a link, not hidden, a plain name); one with a shallow or shared history is left out."""
+    out: list[tuple[str, Path, str]] = []
+    try:
+        names = sorted(e.name for e in os.scandir(root) if e.is_dir(follow_symlinks=False))
+    except OSError:
+        return [], ""
+    for name in names:
+        d = root / name
+        if not _safe_project(name) or name.startswith(".") or _is_link(d):
+            continue
+        dot = d / ".git"
+        if dot.is_symlink() or not dot.is_dir():  # a .git file is a submodule or another worktree
+            continue
+        if safegit.hostile_history(d):
+            continue
+        repo = _repo(d)
+        if repo is None or repo[1] != "" or repo[0] != d.resolve():
+            continue
+        out.append((name, repo[0], repo[2]))
+    if len(out) > MULTI_MAX:
+        return (
+            [],
+            f"This folder holds more than {MULTI_MAX} git projects: separate copies are not made for it.",
+        )
+    return out, ""
+
+
+def _create_multi(
+    root: Path, ticket: str, dest: Path, projects: list[tuple[str, Path, str]]
+) -> tuple[dict | None, str]:
+    """The copy folder of a ticket in a workspace that holds several git projects: one copy of each project
+    in it. (first entry, "") or (None, why); a failure takes back everything this call made."""
+    for _, top, _ in projects:
+        try:
+            dest.resolve().relative_to(top)
+            return None, "The copy would be inside the project."
+        except ValueError:
+            pass
+    why = _copies_folder(root, dest)
+    if why:
+        return None, why
+    if os.path.lexists(dest):
+        for name, top, _ in projects:
+            if not os.path.lexists(dest / name):
+                _git(["worktree", "prune"], top, filters=False)
+        return None, "That copy folder is already there."
+    try:
+        dest.mkdir(mode=0o700)
+    except OSError as e:
+        return None, f"orch cannot make the copy folder: {e.strerror or type(e).__name__}"
+    made: list[tuple[Path, dict, bool]] = []
+
+    def undo() -> None:
+        for top, e, mb in made:
+            _drop_partial(top, Path(e["path"]), e["branch"], mb, e["base"])
+        rmtree_nofollow(dest)  # the folder this call made: only its own copies and nothing else were in it
+
+    for name, top, head in projects:
+        entry, why = _add_copy(root, ticket, top, "", head, dest / name, bring_back=False)
+        if entry is None:
+            undo()
+            return None, f"{name}: {why}"
+        mb = entry.pop("_made", False)
+        entry["project"] = name
+        made.append((top, entry, mb))
+    entries = [e for _, e, _ in made]
     try:
         reg = registry(root)
-        mine = reg.setdefault(ticket, {"paths": [], "created_at": tickets.now()})
-        mine["paths"] = [p for p in mine["paths"] if p.get("path") != entry["path"]] + [entry]
+        reg[ticket] = {
+            "paths": entries,
+            "created_at": (reg.get(ticket) or {}).get("created_at") or tickets.now(),
+        }
         _save_registry(root, reg)
     except OSError as e:
-        _drop_partial(top, dest, branch, made_branch, head)
+        undo()
         return None, f"orch cannot write its list of copies: {e}"
-    return entry, ""
+    return entries[0], ""
+
+
+def _own_names(root: Path) -> set[str]:
+    """Top-level names orch writes into a copy itself: the local instruction files and their harness folder.
+    These are never links to the workspace's own (the workspace's file imports the workspace's harness)."""
+    from orch import skills
+
+    names = {harness.COPY_HARNESS}
+    for n in skills.detected_agents(root):
+        for fn in (adapters.load(n).get("files") or {}).get("instructions_link") or {}:
+            names.add(PurePosixPath(fn).parts[0])
+    return names
+
+
+def _link_workspace(root: Path, group: Path, projects: set[str]) -> tuple[set[str], list[str]]:
+    """Links in the copy folder to the workspace's other top-level entries (instruction files, the agent
+    tools' settings and skills, shared files), made once and kept: (names that are links to the workspace,
+    notes). Never the projects (they are copies), the store, git, or what orch writes itself; nothing that
+    is already there is replaced."""
+    skip = projects | _own_names(root) | {".orch", ".git", TRASH}
+    linked: set[str] = set()
+    notes: list[str] = []
+    try:
+        names = sorted(e.name for e in os.scandir(root))
+    except OSError:
+        return linked, notes
+    for name in names:
+        here = group / name
+        target = root / name
+        if name in skip or (target.is_dir() and _has_git(target)):  # a project is never linked in
+            continue
+        if os.path.lexists(here):
+            if _is_link(here) and os.readlink(here) == str(target):
+                linked.add(name)
+            continue
+        try:
+            os.symlink(target, here, target_is_directory=target.is_dir())
+            linked.add(name)
+        except OSError as e:
+            notes.append(f"{name} could not be linked into the copy ({e.strerror or type(e).__name__})")
+    return linked, notes
+
+
+def _copy_note(ticket: str, names: list[str]) -> str:
+    listed = ", ".join(names)
+    return (
+        "\n\n## This separate copy\n"
+        f"This folder is a separate copy for ticket {ticket}. The folders {listed} are copies of the "
+        f"workspace's git projects, each on its own branch orch/{ticket}, made from the project's commit "
+        "when the copy was made. Change project files only here, never in the workspace's own projects. "
+        "orch does not bring this work back by itself: hand it over with a pull request. When the ticket is "
+        "closed, orch removes a project's copy only when everything in it is committed and its commits are "
+        "on another branch too (pushed or merged).\n"
+    )
+
+
+def _write_copy_note(group: Path, ticket: str, names: list[str]) -> None:
+    """The copy's own instruction file (written from the workspace's at each start) says where the projects
+    are and how the work goes back."""
+    f = group / harness.COPY_HARNESS / "AGENTS.orch.md"
+    if _is_link(f.parent) or _is_link(f) or not f.is_file():
+        return
+    note = _copy_note(ticket, names)
+    text = f.read_text(encoding="utf-8")
+    if note not in text:
+        harness.write_text(f, text.rstrip("\n") + note)
 
 
 def create(root: Path, ticket: str) -> dict | None:
@@ -840,6 +1074,18 @@ def _prepare_files(root: Path, entry: dict) -> list[str]:
 
     work = work_dir(entry)
     notes: list[str] = []
+    if "project" in entry:  # the folder holding the copies of several projects: no git of its own
+        names = [e["project"] for e in (registry(root).get(_ticket_of(work)) or {}).get("paths") or []]
+        names = [n for n in names if _safe_project(n)] or [entry["project"]]
+        linked, more = _link_workspace(root, work, set(names))
+        notes += more
+        try:
+            skills.apply_copy_files(root, work, linked=linked)
+        except Refused as e:
+            notes.append(f"Some orch files could not be put in the copy: {e}")
+        with contextlib.suppress(OSError, Refused):
+            _write_copy_note(work, _ticket_of(work), names)
+        return notes
     try:
         harness.protect_local(
             root, skills._exclude_lines(root)
@@ -848,6 +1094,11 @@ def _prepare_files(root: Path, entry: dict) -> list[str]:
     except Refused as e:
         notes.append(f"Some orch files could not be put in the copy: {e}")
     return notes
+
+
+def _ticket_of(group: Path) -> str:
+    """The ticket id a copy folder is named after (path_for: <copies base>/<ws8>/<ticket>)."""
+    return group.name
 
 
 def _setup(root: Path, ticket: str, entry: dict) -> list[str]:
@@ -927,10 +1178,14 @@ def _record_on_ticket(root: Path, ticket: str, entry: dict) -> None:
         folders = [
             f
             for f in work.get("folders") or []
-            if isinstance(f, dict) and (f.get("branch"), f.get("host")) != (entry["branch"], host)
+            if isinstance(f, dict)
+            and (f.get("branch"), f.get("host"), f.get("project"))
+            != (entry["branch"], host, entry.get("project"))
         ]
         folders = [{k: v for k, v in f.items() if k != "path"} for f in folders]  # a legacy local path goes
         rec = {"branch": entry["branch"], "base": entry["base"], "sub": entry.get("sub") or "", "host": host}
+        if "project" in entry:
+            rec["project"] = entry["project"]
         work["folders"] = [rec, *folders]
 
     tickets.apply_op(root, ticket, fn, by=tickets.SYSTEM)
@@ -2279,7 +2534,7 @@ def _digest(paths: list[str]) -> str:
 
 def _bring_back_locked(root: Path, ticket: str) -> dict | None:
     t = tickets.load(root, ticket)
-    if t.get("status") != "done":
+    if t.get("status") != "done" or _multi_ticket(root, ticket):  # several projects: by pull request
         return None
 
     def wait(reason):
@@ -2716,8 +2971,14 @@ def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
             )
             notes.extend(_prepare_files(root, entry))
             notes.extend(_setup(root, ticket, entry))
-            with contextlib.suppress(Exception):  # a failed write must not stop the start
-                _record_on_ticket(root, ticket, entry)
+            mine = (
+                ((registry(root).get(ticket) or {}).get("paths") or [entry])
+                if "project" in entry
+                else [entry]
+            )
+            for e in mine:
+                with contextlib.suppress(Exception):  # a failed write must not stop the start
+                    _record_on_ticket(root, ticket, e)
             return notes
 
     return work_dir(entry), [], [after]
@@ -3284,6 +3545,8 @@ def _remove_locked(
     paths = (ent or {}).get("paths") or []
     if not paths:
         return []
+    if _is_multi(paths):
+        return _remove_multi(root, ticket, paths, reason)
     if top is False:
         top = _top_of(root)
     want = _want(root, ticket)
@@ -3298,6 +3561,153 @@ def _remove_locked(
             keep.append(e)
             notes.append(f"{ticket}: {res}")
     _drop_entry(root, ticket, keep)
+    return notes
+
+
+# A copy of several projects (see _create_multi) goes through _remove_multi only. Each project's copy needs
+# (1)-(3) of THE INVARIANT for the ticket's copy folder, the line's path exactly <copy folder>/<project>, a
+# git project at <workspace>/<project> that confirms the copy is its worktree, and (4') nothing lost:
+# everything in the copy committed and its commit on a branch; the copy is then RENAMED into <ws8>/.trash
+# (files git ignores wait there a day, as for a single-project copy). The branch orch/<ticket> goes only
+# when its commits are on another branch, remote branch or tag too (pushed or merged; never decided from
+# the registry, which agents can write); otherwise it stays. The copy folder
+# itself goes (to the trash) only when nothing but orch's own files and links is left in it.
+
+
+def _held_elsewhere(top: Path, commit: str, exclude: str = "") -> bool:
+    """`commit` is on a branch, remote branch or tag of the project other than `exclude`."""
+    rc, out, _ = _git(
+        [
+            "for-each-ref",
+            "--contains",
+            commit,
+            "--format=%(refname)",
+            "refs/heads/",
+            "refs/remotes/",
+            "refs/tags/",
+        ],
+        top,
+        read_only=True,
+    )
+    return rc == 0 and any(r.strip() and r.strip() != exclude for r in out.splitlines())
+
+
+def _remove_project_copy(root: Path, ticket: str, name: str, copy: Path, entry: dict) -> str:
+    """ "removed" or "kept: <why>" for one project's copy (the comment above). Never raises."""
+    try:
+        d = root / name
+        repo = None if _is_link(d) or not d.is_dir() else _repo(d)
+        if repo is None or repo[1] != "":
+            return "kept: its project in the workspace is not a git project right now"
+        top = repo[0]
+        if os.path.lexists(copy):
+            if _is_link(copy) or not copy.is_dir():
+                return "kept: not a folder"
+            if not _is_our_worktree(top, copy):
+                return "kept: git could not confirm it is a copy of this project"
+            rc, changed, _ = _git(["status", "--porcelain", "--untracked-files=all"], copy, read_only=True)
+            if rc != 0:
+                return "kept: git could not read the copy"
+            if changed:
+                return "kept: it has changes that are not committed"
+            rc, head, _ = _git(
+                ["rev-parse", "--verify", "HEAD^{commit}"], copy, read_only=True, filters=False
+            )
+            if rc != 0:
+                return "kept: git could not read the copy"
+            on_branch = _git(["symbolic-ref", "-q", "HEAD"], copy, read_only=True, filters=False)[0] == 0
+            if not on_branch and not _held_elsewhere(top, head):
+                return "kept: its last commit is on no branch"
+            # into the trash (a rename: files git ignores wait there a day too), then git forgets the copy
+            moved = _project_to_trash(copy, ticket)
+            if moved is None:
+                return "kept: it could not be moved away (a file is in use?)"
+            _trash_note(root, ticket, moved.name)
+            _git(["worktree", "prune"], top, filters=False)
+        branch = f"refs/heads/orch/{ticket}"
+        rc, tip, _ = _git(["rev-parse", "--verify", "--quiet", branch], top, read_only=True, filters=False)
+        if rc == 0:
+            if _held_elsewhere(top, tip, exclude=branch):  # never decided from the (writable) registry
+                _git(["branch", "-D", "--", f"orch/{ticket}"], top, filters=False)
+            else:
+                _log(root, f"{ticket}: {name}: branch orch/{ticket} kept, its commits are on no other branch")
+        return "removed"
+    except Exception as e:  # noqa: BLE001 - fail closed
+        return f"kept: {e}"
+
+
+def _project_to_trash(copy: Path, ticket: str) -> Path | None:
+    """Like _to_trash, into the same <ws8>/.trash (the copy sits one folder deeper, in the copy folder)."""
+    trash = copy.parent.parent / TRASH
+    try:
+        if trash.is_symlink():
+            return None
+        trash.mkdir(exist_ok=True)
+        dest = trash / f"{ticket}-{secrets.token_hex(4)}"
+        os.rename(copy, dest)
+        return dest
+    except OSError:
+        return None
+
+
+def _drop_group(root: Path, ticket: str, group: Path) -> str:
+    """The copy folder once its project copies are gone: to the trash when only orch's own files and the
+    links to the workspace are left in it, else kept. "removed" or "kept: <why>"."""
+    if not os.path.lexists(group):
+        return "removed"
+    if _is_link(group) or not group.is_dir():
+        return "kept: not a folder"
+    from orch import skills
+
+    own = _own_names(root) | {PurePosixPath(w).parts[0] for w in skills._skill_places(root)}
+    try:
+        for e in os.scandir(group):
+            p = Path(e.path)
+            if _is_link(p) and os.readlink(p) == str(root / e.name):
+                continue  # a link orch made to the workspace's own entry (never followed when removed)
+            if e.name in own:
+                continue
+            return f"kept: the copy folder holds other files ({e.name}); look at it and remove it by hand"
+    except OSError as e:
+        return f"kept: {e.strerror or type(e).__name__}"
+    moved = _to_trash(group, ticket)
+    if moved is None:
+        return "kept: it could not be moved away (a file is in use?)"
+    _trash_note(root, ticket, moved.name)
+    _forget_agent_traces({"path": str(group), "sub": ""}, group)
+    return "removed"
+
+
+def _remove_multi(root: Path, ticket: str, paths: list[dict], reason: str) -> list[str]:
+    """_remove_locked for a copy of several projects. One line per thing that was kept."""
+    group = _want(root, ticket)
+    if group is None or not _owned(root, group) or _holds_workspace(root, group):
+        return [f"{ticket}: kept: not this workspace's copy"]
+    if not _ticket_closed(root, ticket):
+        return [f"{ticket}: kept: its ticket is not done or closed"]
+    if _alive_here(root, ticket):
+        return [f"{ticket}: kept: an agent is still working in it"]
+    keep: list[dict] = []
+    notes: list[str] = []
+    for e in paths:
+        name = e["project"]
+        if not _same(Path(e["path"]), group / name):
+            notes.append(f"{ticket}: dropped a saved copy line that is not this ticket's copy folder")
+            continue  # a forged or foreign line: dropped from the list, its path is never touched
+        res = _remove_project_copy(root, ticket, name, group / name, e)
+        if res != "removed":
+            keep.append(e)
+            notes.append(f"{ticket}: {name}: {res}")
+    if not keep:
+        res = _drop_group(root, ticket, group)
+        if res != "removed":
+            notes.append(f"{ticket}: {res}")
+    _drop_entry(root, ticket, keep)
+    if keep:
+        _mark(root, "kept", ticket, reason="; ".join(n.split(": ", 1)[1] for n in notes))
+    else:
+        _mark(root, "kept", ticket)
+    _log(root, f"{ticket}: " + ("; ".join(notes) or "removed") + f" ({reason})")
     return notes
 
 
@@ -3331,6 +3741,9 @@ def on_closed(root: Path, ticket: str) -> None:
     try:
         # Existence reads precede the first Done action; never create a Need for a ticket without a copy.
         if _has_work(root, ticket):
+            if _multi_ticket(root, ticket):  # handed over by pull request: nothing to bring back
+                remove(root, ticket, wait=SWEEP_WAIT)
+                return
             if tickets.load(root, ticket).get("status") == "done":
                 # "Mark Done" stays cheap: it only judges the tip recorded when the review began (no save, no
                 # merge). The bring-back itself runs in the detached sweep, never inside the person's click.
@@ -3348,7 +3761,7 @@ def on_status(root: Path, ticket: str, before: str | None, after: str | None) ->
     released; never raises). Any change forgets the tip recorded for an earlier review; entering Review
     records the one shown now; leaving Done (reopened for more work) forgets the whole finished round."""
     try:
-        if not _has_work(root, ticket):
+        if not _has_work(root, ticket) or _multi_ticket(root, ticket):
             return
         with _scoped(root):
 
@@ -3378,7 +3791,11 @@ def on_run_ended(root: Path, tid: str) -> None:
     # A run that ends while its ticket is in Review: what is in the copy now is what the person reviews,
     # unless a tip was recorded in this round already (that one is kept, or forgotten when the branch moved).
     with contextlib.suppress(Exception):
-        if tickets.load(root, tid).get("status") == "review" and _has_work(root, tid):
+        if (
+            tickets.load(root, tid).get("status") == "review"
+            and _has_work(root, tid)
+            and not _multi_ticket(root, tid)
+        ):
             with _scoped(root), runs.locked(root, LOCK_ID, wait=SWEEP_WAIT):
                 _record_review_locked(root, tid, new_round=False)
     schedule_sweep(root)
