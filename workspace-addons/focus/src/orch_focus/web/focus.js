@@ -268,10 +268,12 @@
   /* A push (server-sent events) tells the page at once when a ticket or run file changed; the poll above is the
      slow fallback while the stream is up and the normal pace while it is down. Under the dashboard the stream is
      the dashboard's own (same origin, no proxy); opened directly it is Focus's own. */
-  if (typeof EventSource !== 'undefined') {
+  /* In the dashboard's sandboxed frame the stream is read with the frame pass (kit/frame.js, ORCH-186). */
+  const Stream = window.OrchFrame && window.OrchFrame.on ? window.OrchFrame.EventSource : window.EventSource;
+  if (typeof Stream !== 'undefined') {
     let stream, pending;
     const connect = () => {
-      stream = new EventSource('/api/events');
+      stream = new Stream('/api/events');
       stream.onopen = () => { live = true; };
       stream.onerror = () => { live = false; };
       stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(() => { fresh = true; poll(); }, Math.max(30, 500 - (Date.now() - lastFetch))); });

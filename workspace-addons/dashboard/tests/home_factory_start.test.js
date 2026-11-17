@@ -92,6 +92,7 @@ test('any other question keeps its usual card', () => {
 
 test('the dashboard opens an add-on page at its own place after a second #', () => {
   const app = read('app.js'), settings = read('pages/settings.js');
-  assert.match(app, /\(\?:#\(\\\/\[A-Za-z0-9_\/-\]\*\)\)\?\$/);
+  assert.match(app, /\(\?:#\(\[A-Za-z0-9_\/-\]\*\)\)\?\$/);
   assert.match(settings, /r\.inner \? '#' \+ r\.inner : ''/);
+  assert.match(settings, /r\.inner \? '&' \+ r\.inner : ''/);  // after the frame pass (ORCH-186)
 });

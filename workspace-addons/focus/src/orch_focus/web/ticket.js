@@ -14,8 +14,8 @@
     const thumb = h('span', {class: 'thumb', text: kind});
     if (r && typeof r.preview === 'string' && r.preview.startsWith('/api/file?')) {
       const src = P + r.preview;
-      if (r.kind === 'image') {
-        const img = h('img', {alt: '', loading: 'lazy'}); img.src = src; thumb.replaceChildren(img);
+      if (r.kind === 'image') {  // in the dashboard's sandboxed frame a picture address carries the frame pass
+        const img = h('img', {alt: '', loading: 'lazy'}); img.src = window.OrchFrame ? window.OrchFrame.url(src) : src; thumb.replaceChildren(img);
       } else {
         fetch(src).then(x => x.ok && (x.headers.get('Content-Type') || '').startsWith('text/plain') ? x.text() : null)
           .then(txt => { if (txt) thumb.replaceChildren(h('pre', {text: txt.slice(0, 600).split('\n').slice(0, 8).join('\n')})); }).catch(() => {});
@@ -146,7 +146,7 @@
       if (S.state.dashNeeds === d.count) return;
       S.state.dashNeeds = d.count; pickAttention();
     });
-    try { window.parent.postMessage({orch: 'needs-count'}, location.origin); } catch (e) { /* not framed */ }
+    try { window.parent.postMessage({orch: 'needs-count', chan: (window.OrchFrame || {}).chan}, location.origin); } catch (e) { /* not framed */ }
   }
 
   /* "2 agents are working. One question needs you." The agent count comes from the live cards, the rest from the tickets. */
@@ -252,7 +252,7 @@
   const DOT = {waiting: 'dot-warn', review: 'dot-warn', active: 'dot-work', done: 'dot-ok'};
   function buildShell(top, stepbar, rail, stage) {
     root.classList.add('fx-shell', 'fx-terminal');
-    try { parent.postMessage({orch: 'embed-shell', path: location.pathname}, location.origin); } catch (e) { /* not framed */ }
+    try { parent.postMessage({orch: 'embed-shell', path: location.pathname, chan: (window.OrchFrame || {}).chan}, location.origin); } catch (e) { /* not framed */ }
     els.ticketList = h('div', {class: 'fx-tickets', role: 'list', 'aria-label': 'Tickets in focus'});
     const left = h('aside', {class: 'focus-list fx-left', 'aria-label': 'Tickets in focus'},
       h('div', {class: 'card-h'}, h('h3', {text: 'Tickets in focus'})), els.ticketList,

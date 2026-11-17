@@ -24,6 +24,7 @@ from .settings import build_settings
 DEFAULT_PORT = 8431
 MAX_BODY = 4096
 KIT_FILES = (
+    "frame.js",
     "tokens.css",
     "components.css",
     "motion.css",
