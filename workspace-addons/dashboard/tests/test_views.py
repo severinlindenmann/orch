@@ -634,7 +634,7 @@ def test_v1_home_and_ticket_controls():
     for old in ("Jump to", "status-jumps", "board-jump", "boardCol"):
         assert old not in tickets
     css = (WEBDIR / "pages" / "tickets.css").read_text()
-    assert ".board .kanban-col{display:block" in css
+    assert ".board .kanban-col{flex:0 0 82%" in css  # ORCH-240: phone lanes side by side, swiped
     # Reduced motion for Home comes from the kit (motion.css switches every animation and transition off).
     assert 'href="kit/motion.css"' in (WEBDIR / "index.html").read_text()
 

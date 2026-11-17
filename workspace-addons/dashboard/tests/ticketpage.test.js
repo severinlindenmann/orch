@@ -177,7 +177,7 @@ test('the review buttons show whenever the status is Review, an open question fi
   const review = all.find(n => /review-card/.test(n.attrs.className || ''));
   const reviewText = JSON.stringify(review);
   assert.match(reviewText, /Result/);
-  assert.match(reviewText, /Next steps/);
+  assert.match(reviewText, /next-steps\.html/);
   assert.doesNotMatch(reviewText, /Looks good/, 'the verdict buttons live in the header strip');
   assert.doesNotMatch(JSON.stringify(all), /Technical details|Show technical/);
 });
@@ -465,13 +465,13 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
   assert.match(withGoal, /Goal: /); assert.match(withGoal, /customers pay online/); assert.match(withGoal, /Not included: /); assert.match(withGoal, /refunds · subscriptions/);
   assert.doesNotMatch(JSON.stringify(ctx.detail({...t, plan:undefined})), /Goal: /);
   delete t.note; delete t.plan;
-  assert.ok(find(tree, 'Start work')); assert.ok(find(tree, 'Change a step'));
+  assert.ok(find(tree, 'Start work')); assert.ok(find(tree, 'Change sub-tickets'));
   assert.equal(find(tree, 'Rename'), undefined);
-  find(tree, 'Change a step').onclick();
+  find(tree, 'Change sub-tickets').onclick();
   tree = ctx.detail(t);
   assert.equal(buttons(tree).filter(n => n.children.includes('Rename')).length, 2);
   assert.equal(buttons(tree).filter(n => n.children.includes('Remove')).length, 2);
-  assert.ok(find(tree, '+ Add a step')); assert.ok(find(tree, 'Done editing'));
+  assert.ok(find(tree, '+ Add a sub-ticket')); assert.ok(find(tree, 'Done editing'));
   await find(tree, 'Remove').onclick();
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.patch', {ticket:'a', data:{status:'dropped'}, if_revision:1}]));
   find(tree, 'Done editing').onclick();
@@ -482,7 +482,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
     t.plan_first = plan; t.questions[0].text = text; t.status = status;
     tree = ctx.detail(t);
     assert.equal(find(tree, 'Start work'), undefined);
-    assert.equal(find(tree, 'Change a step'), undefined);
+    assert.equal(find(tree, 'Change sub-tickets'), undefined);
   }
 });
 
@@ -549,9 +549,9 @@ test('ORCH-14: an epic lists its tickets under Tickets in this epic, with Add a 
   const kid = {id:'t_k', key:'WS-10', title:'Fix the header', status:'open', parent:'t_e', created_at:'2026-11-16T09:00:00Z'};
   const c = context({card:(key, title, suffix, kids) => ({title, kids}), emptyRow:x => x, statusChip:() => null, href:id => '#' + id, clean:v => String(v)});
   const shown = JSON.stringify(c.ticketParts(epic, [kid]));
-  assert.match(shown, /Tickets in this epic/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Steps"|Add a step/);
+  assert.match(shown, /Tickets in this epic/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Sub-tickets"|Add a sub-ticket/);
   const plain = JSON.stringify(c.ticketParts({...epic, epic:undefined}, [kid]));
-  assert.match(plain, /"Steps"/); assert.match(plain, /\+ Add a step/);
+  assert.match(plain, /"Sub-tickets"/); assert.match(plain, /\+ Add a sub-ticket/);
 });
 test('the Accept button is keyed by the shown tip, so a refresh never keeps a stale handler (B13g)', () => {
   const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});
