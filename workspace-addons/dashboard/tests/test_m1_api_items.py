@@ -120,3 +120,15 @@ def test_who_uses_actor_fallback(ws, monkeypatch):
 
     monkeypatch.setattr(actions.getpass, "getuser", missing_user)
     assert data.load_state(ws)["who"] == "dashboard"
+
+
+def test_state_names_the_computer_login(ws, monkeypatch):
+    """ORCH-184: a line recorded under the computer login is shown as the person's name, so the page needs the login."""
+    monkeypatch.setattr(actions.getpass, "getuser", lambda: "anna")
+    assert data.load_state(ws)["login"] == "anna"
+
+    def missing_user():
+        raise KeyError("no user")
+
+    monkeypatch.setattr(actions.getpass, "getuser", missing_user)
+    assert data.load_state(ws)["login"] == ""

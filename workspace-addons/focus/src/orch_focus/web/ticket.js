@@ -61,8 +61,7 @@
         h('a', {class: 'btn ghost sm', href: '/#home', target: '_top', text: 'See everything on Home'})));
       for (const [status, label, action] of groups) {
         if (INAPP && (status === 'waiting' || status === 'review')) continue;  /* Home lists these; not twice */
-        const needsYou = window.FocusHelpers.needsYou;
-        const rows = list.filter(t => status === 'waiting' ? needsYou(t) : t.status === status);
+        const rows = window.FocusHelpers.groupRows(list, status);
         if (!rows.length) continue;
         const {shown, more} = window.FocusHelpers.limitGroup(rows);
         const cards = status === 'review';  /* results are cards, every other group stays a row */

@@ -160,12 +160,19 @@ function chatNewChatRows(onPick) {
     return row;
   });
 }
+// The Earlier button is only there when it leads somewhere (F5): a finished group, or a past day, or a history that did not load (so it can be retried).
+// The days are asked for once when the thread is drawn; until they are known the button waits.
+function chatHasEarlier() {
+  if (chatDays.status === 'idle') setTimeout(() => { if (chatDays.status === 'idle') chatLoad(); }, 0);
+  const today = chatToday();
+  return chatGroups().some(chatFinished) || chatDays.status === 'error' || (chatDays.status === 'ready' && chatObjects(chatDays.rows).some(d => /^\d{4}-\d{2}-\d{2}$/.test(d.day || '') && d.day !== today));
+}
 function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (!g && chatUi.filter === 'phone' ? 'Your phone' : (agent && !chatConversation().length ? 'New conversation with your helper' : CHAT_HELPER));
   const helper = !g && !history, others = g ? chatObjects(g.members).filter(m => m.ws !== 'you').length : 0;
   const plain = helper && !agent && chatUi.filter !== 'phone';
-  const earlier = history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g ? null : chatButton('Earlier', 'history');
+  const earlier = history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g || !chatHasEarlier() ? null : chatButton('Earlier', 'history');
   // The helper conversation has no title row of its own: the page heading above says "Chat" and who it is with.
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     plain ? null : h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,

@@ -3,6 +3,9 @@
 Entries keep their order. States: waiting (in line), running (in the group being checked), merged, out (left
 the queue; `why` says why). Every change reads, changes and writes the file under a short lock folder, so the
 runner and a helper adding a pull request never lose each other's change.
+
+`groups.json` (same lock) lists every group branch from just before its push until its pull request is closed
+and its branch deleted, so an error, a crash or a full write limit never leaves one behind for good.
 """
 
 from __future__ import annotations
@@ -42,12 +45,19 @@ def now() -> str:
 
 
 def parse_url(url: str) -> tuple[str, int]:
+    """(owner/name in lower case, number): GitHub names do not care about case, so one pull request has one
+    spelling in the queue."""
     m = PR_URL.fullmatch((url or "").strip())
     if m is None:
         raise Refused(
             f"'{url}' is not a GitHub pull request address (https://github.com/owner/name/pull/12)."
         )
-    return m[1], int(m[2])
+    return m[1].lower(), int(m[2])
+
+
+def canonical(url: str) -> str:
+    repo, number = parse_url(url)
+    return f"https://github.com/{repo}/pull/{number}"
 
 
 def read(root: Path, strict: bool = False) -> list[dict]:
@@ -178,8 +188,9 @@ def find(rows: list[dict], url: str) -> dict | None:
     return next((r for r in reversed(rows) if r.get("url") == url), None)
 
 
-def add(root: Path, url: str, ticket: str | None, by: str) -> tuple[dict, bool]:
-    """Put a pull request at the end of the line. Already waiting or running: that entry, not a second one."""
+def add(root: Path, url: str, ticket: str | None, by: str, **extra) -> tuple[dict, bool]:
+    """Put a pull request at the end of the line. Already waiting or running: that entry, not a second one.
+    extra: what was seen at add time (base, login)."""
     repo, number = parse_url(url)
     url = f"https://github.com/{repo}/pull/{number}"
 
@@ -190,7 +201,7 @@ def add(root: Path, url: str, ticket: str | None, by: str) -> tuple[dict, bool]:
                 old["ticket"] = ticket
             return dict(old), False
         row = {"url": url, "repo": repo, "number": number, "ticket": ticket, "by": by, "added": now()}
-        row.update(state=WAITING, why="waiting in line")
+        row.update(extra, state=WAITING, why="waiting in line")
         rows.append(row)
         return dict(row), True
 
@@ -198,8 +209,7 @@ def add(root: Path, url: str, ticket: str | None, by: str) -> tuple[dict, bool]:
 
 
 def remove(root: Path, url: str, by: str) -> bool:
-    repo, number = parse_url(url)
-    url = f"https://github.com/{repo}/pull/{number}"
+    url = canonical(url)
 
     def go(rows):
         old = find(rows, url)
@@ -269,3 +279,41 @@ def claim(root: Path, batch: list[dict]) -> list[dict]:
 
 def waiting(root: Path) -> list[dict]:
     return [r for r in read(root) if r.get("state") == WAITING]
+
+
+# -- group branches that may still exist on GitHub ---------------------------------------------------------
+def _groups_file(root: Path) -> Path:
+    return folder(root) / "groups.json"
+
+
+def groups(root: Path) -> list[dict]:
+    """[{repo, branch, url, closed}]: group branches not cleaned up yet (url None: no pull request seen)."""
+    try:
+        data = json.loads(_groups_file(root).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError):
+        raise Refused(f"The merge queue's group list is damaged: {_groups_file(root)}.") from None
+    rows = data.get("groups") if isinstance(data, dict) else None
+    return [g for g in rows or [] if isinstance(g, dict) and g.get("repo") and g.get("branch")]
+
+
+def change_group(root: Path, repo: str, branch: str, **fields) -> None:
+    """Add or update the record of one group branch; drop=True removes it."""
+    with locked(root):
+        rows = groups(root)
+        row = next((g for g in rows if g["repo"] == repo and g["branch"] == branch), None)
+        if fields.pop("drop", False):
+            rows = [g for g in rows if g is not row]
+        elif row is None:
+            rows.append({"repo": repo, "branch": branch, "url": None, "closed": False, **fields})
+        else:
+            row.update(fields)
+        d = folder(root)
+        d.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=".groups-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"groups": rows}, f, indent=1)
+        from orch import procs
+
+        procs.replace(tmp, _groups_file(root))
