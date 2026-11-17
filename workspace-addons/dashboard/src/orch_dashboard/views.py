@@ -140,9 +140,10 @@ def _ticket_ref_ok(t):
 
 def _toggle_ok(t):
     return (
-        _keys_only(t, ("on", "label", "action"))
+        _keys_only(t, ("on", "label", "text", "action"))
         and isinstance(t.get("on"), bool)
         and _text(t.get("label"), 60)
+        and ("text" not in t or _text(t.get("text"), 24))
         and _action(t.get("action"))
     )
 

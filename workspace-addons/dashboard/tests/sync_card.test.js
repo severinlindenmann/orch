@@ -409,3 +409,13 @@ test('ORCH-184: changing Sync in Settings drops the Sync page\'s saved view, so 
   assert.equal(vm.runInContext("addonViews.sync", c), undefined, 'a change drops it');
   assert.equal(vm.runInContext("!!addonViews.other", c), true, 'other add-ons keep theirs');
 });
+
+test('bug hunt 17 Nov: each place to keep a copy says what it does, and the Sync page does not repeat its heading', () => {
+  const {page} = syncPage({...BASE, ...INFO});
+  for (const [key, want] of [['off', /No copy is kept\./], ['local', /Nothing leaves this computer\./], ['remote', /private place you own/]])
+    assert.match(text(byKey(page, 'sync-where-says-' + key)), want);
+  assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'h3' && text(n) === 'Sync').length, 0);
+  const {c, ui} = context();
+  ui.card = {...BASE};
+  assert.equal(all(c.syncCard(ON), n => n.tag === 'h3' && text(n) === 'Sync').length, 1, 'Settings keeps the card heading');
+});
