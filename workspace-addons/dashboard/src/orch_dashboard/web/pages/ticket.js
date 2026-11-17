@@ -1149,14 +1149,25 @@ function ticketAddStep(t) {
   const ask = t.epic ? 'What needs doing in this ticket?' : 'What is this step about?';  // an epic holds tickets (ORCH-14)
   const {d, actions} = dialog(ask);
   const input = h('input', {className:'input', 'aria-label':ask, maxlength:200});
+  // ORCH-156: or a ticket that already exists moves in (its "Part of" changes). Not this ticket, not one it is
+  // part of (a loop), not a closed one, not one already in it. FOLLOW-UP: kit select, a native one until then.
+  const all = tickets(), above = new Set([t.id]);
+  for (let p = window.DashHelpers.parentOf(all, t); p && !above.has(p.id); p = window.DashHelpers.parentOf(all, p)) above.add(p.id);
+  const inside = new Set(window.DashHelpers.childrenOf(all, t).map(c => c.id));
+  const existing = all.filter(x => x && !above.has(x.id) && !inside.has(x.id) && !['done', 'dropped'].includes(x.status)).sort((x, y) => window.DashHelpers.creationOrder(y, x));
+  const pick = existing.length ? h('select', {className:'input', 'aria-label':'Or pick a ticket that already exists'},
+    h('option', {value:''}, 'Or pick a ticket that already exists'),
+    existing.map(x => h('option', {value:x.id}, [x.key, clean(x.title)].filter(Boolean).join(' ')))) : null;
+  if (pick) pick.onchange = () => { input.hidden = !!pick.value; };
   const send = ticketButton('Add', 'primary', async () => {
-    const title = input.value.trim(); if (!title || send.disabled) return;
+    const moved = pick && pick.value ? existing.find(x => x.id === pick.value) : null;
+    const title = input.value.trim(); if ((!title && !moved) || send.disabled) return;
     send.disabled = true;
-    const result = await act('ticket.new', {title, parent:t.id});
+    const result = moved ? await act('ticket.edit', {ticket:moved.id, parent:t.id, if_revision:moved.revision}) : await act('ticket.new', {title, parent:t.id});
     if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(changeError(result), 'error'); }
   });
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
-  actions.append(send); d.append(input, actions); window.orch.open(d); input.focus();
+  actions.append(send); d.append(...[input, pick, actions].filter(Boolean)); window.orch.open(d); input.focus();
 }
 function ticketParts(t, children) {
   const add = snapshot ? null : ticketButton(t.epic ? '+ Add a ticket' : '+ Add a step', 'ghost add-row', () => ticketAddStep(t));

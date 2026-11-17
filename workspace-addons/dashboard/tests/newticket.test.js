@@ -351,6 +351,7 @@ test('ORCH-14: Start makes the epic, then one ticket inside it per box with its 
   const twoText = walk(two).find(n => n.tag === 'textarea'); twoText.value = 'Larger buttons';
   assert.equal((await twoText.fire('paste', {clipboardData:{files:[{name:'Screenshot 09-13.png', size:1}], getData:() => ''}})).prevented, true);
   assert.equal(walk(empty).find(n => n.tag === 'textarea').value, '');
+  await walk(empty).find(n => n.textContent === 'Remove').click();  // ORCH-156: an empty box is refused, not skipped
   await s.form.fire('submit');
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'ticket.new', 'ticket.new', 'run.start']);
@@ -371,6 +372,7 @@ test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 4.9 MB i
   const big = setup();
   big.input.value = 'Main'; await big.input.fire('input');
   await addStepButton(big).click(); await addStepButton(big).click();
+  walk(stepBoxes(big)[0]).find(n => n.tag === 'textarea').value = 'small';
   walk(stepBoxes(big)[1]).find(n => n.tag === 'textarea').value = 'y'.repeat(5000000);
   await big.form.fire('submit');
   assert.equal(big.calls.length, 0);
@@ -400,11 +402,70 @@ test('ORCH-14: a ticket that fails keeps the window open; pressing again sends o
   assert.equal(s.calls[3].args.parent, 't_1');
   assert.equal(s.d.open, false);
 });
-test('ORCH-14: empty ticket boxes make no epic; a plain ticket is sent as before', async () => {
+test('ORCH-156: an empty ticket box is refused with a plain message; nothing is made until it is filled or removed', async () => {
   const s = setup();
   s.input.value = 'Just one'; await s.input.fire('input');
   await addStepButton(s).click();
   await s.form.fire('submit');
+  assert.deepEqual(s.calls, []);
+  const error = walk(s.d).find(n => n.className === 'bad' && n.role === 'alert');
+  assert.equal(error.textContent, 'Ticket 1 is empty. Write what needs doing in it, or remove it.');
+  assert.equal(s.d.open, true);
+  await walk(s.d).find(n => n.textContent === 'Remove').click();  // removed: a plain ticket, as before
+  await s.form.fire('submit');
   assert.equal(s.calls[0].args.epic, undefined);
   assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'run.start']);
+});
+test('ORCH-156: the second of two boxes empty names Ticket 2; a filled one alone still makes the epic', async () => {
+  const s = setup();
+  s.input.value = 'Epic'; await s.input.fire('input');
+  await addStepButton(s).click(); await addStepButton(s).click();
+  const boxes = walk(s.d).filter(n => n.name === 'step');
+  boxes[0].value = 'First';
+  await s.form.fire('submit');
+  assert.deepEqual(s.calls, []);
+  assert.match(walk(s.d).find(n => n.className === 'bad').textContent, /^Ticket 2 is empty/);
+  boxes[1].value = 'Second';
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].args.epic, true);
+  assert.deepEqual(s.calls.filter(c => c.op === 'ticket.new').length, 3);
+});
+test('ORCH-156: Edit ticket has Part of: epics first, never itself or a ticket inside it; a change sends parent, none sends null', async () => {
+  const helpers = require('../src/orch_dashboard/web/helpers.js');
+  const s = setupWith(null, {DashHelpers:{...helpers, scrubText:x => x}});
+  const me = {id:'t_me', key:'WS-5', title:'Lanes', status:'active', revision:4};
+  const items = s.c.tickets();
+  items.push(me,
+    {id:'t_old', key:'WS-1', title:'Plain', status:'open'},
+    {id:'t_epic', key:'WS-2', title:'Ticket flow', status:'open', epic:true},
+    {id:'t_kid', key:'WS-6', title:'Inside me', status:'open', parent:'t_me'},
+    {id:'t_grand', key:'WS-7', title:'Deeper', status:'open', parent:'t_kid'},
+    {id:'t_closed', key:'WS-3', title:'Closed', status:'done'});
+  s.c.ticketForm(me);
+  const sheet = s.body.children[s.body.children.length - 1];
+  const select = walk(sheet).find(n => n.name === 'parent');
+  assert.deepEqual(select.children.map(o => o.value), ['', 't_epic', 't_old']);
+  assert.equal(select.children[1].textContent, 'WS-2 Ticket flow (epic)');
+  assert.equal(select.value, '');
+  await walk(sheet).find(n => n.tag === 'form').fire('submit');  // unchanged: no parent in the call
+  assert.equal('parent' in s.calls.pop().args, false);
+  s.c.ticketForm(me);
+  const again = s.body.children[s.body.children.length - 1];
+  walk(again).find(n => n.name === 'parent').value = 't_epic';
+  await walk(again).find(n => n.tag === 'form').fire('submit');
+  const sent = s.calls.pop();
+  assert.equal(sent.op, 'ticket.edit'); assert.equal(sent.args.parent, 't_epic'); assert.equal(sent.args.if_revision, 4);
+  const under = {...me, parent:'t_epic'};
+  s.c.ticketForm(under);
+  const third = s.body.children[s.body.children.length - 1];
+  const sel = walk(third).find(n => n.name === 'parent');
+  assert.equal(sel.value, 't_epic');
+  sel.value = '';
+  await walk(third).find(n => n.tag === 'form').fire('submit');
+  assert.equal(s.calls.pop().args.parent, null);
+});
+test('ORCH-156: parentChoices keeps the current parent even when it is closed', () => {
+  const helpers = require('../src/orch_dashboard/web/helpers.js');
+  const all = [{id:'t_a', status:'done'}, {id:'t_b', status:'done'}, {id:'t_me', parent:'t_a', status:'open'}];
+  assert.deepEqual(helpers.parentChoices(all, all[2]).map(x => x.id), ['t_a']);
 });

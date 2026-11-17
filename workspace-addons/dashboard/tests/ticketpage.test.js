@@ -468,7 +468,7 @@ test('plan step dialogs rename with a revision and add under the parent', async 
   const calls = [], dialogs = [];
   const node = (tag, attrs = {}, ...children) => ({tag, attrs, children, value:attrs.value || '',
     append(...kids) { this.children.push(...kids); }, focus() {}});
-  const c = context({h:node, act:async (op,args) => { calls.push([op,args]); return {ok:true}; },
+  const c = context({h:node, act:async (op,args) => { calls.push([op,args]); return {ok:true}; }, tickets:() => [],
     dialog:() => { const value = {d:node('dialog'), actions:node('div')}; dialogs.push(value); return value; }});
   c.window.orch.open = () => {};
   c.window.orch.close = () => {};
@@ -484,6 +484,28 @@ test('plan step dialogs rename with a revision and add under the parent', async 
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.new', {title:'New step', parent:'parent'}]));
 });
 
+test('ORCH-156: Add a ticket can move in a ticket that already exists; never itself, a ticket above it, a closed one or one already in it', async () => {
+  const calls = [], dialogs = [];
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), value:attrs.value || '', hidden:false,
+    append(...kids) { this.children.push(...kids); }, focus() {}});
+  const top = {id:'t_top', key:'WS-1', title:'Release', status:'open'};
+  const epic = {id:'t_epic', key:'WS-2', title:'Ticket flow', status:'open', epic:true, parent:'t_top'};
+  const lanes = {id:'t_lanes', key:'WS-3', title:'Board lanes', status:'active', revision:5};
+  const done = {id:'t_done', key:'WS-4', title:'Old', status:'done'};
+  const kid = {id:'t_kid', key:'WS-5', title:'Already in', status:'open', parent:'t_epic'};
+  const c = context({h:node, clean:v => String(v ?? ''), tickets:() => [top, epic, lanes, done, kid], act:async (op, args) => { calls.push([op, args]); return {ok:true}; },
+    dialog:() => { const value = {d:node('dialog'), actions:node('div')}; dialogs.push(value); return value; }});
+  c.window.orch.open = () => {}; c.window.orch.close = () => {};
+  c.ticketAddStep(epic);
+  const {d, actions} = dialogs.pop(), [input, pick] = d.children;
+  assert.equal(pick.tag, 'select');
+  assert.deepEqual(pick.children.slice(1).map(o => o.attrs.value), ['t_lanes']);
+  assert.equal(pick.children[1].children.join(''), 'WS-3 Board lanes');
+  pick.value = 't_lanes'; pick.onchange();
+  assert.equal(input.hidden, true);
+  await actions.children[0].onclick();
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.edit', {ticket:'t_lanes', parent:'t_epic', if_revision:5}]));
+});
 test('a parent lists its steps in creation order, whatever order the ticket list arrives in (every width)', () => {
   const parent = {id:'t_p', key:'WS-1', title:'Plan'};
   const mk = (id, key, title, status) => ({id, key, title, status, parent:'t_p', created_at:'2026-11-09T10:00:00Z'});

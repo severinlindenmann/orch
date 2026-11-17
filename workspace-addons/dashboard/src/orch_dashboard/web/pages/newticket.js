@@ -291,6 +291,22 @@ function ticketForm(t) {
     input.value = field === 'due' ? String(t?.[field] || '').replace('T', ' ') : t?.[field] || '';
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs[field] = input;
   }
+  // ORCH-156: "Part of": put this ticket under an epic (or another ticket) that already exists, or take it out.
+  // FOLLOW-UP: move to kit (shared custom select from the foundation PR); a native select like Helper until then.
+  let parentSelect = null, parentWas = '';
+  if (t && window.DashHelpers?.parentChoices) {
+    const all = typeof tickets === 'function' ? tickets() : [];
+    parentWas = window.DashHelpers.parentOf(all, t)?.id || '';
+    const label = el('label', '', 'Part of (optional)');
+    parentSelect = el('select', 'input'); parentSelect.name = 'parent'; parentSelect.id = 'field-' + serial + '-parent';
+    const none = el('option', '', 'Not part of another ticket'); none.value = ''; parentSelect.append(none);
+    for (const p of window.DashHelpers.parentChoices(all, t)) {
+      const option = el('option', '', [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.epic ? ' (epic)' : ''));
+      option.value = p.id; parentSelect.append(option);
+    }
+    parentSelect.value = parentWas;
+    label.htmlFor = parentSelect.id; label.append(parentSelect); fields.append(label);
+  }
   const error = el('p', 'bad'); error.setAttribute('role', 'alert');
   const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
   reload.hidden = true;
@@ -331,7 +347,8 @@ function ticketForm(t) {
     // A helper other than the default is kept as the ticket's owner. FOLLOW-UP: run.start takes no helper yet.
     if (!t) values.owner = helperSelect && helperSelect.value !== helpers[0].name ? 'agent:' + helperSelect.value : '';
     let result;
-    if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, if_revision:t.revision});
+    const parentArgs = parentSelect && parentSelect.value !== parentWas ? {parent:parentSelect.value || null} : {};
+    if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, ...parentArgs, if_revision:t.revision});
     else {
       const fullText = inputs.text.value;
       if (fullText.length > 1500) {
@@ -342,6 +359,13 @@ function ticketForm(t) {
       const longText = pastedText, shortText = inputs.text.value;
       const base = ticketFromText(fullText, shortText, longText, files);
       values.title = base.title;
+      // ORCH-156: an empty ticket box is refused with a plain message (it used to drop out silently, and an epic
+      // with only empty boxes was saved as a plain ticket with no epic mark).
+      const emptyStep = steps.findIndex(step => !ticketStepArgs(step.input.value, step.files, 'x'));
+      if (emptyStep >= 0) {
+        error.textContent = 'Ticket ' + (emptyStep + 1) + ' is empty. Write what needs doing in it, or remove it.';
+        steps[emptyStep].input.focus(); submit.disabled = false; idle(); return;
+      }
       // Every ticket is checked before anything is created, so a too-big one never leaves half the tickets behind.
       const bigStep = steps.findIndex(step => ticketTooBig(ticketStepArgs(step.input.value, step.files, 'x', values.owner) || {}));
       if (bigStep >= 0) { error.textContent = 'Ticket ' + (bigStep + 1) + ' is too big to send at once (over 4.9 MB). Remove a file or shorten its text.'; submit.disabled = false; idle(); return; }

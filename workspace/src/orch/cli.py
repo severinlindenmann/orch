@@ -494,6 +494,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x.add_argument("--note", help="a free note (empty clears)")
     x.add_argument("--done-when", help="what should be true when it is done (empty clears)")
+    x.add_argument(
+        "--parent", metavar="ID", help="put it under this ticket, e.g. an epic (empty takes it out)"
+    )
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x = t.add_parser("set", parents=[common], help="set an add-on field, e.g. marketing.budget 2400")
     x.add_argument("id")
@@ -1041,9 +1044,14 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
-        if args.title is None and not fields:
-            raise Refused("Say what to change: --title, --owner, --due, --note or --done-when.")
-        t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
+        if args.title is None and not fields and args.parent is None:
+            raise Refused("Say what to change: --title, --owner, --due, --note, --done-when or --parent.")
+        if args.parent is not None:  # first, so a refused parent changes nothing else
+            t = tickets.set_parent(root, args.id, args.parent, by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other fields follow it
+        if args.title is not None or fields:
+            t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
         _out(args, t, f"Saved (revision {t['revision']}).")
     elif cmd == "ticket" and sub == "set":
         _ticket_set(args, root, by)

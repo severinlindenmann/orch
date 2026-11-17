@@ -853,7 +853,7 @@ def create(
         raise Refused("A title needs 1 to 200 characters.")
     parent_ticket = None
     if parent is not None:
-        # the parent must exist (cycles are impossible: it is set only here)
+        # the parent must exist (a new ticket has no children, so no loop; set_parent checks loops later)
         parent_ticket = load(root, parent)
     fields = fields or {}
     for k, v in fields.items():
@@ -1550,6 +1550,56 @@ def edit(
             add_history(ticket, by, "Edited " + ", ".join(sorted(fields)))
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+PARENT_DEPTH = 50  # a parent chain longer than this is broken data: never followed further
+
+
+def set_parent(root: Path, tid: str, parent: str | None, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-156: put a ticket that already exists under another one (an epic, a release) or take it out
+    (`parent` None or empty). Refused: itself, a ticket that does not exist, or one of its own sub-tickets
+    (a loop). One history line on the ticket and one on each parent it joins or leaves."""
+    me = load(root, tid)
+    new = None
+    if isinstance(parent, str) and parent.strip():
+        if parent.strip() in (me["id"], me.get("key")):
+            raise Refused("A ticket cannot be part of itself.")
+        new = load(root, parent.strip())
+        by_id = {t["id"]: t for t in list_all(root)}
+        seen, cur = set(), new
+        while cur is not None and cur["id"] not in seen and len(seen) < PARENT_DEPTH:
+            if cur["id"] == me["id"]:
+                raise Refused(
+                    f"{_parent_words(new)} is inside this ticket already, so it cannot hold this ticket."
+                )
+            seen.add(cur["id"])
+            cur = by_id.get(str(cur.get("parent") or ""))
+    old_id = me.get("parent")
+    if (new["id"] if new else None) == (old_id or None):
+        return me  # nothing changes: no write, no history line
+    try:
+        old = load(root, old_id) if old_id else None
+    except (Refused, OSError, ValueError):
+        old = None  # a parent that is gone: taking the ticket out still works
+
+    def op(ticket):
+        if new is None:
+            ticket.pop("parent", None)
+            add_history(ticket, by, "Taken out of " + (_parent_words(old) if old else str(old_id)))
+        else:
+            ticket["parent"] = new["id"]
+            add_history(ticket, by, "Put under " + _parent_words(new))
+
+    t = apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    me_words = _parent_words(t)
+    for other, words in ((old, f"{me_words} moved out"), (new, f"{me_words} added")):
+        if other is None:
+            continue
+        try:  # the parent's line is a courtesy: the ticket itself is already saved
+            apply_op(root, other["id"], lambda p, w=words: add_history(p, by, w), by=by)
+        except (Refused, OSError, ValueError):
+            pass
+    return t
 
 
 LONG_NOTE = (

@@ -99,6 +99,8 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("answer", {"ticket": "t_abcdef", "question": "q1", "digest": "x", "answer": "a"}),
         ("ticket.edit", {"ticket": "t_abcdef", "due": "tomorrow"}),
         ("ticket.edit", {"ticket": "t_abcdef"}),
+        ("ticket.edit", {"ticket": "t_abcdef", "parent": "--title=x"}),
+        ("ticket.edit", {"ticket": "t_abcdef", "parent": 7}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"title": "x"}}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"id": "t_other1"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "weird"}, "if_revision": 1}),
@@ -199,6 +201,14 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         (
             {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": ""}},
             ["ticket", "edit", "t_abcdef", "--due=", *common],
+        ),
+        (  # ORCH-156: "Part of" puts the ticket under an epic; null takes it out
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "parent": "t_epic01", "if_revision": 4}},
+            ["ticket", "edit", "t_abcdef", "--parent=t_epic01", "--if-revision=4", *common],
+        ),
+        (
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "parent": None}},
+            ["ticket", "edit", "t_abcdef", "--parent=", *common],
         ),
         (
             {"op": "log", "args": {"ticket": "t_abcdef", "text": "-hello"}},
