@@ -23,7 +23,6 @@ const WIDGETS = ['Markdown', 'Text and logs', 'Code', 'JSON and YAML', 'Table', 
   'Video and recording', 'Audio', 'Chart', 'Change', 'Pull request or issue link', 'Archive', 'Plain link', 'Unknown file'];
 
 const T = {
-  preview: 'Preview switch for the new Focus (ORCH-264)',
   pages: 'Pages change without a full reload (crew task soft-pages)',
   bar: 'The bar under every page (crew task bar)',
   layer: 'The layer: bottom, right, full screen (crew task layer)',
@@ -50,6 +49,62 @@ async function mainHasText(page) {
   }, null, { timeout: 20000 });
 }
 
+// Step 3. The test dashboard reads files only, so it has no add-on list (that comes from the orch command): the step
+// adds the live-session add-on to the page's state and answers the switch's one call (focus_preview.set) like the
+// server does. Everything else is the real page: Settings row, the click, the address, today's frame, the new page.
+async function previewSwitch(page, dash) {
+  let on = false;
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  let last = null;
+  const dress = st => {
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: on,
+      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    last = st;
+    return st;
+  };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    route.fulfill({ response: res, json: dress(await res.json()) });
+  });
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'focus_preview.set') return route.continue();
+    on = body.args.on === true;
+    route.fulfill({ json: dress({ ...last }) });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+  const sw = '[data-key="addon-detail-live-preview"]';
+  const settings = async want => {
+    await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
+    await page.waitForSelector(sw, { timeout: 20000 });
+    if (await page.getAttribute(sw, 'aria-checked') !== String(!want)) throw new Error('the Preview switch is not ' + (want ? 'off' : 'on') + ' before the click');
+    await page.click(sw);
+    await page.waitForSelector(`${sw}[aria-checked="${want}"]`, { timeout: 10000 });
+  };
+  const focusPage = async () => { await page.evaluate(() => { location.hash = '#addon/focus'; }); await page.waitForTimeout(300); };
+  await page.goto(dash + '/#settings/addons/focus');
+  await page.waitForSelector(sw, { timeout: 20000 });
+  await focusPage();
+  await page.waitForSelector('iframe.embed', { timeout: 10000 });  // off: today's Focus
+  await settings(true);
+  await focusPage();
+  await page.waitForSelector('[data-key="live-next"]', { timeout: 10000 });
+  if (await page.$('iframe.embed')) throw new Error('today\'s Focus still shows with Preview on');
+  if ((await page.textContent('[data-key="live-next-tag"]')).trim() !== 'Preview') throw new Error('the new Focus is not marked Preview');
+  await settings(false);
+  await focusPage();
+  await page.waitForSelector('iframe.embed', { timeout: 10000 });  // off again: today's Focus is back
+  await settings(true);
+  await focusPage();
+  await page.waitForSelector('[data-key="live-next"]', { timeout: 10000 });
+  await noSideways(page);
+}
+
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -74,10 +129,12 @@ const STEPS = [
   },
   {
     n: 3, pic: 'fd-03-preview-on', area: 'start', title: 'Turn the new Focus on with the Preview switch', feature: [],
-    waits: T.preview,
     do: ['Open Settings and turn on the Preview switch for the new Focus.', 'Open Focus from the side bar.'],
-    see: ['Focus opens as the wall of sessions (step 4).', 'The switch is marked Preview.',
+    see: ['Focus opens as the new Focus, marked Preview (the wall of step 4 fills it).', 'The switch is marked Preview.',
       'Turning it off again brings back today\'s Focus.'],
+    async run({ page, dash }) {
+      await previewSwitch(page, dash);
+    },
     draft: { q: '' },
   },
   {
