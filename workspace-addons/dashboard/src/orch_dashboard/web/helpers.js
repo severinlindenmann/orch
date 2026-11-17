@@ -641,5 +641,49 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  // ORCH-189 manager view. Helper time and money at list price: "1 h 40 min · $3.10"; "" without any.
+  function durationWords(seconds) {
+    const n = Number(seconds) || 0, m = Math.round(n / 60);
+    if (n <= 0) return '';
+    if (m < 1) return 'under 1 min';
+    return m >= 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : m + ' min';
+  }
+  const moneyWords = cost => '$' + (Number(cost) || 0).toFixed(2);
+  function spendWords(spend) {
+    if (!spend || typeof spend !== 'object') return '';
+    const time = durationWords(spend.seconds), cost = Number(spend.cost) || 0;
+    return [time, cost > 0 ? moneyWords(cost) : ''].filter(Boolean).join(' · ');
+  }
+  function spendTotal(items) {
+    return (items || []).reduce((sum, t) => ({cost:sum.cost + (Number(t?.spend?.cost) || 0), seconds:sum.seconds + (Number(t?.spend?.seconds) || 0)}), {cost:0, seconds:0});
+  }
+  // The one line under a stuck ticket (the core's reason; a stuck helper says its own words).
+  function stuckWords(t, nowMs = Date.now()) {
+    const why = t && t.stuck;
+    if (why === 'question') {
+      const open = (t.questions || []).filter(q => q && q.answer == null && !q.taken_back).map(q => Date.parse(q.sent_at || q.at)).filter(Number.isFinite);
+      const days = open.length ? Math.floor((nowMs - Math.min(...open)) / 86400000) : 1;
+      return 'Question waits ' + (days <= 1 ? '1 day' : days + ' days');
+    }
+    if (why === 'quiet') {
+      const at = Date.parse(t.quiet_since || '');
+      return Number.isFinite(at) ? 'No news for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'No news for a day';
+    }
+    if (why === 'overdue') return 'Past its due date';
+    return '';
+  }
+  // This week = Monday 00:00 to Sunday 23:59 local. A ticket is "this week" when it is due by Sunday and not
+  // finished, works now, or finished since Monday.
+  function weekStart(nowMs = Date.now()) {
+    const d = new Date(nowMs); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime();
+  }
+  function inThisWeek(t, status, nowMs = Date.now()) {
+    const start = weekStart(nowMs), end = start + 7 * 86400000;
+    if (status === 'active') return true;
+    if (status === 'done') { const at = Date.parse(t.done_at || t.updated_at); return Number.isFinite(at) && at >= start; }
+    if (status === 'dropped' || !t.due) return false;
+    const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
+    return Number.isFinite(due) && due < end;
+  }
+  return {durationWords, moneyWords, spendWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });

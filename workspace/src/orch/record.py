@@ -1067,6 +1067,48 @@ def note_lost(ws, run, reason, *, now=None, error=None):
         _note(ws, "hook-lost", run, reason, now, _LOST_RUN_LINES, error)
 
 
+def lost_in(ws, day_from: str, day_to: str) -> dict:
+    """ORCH-189: how many hook lines of proven runs were lost between two days (YYYY-MM-DD, both included), by
+    reason, from alerts/hook-lost-<day>.jsonl. Insights shows it, so a record that counts nothing is never read
+    as "nothing was used". {"lines": n, "reasons": {reason: n}, "errors": {type name: n}}; never raises."""
+    out: dict = {"lines": 0, "reasons": {}, "errors": {}}
+    try:
+        start = datetime.fromisoformat(day_from).date()
+        end = datetime.fromisoformat(day_to).date()
+    except (TypeError, ValueError):
+        return out
+    if (end - start).days > 400:
+        start = end - timedelta(days=400)
+    day = start
+    while day <= end:
+        try:
+            fd = _open(ws, ("alerts", f"hook-lost-{day.isoformat()}.jsonl"), "read")
+        except (OSError, RecordTampered, RecordUnavailable):
+            fd = None
+        if fd is not None:
+            try:
+                raw = _read_bytes(fd)
+            except (OSError, RecordTampered, RecordUnavailable):
+                raw = b""
+            finally:
+                _close(fd)
+            for line in raw.splitlines():
+                try:
+                    row = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                reason = row.get("reason") if isinstance(row, dict) else None
+                if not isinstance(reason, str) or reason == "trimmed" or reason not in LOST_REASONS:
+                    continue
+                out["lines"] += 1
+                out["reasons"][reason] = out["reasons"].get(reason, 0) + 1
+                err = row.get("error")
+                if isinstance(err, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", err):
+                    out["errors"][err] = out["errors"].get(err, 0) + 1
+        day += timedelta(days=1)
+    return out
+
+
 def note_unattributed(ws, reason, *, now=None):
     """A hook entry whose caller could not be proven to be in the run: nothing under any run id (the claimed
     run is the caller's word), only the reason, in alerts/hook-lost-unattributed-<day>.jsonl, 1 per minute."""

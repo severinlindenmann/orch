@@ -129,3 +129,86 @@ def test_empty_text(proj, env, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", env["CLAUDE_CONFIG_DIR"])
     assert cli.main(["usage"]) == 0
     assert "No model use in the last 30 days." in capsys.readouterr().out
+
+
+def dated(model, mid, i, o, at, cc=0, cr=0):
+    d = json.loads(line(model, mid, i, o, cc=cc, cr=cr))
+    d["timestamp"] = at
+    return json.dumps(d)
+
+
+def test_cost_at_list_price_and_working_time(proj, env):
+    """ORCH-189: money at list price per model (cache reads and writes priced apart) and helper time from the
+    gaps between dated lines; a gap over five minutes is a pause, helpers beside the main one add no time."""
+    t = make(proj, "Costs", [SID])
+    p = projects(env)
+    write(
+        p / "-x" / f"{SID}.jsonl",
+        dated("claude-opus-5-5", "m1", 1_000_000, 100_000, "2026-11-17T10:00:00Z"),
+        dated("claude-opus-5-5", "m2", 0, 0, "2026-11-17T10:04:00Z", cc=1_000_000),
+        dated("claude-sonnet-5-5", "m3", 0, 0, "2026-11-17T10:05:00Z", cr=1_000_000),
+        dated("weird-model", "m4", 1_000_000, 0, "2026-11-17T11:00:00Z"),  # an hour later: a pause, no price
+        dated("claude-opus-5-5", "m5", 0, 0, "2026-11-17T11:02:00Z"),
+    )
+    write(
+        p / "-x" / SID / "subagents" / "a.jsonl",
+        dated("claude-haiku-5-5", "h1", 1_000_000, 0, "2026-11-17T10:01:00Z"),
+        dated("claude-haiku-5-5", "h2", 0, 0, "2026-11-17T10:04:00Z"),
+    )
+    got = usage.spend(proj, [t], env)[t["id"]]
+    # opus: 1M in $4 + 0.1M out $2 + 1M cache write $5; sonnet 1M cache read $0.10; haiku 1M in $0.10
+    assert got["cost"] == pytest.approx(11.2)
+    assert got["seconds"] == 4 * 60 + 60 + 120  # 10:00-10:05 and 11:00-11:02; the subagent's 3 min not added
+    ws = usage.workspace_usage(proj, 30, env)
+    assert ws["cost"] == pytest.approx(11.2) and ws["seconds"] == got["seconds"]
+    assert ws["tickets"][0]["cost"] == pytest.approx(11.2)
+    assert "Helper time: 7 min · $11.20 at list price" in usage.text(ws)
+
+
+def test_price_rows_and_words():
+    assert usage.price("claude-opus-5-5") == (4.0, 20.0, 0.20)
+    assert usage.price("claude-opus-4-8") == (5.0, 25.0, 0.50)
+    assert usage.price("claude-sonnet-4-6[1m]") == (3.0, 15.0, 0.30)
+    assert (
+        usage.price("claude-opus-6") == usage.PRICES["claude-opus-5-5"]
+    )  # unknown, known family: newest row
+    assert usage.price("gpt-x") is None
+    assert usage.duration(0) == "–" and usage.duration(20) == "under 1 min"
+    assert usage.duration(45 * 60) == "45 min" and usage.duration(125 * 60) == "2 h 5 min"
+    assert usage.money(3.1) == "$3.10"
+
+
+def test_old_cache_entries_are_read_again(proj, env):
+    t = make(proj, "Old cache", [SID])
+    f = write(
+        projects(env) / "-p" / f"{SID}.jsonl",
+        dated("claude-opus-5-5", "m1", 1_000_000, 0, "2026-11-17T10:00:00Z"),
+    )
+    st = f.stat()
+    cache = {
+        str(f): {"sig": [st.st_size, st.st_mtime_ns], "use": {"opus": {"in": 1, "out": 0}}}
+    }  # before ORCH-189
+    (proj / ".orch" / "run").mkdir(parents=True, exist_ok=True)
+    (proj / ".orch" / "run" / usage.CACHE_NAME).write_text(json.dumps(cache))
+    assert usage.spend(proj, [t], env)[t["id"]]["cost"] == pytest.approx(4.0)
+
+
+def test_session_folders_are_remembered_and_misses_retried_later(proj, env, monkeypatch):
+    t = make(proj, "Index", [SID])
+    p = projects(env)
+    (p / "-other").mkdir(parents=True)
+    assert usage.spend(proj, [t], env) == {}  # not there yet: a miss, remembered
+    write(p / "-later" / f"{SID}.jsonl", dated("claude-opus-5-5", "m1", 1_000_000, 0, "2026-11-17T10:00:00Z"))
+    assert usage.spend(proj, [t], env) == {}, "a miss is not looked for again at once"
+    monkeypatch.setattr(usage, "MISS_RETRY", 0)
+    assert usage.spend(proj, [t], env)[t["id"]]["cost"] == pytest.approx(4.0)
+    listed = []
+    real = type(p).iterdir
+    monkeypatch.setattr(type(p), "iterdir", lambda self: listed.append(self) or real(self))
+    assert usage.spend(proj, [t], env)[t["id"]]["cost"] == pytest.approx(4.0)
+    assert p not in listed, "a found session does not list every folder again"
+    write(
+        p / "-later" / SID / "subagents" / "a.jsonl",
+        dated("claude-haiku-5-5", "h", 1_000_000, 0, "2026-11-17T10:01:00Z"),
+    )
+    assert usage.spend(proj, [t], env)[t["id"]]["cost"] == pytest.approx(4.1), "new helper files still count"

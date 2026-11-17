@@ -464,6 +464,7 @@ def _mark_tickets(root: Path, tickets: list[dict]) -> None:
     add_proof_state(tickets, root)
     add_artifact_marks(tickets)
     add_quiet(tickets)
+    add_stuck(tickets)
 
 
 def add_proof_state(tickets: list[dict], root: Path | None = None) -> None:
@@ -495,6 +496,40 @@ def add_quiet(tickets: list[dict]) -> None:
             since = None
         if since:
             t["quiet_since"] = since
+
+
+def add_stuck(tickets: list[dict]) -> None:
+    """`stuck` ("question" | "quiet" | "overdue") from the core's one rule (ORCH-189); a stuck helper is added by
+    the page from the run. Not stored."""
+    try:
+        from orch import tickets as core
+    except ImportError:
+        return
+    for t in tickets:
+        t.pop("stuck", None)
+        try:
+            why = core.stuck_why(t)
+        except (TypeError, ValueError, AttributeError):
+            why = None
+        if why:
+            t["stuck"] = why
+
+
+def add_spend(root: Path, tickets: list[dict]) -> None:
+    """`spend` {cost, seconds} on tickets a helper worked on: helper time and money at list price, read from the
+    helpers' conversation files by the core (cached per file). Left out of snapshots (ORCH-189)."""
+    try:
+        from orch import usage
+    except ImportError:
+        return
+    try:
+        got = usage.spend(root, tickets)
+    except (OSError, TypeError, ValueError):
+        return
+    for t in tickets:
+        t.pop("spend", None)
+        if t.get("id") in got:
+            t["spend"] = got[t["id"]]
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
@@ -1241,6 +1276,8 @@ def load_state(
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
+    else:
+        add_spend(root, tickets)
     _shape_refs(root, tickets, with_settings)
     kinds = link_kinds(raw) if with_addons else []
     if with_settings:

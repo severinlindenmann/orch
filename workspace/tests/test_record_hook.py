@@ -2073,3 +2073,30 @@ def test_the_run_environment_picks_the_config_dir_for_hooks_off(tool_run, tmp_pa
         root, run, tid, "claude", work, [use_line(), result_line()], {"CLAUDE_CONFIG_DIR": str(prof)}
     )
     assert [json.loads(x)["reason"] for x in lost_notes(root).splitlines()] == ["hooks_off"]
+
+
+def test_hider_off_trace_names_the_error_type_never_its_message(proj, monkeypatch):
+    """ORCH-189: a workspace lost every hook line as hider_off with no hint why; the trace now keeps the
+    error's type name (never its message), and record counts adds the lost lines up for Insights."""
+    from orch import errors, record, secretrun
+
+    t = tickets.create(proj, "Key store refuses", "human:t")
+    rec = runs.claim(proj, t["id"], "agent:x", "claude", pid=os.getpid())
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    monkeypatch.setenv("ORCH_TICKET", t["id"])
+    monkeypatch.setattr(hider, "_registered", None)
+
+    def refuse(root):
+        raise errors.Refused("secret-ish message sk-not-a-key")
+
+    monkeypatch.setattr(secretrun, "record_writer", refuse)
+    with pytest.raises(record_hook.NotRecorded, match="key hiding"):
+        record_hook.hook(proj, line())
+    notes = [json.loads(x) for x in lost_notes(proj).splitlines()]
+    assert notes[-1]["reason"] == "hider_off" and notes[-1]["error"] == "Refused"
+    assert "sk-not-a-key" not in lost_notes(proj)
+    day = notes[-1]["at"][:10]
+    lost = record.lost_in(proj, day, day)
+    assert lost == {"lines": 1, "reasons": {"hider_off": 1}, "errors": {"Refused": 1}}
+    assert record.lost_in(proj, "2020-01-01", "2020-01-02")["lines"] == 0
+    assert record.lost_in(proj, "not a day", day)["lines"] == 0
