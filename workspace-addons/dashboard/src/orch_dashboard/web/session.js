@@ -32,7 +32,7 @@
       }
     }
     return realFetch.call(this, input, init).then(function (r) {
-      if (r.status === 403) signInNotice(r);
+      if (r.status === 401 || r.status === 403) signInNotice(r);
       return r;
     });
   };
