@@ -5,20 +5,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-// The page runs on a fixed clock, local noon today: "in 3 hours" stays today and "in 26 hours" is tomorrow, whatever the
-// hour the test runs (late in the evening they used to cross midnight, #1366).
-const NOON = (() => { const d = new Date(); d.setHours(12, 0, 0, 0); return d.getTime(); })();
-class NoonDate extends Date {
-  constructor(...a) { if (a.length) super(...a); else super(NOON); }
-  static now() { return NOON; }
-}
 function load() {
   const el = () => ({hidden:true, disabled:false, title:'', attrs:{}, children:[], className:'', setAttribute(k, v) { this.attrs[k] = v; }, replaceChildren(...n) { this.children = n.flat().filter(x => x != null); },
     append(...n) { this.children.push(...n); }, querySelector: sel => sel === '.mm-label' ? label : null, classList:{toggle(){}}});
   const label = {textContent:'Send questions to my phone'}, toggle = el(), bar = el(), chip = el(), clicks = [];
   const doc = {getElementById:id => id === 'mm-toggle' ? toggle : id === 'mm-chip' ? chip : bar, createElement:() => el(), addEventListener(type, fn) { if (type === 'click') clicks.push(fn); }, body:{classList:{toggle(){}}}};
   const win = {listeners:{}, addEventListener(name, fn) { this.listeners[name] = fn; }};
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/mobile-mode.js'), 'utf8'), {document:doc, window:win, Date:NoonDate, localStorage:{getItem(){}, setItem(){}, removeItem(){}}});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/mobile-mode.js'), 'utf8'), {document:doc, window:win, localStorage:{getItem(){}, setItem(){}, removeItem(){}}});
   return {toggle, label, win, bar, chip, clicks, state:mobile_mode => win.listeners['orch:state']({detail:{mobile_mode}})};
 }
 const base = {on:false, default_hours:12, hours_choices:[4, 8, 12, 24]};
@@ -46,8 +39,7 @@ test('a paired phone, or an unknown count, leaves the switch usable; an On switc
 // UX round 15 Nov (item 3): while it is on, a chip in the top bar and no banner; the banner is for the ask, the ended notice and the last 5 minutes.
 const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join('');
 const find = (n, f) => typeof n === 'string' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(k => find(k, f))];
-const soon = ms => new Date(NOON + ms).toISOString();  // on the page's clock
-const fromNow = ms => new Date(Date.now() + ms).toISOString();  // on the real clock (helpers.js below runs on it)
+const soon = ms => new Date(Date.now() + ms).toISOString();
 test('on: the chip shows "Phone until HH:MM" with the menu, and the banner stays hidden', () => {
   const c = load();
   c.state({...base, phones:1, on:true, ends_at:soon(3 * 3600000), awake:'awake'});
@@ -113,8 +105,8 @@ test('ORCH-184: a mode whose end time has passed is shown as ended, not "Phone u
   assert.equal(c.bar.hidden, true);
   assert.equal(c.label.textContent, 'Phone');
   const helpers = require('../src/orch_dashboard/web/helpers.js');
-  assert.equal(helpers.mobileOn({on:true, ends_at:fromNow(-1000)}), false);
-  assert.equal(helpers.mobileOn({on:true, ends_at:fromNow(60000)}), true);
+  assert.equal(helpers.mobileOn({on:true, ends_at:soon(-1000)}), false);
+  assert.equal(helpers.mobileOn({on:true, ends_at:soon(60000)}), true);
   assert.equal(helpers.mobileOn({on:true}), true);
 });
 test('ORCH-286: an end time on another day says the day, in the chip, the menu and the sidebar label', () => {
