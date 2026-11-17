@@ -6,9 +6,11 @@
            meta (element whose text becomes "Review · <workspace>" once api.workspace is known),
            poll (ms, default 5000, 0 = off), now (Date, tests),
            onChange (deck: called when the deck is built and after every move or answer; the dashboard's "All cards" list),
-           startId (open at this card first, e.g. core:q:t_x:q2)}
+           startId (open at this card first, e.g. core:q:t_x:q2),
+           ticketHref (ticket id -> link; the Answered list links each card's ticket key and title)}
    UI.cardShown(card, o)       the pictures of a card as small tiles (the ticket page shows them with the question). o: {fileUrl}
-   UI.answerRecord(entry, o)   one answer record (under the ticket questions and the Answered list). o: {fileUrl, now}
+   UI.answerRecord(entry, o)   one answer record (under the ticket questions and the Answered list). o: {fileUrl, now, ticketHref, showTicket (false on the ticket's own page)}
+   UI.reviewViewer(shots, i, o) one tile of a card, large (a click or Enter on a tile opens it)
    UI.appliesNow(entries, o)   the "What applies now" block (null when nothing was answered yet)
    UI.reviewFetchApi(base, f)    the api for pages served by orch itself: same-origin /api/stack, /api/answered,
                                  /api/answer, /api/file (f = fetch, for tests)
@@ -19,7 +21,7 @@
                   {id, ticket, key, card:{kind,title,why,need,then,ok_label,open,preview}, digest, since,
                    text (the question, shown on the card), group (cards that belong together), recommended}
                   preview refs are "reviewed/<sha12>/<name>" files; the page asks api.fileUrl for them
-     answered() -> Promise<[entry]>     entry = {id, ticket, key, card, shown:{digest,copy,files}, at, by, via,
+     answered() -> Promise<[entry]>     entry = {id, ticket, ticket_key, ticket_title, text, key, card, shown:{digest,copy,files}, at, by, via,
                   decision:{action:approve|use|use_with_changes|send_back|dont|none_of_these, picked, allows,
                   changes:[str], words:{text, voice:[{text,secs}]}, pins:[{n,on,x,y,text}], summary, replaces, replaced_by}}
      answer({id, digest, verdict:'ok'|'no'|'talk', picked, note}) -> Promise<{ok, error?:{code,message}}>
@@ -64,33 +66,69 @@ const verdictWord=e=>{const d=e.decision||{},k=e.card||{},n=(d.changes||[]).leng
   default:return d.summary||'Answered'}};
 const verdictClass=e=>{const a=(e.decision||{}).action;return a==='dont'||a==='none_of_these'?'no':a==='send_back'?'talk':'ok'};
 
+/* A preview with nothing in it (no picture, page, table or words) gets no tile: no empty "Reviewed" box. */
+const hasContent=pv=>!!pv&&(((pv.type==='img'||pv.type==='page')&&!!refOf(pv))||(pv.type==='table'&&(pv.rows||[]).length>0)||!!pv.heading||(pv.paras||[]).some(x=>String(x||'').trim()));
 const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
- const content=pv=>{const w=el('span','opt-thumb');
+ const urlOf=pv=>{const r=refOf(pv);return r&&o.fileUrl?o.fileUrl(e,r):''};
+ const content=(pv,label)=>{const w=el('span','opt-thumb');
   if(!pv)return w;
-  if(pv.type==='img'||pv.type==='page'){const r=refOf(pv),u=r&&o.fileUrl?o.fileUrl(e,r):'';
-   if(pv.type==='img'){const i=el('img');i.src=u;i.alt=pv.alt||'';i.draggable=false;w.append(i)}
-   else{const f=el('iframe');f.src=u;f.title=pv.title||k.title||'Reviewed page';f.setAttribute('sandbox','');f.tabIndex=-1;f.loading='lazy';w.append(f)}}
+  if(pv.type==='img'||pv.type==='page'){const u=urlOf(pv);
+   if(pv.type==='img'){const i=el('img');i.src=u;i.alt=pv.alt||label||'';i.draggable=false;w.append(i)}
+   else{const f=el('iframe');f.src=u;f.title=pv.title||label||k.title||'Reviewed page';f.setAttribute('sandbox','');f.tabIndex=-1;f.loading='lazy';w.append(f)}}
   else if(pv.type==='table'){const t=el('div','doc');t.append(el('h4','',(pv.cols||[]).join(' · ')));(pv.rows||[]).slice(0,3).forEach(r=>t.append(el('p','',r.join(' · '))));w.append(t)}
   else{const t=el('div','doc');if(pv.heading)t.append(el('h4','',pv.heading));(pv.paras||[]).slice(0,2).forEach(x=>t.append(el('p','',x)));w.append(t)}
   return w};
+ /* every tile is a button: a click or Enter opens the picture large (UI.reviewViewer), with the card's other tiles a step away */
  const shot=(label,pv,on,taken,dim)=>{const b=el('button','decision-shot'+(taken?' taken':'')+(dim?' dim':''));b.type='button';b.dataset.on=on;
-  const w=content(pv),cap=el('span');cap.append(el('b','',label));b.append(w,cap);out.push({b,w,on,taken:!!taken});return b};
+  const w=content(pv,label),cap=el('span');cap.append(el('b','',label));b.append(w,cap);b.setAttribute('aria-label','Open '+label+' large');
+  if(window.icon){const z=el('span','decision-open');z.setAttribute('aria-hidden','true');const t=document.createElement('template');t.innerHTML=window.icon('expand',14);z.append(t.content);w.append(z)}
+  const me={b,w,on,taken:!!taken,label,pv,src:pv&&(pv.type==='img'||pv.type==='page')?urlOf(pv):''};out.push(me);
+  b.addEventListener('click',()=>UI.reviewViewer(out.map(x=>({label:x.label,preview:x.pv,src:x.src})),out.indexOf(me),{title:k.title||e.ticket_title||''}));return b};
  if(p.type==='options'&&p.before)shot('Today',p.before,'before');
  /* options with no picture (a plain question): no empty tiles, the verdict already names the pick */
  if(p.type==='options'){if(p.before||(p.options||[]).some(op=>op.preview))(p.options||[]).forEach(op=>shot((op.id&&op.id!==op.title?op.id+' · ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''),op.preview,'option '+op.id,d.picked===op.id,d.picked&&d.picked!==op.id))}
  else if(p.type==='compare'){shot('Before',p.before,'before');shot('After',p.after,'after')}
- else shot(k.title||'Reviewed',p,'');
+ else if(hasContent(p))shot(k.title||e.ticket_title||'Reviewed',p,'');
  /* pins sit on the thumbnail they were set on (else the taken one, else the first) */
  (d.pins||[]).forEach((pn,i)=>{const t=out.find(x=>x.on&&(x.on===pn.on||x.on==='option '+pn.on))||out.find(x=>x.taken)||out[0];
   if(!t)return;const s=el('span','swipe-pin');s.style.left=pn.x+'%';s.style.top=pn.y+'%';s.title=pn.text||'';s.append(el('span','',String(pn.n||i+1)));t.w.append(s)});
  return out.map(x=>x.b)};
 
+/* UI.reviewViewer(shots, index, o): one picture of a Review card, large (owner 17 Nov: "just use more of the screen").
+   shots: [{label, preview, src}]; o: {title}. A native dialog through the shared overlay (× Close, Esc, a click outside,
+   focus back to the tile). A picture fits the width and a tall one scrolls, so it can be read in full; a page fills the
+   dialog in a sandboxed frame; words show in full in short lines. ← → (and Previous / Next) go to the card's other tiles. */
+UI.reviewViewer=(shots,index,o)=>{o=o||{};shots=(shots||[]).filter(Boolean);if(!shots.length||typeof document.body==='undefined')return null;
+ let i=Math.max(0,Math.min(index||0,shots.length-1));
+ const d=el('dialog','review-viewer');d.setAttribute('aria-label',o.title||'Picture');
+ const head=el('header','review-viewer-head'),names=el('div','review-viewer-names'),cap=el('h2'),pos=el('p','meta');names.append(cap,pos);
+ const nav=el('div','row'),mk=(label,step)=>{const b=el('button','btn outline sm',label);b.type='button';b.onclick=()=>go(i+step);return b};
+ const prev=mk('← Previous',-1),next=mk('Next →',1);nav.append(prev,next);head.append(names,nav);
+ const body=el('div','review-viewer-body');d.append(head,body);
+ const big=s=>{const pv=s.preview||{};
+  if(pv.type==='img'){const img=el('img');img.src=s.src||'';img.alt=pv.alt||s.label||'';return img}
+  if(pv.type==='page'){const f=el('iframe');f.src=s.src||'';f.title=s.label||'Reviewed page';f.setAttribute('sandbox','');return f}
+  const t=el('div','doc');
+  if(pv.type==='table'){const tb=el('table','mini-table'),hr=el('tr');(pv.cols||[]).forEach(c=>hr.append(el('th','',c)));tb.append(hr);(pv.rows||[]).forEach(r=>{const tr=el('tr');r.forEach(c=>tr.append(el('td','',c)));tb.append(tr)});t.append(tb);return t}
+  if(pv.heading)t.append(el('h3','',pv.heading));(pv.paras||[]).forEach(x=>t.append(el('p','',x)));return t};
+ const draw=()=>{const s=shots[i];cap.textContent=s.label||o.title||'Picture';pos.textContent=[o.title&&o.title!==s.label?o.title:'',shots.length>1?(i+1)+' of '+shots.length:''].filter(Boolean).join(' · ');
+  prev.hidden=next.hidden=shots.length<2;prev.disabled=i===0;next.disabled=i===shots.length-1;body.replaceChildren(big(s));body.scrollTop=0;d.dataset.kind=(s.preview||{}).type||'doc'};
+ const go=n=>{if(n<0||n>=shots.length||n===i)return;i=n;draw()};
+ d.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==='ArrowLeft'){e.preventDefault();go(i-1)}if(e.key==='ArrowRight'){e.preventDefault();go(i+1)}});
+ d.addEventListener('close',()=>d.remove(),{once:true});
+ draw();document.body.append(d);d.showModal();return {dialog:d,go,get index(){return i}}};
+
+/* Every answered card says what it was about: its own title, else the question (one line), else the ticket. */
+const oneLine=(x,n)=>{x=String(x||'').replace(/\s+/g,' ').trim();if(x.length<=n)return x;const cut=x.slice(0,n),sp=cut.lastIndexOf(' ');return (sp>n*.6?cut.slice(0,sp):cut).replace(/[\s,;:.]+$/,'')+'…'};
+const recordTitle=e=>{const k=e.card||{};return k.title||oneLine(e.text,120)||e.ticket_title||'Answered'};
+const ticketLine=e=>[e.ticket_key,e.ticket_title].filter(x=>typeof x==='string'&&x).join(' · ');
 UI.cardShown=(c,o)=>{o=o||{};const th=thumbs({card:c.card||{},decision:{},ticket:c.ticket},o);if(!th.length)return null;const g=el('div','decision-shown');th.forEach(x=>g.append(x));return g};
 UI.answerRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('article','decision');c.dataset.id=e.id||'';
  const h=el('div','decision-h'),v=el('span','decision-verdict '+verdictClass(e),verdictWord(e));
- h.append(el('h3','',k.title||'Answered'),v);
+ h.append(el('h3','',recordTitle(e)),v);
  const Q=window.QuestionCardState||{whoWord:x=>String(x||'').replace(/^human:/,''),viaWord:x=>x},by=[Q.whoWord(e.by),Q.viaWord(e.via),fmtTime(e.at,o.now)].filter(Boolean).join(' · ');
- c.append(h,el('div','decision-by',by));
+ c.append(h);const tk=o.showTicket===false?'':ticketLine(e);if(tk){const t=el('div','decision-by');if(o.ticketHref&&e.ticket){const a=el('a','',tk);a.href=o.ticketHref(e.ticket);t.append(a)}else t.textContent=tk;c.append(t)}
+ c.append(el('div','decision-by',by));
  const th=thumbs(e,o);if(th.length){const g=el('div','decision-shown');th.forEach(x=>g.append(x));c.append(g)}
  const w=d.words||{},lines=[];if(w.text)lines.push(w.text);(w.voice||[]).forEach(x=>x&&x.text&&lines.push('Voice: '+x.text));
  (d.pins||[]).forEach((pn,i)=>lines.push('Spot '+(pn.n||i+1)+(pn.on?' on '+pn.on:'')+': '+pn.text));
@@ -170,7 +208,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const load=async force=>{if(loading||!alive)return;loading=true;try{const cards=await api.stack();touchMeta();apply(cards,!!force)}catch(e){if(!deck||isAuth(e))err(e)}finally{loading=false}};
  const drawAnswered=async()=>{try{const list=await api.answered();if(!alive)return;ansEl.replaceChildren();
    if(!list.length){ansEl.append(UI.state({kind:'empty',title:'No answers yet',text:'Your answers appear here and on each ticket.'}));return}
-   list.forEach(e=>ansEl.append(UI.answerRecord(e,{fileUrl:api.fileUrl,now:o.now})))}
+   list.forEach(e=>ansEl.append(UI.answerRecord(e,{fileUrl:api.fileUrl,now:o.now,ticketHref:o.ticketHref})))}
   catch(e){ansEl.replaceChildren(isAuth(e)?UI.state({kind:'empty',title:'Sign in',text:'Run orch review in your terminal. It opens this page signed in.'}):UI.state({kind:'error',title:"Can't reach orch",text:'Is the review page still running in your terminal?',action:{label:'Try again',onClick:drawAnswered}}))}};
  bWait.onclick=()=>setView('deck');bAns.onclick=()=>setView('answered');
  deckEl.replaceChildren(UI.state({kind:'loading'}));waitCount(0);setView('deck');
@@ -178,5 +216,5 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  load(false);if(pollMs>0)timer=setInterval(tick,pollMs);
  return {reload:()=>load(true),show:setView,destroy:()=>{alive=false;clearInterval(timer)},get deck(){return deck},tick};
 };
-UI.review={mapCard,verdictWord,fmtTime,mapPreview};
+UI.review={mapCard,verdictWord,fmtTime,mapPreview,recordTitle,ticketLine};
 })();
