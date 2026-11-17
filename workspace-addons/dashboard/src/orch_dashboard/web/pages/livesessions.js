@@ -1,5 +1,5 @@
 'use strict';
-// Live sessions (ORCH-359): the one list of sessions the new Focus reads (the bar, the panes, later the wall), from
+// Live sessions (ORCH-359): the one list of sessions the live page reads (the bar, the panes, later the wall), from
 // GET /api/sessions (sessions.py: built from the state the page already polls, plus one read of the live screens).
 // Polled every few seconds while the Preview switch is on and the page is shown; nothing else asks for it.
 // window.LiveSessions: list (in the API's order), get(id or key), ready (true after the first answer), refresh().

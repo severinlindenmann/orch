@@ -1,4 +1,4 @@
-"""Live sessions (ORCH-359): one list of every session that the new Focus (draft D: the wall, the bar and the
+"""Live sessions (ORCH-359): one list of every session that the live page (draft D: the wall, the bar and the
 panes) reads, served as GET /api/sessions and polled while the Preview switch is on.
 
 Nothing here asks orch anything new. Status, what a session waits on, tool, model and open time come from the

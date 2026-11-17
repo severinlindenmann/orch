@@ -757,7 +757,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
-        if path == "/api/sessions":  # every session for the new Focus (ORCH-359): built from the cached state
+        if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
             from . import sessions
