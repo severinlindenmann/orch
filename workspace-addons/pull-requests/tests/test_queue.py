@@ -326,6 +326,27 @@ def test_add_list_remove_commands(ws, monkeypatch, capsys):
     assert cli.main(["queue", "add", "not a url"]) == 2
 
 
+@pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
+def test_start_runner_starts_the_background_runner(ws, monkeypatch, platform):
+    """The real start_runner (other tests stub it): every keyword once, on every platform (issue 1373)."""
+    from orch import procs
+
+    monkeypatch.setattr(procs.sys, "platform", platform)
+    monkeypatch.setattr(cli, "runner_alive", lambda root: False)
+    calls = []
+
+    def popen(argv, **kw):  # a duplicate keyword raises TypeError at the call itself, before this runs
+        calls.append((argv, kw))
+
+    monkeypatch.setattr(cli.subprocess, "Popen", popen)
+    cli.start_runner(ws)
+    [(argv, kw)] = calls
+    assert argv[-4:] == ["queue", "run", "--root", str(ws)]
+    assert kw["stdin"] == subprocess.DEVNULL and kw["cwd"] == ws
+    assert kw.get("start_new_session", False) is (platform != "win32")
+    assert ("creationflags" in kw) is (platform == "win32")
+
+
 def test_wait_reports_the_end(ws, monkeypatch, capsys):
     monkeypatch.setattr(cli, "start_runner", lambda root: None)
     store.add(ws, url(1), None, "agent:t", login="bot")
