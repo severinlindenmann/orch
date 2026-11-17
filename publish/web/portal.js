@@ -336,7 +336,7 @@
   }
 
   async function copy(text) {
-    try { await navigator.clipboard.writeText(String(text)); notify('Copied. Paste it to your agent.'); return true; }
+    try { await navigator.clipboard.writeText(String(text)); notify('Copied. Paste it to your helper.'); return true; }
     catch (_) {
       const field = document.createElement('textarea');
       const focused = document.activeElement;
@@ -344,7 +344,7 @@
       let ok = false;
       try { ok = document.execCommand('copy'); } catch (_) { /* Offer manual copy below. */ }
       field.remove(); focused?.focus();
-      notify(ok ? 'Copied. Paste it to your agent.' : 'Select the text and copy it manually.');
+      notify(ok ? 'Copied. Paste it to your helper.' : 'Select the text and copy it manually.');
       return ok;
     }
   }
@@ -356,7 +356,7 @@
     }
     const name = readyData.name || 'Your workspace';
     view.innerHTML = head(readyData.renewed ? 'New access key ready' : 'Your workspace is ready', '') +
-      `<p>Paste this into your agent in the project that should use “${esc(name)}”.</p><div class="copy-wrap"><pre class="copy-box">${esc(readyData.prompt)}</pre><button class="primary small" data-copy="prompt">Copy</button></div><p class="section-note">This is shown only once. Copy it before you leave this page.</p><p class="fact">Workspace ID <code>${esc(readyData.id)}</code> <button class="small quiet icon" data-copy="id" aria-label="Copy workspace ID">${icon('copy')}</button></p><div class="actions"><a class="button quiet" href="#workspaces">Done</a></div>`;
+      `<p>Paste this into your helper in the project that should use “${esc(name)}”.</p><div class="copy-wrap"><pre class="copy-box">${esc(readyData.prompt)}</pre><button class="primary small" data-copy="prompt">Copy</button></div><p class="section-note">This is shown only once. Copy it before you leave this page.</p><p class="fact">Workspace ID <code>${esc(readyData.id)}</code> <button class="small quiet icon" data-copy="id" aria-label="Copy workspace ID">${icon('copy')}</button></p><div class="actions"><a class="button quiet" href="#workspaces">Done</a></div>`;
     copied = false;
     view.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
       const data = readyData;
@@ -517,7 +517,7 @@ export ORCH_TOKEN='your-access-key'</pre></div></section><section class="card">$
     showAlert('');
     document.querySelector('#add-workspace').hidden = true;
     document.querySelector('.portal-footer').hidden = route === 'ready';
-    document.querySelector('#crumb').textContent = { workspaces: 'Workspaces', add: 'Add workspace', ready: 'Connect your agent', files: 'Files', apps: 'Apps', api: 'API reference' }[route];
+    document.querySelector('#crumb').textContent = { workspaces: 'Workspaces', add: 'Add workspace', ready: 'Connect your helper', files: 'Files', apps: 'Apps', api: 'API reference' }[route];
     document.title = `orch publish · ${document.querySelector('#crumb').textContent}`;
     document.querySelectorAll('.side-nav a').forEach(link => {
       const active = link.hash === `#${route}`;
