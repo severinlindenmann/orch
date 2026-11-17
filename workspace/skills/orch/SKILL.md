@@ -171,6 +171,18 @@ review): give each the same `--group "<short name>"`; the person sees them as on
 Links to look at beside the card (a mockup, an issue): `--ref "Mockup=http://…"` (up to 5). A line under one option of
 a choice: `--describe "A=Keeps the menu as it is"`.
 
+**Cards are short and visual, never a text wall** (owner 17 Nov: "I will never read reviews like that"). A headline is one sentence; everything long goes in `details`, which sits behind one click. Pick the format that fits the news, as in the style guide (`/styleguide`, "Review card formats"):
+- Work finished: a Check card (orch builds it: headline, progress bar, chips, short steps). Put your result in the ticket summary: its FIRST sentence is the headline, so make it say the outcome.
+- Looks different: `--before` and `--after` pictures, one line of words. Several ways: `--choose` with a picture per option.
+- Numbers: a chart. Order or how it works: a flow of at most 6 boxes. Wording or files changed: a diff.
+- Many items or a comparison: a table. Something failed: say what, where and what you need, in 2 lines. A page to try: `--link` with `--open`.
+Write the card as a JSON file and pass it with `--file card.json` on `--draft` or `--plan`:
+    {"headline": "Page load is 2.4 s faster.", "progress": {"done": 5, "total": 5},
+     "chips": [{"text": "17 tests passed", "tone": "ok"}], "flow": ["Phone", "Relay", "Ticket"],
+     "chart": {"unit": " s", "bars": [{"label": "Before", "value": 4.2}, {"label": "After", "value": 1.8}]},
+     "diff": [{"op": "-", "text": "Approve"}, {"op": "+", "text": "Looks good"}], "details": ["Long text here."]}
+Chip tones: ok, warn, bad, info. Use only the fields you need. Add a screenshot (`--before`/`--after`) whenever the work has something to look at.
+
 A GitHub pull request only the person may merge: `orch ask <id> "Merge release 3?" --link "Release 3" --open <pull request address> --merge --then "<what follows>"`. The person's Merge click merges it with their own GitHub login; never merge it yourself.
 
 The ticket now waits for the answer (Waiting). Keep working on the steps that do not depend on it; stop only when

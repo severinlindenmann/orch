@@ -941,3 +941,14 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .swipe-preview:has(.doc-rows){background:var(--surface-2)}
 .swipe-preview:has(>.doc) .swipe-expand{top:8px;bottom:auto}
 @media(max-width:720px){.doc-row{flex-wrap:wrap}.doc-row-title{flex-basis:100%}}
+
+/* Glance formats of a doc box (ORCH-329): headline, progress, chips, flow, chart, diff, details */
+.doc-headline{margin:0 0 10px;font-size:20px;line-height:28px;font-weight:600;color:var(--text)}
+.swipe-preview .doc .doc-headline{color:var(--text)}
+.doc-progress{display:grid;gap:4px;margin:0 0 12px}.doc-progress .progress{height:8px}
+.doc-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.doc-flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}
+.doc-box{padding:6px 10px;border-radius:8px;background:var(--info-soft);color:var(--info);font-size:13px;line-height:18px}.doc-arrow{color:var(--text-faint)}
+.doc-chart{display:grid;gap:8px;margin:0 0 12px}.doc-bar{display:grid;grid-template-columns:minmax(64px,120px) 1fr auto;gap:10px;align-items:center;font-size:13px}.doc-bar .progress{height:10px}
+.doc-diff{display:grid;gap:2px;margin:0 0 12px;font-family:var(--font-mono,ui-monospace,monospace);font-size:13px}.doc-line{padding:2px 8px;border-radius:4px}.doc-line.add{background:var(--add-bg)}.doc-line.del{background:var(--del-bg)}
+.doc-details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}.doc-details summary{cursor:pointer;color:var(--text-muted);font-size:13px}.doc-details p{margin:8px 0 0}

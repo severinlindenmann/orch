@@ -70,3 +70,12 @@ document.querySelector('[data-copy]').onclick=async()=>{try{await navigator.clip
 document.getElementById('g-density')?.addEventListener('change',e=>{document.documentElement.dataset.density=e.target.value});
 
 if(window.UI?.date){const v=document.getElementById('g-due'),t=document.getElementById('g-due-toggle');if(v&&t)window.UI.date(v,t,null,{time:true});}
+
+{const host=document.querySelector('#w-formats');if(host&&UI.docBox){const box=(name,when,pv)=>{const c=document.createElement('section'),t=document.createElement('p');c.className='card pad stack';t.className='sample-label';t.textContent=name+' · '+when;c.append(t,UI.docBox(pv,'h4'));host.append(c)};
+ box('Result','work is finished',{headline:'Works on Mac. Linux was tested with a stand-in only.',progress:{done:5,total:5},chips:[{text:'17 tests passed',tone:'ok'},{text:'CI job: you push',tone:'warn'}],steps:['Done: Record format','Done: Commands'],details:['Every step with its proof.']});
+ box('Chart','numbers: speed, cost, usage',{headline:'Page load is 2.4 s faster.',chart:{unit:' s',bars:[{label:'Before',value:4.2},{label:'After',value:1.8}]}});
+ box('Flow','how something works, max 6 boxes',{headline:'A phone message reaches a ticket.',flow:['Phone','Relay','Workspace','Ticket']});
+ box('Changes','what wording or files changed',{headline:'One button word changes.',chips:[{text:'3 files',tone:'info'}],diff:[{op:'-',text:'Approve'},{op:'+',text:'Looks good'}]});
+ box('Blocked','something failed and needs you',{status:{tone:'failed',text:'Checks failed twice'},headline:'The login test fails at phone width.',paras:['I need: a decision on the 390 px layout.']});
+ box('Link to try','a page to click through (the card Open button)',{headline:'Open the new Home page and look at the Review tab.',chips:[{text:'Opens in a new tab',tone:'info'}]});
+ const n=document.createElement('p');n.className='meta';n.textContent='Before/after, Choice and Table use the compare, options and table previews above (the review deck). Pictures: img preview.';host.append(n)}}
