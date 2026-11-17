@@ -158,7 +158,8 @@ def test_replaces_a_marker_less_copy_of_an_older_orch(proj, run):
     assert run("init")[0] == 0
     d = proj / ".agents/skills/orch-dashboard"
     d.mkdir(parents=True)
-    (d / "SKILL.md").write_text("---\nname: orch-dashboard\ndescription: older\n---\nolder text", encoding="utf-8")
+    old_text = "---\nname: orch-dashboard\ndescription: older\n---\nolder text"
+    (d / "SKILL.md").write_text(old_text, encoding="utf-8")
     target = proj / ".orch/harness/skills/orch-dashboard"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("---\nname: orch-dashboard\n---\nnew", encoding="utf-8")
