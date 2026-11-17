@@ -424,6 +424,7 @@ function render(arrived = new Set()) {
     throw err;
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
+  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
   main.querySelectorAll('[data-question]').forEach(host => {
