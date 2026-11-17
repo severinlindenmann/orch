@@ -536,7 +536,14 @@ async function refresh() {
   const version = mutation;
   const connection = document.getElementById('connection');
   try {
-    const res = await fetch('/api/state', {cache:'no-store'});
+    // Send the revision we hold: an unchanged state comes back as an empty 304, not the whole state again.
+    const res = await fetch('/api/state', {cache:'no-store', headers: state?.rev ? {'If-None-Match': '"' + String(state.rev).replace(/"/g, '') + '"'} : {}});
+    if (res.status === 304 && state) {
+      connection.hidden = true;
+      lastOk = Date.now();
+      paintUpdated();
+      return;
+    }
     if (!res.ok) throw new Error('Could not load the workspace.');
     const next = await res.json();
     if (writing || version !== mutation) { refreshAgain = true; return; }

@@ -529,9 +529,25 @@ class Handler(BaseHTTPRequestHandler):
             if fresh:
                 forget_static()  # the add-on list too: a catalogue opened after a change made in the terminal
             state, age = self.server.state_cache.fresh() if fresh else self.server.state_cache.get()
-            return self._send(
-                200, json.dumps(state).encode(), "application/json", {"X-State-Age-Ms": str(int(age * 1000))}
-            )
+            rev = str(state.get("rev") or "")
+            tag = '"' + rev.replace('"', "") + '"' if rev else ""
+            hdr = {"X-State-Age-Ms": str(int(age * 1000))}
+            if tag:
+                hdr["ETag"] = tag
+                if not fresh and tag in [
+                    t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")
+                ]:
+                    return self._send(
+                        304, b"", "application/json", hdr
+                    )  # nothing changed: no body, no megabytes
+            body = json.dumps(state).encode()
+            if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                import gzip
+
+                body = gzip.compress(body, 3)
+                hdr["Content-Encoding"] = "gzip"
+                hdr["Vary"] = "Accept-Encoding"
+            return self._send(200, body, "application/json", hdr)
         if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
             from .data import load_chat_contacts, load_chat_thread
 
