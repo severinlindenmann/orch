@@ -278,6 +278,21 @@ def head_of(url: str) -> str:
     return head
 
 
+def _unfinished_checks(gh: str, url: str) -> str | None:
+    """Plain words when the pull request's checks have not all passed yet ("3 of 18 checks still running",
+    "1 check failed: lint"), read now at GitHub; None when they passed, there are none (a repository without
+    checks), or GitHub could not be read (GitHub's own rules then decide)."""
+    try:
+        v = _gh(gh, ["pr", "view", url, "--json", "statusCheckRollup"], 15)
+        rollup = (json.loads(v.stdout) if v.returncode == 0 else {}).get("statusCheckRollup")
+    except (ValueError, AttributeError, Refused):
+        return None
+    if not isinstance(rollup, list) or not rollup:
+        return None
+    tone, words = checks_state(rollup)
+    return None if tone == "done" else words
+
+
 def merge(url: str, head: str, add_review: bool = True) -> dict:
     """Merge the pull request at `url` as the person signed in to gh, only while its newest commit is still
     `head` (what the card showed). Returns {"login", "already"}: already is True when it was merged before (a
@@ -300,6 +315,12 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
         raise Refused("The pull request is closed on GitHub, so it cannot be merged. Open it to see why.")
     if now != head:
         raise Refused(CHANGED)
+    unfinished = _unfinished_checks(gh, url)
+    if unfinished:  # say it plainly instead of GitHub's "base branch policy prohibits the merge"
+        raise Refused(
+            f"Its checks have not all passed yet ({unfinished}), so nothing was merged. "
+            "The card stays: click Merge again when they are green."
+        )
     if (
         add_review and review == "REVIEW_REQUIRED"
     ):  # the branch rules want a review: the click is the person's, on THIS commit
