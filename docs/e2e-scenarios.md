@@ -17,9 +17,6 @@ Format: steps → expected result.
 
 ## Add-ons (A)
 - A0 `orch addon add dashboard --yes` + `add scheduler --yes` → `orch addon list --json` shows both active (built-in); skills, `<!-- orch:addon:<name> -->` blocks, `.orch/addons.json`, `.orch/.local-id`, install registry and consent record (under `ORCH_HOME`); `remove scheduler` → its skill and block gone, dashboard's stay.
-- A1 Dashboard on Pilatus: Playwright clicks list → detail → evidence chips, question, history → matches files; no control changes data (walkthrough).
-- A2 Item without evidence is flagged in the detail view; empty workspace shows the one start command (walkthrough).
-- A3 `orch dashboard snapshot --publish` → private link; without token "This app is private"; with token the snapshot opens (walkthrough step `snapshot`).
 - A4 `orch wait --until now+8s` → `waiting_on {kind: time, until}` (no `wake_at`); scheduler (fake agent, `[scheduler]` in `.orch/config.toml`) starts the agent at that time; history entry `agent:scheduler`; `waiting_on` cleared; log in `.orch/addons/scheduler/logs/`.
 - A5 `orch scheduler repeat <id> "* * * * *"` → `ext.scheduler {recurring, cron}`; two runs, one at a time, logs + `state.json` in `.orch/addons/scheduler/` (slow). With codex in Reports: `e2e/run.sh AG-A45`.
 - A6 `orch scheduler start` / `stop` on macOS and Windows → starts at login entry made / removed (not built).

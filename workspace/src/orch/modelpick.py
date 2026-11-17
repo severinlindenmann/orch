@@ -2,15 +2,20 @@
 
 orch picks before every start while no person chose (ticket field `model`, by "orch"); a person's choice
 stays until they set it back to auto. Only adapters with `model_args` get the model passed; the others
-keep their own default. Never Fable (or any other model) by default: the pick is Sonnet or Opus.
+keep their own default. orch's pick is only ever Sonnet or Opus. Haiku (a fast option) and Fable (drafts)
+are a person's choice only: no agent and no rule picks them (owner 17 Nov, ORCH-257). A ticket on Fable
+works the drafts way (runs.fresh_prompt: three or more drafts, each challenged on Opus, one card).
 """
 
 from __future__ import annotations
 
 import re
 
-MODELS = ("sonnet", "opus")
-LABELS = {"sonnet": "Sonnet", "opus": "Opus"}
+MODELS = ("haiku", "sonnet", "opus", "fable")
+LABELS = {"haiku": "Haiku", "sonnet": "Sonnet", "opus": "Opus", "fable": "Fable"}
+PICKED = ("sonnet", "opus")  # all orch ever picks by itself
+SMALL = ("haiku", "sonnet")  # orch moves these up to Opus (helper's "up", two failed checks)
+STRONG = ("opus", "fable")  # "up" never changes these (Fable is not below Opus; it is for drafts)
 BY_ORCH = "orch"
 
 # Which model (owner 16 Nov, ORCH-82; changed 17 Nov, ORCH-252): design, look, layout, UX, concept, security
@@ -67,7 +72,8 @@ def _text(ticket: dict) -> str:
 
 
 def pick(ticket: dict) -> tuple[str, str]:
-    """(model, why in one plain line) from the ticket alone. Opus unless the work is clearly small."""
+    """(model, why in one plain line) from the ticket alone: Sonnet or Opus, never Haiku or Fable (a person's
+    choice only). Opus unless the work is clearly small."""
     if ticket.get(HINT) == "small":  # orch's own routine ticket (Reviewer second look, daily review)
         return "sonnet", "orch's own routine check; it moves up when it turns hard"
     text = _text(ticket)
@@ -117,7 +123,7 @@ def by_person(ticket: dict) -> bool:
 
 
 def label(ticket: dict) -> str | None:
-    """'Opus (picked by orch)' / 'Sonnet (chosen by Severin)', or None when nothing was picked yet."""
+    """'Opus (picked by orch)' / 'Fable (chosen by Severin)', or None when nothing was picked yet."""
     m = chosen(ticket)
     if not m:
         return None
