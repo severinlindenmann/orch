@@ -161,6 +161,8 @@ def test_answer_talk_with_note_and_answered_list(tk, run):
     d = e["decision"]
     assert d["action"] == "send_back" and d["changes"] == ["Shorter title."] and d["pins"][0]["n"] == 1
     assert {"card", "shown", "id"} <= set(e)
+    # every Answered card can name its ticket and what was asked (ORCH-172: no bare "Answered" cards)
+    assert e["ticket_title"] == "Home layout" and e["ticket_key"] and e["text"] == "Please look: New block"
     code, out, _ = run("review", "list", "--answered")
     assert "Answered (newest first)" in out and "Send back" in out
 

@@ -134,9 +134,13 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .topbar-chip .menu-pop .meta{padding:0 8px 8px}
 .topbar-chip .menu-item{display:flex;width:100%;justify-content:flex-start}
 .topbar>.topbar-chip:not([hidden])~.topbar-wait,.topbar>.topbar-chip:not([hidden])~.topbar-actions{margin-left:0}
+/* One row on a wide screen (persona test F1): the title area gives way (cut with …) before the bar wraps to two rows */
+@media(min-width:900px){.topbar{flex-wrap:nowrap}.topbar>*{flex-shrink:0}.topbar>.breadcrumb{flex-shrink:1;min-width:0}}
 /* Page frame (one for every page): content starts at the same y, the heading is title + one muted line on the left and the
    actions on the right, flush to ONE right edge. Two widths only: full (the default) and .form-width (a narrower form page). */
 .page{width:100%;max-width:none;margin:0;padding:32px var(--page-gutter);display:flex;flex-direction:column;gap:24px}
+/* an empty row (Factory's notices) would still add one 24 px gap above the title */
+.page>.stack:empty{display:none}
 .page.wide{max-width:none}
 .page:empty{min-height:calc(100dvh - var(--topbar-height))}
 .form-width{width:100%;max-width:var(--form-width)}
@@ -379,7 +383,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .btn.icon,.btn.icon.sm,.btn.icon.xs{width:44px}
 .card-row{flex-wrap:wrap;gap:8px}
 .card-row .grow{flex-basis:calc(100% - 40px)}
-.card-row>.btn{margin-left:24px}
+/* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) keeps the button on the left edge */
+.card-row:has(>:first-child:not(.grow))>.btn{margin-left:24px}
 .card-row time{margin-left:24px}
 .card-row time+.btn{margin-left:auto}
 .file-row{flex-wrap:wrap}
@@ -403,6 +408,7 @@ dialog.sheet{width:100%}
 .qmeta{font-size:var(--fs-1)}
 .qoptions{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center;margin-top:var(--s1)}
 .qoption{height:auto;min-height:var(--h);max-width:100%;white-space:normal;text-align:left;padding:var(--s2) var(--s3);justify-content:space-between}
+.qopt{display:inline-flex;align-items:center;gap:var(--s2);max-width:100%}
 .qoption>span:first-child{min-width:0}
 .qoption.suggested{background:var(--brand-soft);border-color:var(--brand);color:var(--text)}
 .qoption.suggested:hover{background:var(--surface-3)}

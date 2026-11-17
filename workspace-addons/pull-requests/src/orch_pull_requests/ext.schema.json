@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addons/pull-requests/ext.schema.json",
+  "title": "orch pull-requests ticket data: ext.pull-requests",
+  "description": "Owned by the pull-requests add-on (its ticket_ext and ticket_fields; the add-on ships a byte-identical copy). merge_when_green = on: the add-on's background service puts the ticket's open, ready pull requests in the merge queue, which merges each only on green checks of the checked commit. Not inert: it starts merges.",
+  "type": "object",
+  "properties": {
+    "merge_when_green": {
+      "type": "string",
+      "enum": ["off", "on"],
+      "x-labels": { "off": "Off", "on": "On" },
+      "title": "Merge when green",
+      "description": "on = merge this ticket's pull requests by themselves once every check passed. Absent or off = no."
+    }
+  },
+  "additionalProperties": false
+}

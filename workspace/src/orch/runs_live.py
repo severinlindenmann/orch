@@ -9,7 +9,8 @@ own hooks call `orch run event --kind idle`, a generic agent calls
 `orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
 once (workspace.live_max) sets a limit; then a start waits in line for a slot. A session idle (or
 waiting for a person) for an hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review,
-Done or Dropped, and such a session does not count toward the limit), or on a ticket Done for that long,
+Done or Dropped, and such a session does not count toward the limit, nor does one idle while it only waits for
+pull request checks), or on a ticket Done for that long,
 is closed on the next `orch run` call (there is no daemon); its session id stays on the ticket, so the next
 start continues it.
 Nothing here reads the screen to decide anything, with one exception: a run still "starting" (no hook has
@@ -42,7 +43,7 @@ FINISHED_IDLE_SECONDS = 10 * 60  # a session on a ticket in Review, Done or Drop
 LOAD_STOP = 30.0  # no new helper while the 1-minute load average is above this (also with no limit set)
 DISK_STOP_GB = 5.0  # ... or while less than this much disk is free
 PACE_SECONDS = 30  # with no limit set: at most one new helper in this time, the rest wait in line
-HARD_EXTRA = 4  # most sessions over a set limit that finished tickets may keep open
+HARD_EXTRA = 4  # most sessions over a set limit that finished tickets or check waiters may keep open
 WHERE_TO_CHANGE = "Settings > Helper > Helpers at once"
 FINISHED = ("review", "done", "dropped")
 PASTE_DELAY = 0.3
@@ -139,14 +140,30 @@ def live_all(root: Path) -> list[dict]:
     ]
 
 
+def _only_waits_for_checks(rec: dict) -> bool:
+    """Idle at its prompt and every command it still runs is a wait on pull request checks (orch ref wait,
+    orch github wait): it uses no machine to speak of, so it does not hold a slot (ORCH-148)."""
+    if (rec.get("live") or {}).get("state") != "idle":
+        return False
+    from orch import runwatch  # runwatch imports this module
+
+    with contextlib.suppress(Exception):
+        return runwatch.only_waits_for_checks(rec.get("agent_pid"))
+    return False
+
+
 def live_alive(root: Path) -> list[dict]:
     """Live runs that count against the limit. A session that is idle or waiting for a person on a ticket in
-    Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS); a working or starting
-    one does."""
+    Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS), nor does one idle
+    while it only waits for pull request checks; a working or starting one does. Both stay under the
+    hard ceiling in _full (the limit plus HARD_EXTRA)."""
     return [
         r
         for r in live_all(root)
-        if not ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
+        if not (
+            ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
+            or _only_waits_for_checks(r)
+        )
     ]
 
 
@@ -163,8 +180,8 @@ def _crowded(root: Path) -> bool:
 
 
 def _full(root: Path) -> int | None:
-    """The limit that was hit (a set limit, or that plus HARD_EXTRA for sessions on finished tickets), else
-    None."""
+    """The limit that was hit (a set limit, or that plus HARD_EXTRA for sessions on finished tickets or that
+    only wait for checks), else None."""
     n = max_live(root)
     if n is None:
         return None

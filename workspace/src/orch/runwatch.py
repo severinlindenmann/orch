@@ -117,9 +117,29 @@ def label(cmd: str) -> str:
     return _base(words[0])[:60] or "a command"
 
 
+_CHECK_WAITS = {("ref", "wait"), ("github", "wait")}
+
+
+def is_check_wait(cmd: str) -> bool:
+    """True for orch's own waits on checks or the GitHub write limit (`orch ref wait`, `orch github wait`):
+    they only poll. Anything else (tests, builds, a script) is real work."""
+    words = cmd.split()
+    for i, w in enumerate(words):
+        if _base(w) in ("orch", "orch.exe"):
+            return tuple([x for x in words[i + 1 :] if not x.startswith("-")][:2]) in _CHECK_WAITS
+    return False
+
+
+def only_waits_for_checks(agent_pid: int | None, table: list | None = None) -> bool:
+    """The agent runs commands, and every one of them is a wait on checks (is_check_wait)."""
+    cmds = tool_commands(agent_pid, table)
+    return bool(cmds) and all(c["check_wait"] for c in cmds)
+
+
 def tool_commands(agent_pid: int | None, table: list | None = None) -> list[dict]:
     """The commands the agent runs right now through its shell tool (a test run, a CI watcher), oldest
-    first: [{"label", "seconds", "pid"}]. One entry per tool shell: the program under it, else the shell."""
+    first: [{"label", "seconds", "pid", "check_wait"}]. One entry per tool shell: the program under it, else
+    the shell."""
     if not isinstance(agent_pid, int) or agent_pid <= 0:
         return []
     rows = _table() if table is None else table
@@ -136,7 +156,14 @@ def tool_commands(agent_pid: int | None, table: list | None = None) -> list[dict
         if inner is None and under:
             inner = next(iter(sorted(kids.get(under[0][0], []))), None)
         name = label(inner[3]) if inner else "a shell command"
-        out.append({"label": name, "seconds": secs, "pid": pid})
+        out.append(
+            {
+                "label": name,
+                "seconds": secs,
+                "pid": pid,
+                "check_wait": bool(inner) and is_check_wait(inner[3]),
+            }
+        )
     out.sort(key=lambda d: -(d["seconds"] or 0))
     return out
 
@@ -391,13 +418,40 @@ def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:
         raise Refused(f"No live session on {name}.{why}")
     n = max(1, min(int(lines), SCREEN_MAX_LINES))
     r = runs_live.tmux(
-        root, "capture-pane", "-p", "-J", "-S", f"-{n + 50}", "-t", runs_live.target(tid), timeout=5
+        root, "capture-pane", "-e", "-p", "-J", "-S", f"-{n + 50}", "-t", runs_live.target(tid), timeout=5
     )
     if r.returncode != 0:
         raise Refused(f"Could not read the screen of {name}: {r.stderr.strip() or 'unknown error'}")
-    rows = runs_live.clean(_ANSI.sub("", r.stdout)).rstrip("\n").split("\n")
-    rows = [r.rstrip() for r in rows]
+    raw = r.stdout.rstrip("\n").split("\n")
+    rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
+    hint = _suggestion(raw, rows)
     while rows and not rows[-1].strip():
         rows.pop()
     rows = rows[-n:]
-    return {"ticket": tid, "key": name, "run": rec["run"], "lines": rows, **describe(root, tid, rec)}
+    out = {"ticket": tid, "key": name, "run": rec["run"], "lines": rows, **describe(root, tid, rec)}
+    if hint is not None:
+        out["suggestion"] = hint
+    return out
+
+
+_RAW_GLYPH = re.compile(r"^((?:\x1b\[[0-9;]*m)*)(\s*[>\u276f\u203a]\s?)")
+SUGGESTION = "(greyed-out suggestion from the tool, not typed: {text})"
+
+
+def _suggestion(raw: list[str], rows: list[str]) -> str | None:
+    """ORCH-190: a tool may show a greyed-out suggestion for the next message in its empty prompt box (for
+    example "go ahead", "check if the PR merged"). Without its colour it reads like a message typed but never
+    sent. When the last prompt row holds only such hint-styled text, that row is rewritten in place (rows) to
+    say so, and the suggestion is returned; None when there is none or any doubt."""
+    for i in range(len(raw) - 1, -1, -1):
+        m = _RAW_GLYPH.match(raw[i])
+        if not m:
+            continue
+        tail = raw[i][m.end() :]
+        text = runs_live.clean(_ANSI.sub("", tail)).strip()
+        if not text or runs_live._is_hint(tail) is not True:
+            return None
+        glyph = runs_live.clean(_ANSI.sub("", raw[i][: m.end()]))
+        rows[i] = glyph + SUGGESTION.format(text=text)
+        return text
+    return None

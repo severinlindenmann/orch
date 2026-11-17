@@ -53,6 +53,9 @@ class Verdict:
     green: bool
     why: str
     checks: list = field(default_factory=list)  # [(name, state)] as seen last, green first
+    # not green because GitHub did not answer in time (unreadable, no checks, timeout), not because a check
+    # failed: a caller that can try again later does not count it as red
+    unknown: bool = False
 
     def line(self) -> str:
         return f"GREEN: {self.why}" if self.green else f"NOT green: {self.why}"
@@ -268,12 +271,13 @@ def _sorted(checks: list) -> list[tuple[str, str]]:
 def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) -> Verdict:
     """Wait until the checks have finished, then say GREEN or NOT green. Never raises for GitHub trouble:
     what cannot be read keeps the wait going or ends NOT green."""
-    if src.is_draft() is not False:
-        return Verdict(False, "the pull request is a draft (or unreadable)")
+    draft = src.is_draft()
+    if draft is not False:
+        return Verdict(False, "the pull request is a draft (or unreadable)", unknown=draft is None)
     try:
         required = src.required()
     except Refused as e:
-        return Verdict(False, str(e))
+        return Verdict(False, str(e), unknown=True)
     src.sleep(FIRST_NAP)  # a fresh push reports "no checks" for a moment
     while True:
         raw, open_runs = src.look()
@@ -289,14 +293,14 @@ def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) 
             break
         el = src.elapsed()
         if not checks and el >= no_checks:
-            return Verdict(False, f"no checks after {int(el)}s")
+            return Verdict(False, f"no checks after {int(el)}s", unknown=True)
         if el >= timeout:
             why = f"still waiting after {int(el)}s (pending checks: {pending}"
             if not have_required:
                 why += "; required not reported yet: " + ", ".join(r for r in required if r not in names)
             if open_runs:
                 why += f"; unfinished workflow runs: {open_runs}"
-            return Verdict(False, why + ")", _sorted(checks))
+            return Verdict(False, why + ")", _sorted(checks), unknown=True)
         src.sleep(POLL_SECS)
     rows = _sorted(checks)
     bad = [f"{n} {s}" for n, s in rows if s != "SUCCESS"]
@@ -314,8 +318,9 @@ def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) 
         return Verdict(False, "required check(s) not SUCCESS: " + ", ".join(missing), rows)
     if fallback and not any(n in required and s == "SUCCESS" for n, s in rows):
         return Verdict(False, "none of the required checks ran (all skipped)", rows)
-    if src.is_draft() is not False:
-        return Verdict(False, "the pull request is a draft (or unreadable)", rows)
+    draft = src.is_draft()
+    if draft is not False:
+        return Verdict(False, "the pull request is a draft (or unreadable)", rows, unknown=draft is None)
     ok = sum(1 for _, s in rows if s == "SUCCESS")
     skipped = sum(1 for _, s in rows if s == "SKIPPED")
     return Verdict(
@@ -378,12 +383,15 @@ def _no_room(url: str, kind: str) -> str:
     )
 
 
-def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | None = None) -> Outcome:
+def run_one(
+    url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | None = None, before_merge=None
+) -> Outcome:
     """Wait for one pull request's checks; with merge, merge it on green as GitHub's branch rules allow, only
     its checked commit. When the base branch got commits since the branch last took it in, and they touch a
     file the pull request changes (or a test file of the same module), the base branch is taken in first and
     the checks are waited for once more: two green pull requests on the same code must not break it
-    together."""
+    together. before_merge(head) is asked right before the merge: a reason (text) stops it, status
+    "held"; None lets it go on."""
     src = src or Live(url)
     v = src.view()
     if v is None:
@@ -404,7 +412,9 @@ def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | No
         if now is None or now.get("headRefOid") != head:
             line = f"{url} got a new commit while its checks ran; not merged."
             return Outcome(url, False, "changed", line, verdict)
-        base = now.get("baseRefName") or base
+        if (now.get("baseRefName") or base) != base:  # moved to another base branch: never merged there
+            line = f"{url} was moved to another base branch while its checks ran; not merged."
+            return Outcome(url, False, "changed", line, verdict)
         landed, changed = src.landed(head, base), src.changed_files()
         if landed is None or changed is None:
             line = f"GitHub did not say what changed on {base} or in {url}; not merged. Run it again."
@@ -442,6 +452,13 @@ def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | No
             return Outcome(url, False, "checks failed", line, verdict)
     if not src.take("merge", url):
         return Outcome(url, False, "checks passed", _no_room(url, "merge"), verdict)
+    try:  # after the wait for room, not before
+        held = before_merge(head) if before_merge is not None else None
+    except Exception as e:  # noqa: BLE001 - a check that broke never lets the merge through
+        held = f"the last check before the merge failed ({e.__class__.__name__})"
+    if held:
+        ghlimit.give_back("merge", url)  # no merge happened: the place goes back
+        return Outcome(url, False, "held", f"Checks of {url} passed; not merged: {held}", verdict)
     done = _run([src.gh, "pr", "merge", url, "--merge", "--match-head-commit", head], 60)
     if done.returncode != 0:
         why = next((x.strip() for x in (done.stderr or done.stdout).splitlines() if x.strip()), "no reason")
