@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 6 ready (the script clicks them), 19 pending (not built yet).
+25 steps: 7 ready (the script clicks them), 18 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -206,19 +206,22 @@ Must be seen:
 ## 12. Split into two and three sessions with the pane controls
 
 - Part: split (draft D feature 7)
-- State: pending, waits for: Split into one, two or three sessions (crew task split)
+- State: ready, clicked by the script
 - Pictures: `fd-12-split-1280.png`, `fd-12-split-1920.png`, `fd-12-split-390.png`
 
 Do:
 
 1. In the layer press Add beside twice.
-2. On one pane use pin, Place, minimise and close.
+2. Change to Tickets, Review and Home.
+3. On one pane use pin, Place, minimise and close.
 
 Must be seen:
 
-- Two, then three panes sit next to each other.
+- Two, then three panes sit next to each other; on the right they are stacked.
 - Every pane has pin, add beside, place, minimise and close.
+- The split stays while the page changes.
 - Closing a pane gives its room to the others.
+- On a phone one session shows at a time and there is no add beside.
 
 ## 13. Focus stays open with typed text and split while you change pages
 

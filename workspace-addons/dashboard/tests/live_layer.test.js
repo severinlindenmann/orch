@@ -1,6 +1,6 @@
 'use strict';
 // ORCH-338: the layer of the new live page (pages/live-layer.js). The model is plain data: where the layer sits, where
-// it opens again, what Esc does, the size limits and what is kept per browser.
+// it opens again, what Esc does, the size limits and what is kept per browser. ORCH-339: the split into 1, 2 or 3 panes.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, LIVE_LAYER_KEY};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerSort, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -115,6 +115,82 @@ test('place and size are kept per browser; full screen opens docked after a relo
   assert.equal(L.liveLayerRead(store({[L.LIVE_LAYER_KEY]:JSON.stringify({mode:'bottom', panes:[]})})).mode, 'bar', 'no session: only the bar');
   assert.equal(L.liveLayerRead(null).mode, 'bar', 'no storage (private window)');
   assert.doesNotThrow(() => L.liveLayerWrite({setItem() { throw new Error('full'); }}, s));
+});
+
+test('Add beside splits into two, then three panes; the third is the most and the new pane is selected', () => {
+  let s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'beside', key:'t_2'}]);
+  assert.deepEqual([...s.panes], ['t_1', 't_2']);
+  assert.equal(s.cur, 't_2');
+  assert.equal(s.mode, 'bottom');
+  s = L.liveLayerStep(s, {type:'beside', key:'t_3'});
+  assert.deepEqual([...s.panes], ['t_1', 't_2', 't_3']);
+  assert.equal(L.LIVE_MAX, 3);
+  s = L.liveLayerStep(s, {type:'beside', key:'t_4'});
+  assert.deepEqual([...s.panes], ['t_1', 't_2', 't_4'], 'a fourth takes the last pane');
+  assert.deepEqual([...L.liveLayerStep(s, {type:'beside', key:'t_1'}).panes], ['t_1', 't_2', 't_4'], 'a shown session is only selected');
+  assert.equal(L.liveLayerStep(s, {type:'beside', key:'t_1'}).cur, 't_1');
+  assert.equal(L.liveLayerStep(s, {type:'beside'}), s, 'nothing to add');
+  const min = run(s, [{type:'min'}, {type:'beside', key:'t_9'}]);
+  assert.equal(min.mode, 'bottom', 'Add beside from the bar opens the layer again');
+  assert.deepEqual([...min.panes], ['t_1', 't_2', 't_9'], 'the split stays when it opens again');
+});
+
+test('opening a session from the bar selects it when shown, else it takes the selected pane', () => {
+  let s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'beside', key:'t_2'}, {type:'beside', key:'t_3'}, {type:'select', key:'t_2'}]);
+  assert.equal(s.cur, 't_2');
+  assert.equal(L.liveLayerStep(s, {type:'select', key:'t_2'}), s);
+  assert.equal(L.liveLayerStep(s, {type:'select', key:'t_8'}), s, 'only a shown pane can be selected');
+  const shown = L.liveLayerStep(s, {type:'open', key:'t_3'});
+  assert.deepEqual([...shown.panes], ['t_1', 't_2', 't_3']);
+  assert.equal(shown.cur, 't_3');
+  const other = L.liveLayerStep(s, {type:'open', key:'t_7'});
+  assert.deepEqual([...other.panes], ['t_1', 't_7', 't_3']);
+  assert.equal(other.cur, 't_7');
+});
+
+test('closing a pane gives its room to the others and selects its neighbour; the last one leaves the bar', () => {
+  let s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'beside', key:'t_2'}, {type:'beside', key:'t_3'}, {type:'select', key:'t_2'}]);
+  s = L.liveLayerStep(s, {type:'close', key:'t_2'});
+  assert.deepEqual([...s.panes], ['t_1', 't_3']);
+  assert.equal(s.cur, 't_3');
+  assert.equal(s.mode, 'bottom');
+  s = L.liveLayerStep(s, {type:'close', key:'t_1'});
+  assert.deepEqual([...s.panes], ['t_3']);
+  assert.equal(s.cur, 't_3');
+  assert.equal(L.liveLayerStep(s, {type:'close', key:'t_x'}), s, 'an unknown pane changes nothing');
+  s = L.liveLayerStep(s, {type:'close', key:'t_3'});
+  assert.equal(s.mode, 'bar');
+  assert.equal(s.cur, '');
+});
+
+test('the split and the selected pane are kept per browser, at most three', () => {
+  const st = store();
+  const s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'beside', key:'t_2'}, {type:'select', key:'t_1'}]);
+  L.liveLayerWrite(st, s);
+  const back = L.liveLayerRead(st);
+  assert.deepEqual([...back.panes], ['t_1', 't_2']);
+  assert.equal(back.cur, 't_1');
+  const many = L.liveLayerRead(store({[L.LIVE_LAYER_KEY]:JSON.stringify({mode:'bottom', panes:['a', 'a', 'b', 'c', 'd'], cur:'zz'})}));
+  assert.deepEqual([...many.panes], ['a', 'b', 'c'], 'twice is once, four is three');
+  assert.equal(many.cur, 'a', 'an unknown selection falls back to the first pane');
+});
+
+test('panes fold pin and place into More when narrow, on the right with more than one, and on a phone', () => {
+  assert.equal(L.liveLayerNarrow('bottom', 1, 1040, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 2, 1040, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 3, 1040, false), true);
+  assert.equal(L.liveLayerNarrow('bottom', 3, 1680, false), false);
+  assert.equal(L.liveLayerNarrow('right', 2, 760, false), true);
+  assert.equal(L.liveLayerNarrow('right', 1, 760, false), false);
+  assert.equal(L.liveLayerNarrow('bottom', 1, 390, true), true);
+});
+
+test('panes sit in the order of the bar; a session not in the bar stays last', () => {
+  const s = run(L.liveLayerFresh(), [{type:'open', key:'t_3'}, {type:'beside', key:'t_x'}, {type:'beside', key:'t_1'}]);
+  const sorted = L.liveLayerSort(s, ['t_1', 't_2', 't_3']);
+  assert.deepEqual([...sorted.panes], ['t_1', 't_3', 't_x']);
+  assert.equal(sorted.cur, 't_1', 'the selection stays on its session');
+  assert.equal(L.liveLayerSort(sorted, ['t_1', 't_2', 't_3']), sorted, 'already in order: the same model');
 });
 
 test('the layer names no add-on and builds no inline style', () => {
