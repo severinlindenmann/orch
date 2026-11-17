@@ -303,3 +303,15 @@ def test_two_human_items_are_two_ids_for_the_host_but_one_ticket(proj, run, new_
     tickets.ask_for_changes(proj, tid, "Blue please", "human:lume")
     code, out, _ = run("run", "status", tid, "--json")
     assert code == 0 and len(json.loads(out)["human_pending_ids"]) == 2
+
+
+def test_changes_asked_shows_after_send_back_and_clears_when_worked(proj, new_ticket):
+    """ORCH-295: after Send back the ticket says Changes asked; finishing the task (or a task set aside) clears it."""
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "review", "human:lume")
+    assert tickets.status_word(tickets.load(proj, tid)) == "Review"
+    t = tickets.ask_for_changes(proj, tid, "Make the header blue", "human:lume")
+    assert tickets.changes_asked(t) and tickets.status_word(t) == "Changes asked"
+    done = dict(t, checklist=[dict(c, done=True) for c in t["checklist"]])
+    assert not tickets.changes_asked(done) and tickets.status_word(done) == "Ready"
+    assert tickets.status_word(dict(t, status="review")) == "Review"  # only while it waits to be worked
