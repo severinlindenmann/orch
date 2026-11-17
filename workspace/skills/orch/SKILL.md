@@ -42,9 +42,10 @@ ask; its list replaces the one above.
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
-    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" [--owner <name>] [--due YYYY-MM-DD]
+    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> [--owner <name>] [--due YYYY-MM-DD]
                                         # a NEW ticket, first thing, no asking: fix typos, short clear title, a description and a
-                                        # done-when line from the person's note (kept when they wrote one); owner / due only where
+                                        # done-when line from the person's note (kept when they wrote one); your estimate of the
+                                        # helper time and cost at list price for the whole ticket; owner / due only where
                                         # their text says them (their title stays in the history)
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
@@ -56,7 +57,8 @@ In a live session, when you see `New input on orch ticket <id>` or `Your task fo
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
 Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, reminds a helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
-The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes, or a part of Done when that no task covers, stay in Review with one line why; `--dry-run` only says it. What it accepted: `orch review accepted [--since yesterday]`.
+The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes, or a part of Done when that no task covers, stay in Review with one line why; `--dry-run` only says it. When the person also turned on `workflow.reviewer_answers`, the same pass answers a plain question for them with your recommended option after 30 minutes, unless it names concept, words, look, money, production or something that cannot be undone; so recommend the option you would pick. What it accepted and answered: `orch review accepted [--since yesterday]`.
+Its second look (only when the person also turned on `workflow.reviewer_look`): bigger work it leaves waits in line, and one helper on the small model checks each Done-when part and the pictures, then decides each ticket with `orch review verdict <ticket> accept|back|leave "<one line>" --point "<point>: shown"` (only for tickets in that line; never for your own ticket).
 Releases (for a script that repeats, only when the person turned on `workflow.release_merge` in Settings): a release Merge card made with `orch ask ... --merge --release` is merged for the person by `orch review tend-releases` once every check of its pull request is green; otherwise the person clicks Merge. `--dry-run` only says it.
 
 **Finish a step**
@@ -119,8 +121,9 @@ To keep a text file or picture with a ticket yourself: `orch ticket attach <id> 
 
 **The work needs a bigger model**
 
-orch starts most tickets on Sonnet and hard ones (design, security, a migration, a crash or
-flaky test, part of a bigger plan) on Opus. When your plan shows design, security or several parts, or you
+orch starts a ticket on Opus unless it is clearly a small, mechanical fix (a typo, a word, a label, one
+line), which starts on Sonnet; design, look, layout, concept, security and feature work always start on
+Opus, and the ticket shows in one line why. When your plan shows design, security or several parts, or you
 failed twice at the same problem, move the ticket up; one history line says why:
 
     orch ticket model <id> up --why "<what makes it hard, a few plain words>"
@@ -185,6 +188,13 @@ orch only records the wait. An add-on may wake the ticket when it is due; if non
     orch ticket order <lane> <id> <id> ...       # the order of tickets inside one board lane (todo, backlog ...), first to last
 
 Read the parent first, work only in yours, keep it at most 3 levels deep. Close the sub-tickets before the parent.
+
+**Tidy the tickets** (triage)
+
+    orch triage [--lanes backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded]   # read-only list of what needs a look
+    orch triage --start [--lanes ...]   # one dated Triage ticket with that list, and one helper on it (never two at once)
+
+On a Triage ticket, follow its note: change tickets yourself, one 'Triage:' line on each, every change in the summary.
 
 **Plan big work**
 

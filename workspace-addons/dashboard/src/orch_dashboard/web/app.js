@@ -359,7 +359,7 @@ function render(arrived = new Set()) {
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
     const ages = array(state.tickets).filter(t => t.status !== 'done' && questions(t).length).map(t => Date.parse(t.updated_at)).filter(Number.isFinite);
     const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · longest wait ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
-    wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
+    wait.hidden = !line; if (wait.textContent !== line) { wait.textContent = line; wait.title = line; }
   }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
   const buildMark = document.getElementById('topbar-build');
@@ -547,9 +547,17 @@ async function refresh() {
   const version = mutation;
   const connection = document.getElementById('connection');
   try {
-    const res = await fetch('/api/state', {cache:'no-store'});
+    // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
+    const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
     const next = await res.json();
+    if (next.unchanged && state) {
+      if (writing || version !== mutation) { refreshAgain = true; return; }
+      connection.hidden = true;
+      lastOk = Date.now();
+      paintUpdated();
+      return;
+    }
     if (writing || version !== mutation) { refreshAgain = true; return; }
     connection.hidden = true;
     lastOk = Date.now();
@@ -616,12 +624,23 @@ function setMenu(open) {
   if (open && more) window.scrollTo(0, 0);
 }
 toggle.addEventListener('click', () => setMenu(toggle.getAttribute('aria-expanded') !== 'true'));
+// The open phone menu covers the page: going anywhere (a bottom-bar tab, a link, the back button) closes it.
+document.addEventListener('click', event => { if (event.target.closest?.('#tabbar a')) setMenu(false); });
 document.querySelector('.sidebar').addEventListener('click', event => {
   const helper = event.target.closest('[data-nav="open-agent"]');
   if (!event.target.closest('a') && !helper) return;
   setMenu(false);
   if (helper) chatOpenAgent();
 });
+// The icon rail (721-1279 px) lets its list stick out for the hover labels; on a short screen (150% zoom) that list ran
+// under the foot (report r-1117-1256-ws-2). Mark it .cramped while it does not fit: then it scrolls (master CSS).
+const sideScroll = document.querySelector('.sidebar-scroll');
+if (sideScroll && window.ResizeObserver) {
+  const fit = () => sideScroll.classList.toggle('cramped', sideScroll.scrollHeight > sideScroll.clientHeight + 1);
+  const watch = new ResizeObserver(fit);
+  watch.observe(sideScroll);
+  for (const part of sideScroll.children) watch.observe(part);
+}
 // Phone bottom bar (ORCH-73, master UI.tabbar): Home, Tickets, Review with the one needs-you number, More = the side menu.
 // Shown only up to 720 px (master CSS); the top bar comes back while the side menu is open.
 function paintTabbar(here, needCount, needsWords) {
@@ -676,19 +695,19 @@ main.addEventListener('change', async event => {
   if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
   const most = event.target.closest('[data-key="settings-live-max"]');
   if (most) {
-    if (snapshot || settingsBusy.has('live')) return;
+    if (snapshot) return;
     const v = most.value === 'none' ? null : Number(most.value);
-    const result = await settingsSend('live.set', {max:v}, 'live');
-    if (result.ok) window.orch.toast(v ? 'Up to ' + v + ' helpers at once.' : 'No limit: any number of helpers at once.', 'ok');
+    const result = await settingsChoose('live', v, () => settingsSend('live.set', {max:v}, 'live'));
+    if (result?.ok) window.orch.toast(v ? 'Up to ' + v + ' helpers at once.' : 'No limit: any number of helpers at once.', 'ok');
     return;
   }
   const perm = event.target.closest('[data-settings-permissions]');
   if (perm) {
-    if (snapshot || settingsBusy.has('permissions')) return;
+    if (snapshot) return;
     const mode = perm.dataset.settingsPermissions;
     const send = async () => {
-      const result = await settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions');
-      if (result.ok) window.orch.toast('Saved. New helper runs use ' + capitalise(mode) + '.', 'ok');
+      const result = await settingsChoose('permissions', mode, () => settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions'));
+      if (result?.ok) window.orch.toast('Saved. New helper runs use ' + capitalise(mode) + '.', 'ok');
     };
     if (mode !== 'full') { await send(); return; }
     perm.checked = false;  // stays on the old choice until the person says Yes
@@ -901,6 +920,7 @@ main.addEventListener('click', async event => {
   }
 });
 window.addEventListener('hashchange', async () => {
+  if (document.querySelector('.sidebar')?.dataset.open === 'true') setMenu(false);
   for (const d of document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
 });

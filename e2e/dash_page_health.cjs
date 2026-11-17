@@ -1,8 +1,12 @@
-// Page health (ORCH-80): every main dashboard page at 1280, 1920 and 390 px, on fake data, before a release.
+// Page health (ORCH-80): every main dashboard page at 1280, 1920, 390 and 320 px and at 150% zoom (960x600), on fake
+// data, before a release.
 // The same checks the daily Dashboard tester role runs on the real workspace: no page error, the page shows its
 // content (the loading shape goes away), nothing scrolls sideways at phone width, no button or link is cut off at
 // the right edge, no word from the never-list (docs/wording.md) on buttons, tabs, headings or labels, and no program
-// value (undefined, NaN, null, [object Object]) in the page text.
+// value (undefined, NaN, null, [object Object]) in the page text. At phone width the open menu (More) is checked too:
+// top-bar items do not overlap and every menu row can be scrolled above the bottom bar; at 150% zoom the icon rail
+// does not draw its list under its foot (report r-1117-1256-ws-2). The state is the crowded case: a development build,
+// phone mode on, a full add-on list and a result with a Done-when part that has no task.
 // Real dashboard web files in Chromium (own browser, mock keychain), every request answered in memory.
 // usage: [PW_DIR=..] [SHOTS_DIR=..] node --test e2e/dash_page_health.cjs
 const test = require('node:test');
@@ -21,7 +25,9 @@ const VIEW = path.join(__dirname, '..', 'contracts', 'examples', 'addon-view', '
 const BASE = 'http://dash.test';
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
-const WIDTHS = [{name: 'desktop', width: 1280, height: 800}, {name: 'wide', width: 1920, height: 1080}, {name: 'phone', width: 390, height: 844}];
+const WIDTHS = [{name: 'desktop', width: 1280, height: 800}, {name: 'wide', width: 1920, height: 1080}, {name: 'phone', width: 390, height: 844},
+  {name: 'small phone', width: 320, height: 700}, {name: 'zoom 150%', width: 960, height: 600}];
+const PHONE = vp => vp.width <= 720;
 // The never-list comes from its one source, docs/wording.md (last column of the table). Entries that only make sense
 // in a sentence (with a note in brackets, quotes or a placeholder) are left to the wording test in brand/.
 const WORDING = path.join(__dirname, '..', 'docs', 'wording.md');
@@ -66,6 +72,35 @@ function look({never, leak}) {
   return out;
 }
 
+// Runs in the page with the phone menu open: overlapping top-bar items, menu rows the bottom bar keeps covering.
+function menuLook() {
+  const shown = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const out = {overlap: [], covered: [], sideways: document.documentElement.scrollWidth - window.innerWidth};
+  const top = [...document.querySelectorAll('.topbar > *, .topbar-actions > *')].filter(e => !e.matches('.topbar-actions') && shown(e));
+  for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) {
+    const a = top[i].getBoundingClientRect(), b = top[j].getBoundingClientRect();
+    if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1)
+      out.overlap.push((top[i].innerText || top[i].getAttribute('aria-label') || top[i].id).trim().slice(0, 30) + ' / ' + (top[j].innerText || top[j].getAttribute('aria-label') || top[j].id).trim().slice(0, 30));
+  }
+  window.scrollTo(0, document.documentElement.scrollHeight);
+  const bar = document.getElementById('tabbar')?.getBoundingClientRect().top ?? window.innerHeight;
+  for (const el of document.querySelectorAll('.sidebar[data-open=true] :is(a.nav-item, summary.nav-item, .mm-toggle, .person-switch)')) {
+    if (shown(el) && el.getBoundingClientRect().bottom > bar + 1) out.covered.push((el.innerText || el.getAttribute('aria-label') || '').trim().slice(0, 30));
+  }
+  window.scrollTo(0, 0);
+  return out;
+}
+
+// Runs in the page at 150% zoom: the rail list must end above its foot, or scroll.
+function railLook() {
+  const list = document.querySelector('.sidebar-scroll'), foot = document.querySelector('.side-foot');
+  if (!list || !foot || !foot.getClientRects().length) return {under: []};
+  const scrolls = ['auto', 'scroll'].includes(getComputedStyle(list).overflowY);
+  const top = foot.getBoundingClientRect().top;
+  const under = scrolls ? [] : [...list.querySelectorAll('.nav-item')].filter(e => e.getClientRects().length && e.getBoundingClientRect().bottom > top + 1).map(e => e.getAttribute('aria-label') || e.innerText.trim());
+  return {under};
+}
+
 test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}, async () => {
   const {chromium} = require(path.join(PW, 'playwright'));
   fs.mkdirSync(OUT, {recursive: true});
@@ -73,6 +108,13 @@ test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}
   const state = JSON.parse(fs.readFileSync(FIX, 'utf8'));
   delete state._note; delete state.chat_activity; delete state.act_answer;
   state.addons.push({name: 'lessons', dashboard: {label: 'Lessons', icon: 'book', order: 50, title: 'Lessons', subtitle: 'What your helpers learned.'}});
+  // the crowded case of report r-1117-1256-ws-2: every add-on in the menu, the build badge, phone mode on, an uncovered Done-when part
+  for (const [name, icon] of [['contacts', 'phone'], ['factory', 'pen'], ['focus', 'target'], ['insights', 'chart'], ['sync', 'cloud'], ['publish', 'link']])
+    state.addons.push({name, dashboard: name === 'contacts' ? {label: 'Contacts', icon, panel: 'phone'} : {label: name[0].toUpperCase() + name.slice(1), icon}});
+  state.build = 'development';
+  state.mobile_mode = {...state.mobile_mode, on: true, ends_at: new Date(Date.now() + 3 * 3600e3).toISOString()};
+  const result = state.tickets.find(t => t.status === 'review');
+  result.proof = {...(result.proof || {}), uncovered: ['The owner has approved the result']};
   const never = neverList();
   assert.ok(never.length > 20, 'never-list read from docs/wording.md');
   const problems = [];
@@ -108,13 +150,26 @@ test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}
           return m && !m.querySelector('.skeleton-page[aria-busy="true"]') && m.innerText.trim().length > 20;
         }, null, {timeout: 15_000}).then(() => true, () => false);
         await page.waitForTimeout(300);
-        await page.screenshot({path: path.join(OUT, `${vp.name}-${hash.replace(/\W+/g, '-').replace(/^-/, '')}.png`)});
+        await page.screenshot({path: path.join(OUT, `${vp.name.replace(/\W+/g, "-")}-${hash.replace(/\W+/g, '-').replace(/^-/, '')}.png`)});
         if (!ready) { problems.push(`${vp.name} ${hash}: shows nothing within 15 s`); continue; }
         const o = await page.evaluate(look, {never, leak: LEAK});
-        if (vp.name === 'phone' && o.sideways > 4) problems.push(`${vp.name} ${hash}: scrolls sideways (${o.sideways} px too wide)`);
+        if (PHONE(vp) && o.sideways > 4) problems.push(`${vp.name} ${hash}: scrolls sideways (${o.sideways} px too wide)`);
         for (const c of o.cut) problems.push(`${vp.name} ${hash}: cut off at the right edge: ${c}`);
         for (const w of o.words) problems.push(`${vp.name} ${hash}: never-list word ${w}`);
         for (const l of o.leaks) problems.push(`${vp.name} ${hash}: program value on screen: ${l}`);
+        if (vp.name === 'zoom 150%') for (const n of (await page.evaluate(railLook)).under) problems.push(`${vp.name} ${hash}: menu item under the menu foot: ${n}`);
+        if (PHONE(vp) && hash === '#home') {
+          await page.click('#tabbar [data-tab="more"]');
+          await page.waitForTimeout(300);
+          await page.screenshot({path: path.join(OUT, `${vp.name.replace(/\W+/g, '-')}-menu.png`)});
+          const m = await page.evaluate(menuLook);
+          if (m.sideways > 4) problems.push(`${vp.name} menu: scrolls sideways (${m.sideways} px too wide)`);
+          for (const x of m.overlap) problems.push(`${vp.name} menu: top-bar items overlap: ${x}`);
+          for (const x of m.covered) problems.push(`${vp.name} menu: behind the bottom bar: ${x}`);
+          const report = await page.locator('#report-problem').isVisible();
+          if (!report) problems.push(`${vp.name} menu: no Report a problem`);
+          await page.click('#tabbar [data-tab="more"]');
+        }
       }
       await context.close();
     }
