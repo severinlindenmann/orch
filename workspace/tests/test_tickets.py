@@ -785,8 +785,8 @@ def test_every_apply_op_call_names_its_actor():
 
 
 def test_proof_state_reworded_done_when_matches_task_text_loosely():
-    done_when = "With 20 queued tickets and no limit set, helpers start in steps. Usage belongs to another ticket."
+    done_when = "With 20 queued tickets and no limit set, helpers start in steps. Usage belongs elsewhere."
     c = _c("c1")
     c["text"] = "Add a test: 20 queued tickets, no limit set, helpers start in steps"
     ps = tickets.proof_state(_t([c], done_when=done_when))
-    assert ps["uncovered"] == ["Usage belongs to another ticket."]
+    assert ps["uncovered"] == ["Usage belongs elsewhere."]

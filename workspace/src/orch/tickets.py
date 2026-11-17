@@ -986,7 +986,9 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
     if isinstance(done_when, str) and done_when.strip():
         parts = done_when_parts(done_when)
         texts = [c["text"] for c in items if isinstance(c.get("text"), str) and not c.get("wont_do")]
-        uncovered = [p for p in parts if not any(_covered(p, c) for c in covers) and not _loosely_named(p, texts)]
+        uncovered = [
+            p for p in parts if not any(_covered(p, c) for c in covers) and not _loosely_named(p, texts)
+        ]
         if not parts and not covers:
             uncovered = ["Done when isn't linked to tasks"]
     n = {k: list(per.values()).count(k) for k in ("passed", "failed", "changed", "note")}
