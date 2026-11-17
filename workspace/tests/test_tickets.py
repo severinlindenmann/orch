@@ -782,3 +782,11 @@ def test_every_apply_op_call_names_its_actor():
             if name == "apply_op" and not any(k.arg == "by" for k in n.keywords):
                 missing.append(f"{f.relative_to(repo)}:{n.lineno}")
     assert not missing, f"apply_op without by=: {missing}"
+
+
+def test_proof_state_reworded_done_when_matches_task_text_loosely():
+    done_when = "With 20 queued tickets and no limit set, helpers start in steps. Usage belongs to another ticket."
+    c = _c("c1")
+    c["text"] = "Add a test: 20 queued tickets, no limit set, helpers start in steps"
+    ps = tickets.proof_state(_t([c], done_when=done_when))
+    assert ps["uncovered"] == ["Usage belongs to another ticket."]
