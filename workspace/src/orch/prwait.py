@@ -463,6 +463,9 @@ def run_one(
     if done.returncode != 0:
         why = next((x.strip() for x in (done.stderr or done.stdout).splitlines() if x.strip()), "no reason")
         ghlimit.give_back("merge", url)  # no merge happened: the place goes back
+        after = src.view()
+        if after is not None and after.get("state") == "MERGED":  # someone else merged it meanwhile
+            return Outcome(url, True, "merged", f"{url} was merged meanwhile (not by this wait).", verdict)
         line = f"Checks of {url} passed but GitHub did not merge it ({case}): {why[:200]}"
         return Outcome(url, False, "checks passed", line, verdict)
     took = f"; {base} taken in {rounds}x first" if rounds else ""

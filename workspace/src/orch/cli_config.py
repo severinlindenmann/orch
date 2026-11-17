@@ -25,6 +25,7 @@ from orch import (
     nextstep,
     report_tickets,
     tickets,
+    unblock,
 )
 from orch.errors import Refused
 
@@ -53,6 +54,9 @@ KEYS = (
     *ghlimit.SETTING_KEYS,
     "github.dev_expert",
     "github.dev_expert_repo",
+    "github.unblock",
+    "github.unblock_merge",
+    "github.unblock_bases",
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
@@ -306,6 +310,9 @@ def _config(args, root: Path) -> None:
             **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
             "github.dev_expert": lambda: devexpert.role(root),
             "github.dev_expert_repo": lambda: devexpert.repo(root),
+            "github.unblock": lambda: unblock.role(root),
+            "github.unblock_merge": lambda: "on" if unblock.merge_on(root) else "off",
+            "github.unblock_bases": lambda: ",".join(unblock.bases(root)),
         }
         if args.key:
             key = args.key
@@ -339,6 +346,23 @@ def _config(args, root: Path) -> None:
             {args.key: v},
             f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
         )
+    elif args.sub == "set" and args.key == "github.unblock":
+        v = unblock.set_role(root, args.value)
+        _out(
+            args, {args.key: v}, f"The Merge unblocker writes to {v}." if v else "The Merge unblocker is off."
+        )
+    elif args.sub == "set" and args.key == "github.unblock_merge":
+        on = unblock.set_merge(root, args.value)
+        _out(
+            args,
+            {args.key: "on" if on else "off"},
+            "The Merge unblocker merges stuck green pull requests."
+            if on
+            else "The Merge unblocker only reports.",
+        )
+    elif args.sub == "set" and args.key == "github.unblock_bases":
+        v = unblock.set_bases(root, args.value)
+        _out(args, {args.key: ",".join(v)}, "The Merge unblocker merges into: " + ", ".join(v) + ".")
     elif args.sub == "set" and args.if_current is not None:
         raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
