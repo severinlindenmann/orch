@@ -4,17 +4,18 @@
   var KEY = 'orch-focus-v4d-picks', IMG = '../../../../workspace/src/orch_ui/static/demo-image.svg';
   var F = [
     [1, 'Live wall', 'Focus opens on every session in bands: Pinned, Needs you, Working, In line, Idle and no session. One summary line on top; each tile says in a plain sentence what its helper does and shows its last lines live.', 'orch run list gives the signal per ticket (working, idle, waiting); the sentence comes from the helper messages, the peek from the read-only screen, refreshed every few seconds.', 'Medium', 'a new page; the data exists', { page: 'focus', view: 'wall' }],
-    [2, 'Needs you, answered in one row', 'A session that waits for you is one compact row: the question and its two answers. One click answers it.', 'The "waiting on" value of orch run list plus the open question on the ticket; the answer is sent into the session.', 'Small', 'one row and one send', { page: 'focus', view: 'wall', need: 'ORCH-238' }],
+    [2, 'Needs you is an orange tile', 'A session that waits for you is its normal tile, in orange, first after the pinned ones, with the question as its one sentence. You open it to answer; nothing is decided on the wall.', 'The "waiting on" value of orch run list plus the open question on the ticket; the answer is sent into the session.', 'Small', 'a colour and a sort order', { page: 'focus', view: 'wall', need: 'ORCH-238' }],
     [3, 'Focus button and Open ticket', 'Every ticket has one Focus button (Watch, Answer, Open or Start). Every session has Open ticket to go the other way.', 'The run signal of the ticket decides the word on the button; the session name is the ticket id.', 'Small', 'one button per ticket, one link per session', { page: 'ticket', tk: 'ORCH-189' }],
     [4, 'Continue, fresh start or an earlier session', 'Start asks one thing: continue the last conversation, make a fresh start, or reopen an earlier session from the history list.', 'The session id is kept on the ticket, so the next start resumes it. To build: orch keeps only the last session today; a history needs new storage.', 'Medium', 'history of sessions per ticket is new', { page: 'focus', view: 'zoom', cur: 'ORCH-189', need: 'ORCH-189' }],
     [5, 'Chat or real terminal', 'Chat shows plain messages with results inside. Terminal is the real screen of the helper: click it and type, select, copy and paste like in the Terminal app.', 'Every helper runs in its own tmux session. Chat is helper messages plus ticket events; no transcript exists.', 'Large', 'a terminal in the browser (xterm.js and a bridge) is new', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: true }],
-    [6, 'Sessions without a ticket', 'Empty helper, Chat helper, Plain terminal and Manager are buttons at the top of Focus and in the New menu of the bar. They are pinned by default.', 'The same per-workspace tmux socket, with a name that is not a ticket id. An empty helper is a helper started with no ticket and no task.', 'Medium', 'sessions outside the ticket limit need rules', { page: 'home', mode: 'bar', menu: 'new' }],
-    [7, 'Focus on every page, split in up to 3', 'A calm bar under every page opens Focus at the bottom, on the right or full screen, or closes it to a tab at the side. Inside, 1, 2 or 3 sessions sit next to each other.', 'Pages are separate full loads today. Cheapest honest path: soft page swaps that keep the layer; fallback: a pop-out window. Each pane attaches to its own tmux session.', 'Large', 'no layer survives a page change today', { page: 'home', mode: 'bottom', panes: ['ORCH-228', 'ORCH-232', 'Manager'], cur: 'ORCH-228', term: true }],
+    [6, 'Sessions without a ticket', 'Empty helper, Chat helper, Plain terminal and Manager are buttons at the top of Focus and in the New menu of the bar. They are pinned by default.', 'The same per-workspace tmux socket, with a name that is not a ticket id. To build: orch starts helpers only on tickets today.', 'Medium', 'sessions outside the ticket limit need rules', { page: 'home', mode: 'bar', menu: 'new' }],
+    [7, 'Focus on every page, split in up to 3', 'A calm bar under every page opens Focus at the bottom, on the right or full screen. Inside, 1, 2 or 3 sessions sit next to each other. Every pane has its own small controls: pin, add one beside, move, minimise and close.', 'Pages are separate full loads today. Cheapest honest path: soft page swaps that keep the layer; fallback: a pop-out window. Each pane attaches to its own tmux session.', 'Large', 'no layer survives a page change today', { page: 'home', mode: 'bottom', panes: ['ORCH-228', 'ORCH-232', 'Manager'], cur: 'ORCH-228', term: true }],
     [8, 'Zoom and full screen', 'Click a session and it grows into a large view. Full screen removes everything but a slim strip of the other sessions, and can be split too. Esc goes one step back.', 'Nothing new in orch: the same session, drawn bigger.', 'Small', 'layout only', { page: 'focus', view: 'zoom', cur: 'ORCH-232', term: true, full: true }],
     [9, 'Pin and name', 'Pin any session to keep it first on the wall and in the bar. Click its name to give it your own.', 'To build: a pinned flag and a display name per session, kept next to the session id.', 'Small', 'two small values to store', { page: 'focus', view: 'zoom', cur: 'Manager', ren: 'Manager' }],
-    [10, 'Result widgets with a big preview', 'Pictures, pages, tables, charts and pull requests are small reusable widgets. A click opens a big preview on top of the page, with previous and next. Anything else is a plain link with an icon.', 'Files and evidence attached to the ticket, and the links on it. The widgets would live in the style guide.', 'Medium', 'one widget and one preview per file type, built once', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: false, ov: { src: 'ORCH-228', i: 0 } }, ['See all widget types', { page: 'widgets' }]],
+    [10, 'Result widgets with a big preview', 'Every kind of result gets a small widget and a big preview on top of the page: documents, code, tables, pages, PDFs, pictures, recordings, charts, changes. The Widgets page is the proposal, one real example each.', 'Files and evidence attached to the ticket, and the links on it. The style guide already previews pictures, PDFs, pages, tables, Markdown, code, text, audio and video; charts, changes and the tree view are new.', 'Medium', 'one widget and one preview per type, built once in the style guide', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: false, ov: { src: 'ORCH-228', i: 0 } }, ['See the widget proposal', { page: 'widgets' }]],
     [11, 'Works with 20 to 30 sessions', 'The bar shows the sessions that need you and your pinned ones; everything else is a count such as "9 in line" that opens a list you can search. The wall bands collapse, scroll and filter.', 'The same run list, grouped by signal. Live places are limited (8 in this demo): the other tickets wait in line and start by themselves.', 'Small', 'grouping and a search box', { page: 'home', mode: 'bar', many: true, list: 'queue' }],
-    [12, 'Who runs it, how long, how warm', 'Every session shows its tool (Claude CLI, Codex or a plain terminal), how long it has been open and when it closes for being idle.', 'The start time and the helper kind are known per run. Idle sessions close after about an hour; the conversation is kept and can be continued.', 'Small', 'three values on the tile', { page: 'focus', view: 'zoom', cur: 'ORCH-247' }]
+    [12, 'Tool and model, seen and chosen', 'Every session shows its tool and model (Claude CLI · Opus, Codex · GPT-5), how long it has been open and when it closes for being idle. A new session or a fresh start lets you pick tool and model; the usual one is preselected, so it stays one click.', 'Today orch picks a model per ticket (the small one first) and a person can move it up. To build: choosing the tool and model at the start, and showing them per session. A change of model takes effect with a fresh start.', 'Medium', 'a choice at the start and a label per session', { page: 'home', mode: 'bar', menu: 'new' }],
+    [13, 'Files, screenshots and voice in the message box', 'Attach files, paste or drop a screenshot, and see each one as a small preview before you send. Speak instead of typing: the words land in the box for you to check and edit, never sent by themselves.', 'Attachments to a helper message exist today (the composer: paste a screenshot or drop files, up to 25 MB each). Voice needs the relay turned on, which has a speech-to-text key, so the microphone only shows then. To build and to check: recording in the browser and the text coming back.', 'Medium', 'previews before sending; voice is new', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: false, att: true, voice: 'done' }]
   ];
   var HIST = [['Yesterday 16:40', 'step 2 of 4', 'Made the sketch, then stopped'], ['12 Nov 10:15', 'step 1 of 4', 'Read the ticket and asked about the size of the job'], ['11 Nov 09:02', 'step 1 of 4', 'First try, went off track']];
   var S = [
@@ -23,7 +24,7 @@
       lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)', '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ The upload works. One thing only you can decide:', '  Keep the old file name when the same file is added twice?', '  1. Keep the old name (suggested)', '  2. Use the new name', '  Waiting for your answer…'],
       chat: [['e', 'Step 2 done: files can be dropped on a ticket', '14:21'], ['h', 'Uploading works for pictures, pages and tables. Notes sit below the files.', '14:38', 0, 0], ['h', 'One thing I need from you before I go on: when the same file is added twice, should the old name stay?', '14:52', 1]],
       files: [['img', 'ticket-files.png', 'Picture · 14:36'], ['table', 'upload-sizes.csv', 'Table · 3 rows', [['Picture', '2.1 MB'], ['Page', '48 KB'], ['Table', '12 KB']]]] },
-    { k: 'ORCH-228', t: 'Phone width and zoom', kind: 'ticket', s: 'run', tool: 'claude', up: 38, step: [4, 5], now: 'Opening the pull request.',
+    { k: 'ORCH-228', t: 'Phone width and zoom', kind: 'ticket', s: 'run', tool: 'claude', model: 'Opus', up: 38, step: [4, 5], now: 'Opening the pull request.',
       lines: ['⏺ All 3 widths pass: 1280, 1920 and 390.', '⏺ Bash(git push -u origin fix/phone-width)', '  ⎿ branch fix/phone-width set up to track origin', '⏺ Writing the pull request text.', '⏺ Bash(gh pr create --base develop --draft)', '  ⎿ Creating pull request…'],
       feed: ['  ⎿ pull request 1318 opened as a draft', '⏺ Linking the pull request to the ticket.', '  ⎿ linked', '⏺ Waiting for the checks: 3 of 12 green.', '⏺ Waiting for the checks: 7 of 12 green.', '⏺ Waiting for the checks: 11 of 12 green.'],
       chat: [['e', 'Step 3 done: the page fits a phone at 390', '14:31'], ['h', 'The Home page no longer scrolls sideways on a phone. Here is the picture.', '14:40', 0, 0], ['h', 'Opening the pull request now. I will tell you when the checks are green.', '15:02', 0, 4]],
@@ -33,7 +34,7 @@
       feed: ['  ⎿ ✔ week view adds up to the day view (17 ms)', '  ⎿ ✔ a failed call counts as failed (8 ms)', '  ⎿ ℹ tests 14 · pass 14 · fail 0', '⏺ Bash(uv run python -m pytest -q tests/test_insights.py)', '  ⎿ ......................  22 passed in 3.1s', '⏺ Tests are green. Drawing the usage chart next.', '⏺ Running the tests once more after the chart.'],
       chat: [['e', 'Step 1 done: counts are collected per day', '13:58'], ['h', 'The counts are in. I am running the tests before I draw the chart.', '15:04', 0, 0]],
       files: [['chart', 'Usage by day', 'Chart · 14 days'], ['html', 'insights-preview.html', 'Page · draft'], ['link', 'usage-raw.json', 'Link · data file']] },
-    { k: 'ORCH-247', t: 'Steer a helper from the dashboard', kind: 'ticket', s: 'idle', sl: 'Idle 18 min', tool: 'claude', up: 96, close: 42, step: [5, 5], now: 'Finished and merged. Ready for your review.',
+    { k: 'ORCH-247', t: 'Steer a helper from the dashboard', kind: 'ticket', s: 'idle', sl: 'Idle 18 min', tool: 'claude', model: 'Opus', up: 96, close: 42, step: [5, 5], now: 'Finished and merged. Ready for your review.',
       lines: ['⏺ Bash(orch ref wait ORCH-247 --merge)', '  ⎿ 12 of 12 checks green · merged', '⏺ Done. The Steer button is on the ticket page and', '  pull request 1309 is merged. Ready for your review.'],
       chat: [['e', 'Step 5 done: merged on green checks', '14:44'], ['h', 'Finished. You can try the Steer button on any working ticket.', '14:45', 0, 0]],
       files: [['pr', 'Pull request 1309', 'Merged · 12 of 12 checks green', [['State', 'Merged'], ['Checks', '12 of 12 green'], ['Changes', '9 files']]], ['img', 'steer-button.png', 'Picture · 14:30']] },
@@ -56,7 +57,7 @@
   var PAGES = { focus: 'Focus', home: 'Home', tickets: 'Tickets', ticket: 'Tickets', review: 'Review', widgets: 'Widgets' };
   var TOOL = { claude: 'Claude CLI', codex: 'Codex', shell: 'Plain terminal' };
   var NEW = [['Empty helper', 'A helper with no ticket and no task yet'], ['Chat helper', 'Ask anything, no ticket'], ['Plain terminal', 'An empty terminal in this workspace'], ['Manager', 'Looks after all helpers']];
-  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, ov: null, many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
+  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', ov: null, nt: 'claude', nm: 'Sonnet', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
   var drafts = {}, picks = {}, uid = 0, feedAt = 0;
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   try { picks = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { picks = {}; }
@@ -74,7 +75,7 @@
   function phone() { return window.innerWidth <= 720; }
   function nm(s) { return s.name || s.t; }
   function word(s) { return s.sl && (s.s === 'idle' || s.s === 'none') ? s.sl : ST[s.s][1]; }
-  function now(s) { return s.q ? 'Waits for your answer.' : (s.now || word(s)); }
+  function now(s) { return s.q ? s.q.t : (s.now || word(s)); }
   function dur(m) { return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60 ? (m % 60) + ' min' : ''); }
   function warm(s) {
     if (s.kind === 'shell') return 'stays open until you close it';
@@ -85,7 +86,7 @@
   }
   function grp(o) { return o.s === 'run' || o.s === 'open' ? 'run' : (o.s === 'queue' ? 'queue' : 'idle'); }
   function isOpen() { var m = eff(); return (m !== 'bar' && m !== 'side') || zoomed(); }
-  function shownIn(o) { return isOpen() && (zoomed() ? o.k === st.cur : st.panes.indexOf(o.k) >= 0); }
+  function shownIn(o) { return isOpen() && (zoomed() || phone() ? o.k === st.cur : st.panes.indexOf(o.k) >= 0); }
   function inChip(o) { return o.s === 'wait' || o.pin || shownIn(o); }
   function zoomed() { return st.page === 'focus' && st.view === 'zoom' && !st.full; }
   function eff() { return st.full ? 'full' : (zoomed() ? (st.mode === 'side' ? 'side' : 'bar') : (phone() && st.mode === 'right' ? 'bottom' : st.mode)); }
@@ -103,7 +104,9 @@
     prev: ic('<path d="m14 6-6 6 6 6"/>'), next: ic('<path d="m10 6 6 6-6 6"/>'),
     down: ic('<path d="m6 9 6 6 6-6"/>'), up: ic('<path d="m6 15 6-6 6 6"/>'),
     back: ic('<path d="M11 5l-7 7 7 7M4 12h16"/>'), plus: ic('<path d="M12 5v14M5 12h14"/>'), minus: ic('<path d="M5 12h14"/>'),
-    x: ic('<path d="M6 6l12 12M18 6 6 18"/>'), ext: ic('<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>'),
+    file: ic('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>'), play: ic('<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>'), wave: ic('<path d="M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4"/>'),
+    clip: ic('<path d="m20 11-8 8a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7"/>'), mic: ic('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'), stop: ic('<rect x="7" y="7" width="10" height="10" rx="1"/>'),
+    x: ic('<path d="M6 6l12 12M18 6 6 18"/>'), more: ic('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'), ext: ic('<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>'),
     claude: ic('<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/>'), codex: ic('<path d="m8 7-5 5 5 5m8-10 5 5-5 5"/>'), shell: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m5 0h5"/>'),
     img: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 4 4 2-2 3 3"/>'),
     html: ic('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>'),
@@ -117,29 +120,112 @@
     html: '<svg viewBox="0 0 120 72" preserveAspectRatio="xMidYMin slice" aria-hidden="true"><rect class="mw-f0" width="120" height="72" rx="4"/><rect class="mw-f5" width="120" height="22" rx="4"/><rect class="mw-f2" x="10" y="8" width="46" height="6" rx="2"/><rect class="mw-f1" x="10" y="30" width="100" height="5" rx="2"/><rect class="mw-f1" x="10" y="40" width="84" height="5" rx="2"/><rect class="mw-f1" x="10" y="50" width="92" height="5" rx="2"/><rect class="mw-f3" x="10" y="60" width="30" height="6" rx="2"/></svg>',
     chart: '<svg viewBox="0 0 120 72" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><rect class="mw-f0" width="120" height="72" rx="4"/><path class="mw-l1" d="M10 62h100"/><rect class="mw-f3" x="14" y="40" width="12" height="22" rx="2"/><rect class="mw-f3" x="32" y="30" width="12" height="32" rx="2"/><rect class="mw-f3" x="50" y="36" width="12" height="26" rx="2"/><rect class="mw-f3" x="68" y="18" width="12" height="44" rx="2"/><rect class="mw-f2" x="86" y="10" width="12" height="52" rx="2"/></svg>'
   };
+  var BL = 0; /* how far the bar is folded: 0 all chips, 1 pinned as a count, 2 counts as More, 3 symbols and counts only */
   var GRP = { run: ['●', 'working', 'Working'], queue: ['◷', 'in line', 'In line'], idle: ['◐', 'idle', 'Idle'] };
-  var KIND = { img: 'picture', html: 'page', table: 'table', chart: 'chart', pr: 'pull request', link: 'link' };
-  function tool(s) { var t = s.kind === 'shell' ? 'shell' : (s.tool || 'claude'); return '<span class="mw-tool">' + I[t] + TOOL[t] + '</span>'; }
-  function meta(s) { return '<span class="mw-meta meta">' + tool(s) + (live(s) && s.up !== undefined ? '<span>open ' + dur(s.up) + '</span>' : '') + '<span>' + warm(s) + '</span></span>'; }
+  var MODELS = { claude: ['Opus', 'Sonnet', 'Haiku', 'Fable'], codex: ['GPT-5', 'GPT-5 mini'] };
+  var KIND = { file: 'file', img: 'picture', html: 'page', table: 'table', chart: 'chart', pr: 'pull request', link: 'link' };
+  function mdl(s) { return s.model || (s.tool === 'codex' ? 'GPT-5' : 'Sonnet'); }
+  function tlabel(s) { return s.kind === 'shell' ? TOOL.shell : TOOL[s.tool || 'claude'] + ' · ' + mdl(s); }
+  function tool(s) { var t = s.kind === 'shell' ? 'shell' : (s.tool || 'claude'); return '<span class="mw-tool">' + I[t] + tlabel(s) + '</span>'; }
+  /* tool and model for a new session or a fresh start: the usual choice is preselected, so starting stays one click */
+  function pickHTML() {
+    var sg = function (label, list, cur, act, name) { return '<span class="segmented" role="group" aria-label="' + label + '">' + list.map(function (x) { return btn('btn sm', act, name ? name(x) : x, { 'data-v': x, 'aria-pressed': String(cur === x) }); }).join('') + '</span>'; };
+    return '<div class="mw-pick" role="group" aria-label="Runs on"><span class="mw-bl">Runs on</span>' + sg('Tool', ['claude', 'codex'], st.nt, 'ntool', function (x) { return TOOL[x]; }) + sg('Model', MODELS[st.nt], st.nm, 'nmodel') + mk(12) + '</div>';
+  }
+  function meta(s, bare) { return '<span class="mw-meta meta">' + (bare ? '' : tool(s)) + (live(s) && s.up !== undefined ? '<span>open ' + dur(s.up) + '</span>' : '') + '<span>' + warm(s) + '</span></span>'; }
 
   /* ---------- result widgets: one per type, a plain link for the rest (would live in the style guide) ---------- */
-  function files(src) { return src === '*' ? SAMPLES : (by(src).files || []); }
-  function kv(rows) { return '<span class="mw-kv">' + rows.map(function (r) { return '<span>' + esc(r[0]) + '</span><span>' + esc(r[1]) + '</span>'; }).join('') + '</span>'; }
+  var WG = [
+    ['md', 'Markdown', '.md', 'release-notes.md', 'Document · 38 lines', 'Rendered headings and the first lines', 'The whole document, rendered, with Show source', 'yes'],
+    ['txt', 'Text and logs', '.txt .log', 'test-run.log', 'Log · 214 lines', 'The last lines, in a fixed-width font', 'The whole text, wrapped, with search', 'yes'],
+    ['code', 'Code', '.py .js .ts .sh .css', 'attach.py', 'Code · 64 lines', 'A few highlighted lines with line numbers', 'The whole file, highlighted, with line numbers and Copy', 'yes'],
+    ['json', 'JSON and YAML', '.json .yaml', 'settings.json', 'Data · 3 keys', 'A tree you can fold, with counts', 'The whole tree, every branch can fold; Show source', 'check'],
+    ['table', 'Table', '.csv .xlsx', 'price-list.csv', 'Table · 3 columns · 12 rows', 'The first rows and the column count', 'All rows, sticky header, pick columns', 'yes'],
+    ['html', 'Web page', '.html', 'phone-widths.html', 'Page · before and after', 'A small live preview', 'The page itself, shut off from the dashboard, with Open in a new tab', 'yes'],
+    ['pdf', 'PDF', '.pdf', 'offer-acme.pdf', 'PDF · 4 pages', 'The first page and the page count', 'All pages to scroll, with Download', 'yes'],
+    ['img', 'Picture', '.png .jpg .svg .gif', 'home-390.png', 'Picture · 390 × 844', 'A thumbnail', 'The picture, fit or full size', 'yes'],
+    ['video', 'Video and recording', '.mp4 .webm', 'walkthrough.mp4', 'Video · 0:42', 'A still picture with the length', 'A player with normal controls, no autoplay', 'yes'],
+    ['audio', 'Audio', '.mp3 .wav', 'voice-note.mp3', 'Audio · 1:15', 'A wave line with the length', 'A player; the words as text when there is a transcript', 'yes'],
+    ['chart', 'Chart', 'numbers from a result', 'Usage by day', 'Chart · 14 days', 'Bars or a line', 'The chart large, with the numbers as a table below', 'new'],
+    ['change', 'Change', '.diff and pull requests', 'Phone width fix', 'Change · 6 files', 'Files changed, lines added and removed, checks', 'File by file: what was added and removed', 'check'],
+    ['prl', 'Pull request or issue link', 'links to GitHub', 'Pull request 1318', 'Draft · 3 of 12 checks green', 'Its state and the checks', 'State, checks one by one, and the link', 'new'],
+    ['zip', 'Archive', '.zip', 'export-november.zip', 'Archive · 14 files', 'How many files and the first names', 'The list of files with sizes, with Download', 'check'],
+    ['link', 'Plain link', 'any address', 'Notes on phone widths', 'wiki.example.com/phone-widths', 'An icon, the title and the address; no widget', 'No preview: it opens in a new tab', 'yes'],
+    ['unknown', 'Unknown file', 'anything else', 'layout-v3.sketch', 'File · 4.2 MB', 'An icon, the name and the size', 'A plain sentence that it cannot be shown, with Download', 'yes']
+  ];
+  var WI = { table: 'table', html: 'html', img: 'img', chart: 'chart', change: 'pr', prl: 'pr', link: 'link', video: 'play', audio: 'wave' };
+  var WHAVE = { yes: 'In the style guide preview today', check: 'To check', 'new': 'New' };
+  var PDF = '<svg viewBox="0 0 120 72" preserveAspectRatio="xMidYMin slice" aria-hidden="true"><rect class="mw-f0" width="120" height="72" rx="4"/><rect class="mw-fp" x="34" y="6" width="52" height="66"/><rect class="mw-f2" x="40" y="13" width="26" height="4"/><rect class="mw-fi" x="40" y="23" width="40" height="2"/><rect class="mw-fi" x="40" y="29" width="36" height="2"/><rect class="mw-fi" x="40" y="35" width="40" height="2"/><rect class="mw-fi" x="40" y="45" width="24" height="2"/><rect class="mw-fi" x="40" y="51" width="40" height="2"/><rect class="mw-fi" x="40" y="57" width="32" height="2"/></svg>';
+  var VID = '<svg viewBox="0 0 120 72" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect class="mw-f0" width="120" height="72" rx="4"/><rect class="mw-f1" x="8" y="10" width="46" height="52" rx="3"/><rect class="mw-f1" x="60" y="10" width="52" height="24" rx="3"/><rect class="mw-f1" x="60" y="38" width="52" height="24" rx="3"/><circle class="mw-f5" cx="60" cy="36" r="13"/><path class="mw-f2" d="m56 29 12 7-12 7z"/></svg>';
+  var WAV = '<svg viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"><rect class="mw-f0" width="120" height="36" rx="4"/><path class="mw-lw" d="M8 18v0M12 14v8M16 10v16M20 15v6M24 8v20M28 13v10M32 16v4M36 9v18M40 12v12M44 15v6M48 6v24M52 11v14M56 16v4M60 13v10M64 8v20M68 14v8M72 16v4M76 10v16M80 13v10M84 15v6M88 9v18M92 14v8M96 16v4M100 12v12M104 15v6M108 17v2"/></svg>';
+  function ln(n, h) { return '<span class="mw-cl2"><i>' + n + '</i>' + h + '</span>'; }
+  var CODE = [ln(12, '<span class="tok-keyword">def</span> <span class="tok-func">keep_name</span>(old, new):'), ln(13, '    <span class="tok-comment"># the first name stays, links keep working</span>'), ln(14, '    <span class="tok-keyword">if</span> old.name == new.name:'), ln(15, '        <span class="tok-keyword">return</span> old.name'), ln(16, '    <span class="tok-keyword">return</span> <span class="tok-func">unique</span>(new.name)'), ln(17, ''), ln(18, '<span class="tok-keyword">def</span> <span class="tok-func">unique</span>(name):'), ln(19, '    stem, ext = <span class="tok-func">split</span>(name)'), ln(20, '    <span class="tok-keyword">return</span> <span class="tok-string">f"{stem}-2{ext}"</span>')];
+  var LOG = ['15:04:02 ✔ counts skills per day (41 ms)', '15:04:02 ✔ counts keys that were never used (9 ms)', '15:04:03 ✔ empty workspace shows zero, not an error (6 ms)', '15:04:03 ✔ week view adds up to the day view (17 ms)', '15:04:03 ℹ tests 14 · pass 14 · fail 0'];
+  var PRICES = [['Plan', 'Per month', 'Per year'], ['Starter', '19', '190'], ['Team', '49', '490'], ['Company', '129', '1290'], ['Extra seat', '9', '90']];
+  var CHG = [['dashboard/static/home.css', '+48', '−12'], ['dashboard/static/shell.css', '+31', '−9'], ['dashboard/pages/home.js', '+22', '−14'], ['tests/test_phone_width.py', '+23', '−3']];
+  var ZIP = [['tickets.csv', '48 KB'], ['files/home-390.png', '212 KB'], ['files/offer-acme.pdf', '1.1 MB'], ['files/release-notes.md', '3 KB']];
+  function grid(rows, head) { return '<span class="mw-gr" data-c="' + rows[0].length + '">' + rows.map(function (r, i) { return r.map(function (c) { return '<span' + (head && !i ? ' class="mw-gh"' : '') + '>' + esc(c) + '</span> '; }).join(''); }).join('') + '</span>'; }
+  function tbl(rows, cap, head) { return '<table class="mw-rx mw-ovtable"><caption class="sr-only">' + esc(cap) + '</caption>' + (head ? '<thead><tr>' + rows[0].map(function (c) { return '<th scope="col">' + esc(c) + '</th>'; }).join('') + '</tr></thead>' : '') + '<tbody>' + rows.slice(head ? 1 : 0).map(function (r) { return '<tr>' + r.map(function (c, i) { return i ? '<td>' + esc(c) + '</td>' : '<th scope="row">' + esc(c) + '</th>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>'; }
+  /* the small card of a proposed widget (inside a button: spans only) */
+  function wsmall(id) {
+    if (id === 'md') return '<span class="mw-md"><b>Release notes, week 46</b><span>• Phone pages no longer scroll sideways</span><span>• Files and notes can be added to a ticket</span></span>';
+    if (id === 'txt') return '<span class="mw-mono">' + LOG.slice(-3).map(esc).join('\n') + '</span>';
+    if (id === 'code') return '<span class="mw-mono">' + CODE.slice(0, 4).join('') + '</span>';
+    if (id === 'json') return '<span class="mw-tree"><span>▸ widths <i>3 items</i></span><span>▸ limits <i>2 keys</i></span><span>theme <i>"dark"</i></span></span>';
+    if (id === 'table') return grid(PRICES.slice(0, 4), true);
+    if (id === 'html') return '<span class="mw-thumb">' + TH.html + '</span>';
+    if (id === 'pdf') return '<span class="mw-thumb">' + PDF + '</span>';
+    if (id === 'img') return '<span class="mw-thumb">' + TH.img + '</span>';
+    if (id === 'video') return '<span class="mw-thumb">' + VID + '</span>';
+    if (id === 'audio') return '<span class="mw-thumb mw-wave">' + WAV + '</span>';
+    if (id === 'chart') return '<span class="mw-thumb">' + TH.chart + '</span>';
+    if (id === 'change') return kv([['Files', '6 changed'], ['Lines', '+124 added, −38 removed'], ['Checks', '3 of 12 green']]);
+    if (id === 'prl') return kv([['State', 'Draft'], ['Checks', '3 of 12 green']]);
+    if (id === 'zip') return kv(ZIP.slice(0, 2).concat([['and 12 more', '']]));
+    return '<span class="meta">No preview for this type</span>';
+  }
+  /* the big preview of a proposed widget */
+  function wbig(id) {
+    if (id === 'md') return '<div class="mw-doc"><h3>Release notes, week 46</h3><p>Two changes are ready for review. Nothing needs a decision from you.</p><ul><li>Phone pages no longer scroll sideways (ORCH-228).</li><li>Files and notes can be added to a ticket (ORCH-238).</li><li>The Steer button is on every working ticket (ORCH-247).</li></ul><h3>Known gaps</h3><p>The usage chart is still a draft. The newsletter waits for a date.</p></div>';
+    if (id === 'txt') return '<pre class="mw-screen mw-ovtext">' + ['15:04:01 node --test tests/insights.test.js'].concat(LOG).map(esc).join('\n') + '</pre>';
+    if (id === 'code') return '<pre class="mw-screen mw-ovtext">' + CODE.join('') + '</pre>';
+    if (id === 'json') return '<div class="mw-doc mw-tree2"><details open><summary>widths <i>3 items</i></summary><p>1280</p><p>1920</p><p>390</p></details><details open><summary>limits <i>2 keys</i></summary><p>file_mb: 25</p><p>live_helpers: 6</p></details><p>theme: "dark"</p></div>';
+    if (id === 'table') return tbl(PRICES, 'price-list.csv', true) + '<p class="meta">5 of 12 rows · 3 columns</p>';
+    if (id === 'html') return '<iframe class="mw-ovframe" src="review-preview.html" title="phone-widths.html"></iframe>';
+    if (id === 'pdf') return '<div class="mw-ovpic mw-ovpdf">' + PDF + '</div><p class="meta">Page 1 of 4</p>';
+    if (id === 'img') return '<div class="mw-ovpic">' + TH.img + '</div>';
+    if (id === 'video') return '<div class="mw-ovpic">' + VID + '</div><p class="meta">0:00 of 0:42 · press play to start</p>';
+    if (id === 'audio') return '<div class="mw-ovpic mw-wave">' + WAV + '</div><p class="meta">0:00 of 1:15</p><div class="mw-doc"><h3>The words</h3><p>Please keep the old file name, and add a note for the support team.</p></div>';
+    if (id === 'chart') return '<div class="mw-ovpic">' + TH.chart + '</div>' + tbl([['Day', 'Uses'], ['Mon', '41'], ['Tue', '56'], ['Wed', '38'], ['Thu', '72'], ['Fri', '88']], 'Usage by day', true);
+    if (id === 'change') return tbl([['File', 'Added', 'Removed']].concat(CHG), 'Files changed', true) + '<pre class="mw-screen mw-ovtext"><span class="mw-del">- .home { min-width: 480px; }</span>\n<span class="mw-add">+ .home { min-width: 0; }</span>\n<span class="mw-add">+ .home .card { overflow-wrap: anywhere; }</span></pre>';
+    if (id === 'prl') return tbl([['State', 'Draft'], ['Checks', '3 of 12 green, 9 running'], ['Changes', '6 files'], ['Asked by', 'the helper on ORCH-228']], 'Pull request 1318') + '<p class="meta">Opens on GitHub in a new tab.</p>';
+    if (id === 'zip') return tbl([['File', 'Size']].concat(ZIP), 'export-november.zip', true) + '<p class="meta">4 of 14 files</p>';
+    return '<div class="mw-doc"><p>This kind of file cannot be shown here. You can download it and open it on your computer.</p><p><span class="btn outline sm">Download</span></p></div>';
+  }
+  function files(src) {
+    if (src === '*') return WG.map(function (w) { return [w[0] === 'link' ? 'link' : 'w', w[3], w[4]]; });
+    if (src.indexOf('att:') === 0) return by(src.slice(4)).att || [];
+    if (src.indexOf('sent:') === 0) return by(src.slice(5)).sent || [];
+    return by(src).files || [];
+  }
+  function kv(rows) { return '<span class="mw-kv">' + rows.map(function (r) { return '<span>' + esc(r[0]) + '</span> <span>' + esc(r[1]) + '</span> '; }).join('') + '</span>'; }
   function widget(f, src, i, small) {
     var t = f[0];
     if (t === 'link') return '<a class="mw-wl" href="review-preview.html" target="_blank" rel="noopener" data-type="link">' + I.link + '<span class="mw-rn">' + esc(f[1]) + '</span><span class="meta">' + esc(f[2]) + ' · opens in a new tab</span>' + I.ext + '</a>';
     var body = TH[t] ? '<span class="mw-thumb">' + TH[t] + '</span>' : (f[3] && !(small && t === 'pr') ? kv(f[3].slice(0, 3)) : '');
-    return btn('mw-wg', 'ov', '<span class="mw-wh2">' + I[t] + '<span class="mw-rn">' + esc(f[1]) + '</span></span>' + body + '<span class="meta">' + esc(f[2]) + '</span>', { 'data-src': src, 'data-i': i, 'data-type': t, 'data-small': small ? 1 : false, 'aria-label': 'Open a big preview of ' + KIND[t] + ' ' + f[1] });
+    return btn('mw-wg', 'ov', '<span class="mw-wh2">' + (I[t] || I.file) + '<span class="mw-rn">' + esc(f[1]) + '</span></span>' + body + '<span class="meta">' + esc(f[2]) + '</span>', { 'data-src': src, 'data-i': i, 'data-type': t, 'data-small': small ? 1 : false, 'aria-label': 'Open a big preview of ' + KIND[t] + ' ' + f[1] });
   }
   function ovHTML() {
     if (!st.ov) return '';
     var L = files(st.ov.src), f = L[st.ov.i]; if (!f || f[0] === 'link') return '';
-    var ids = L.map(function (x, i) { return i; }).filter(function (i) { return L[i][0] !== 'link'; }), at0 = ids.indexOf(st.ov.i), t = f[0], body;
-    if (t === 'html') body = '<iframe class="mw-ovframe" src="review-preview.html" title="' + esc(f[1]) + '"></iframe>';
+    var ids = L.map(function (x, i) { return i; }).filter(function (i) { return L[i][0] !== 'link'; }), at0 = ids.indexOf(st.ov.i), t = f[0], body, wid = st.ov.src === '*' ? WG[st.ov.i][0] : '';
+    if (wid) body = wbig(wid);
+    else if (t === 'file') body = '<div class="mw-doc"><p>This kind of file cannot be shown here. You can download it and open it on your computer.</p></div>';
+    else if (t === 'html') body = '<iframe class="mw-ovframe" src="review-preview.html" title="' + esc(f[1]) + '"></iframe>';
     else if (TH[t]) body = '<div class="mw-ovpic">' + TH[t] + '</div>';
     else body = '<table class="mw-rx mw-ovtable"><caption class="sr-only">' + esc(f[1]) + '</caption><tbody>' + (f[3] || []).map(function (r) { return '<tr><th scope="row">' + esc(r[0]) + '</th><td>' + esc(r[1]) + '</td></tr>'; }).join('') + '</tbody></table>' + (t === 'pr' ? '<p class="meta">A pull request is the set of changes the helper asks to add. It goes in when all checks are green.</p>' : '');
     var one = ids.length < 2;
-    return '<div class="mw-ovscrim" data-act="ovclose"></div><section class="mw-ovbox" role="dialog" aria-modal="true" aria-label="Preview of ' + esc(KIND[t] + ' ' + f[1]) + '"><header class="mw-ovh">' + I[t] + '<h2>' + esc(f[1]) + '</h2><span class="meta">' + esc(f[2]) + (one ? '' : ' · ' + (at0 + 1) + ' of ' + ids.length) + '</span><span class="grow"></span>' + (one ? '' : btn('btn icon sm ghost', 'ovnav', I.prev, { 'data-d': -1, 'aria-label': 'Previous result' }) + btn('btn icon sm ghost', 'ovnav', I.next, { 'data-d': 1, 'aria-label': 'Next result' })) + btn('btn sm ghost', 'ovclose', I.x + '<span>Close</span>', { id: 'mw-ovx' }) + '</header><div class="mw-ovb" data-type="' + t + '">' + body + '</div></section>';
+    return '<div class="mw-ovscrim" data-act="ovclose"></div><section class="mw-ovbox" role="dialog" aria-modal="true" aria-label="Preview of ' + esc(f[1]) + '"><header class="mw-ovh">' + (I[wid ? WI[wid] : t] || I.file) + '<h2>' + esc(f[1]) + '</h2><span class="meta">' + esc(f[2]) + (one ? '' : ' · ' + (at0 + 1) + ' of ' + ids.length) + '</span><span class="grow"></span>' + (one ? '' : btn('btn icon sm ghost', 'ovnav', I.prev, { 'data-d': -1, 'aria-label': 'Previous result' }) + btn('btn icon sm ghost', 'ovnav', I.next, { 'data-d': 1, 'aria-label': 'Next result' })) + btn('btn sm ghost', 'ovclose', I.x + '<span>Close</span>', { id: 'mw-ovx' }) + '</header><div class="mw-ovb" data-type="' + (wid === 'html' ? 'html' : t) + '">' + body + '</div></section>';
   }
   function ovStep(d) {
     var L = files(st.ov.src), ids = L.map(function (x, i) { return i; }).filter(function (i) { return L[i][0] !== 'link'; });
@@ -176,12 +262,23 @@
     return s.chat.filter(function (m) { return !(s.q && m[3]); }).map(function (m, i) {
       if (m[0] === 'e') return '<p class="mw-ev meta"><span aria-hidden="true">✓</span> ' + esc(m[1]) + ' · ' + esc(m[2]) + '</p>';
       var f = m[4] !== undefined && s.files && s.files[m[4]] && m[1].indexOf('picture') + m[1].indexOf('pull request') > -2 ? s.files[m[4]] : null;
-      return '<div class="mw-msg" data-w="' + m[0] + '"><span class="meta">' + (m[0] === 'y' ? 'You' : 'Helper') + ' · ' + esc(m[2]) + '</span><p>' + esc(m[1]) + '</p>' + (f ? '<div class="mw-inmsg">' + widget(f, s.k, m[4], true) + '</div>' : '') + '</div>';
+      var sent = (m[5] || []).map(function (x) { return '<div class="mw-inmsg">' + widget(s.sent[x], 'sent:' + s.k, x, true) + '</div>'; }).join('');
+      return '<div class="mw-msg" data-w="' + m[0] + '"><span class="meta">' + (m[0] === 'y' ? 'You' : 'Helper') + ' · ' + esc(m[2]) + '</span>' + (m[1] ? '<p>' + esc(m[1]) + '</p>' : '') + (f ? '<div class="mw-inmsg">' + widget(f, s.k, m[4], true) + '</div>' : '') + (sent ? '<div class="mw-sent">' + sent + '</div>' : '') + '</div>';
     }).join('');
   }
-  function chatHTML(s, prim) {
-    var id = 'mw-i' + (++uid);
-    return '<div class="mw-chat" data-chat="' + esc(s.k) + '" role="log" aria-label="Messages and ticket events">' + chatMsgs(s) + '</div><form class="mw-comp" data-k="' + esc(s.k) + '" data-f="chat"><label class="sr-only" for="' + id + '">Message to the helper on ' + esc(s.k) + '</label><input class="input" id="' + id + '" data-d="c:' + esc(s.k) + '" value="' + esc(drafts['c:' + s.k] || '') + '" placeholder="Message the helper" autocomplete="off"><button class="btn ' + (prim ? 'primary' : 'outline') + '" type="submit">Send</button></form>';
+  function attHTML(s) {
+    if (!s.att || !s.att.length) return '';
+    return '<div class="mw-atts" role="group" aria-label="Attached, not sent yet">' + s.att.map(function (f, i) {
+      return '<span class="mw-att">' + btn('mw-attb', 'ov', (f[0] === 'img' ? '<span class="mw-thumb">' + TH.img + '</span>' : (I[f[0]] || I.file)) + '<span class="mw-rn">' + esc(f[1]) + '</span><span class="meta">' + esc(f[2]) + '</span>', { 'data-src': 'att:' + s.k, 'data-i': i, 'aria-label': 'Open a big preview of ' + f[1] }) + btn('btn icon xs ghost', 'attx', I.x, { 'data-k': s.k, 'data-i': i, 'aria-label': 'Remove ' + f[1] }) + '</span>';
+    }).join('') + '</div>';
+  }
+  function chatHTML(s, prim, withMk) {
+    var id = 'mw-i' + (++uid), rec = st.voice === 'rec' && st.vk === s.k, done = st.voice === 'done' && st.vk === s.k;
+    var h = '<div class="mw-chat" data-chat="' + esc(s.k) + '" role="log" aria-label="Messages and ticket events">' + chatMsgs(s) + '</div><form class="mw-comp" data-k="' + esc(s.k) + '" data-f="chat">' + attHTML(s);
+    if (rec) h += '<div class="mw-voice" role="status"><span class="mw-level" aria-hidden="true">' + WAV + '</span><span>Listening <span data-vt="1">0:04</span></span><span class="grow"></span>' + btn('btn outline sm', 'voice', I.stop + '<span>Stop</span>', { 'data-k': s.k, 'data-v': 'done' }) + btn('btn sm ghost', 'voice', 'Cancel', { 'data-k': s.k, 'data-v': '' }) + '</div>';
+    h += '<div class="mw-crow">' + btn('btn icon ghost', 'attach', I.clip, { 'data-k': s.k, 'aria-label': 'Attach files', title: 'Attach files. You can also paste a screenshot or drop files here, up to 25 MB each.' }) + '<label class="sr-only" for="' + id + '">Message to the helper on ' + esc(s.k) + '</label><input class="input" id="' + id + '" data-d="c:' + esc(s.k) + '" value="' + esc(drafts['c:' + s.k] || '') + '" placeholder="Message the helper" autocomplete="off">' + (rec ? '' : btn('btn icon ghost', 'voice', I.mic, { 'data-k': s.k, 'data-v': 'rec', 'aria-label': 'Speak', title: 'Speak instead of typing' })) + (withMk ? mk(13) : '') + '<button class="btn ' + (prim ? 'primary' : 'outline') + '" type="submit">Send</button></div>';
+    if (done) h += '<p class="meta mw-vhint">From your voice. Check the words, change what is wrong, then send.</p>';
+    return h + '</form>';
   }
   function termHTML(s) {
     return '<div class="mw-term"><div class="mw-tbar"><span class="meta">Terminal · click and type · select text to copy it</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
@@ -199,7 +296,7 @@
     h += '<div class="mw-choices">';
     if (on) h += '<div class="mw-choice"><h3>Keep going</h3><p class="meta">Nothing changes. The helper keeps its conversation.</p>' + btn('btn outline', 'askoff', 'Keep going') + '</div>';
     else h += '<div class="mw-choice"><h3>Continue where it stopped</h3><p class="meta">Keeps the last conversation' + (s.last ? ' from ' + esc(s.last) : '') + '. Best when the work is half done.</p>' + btn('btn outline', 'start', 'Continue', { 'data-how': 'continue', 'data-k': s.k }) + '</div>';
-    h += '<div class="mw-choice"><h3>Fresh start</h3><p class="meta">The helper reads the ticket again. The earlier talk is not used. Best when it went off track.</p>' + btn('btn outline', 'start', 'Start again', { 'data-how': 'clean', 'data-k': s.k, 'aria-label': 'Fresh start on ' + s.k }) + '</div></div>';
+    h += '<div class="mw-choice"><h3>Fresh start</h3><p class="meta">The helper reads the ticket again. The earlier talk is not used. Best when it went off track.</p>' + pickHTML() + btn('btn outline', 'start', 'Start again', { 'data-how': 'clean', 'data-k': s.k, 'aria-label': 'Fresh start on ' + s.k }) + '</div></div>';
     return h + histHTML(s) + '</div>';
   }
   function seg(term, withMk) {
@@ -212,21 +309,46 @@
     o = o || {};
     var s = by(k), asking = s.s === 'none' || (o.main && st.ask), term = s.kind === 'shell' || st.term, id = 'mw-i' + (++uid);
     var segOk = s.kind !== 'shell' && !asking && s.s !== 'queue', qOut = size === 'md' && s.q && !asking;
-    var h = '<section class="mw-pane" data-size="' + size + '" data-s="' + s.s + '" data-k="' + esc(s.k) + '"' + (o.main ? ' data-on="1"' : '') + ' aria-label="' + esc(s.k + ', ' + nm(s)) + '"><header class="mw-ph">' + (o.pre || '') + stat(s) + '<span class="mw-key">' + esc(s.k) + '</span>';
+    var h = '<section class="mw-pane" data-size="' + size + '" data-s="' + s.s + '" data-k="' + esc(s.k) + '"' + (o.main ? ' data-on="1"' : '') + ' aria-label="' + esc(s.k + ', ' + nm(s)) + '"><header class="mw-ph">' + (o.pre || '') + stat(s, !!o.narrow) + '<span class="mw-key">' + esc(s.k) + '</span>';
     if (o.main && st.ren === s.k) h += '<form class="mw-ren" data-f="ren" data-k="' + esc(s.k) + '"><label class="sr-only" for="' + id + '">Name of this session</label><input class="input" id="' + id + '" value="' + esc(nm(s)) + '" maxlength="60" autocomplete="off"><button class="btn outline sm" type="submit">Save name</button></form>';
     else if (o.main) h += btn('mw-pt truncate', 'ren', esc(nm(s)), { 'data-k': s.k, title: 'Click to rename', 'aria-label': 'Rename ' + nm(s) }) + (o.mk ? mk(9) : '');
     else if (o.sel) h += btn('mw-pt truncate', 'act', esc(nm(s)), { 'data-k': s.k, 'aria-label': 'Select the pane of ' + s.k });
     else h += '<span class="mw-pt truncate">' + esc(nm(s)) + '</span>';
-    if (segOk && size === 'lg') h += seg(term, o.mk);
-    h += (o.tools || '');
-    var r2 = (segOk && size !== 'lg' ? seg(term, false) : '') + (o.tools2 || '') + (size === 'sm' ? '' : meta(s) + (o.mk ? mk(12) : '') + tkLink(s));
+    if (!o.compact && segOk && size === 'lg') h += seg(term, o.mk);
+    h += o.ctl ? ctlHTML(s, o) : (o.tools || '');
+    ['place', 'model', 'more'].forEach(function (kd) { if (pmOpen(s.k, kd)) h += paneMenu(s, kd, o); });
+    var r2 = o.compact ? '' : (segOk && size !== 'lg' ? seg(term, false) : '') + (o.tools2 || '') + (size === 'sm' ? '' : mdlBtn(s, o.main) + meta(s, true) + (o.mk ? mk(12) : '') + tkLink(s));
     if (r2) h += '<span class="mw-prow">' + r2 + '</span>';
     h += '</header><div class="mw-pb">' + (qOut ? '<div class="mw-qwrap">' + qHTML(s, o.quiet) + '</div>' : '') + '<div class="mw-pmain">';
     if (asking) h += startHTML(s, o.mk);
     else if (s.s === 'queue') h += '<div class="mw-start"><h2>In line</h2><p class="meta">All ' + max() + ' helper places are in use. This one starts by itself when a place is free. Idle helpers close after about an hour.</p></div>';
-    else h += (s.q && !qOut ? qHTML(s, o.quiet) : '') + (term ? termHTML(s) : chatHTML(s, o.prim && !s.q));
+    else h += (s.q && !qOut ? qHTML(s, o.quiet) : '') + (term ? termHTML(s) : chatHTML(s, o.prim && !s.q, o.mk));
     h += '</div>' + (size === 'sm' || o.noshelf ? '' : shelf(s, o.mk)) + '</div></section>';
     return h;
+  }
+  function pmOpen(k, kind) { return st.pm === k + '|' + kind; }
+  function pmBtn(s, kind, icon, label) { return btn('btn icon sm ghost', 'pm', icon, { 'data-k': s.k, 'data-kind': kind, 'aria-expanded': String(pmOpen(s.k, kind)), 'aria-label': label, title: label }); }
+  function paneMenu(s, kind, o) {
+    var it = function (act, label, x) { x = x || {}; x['data-k'] = s.k; return btn('mw-opt', act, label, x); }, m = eff(), segOk = s.kind !== 'shell' && live(s) && s.s !== 'queue';
+    var place = it('mode', I.bottom + '<span>At the bottom</span>', { 'data-m': 'bottom', 'aria-pressed': String(m === 'bottom') }) + '<span class="mw-nophone">' + it('mode', I.right + '<span>On the right</span>', { 'data-m': 'right', 'aria-pressed': String(m === 'right') }) + '</span>' + it('full', I.full + '<span>Full screen</span>', { 'aria-pressed': String(m === 'full') });
+    if (kind === 'place') return '<div class="mw-pmenu" role="group" aria-label="Where Focus sits"><p class="mw-poph">Where Focus sits</p>' + place + '</div>';
+    if (kind === 'model') return '<div class="mw-pmenu" role="group" aria-label="Model"><p class="mw-poph">' + TOOL[s.tool || 'claude'] + ': model</p>' + MODELS[s.tool || 'claude'].map(function (x) { return it('smodel', x + (x === mdl(s) ? ' (now)' : ''), { 'data-v': x, 'aria-pressed': String((s.next || mdl(s)) === x) }); }).join('') + '<p class="meta">A change takes effect with a fresh start.</p></div>';
+    return '<div class="mw-pmenu" role="group" aria-label="More for ' + esc(s.k) + '">' + (segOk ? it('view', st.term ? 'Show chat' : 'Show terminal', { 'data-v': st.term ? 'chat' : 'term' }) : '') + (s.kind !== 'shell' ? it('ask', 'History') + it('pm', 'Model: ' + mdl(s), { 'data-kind': 'model' }) : '') + (o.narrow ? it('pin', s.pin ? 'Unpin' : 'Pin') + place : '') + (s.kind === 'ticket' ? it('ticket', 'Open ticket') : '') + '</div>';
+  }
+  function ctlHTML(s, o) {
+    var h = '<span class="mw-ctl">';
+    if (!o.narrow) h += pinBtn(s);
+    h += btn('btn icon sm ghost mw-nophone', 'addpane', I.plus, { disabled: o.n >= 3 ? 'disabled' : false, 'aria-label': 'Add a session beside this one', title: o.n >= 3 ? 'Three sessions is the most' : 'Add a session beside this one' });
+    if (!o.narrow) h += pmBtn(s, 'place', I[eff() === 'right' ? 'right' : 'bottom'], 'Where Focus sits');
+    h += btn('btn icon sm ghost', 'min', I.down, { 'aria-label': 'Minimise to the bar', title: 'Minimise to the bar' });
+    h += btn('btn icon sm ghost', 'closepane', I.x, { 'data-k': s.k, 'aria-label': o.n > 1 ? 'Close this pane' : 'Close Focus', title: o.n > 1 ? 'Close this pane' : 'Close Focus (the bar stays)' });
+    if (o.compact) h += pmBtn(s, 'more', I.more, 'More for ' + s.k);
+    return h + '</span>';
+  }
+  function mdlBtn(s, can) {
+    if (s.kind === 'shell') return tool(s);
+    var t = I[s.tool || 'claude'] + tlabel(s) + (s.next && s.next !== mdl(s) ? ' → ' + s.next + ' at the next fresh start' : '');
+    return can ? btn('mw-mdl', 'pm', t, { 'data-k': s.k, 'data-kind': 'model', 'aria-expanded': String(pmOpen(s.k, 'model')), title: 'See or change the model' }) : '<span class="mw-tool">' + t + '</span>';
   }
   function histBtn(s) { return s.kind !== 'shell' ? btn('btn sm ghost', st.ask ? 'askoff' : 'ask', 'History', { 'aria-pressed': String(!!st.ask && live(s)) }) : ''; }
   function paneTools(s) { return pinBtn(s); }
@@ -235,7 +357,7 @@
   function tileActs(s) { return '<span class="grow"></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + besideBtn(s); }
   function openB(s, cls, inner) { return btn(cls, 'zoom', inner, { 'data-k': s.k, 'aria-label': 'Open ' + s.k + ', ' + nm(s) + ', ' + word(s) }); }
   function tile(s) {
-    return '<article class="mw-tile mw-work" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-topen', '<span class="mw-thead">' + stat(s) + '<span class="mw-key">' + esc(s.k) + '</span></span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-now" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>' + (live(s) ? '<span class="mw-peek" data-peek="' + esc(s.k) + '" aria-hidden="true">' + esc(peekText(s)) + '</span>' : '')) + (s.q ? '<div class="mw-tq">' + qHTML(s, true) + '</div>' : '') + meta(s) + '<footer class="mw-tfoot">' + steps(s) + tileActs(s) + '</footer></article>';
+    return '<article class="mw-tile mw-work" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-topen', '<span class="mw-thead">' + stat(s) + '<span class="mw-key">' + esc(s.k) + '</span></span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-now" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>' + (live(s) ? '<span class="mw-peek" data-peek="' + esc(s.k) + '" aria-hidden="true">' + esc(peekText(s)) + '</span>' : '')) + meta(s) + '<footer class="mw-tfoot">' + steps(s) + tileActs(s) + '</footer></article>';
   }
   function line(s) {
     return '<div class="mw-line" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-lopen', stat(s) + '<span class="mw-key">' + esc(s.k) + '</span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-lnow" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>') + '<span class="mw-lmeta meta">' + tool(s) + '<span>' + warm(s) + '</span></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + '</div>';
@@ -244,15 +366,12 @@
     var col = !!st.col[id];
     return '<section class="mw-band" data-band="' + id + '"><div class="mw-bh"><h2>' + btn('mw-bt', 'col', '<span class="mw-chev" aria-hidden="true">' + (col ? '▸' : '▾') + '</span>' + title + ' (' + list.length + ')', { 'data-id': id, 'aria-expanded': String(!col) }) + '</h2>' + (extra || '') + '</div>' + (col ? '' : (list.length ? '<div class="' + cls + '">' + list.map(draw).join('') + '</div>' : '<p class="meta mw-none">' + empty + '</p>')) + '</section>';
   }
-  function needRow(s, i) {
-    return '<article class="mw-nrow" data-tile="' + esc(s.k) + '" data-s="wait">' + openB(s, 'mw-lopen', stat(s, true) + '<span class="mw-key">' + esc(s.k) + '</span><span class="mw-tt">' + esc(nm(s)) + '</span>') + '<span class="mw-nq">' + esc(s.q.t) + '</span><span class="mw-ans">' + btn('btn sm ' + (i ? 'outline' : 'primary'), 'answer', esc(s.q.a[0]), { 'data-k': s.k, 'data-a': 0 }) + btn('btn sm outline', 'answer', esc(s.q.a[1]), { 'data-k': s.k, 'data-a': 1 }) + '</span>' + (i ? '' : mk(2)) + '</article>';
-  }
   function bandsHTML() {
     var f = st.f.trim().toLowerCase(), all = sorted().filter(function (s) { return !f || (s.k + ' ' + nm(s) + ' ' + word(s)).toLowerCase().indexOf(f) >= 0; });
-    var need = all.filter(function (s) { return s.s === 'wait'; }), pin = all.filter(function (s) { return s.pin && s.s !== 'wait'; }), rest = all.filter(function (s) { return !s.pin && s.s !== 'wait'; });
-    var by3 = function (g) { return rest.filter(function (s) { return grp(s) === g; }); }, inl = by3('queue');
+    var pin = all.filter(function (s) { return s.pin; }), rest = all.filter(function (s) { return !s.pin; });
+    var act = rest.filter(function (s) { return s.s === 'wait' || grp(s) === 'run'; }), inl = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'queue'; }), idle = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'idle'; });
     if (f && !all.length) return '<p class="meta mw-none">No session matches "' + esc(st.f) + '".</p>';
-    return (pin.length || !f ? band('pin', 'Pinned', pin, tile, 'mw-works', 'Nothing is pinned. Pin a session to keep it here.', mk(9)) : '') + band('need', 'Needs you', need, needRow, 'mw-nrows', 'Nobody needs you right now.') + band('run', 'Working', by3('run'), tile, 'mw-works', 'No helper is working on a ticket.', mk(12)) + (inl.length ? band('queue', 'In line', inl, line, 'mw-lines', '') : '') + band('idle', 'Idle and no session', by3('idle'), line, 'mw-lines', 'Every ticket has a working helper.');
+    return (pin.length || !f ? band('pin', 'Pinned', pin, tile, 'mw-works', 'Nothing is pinned. Pin a session to keep it here.', mk(9)) : '') + band('run', 'Needs you and working', act, tile, 'mw-works', 'No helper is working on a ticket.', mk(2)) + (inl.length ? band('queue', 'In line', inl, line, 'mw-lines', '') : '') + band('idle', 'Idle and no session', idle, line, 'mw-lines', 'Every ticket has a working helper.');
   }
   function wallHTML() {
     var c = { wait: 0, run: 0, queue: 0, idle: 0 };
@@ -260,6 +379,7 @@
     var part = function (n, g, w) { return n ? '<span class="mw-st" data-s="' + g + '"><span class="mw-sym" aria-hidden="true">' + ST[g][0] + '</span>' + n + ' ' + w + '</span>' : ''; };
     var h = '<div class="mw-wall"><header class="mw-wh"><div><div class="mw-h1"><h1>Focus</h1>' + mk(1) + '</div><p class="mw-hero" role="status">' + (c.wait ? part(c.wait, 'wait', c.wait === 1 ? 'needs you' : 'need you') : '<span class="mw-st">Nobody needs you</span>') + part(c.run, 'run', 'working') + part(c.queue, 'queue', 'in line') + part(c.idle, 'idle', 'idle') + '</p><p class="meta">' + S.length + ' sessions · ' + used() + ' of ' + max() + ' helper places in use</p></div>';
     h += '<div class="mw-new" role="group" aria-label="New session without a ticket">' + mk(6) + NEW.map(function (o) { return btn('btn outline sm', 'new', (has(o[0]) ? '' : '<span aria-hidden="true">+</span> ') + o[0], { 'data-k': o[0], title: has(o[0]) ? 'Already open: go to it' : o[1] }); }).join('') + '</div></header>';
+    h += pickHTML();
     h += '<div class="mw-tools"><label class="sr-only" for="mw-filter">Filter sessions</label><input class="input" id="mw-filter" type="search" placeholder="Filter by name, ticket or status" value="' + esc(st.f) + '" autocomplete="off">' + mk(11) + '</div>';
     return h + '<div id="mw-bands" class="mw-bands"' + (st.many ? ' data-many="1"' : '') + '>' + bandsHTML() + '</div></div>';
   }
@@ -294,45 +414,65 @@
       return '<div class="mw-pg"><h1>Review</h1><p class="meta">Results that wait for your look. Focus stays open while you check them.</p><section class="card pad mw-rev"><span class="mw-thumb">' + TH.img + '</span><div><h2>Steer a helper from the dashboard</h2><p class="meta">ORCH-247 · merged on green checks · 1 picture, 1 pull request</p><div class="mw-ans">' + btn('btn outline sm', 'focus', 'Open in Focus', { 'data-k': 'ORCH-247' }) + '</div></div></section><section class="card pad mw-rev"><span class="mw-thumb">' + TH.html + '</span><div><h2>Newsletter draft</h2><p class="meta">A page to read · no helper is running</p><div class="mw-ans"><a class="btn outline sm" href="newsletter-preview.html" target="_blank" rel="noopener">Open page</a></div></div></section></div>';
     },
     widgets: function () {
-      return '<div class="mw-pg"><div class="mw-h1"><h1>Widgets</h1>' + mk(10) + '</div><p class="meta">Draft: these result widgets would live in the style guide and be reusable on ticket pages too, not only in Focus. One of each type.</p><div class="mw-wgrid">' + SAMPLES.map(function (f, i) { return '<section class="card pad mw-wsample"><h2>' + KIND[f[0]].charAt(0).toUpperCase() + KIND[f[0]].slice(1) + (f[0] === 'link' ? ' (no widget)' : '') + '</h2>' + widget(f, '*', i) + '</section>'; }).join('') + '</div><p class="meta">' + btn('mw-tkl', 'page', '‹ Back to Focus', { 'data-p': 'focus' }) + '</p></div>';
+      var n = WG.filter(function (w) { return picks['w:' + w[0]]; }).length;
+      var h = '<div class="mw-pg mw-wpage"><div class="mw-h1"><h1>Widgets</h1>' + mk(10) + '</div><p>Proposal: result widgets. One real example of each kind of result a helper can hand back: small as it sits beside a session or on a ticket, big when you click it.</p><p class="meta">They would live in the style guide and be reusable on ticket pages too, not only in Focus. <span role="status">' + n + ' of ' + WG.length + ' picked</span></p><div class="mw-wtable">';
+      WG.forEach(function (w, i) {
+        var id = w[0], small = id === 'link' ? '<a class="mw-wl" href="review-preview.html" target="_blank" rel="noopener">' + I.link + '<span class="mw-rn">' + esc(w[3]) + '</span><span class="meta">' + esc(w[4]) + ' · opens in a new tab</span>' + I.ext + '</a>' : btn('mw-wg', 'ov', '<span class="mw-wh2">' + (I[WI[id]] || I.file) + '<span class="mw-rn">' + esc(w[3]) + '</span></span>' + wsmall(id) + '<span class="meta">' + esc(w[4]) + '</span>', { 'data-src': '*', 'data-i': i, 'data-type': id, 'aria-label': 'Open the big preview of ' + w[3] });
+        h += '<section class="mw-wrow" aria-label="' + esc(w[1]) + '"><div class="mw-wtype"><h2>' + esc(w[1]) + '</h2><span class="mw-key">' + esc(w[2]) + '</span><span class="chip' + (w[7] === 'yes' ? ' success' : (w[7] === 'new' ? ' info' : '')) + '">' + WHAVE[w[7]] + '</span></div><div class="mw-wsmall"><span class="mw-bl">Small: ' + esc(w[5].charAt(0).toLowerCase() + w[5].slice(1)) + '</span>' + small + '</div><div class="mw-wbig"><span class="mw-bl">Big preview</span><p>' + esc(w[6]) + '</p></div><div class="mw-wpick"><span class="segmented" role="group" aria-label="Your pick for ' + esc(w[1]) + '">';
+        ['Keep', 'Maybe', 'Drop'].forEach(function (p) { h += btn('btn sm', 'pick', p, { 'data-n': 'w:' + id, 'data-p': p.toLowerCase(), 'aria-pressed': String(picks['w:' + id] === p.toLowerCase()) }); });
+        h += '</span></div></section>';
+      });
+      return h + '</div><p class="meta">' + btn('mw-tkl', 'page', '‹ Back to Focus', { 'data-p': 'focus' }) + '</p></div>';
     }
   };
 
-  /* ---------- the layer: bar on every page, a panel (bottom, right, full), small windows, or closed to the side ---------- */
-  function chip(o, on) {
-    return btn('mw-swb', 'switch', stat(o, !on) + '<span class="mw-cn truncate">' + esc(o.name || o.k.replace('ORCH-', '')) + '</span>', { 'data-k': o.k, 'data-s': o.s, 'aria-pressed': String(on), 'aria-label': o.k + ', ' + nm(o) + ', ' + word(o), title: o.k + ' · ' + nm(o) });
+  /* ---------- the layer: bar on every page, a panel (bottom, right, full) split in up to 3, or closed to the side ---------- */
+  function inList(o, l) { var w = o.s === 'wait'; return l === 'wait' ? w : (l === 'pin' ? !!o.pin && !w : (!w && !o.pin && (l === 'more' || grp(o) === l))); }
+  var LIST = { wait: ['◆', 'need you', 'Needs you'], pin: ['', 'pinned', 'Pinned'], run: GRP.run, queue: GRP.queue, idle: GRP.idle, more: ['', 'more', 'More sessions'] };
+  function chip(o) {
+    var on = shownIn(o);
+    return btn('mw-swb', 'switch', stat(o, true) + '<span class="mw-cn">' + esc(o.name || o.k) + '</span>', { 'data-k': o.k, 'data-s': o.s, 'aria-pressed': String(on), title: nm(o) });
+  }
+  function cnt(l, compact) {
+    var n = sorted().filter(function (o) { return inList(o, l); }).length; if (!n) return '';
+    var sym = l === 'pin' ? I.pin : (l === 'more' ? I.more : '<span class="mw-st" data-s="' + l + '"><span class="mw-sym" aria-hidden="true">' + LIST[l][0] + '</span></span>');
+    var text = compact ? sym + n : (l === 'pin' ? sym + 'Pinned (' + n + ')' : (l === 'more' ? 'More (' + n + ')' : n + ' ' + LIST[l][1])) + I.up;
+    return btn('mw-swb mw-grp', 'list', text, { 'data-l': l, 'aria-expanded': String(st.list === l), 'aria-label': compact ? n + ' ' + LIST[l][1] : null });
   }
   function chipsHTML() {
-    var h = '', c = { run: 0, queue: 0, idle: 0 };
-    sorted().forEach(function (o) { if (inChip(o)) h += chip(o, shownIn(o)); else c[grp(o)]++; });
-    ['run', 'queue', 'idle'].forEach(function (g) {
-      if (c[g]) h += btn('mw-swb mw-grp', 'list', c[g] + ' ' + GRP[g][1] + I.up, { 'data-l': g, 'aria-expanded': String(st.list === g), 'aria-label': c[g] + ' ' + GRP[g][1] + ': show the list' });
-    });
-    return h + mk(11);
+    var all = sorted(), need = all.filter(function (o) { return o.s === 'wait'; }), pin = all.filter(function (o) { return inList(o, 'pin'); }), open = all.filter(function (o) { return shownIn(o) && o.s !== 'wait' && !o.pin; });
+    var grpH = function (g, label, list) { return '<span class="mw-bg" role="group" data-g="' + g + '" aria-label="' + (g === 'pin' ? 'Pinned' : label) + '"><span class="mw-bl">' + label + '</span>' + list.map(chip).join('') + '</span>'; };
+    if (BL >= 3) return ['wait', 'pin', 'run', 'queue', 'idle'].map(function (l) { return cnt(l, true); }).join('') + mk(11);
+    var h = grpH('wait', need.length ? 'Needs you' : 'All calm', need);
+    if (pin.length) h += BL >= 1 ? cnt('pin') : grpH('pin', I.pin, pin);
+    if (open.length && BL < 2) h += grpH('open', 'Open', open);
+    return h + (BL >= 2 ? cnt('more') : cnt('run') + cnt('queue') + cnt('idle')) + mk(11);
   }
   function listRows() {
-    var q = st.lq.trim().toLowerCase(), l = sorted().filter(function (o) { return !inChip(o) && grp(o) === st.list && (!q || (o.k + ' ' + nm(o)).toLowerCase().indexOf(q) >= 0); });
-    return l.length ? l.map(function (o) { return btn('mw-opt mw-lrow', 'switch', stat(o, true) + '<span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn truncate">' + esc(nm(o)) + '</span><span class="meta truncate">' + esc(now(o)) + '</span>', { 'data-k': o.k }); }).join('') : '<p class="meta">No session matches.</p>';
+    var q = st.lq.trim().toLowerCase(), l = sorted().filter(function (o) { return inList(o, st.list) && (!q || (o.k + ' ' + nm(o)).toLowerCase().indexOf(q) >= 0); });
+    return l.length ? l.map(function (o) { return btn('mw-opt mw-lrow', 'switch', stat(o) + '<span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn">' + esc(nm(o)) + '</span><span class="meta">' + esc(tlabel(o)) + '</span>', { 'data-k': o.k }); }).join('') : '<p class="meta">No session matches.</p>';
   }
   function popHTML(mode) {
-    if (st.menu === 'new') return '<div class="mw-pop" role="group" aria-label="New session without a ticket"><p class="mw-poph">New session without a ticket</p><div class="mw-plist">' + NEW.map(function (o) { return btn('mw-opt', 'new', '<strong>' + o[0] + '</strong><span class="meta">' + (has(o[0]) ? 'Already open: go to it' : o[1]) + '</span>', { 'data-k': o[0] }); }).join('') + '</div><p class="meta">' + used() + ' of ' + max() + ' helper places in use</p></div>';
+    if (st.menu === 'new') return '<div class="mw-pop" role="group" aria-label="New session without a ticket"><p class="mw-poph">New session without a ticket</p>' + pickHTML() + '<div class="mw-plist">' + NEW.map(function (o) { return btn('mw-opt', 'new', '<strong>' + o[0] + '</strong><span class="meta">' + (has(o[0]) ? 'Already open: go to it' : o[1]) + '</span>', { 'data-k': o[0] }); }).join('') + '</div><p class="meta">' + used() + ' of ' + max() + ' helper places in use</p></div>';
     if (st.menu === 'pos') {
       var po = function (act, m, icon, label, on, cls) { return btn('mw-opt mw-posopt' + (cls || ''), act, icon + '<span>' + label + '</span>', { 'data-m': m, 'aria-pressed': String(on) }); };
       return '<div class="mw-pop" role="group" aria-label="Where Focus sits"><p class="mw-poph">Where Focus sits</p><div class="mw-plist">' + po('mode', 'bottom', I.bottom, 'At the bottom', mode === 'bottom') + po('mode', 'right', I.right, 'On the right', mode === 'right', ' mw-nophone') + po('full', '', I.full, 'Full screen', false) + po('mode', 'bar', I.down, 'Bar only', mode === 'bar') + po('mode', 'side', I.side, 'Closed to the side', false) + '</div></div>';
     }
     if (st.list) {
-      var n = sorted().filter(function (o) { return !inChip(o) && grp(o) === st.list; }).length;
-      return '<div class="mw-pop" role="group" aria-label="' + GRP[st.list][2] + ' sessions"><p class="mw-poph">' + GRP[st.list][2] + ' (' + n + ')</p>' + (n > 6 ? '<label class="sr-only" for="mw-lq">Search sessions</label><input class="input" id="mw-lq" type="search" placeholder="Search ' + GRP[st.list][1] + ' sessions" value="' + esc(st.lq) + '" autocomplete="off">' : '') + '<div class="mw-plist" id="mw-plist">' + listRows() + '</div></div>';
+      var n = sorted().filter(function (o) { return inList(o, st.list); }).length;
+      return '<div class="mw-pop mw-pop-list" role="group" aria-label="' + LIST[st.list][2] + '"><p class="mw-poph">' + LIST[st.list][2] + ' (' + n + ')</p>' + (n >= 9 ? '<label class="sr-only" for="mw-lq">Search these sessions</label><input class="input" id="mw-lq" type="search" placeholder="Search these sessions" value="' + esc(st.lq) + '" autocomplete="off">' : '') + '<div class="mw-plist" id="mw-plist">' + listRows() + '</div></div>';
     }
     return '';
   }
   function barHTML(mode) {
-    var w = S.filter(function (x) { return x.s === 'wait'; }).length, full = mode === 'full';
-    var h = '<div class="mw-bar" role="group" aria-label="Focus bar">' + btn('mw-home', 'home', '<b>Focus</b><span class="mw-cnt"' + (w ? ' data-s="wait"' : '') + '>' + (w ? w + (w === 1 ? ' needs you' : ' need you') : 'All calm') + '</span>', { 'aria-label': 'Focus start page. ' + (w ? w + ' waiting for you' : 'Nothing is waiting') }) + (full ? '' : mk(7));
+    var full = mode === 'full', tiny = BL >= 3;
+    var h = '<div class="mw-bar" role="group" aria-label="Focus bar" data-fold="' + BL + '">' + btn('mw-home', 'home', '<b>Focus</b>', { title: 'Focus start page' }) + (full ? '' : mk(7));
     h += '<nav class="mw-sw" aria-label="Sessions">' + chipsHTML() + '</nav>';
     if (full) return h + popHTML(mode) + '<span class="meta mw-hint">Esc to leave</span>' + btn('btn icon sm ghost', 'full', I.exit, { 'aria-label': 'Leave full screen' }) + '</div>';
-    h += btn('btn sm ghost', 'menu', I.plus + '<span class="mw-wide">New</span>', { 'data-m': 'new', 'aria-expanded': String(st.menu === 'new'), 'aria-label': 'New session without a ticket' });
-    if (!zoomed()) h += btn('btn sm ghost mw-pos', 'menu', I[mode === 'right' ? 'right' : 'bottom'] + '<span class="mw-wide">' + (mode === 'bar' ? 'Open' : (mode === 'right' ? 'Right' : 'Bottom')) + '</span>' + I.up, { 'data-m': 'pos', 'aria-expanded': String(st.menu === 'pos'), 'aria-label': 'Where Focus sits: ' + (mode === 'bar' ? 'bar only' : mode) });
+    h += btn('btn sm ghost', 'menu', I.plus + (tiny ? '' : '<span>New</span>'), { 'data-m': 'new', 'aria-expanded': String(st.menu === 'new'), 'aria-label': tiny ? 'New' : null, title: 'New session without a ticket' });
+    if (zoomed()) return h + popHTML(mode) + '</div>';
+    if (mode === 'bar') h += btn('btn sm ghost', 'mode', I.up + (tiny ? '' : '<span>Open</span>'), { 'data-m': phone() ? 'bottom' : st.last, 'aria-label': tiny ? 'Open' : null, title: 'Open Focus where it was last' }) + btn('btn icon sm ghost mw-pos', 'menu', I[st.last === 'right' ? 'right' : 'bottom'], { 'data-m': 'pos', 'aria-expanded': String(st.menu === 'pos'), 'aria-label': 'Place' , title: 'Where Focus sits' });
+    else { var pl = mode === 'right' ? 'Right' : 'Bottom'; h += btn('btn sm ghost mw-pos', 'menu', I[mode === 'right' ? 'right' : 'bottom'] + (tiny ? '' : '<span>' + pl + '</span>') + I.up, { 'data-m': 'pos', 'aria-expanded': String(st.menu === 'pos'), 'aria-label': tiny ? pl : null, title: 'Where Focus sits' }); }
     return h + popHTML(mode) + '</div>';
   }
   function layerHTML() {
@@ -340,17 +480,15 @@
     if (mode === 'side') return btn('mw-edge', 'mode', '<span class="mw-edget">Focus</span>' + (w ? '<span class="mw-cnt" data-s="wait"><span aria-hidden="true">◆</span> ' + w + '</span>' : ''), { 'data-m': st.last, 'aria-label': 'Open Focus again. ' + (w ? w + ' waiting for you' : 'Nothing is waiting') });
     var panel = '', full = mode === 'full', n = st.panes.length;
     if (mode !== 'bar') panel = '<div class="mw-panel" data-mode="' + mode + '" data-n="' + n + '">' + st.panes.map(function (k, i) {
-      var s = by(k), on = i === st.act, tools = '';
-      if (on) tools += pinBtn(s) + (n < 3 ? btn('btn sm ghost mw-nophone', 'addpane', I.beside + '<span class="mw-wide">Add beside</span>', { 'aria-label': 'Add another session beside this one' }) : '');
-      if (n > 1) tools += btn('btn icon sm ghost mw-nophone', 'closepane', I.x, { 'data-k': k, 'aria-label': 'Close the pane of ' + k });
-      return pane(k, full ? 'lg' : 'md', { main: on, sel: !on, noshelf: n > 1 || (full && window.innerWidth < 1600), tools: tools, tools2: on ? histBtn(s) : '', quiet: st.page === 'focus' || !on });
+      var s = by(k), on = i === st.act, narrow = n > 1 && (mode === 'right' || phone() || (window.innerWidth - 240) / n < 480);
+      return pane(k, full ? 'lg' : 'md', { main: on, sel: !on, ctl: true, compact: n > 1, narrow: narrow, n: n, noshelf: n > 1 || (full && window.innerWidth < 1600), tools2: on && n === 1 ? histBtn(s) : '', prim: on, quiet: !on });
     }).join('') + '</div>';
     return full ? barHTML(mode) + panel : panel + barHTML(mode);
   }
 
   /* ---------- features sheet ---------- */
   function sheetHTML() {
-    var n = Object.keys(picks).filter(function (k) { return picks[k]; }).length;
+    var n = F.filter(function (f) { return picks[f[0]]; }).length;
     var h = '<header class="mw-shh"><div><h2>Features</h2><p class="meta" role="status">' + n + ' of ' + F.length + ' picked</p><label class="mw-marks"><input class="switch" type="checkbox" id="mw-marks"' + (st.marks ? ' checked' : '') + '><span>Show feature numbers</span></label></div>' + btn('btn icon sm ghost', 'sheet', I.x, { 'aria-label': 'Close features' }) + '</header><div class="mw-feats">';
     F.forEach(function (f) {
       h += '<article class="mw-feat" id="mw-f' + f[0] + '"' + (st.feat === f[0] ? ' data-on="1"' : '') + '><h3><span class="mw-mk" data-pick="' + (picks[f[0]] || '') + '" aria-hidden="true">' + f[0] + '</span>' + esc(f[1]) + '</h3><p>' + esc(f[2]) + '</p><p class="meta"><strong>In orch:</strong> ' + esc(f[3]) + '</p><p class="meta"><strong>New work:</strong> ' + f[4] + ', ' + esc(f[5]) + '.</p><div class="mw-frow"><span class="segmented" role="group" aria-label="Your pick for ' + esc(f[1]) + '">';
@@ -364,8 +502,11 @@
   function syncPanes() {
     if (!has(st.cur)) st.cur = S[0].k;
     st.panes = st.panes.filter(has).filter(function (k, i, a) { return a.indexOf(k) === i; }).slice(0, 3);
-    var i = st.panes.indexOf(st.cur);
-    if (i >= 0) st.act = i; else { st.act = Math.max(0, Math.min(st.act, st.panes.length - 1)); st.panes[st.act] = st.cur; }
+    if (st.panes.indexOf(st.cur) < 0) { st.act = Math.max(0, Math.min(st.act, st.panes.length - 1)); st.panes[st.act] = st.cur; }
+    var ord = sorted().map(function (o) { return o.k; }); /* panes sit in the same order as the chips in the bar */
+    st.panes.sort(function (a, b) { return ord.indexOf(a) - ord.indexOf(b); });
+    st.act = st.panes.indexOf(st.cur);
+    if (st.pm && !has(st.pm.split('|')[0])) st.pm = '';
   }
   function render(focusSel) {
     uid = 0; syncPanes();
@@ -373,10 +514,13 @@
     b.dataset.mwPage = st.page; b.dataset.mwView = st.page === 'focus' ? st.view : '';
     b.dataset.mwSheet = st.sheet ? '1' : ''; b.dataset.mwLayer = mode; b.dataset.mwSplit = mode === 'bar' || mode === 'side' ? '' : st.panes.length;
     $('mw-page').innerHTML = st.page === 'focus' ? (st.view === 'zoom' ? zoomHTML() : wallHTML()) : PG[st.page]();
-    var L = $('mw-layer'); L.dataset.mode = mode; L.innerHTML = layerHTML();
+    var L = $('mw-layer'), nav; L.dataset.mode = mode;
+    /* the bar never wraps: beside the right dock and on phones it is symbols and counts; elsewhere it folds only as far as needed */
+    BL = phone() || (mode === 'right' && window.innerWidth < 1700) ? 3 : 0; L.innerHTML = layerHTML();
+    while (BL < 3 && (nav = q1('.mw-bar .mw-sw')) && nav.scrollWidth > nav.clientWidth + 1) { BL++; L.innerHTML = layerHTML(); }
     var sh = $('mw-sheet'); sh.innerHTML = sheetHTML(); sh.inert = !st.sheet; sh.setAttribute('aria-hidden', String(!st.sheet));
     var ov = $('mw-ov'), oh = ovHTML(); ov.innerHTML = oh; ov.hidden = !oh; if (!oh) st.ov = null;
-    q1('.shell').inert = !!oh; if (oh) sh.inert = true;
+    Array.prototype.forEach.call(b.children, function (c) { if (c !== ov && c !== sh && c.tagName !== 'SCRIPT') c.inert = !!oh; }); if (oh) sh.inert = true; /* the page behind a preview cannot be reached */
     $('mw-crumb').textContent = PAGES[st.page] + (st.page === 'ticket' ? ' › ' + st.tk : '');
     $('mw-fbtn').setAttribute('aria-expanded', String(st.sheet));
     $('mw-many').checked = st.many;
@@ -401,6 +545,10 @@
     if (st.many) p.push('many=1');
     if (st.list) p.push('list=' + st.list);
     if (st.menu) p.push('menu=' + st.menu);
+    if (st.pm) p.push('pm=' + encodeURIComponent(st.pm.replace('|', ':')));
+    if (st.nt !== 'claude' || st.nm !== 'Sonnet') p.push('tool=' + st.nt, 'model=' + encodeURIComponent(st.nm));
+    if ((by(st.cur).att || []).length) p.push('att=1');
+    if (st.voice) p.push('voice=' + st.voice);
     if (st.f) p.push('q=' + encodeURIComponent(st.f));
     if (st.ov) p.push('res=' + encodeURIComponent(st.ov.src) + ':' + st.ov.i);
     if (st.marks) p.push('marks=1');
@@ -478,7 +626,7 @@
   }
   function start(k, how) {
     var s = by(k);
-    if (how === 'clean') { s.lines = []; begin(s, ['⏺ Fresh start.', '⏺ Reading the ticket and its files.'], 'Fresh start: the helper reads the ticket again'); }
+    if (how === 'clean') { s.lines = []; if (s.kind !== 'shell') { s.tool = st.nt; s.model = st.nm; s.next = ''; } begin(s, ['⏺ Fresh start.', '⏺ Reading the ticket and its files.'], 'Fresh start: the helper reads the ticket again'); }
     else begin(s, ['', '⏺ Resuming the last conversation.', '⏺ Picking up where it stopped.'], 'Continued the last conversation');
   }
   function create(k) {
@@ -487,7 +635,7 @@
       if (k === 'Plain terminal') S.push({ k: k, t: 'No helper, just a terminal', kind: 'shell', s: 'open', up: 0, pin: true, now: 'An empty terminal, ready for you.', lines: ['Last login: today 15:06', 'demo@workspace ~ %'], chat: [], files: [] });
       else {
         var fullUp = used() >= max(), t = T[k] || T['Empty helper'];
-        S.push({ k: k, t: t[0], kind: 'free', tool: 'claude', s: fullUp ? 'queue' : 'run', up: 0, pin: true, now: fullUp ? 'Waits in line for a free helper place.' : t[1], lines: [t[2]], chat: [['h', t[2].slice(2), 'now']], files: [] });
+        S.push({ k: k, t: t[0], kind: 'free', tool: st.nt, model: st.nm, s: fullUp ? 'queue' : 'run', up: 0, pin: true, now: fullUp ? 'Waits in line for a free helper place.' : t[1], lines: [t[2]], chat: [['h', t[2].slice(2), 'now']], files: [] });
       }
       say(k + ' opened and pinned.');
     }
@@ -514,8 +662,14 @@
     st.panes.push(next.k); st.cur = next.k; st.ask = false; st.ren = '';
     render('.mw-pane[data-on] .mw-pt'); say(next.k + ' added beside. Pick another session in the bar to change it.');
   }
+  var DEMO = [['img', 'home-390.png', 'Picture · 212 KB'], ['table', 'price-list.csv', 'Table · 14 KB', [['Starter', '19'], ['Team', '49'], ['Company', '129']]]];
+  function attach(s, list) { s.att = (s.att || []).concat(list); say(list.length + (list.length === 1 ? ' file' : ' files') + ' attached. Nothing is sent yet.'); }
+  function fromFiles(fl) {
+    return Array.prototype.map.call(fl, function (f) { var e = (f.name.split('.').pop() || '').toLowerCase(), t = /^(png|jpe?g|gif|svg|webp)$/.test(e) ? 'img' : (/^(csv|xlsx)$/.test(e) ? 'table' : (e === 'html' ? 'html' : 'file')); return [t, f.name || 'screenshot.png', KIND[t].charAt(0).toUpperCase() + KIND[t].slice(1) + ' · ' + (f.size > 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(f.size / 1024)) + ' KB')]; });
+  }
   function closePane(k) {
-    var i = st.panes.indexOf(k); if (i < 0 || st.panes.length < 2) return;
+    var i = st.panes.indexOf(k); if (i < 0) return;
+    if (st.panes.length < 2) { setMode('bar'); return; }
     st.panes.splice(i, 1); st.act = Math.max(0, Math.min(st.act > i ? st.act - 1 : st.act, st.panes.length - 1)); st.cur = st.panes[st.act]; st.ask = false; st.ren = '';
     render('.mw-pane[data-on] .mw-pt');
   }
@@ -563,6 +717,8 @@
     if (!!o.many !== st.many) many(!!o.many);
     Object.keys(o).forEach(function (k) { if (k !== 'need' && k !== 'many') st[k] = Array.isArray(o[k]) ? o[k].slice() : (o[k] && typeof o[k] === 'object' ? JSON.parse(JSON.stringify(o[k])) : o[k]); });
     if (!o.panes) { st.panes = [st.cur]; st.act = 0; }
+    st.voice = o.voice || ''; st.vk = st.cur; if (o.att) by(st.cur).att = DEMO.slice(); if (o.voice === 'done') drafts['c:' + st.cur] = 'Please keep the old file name, and add a note for the support team.';
+    delete st.att;
     if (st.mode === 'bottom' || st.mode === 'right') st.last = st.mode;
     st.feat = n; st.marks = true; if (window.innerWidth <= 900 || o.full || o.ov) st.sheet = false;
     render();
@@ -581,8 +737,21 @@
     var nav = e.target.closest('.sidebar .nav-item[aria-label], .sidebar .brand');
     if (nav) { var p = nav.classList.contains('brand') ? 'home' : nav.getAttribute('aria-label').toLowerCase(); if (PAGES[p]) { e.preventDefault(); setPage(p); return; } }
     var b = e.target.closest('[data-act]');
-    if (!b) { if ((st.menu || st.list) && !e.target.closest('.mw-pop')) { st.menu = ''; st.list = ''; render(); } return; }
+    if (!b) { if ((st.menu || st.list || st.pm) && !e.target.closest('.mw-pop, .mw-pmenu')) { st.menu = ''; st.list = ''; st.pm = ''; render(); } return; }
     var a = b.dataset.act, k = b.dataset.k, s;
+    if (a === 'pm') { var pk = k + '|' + b.dataset.kind; st.pm = st.pm === pk ? '' : pk; st.menu = ''; st.list = ''; render(st.pm ? '.mw-pmenu .mw-opt' : '[data-act=pm][data-k="' + k + '"][data-kind=' + b.dataset.kind + ']'); return; }
+    if (st.pm) { st.pm = ''; if (k && has(k) && (a === 'ask' || a === 'view')) st.cur = k; }
+    if (a === 'ntool') { st.nt = b.dataset.v; st.nm = st.nt === 'codex' ? 'GPT-5' : 'Sonnet'; render('[data-act=ntool][data-v=' + st.nt + ']'); return; }
+    if (a === 'nmodel') { st.nm = b.dataset.v; render('[data-act=nmodel][aria-pressed=true]'); return; }
+    if (a === 'smodel') { s = by(k); s.next = b.dataset.v === mdl(s) ? '' : b.dataset.v; render('[data-act=pm][data-k="' + k + '"][data-kind=model]'); say(s.next ? 'Model ' + s.next + ' is used from the next fresh start.' : 'The model stays ' + mdl(s) + '.'); return; }
+    if (a === 'min') { setMode('bar'); return; }
+    if (a === 'attach') { attach(by(k), DEMO.filter(function (d) { return !(by(k).att || []).some(function (x) { return x[1] === d[1]; }); })); render('.mw-comp[data-k="' + k + '"] input'); return; }
+    if (a === 'attx') { by(k).att.splice(+b.dataset.i, 1); render('.mw-comp[data-k="' + k + '"] input'); return; }
+    if (a === 'voice') {
+      st.voice = b.dataset.v; st.vk = k;
+      if (st.voice === 'done') drafts['c:' + k] = ((drafts['c:' + k] || '') + ' Please keep the old file name, and add a note for the support team.').trim();
+      render('.mw-comp[data-k="' + k + '"] ' + (st.voice === 'rec' ? '[data-act=voice]' : 'input')); say(st.voice === 'rec' ? 'Listening.' : (st.voice ? 'Your words are in the box. Nothing is sent yet.' : 'Voice cancelled.')); return;
+    }
     if (a === 'zoom') zoom(k);
     else if (a === 'back') back();
     else if (a === 'home') { if (st.page === 'focus' && st.view === 'zoom') back(); else setPage('focus'); }
@@ -616,7 +785,7 @@
     else if (a === 'sheet') { if (st.sheet) { st.sheet = false; render('#mw-fbtn'); } else openSheet(0); }
     else if (a === 'show') show(+b.dataset.n, b.dataset.more);
     else if (a === 'pick') { var n = b.dataset.n; picks[n] = picks[n] === b.dataset.p ? '' : b.dataset.p; try { localStorage.setItem(KEY, JSON.stringify(picks)); } catch (er) { /* private window */ } render('[data-act=pick][data-n="' + n + '"][data-p=' + b.dataset.p + ']'); }
-    else if (a === 'copy') clip('Focus draft D: my picks\n' + F.map(function (f) { return f[0] + '. ' + f[1] + ': ' + (picks[f[0]] || 'not picked'); }).join('\n'), function () { var c = $('mw-copied'); if (c) c.textContent = 'Copied'; });
+    else if (a === 'copy') clip('Focus draft D: my picks\n' + F.map(function (f) { return f[0] + '. ' + f[1] + ': ' + (picks[f[0]] || 'not picked'); }).join('\n') + '\n\nResult widgets\n' + WG.map(function (w) { return w[1] + ': ' + (picks['w:' + w[0]] || 'not picked'); }).join('\n'), function () { var c = $('mw-copied'); if (c) c.textContent = 'Copied'; });
   });
   function closeOv() { var o = st.ov; st.ov = null; render(o ? '[data-act=ov][data-src="' + o.src + '"][data-i="' + o.i + '"]' : ''); }
   document.addEventListener('change', function (e) {
@@ -625,7 +794,7 @@
   });
   document.addEventListener('input', function (e) {
     var t = e.target, d = t.dataset && t.dataset.d;
-    if (d) drafts[d] = t.value;
+    if (d) { drafts[d] = t.value; if (st.voice === 'done') st.voice = ''; }
     else if (t.id === 'mw-filter') { st.f = t.value; $('mw-bands').innerHTML = bandsHTML(); url(); }
     else if (t.id === 'mw-lq') { st.lq = t.value; $('mw-plist').innerHTML = listRows(); }
   });
@@ -634,10 +803,14 @@
     e.preventDefault();
     var inp = f.querySelector('input'), v = inp.value.trim(), s = by(f.dataset.k);
     if (f.dataset.f === 'ren') { s.name = v && v !== s.t ? v : ''; st.ren = ''; render('[data-act=ren]'); say('Name saved.'); return; }
-    if (!v) return;
+    var at2 = s.att || [];
+    if (!v && !at2.length) return;
     inp.value = ''; drafts[inp.dataset.d] = '';
     {
-      s.chat.push(['y', v, 'now']); s.lines.push('> ' + v);
+      s.sent = s.sent || []; var ix = at2.map(function (f) { s.sent.push(f); return s.sent.length - 1; });
+      s.att = []; if (st.vk === s.k) st.voice = '';
+      s.chat.push(['y', v, 'now', 0, undefined, ix]); s.lines.push('> ' + (v || '(files)') + (ix.length ? ' [' + ix.length + ' attached]' : ''));
+      if (ix.length || f.querySelector('.mw-vhint')) { render('.mw-comp[data-k="' + s.k + '"] input'); }
       setTimeout(function () { s.chat.push(['h', 'Got it. I take that into account.', 'now']); s.lines.push('⏺ Got it. I take that into account.'); refreshChat(s.k); refresh(); }, 600);
       refreshChat(s.k); refresh();
     }
@@ -653,6 +826,16 @@
     else s.typed = t + key;
     refresh(); document.querySelectorAll('[data-screen]').forEach(function (x) { if (by(x.dataset.screen) === s) x.scrollTop = x.scrollHeight; });
   }
+  /* files and screenshots: paste into the message box, or drop anywhere on the pane */
+  document.addEventListener('paste', function (e) {
+    var cf = e.target.closest && e.target.closest('.mw-comp'), fl = e.clipboardData && e.clipboardData.files;
+    if (cf && fl && fl.length) { e.preventDefault(); attach(by(cf.dataset.k), fromFiles(fl)); render('.mw-comp[data-k="' + cf.dataset.k + '"] input'); }
+  });
+  document.addEventListener('dragover', function (e) { if (e.target.closest && e.target.closest('.mw-pane')) e.preventDefault(); });
+  document.addEventListener('drop', function (e) {
+    var pn = e.target.closest && e.target.closest('.mw-pane'), fl = e.dataTransfer && e.dataTransfer.files; if (!pn || !fl || !fl.length) return;
+    e.preventDefault(); attach(by(pn.dataset.k), fromFiles(fl)); render('.mw-comp[data-k="' + pn.dataset.k + '"] input');
+  });
   document.addEventListener('paste', function (e) {
     var scr = e.target.closest && e.target.closest('pre[data-screen]'); if (!scr) return;
     e.preventDefault(); termKey(by(scr.dataset.screen), ((e.clipboardData && e.clipboardData.getData('text')) || '').replace(/\s+/g, ' '));
@@ -661,6 +844,7 @@
     var scr = e.target.closest && e.target.closest('pre[data-screen]');
     if (scr && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'Enter' || e.key === 'Backspace' || e.key.length === 1)) { e.preventDefault(); termKey(by(scr.dataset.screen), e.key); return; }
     if (st.ov) {
+      if (e.key === 'Tab') { var fs = $('mw-ov').querySelectorAll('button, a[href], iframe'), f0 = fs[0], f1 = fs[fs.length - 1]; if (e.shiftKey && document.activeElement === f0) { e.preventDefault(); f1.focus(); } else if (!e.shiftKey && document.activeElement === f1) { e.preventDefault(); f0.focus(); } return; }
       if (e.key === 'Escape') closeOv(); else if (e.key === 'ArrowLeft') ovStep(-1); else if (e.key === 'ArrowRight') ovStep(1);
       return;
     }
@@ -673,12 +857,16 @@
     }
     if (e.key !== 'Escape') return;
     if (st.sheet) { st.sheet = false; render('#mw-fbtn'); }
+    else if (st.pm) { var pk2 = st.pm.split('|'); st.pm = ''; render('[data-act=pm][data-k="' + pk2[0] + '"][data-kind=' + pk2[1] + ']'); }
+    else if (st.voice === 'rec') { st.voice = ''; render('[data-act=voice]'); }
     else if (st.menu || st.list) { var w = st.menu ? '[data-act=menu][data-m=' + st.menu + ']' : '[data-act=list]'; st.menu = ''; st.list = ''; render(w); }
     else if (st.ren) { st.ren = ''; render('[data-act=ren]'); }
     else if (st.full) { st.full = false; render('[data-act=menu][data-m=pos], [data-act=full]'); }
     else if (st.ask && live(by(st.cur))) { st.ask = false; render('[data-act=ask]'); }
     else if (zoomed()) back();
   });
+  var rz; window.addEventListener('resize', function () { clearTimeout(rz); rz = setTimeout(function () { render(); }, 150); });
+  var vt0 = 4; setInterval(function () { var e = q1('[data-vt]'); if (e) { vt0++; e.textContent = Math.floor(vt0 / 60) + ':' + ('0' + vt0 % 60).slice(-2); } else vt0 = 4; }, 1000);
   /* live: one working session gets its next line every few seconds */
   setInterval(function () {
     var w = S.filter(function (s) { return s.s === 'run' && s.feed && s.feed.length; }); if (!w.length) return;
@@ -706,10 +894,15 @@
     st.term = q.get('term') === '1';
     st.ask = q.get('ask') === '1' && live(by(st.cur));
     if (q.get('ren') === '1') st.ren = st.cur;
-    if (/^(run|queue|idle)$/.test(v = q.get('list') || '')) st.list = v;
+    if (/^(wait|pin|run|queue|idle|more)$/.test(v = q.get('list') || '')) st.list = v;
     if (/^(new|pos)$/.test(v = q.get('menu') || '')) st.menu = v;
+    if (MODELS[v = q.get('tool')]) { st.nt = v; st.nm = MODELS[v].indexOf(q.get('model')) >= 0 ? q.get('model') : (v === 'codex' ? 'GPT-5' : 'Sonnet'); }
+    else if (MODELS.claude.indexOf(q.get('model')) >= 0) st.nm = q.get('model');
+    if ((v = q.get('pm'))) { var pc = v.lastIndexOf(':'); if (pc > 0 && has(v.slice(0, pc)) && /^(place|model|more)$/.test(v.slice(pc + 1))) st.pm = v.slice(0, pc) + '|' + v.slice(pc + 1); }
+    if (q.get('att') === '1') by(st.cur).att = DEMO.slice();
+    if (/^(rec|done)$/.test(v = q.get('voice') || '')) { st.voice = v; st.vk = st.cur; if (v === 'done') drafts['c:' + st.cur] = 'Please keep the old file name, and add a note for the support team.'; }
     st.f = q.get('q') || '';
-    if ((v = q.get('res'))) { var c = v.lastIndexOf(':'), src = v.slice(0, c), ri = +v.slice(c + 1); if ((src === '*' || has(src)) && files(src)[ri]) st.ov = { src: src, i: ri }; }
+    if ((v = q.get('res'))) { var c = v.lastIndexOf(':'), src = v.slice(0, c), ri = +v.slice(c + 1); if ((src === '*' || has(src.replace(/^(att|sent):/, ''))) && files(src)[ri]) st.ov = { src: src, i: ri }; }
     st.marks = q.get('marks') === '1';
     if ((v = q.get('sheet'))) { st.sheet = true; st.feat = +v >= 1 && +v <= F.length ? +v : 0; }
     document.body.dataset.mwBoot = '1'; /* a page that opens with the sheet shows it at once, without the slide */
