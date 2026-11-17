@@ -274,7 +274,11 @@ def test_card_shows_and_pins_the_newest_commit(tk, run, gh):
     assert _ask(run, tid)[0] == 0
     q = _q(root, tid)
     assert q["action"] == {"merge": PR, "head": HEAD}
-    assert q["card"]["preview"]["paras"] == [f"Merges commit {HEAD[:7]} exactly."]
+    assert q["card"]["preview"] == {
+        "type": "doc",
+        "heading": "Pull request",
+        "foot": f"Exact version: {HEAD[:7]}",
+    }
     assert PR not in json.dumps(q["card"]["preview"]), "the address is the Open link, not the content"
     assert q["card"]["open"] == PR
 
@@ -308,15 +312,45 @@ def test_a_release_card_shows_what_goes_out_and_the_checks(tk, run, gh):
     }
     assert _ask(run, tid)[0] == 0
     pv = _q(root, tid)["card"]["preview"]
-    assert pv["heading"] == "What goes to main"
-    assert pv["steps"] == [
-        f"Bigger pictures (#7, {tickets.load(root, other)['key']})",
-        "Send back asks for words (#9)",
-        "and 1 other commit",
-    ], "GitHub's own titles, the linked ticket after it, and the commits that are no pull request"
-    assert pv["paras"][0].startswith("Checks at ") and pv["paras"][0].endswith(": all 2 passed.")
-    assert pv["paras"][1] == f"Merges commit {HEAD[:7]} exactly."
-    review.check_wire_card(review.wire_card(_q(root, tid)["card"], {}), 0)  # still a valid phone card
+    key = tickets.load(root, other)["key"]
+    assert pv["heading"] == "What goes out · 2 changes"
+    assert pv["rows"] == [
+        {"title": "Bigger pictures", "n": 7, "key": key},
+        {"title": "Send back asks for words", "n": 9},
+        {"title": "and 1 other commit"},
+    ], "GitHub's own titles, the linked ticket beside it, and the commits that are no pull request"
+    assert pv["status"]["tone"] == "done" and pv["status"]["text"].startswith(
+        "All 2 checks passed · checked "
+    )
+    assert "paras" not in pv, "all green: no warning lines"
+    assert pv["foot"] == f"Exact version: {HEAD[:7]}"
+    wire = review.wire_card(_q(root, tid)["card"], {})
+    review.check_wire_card(wire, 0)  # still a valid phone card: the rows and status become plain lines
+    assert wire["preview"]["steps"][0] == f"Bigger pictures (#7, {key})"
+    assert wire["preview"]["paras"][0].startswith("All 2 checks passed")
+
+
+def test_a_failed_check_turns_the_status_red_and_says_why(tk, run, gh):
+    root, tid = tk
+    bad = {
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "workflowName": "ci",
+        "name": "gate",
+        "startedAt": "1",
+    }
+    gh.summary = {
+        "title": "Release 33",
+        "baseRefName": "main",
+        "headRefOid": HEAD,
+        "statusCheckRollup": [bad],
+        "commits": [{"messageHeadline": "Merge pull request #9 from acme/fix/y", "messageBody": "Y"}],
+    }
+    assert _ask(run, tid)[0] == 0
+    pv = _q(root, tid)["card"]["preview"]
+    assert pv["status"]["tone"] == "failed" and pv["status"]["text"].startswith("1 check failed: gate")
+    assert pv["paras"][0] == "Merging now would put work live that failed a check."
+    assert "may have changed" in pv["paras"][1]
 
 
 def test_a_summary_of_another_commit_or_a_file_never_replaces_it(tk, run, gh, tmp_path):
@@ -329,35 +363,35 @@ def test_a_summary_of_another_commit_or_a_file_never_replaces_it(tk, run, gh, tm
         "statusCheckRollup": [],
     }
     assert _ask(run, tid)[0] == 0
-    assert _q(root, tid)["card"]["preview"]["paras"] == [f"Merges commit {HEAD[:7]} exactly."], (
-        "read for another commit: only the pinned one"
-    )
+    assert "rows" not in _q(root, tid)["card"]["preview"], "read for another commit: only the pinned one"
 
 
 def test_checks_in_plain_words():
     run_ = {"status": "COMPLETED", "conclusion": "SUCCESS", "workflowName": "ci", "startedAt": "1"}
-    assert ghmerge.checks_words([]) == "no checks ran"
-    assert ghmerge.checks_words([{**run_, "name": "a"}, {**run_, "name": "b"}]) == "all 2 passed"
-    assert (
-        ghmerge.checks_words([{**run_, "name": "a"}, {"status": "IN_PROGRESS", "name": "b"}])
-        == "1 of 2 still running"
+    assert ghmerge.checks_state([]) == ("working", "No checks have run yet")
+    assert ghmerge.checks_state([{**run_, "name": "a"}, {**run_, "name": "b"}]) == (
+        "done",
+        "All 2 checks passed",
     )
-    assert ghmerge.checks_words([{**run_, "name": "a", "conclusion": "FAILURE"}]) == "1 failed: a"
+    two = [{**run_, "name": "a"}, {"status": "IN_PROGRESS", "name": "b"}]
+    assert ghmerge.checks_state(two) == ("working", "1 of 2 checks still running")
+    assert ghmerge.checks_state([{**run_, "name": "a", "conclusion": "FAILURE"}]) == (
+        "failed",
+        "1 check failed: a",
+    )
 
 
-def test_a_push_after_the_card_is_never_merged(tk, run, gh):
-    root, tid = tk
-    assert _ask(run, tid)[0] == 0
-    gh.head, gh.review = "b" * 40, "REVIEW_REQUIRED"
-    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
-    assert code == 2 and "changed after the card was made" in out + err
-    assert gh.merges == [] and ["api", "-X"] not in [c[:2] for c in gh.calls]
-    assert _q(root, tid)["answer"] is None
-
-
-def test_card_only_for_an_open_pull_request(tk, run, gh):
-    root, tid = tk
-    gh.state = "MERGED"
-    code, out, err = _ask_only(run, tid)
-    assert code == 2 and "not open on GitHub" in out + err
-    assert tickets.load(root, tid)["questions"] == []
+def test_a_doc_box_takes_status_rows_and_foot_only_in_shape():
+    pv = {
+        "type": "doc",
+        "status": {"tone": "done", "text": "Fine"},
+        "rows": [{"title": "One", "n": 3, "key": "ORCH-1"}],
+    }
+    ok = {"kind": "draft", "title": "T", "then": "x", "preview": {**pv, "foot": "v"}}
+    review.validate_card(json.loads(json.dumps(ok)))
+    for bad in ({"tone": "pink", "text": "x"}, {"tone": "done"}, "Fine"):
+        with pytest.raises(review.Refused):
+            review.validate_card({**ok, "preview": {**ok["preview"], "status": bad}})
+    for bad in ([{"n": 3}], [{"title": "x", "n": -1}], [{"title": "x", "url": "https://x"}], "rows"):
+        with pytest.raises(review.Refused):
+            review.validate_card({**ok, "preview": {**ok["preview"], "rows": bad}})

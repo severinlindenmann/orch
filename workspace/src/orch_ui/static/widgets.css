@@ -885,3 +885,18 @@ a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-de
 @media(max-width:720px){body:has(>.tabbar) .ui-toasts{bottom:calc(var(--touch) + var(--s4) + env(safe-area-inset-bottom))}body:has(>.tabbar):has(.swipe-actions:not([hidden])) .ui-toasts{bottom:calc(var(--touch) + 136px + env(safe-area-inset-bottom))}}
 /* A card with its own answers (a Factory start, ORCH-183 owner choice B): its buttons in place of the three, all outlined */
 .swipe-own{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s3)}
+/* The words box with structure (UI.docBox, a merge card, ORCH-183): status pill on top, rows with a key chip and the
+   number on the right, a small footer; such a box sits on surface-2 (not the black inset), and the enlarge button of
+   any words box sits top right so it never covers the last line. */
+.doc .doc-status{margin:0 0 var(--s3);max-width:calc(100% - 40px);white-space:normal}/* room for the enlarge button top right */
+.doc .doc-status.failed{color:var(--failed);border-color:color-mix(in srgb,var(--failed) 45%,var(--border))}
+.doc-rows{list-style:none;margin:0;padding:0;display:grid}
+.doc-row{display:flex;align-items:baseline;gap:var(--s2);padding:var(--s2) 0;border-top:1px solid var(--border);font-size:14px;line-height:20px;color:var(--text)}
+.doc-row:first-child{border-top:0}
+.doc-row-title{flex:1;min-width:0;overflow-wrap:anywhere}
+.doc-row-key{flex:none}
+.doc-row-n{flex:none;font-size:12px;line-height:16px;color:var(--text-faint);font-variant-numeric:tabular-nums}
+.doc .doc-foot{margin:var(--s3) 0 0;font-size:12px;line-height:16px;color:var(--text-faint)}
+.swipe-preview:has(.doc-rows){background:var(--surface-2)}
+.swipe-preview:has(>.doc) .swipe-expand{top:8px;bottom:auto}
+@media(max-width:720px){.doc-row{flex-wrap:wrap}.doc-row-title{flex-basis:100%}}

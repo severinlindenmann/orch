@@ -76,7 +76,7 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
    if(pv.type==='img'){const i=el('img');i.src=u;i.alt=pv.alt||'';i.draggable=false;w.append(i)}
    else{const f=el('iframe');f.src=u;f.title=pv.title||k.title||'Reviewed page';f.setAttribute('sandbox','');f.tabIndex=-1;f.loading='lazy';w.append(f)}}
   else if(pv.type==='table'){const t=el('div','doc');t.append(el('h4','',(pv.cols||[]).join(' · ')));(pv.rows||[]).slice(0,3).forEach(r=>t.append(el('p','',r.join(' · '))));w.append(t)}
-  else{const t=el('div','doc');if(pv.heading)t.append(el('h4','',pv.heading));(pv.paras||[]).slice(0,2).forEach(x=>t.append(el('p','',x)));w.append(t)}
+  else{const t=el('div','doc');if(pv.status&&pv.status.text)t.append(el('p','',pv.status.text));if(pv.heading)t.append(el('h4','',pv.heading));(pv.paras||[]).slice(0,2).forEach(x=>t.append(el('p','',x)));(pv.rows||[]).slice(0,3).forEach(r=>r&&r.title&&t.append(el('p','',r.title)));w.append(t)}
   return w};
  const shot=(label,pv,on,taken,dim)=>{const b=el('button','decision-shot'+(taken?' taken':'')+(dim?' dim':''));b.type='button';b.dataset.on=on;
   const w=content(pv),cap=el('span');cap.append(el('b','',label));b.append(w,cap);out.push({b,w,on,taken:!!taken});return b};

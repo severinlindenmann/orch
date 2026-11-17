@@ -253,33 +253,48 @@ def _pr_tickets(root: Path, repo_url: str) -> dict[int, list[str]]:
 
 
 def merge_preview(root: Path, url: str, head: str, info: dict | None) -> dict:
-    """A merge card's box (ORCH-183, owner 17 Nov): what goes out, one line each (the ticket when one links
-    the pull request, else its title), the checks in plain words and the exact commit. The address itself is
-    the card's Open link, not its content. Without GitHub's answer only the commit."""
-    when = datetime.now().strftime("%H:%M")
+    """A merge card's box (ORCH-183, owner 17 Nov, after a design challenge): the checks as a status line,
+    "What goes out · N changes" with one row per pull request (GitHub's title first, its ticket key and
+    number beside it), the commits that are no pull request merge, and the exact version as a small footer.
+    The address itself is the card's Open link, not its content. Without GitHub's answer only the version."""
+    foot = f"Exact version: {head[:7]}"
     if not info:
-        return {"type": "doc", "heading": "Pull request", "paras": [f"Merges commit {head[:7]} exactly."]}
-    repo = url.rsplit("/pull/", 1)[0]
-    names = _pr_tickets(root, repo)
-    steps = [
-        f"{i['title'] or 'Pull request'} (#{i['pr']}"
-        + "".join(f", {k}" for k in names.get(i["pr"], [])[:3])
-        + ")"
-        for i in info["items"]
-    ]
+        return {"type": "doc", "heading": "Pull request", "foot": foot}
+    when = datetime.now().strftime("%H:%M")
+    tone, words = info["checks"]
+    names = _pr_tickets(root, url.rsplit("/pull/", 1)[0])
+    rows = []
+    for i in info["items"]:
+        row = {"title": i["title"] or "Pull request", "n": i["pr"]}
+        keys = names.get(i["pr"], [])
+        if keys:
+            row["key"] = " ".join(keys[:2])[:20]
+        rows.append(row)
     if info.get("more"):
-        steps.append(f"and {info['more']} more")
-    if steps and info.get("other"):
+        rows.append({"title": f"and {info['more']} more"})
+    if rows and info.get("other"):
         n = info["other"]
-        steps.append(f"and {n} other commit{'' if n == 1 else 's'}")
-    base = info.get("base") or "the main branch"
-    pv = {
+        rows.append({"title": f"and {n} other commit{'' if n == 1 else 's'}"})
+    paras = []
+    if tone == "working":
+        paras.append("Safer to wait: choose Later and this card stays.")
+    elif tone == "failed":
+        paras.append("Merging now would put work live that failed a check.")
+    if tone != "done":
+        paras.append(f"Checked at {when}; it may have changed. Open shows the latest.")
+    n = len(info["items"]) + info.get("more", 0)
+    pv: dict = {
         "type": "doc",
-        "heading": (f"What goes to {base}" if steps else info.get("title") or "Pull request")[:200],
-        "paras": [f"Checks at {when}: {info['checks']}.", f"Merges commit {head[:7]} exactly."],
+        "heading": (
+            f"What goes out · {n} change{'' if n == 1 else 's'}" if n else info.get("title") or "Pull request"
+        )[:200],
+        "status": {"tone": tone, "text": f"{words} · checked {when}"},
+        "foot": foot,
     }
-    if steps:
-        pv["steps"] = steps
+    if paras:
+        pv["paras"] = paras
+    if rows:
+        pv["rows"] = rows
     return pv
 
 

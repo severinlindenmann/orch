@@ -158,11 +158,12 @@ MERGE_COMMIT = re.compile(r"Merge pull request #([0-9]{1,9}) from ")
 MAX_ITEMS = 40
 
 
-def checks_words(rollup) -> str:
-    """The checks of a pull request in plain words (ORCH-183): "all 18 passed", "3 of 18 still running",
-    "1 failed: gate". The newest run of each check counts, as in passed()."""
+def checks_state(rollup) -> tuple[str, str]:
+    """(tone, plain words) of a pull request's checks (ORCH-183): ("done", "All 18 checks passed"),
+    ("working", "3 of 18 checks still running"), ("failed", "1 check failed: gate"). The newest run of each
+    check counts, as in passed()."""
     if not isinstance(rollup, list) or not rollup:
-        return "no checks ran"
+        return "working", "No checks have run yet"
     runs = [c for c in _newest(rollup) if isinstance(c, dict)]
     failed, running = [], 0
     for c in runs:
@@ -179,10 +180,13 @@ def checks_words(rollup) -> str:
         if word not in PASSED:
             failed.append(str(c.get("name") or c.get("context") or "a check")[:60])
     if failed:
-        return f"{len(failed)} failed: " + ", ".join(failed[:3]) + (" …" if len(failed) > 3 else "")
+        n = len(failed)
+        return "failed", f"{n} check{'' if n == 1 else 's'} failed: " + ", ".join(failed[:3]) + (
+            " …" if n > 3 else ""
+        )
     if running:
-        return f"{running} of {len(runs)} still running"
-    return f"all {len(runs)} passed"
+        return "working", f"{running} of {len(runs)} checks still running"
+    return "done", f"All {len(runs)} checks passed"
 
 
 def summary(url: str, head: str) -> dict | None:
@@ -218,7 +222,7 @@ def summary(url: str, head: str) -> dict | None:
     return {
         "title": str(data.get("title") or "")[:200],
         "base": str(data.get("baseRefName") or "")[:100],
-        "checks": checks_words(data.get("statusCheckRollup")),
+        "checks": checks_state(data.get("statusCheckRollup")),
         "items": items[:MAX_ITEMS],
         "more": max(0, len(items) - MAX_ITEMS),
         "other": other,

@@ -123,3 +123,20 @@ test('a card with its own answers (a Factory start): its buttons in place of the
   assert.deepEqual(JSON.parse(JSON.stringify(decided)), [{id:'f', v:'ok', note:{picked:'Edit'}}]);
   assert.equal(own.hidden, true, 'the next card has the usual three answers');
 });
+
+test('a merge card box: the checks as a status pill, rows with key and number, a small footer (ORCH-183)', () => {
+  const pv = {type:'doc', heading:'What goes out · 2 changes', status:{tone:'failed', text:'1 check failed: gate · checked 11:02'},
+    paras:['Merging now would put work live that failed a check.'], rows:[{title:'Bigger pictures', n:1168, key:'ORCH-172'}, {title:'and 1 other commit'}], foot:'Exact version: 89984e4'};
+  const {host} = deck([{id:'m', kind:'link', kindLabel:'Publish', title:'Release 32', okLabel:'Merge', preview:pv}]);
+  const box = host.querySelector('.swipe-preview .doc');
+  const st = box.querySelector('.doc-status');
+  assert.ok(st.classList.contains('failed'), 'a failed check is red');
+  assert.match(st.textContent, /1 check failed: gate/);
+  const rows = box.querySelectorAll('.doc-row');
+  assert.deepEqual(rows.map(r => r.querySelector('.doc-row-title').textContent), ['Bigger pictures', 'and 1 other commit']);
+  assert.equal(rows[0].querySelector('.doc-row-key').textContent, 'ORCH-172');
+  assert.equal(rows[0].querySelector('.doc-row-n').textContent, '#1168');
+  assert.equal(rows[1].querySelector('.doc-row-key'), null);
+  assert.equal(box.querySelector('.doc-foot').textContent, 'Exact version: 89984e4');
+  assert.equal(box.children[0], st, 'the checks come first');
+});
