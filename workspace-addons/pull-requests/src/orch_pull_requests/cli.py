@@ -1,4 +1,4 @@
-"""orch pull-requests queue add|list|remove|run, tend, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
+"""orch pull-requests queue add|list|remove|run, tend, failed-checks, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
 
 from __future__ import annotations
 
@@ -162,6 +162,58 @@ def _tend(root: Path) -> dict:
     return switch.tend(root, GitHub(), log=lambda s: print(s, flush=True), start=start_runner)
 
 
+def _checks_tend(root: Path) -> dict:
+    from . import checks
+    from .github import GitHub
+
+    return checks.tend(root, GitHub(), log=lambda s: print(s, flush=True))
+
+
+def _watch_round(root: Path) -> None:
+    """One minute of the watcher: Merge when green, then (when turned on) the failed checks. A failure of one
+    part never skips the other."""
+    from . import checks
+
+    err = None
+    try:
+        _tend(root)
+    except Exception as e:  # noqa: BLE001 - raised again after the second part ran
+        err = e
+    if checks.is_on(root):
+        _checks_tend(root)
+    if err is not None:
+        raise err
+
+
+def _checks_cmd(args, root: Path) -> int:
+    """failed-checks on|off|status|tend: rerun a cancelled or timed-out job once, wake the helper on a failure."""
+    from . import checks
+
+    def say(data: dict, text: str) -> None:
+        print(json.dumps(data) if args.json else text, flush=True)
+
+    if args.state in ("on", "off"):
+        on = checks.set_on(root, args.state == "on")
+        say(
+            {"on": on},
+            "Failed checks: on. A cancelled or timed-out job is run again once; a real failure wakes the "
+            "ticket's helper. The Merge when green watcher does it every minute (orch pull-requests start)."
+            if on
+            else "Failed checks: off.",
+        )
+        return 0
+    if args.state == "tend":
+        got = _checks_tend(root)
+        if not got["on"]:
+            say(got, "Failed checks is off: nothing done. Turn it on: orch pull-requests failed-checks on")
+            return 0
+        say(got, f"Failed checks: {len(got['reran'])} job(s) run again, {len(got['woke'])} helper(s) woken.")
+        return 0
+    on = checks.is_on(root)
+    say({"on": on}, "Failed checks: on." if on else "Failed checks: off.")
+    return 0
+
+
 def _switch_cmd(args, root: Path) -> int:
     """tend, start, stop, status, watch: the Merge when green switch and its background watcher."""
     from . import service
@@ -170,7 +222,7 @@ def _switch_cmd(args, root: Path) -> int:
         print(json.dumps(data) if getattr(args, "json", False) else text, flush=True)
 
     if args.cmd == "watch":
-        return service.watch(root, lambda: _tend(root), log=lambda s: print(s, flush=True))
+        return service.watch(root, lambda: _watch_round(root), log=lambda s: print(s, flush=True))
     if args.cmd == "tend":
         got = _tend(root)
         n = len(got["added"])
@@ -219,11 +271,18 @@ def main(argv: list[str] | None = None) -> int:
         ("status", "is it running?"),
     ):
         sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    fc = sub.add_parser(
+        "failed-checks", help="rerun a cancelled or timed-out job once, wake the helper on a failure"
+    )
+    fc.add_argument("state", nargs="?", choices=("on", "off", "status", "tend"), default="status")
+    fc.add_argument("--json", action="store_true")
     w = sub.add_parser("watch", help=argparse.SUPPRESS)
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     try:
         root = _root(getattr(args, "root", None))
+        if args.cmd == "failed-checks":
+            return _checks_cmd(args, root)
         if args.cmd != "queue":
             return _switch_cmd(args, root)
         if args.sub == "run":
