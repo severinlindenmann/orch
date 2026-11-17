@@ -105,6 +105,21 @@ async function previewSwitch(page, dash) {
   await noSideways(page);
 }
 
+// Step 13. Preview on without the switch's clicks (step 3 clicks them): the page's state says the switch is on.
+async function previewOn(page) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    route.fulfill({ response: res, json: st });
+  });
+}
+
 // Step 9. The test dashboard has no running helpers, so the step gives the page draft D's 24 sessions (3 need you,
 // 1 pinned, 3 working, 9 in line, 8 idle) as runs of extra tickets in its state, with the Preview switch on. Pinning is
 // kept in the browser until the wall stores it. Everything else is the real page: the bar, its fold, list and search.
@@ -143,6 +158,57 @@ async function liveBarState(page) {
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
     route.fulfill({ response: res, json: st });
   });
+}
+
+// Step 13 until the layer exists (crew task layer replaces the stand-in with the real layer): a small open dialog with
+// a typed, unsent message in the keep place. Page changes by real links, Back, Forward, a deep link and a reload.
+async function staysOpen(page, dash) {
+  const go = async hash => {
+    await page.locator(`a[href="${hash}"]:visible`).first().click();
+    await page.waitForFunction(h => location.hash === h, hash, { timeout: 10000 });
+    await mainHasText(page);
+  };
+  const kept = async where => {
+    const st = await page.evaluate(() => ({ mark: window.softMark, open: !!document.querySelector('#keep dialog[open]'),
+      typed: document.getElementById('soft-typed')?.value, hash: location.hash }));
+    if (st.mark !== 'same page') throw new Error(`${where}: the page loaded again`);
+    if (!st.open) throw new Error(`${where}: the dialog in the keep place closed`);
+    if (st.typed !== 'Not sent yet') throw new Error(`${where}: the typed text is gone`);
+    return st.hash;
+  };
+  await previewOn(page);
+  await page.goto(dash + '/#tickets');  // a deep link
+  await mainHasText(page);
+  await page.reload();  // reload keeps the page
+  await mainHasText(page);
+  if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('reload left the page');
+  await page.evaluate(() => {
+    window.softMark = 'same page';
+    const d = document.createElement('dialog'), t = document.createElement('textarea'), a = document.createElement('a');
+    d.style.cssText = 'position:fixed;inset:35% 8px auto auto;margin:0;width:200px';
+    t.id = 'soft-typed'; t.setAttribute('aria-label', 'Message');
+    a.href = '/#tickets'; a.id = 'soft-full-link'; a.textContent = 'Tickets';
+    d.append(t, a);
+    window.orchKeep.mount(d);
+    d.show();
+  });
+  await page.fill('#soft-typed', 'Not sent yet');
+  await go('#home');
+  await kept('Home');
+  await go('#review');
+  await kept('Review');
+  await page.click('#soft-full-link');  // "/#tickets" would load the page again without the soft change
+  await page.waitForFunction(() => location.hash === '#tickets', null, { timeout: 10000 });
+  await mainHasText(page);
+  await kept('Tickets');
+  await page.goBack();
+  if (await kept('Back') !== '#review') throw new Error('Back did not go to Review');
+  await page.goBack();
+  if (await kept('Back twice') !== '#home') throw new Error('Back twice did not go to Home');
+  await page.goForward();
+  if (await kept('Forward') !== '#review') throw new Error('Forward did not go to Review');
+  await mainHasText(page);
+  await noSideways(page);
 }
 
 // The bar is one row that never wraps and stays inside the page.
@@ -290,10 +356,13 @@ const STEPS = [
   },
   {
     n: 13, pic: 'fd-13-stays-open', area: 'layer', title: 'Focus stays open with typed text and split while you change pages',
-    feature: [7], waits: T.pages,
+    feature: [7],
     do: ['Open two sessions side by side, type a message without sending.', 'Change to Home, Tickets and Review, then press Back.'],
     see: ['The layer, its split and the typed text stay as they were.', 'The page itself does not reload (no flash).',
       'Back and links work like before.'],
+    async run({ page, dash }) {
+      await staysOpen(page, dash);
+    },
     draft: { q: '?page=tickets&mode=bottom&split=2' },
   },
   {
