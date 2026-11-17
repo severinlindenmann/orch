@@ -349,26 +349,18 @@ def _real(proj, run, new_ticket, name, proves=None):
 
 
 @pytest.mark.parametrize("name", ["orch112", "orch113"])
-def test_work_in_other_words_goes_back_with_the_question_until_a_task_proves_it(
-    proj, run, new_ticket, facts, on, name
-):
+def test_work_in_other_words_is_accepted_with_a_could_not_match_note(proj, run, new_ticket, facts, on, name):
     tid = _real(proj, run, new_ticket, name)
     res = reviewer.run(proj)["actions"][0]
-    assert res["verdict"] == "back" and "which task proves it?" in res["why"] and "looked for:" in res["why"]
-    assert "The Reviewer has a question:" in tickets.load(proj, tid)["checklist"][-1]["text"]
-    assert (
-        run("check", "done", tid, "c1", "--note", "again", "--proves", REAL[name][0], "--by", "human:tester")[
-            0
-        ]
-        == 0
-    )
-    added = tickets.load(proj, tid)["checklist"][-1][
-        "id"
-    ]  # the task the Reviewer added: the helper finishes it
-    assert run("check", "done", tid, added, "--note", "named the task", "--by", "human:tester")[0] == 0
-    tickets.set_status(proj, tid, "review", "human:tester")
-    res = reviewer.run(proj)["actions"][0]
     assert res["verdict"] == "accept", res
+    assert "Could not match:" in res["why"] and REAL[name][0] in res["why"]
+    assert tickets.load(proj, tid)["status"] == "done"
+
+
+def test_the_question_wording_is_kept_for_a_part_with_no_work(proj, run, new_ticket, facts, on):
+    tid = _real(proj, run, new_ticket, "unbuilt")
+    assert reviewer.run(proj)["actions"][0]["verdict"] == "back"
+    assert "The Reviewer has a question:" in tickets.load(proj, tid)["checklist"][-1]["text"]
 
 
 def test_proves_links_a_part_to_a_finished_task_and_no_note_is_left(proj, run, new_ticket, facts, on):
