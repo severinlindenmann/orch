@@ -236,9 +236,9 @@ def find_binary(binary: str | None) -> str | None:
     if os.name != "nt":
         folders += [Path("/opt/homebrew/bin"), Path("/usr/local/bin")]
     for d in folders:
-        found = shutil.which(binary, path=str(d))
-        if found:
-            return found
+        cand = d / binary
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
     return None
 
 
