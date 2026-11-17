@@ -418,13 +418,40 @@ def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:
         raise Refused(f"No live session on {name}.{why}")
     n = max(1, min(int(lines), SCREEN_MAX_LINES))
     r = runs_live.tmux(
-        root, "capture-pane", "-p", "-J", "-S", f"-{n + 50}", "-t", runs_live.target(tid), timeout=5
+        root, "capture-pane", "-e", "-p", "-J", "-S", f"-{n + 50}", "-t", runs_live.target(tid), timeout=5
     )
     if r.returncode != 0:
         raise Refused(f"Could not read the screen of {name}: {r.stderr.strip() or 'unknown error'}")
-    rows = runs_live.clean(_ANSI.sub("", r.stdout)).rstrip("\n").split("\n")
-    rows = [r.rstrip() for r in rows]
+    raw = r.stdout.rstrip("\n").split("\n")
+    rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
+    hint = _suggestion(raw, rows)
     while rows and not rows[-1].strip():
         rows.pop()
     rows = rows[-n:]
-    return {"ticket": tid, "key": name, "run": rec["run"], "lines": rows, **describe(root, tid, rec)}
+    out = {"ticket": tid, "key": name, "run": rec["run"], "lines": rows, **describe(root, tid, rec)}
+    if hint is not None:
+        out["suggestion"] = hint
+    return out
+
+
+_RAW_GLYPH = re.compile(r"^((?:\x1b\[[0-9;]*m)*)(\s*[>\u276f\u203a]\s?)")
+SUGGESTION = "(greyed-out suggestion from the tool, not typed: {text})"
+
+
+def _suggestion(raw: list[str], rows: list[str]) -> str | None:
+    """ORCH-190: a tool may show a greyed-out suggestion for the next message in its empty prompt box (Claude
+    Code: "go ahead", "check if the PR merged"). Without its colour it reads like a message typed but never
+    sent. When the last prompt row holds only such hint-styled text, that row is rewritten in place (rows) to
+    say so, and the suggestion is returned; None when there is none or any doubt."""
+    for i in range(len(raw) - 1, -1, -1):
+        m = _RAW_GLYPH.match(raw[i])
+        if not m:
+            continue
+        tail = raw[i][m.end() :]
+        text = runs_live.clean(_ANSI.sub("", tail)).strip()
+        if not text or runs_live._is_hint(tail) is not True:
+            return None
+        glyph = runs_live.clean(_ANSI.sub("", raw[i][: m.end()]))
+        rows[i] = glyph + SUGGESTION.format(text=text)
+        return text
+    return None
