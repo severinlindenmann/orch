@@ -266,7 +266,7 @@ HINTS = {
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": "keep working on what does not wait: orch ticket list",
-    "usage": "keep working: orch ticket list",
+    "tokens": "keep working: orch ticket list",
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
     "review answer": "orch needs",

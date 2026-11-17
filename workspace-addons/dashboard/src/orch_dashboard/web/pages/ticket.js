@@ -315,7 +315,7 @@ function fieldSections(t) {
   });
 }
 async function saveAddonField(t, addon, field, value) {
-  const result = await act('ticket.field', {ticket:t.id, addon, field, value:String(value), if_revision:t.revision});
+  const result = await act('ticket.field', {ticket:t.id, addon, field, value:String(value), if_revision:(ticketOf(t.id) || t).revision});
   if (!result.ok) window.orch.toast(changeError(result), 'error');
 }
 function startAddonField(control) {
@@ -1329,7 +1329,7 @@ function ticketAddStep(t) {
     const moved = pick && pick.value ? existing.find(x => x.id === pick.value) : null;
     const title = input.value.trim(); if ((!title && !moved) || send.disabled) return;
     send.disabled = true;
-    const result = moved ? await act('ticket.edit', {ticket:moved.id, parent:t.id, if_revision:moved.revision}) : await act('ticket.new', {title, parent:t.id});
+    const result = moved ? await act('ticket.edit', {ticket:moved.id, parent:t.id, if_revision:(ticketOf(moved.id) || moved).revision}) : await act('ticket.new', {title, parent:t.id});
     if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(changeError(result), 'error'); }
   });
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
@@ -1744,6 +1744,12 @@ function ticketHelperMenuItems(t, run) {
     run?.claim?.mode === 'oneshot' ? null : copy('Copy watch command', 'orch run attach ' + ref + ' --watch', 'watch'),
     run?.claim?.mode === 'oneshot' ? null : copy('Copy take-over command', 'orch run attach ' + ref, 'take')];
 }
+// ORCH-248: "Show me the plan first" stays visible on the ticket after it was made (the plan card only shows while the plan waits).
+function ticketPlanFirstLine(t, planShown) {
+  if (!t.plan_first || planShown || ['done', 'dropped'].includes(t.status)) return null;
+  const planned = array(t.questions).some(q => String(q.text || '').startsWith('Plan ready') && q.answer != null);
+  return h('p', {className:'meta ticket-plan-first', 'data-key':'plan-first-' + t.id}, planned ? 'You asked to see the plan first. You have approved it.' : 'You asked to see the plan first. The helper waits for your OK before work starts.');
+}
 // ORCH-235: the ticket page offers the same places as the board and the list (Waiting asks for a date and a reason,
 // Superseded for the ticket that replaces it); the lane the ticket is in now is left out.
 function ticketMoveItems(t) {
@@ -1776,6 +1782,7 @@ function detail(t) {
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
+    ticketPlanFirstLine(t, !!planQ),
     ticketReleaseLine(t),
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
@@ -2254,6 +2261,35 @@ async function looksGoodAll(req) {
   } finally { embedLooksGoodBusy = false; }
 }
 addEventListener('message', e => { const req = embedLooksGoodRequest(e); if (req) looksGoodAll(req); });
+
+// A shipped add-on page's own setting (Usage: a limit, the order, on/off, an end date, switching by itself): the shown
+// page names only one of ITS add-on's verbs and a plain target; the dashboard runs `orch <that add-on> act <verb> -- <target>`
+// through its own op (the person's click with this page's session) and tells the page the add-on's answer or why not.
+// The add-on checks the target itself; nothing here names an add-on. Same origin and shipped-frame fences as orch.idea.
+const EMBED_ACT_VERB = /^[a-z][a-z-]{0,20}$/, EMBED_ACT_MAX = 200, EMBED_ACT_HIDDEN = new RegExp(IDEA_HIDDEN.source);
+function embedActRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.act') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.verb !== 'string' || !EMBED_ACT_VERB.test(data.verb) || data.verb === 'refresh') return null;
+  const t = data.target;
+  if (typeof t !== 'string' || !t || t.length > EMBED_ACT_MAX || t.startsWith('-') || t !== t.trim() || EMBED_ACT_HIDDEN.test(t)) return null;
+  return {...shown, id:data.id, verb:data.verb, target:t};
+}
+let embedActBusy = false;  // one setting at a time: a second click while saving is dropped
+async function runEmbedAct(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (embedActBusy) return reply({type:'orch.act.failed', error:'Still saving the last change. Try again in a moment.'});
+  embedActBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:req.verb, target:req.target});
+    const answer = result.ok ? result.state?.act_answer : null;
+    if (result.ok) reply({type:'orch.act.done', answer:answer && answer.addon === req.addon && answer.answer && typeof answer.answer === 'object' ? {changed:answer.answer.changed !== false} : {}});
+    else reply({type:'orch.act.failed', error:String(result.text || '').slice(0, 300)});
+  } finally { embedActBusy = false; }
+}
+addEventListener('message', e => { const req = embedActRequest(e); if (req) runEmbedAct(req); });
 
 // Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
 // target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this

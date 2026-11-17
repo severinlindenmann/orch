@@ -1,4 +1,4 @@
-"""ORCH-82: tokens per model from the saved Claude conversations, cached per file, and `orch usage`."""
+"""ORCH-82: tokens per model from the saved Claude conversations, cached per file, and `orch tokens`."""
 
 import json
 
@@ -117,17 +117,17 @@ def test_cli_json_and_text(proj, env, monkeypatch, capsys):
     make(proj, "Big", [SID], model="opus")
     write(projects(env) / "-p" / f"{SID}.jsonl", line("claude-opus-5-5", "a", 2000, 10))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", env["CLAUDE_CONFIG_DIR"])
-    assert cli.main(["usage", "--json"]) == 0
+    assert cli.main(["tokens", "--json"]) == 0
     data = json.loads(capsys.readouterr().out.split("\nNext:")[0])
     assert data["totals"]["opus"] == {"in": 2000, "out": 10}
-    assert cli.main(["usage"]) == 0
+    assert cli.main(["tokens"]) == 0
     out = capsys.readouterr().out
     assert "opus: 2.0k in, 10 out" in out and "Big" in out
 
 
 def test_empty_text(proj, env, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", env["CLAUDE_CONFIG_DIR"])
-    assert cli.main(["usage"]) == 0
+    assert cli.main(["tokens"]) == 0
     assert "No model use in the last 30 days." in capsys.readouterr().out
 
 

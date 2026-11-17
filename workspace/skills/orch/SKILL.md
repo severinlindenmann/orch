@@ -132,7 +132,7 @@ In a live session finish your reply: orch switches the same conversation to Opus
 a ticket up by itself after two failed check runs on one step. It never moves down by itself, and a person's
 choice of model always stays (ask them instead). Your own subagents follow the same rule: the small model for
 searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
-Tokens per model and per ticket, and how many tickets moved up: `orch usage` (Insights shows the same).
+Tokens per model and per ticket, and how many tickets moved up: `orch tokens` (Insights shows the same).
 
 Haiku (fastest) and Fable (drafts) are only ever a person's choice: orch and helpers never pick them. A
 ticket a person put on Fable works the drafts way (its start text says how): at least three clearly different,
