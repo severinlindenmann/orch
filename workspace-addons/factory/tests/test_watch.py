@@ -103,6 +103,17 @@ def test_refused_start_is_retried(ws, run):
     assert len(watch.once(ws)) == 1
 
 
+def test_a_refused_start_keeps_its_reason_until_a_start_goes_through(ws, run):
+    order, _ = started(ws, run)
+    (ws / "fail-run").write_text("The computer is very busy.")
+    assert watch.once(ws) == []
+    assert watch.held(Store(ws))[order]["why"] == "The computer is very busy."
+    assert watch.once(ws) == []  # tried again on the next pass, the reason stays
+    assert watch.held(Store(ws))[order]["why"] == "The computer is very busy."
+    (ws / "fail-run").unlink()
+    assert len(watch.once(ws)) == 1 and watch.held(Store(ws)) == {}
+
+
 def test_autopilot_stop_wakes_once(ws, run):
     autopilot_order(ws, run)
     order, _ = started(ws, run)
@@ -438,3 +449,69 @@ def test_the_watcher_keeps_the_shown_active_time_current_while_the_manager_is_id
     monkeypatch.setattr(watch.time, "time", lambda: 9e12)
     watch.once(ws)
     assert core(ws, "ticket", "show", order)["ext"]["factory"]["budget"]["active_min_used"] == 12
+
+
+# ORCH-277: Factory starts its own manager again when an order stands still with nothing waiting
+
+
+def _clock(monkeypatch, start=1_000_000.0):
+    now = [start]
+    monkeypatch.setattr(watch, "_now", lambda: now[0])
+    return now
+
+
+def test_a_standstill_starts_the_manager_again_a_few_times_then_says_stuck(ws, run, monkeypatch):
+    from orch_factory import pageapi
+
+    now = _clock(monkeypatch)
+    order, _ = started(ws, run)
+    assert len(watch.once(ws)) == 1  # the person's Start
+    run("next", order)  # the manager ended without starting the crew
+    assert watch.once(ws) == []  # first sight of the standstill: wait a little
+    now[0] += watch.STILL_AFTER
+    woke = watch.once(ws)
+    assert woke == [{"order": order, "why": "the order stood still with nothing waiting"}]
+    assert "Factory woke the manager: the order stood still with nothing waiting" in history(ws, order)
+    now[0] += 60
+    assert watch.once(ws) == []  # not again soon
+    for _ in range(watch.STILL_MAX - 1):
+        now[0] += watch.STILL_AGAIN
+        assert len(watch.once(ws)) == 1
+    now[0] += watch.STILL_AGAIN * 3
+    assert watch.once(ws) == [] and len(runs(ws)) == 1 + watch.STILL_MAX
+    assert watch.stuck(Store(ws)) == {order}
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: True)  # with the watcher off, that is the reason
+    page = {o["id"]: o for o in pageapi.home(ws)["orders"]}
+    assert page[order]["waiting"] == {"kind": "stuck"}
+
+
+def test_a_moving_or_waiting_order_is_never_started_again(ws, run, monkeypatch):
+    now = _clock(monkeypatch)
+    order, _ = started(ws, run)
+    watch.once(ws)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    for status, extra in (
+        ("active", {}),
+        ("waiting", {"waiting_on": {"kind": "time", "until": "2099-01-01T00:00:00Z"}}),
+    ):
+        edit(ws, tid, lambda t, s=status, x=extra: t.update(status=s, **x))
+        watch.once(ws)
+        now[0] += watch.STILL_AFTER * 10
+        assert watch.once(ws) == []
+    assert len(runs(ws)) == 1
+
+
+def test_a_new_standstill_starts_its_own_count(ws, run, monkeypatch):
+    now = _clock(monkeypatch)
+    order, _ = started(ws, run)
+    watch.once(ws)
+    run("next", order)
+    watch.once(ws)
+    now[0] += watch.STILL_AFTER
+    assert len(watch.once(ws)) == 1
+    tid = run("crew", "add", order, "booking-form")["ticket"]  # something moved: a new state
+    edit(ws, tid, lambda t: t.update(status="ready"))
+    assert watch.once(ws) == []
+    now[0] += watch.STILL_AFTER
+    assert len(watch.once(ws)) == 1

@@ -279,6 +279,7 @@ def test_schedule_row_has_a_switch_and_buttons(ws):
         "op": "addon.act",
         "args": {"verb": "toggle", "target": "t_rec00001"},
     }
+    assert row["toggle"]["text"] == "Repeats"  # the switch says what it turns on (bug hunt 17 Nov)
     assert row["subtitle"] == "claude"
     assert [a["label"] for a in row["actions"]] == ["Start now", "Edit"]
     assert row["actions"][1]["action"] == {"op": "addon.edit", "args": {"target": "t_rec00001"}}
