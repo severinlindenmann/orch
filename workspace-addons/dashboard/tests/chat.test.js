@@ -10,7 +10,7 @@ function context() {
     array:v => Array.isArray(v) ? v : [], clean:v => String(v || ''), snapshot:false,
     state:{workspace:'Fish', chat:{messages:[]}}, ticketOf:() => null, time:() => '', date:v => v,
     MutationObserver:class {observe(){}}, document:{documentElement:{}}, CSS:{supports:() => false},
-    iconEl:() => null, window:{addEventListener(){}}, location:{hash:''}, render(){}});
+    iconEl:() => null, window:{addEventListener(){}}, location:{hash:''}, render(){}, setTimeout:() => 0});
   vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/chat.js'), 'utf8'), c);
   return c;
 }
@@ -192,9 +192,25 @@ test('thread header: no title row for the helper (the page heading says it); New
   const head = c.chatHeader(null, false);
   assert.equal(nodes(head, n => n.attrs?.className === 'chat-head-top').length, 0);
   const row = nodes(head, n => n.attrs?.className === 'chat-head-row')[0];
-  assert.equal(row.textContent, 'New chatContactsEarlier');
+  assert.equal(row.textContent, 'New chatContacts', 'no Earlier button while nothing earlier exists');
   assert.equal(head.children.length, 1, 'only the button row');
   assert.match(JSON.stringify(c.chatHeading()), /Your helper · working on 2 tickets/);
+});
+
+test('Earlier shows only when it leads somewhere: a past day, a finished group, or a history to retry', () => {
+  const c = context();
+  c.state.chat = {day:'2026-11-11', messages:[]};
+  const has = () => vm.runInContext('chatHasEarlier()', c);
+  assert.equal(has(), false, 'days not known yet');
+  vm.runInContext("chatDays = {status:'ready', rows:[{day:'2026-11-11', count:4}]}", c);
+  assert.equal(has(), false, 'only today');
+  vm.runInContext("chatDays = {status:'ready', rows:[{day:'2026-11-11', count:4}, {day:'2026-11-10', count:2}]}", c);
+  assert.equal(has(), true);
+  vm.runInContext("chatDays = {status:'error', rows:[]}", c);
+  assert.equal(has(), true, 'so it can be retried');
+  vm.runInContext("chatDays = {status:'ready', rows:[]}", c);
+  c.state.groups = {hosted:[{id:'g1', ticket:'t_g', title:'Team lunch', closed:true, members:[], tasks:[]}]};
+  assert.equal(has(), true, 'a finished group');
 });
 
 test('New chat picker offers your helper, workspaces and your phone; Your phone shows the phone messages', async () => {

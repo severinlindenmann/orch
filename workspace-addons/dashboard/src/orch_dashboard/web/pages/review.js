@@ -75,7 +75,8 @@ function reviewDrawSide(queue, deck) {
   const row = i => {
     const it = deck.items[i], a = deck.answers[it.id], r = el('button', 'btn ghost sm review-queue-row' + (i === deck.index && !a ? ' is-now' : '') + (a ? ' is-done' : ''));
     r.type = 'button'; r.setAttribute('role', 'listitem');
-    r.append(iconEl(it.icon), el('span', 'review-queue-title', it.title));
+    const title = el('span', 'review-queue-title', it.title); title.title = it.title;  // two lines, and the whole title on hover (F4: cut titles looked repeated)
+    r.append(iconEl(it.icon), title);
     const word = a ? reviewWord(a) : i === deck.index ? 'Now' : '';
     if (word) r.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));
     r.onclick = () => deck.jump(i);

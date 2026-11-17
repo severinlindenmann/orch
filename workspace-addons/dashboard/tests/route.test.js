@@ -98,10 +98,12 @@ test('#settings is General; #settings/<tab> opens that tab on the same Settings 
   assert.deepEqual({...route('#settings', [])}, {kind:'settings', hash:'#settings', tab:'general', addon:null});
   for (const tab of ['general', 'agent', 'phone', 'addons']) assert.deepEqual({...route('#settings/' + tab, [])}, {kind:'settings', hash:'#settings', tab, addon:null});
   assert.deepEqual({...route('#settings/addons/publish', [])}, {kind:'settings', hash:'#settings', tab:'addons', addon:'publish'});  // one add-on's own settings page
+  // the address names the tab like its label; the old names still open the same tab
+  for (const [name, tab] of [['helper', 'agent'], ['contacts', 'phone']]) assert.deepEqual({...route('#settings/' + name, [])}, {kind:'settings', hash:'#settings', tab, addon:null});
   assert.equal(route('#settings/phone/publish', []).kind, 'notfound');
   assert.equal(route('#settings/nope', []).kind, 'notfound');  // an unknown tab is an unknown address: Page not found
 });
-test('the phone tab is role=tab and choosing it keeps Settings open at #settings/phone', () => {
+test('the phone tab is role=tab and choosing it keeps Settings open at #settings/contacts and adds a history entry', () => {
   const settingsSrc = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const nav = settingsSrc.slice(settingsSrc.indexOf("role:'tablist'"), settingsSrc.indexOf("h('div', {className:'settings-content'}"));
   assert.match(nav, /\['phone', phoneAddon\.dashboard\.label\]/);
@@ -110,10 +112,11 @@ test('the phone tab is role=tab and choosing it keeps Settings open at #settings
   const go = settingsSrc.slice(settingsSrc.indexOf('function settingsGo('), settingsSrc.indexOf('}', settingsSrc.indexOf('function settingsGo(')) + 1);
   const calls = [];
   const ctx = {settingsTab:'general', settingsReview:'x', location:{hash:'#settings'}, render:() => calls.push('render'),
-    history:{replaceState:(_s, _t, url) => { ctx.location.hash = url; calls.push('replace'); }}};
-  vm.createContext(ctx); vm.runInContext(go + '; settingsGo("phone");', ctx);
-  assert.equal(ctx.location.hash, '#settings/phone');
+    history:{pushState:(_s, _t, url) => { ctx.location.hash = url; calls.push('push'); }}};
+  const map = settingsSrc.slice(settingsSrc.indexOf('const SETTINGS_TAB_ADDRESS'), settingsSrc.indexOf('\n', settingsSrc.indexOf('const SETTINGS_TAB_ADDRESS')));
+  vm.createContext(ctx); vm.runInContext(map + '\n' + go + '; settingsGo("phone");', ctx);
+  assert.equal(ctx.location.hash, '#settings/contacts');
   assert.equal(ctx.settingsTab, 'phone');
-  assert.deepEqual(calls, ['replace', 'render']);
+  assert.deepEqual(calls, ['push', 'render']);
   assert.equal(route(ctx.location.hash, []).kind, 'settings');
 });
