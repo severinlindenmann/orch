@@ -76,7 +76,7 @@ def test_overdue_time_wait_and_future_wait(proj, run):
     assert run("wait", later, "--until", "2999-01-01T00:00:00Z")[0] == 0
     (row,) = _rows(run)
     assert row["id"] == f"core:wait:{late}" and row["kind"] == "overdue-wait" and row["tone"] == "warn"
-    assert row["text"] == f"Wake time passed; nothing started it. Start it: orch run start {late}"
+    assert row["text"] == "Wake time passed and no helper started. Continue starts it."
 
 
 def test_overdue_wait_of_other_kind(proj, run):
