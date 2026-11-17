@@ -46,6 +46,10 @@ def go(tmp_path, **sim):
     sim.setdefault("heads", {"develop": DEV, "main": MAIN, "unreleased": UN})
     sim.setdefault("last_release", 30)
     sim.setdefault("changes", [SAFE, RELAY])
+    sim.setdefault(
+        "pr_for_commit",
+        {c["sha"]: {"pr": c["pr"], "head": c["head"], "url": c["url"]} for c in sim["changes"] if c["pr"]},
+    )
     st = json.loads(json.dumps(sim.pop("state", {})))
     cfg = rk.Cfg(None, keeper="ORCH-79", repo="x/y", clone=str(tmp_path), run_dir=tmp_path)
     w = rk.World(None, cfg, json.loads(json.dumps(sim)))
@@ -220,6 +224,16 @@ def test_a_matched_change_with_no_pull_request_holds(tmp_path):
         "waits for every security OK: 22222222 (changes relay/src/subs.rs but no pull request with its "
         "merged commit was found)"
     )
+
+
+def test_a_merge_line_github_does_not_confirm_holds(tmp_path):
+    out = go(tmp_path, pr_for_commit={RELAY["sha"]: {"pr": 2, "head": "other"}})
+    assert out["did"] == []
+    assert out["lines"][-1] == (
+        "waits for every security OK: 22222222 (its merge line does not match pull request #2 on GitHub)"
+    )
+    none = go(tmp_path, pr_for_commit={})
+    assert "no pull request with its merged commit was found" in none["lines"][-1]
 
 
 def test_a_rename_out_of_a_matched_path_still_counts(tmp_path):

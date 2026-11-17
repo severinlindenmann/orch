@@ -336,13 +336,18 @@ def _merged_rows(w, pats: tuple[str, ...]) -> tuple[list[dict], list[str]]:
         hits = matched(c.get("files") or [], pats)
         if not hits:
             continue
-        if not c.get("pr"):  # not a merge line: ask GitHub which pull request was merged as this commit
-            c = {**c, **w.pr_for_commit(str(c.get("sha") or ""))}
-        n, head = c.get("pr"), c.get("head")
         sha = str(c.get("sha") or "")[:8]
+        gh = w.pr_for_commit(
+            str(c.get("sha") or "")
+        )  # GitHub says which pull request it merged as this commit
+        n, head = gh.get("pr"), gh.get("head")
         if not n or not head:
             holds.append(f"{sha} (changes {hits[0]} but no pull request with its merged commit was found)")
             continue
+        if (c.get("pr") and c["pr"] != n) or (c.get("head") and c["head"] != head):
+            holds.append(f"{sha} (its merge line does not match pull request #{n} on GitHub)")
+            continue
+        c = {**c, **gh}
         row = prs.setdefault(int(n), {"number": int(n), "title": c.get("title"), "url": c.get("url")})
         row["headRefOid"] = head
         row["hits"] = sorted(set(row.get("hits") or []) | set(hits))

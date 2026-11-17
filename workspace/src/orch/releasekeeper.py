@@ -441,7 +441,8 @@ class World:
     def changes(self) -> list[dict]:
         """Every first-parent change on develop since main (after heads() fetched): {sha, files, pr, head,
         title, url}. files is git's full list with renames as both names; pr and head come from GitHub's merge
-        line ("Merge pull request #N from ...", head = the second parent), else None (security gate)."""
+        line ("Merge pull request #N from ...", head = the second parent), else None. Only a hint: the
+        security gate confirms them with GitHub (pr_for_commit)."""
         if self.sim is not None:
             return list(self.sim.get("changes") or [])
         lg = self._git("log", "--first-parent", "--format=%H%x1f%P%x1f%s", "origin/main..origin/develop")
@@ -449,9 +450,9 @@ class World:
             raise Refused("git log could not read what develop has since main")
         out = []
         for ln in lg.stdout.splitlines():
-            p = ln.split("\x1f")
-            if len(p) != 3 or not p[1].split():
-                continue
+            p = ln.split("\x1f", 2)
+            if len(p) != 3 or not re.fullmatch(r"[0-9a-f]{40}", p[0]) or not p[1].split():
+                raise Refused("git log gave a change it could not read: the release waits")
             sha, parents, subject = p[0], p[1].split(), p[2]
             d = self._git("diff", "--no-renames", "--name-only", "-z", parents[0], sha)
             if d.returncode != 0:
