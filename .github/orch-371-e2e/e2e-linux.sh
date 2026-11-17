@@ -6,7 +6,7 @@ SHA="$1"; MODE="$2"; OUT="$3"; HERE="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$OUT/shots"
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
-R=$(mktemp -d); W=$R/ws/svc-walk; mkdir -p "$W" "$R/home"
+R=$(mktemp -d "$HOME/.orch-e2e-XXXX"); W=$R/ws/svc-walk; mkdir -p "$W" "$R/home"
 if [ "$MODE" = sealed ]; then H=$R/home; else H=$HOME; fi
 OH=$(mktemp -d "$H/.orch-test-XXXX")/orch-tool   # orch's own folder is always sealed (must be under HOME)
 UVH=$R/uv
@@ -31,6 +31,11 @@ E orch init --yes --recommended > "$OUT/init-$MODE.log" 2>&1; echo "init exit $?
 E orch addon add services --yes 2>&1 | tail -2
 E orch ticket new "Web preview for the shop" | head -1
 WSID=$(cat "$W/.orch/.local-id")
+echo "== secret scan probe"
+E "$UVH/tools/orch-workspace/bin/python" -I -c 'from pathlib import Path
+from orch import secretscan
+print(secretscan.find("Web preview\npython3", Path.cwd()))
+print(secretscan.find("Web preview\npython3", Path.cwd(), strict=False))'
 
 o add "Web preview" --id web-preview --port 18741 --ticket SW-1 -- python3 -m http.server 18741
 ok "add leaves it stopped" '[ "$(state web-preview)" = stopped ]'
