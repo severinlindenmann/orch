@@ -73,6 +73,7 @@ Every finished step also gets `--summary "<what came out, one plain line>"` (at 
 sizes) and, when the step produced a file, a picture or a PR, that as `--file` / `--pr` with `--title "<short name>"`.
 The person reads the summary on the task and opens the evidence from it. "Completed" says nothing.
 Record checks with orch check record, so the next run and the person can see whether they still pass. If a step's evidence is changed or failed when you send the ticket to Review, the move still works and orch prints as the next step: run the checks again and record them with orch check record.
+A step that shows a part of Done when in other words than its title: add `--proves "<that part, quoted>"` to `orch check done`; the Reviewer then counts the part as covered.
 
     orch check done <id> c1 --summary "Connected as Dev Team; all 3 workspaces answered." --file out/check.md --title "Connection check"
 
