@@ -633,6 +633,28 @@ test('Settings: "Accept small finished work for me" is one switch that saves at 
 });
 
 // ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.
+test('Settings: "Merge releases without my click" is one switch that saves at once through release_merge.set (ORCH-79)', async () => {
+  const calls = [];
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null},
+    act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
+  c.window.orch = {toast() {}};
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  c.state.settings = {release_merge_on:false};
+  const text = n => typeof n === 'string' ? n : n.textContent != null ? String(n.textContent) : (n.children || []).map(text).join(' ');
+  const card = c.releaseMergeCard(c.state.settings), sw = nodes(card, n => n.attrs?.role === 'switch')[0];
+  assert.equal(sw.attrs['aria-label'], 'Merge releases without my click'); assert.equal(sw.attrs['aria-checked'], false);
+  assert.equal(sw.attrs['data-action'], 'release-merge-set');
+  assert.match(text(card), /A release whose checks are all green goes in by itself with your GitHub login\. You get the short highlights afterwards\. Off: you click Merge on the card\./);
+  await c.releaseMergeSwitch();
+  assert.deepEqual(calls, [JSON.stringify(['release_merge.set', {on:true}])]);
+  c.state.settings.release_merge_on = true;
+  assert.equal(nodes(c.releaseMergeCard(c.state.settings), n => n.attrs?.role === 'switch')[0].attrs['aria-checked'], true);
+  await c.releaseMergeSwitch();
+  assert.equal(calls[1], JSON.stringify(['release_merge.set', {on:false}]));
+});
+
+// ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.
+
 test('tickets list: number before the title, and a search hit is visible without opening its group', () => {
   const items = [{id:'o', key:'ORCH-63', title:'Open one', status:'open'}];
   for (let i = 0; i < 7; i++) items.push({id:'d' + i, key:'ORCH-' + (30 + i), title:'Done ' + i, status:'done'});

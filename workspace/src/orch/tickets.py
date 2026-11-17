@@ -1135,6 +1135,41 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
     return apply_op(root, tid, op, by=REVIEWER)[0]
 
 
+RELEASE_KEEPER = "agent:release-keeper"  # merges a green release for the owner (review.tend_releases)
+RELEASE_VIA = "release-keeper"
+RELEASE_MERGED_LINE = "Merged for you (Settings: merge releases without my click): "
+
+
+def merged_for_owner(root: Path, tid: str, qid: str, url: str, head: str, line: str, decision: dict) -> dict:
+    """A release Merge card that review.tend_releases merged on GitHub for the owner: record it as answered
+    (Merge) by the release keeper, only while the owner turned it on (`workflow.release_merge`) and only for a
+    card made with `orch ask ... --merge --release` on exactly this pull request and commit. The history says
+    who did it and why; the owner's own Merge click stays the default (R4.1: a role acting for the owner)."""
+    if not config.release_merge_on(root):
+        raise Refused("Releases merge only on your click here. Turn it on in Settings.")
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        act = q.get("action")
+        if not (isinstance(act, dict) and act.get("release") is True and act.get("merge") == url
+                and act.get("head") == head):  # fmt: skip
+            raise Refused(f"{qid} is not this release's Merge card.")
+        q["answer"], q["answered_by"], q["via"] = "Merge", RELEASE_KEEPER, RELEASE_VIA
+        q["answered_at"] = q["at"] = now()
+        q["decision"] = dict(decision)
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, RELEASE_KEEPER, RELEASE_MERGED_LINE + _one_line(line), RELEASE_VIA)
+        history.created("answers", q)
+        return q
+
+    return apply_op(root, tid, op, by=RELEASE_KEEPER)[0]
+
+
 def _one_line(text: str, limit: int = 300) -> str:
     return " ".join(str(text or "").split())[:limit]
 

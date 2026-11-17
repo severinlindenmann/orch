@@ -17,3 +17,4 @@
 - 16 Nov (ORCH-110): a choice whose options have no pictures (a plain question) shows plain option rows with the whole
   title and its description: no dark frame, no empty picture box, no zoom, and the letter chip only for short ids (A, B).
 - 16 Nov (ORCH-77): "Accepted for you" card under "All cards" (the Reviewer's Done-for-you tickets of today): ticket link, the why line, a Send back button that asks for a short note, or "Sent back". Hidden when nothing was accepted. It stays on a phone width (below the deck) while the All cards aside hides. Settings > General has the switch "Accept small finished work for me".
+- 17 Nov (ORCH-79): Settings > General has the switch "Merge releases without my click" under "Accept small finished work for me" (off by default; only the owner turns it on). On: a release Merge card with every check green merges by itself and the card shows as answered by the release keeper.
