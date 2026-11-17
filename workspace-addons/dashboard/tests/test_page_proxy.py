@@ -612,13 +612,18 @@ def test_a_read_only_pass_reads_but_never_acts_or_vouches(stack, monkeypatch):
 
 def test_a_shipped_pages_own_code_loads_in_its_sandboxed_frame_and_nothing_else_does(stack):
     base, _ = stack
-    code_of = lambda path, dest="script", extra=None: call(
-        base + path,
-        headers={**REMOTE, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": dest, **(extra or {})},
-    )[0]
+
+    def code_of(path, dest="script"):
+        site = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": dest} if dest else {}
+        return call(base + path, headers={**REMOTE, **site})[0]
+
     assert code_of("/addon/focus/kit/frame.js") == 200
     assert code_of("/addon/focus/web/focus.css", "style") == 200
-    assert code_of("/addon/focus/logo.svg", "image") == 200
+    assert code_of("/addon/focus/web/logo.svg", "image") == 200
+    assert (
+        code_of("/addon/focus/kit/frame.js", None) == 200
+    )  # plain http to another computer: no Sec-Fetch headers
+    assert code_of("/addon/focus/logo.svg", "image") in (401, 403)  # only its /kit/ and /web/ program files
     assert code_of("/addon/viewer/web/x.js") in (401, 403)  # not shipped
     assert code_of("/addon/focus/api/x.js") in (401, 403)  # data, whatever its ending
     assert code_of("/addon/focus/web/x.js", "document") in (401, 403)  # not a page's own code

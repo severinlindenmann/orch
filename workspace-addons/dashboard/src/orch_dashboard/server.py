@@ -125,6 +125,7 @@ SHIPPED_SANDBOX = (
     "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
 )
 FRAME_DEST = ("script", "style", "font", "image")  # what a sandboxed add-on page loads of its own code
+FRAME_CODE_DIRS = ("/kit/", "/web/")  # where a page orch ships keeps its program files
 PROXY_BODY = 16384
 
 
@@ -396,17 +397,20 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(401, SIGNIN_MSG.encode(), "text/plain; charset=utf-8")
 
     def _frame_static(self, path: str) -> bool:
-        """The code of a page orch ships (script, style, font, picture), loaded by that page in its sandboxed
-        frame: an opaque origin sends no cookie. Only files with those endings, never under /api/; no data."""
+        """The code of a page orch ships (script, style, font, picture under its /kit/ and /web/), loaded by that
+        page in its sandboxed frame: an opaque origin sends no cookie. Program files only, no data. A browser
+        sends no Sec-Fetch headers to a plain-http address of another computer: then the path alone decides."""
         px = PROXY.fullmatch(path)
         rest = (px.group(2) or "") if px else ""
+        dest = self.headers.get("Sec-Fetch-Dest")
         return bool(
             px
             and getattr(self, "command", "") == "GET"
-            and self.headers.get("Sec-Fetch-Dest") in FRAME_DEST
+            and (dest is None or dest in FRAME_DEST)
+            and rest.startswith(FRAME_CODE_DIRS)
             and rest.lower().endswith(STATIC_EXT)
-            and not rest.startswith(("/api/", "/page/"))
             and ".." not in rest
+            and "//" not in rest
             and self._shipped(px.group(1))
         )
 
