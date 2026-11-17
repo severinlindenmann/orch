@@ -179,15 +179,6 @@ Final component validation: the requested `node base/scripts/qa-components.cjs 1
 
 - Fix wave b6 (15 Nov): "Watch live" on a running ticket (agent bar and the ticket's "Live session" card) opens Focus on that ticket (`#addon/focus/t/<ticket>`, Live tab is the default). The card's terminal commands sit behind one small "Copy command" menu. "Tickets in focus" lists tickets a helper is working on first, then the most recently updated. Home: the phone-mode "ended" notice is one toast (then marked seen); the sidebar shows "Pick your name" (opens the person menu) until a person is chosen.
 
-## Focus v2 draft (ORCH-251, 17 Nov)
-focus-v2.html: eight numbered features the owner can mark Keep / Maybe / Drop (open ticket in Focus, reopen or fresh session, chat or tmux terminal, sessions without a ticket, drawer right/bottom, true full screen, several tickets with status, visual results). Scenes: drawer right, bottom, full screen, sessions menu, closed. Draft only; nothing here is in the product yet.
-
-## Focus layer draft v3 (ORCH-251, 17 Nov, after the owner's answer)
-focus-layer.html replaces the idea of a drawer inside a page: one always-open layer over every dashboard page (right, bottom, full screen, or a thin status strip), a Focus start page, session tabs, Chat or Terminal, results shelf, side by side. Nine numbered features with "Uses" and "To build" lines taken from what orch has (tmux session per ticket, run signal, saved session id, live slot limit). A second model's critique (slots, closed idle sessions, no chat transcript, terminal risk, page-swap options) is in the feature text. focus-v2.html stays as the first draft.
-
-## Focus v4: three drafts to pick from (ORCH-251, 17 Nov)
-Built by Fable from the owner's eight wishes, each challenged by Opus (UX checklist, IT engineer, business manager, marketing) and fixed.
-- focus-v4.html, draft A "the layer": a bar under every page with one chip per session; opens right, bottom or full screen.
-- focus-v4b.html, draft B "the wall": Needs you as a big card, working tiles, idle rows; zoom into one; a bottom drawer on other pages.
-- focus-v4c.html, draft C "the inbox": helpers as conversations, terminal as a flip, quick switcher, side by side, a panel on other pages.
-All are drafts with demo data and a simulated terminal; none is in the product. Earlier drafts focus-v2.html and focus-layer.html stay for comparison.
+## Focus draft D: the agreed Focus mockup (ORCH-251, ORCH-262, 17 Nov)
+focus-v4d.html (script focus-v4d.js) is the one Focus mockup the owner picked: the live wall of sessions (Needs you as a big card, working tiles, idle rows, zoom into one) with a bar under every dashboard page that opens into a layer (right, bottom, split or full screen), chat or terminal per session, the result widgets and the Features sheet. Demo data and a simulated terminal; picks stay in this browser. It is the visual source of truth for building the new Focus behind the Preview switch.
+The earlier drafts (v2, layer v3, v4 A/B/C) were removed once D was chosen; they live in the git history of PR 1262.
