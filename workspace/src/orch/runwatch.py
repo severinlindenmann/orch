@@ -117,9 +117,29 @@ def label(cmd: str) -> str:
     return _base(words[0])[:60] or "a command"
 
 
+_CHECK_WAITS = {("ref", "wait"), ("github", "wait")}
+
+
+def is_check_wait(cmd: str) -> bool:
+    """True for orch's own waits on checks or the GitHub write limit (`orch ref wait`, `orch github wait`):
+    they only poll. Anything else (tests, builds, a script) is real work."""
+    words = cmd.split()
+    for i, w in enumerate(words):
+        if _base(w) in ("orch", "orch.exe"):
+            return tuple([x for x in words[i + 1 :] if not x.startswith("-")][:2]) in _CHECK_WAITS
+    return False
+
+
+def only_waits_for_checks(agent_pid: int | None, table: list | None = None) -> bool:
+    """The agent runs commands, and every one of them is a wait on checks (is_check_wait)."""
+    cmds = tool_commands(agent_pid, table)
+    return bool(cmds) and all(c["check_wait"] for c in cmds)
+
+
 def tool_commands(agent_pid: int | None, table: list | None = None) -> list[dict]:
     """The commands the agent runs right now through its shell tool (a test run, a CI watcher), oldest
-    first: [{"label", "seconds", "pid"}]. One entry per tool shell: the program under it, else the shell."""
+    first: [{"label", "seconds", "pid", "check_wait"}]. One entry per tool shell: the program under it, else
+    the shell."""
     if not isinstance(agent_pid, int) or agent_pid <= 0:
         return []
     rows = _table() if table is None else table
@@ -136,7 +156,14 @@ def tool_commands(agent_pid: int | None, table: list | None = None) -> list[dict
         if inner is None and under:
             inner = next(iter(sorted(kids.get(under[0][0], []))), None)
         name = label(inner[3]) if inner else "a shell command"
-        out.append({"label": name, "seconds": secs, "pid": pid})
+        out.append(
+            {
+                "label": name,
+                "seconds": secs,
+                "pid": pid,
+                "check_wait": bool(inner) and is_check_wait(inner[3]),
+            }
+        )
     out.sort(key=lambda d: -(d["seconds"] or 0))
     return out
 
