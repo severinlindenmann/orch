@@ -122,3 +122,24 @@ test('the layer names no add-on and builds no inline style', () => {
   assert.doesNotMatch(plain, /\b(focus|automation|scheduler|publish|wiki)\b/i);
   assert.doesNotMatch(source, /setAttribute\(\s*['"]style/);
 });
+
+test('the dock goes inside the mount that survives a page change (#keep), else right after main', () => {
+  const body = source.slice(source.indexOf('function liveDockHost() {'), source.indexOf('function liveLayerDo('));
+  const node = (id, parent = null) => ({id, parentNode:parent, get isConnected() { return !!this.parentNode; }, className:'',
+    append(c) { c.parentNode = this; }, after(c) { c.parentNode = this.parentNode; }});
+  const run = withKeep => {
+    const shellBody = node('shell-body'), main = node('content', shellBody), keep = withKeep ? node('keep', shellBody) : null, made = [];
+    const document = {getElementById: id => id === 'content' ? main : id === 'keep' ? keep : made.find(n => n.id === id) || null,
+      createElement: () => { const n = node(''); made.push(n); return n; }};
+    const ctx = {document, window:{}};
+    vm.createContext(ctx); vm.runInContext(body, ctx);
+    const host = ctx.liveDockHost();
+    assert.equal(ctx.liveDockHost(), host, 'one dock, never a second element');
+    return {host, keep, shellBody};
+  };
+  const a = run(true);
+  assert.equal(a.host.parentNode, a.keep);
+  assert.equal(a.host.className, 'live-dock');
+  const b = run(false);
+  assert.equal(b.host.parentNode, b.shellBody);
+});

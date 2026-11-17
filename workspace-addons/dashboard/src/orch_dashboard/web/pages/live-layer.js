@@ -118,13 +118,17 @@ function liveLayerFirst() {
   return t ? t.id : '';
 }
 function liveDockHost() {
-  // The mount that survives a page change. Until the soft page changes name theirs, it sits right after main.
+  // Inside the mount that survives a page change (#keep of the soft page changes: render() never touches it and a
+  // page change closes only dialogs outside it). Where that is missing, right after main, where #keep sits.
   let host = document.getElementById('live-dock');
   if (!host) {
     host = document.createElement('div');
     host.id = 'live-dock';
-    document.getElementById('content')?.after(host);
   }
+  const keep = document.getElementById('keep');
+  if (keep && host.parentNode !== keep) {
+    if (typeof window.orchKeep?.mount === 'function') window.orchKeep.mount(host); else keep.append(host);
+  } else if (!keep && !host.isConnected) document.getElementById('content')?.after(host);
   host.className = 'live-dock';
   return host;
 }
