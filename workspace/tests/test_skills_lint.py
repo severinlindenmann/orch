@@ -82,7 +82,9 @@ def skill_dirs() -> dict[str, Path]:
 
 SKILLS = skill_dirs()
 ADDON_SRC = {
-    p.parent.name.removeprefix("orch_"): p for p in (ROOT / "workspace-addons").glob("*/src/*/cli.py")
+    # the command is the add-on name: orch_pull_requests -> pull-requests
+    p.parent.name.removeprefix("orch_").replace("_", "-"): p
+    for p in (ROOT / "workspace-addons").glob("*/src/*/cli.py")
 }
 
 

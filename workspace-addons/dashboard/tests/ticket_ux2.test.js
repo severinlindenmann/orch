@@ -94,7 +94,7 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(/Start helper/.test(fresh) && !/Resume/.test(fresh), 'tasks typed before any helper ran: Start helper, not Resume');
 });
 
-test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch pick, and a change sends ticket.model', async () => {
+test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, and a change sends ticket.model', async () => {
   const sent = [];
   const ctx = {window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : [],
     clean:v => String(v ?? ''), el:(tag, cls, txt) => h(tag, {className:cls}, txt), act:async (op, a) => { sent.push([op, a]); return {ok:true}; }};
@@ -102,7 +102,7 @@ test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch pick, an
   const picked = ctx.modelField({id:'t1', model:{name:'opus', by:'orch', why:'it mentions design'}});
   assert.equal(picked.tag, 'select');
   assert.deepEqual(picked.children.map(o => o.attrs.value), ['auto', 'sonnet', 'opus']);
-  assert.equal(text(picked.children[0]), 'Let orch pick (Opus)');
+  assert.equal(text(picked.children[0]), 'Let orch decide (Opus)');
   assert.equal(picked.value, 'auto');
   assert.match(picked.attrs.title, /Opus \(picked by orch: it mentions design\)/);
   const mine = ctx.modelField({id:'t1', model:{name:'sonnet', by:'human:severin'}});
@@ -161,4 +161,16 @@ test('ORCH-62: a chip only for an Idle or Stuck helper, with how long nothing ra
 test('ORCH-62: an open question reads "Question: ..." under the title', () => {
   const c = listCtx();
   assert.match(text(c.ticketNext({id:'q', status:'waiting', questions:[{text:'Start the run?'}]})), /^Question: /);
+});
+test('ORCH-157: a Group choice lists the tickets that have parts, and picking one keeps only that group', () => {
+  const rows = [{id:'e', title:'Epic', status:'open'}, {id:'p1', title:'Part', parent:'e', status:'open'}, {id:'x', title:'Other', status:'open'}];
+  const c = listCtx({tickets:() => rows});
+  const sel = nodes(h('div', {}, c.ticketFilters())).find(n => n.attrs['data-key'] === 'ticket-group');
+  assert.ok(sel, 'a Group choice');
+  assert.deepEqual(c.filterTickets(rows, '', false, '', '', '', 'e').map(t => t.id), ['e', 'p1']);
+  assert.equal(c.filterTickets(rows, '', false).length, 3);
+});
+test('ORCH-157: the To do view keeps only backlog tickets', () => {
+  const c = listCtx();
+  assert.deepEqual(c.filterTickets([{id:'a', status:'open'}, {id:'b', status:'active'}], '', false, '', '', 'backlog').map(t => t.id), ['a']);
 });

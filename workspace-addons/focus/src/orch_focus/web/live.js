@@ -20,7 +20,7 @@
     if ((m = /^Moved (c\d+) after c\d+$/.exec(text))) return 'Moved a task' + task(m[1]);
     if ((m = /^Created under (.+)$/.exec(text))) return 'Created under ' + m[1];
     if (text === 'Created') return 'Ticket created';
-    if ((m = /^Edited ([a-z_, ]+)$/.exec(text)) && !/[A-Z]/.test(m[1])) return 'Changed ' + m[1].split(/,\s*/).map(f => FIELD[f] || f).join(', ');
+    if ((m = /^Edited ([a-z_, ]+)(?: \(was: [\s\S]* \| now: [\s\S]*\))?$/.exec(text)) && !/[A-Z]/.test(m[1])) return 'Changed ' + m[1].split(/,\s*/).map(f => FIELD[f] || f).join(', ');
     if (/^Asked q\d+, waiting$/.test(text)) return 'Asked a question';
     if ((m = /^Answered q\d+: ([\s\S]*)$/.exec(text))) return 'Answered a question: ' + m[1];
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);

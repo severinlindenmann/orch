@@ -808,7 +808,7 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
         return f"Answered a question: {m.group(1)}"
     if m := re.fullmatch(r"Status (\w+) -> (\w+)", t):
         return f"Moved to {STATUS_WORDS.get(m.group(2), m.group(2))}"
-    if m := re.fullmatch(r"Edited ([a-z_, ]+)", t):
+    if m := re.fullmatch(r"Edited ([a-z_, ]+)(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
         if (f := _fields_text(m.group(1))) is not None:
             return "Changed " + f
     if m := re.fullmatch(r"Patched ([a-z_, ]+?)(?: \(status \w+ -> (\w+)\))?", t):
@@ -1570,9 +1570,16 @@ def clean_field(key: str, value):
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
     if key == "note" and len(v) > 2000:
-        raise Refused("A note is at most 2000 characters.")
+        raise Refused(
+            f"A note is at most 2000 characters; this one has {len(v)}. Nothing was changed. "
+            "Shorten it, or keep the full text as a file on the ticket: "
+            "orch ticket attach <ticket> --name note.md < note.md"
+        )
     if key == "done_when" and len(v) > 2000:
-        raise Refused("The done criteria are at most 2000 characters.")
+        raise Refused(
+            f"The done criteria are at most 2000 characters; these have {len(v)}. Nothing was changed. "
+            "Shorten them to one plain line and keep the details in the note."
+        )
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
@@ -1586,6 +1593,14 @@ def _set_field(ticket: dict, key: str, value) -> None:
         ticket.pop(key, None)
     else:
         ticket[key] = v
+
+
+def _edit_snip(value, limit: int = 200) -> str:
+    """The old or new text of an edited field in one short line for the Activity (ORCH-185)."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return "(empty)"
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def edit(
@@ -1611,10 +1626,15 @@ def edit(
                 ticket.pop("title_auto", None)  # a person's (or anyone's) own title is final
             ticket["title"] = title
             add_history(ticket, by, "Title changed")
+        was = {k: ticket.get(k) for k in fields}
         for k, v in fields.items():
             _set_field(ticket, k, v)
         if fields:
-            add_history(ticket, by, "Edited " + ", ".join(sorted(fields)))
+            text = "Edited " + ", ".join(sorted(fields))
+            if len(fields) == 1 and next(iter(fields)) in ("note", "done_when"):
+                k = next(iter(fields))
+                text += f" (was: {_edit_snip(was[k])} | now: {_edit_snip(ticket.get(k))})"  # ORCH-185
+            add_history(ticket, by, text)
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
