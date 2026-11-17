@@ -823,9 +823,9 @@ def test_fresh_prompt_summary_names_writer_and_proof(repo, run, new_ticket):
 def test_a_yes_on_the_dashboard_counts_when_the_server_runs_under_a_helper(
     proj, run, new_ticket, monkeypatch
 ):
-    """#1354: the dashboard was started from a helper's session, so its environment shows an agent tool and a
-    person's click on yes did nothing. Through the dashboard or a phone the click is the person; at the CLI the
-    environment still decides."""
+    """#1354: the dashboard was started from a helper's session, so its environment shows an agent tool
+    and a person's click on yes did nothing. Through the dashboard or a phone the click is the person;
+    at the CLI the environment still decides."""
     tid = with_checks(proj, run, new_ticket)
     for c in ("c2", "c3"):
         run("ask", tid, f"Mark step {c} as won't do?", "--option", "yes", "--option", "no", "--check", c)
