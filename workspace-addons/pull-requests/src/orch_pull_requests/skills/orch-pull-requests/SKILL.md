@@ -42,6 +42,12 @@ person says to merge on green; leave it off when a person merges with a Merge ca
 
     orch pull-requests queue remove <pull request url>
 
+**5. Failed checks** (off until a person turns it on: `orch pull-requests failed-checks on`)
+
+When it is on, a cancelled or timed-out job of your ticket's pull request is run again once by itself, and when a
+check fails for real you get a message with the failed job and the last lines of its log (once per commit). Fix the
+cause and push; do not rerun jobs by hand that orch already reran.
+
 ## Rules
 - A pull request a person merges with a Merge card is never queued; a Merge card made while it waits takes it out.
 - A pull request that is closed, made a draft, moved to another base branch, gets a new commit or gets changes

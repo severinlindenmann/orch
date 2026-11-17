@@ -54,6 +54,7 @@ except ImportError:  # no orch: nothing runs
 # (under the dashboard, no session of its own) keeps its started-run bookkeeping in Focus, so these three stay
 # open until that has a session path. Every other op acts as the person and needs the page session (watch-only
 # without one).
+# manager.start is NOT free: the Manager has a normal helper's full rights and Start fresh ends its conversation
 FREE_OPS = frozenset({"check.add", "check.move", "run.start", "run.stop", "mobile.set"})
 
 
@@ -132,6 +133,12 @@ def _session_continue(a):
     if not isinstance(sid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", sid):
         raise BadRequest("That is not a session id.")
     return ["run", "history", _t(a)], ["--session", sid, "--continue"], []
+
+
+def _manager_start(a):
+    """The workspace's always-on Manager (ORCH-147): made the first time, started live; fresh = an empty talk."""
+    _only(a, ("fresh",))
+    return ["manager", "start"], (["--fresh"] if _flag(a.get("fresh")) else []), []
 
 
 def _run_stop(a):
@@ -286,6 +293,7 @@ OPS = {
     "ticket.done": _ticket_done,
     "answer": _answer,
     "run.start": _run_start,
+    "manager.start": _manager_start,
     "run.stop": _run_stop,
     "session.continue": _session_continue,
     "run.send": _run_send,
@@ -299,6 +307,7 @@ OPS = {
 }
 BY = {
     "run.start": "focus",
+    "manager.start": "focus",
     "mobile.set": "focus",
 }  # who a start is recorded as (the page is the starter); other ops: the person
 

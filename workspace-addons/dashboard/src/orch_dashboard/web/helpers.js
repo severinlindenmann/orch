@@ -365,7 +365,7 @@
       arr(all).find(p => p && p.id !== t.id && arr(p.children).includes(t.id)) || null;
   }
   /* ORCH-156: the tickets a ticket can be put under ("Part of" in Edit ticket): not itself, not one of its own
-     sub-tickets (a loop), not closed (its current parent stays listed). Epics first, then tickets that already
+     sub-tickets (a loop), not closed (its current parent stays listed). Releases, epics, then tickets that already
      hold others, then the rest; newest first inside each group. */
   function parentChoices(all, t) {
     const list = arr(all).filter(x => x && x.id), inside = new Set([t.id]);
@@ -374,7 +374,7 @@
       for (const x of list) if (!inside.has(x.id) && list.some(p => inside.has(p.id) && matchesTicket(x.parent, p))) { inside.add(x.id); grew = true; }
     }
     const current = parentOf(list, t), holds = new Set(list.map(x => (parentOf(list, x) || {}).id).filter(Boolean));
-    const rank = x => x.epic ? 0 : holds.has(x.id) ? 1 : 2;
+    const rank = x => x.release ? 0 : x.epic ? 1 : holds.has(x.id) ? 2 : 3;  // ORCH-37: releases first
     return list.filter(x => !inside.has(x.id) && (!['done', 'dropped'].includes(x.status) || (current && x.id === current.id)))
       .sort((x, y) => rank(x) - rank(y) || creationOrder(y, x));
   }
