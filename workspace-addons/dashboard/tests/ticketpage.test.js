@@ -479,7 +479,7 @@ test('plan step dialogs rename with a revision and add under the parent', async 
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.edit', {ticket:'child', title:'After', if_revision:7}]));
   c.ticketAddStep({id:'parent'});
   ({d, actions} = dialogs.pop());
-  d.children[0].value = 'New step';
+  d.children[0].children[0].value = 'New step';
   await actions.children[0].onclick();
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.new', {title:'New step', parent:'parent'}]));
 });
@@ -497,7 +497,7 @@ test('ORCH-156: Add a ticket can move in a ticket that already exists; never its
     dialog:() => { const value = {d:node('dialog'), actions:node('div')}; dialogs.push(value); return value; }});
   c.window.orch.open = () => {}; c.window.orch.close = () => {};
   c.ticketAddStep(epic);
-  const {d, actions} = dialogs.pop(), [input, pick] = d.children;
+  const {d, actions} = dialogs.pop(), [input, pick] = d.children[0].children;
   assert.equal(pick.tag, 'select');
   assert.deepEqual(pick.children.slice(1).map(o => o.attrs.value), ['t_lanes']);
   assert.equal(pick.children[1].children.join(''), 'WS-3 Board lanes');

@@ -291,22 +291,6 @@ function ticketForm(t) {
     input.value = field === 'due' ? String(t?.[field] || '').replace('T', ' ') : t?.[field] || '';
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs[field] = input;
   }
-  // ORCH-156: "Part of": put this ticket under an epic (or another ticket) that already exists, or take it out.
-  // FOLLOW-UP: move to kit (shared custom select from the foundation PR); a native select like Helper until then.
-  let parentSelect = null, parentWas = '';
-  if (t && window.DashHelpers?.parentChoices) {
-    const all = typeof tickets === 'function' ? tickets() : [];
-    parentWas = window.DashHelpers.parentOf(all, t)?.id || '';
-    const label = el('label', '', 'Part of (optional)');
-    parentSelect = el('select', 'input'); parentSelect.name = 'parent'; parentSelect.id = 'field-' + serial + '-parent';
-    const none = el('option', '', 'Not part of another ticket'); none.value = ''; parentSelect.append(none);
-    for (const p of window.DashHelpers.parentChoices(all, t)) {
-      const option = el('option', '', [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.epic ? ' (epic)' : ''));
-      option.value = p.id; parentSelect.append(option);
-    }
-    parentSelect.value = parentWas;
-    label.htmlFor = parentSelect.id; label.append(parentSelect); fields.append(label);
-  }
   const error = el('p', 'bad'); error.setAttribute('role', 'alert');
   const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
   reload.hidden = true;
@@ -347,8 +331,7 @@ function ticketForm(t) {
     // A helper other than the default is kept as the ticket's owner. FOLLOW-UP: run.start takes no helper yet.
     if (!t) values.owner = helperSelect && helperSelect.value !== helpers[0].name ? 'agent:' + helperSelect.value : '';
     let result;
-    const parentArgs = parentSelect && parentSelect.value !== parentWas ? {parent:parentSelect.value || null} : {};
-    if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, ...parentArgs, if_revision:t.revision});
+    if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, if_revision:t.revision});
     else {
       const fullText = inputs.text.value;
       if (fullText.length > 1500) {

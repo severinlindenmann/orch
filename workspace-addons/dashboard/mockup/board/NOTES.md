@@ -79,6 +79,18 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 - Under the files: "＋ Make it an epic with several tickets". Each click adds a "Ticket N" box with its own text, files and Remove; the button then reads "＋ Add another ticket" and a line says the ticket becomes an epic. On Start the epic is made first, then one ticket inside it per box; one helper run goes through them in order. The epic page lists them under "Tickets in this epic"; the board card says "Epic · N of M done"; a ticket inside says "Part of the epic …".
 
+## ORCH-156 (17 Nov): existing tickets under an epic, no empty epic box, order inside a lane
+
+### new.html
+- An empty "Ticket N" box stops the save with "Ticket N is empty. Write what needs doing in it, or remove it." (it used to drop out silently, and an epic with only empty boxes became a plain ticket). Nothing is made until it is filled or removed.
+
+### Ticket page (Properties, Add a ticket)
+- Properties has "Part of" (it replaces the "Sub-ticket of" line): a select with "Not part of another ticket" or any open ticket, epics first (marked "(epic)"), never the ticket itself or one inside it. The header line "Part of the epic …" follows it.
+- An epic's "+ Add a ticket" window keeps the title box and adds "Or pick a ticket that already exists"; picking one hides the title box, Add moves that ticket in.
+
+### board.html
+- Inside a lane the person drags a card above another to put them in order; the order is kept per lane. Cards that came into the lane since stay on top.
+
 ## Revised after the owner's answer (16 Nov, ORCH-62)
 
 ### list.html

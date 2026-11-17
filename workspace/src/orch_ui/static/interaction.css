@@ -18,6 +18,9 @@ dialog.ui-closing::backdrop{animation:ui-fade var(--ui-exit) reverse forwards}
 .ui-select{position:relative;display:inline-flex;min-width:0;vertical-align:middle;max-width:100%}
 .ui-native-select{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;border:0!important;clip-path:inset(50%)!important;overflow:hidden!important;opacity:0!important;pointer-events:none!important}
 .ui-select-trigger{display:flex;align-items:center;justify-content:space-between;gap:12px;height:36px;min-width:100%;padding:0 11px;border:1px solid var(--border,#ddd);border-radius:7px;background:var(--surface,#fff);color:var(--text,#222);font:inherit;font-size:13px;white-space:nowrap;cursor:pointer}
+/* a long choice (a ticket title) ends with … inside the box instead of pushing out of it (ORCH-156) */
+.ui-select-trigger{max-width:100%}
+.ui-select-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .ui-select-trigger:hover{background:var(--surface-2,#f5f5f7)}
 .ui-select-trigger[aria-invalid=true]{border-color:var(--danger,#b42318)}
 .ui-select-list{position:fixed;inset:auto;margin:0;padding:5px;border:1px solid var(--border,#ddd);border-radius:9px;background:var(--surface,#fff);color:var(--text,#222);box-shadow:0 12px 35px #17203425;max-height:280px;overflow:auto;animation:ui-enter 150ms ease-out}

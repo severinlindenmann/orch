@@ -430,40 +430,6 @@ test('ORCH-156: the second of two boxes empty names Ticket 2; a filled one alone
   assert.equal(s.calls[0].args.epic, true);
   assert.deepEqual(s.calls.filter(c => c.op === 'ticket.new').length, 3);
 });
-test('ORCH-156: Edit ticket has Part of: epics first, never itself or a ticket inside it; a change sends parent, none sends null', async () => {
-  const helpers = require('../src/orch_dashboard/web/helpers.js');
-  const s = setupWith(null, {DashHelpers:{...helpers, scrubText:x => x}});
-  const me = {id:'t_me', key:'WS-5', title:'Lanes', status:'active', revision:4};
-  const items = s.c.tickets();
-  items.push(me,
-    {id:'t_old', key:'WS-1', title:'Plain', status:'open'},
-    {id:'t_epic', key:'WS-2', title:'Ticket flow', status:'open', epic:true},
-    {id:'t_kid', key:'WS-6', title:'Inside me', status:'open', parent:'t_me'},
-    {id:'t_grand', key:'WS-7', title:'Deeper', status:'open', parent:'t_kid'},
-    {id:'t_closed', key:'WS-3', title:'Closed', status:'done'});
-  s.c.ticketForm(me);
-  const sheet = s.body.children[s.body.children.length - 1];
-  const select = walk(sheet).find(n => n.name === 'parent');
-  assert.deepEqual(select.children.map(o => o.value), ['', 't_epic', 't_old']);
-  assert.equal(select.children[1].textContent, 'WS-2 Ticket flow (epic)');
-  assert.equal(select.value, '');
-  await walk(sheet).find(n => n.tag === 'form').fire('submit');  // unchanged: no parent in the call
-  assert.equal('parent' in s.calls.pop().args, false);
-  s.c.ticketForm(me);
-  const again = s.body.children[s.body.children.length - 1];
-  walk(again).find(n => n.name === 'parent').value = 't_epic';
-  await walk(again).find(n => n.tag === 'form').fire('submit');
-  const sent = s.calls.pop();
-  assert.equal(sent.op, 'ticket.edit'); assert.equal(sent.args.parent, 't_epic'); assert.equal(sent.args.if_revision, 4);
-  const under = {...me, parent:'t_epic'};
-  s.c.ticketForm(under);
-  const third = s.body.children[s.body.children.length - 1];
-  const sel = walk(third).find(n => n.name === 'parent');
-  assert.equal(sel.value, 't_epic');
-  sel.value = '';
-  await walk(third).find(n => n.tag === 'form').fire('submit');
-  assert.equal(s.calls.pop().args.parent, null);
-});
 test('ORCH-156: parentChoices keeps the current parent even when it is closed', () => {
   const helpers = require('../src/orch_dashboard/web/helpers.js');
   const all = [{id:'t_a', status:'done'}, {id:'t_b', status:'done'}, {id:'t_me', parent:'t_a', status:'open'}];

@@ -1167,7 +1167,7 @@ function ticketAddStep(t) {
     if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(changeError(result), 'error'); }
   });
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
-  actions.append(send); d.append(...[input, pick, actions].filter(Boolean)); window.orch.open(d); input.focus();
+  actions.append(send); d.append(h('div', {className:'stack'}, input, pick), actions); window.orch.open(d); input.focus();
 }
 function ticketParts(t, children) {
   const add = snapshot ? null : ticketButton(t.epic ? '+ Add a ticket' : '+ Add a step', 'ghost add-row', () => ticketAddStep(t));
@@ -1460,7 +1460,7 @@ function ticketProperties(t, parent) {
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = ev?.at || t.done_at || t.updated_at;
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, parent ? field('Sub-ticket of', h('a', {href:href(parent.id)}, partName(parent))) : null,
+    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)),
       ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Model', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
@@ -1614,6 +1614,20 @@ const MODEL_NAMES = {sonnet:'Sonnet', opus:'Opus'};
 function modelChoice(t) {
   const m = t.model && MODEL_NAMES[t.model.name] ? t.model : null;
   return m ? {name:m.name, auto:m.by === 'orch', why:m.why ? clean(String(m.why)) : ''} : null;
+}
+// ORCH-156: what this ticket is part of (an epic, another ticket); a person puts it under one that exists or takes
+// it out. Never itself or a ticket inside it; epics first. FOLLOW-UP: kit select, a native one like Model until then.
+function partOfField(t, parent) {
+  const was = parent ? parent.id : '';
+  const select = h('select', {'aria-label':'Part of', 'data-key':'part-of-' + t.id},
+    h('option', {value:''}, 'Not part of another ticket'),
+    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.epic ? ' (epic)' : ''))));
+  select.value = was;
+  select.onchange = async () => {
+    const result = await act('ticket.edit', {ticket:t.id, parent:select.value || null, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
+  };
+  return select;
 }
 function modelField(t) {
   const m = modelChoice(t);
