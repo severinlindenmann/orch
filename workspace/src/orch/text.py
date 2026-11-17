@@ -66,7 +66,7 @@ def clean_untrusted(text: str, limit: int = 2000) -> str:
 
 
 def at_word(text: str, limit: int) -> str:
-    """`text` cut to at most `limit` characters at a whole word, with an ellipsis when something was left out."""
+    """`text` cut to at most `limit` characters at a whole word, with an ellipsis when text was left out."""
     if len(text) <= limit:
         return text
     cut = text[: max(limit - 1, 0)]

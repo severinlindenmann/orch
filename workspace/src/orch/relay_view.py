@@ -231,7 +231,7 @@ def fold(rows: list[tuple[str, dict, tuple]]) -> list[tuple[str, dict]]:
 
 
 def _question_state(root: Path, entry: dict) -> str:
-    """"Answered" or "Taken back" for a question the ticket has moved on from, else "" (it stays "Question")."""
+    """Answered or Taken back once the ticket has moved on from the question, else empty (stays Question)."""
     rec = net.read_json(relay._asked_path(root), {}).get(entry.get("id"))
     if not isinstance(rec, dict) or not isinstance(rec.get("ticket"), str):
         return ""
