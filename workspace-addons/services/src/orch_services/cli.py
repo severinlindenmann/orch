@@ -1,4 +1,4 @@
-"""orch services list|found|add|adopt|start|stop|restart|auto|remove|log|act|view (contract: contracts/addons/services/README.md)."""
+"""orch services list|check|found|add|adopt|start|stop|restart|auto|remove|log|act|view (contract: contracts/addons/services/README.md)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import drivers, store
+from . import drivers, store, watch
 from .store import Refused
 
 MASK = "••••••"
@@ -141,6 +141,9 @@ def _row(root: Path, rec: dict, st: drivers.Status | None) -> dict:
     }
     if running and st and st.pid:
         row["pid"] = st.pid
+    row.update(watch.row_extra(root, rec, st))
+    if row["failing"]:
+        row["state"] = "failing"
     return row
 
 
@@ -276,6 +279,8 @@ def _list_text(rows: list[dict], bad: int, note: str | None) -> str:
     lines = []
     for r in rows:
         bits = [r["state"].capitalize()]
+        if r.get("health") and r["state"] != "stopped":
+            bits.append(r["health"]["text"])
         if r["auto"]:
             bits.append("starts by itself")
         if r.get("port"):
@@ -332,6 +337,7 @@ def cmd_add(args, root: Path) -> int:
     if args.start:
         drv.start(spec)
         store.mark(root, sid, True)
+        watch.note_own_start(root, drv, spec)
     row = _state(root, drv, rec, wid)
     nxt = (
         f"Added {rec['name']}; it is running."
@@ -375,6 +381,8 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     spec = _spec(root, rec, wid, strict=verb != "stop")
     getattr(drv, verb)(spec)
     store.mark(root, sid, verb != "stop")
+    if verb != "stop":
+        watch.note_own_start(root, drv, spec)
     row = _state(root, drv, rec, wid)
     words = {"start": "Started", "stop": "Stopped", "restart": "Restarted"}[verb]
     nxt = f"{words} {rec['name']}."
@@ -493,6 +501,33 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     return _emit(args, {"service": row, "next": nxt}, nxt)
 
 
+def cmd_check(args, root: Path) -> int:
+    """One pass over every service: health, failing, the one question and acting on its answer (no loop)."""
+    recs, bad = store.load_all(root)
+    drv = _driver()
+    wid = _workspace_id(root)
+    out, said = [], []
+    for rec in recs:
+        try:
+            _same_kind(drv, rec)
+            res = watch.check_one(root, drv, rec, _spec(root, rec, wid, strict=False))
+        except Refused as e:
+            res = {"id": rec["id"], "name": rec["name"], "error": str(e)}
+            said.append(f"{rec['name']}: {e}")
+        else:
+            if res.get("did"):
+                said.append(res["did"])
+            elif res["failing"]:
+                said.append(f"{rec['name']} keeps stopping; the question is open.")
+        out.append(res)
+    if not recs:
+        said.append("No services yet.")
+    elif not said:
+        said.append(f"Checked {len(recs)} service(s); all as expected.")
+    data: dict = {"checked": out, "unreadable": bad}
+    return _emit(args, data, "\n".join(said))
+
+
 def run(args) -> int:
     root = _root(args.dir)
     cmd = args.cmd
@@ -504,6 +539,8 @@ def run(args) -> int:
         return _emit(args, data, _list_text(rows, bad, note))
     if cmd == "add":
         return cmd_add(args, root)
+    if cmd == "check":
+        return cmd_check(args, root)
     if cmd == "found":
         from . import found
 
@@ -545,6 +582,7 @@ def main(argv=None) -> int:
         return s
 
     p("list")
+    p("check")
     p("found")
     s = p("adopt")
     s.add_argument("found_id")
