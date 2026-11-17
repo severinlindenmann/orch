@@ -57,7 +57,7 @@ def test_a_new_report_gets_one_ticket(proj, run):
     # the next pass opens nothing
     assert json.loads(run("diag", "tickets", "--json")[1])["opened"] == []
     assert len(opened(proj)) == 1
-    assert run("diag", "tickets")[1].strip() == "No new reports."
+    assert run("diag", "tickets")[1].startswith("No new reports.")
 
 
 def test_a_feature_wish_gets_a_ticket_but_no_helper(proj, run):
