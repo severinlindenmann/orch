@@ -19,21 +19,11 @@ import sys
 import time
 from pathlib import Path
 
-from lib import Fail, Skip, check, free_port, http, page_signin, scenario, wait_http
+from lib import Fail, Skip, check, free_port, http, page_signin, scenario, wait_for, wait_http
 
 AGENT = Path(__file__).parent / "fixtures" / "generic-agent" / "agent.py"
 NEEDS_FIXTURE = Path(__file__).parent / "fixtures" / "needs-addon"
 ESSENTIALS = ("uv", "node", "git", "python3", "ps", "sh", "env", "sleep", "cat", "date", "ls", "head", "tail", "kill", "mkdir", "rm", "cp", "tr", "grep", "true")
-
-
-def wait_for(fn, secs: float = 30, step: float = 0.1):
-    end = time.time() + secs
-    while time.time() < end:
-        v = fn()
-        if v:
-            return v
-        time.sleep(step)
-    return None
 
 
 class W:
@@ -443,8 +433,7 @@ def r8(e):
     # a claim without a process is only ever taken on request
     tid3 = w.ticket("Hand started")
     w.o("run", "claim", tid3, "--agent", "fake")
-    time.sleep(3)
-    st = w.j("run", "status", tid3)
+    st = wait_for(lambda: (s := w.j("run", "status", tid3))["state"] == "maybe-stale" and s, 20) or w.j("run", "status", tid3)
     check(st["state"] == "maybe-stale", f"pid-less claim after the lease: {st['state']}")
     rc, out, err = w.o("run", "claim", tid3, "--agent", "fake", "--json", ok=False)
     check(rc == 2, f"a pid-less claim was taken without --take-over (rc {rc})")
