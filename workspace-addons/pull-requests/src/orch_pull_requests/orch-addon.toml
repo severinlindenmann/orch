@@ -1,11 +1,18 @@
-# Pull requests: the merge queue (ORCH-168, first part of the GitHub plan ORCH-146). CLI only for now, no page,
-# no background service: `queue add` starts the runner, which ends when the queue is empty.
+# Pull requests (GitHub plan ORCH-146): the merge queue (ORCH-168) and the per-ticket "Merge when green" switch
+# (ORCH-166). `queue add` starts the runner, which ends when the queue is empty; the background service (orch start)
+# looks at the switched-on tickets every minute and puts their ready pull requests in the queue.
 schema = "orch.addon/1"
 orch_api = 1
 name = "pull-requests"
-version = "0.1.0"
+version = "0.2.0"
 description = "Merge queue: pull requests wait in line and are merged in groups after one run of the checks."
 run = "orch_pull_requests"
 skill = "skills/orch-pull-requests"
 agents_block = "skills/orch-pull-requests/AGENTS-block.md"
 gitignore = [".orch/addons/pull-requests/"]
+ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/addons/pull-requests/ext.schema.json
+background = true                          # orch pull-requests start|stop|status: the Merge when green watcher
+
+[ticket_fields]
+section = "Pull requests"
+schema = "ext.schema.json"

@@ -1,4 +1,4 @@
-"""orch pull-requests queue add|list|remove|run (contract: contracts/addons/pull-requests/README.md)."""
+"""orch pull-requests queue add|list|remove|run, tend, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
 
 from __future__ import annotations
 
@@ -43,10 +43,12 @@ def _ticket(root: Path, ref: str | None, url: str) -> str | None:
         return None
     from orch import review, tickets
 
+    from .runner import pr_key
+
     tid = tickets.resolve(root, ref.strip())
     t = tickets.load(root, tid)
     for q in t.get("questions") or []:
-        if q.get("answer") is None and review.merge_url(q) == url:
+        if q.get("answer") is None and pr_key(review.merge_url(q) or "") == pr_key(url):
             raise Refused(f"A person merges {url} with the Merge card on {t.get('key') or tid}; not queued.")
     return t["id"]
 
@@ -92,8 +94,13 @@ def start_runner(root: Path) -> None:
         )  # fmt: skip
 
 
-def _run(root: Path) -> int:
+def _github():
     from .github import GitHub
+
+    return GitHub()
+
+
+def _run(root: Path) -> int:
     from .group import Git
     from .runner import Runner
 
@@ -102,12 +109,19 @@ def _run(root: Path) -> int:
     while _hold_runner(root):
         ran = True
         try:
-            r = Runner(root, GitHub(), lambda repo: Git(folder, repo), log=lambda s: print(s, flush=True))
+            r = Runner(root, _github(), lambda repo: Git(folder, repo), log=lambda s: print(s, flush=True))
             r.run()
+            more = r.has_work()  # an add that came while the lock was still ours started no runner
         finally:
             store._drop_lock(_runner_lock(root))
-        if not store.waiting(root):  # an add that came while the lock was still ours started no runner
-            print("The merge queue is empty.", flush=True)
+        if not more:
+            other = len(store.waiting(root))
+            print(
+                f"Nothing waits for this runner; {other} wait for a runner on the GitHub login that added them."
+                if other
+                else "Nothing waits in the merge queue.",
+                flush=True,
+            )
             return 0
     if not ran:
         print("The merge queue runs already.")
@@ -141,6 +155,46 @@ def _wait(root: Path, url: str, max_wait: float, json_out: bool) -> int:
         time.sleep(POLL_SECS)
 
 
+def _tend(root: Path) -> dict:
+    from . import switch
+    from .github import GitHub
+
+    return switch.tend(root, GitHub(), log=lambda s: print(s, flush=True), start=start_runner)
+
+
+def _switch_cmd(args, root: Path) -> int:
+    """tend, start, stop, status, watch: the Merge when green switch and its background watcher."""
+    from . import service
+
+    def say(data: dict, text: str) -> None:
+        print(json.dumps(data) if getattr(args, "json", False) else text, flush=True)
+
+    if args.cmd == "watch":
+        return service.watch(root, lambda: _tend(root), log=lambda s: print(s, flush=True))
+    if args.cmd == "tend":
+        got = _tend(root)
+        n = len(got["added"])
+        say(
+            got,
+            f"Merge when green: {n} pull request(s) put in the merge queue, {len(got['removed'])} taken out.",
+        )
+        return 0
+    if args.cmd == "start":
+        pid = service.start(root)
+        say({"running": True, "pid": pid}, f"Merge when green watcher runs (pid {pid}).")
+        return 0
+    if args.cmd == "stop":
+        stopped = service.stop(root)
+        say({"stopped": stopped}, "Merge when green watcher stopped." if stopped else "It was not running.")
+        return 0
+    pid = service.running_pid(root)
+    say(
+        {"running": bool(pid), **({"pid": pid} if pid else {})},
+        f"Running (pid {pid})." if pid else "Not running.",
+    )
+    return 0 if pid else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="orch pull-requests")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -157,9 +211,21 @@ def main(argv: list[str] | None = None) -> int:
     rm.add_argument("url")
     r = q.add_parser("run", help="the runner (add starts it by itself)")
     r.add_argument("--root", help=argparse.SUPPRESS)
+    t = sub.add_parser("tend", help="Merge when green: one pass over the switched-on tickets")
+    t.add_argument("--json", action="store_true")
+    for name, text in (
+        ("start", "start the Merge when green watcher"),
+        ("stop", "stop it"),
+        ("status", "is it running?"),
+    ):
+        sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    w = sub.add_parser("watch", help=argparse.SUPPRESS)
+    w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     try:
         root = _root(getattr(args, "root", None))
+        if args.cmd != "queue":
+            return _switch_cmd(args, root)
         if args.sub == "run":
             return _run(root)
         if args.sub == "list":
@@ -177,9 +243,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             print(f"{args.url} does not wait in the merge queue.")
             return 1
-        repo, number = store.parse_url(args.url)
-        url = f"https://github.com/{repo}/pull/{number}"
-        row, new = store.add(root, url, _ticket(root, args.ticket, url), _actor())
+        from .runner import admit
+
+        url = store.canonical(args.url)
+        ticket = _ticket(root, args.ticket, url)
+        old = store.find(store.read(root), url)
+        seen = {} if old and old.get("state") not in FINISHED else admit(root, _github(), url)
+        row, new = store.add(root, url, ticket, _actor(), **seen)
         start_runner(root)
         if not args.wait:
             ahead = [x for x in store.read(root) if x.get("state") not in FINISHED and x["url"] != url]

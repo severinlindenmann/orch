@@ -90,6 +90,20 @@
     },
     {
       "v": 1,
+      "id": "m_tb7k3f9q0a1b2c3d",
+      "type": "closed",
+      "workspace": {
+        "id": "ws_4hd8k2m1qa",
+        "name": "Month-end close"
+      },
+      "ticket": "t_7k3f9q",
+      "key": "DM1-12",
+      "at": "2026-11-06T19:45:00Z",
+      "question_id": "m_q71hc0dn2a3b4c5d",
+      "reason": "Answered in orch"
+    },
+    {
+      "v": 1,
       "id": "test_k2j4h6g8f0",
       "type": "test",
       "text": "Test event from your orch relay.",
@@ -97,6 +111,22 @@
     }
   ],
   "invalid_events": [
+    {
+      "name": "closed-without-reason",
+      "event": {
+        "v": 1,
+        "id": "m_tb7k3f9q0a1b2c3e",
+        "type": "closed",
+        "workspace": {
+          "id": "ws_4hd8k2m1qa",
+          "name": "Month-end close"
+        },
+        "ticket": "t_7k3f9q",
+        "key": "DM1-12",
+        "at": "2026-11-06T19:45:00Z",
+        "question_id": "m_q71hc0dn2a3b4c5d"
+      }
+    },
     {
       "name": "update-without-kind",
       "event": {

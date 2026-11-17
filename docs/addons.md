@@ -98,6 +98,20 @@ $ orch pull-requests queue remove <pull request url>
 this computer's write limit (`orch github writes`). A pull request a person merges with a Merge card is never queued.
 Files: `.orch/addons/pull-requests/` (gitignored).
 
+**Merge when green.** A switch on each ticket (Details, Pull requests; off until you turn it on). When it is on, the
+ticket's open pull requests go into the merge queue by themselves once they are ready (not a draft), and are merged
+when every check passed, only the commit that was checked. No helper has to wait for it. `orch start` runs the
+watcher that looks every minute.
+
+```sh
+$ orch ticket set <id> pull-requests.merge_when_green on
+$ orch start
+$ orch ticket set <id> pull-requests.merge_when_green off   # a waiting pull request leaves the queue
+```
+
+One that left the queue (checks failed, a conflict) comes back with the next push. Never a draft, never a pull request
+a person merges with a Merge card.
+
 ## Write your own add-on
 
 The core knows no add-on by name. An add-on is a folder with an `orch-addon.toml`

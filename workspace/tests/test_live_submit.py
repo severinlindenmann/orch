@@ -25,9 +25,12 @@ _tmux = pytest.mark.skipif(
 # A prompt box drawn like Claude Code's: transcript, a border, the box, a border, a status line; the cursor
 # is left after the status line. It turns bracketed paste on and records any paste (orch must never paste),
 # shows typed keys in the box and submits only on Enter. For its first `deaf` seconds it drops Enter.
+# ORCH-190: for its first `slow` seconds it is still starting (no box, every key dropped), and `hint` is a
+# greyed-out suggestion it shows in the empty box (cursor on its first character), like Claude Code's.
 FAKE_TUI = r"""
-import json, os, sys, time, tty
+import json, os, select, sys, time, tty
 out, deaf = sys.argv[1], float(sys.argv[2])
+slow, hint = float(sys.argv[3]), sys.argv[4]
 t0 = time.monotonic()
 tty.setraw(0)
 START, END = b"\x1b[200~", b"\x1b[201~"
@@ -38,16 +41,33 @@ def record(kind, text):
     with open(out, "a") as f:
         f.write(json.dumps({"kind": kind, "text": text}) + "\n")
 
+def starting():
+    return time.monotonic() - t0 < slow
+
 def draw():
-    rows = ["ready"] + ["> " + s for s in said[-5:]] + [BORDER, "> " + box, BORDER, "  auto mode on"]
-    os.write(1, b"\x1b[2J\x1b[H" + "\r\n".join(rows).encode())
+    if starting():
+        os.write(1, b"\x1b[2J\x1b[Hstarting ...")
+        return
+    top = ["ready"] + ["> " + s for s in said[-5:]] + [BORDER]
+    shown = box or ("\x1b[2m" + hint + "\x1b[0m" if hint else "")
+    rows = top + ["> " + shown, BORDER, "  auto mode on"]
+    put = f"\x1b[{len(top) + 1};3H".encode() if hint and not box else b""
+    os.write(1, b"\x1b[2J\x1b[H" + "\r\n".join(rows).encode() + put)
 
 os.write(1, b"\x1b[?2004h")
 draw()
+was = starting()
 while True:
+    if not select.select([0], [], [], 0.05)[0]:
+        if was and not starting():
+            was = False
+            draw()  # the prompt shows now
+        continue
     data = os.read(0, 4096)
     if not data:
         break
+    if starting():
+        continue  # not up yet: the keys are lost
     buf += data
     while buf:
         if pasting:
@@ -84,13 +104,13 @@ def tui(proj, tmp_path, monkeypatch):
     script.write_text(FAKE_TUI, encoding="utf-8")
     out = tmp_path / "tui.jsonl"
 
-    def start(tid: str, agent: str = "claude", deaf: float = 0.0) -> dict:
+    def start(tid: str, agent: str = "claude", deaf: float = 0.0, slow: float = 0.0, hint: str = "") -> dict:
         r = runs_live.tmux(
             proj, "new-session", "-d", "-x", "200", "-y", "50", "-s", tid,
-            "--", sys.executable, str(script), str(out), str(deaf),
+            "--", sys.executable, str(script), str(out), str(deaf), str(slow), hint,
         )  # fmt: skip
         assert r.returncode == 0, r.stderr
-        _until(lambda: "ready" in _pane(proj, tid), "fake TUI up")
+        _until(lambda: ("starting" if slow else "ready") in _pane(proj, tid), "fake TUI up")
         rec = runs.claim(proj, tid, "human:t", agent, "live", pid=os.getpid())
         rec["live"] = {"state": "idle", "since": tickets.now()}
         rec["up"] = True
@@ -172,6 +192,62 @@ def test_an_enter_the_tool_dropped_is_sent_again_and_submits_once(proj, run, tui
     assert any(
         "Enter again (2)" in e["kv"]["what"] for e in diag.read_events(proj) if e["ev"] == "run.live_submit"
     )
+
+
+def _watch(proj, tid, rec, until, seconds=15.0):
+    """What the pane's wrapper does: offer the input, check it went in (Enter again, type again)."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if (runs.read(proj, tid) or {}).get("submit"):
+            runs_live.check_submit(proj, tid, rec["run"])
+        else:
+            runs_live.deliver(proj, tid)
+        if until():
+            return
+        time.sleep(0.1)
+    raise AssertionError("the input never went in")
+
+
+@_tmux
+@pytest.mark.slow
+def test_a_slow_starting_helper_gets_its_first_task_once_it_is_ready(proj, run, tui):
+    """ORCH-190: a helper still starting (no prompt yet, keys lost) and then dropping the first Enter. Nothing
+    is typed into the starting screen; once the prompt shows and is calm the notice goes in, the lost Enter is
+    sent again, and the task is submitted exactly once without a person."""
+    start, out = tui
+    tid = _ticket(run)
+    rec = start(tid, slow=1.5, deaf=4.5)
+    runs.pending_add(proj, tid, "orch", "event", "Work on the ticket.", "start")
+    assert runs_live.deliver(proj, tid) == 0
+    assert runs.read(proj, tid)["hold"]["why"] == "nobox"  # still starting: nothing typed
+    _watch(proj, tid, rec, lambda: _got(out, "submit"))
+    assert _got(out) == [runs_live.notice_line(tid, True)]  # once, typed, never pasted
+    assert any(
+        "Enter again" in e["kv"]["what"] for e in diag.read_events(proj) if e["ev"] == "run.live_submit"
+    )
+    text, n = runs_live.read_input(proj, tid, rec["run"], True)
+    assert n == 1 and "Work on the ticket." in text and "submit" not in runs.read(proj, tid)
+
+
+@_tmux
+@pytest.mark.slow
+def test_a_greyed_out_suggestion_is_an_empty_box_and_the_screen_says_so(proj, run, tui):
+    """ORCH-190: Claude Code shows a greyed-out "go ahead" in its empty box after a turn. Without colour it
+    read like a message typed but never sent. orch types into that box, and `orch run screen` says what it
+    is."""
+    from orch import runwatch
+
+    start, out = tui
+    tid = _ticket(run)
+    start(tid, hint="go ahead")
+    shown = runwatch.screen(proj, tid)
+    assert shown["suggestion"] == "go ahead"
+    assert any("suggestion from the tool, not typed: go ahead" in ln for ln in shown["lines"])
+    runs.pending_add(proj, tid, "human:lume", "message", "Please go on.")
+    assert runs_live.deliver(proj, tid) == 1
+    _until(lambda: _got(out, "submit"), "submitted")
+    assert _got(out) == [runs_live.notice_line(tid, False)]
+    _until(lambda: "suggestion" in runwatch.screen(proj, tid), "the suggestion shows again")
 
 
 # ---------------------------------------------------------------- the check (fake tmux)

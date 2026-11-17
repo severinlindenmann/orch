@@ -8,7 +8,11 @@ from urllib.parse import quote
 
 from .store import Refused
 
-VIEW = "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository"
+VIEW = (
+    "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,"
+    "reviewDecision,reviews"
+)
+GONE = ("reference does not exist", "not found", "http 404")
 
 
 class GitHub:
@@ -32,8 +36,15 @@ class GitHub:
         except ValueError:
             return None
 
+    def login(self) -> str | None:
+        """The GitHub login gh signs in with, or None when GitHub did not say."""
+        got = self._run("api", "user", "--jq", ".login")
+        name = (got.stdout or "").strip() if got.returncode == 0 else ""
+        return name or None
+
     def pr(self, url: str) -> dict | None:
-        """{state, isDraft, baseRefName, headRefOid, number, title, closingIssuesReferences} or None."""
+        """{state, isDraft, baseRefName, headRefOid, number, title, closingIssuesReferences, reviewDecision}
+        or None when GitHub did not answer."""
         v = self._json("pr", "view", url, "--json", VIEW)
         return v if isinstance(v, dict) and isinstance(v.get("headRefOid"), str) else None
 
@@ -56,13 +67,10 @@ class GitHub:
         return lines[-1] if got.returncode == 0 and lines else None
 
     def close(self, url: str) -> bool:
-        """Close a group pull request and delete its branch."""
-        return self._run("pr", "close", url, "--delete-branch").returncode == 0
+        """Close a group pull request (its branch is deleted on its own, one more write)."""
+        return self._run("pr", "close", url).returncode == 0
 
     def delete_branch(self, repo: str, branch: str) -> bool:
-        return (
-            self._run(
-                "api", "-X", "DELETE", f"repos/{repo}/git/refs/heads/{quote(branch, safe='/')}"
-            ).returncode
-            == 0
-        )
+        """True when the branch is gone afterwards (deleted now, or not there at all)."""
+        got = self._run("api", "-X", "DELETE", f"repos/{repo}/git/refs/heads/{quote(branch, safe='/')}")
+        return got.returncode == 0 or any(g in (got.stderr or "").lower() for g in GONE)

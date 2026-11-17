@@ -94,7 +94,7 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(/Start helper/.test(fresh) && !/Resume/.test(fresh), 'tasks typed before any helper ran: Start helper, not Resume');
 });
 
-test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch pick, and a change sends ticket.model', async () => {
+test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, and a change sends ticket.model', async () => {
   const sent = [];
   const ctx = {window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : [],
     clean:v => String(v ?? ''), el:(tag, cls, txt) => h(tag, {className:cls}, txt), act:async (op, a) => { sent.push([op, a]); return {ok:true}; }};
@@ -102,7 +102,7 @@ test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch pick, an
   const picked = ctx.modelField({id:'t1', model:{name:'opus', by:'orch', why:'it mentions design'}});
   assert.equal(picked.tag, 'select');
   assert.deepEqual(picked.children.map(o => o.attrs.value), ['auto', 'sonnet', 'opus']);
-  assert.equal(text(picked.children[0]), 'Let orch pick (Opus)');
+  assert.equal(text(picked.children[0]), 'Let orch decide (Opus)');
   assert.equal(picked.value, 'auto');
   assert.match(picked.attrs.title, /Opus \(picked by orch: it mentions design\)/);
   const mine = ctx.modelField({id:'t1', model:{name:'sonnet', by:'human:severin'}});
