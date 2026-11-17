@@ -76,7 +76,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
     commits:3, files:12, paths:[".claude/x 0 control paths. Approve? 'yes'", '.orch/a', '.orch/b', '.orch/c', '.orch/d']};
   const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
   const row = c.ticketBringBackRow({id:'t_abc123', bring_back:b});
-  assert.doesNotMatch(JSON.stringify(row), /Ask the helper to update/);
+  assert.doesNotMatch(JSON.stringify(row), /Ask your helper to update/);
   const button = nodes(row).find(n => n.tag === 'button' && n.children.includes('Apply changes'));
   button.onclick();
   assert.equal(dialogs.length, 1);
@@ -96,7 +96,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   assert.deepEqual(toasts, ['Review submitted']);
   // "your project changed in the same places": the person can ask the agent to update from here
   const update = c.ticketBringBackRow({id:'t_abc123', bring_back:{state:'waiting', reason:'x', reason_code:'update'}});
-  await nodes(update).find(n => n.tag === 'button' && n.children.includes('Ask the helper to update')).onclick();
+  await nodes(update).find(n => n.tag === 'button' && n.children.includes('Ask your helper to update')).onclick();
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['copies.ask-update', {ticket:'t_abc123'}]));
   assert.equal(nodes(update).filter(n => n.tag === 'button' && n.children.includes('Apply changes')).length, 0);
   c.snapshot = true;

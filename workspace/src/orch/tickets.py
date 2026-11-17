@@ -1503,9 +1503,16 @@ def clean_field(key: str, value):
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
     if key == "note" and len(v) > 2000:
-        raise Refused("A note is at most 2000 characters.")
+        raise Refused(
+            f"A note is at most 2000 characters; this one has {len(v)}. Nothing was changed. "
+            "Shorten it, or keep the full text as a file on the ticket: "
+            "orch ticket attach <ticket> --name note.md < note.md"
+        )
     if key == "done_when" and len(v) > 2000:
-        raise Refused("The done criteria are at most 2000 characters.")
+        raise Refused(
+            f"The done criteria are at most 2000 characters; these have {len(v)}. Nothing was changed. "
+            "Shorten them to one plain line and keep the details in the note."
+        )
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
