@@ -92,8 +92,9 @@ def test_rejects_foreign_host_header(server):
 
     port = int(server.rsplit(":", 1)[1])
     for host, want in (
-        ("evil.example.com", 421),
-        (f"evil.example.com:{port}", 421),
+        ("evil.example.com", 401),  # well-formed, no sign-in: no data (ORCH-186)
+        (f"evil.example.com:{port}", 401),
+        ("evil example", 421),  # malformed: misdirected
         (f"localhost:{port}", 200),
         (f"127.0.0.1:{port}", 200),
     ):
@@ -699,7 +700,7 @@ def test_event_and_ref_routes_enforce_origin_and_host_without_a_listener(ws):
 
     for path in ("/api/events", "/api/ref-file?ticket=t_weekly01&n=1"):
         for headers, expected in [
-            ({"Host": "foreign.example"}, 421),
+            ({"Host": "foreign.example"}, 401),
             ({"Host": "localhost:8420", "Origin": "https://foreign.example"}, 403),
             ({"Host": "localhost:8420", "Sec-Fetch-Site": "cross-site"}, 403),
         ]:

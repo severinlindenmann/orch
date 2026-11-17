@@ -16,6 +16,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, result} = {}) {
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:() => null,
     document:{querySelector:() => frame}, act:async (...a) => { calls.acts.push(a); return answer; },
     addEventListener(){}, window:{orch:{toast:t => calls.toasts.push(t)}}};
+  ctx.orchFrameChan = () => 'ab'.repeat(16);  // the shown frame's per-frame code (settings.js, ORCH-186)
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow, frame};
 }
@@ -27,7 +28,12 @@ test('only the shown shipped add-on frame of this origin may ask; anything else 
   assert.equal(ctx.embedIdeaRequest(msg(frameWindow)).text, 'A page with our opening hours');
   assert.equal(ctx.embedIdeaRequest(msg(frameWindow)).addon, 'factory');
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), origin:'https://evil.example'}), null);
+  // ORCH-186: the shown shipped frame is sandboxed (origin "null"): it must carry its per-frame code
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), origin:'null'}), null);
+  const coded = {...msg(frameWindow), origin:'null'}; coded.data = {...coded.data, chan:'ab'.repeat(16)};
+  assert.notEqual(ctx.embedIdeaRequest(coded), null);
+  assert.equal(ctx.embedIdeaRequest({...coded, data:{...coded.data, chan:'cd'.repeat(16)}}), null);
+  assert.equal(ctx.embedIdeaRequest({...coded, source:{}}), null);  // ...and come from that frame
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), source:{}}), null);
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), source:null}), null);
   for (const bad of [{type:'orch.say'}, {type:'orch.idea.done'}, {id:'x'}, {id:5}, {id:'ABCDEFGH'}, {text:5}, {text:'   '}, {text:'---'}]) assert.equal(ctx.embedIdeaRequest(msg(frameWindow, bad)), null);
@@ -45,14 +51,14 @@ test("the person's click files the idea through the dashboard's own act and tell
   const {ctx, calls, frameWindow} = setup();
   await ctx.fileEmbedIdea(ctx.embedIdeaRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.acts), [['addon.act', {addon:'factory', verb:'idea', target:'A page with our opening hours'}]]);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.done', order:'t_new123', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.done', order:'t_new123', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
   assert.equal(calls.toasts.length, 1);
 });
 
 test('a refused act (no page session: watch-only) tells the page why, so it offers the Chat fallback', async () => {
   const {ctx, calls, frameWindow} = setup({result:{ok:false, status:403, text:'Sign in to do this: open the dashboard with a sign-in link from orch.'}});
   await ctx.fileEmbedIdea(ctx.embedIdeaRequest(msg(frameWindow)));
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 
 test("an answer without an order, or another add-on's answer, is a failure; too long is refused before any act", async () => {

@@ -1182,3 +1182,43 @@ async fn a_question_the_workspace_closes_is_a_closed_event_and_no_longer_answera
         "{v}"
     );
 }
+
+#[tokio::test]
+async fn a_closed_event_never_names_a_question_from_before_the_subscriber() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let old = question(&t, &a).await;
+    // stored_at has a 1 s resolution: make the old question clearly older than the subscriber
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE messages SET stored_at=stored_at-10 WHERE id=?1",
+            [&old],
+        )
+        .unwrap();
+    let s = add_sub(&t, json!({"name": "Late hook", "workspaces": [a.id]})).await;
+    let new = question(&t, &a).await;
+    for q in [&old, &new] {
+        let m = json!({"schema": "orch.msg/1", "id": mid(), "from": a.id, "to": "phones", "type": "text",
+            "created_at": "2026-11-06T09:45:00Z", "ticket": "t_7k3f9q", "key": "DM1-12", "reply_to": q,
+            "body": {"text": "Taken back: Ticket done", "taken_back": {"reason": "Ticket done"}}});
+        let (st, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
+        assert_eq!(st, 201, "{v}");
+    }
+    let (st, v) = events(&t, &s, "").await;
+    assert_eq!(st, 200, "{v}");
+    let closed: Vec<&Value> = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["type"] == "closed")
+        .collect();
+    assert_eq!(closed.len(), 1, "only the question it could see: {v}");
+    assert_eq!(closed[0]["question_id"], new.as_str());
+    assert!(
+        !v.to_string().contains(old.as_str()),
+        "the older question is never named: {v}"
+    );
+}
