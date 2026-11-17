@@ -1273,6 +1273,17 @@ def test_send_into_an_idle_session_types_only_the_notice_and_says_sent(proj, run
     assert "rain" not in "".join(sent)
 
 
+def test_send_to_an_idle_session_whose_notice_went_stale_says_queued(proj, run, monkeypatch):
+    """ORCH-247: a stale notice (taken by nobody twice) is not a delivery: the answer must not say Sent."""
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane=_screen(""))
+    rec = runs.read(proj, tid)
+    rec["submit"] = {"at": tickets.now(), "nudges": runs_live.NUDGES, "stale": True}
+    runs._write(proj, rec)
+    res = runs_live.send(proj, tid, "human:t", "Please add the rain plan.")
+    assert res["delivered"] == 0 and res["queued"] is True
+    assert runs_live.send_text(res, tid).startswith("Queued.")
+
+
 def test_claude_2_1_325_placeholder_with_the_cursor_block_is_an_empty_prompt(proj, run, monkeypatch):
     """First-run proof (15 Nov): the placeholder of Claude Code 2.1.325 is `ESC[7m`T`ESC[0;2m`ry ...: a cursor
     block on its first character. It was seen as typed text, so the first task was held for ever."""
