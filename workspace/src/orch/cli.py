@@ -237,7 +237,8 @@ def _show(t: dict, root: Path) -> str:
     from orch import modelpick
 
     if modelpick.label(t):
-        extra.append(f"Model: {modelpick.label(t)}")
+        reason = modelpick.why(t)
+        extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):

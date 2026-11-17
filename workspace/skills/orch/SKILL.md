@@ -120,8 +120,9 @@ To keep a text file or picture with a ticket yourself: `orch ticket attach <id> 
 
 **The work needs a bigger model**
 
-orch starts most tickets on Sonnet and hard ones (design, security, a migration, a crash or
-flaky test, part of a bigger plan) on Opus. When your plan shows design, security or several parts, or you
+orch starts a ticket on Opus unless it is clearly a small, mechanical fix (a typo, a word, a label, one
+line), which starts on Sonnet; design, look, layout, concept, security and feature work always start on
+Opus, and the ticket shows in one line why. When your plan shows design, security or several parts, or you
 failed twice at the same problem, move the ticket up; one history line says why:
 
     orch ticket model <id> up --why "<what makes it hard, a few plain words>"
