@@ -30,6 +30,8 @@ KIT_FILES = (
     "select.js",
     "widgets.css",
     "widgets.js",
+    "results.css",
+    "results.js",
 )
 WEB_FILES = ("index.html", "factory.css", "factory.js")
 PLAIN = "text/plain; charset=utf-8"
@@ -41,6 +43,7 @@ TYPES = {
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")
 CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"
 ORDER_PATH = re.compile(r"/api/order/(t_[a-z0-9]{6,16})(?:/(draft|file)/(.+))?")
+RESULT_PATH = re.compile(r"/api/order/(t_[a-z0-9]{6,16})/result/(t_[a-z0-9]{6,16})/([A-Za-z0-9._-]{1,80})")
 SCAN_PATH = re.compile(r"/api/order/(t_[a-z0-9]{6,16})/stop/([1-9][0-9]{0,3})/scan")
 
 
@@ -209,6 +212,10 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             out = pageapi.scan(root, m[1], int(m[2]))  # read only; runs the core's scan, so no time budget
             return self._json(out) if out else self._send(404, b"not found")
+        m = RESULT_PATH.fullmatch(path)
+        if m:  # a picture or the demo of a built task (read only, only files its own evidence names)
+            out = pageapi.result_file(root, m[1], m[2], m[3])
+            return self._send(200, out[0], out[1]) if out else self._send(404, b"not found")
         m = ORDER_PATH.fullmatch(path)
         if m:
             order, what, rest = m.groups()
