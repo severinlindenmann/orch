@@ -74,10 +74,13 @@ class World:
         want = g["head"] if g else self.head(int(u.rsplit("/", 1)[1]))
         if state != "OPEN" or head != want:
             return False
-        dev = out(self.bare, "rev-parse", "develop")
+        into = g["base"] if g else self.prs[int(u.rsplit("/", 1)[1])]["base"]  # GitHub merges into the base
+        dev = git(self.bare, "rev-parse", "--verify", "-q", into, check=False).stdout.strip() or out(
+            self.bare, "rev-parse", "develop"
+        )
         tree = out(self.bare, "merge-tree", "--write-tree", dev, head).splitlines()[0]
         new = out(self.bare, "commit-tree", tree, "-p", dev, "-p", head, "-m", f"Merge {u}")
-        out(self.bare, "update-ref", "refs/heads/develop", new)
+        out(self.bare, "update-ref", f"refs/heads/{into}", new)
         if g:
             g["state"] = "MERGED"
         for n, p in self.prs.items():  # GitHub marks every pull request whose head is now on develop
@@ -87,7 +90,8 @@ class World:
 
     # -- the runner's GitHub ----------------------------------------------------------------------------
     def login(self):
-        return self.me
+        self.logins = getattr(self, "logins", 0) + 1
+        return None if self.logins > 1 and self.hiccup("login") else self.me
 
     def pr(self, u):
         if self.hiccup(f"view {u}"):
@@ -450,6 +454,30 @@ def test_github_never_showing_it_ends_after_the_tries(ws, world):
     world.hiccups[f"view {url(1)}"] = 99
     make(ws, world).run()
     assert states(ws) == {1: "out"} and f"after {runner.MAX_TRIES} tries" in why(ws, 1)
+
+
+def test_a_github_outage_uses_up_no_tries(ws, world):
+    add(ws, 1, 2)
+    for what in (f"view {url(1)}", f"view {url(2)}", "login"):
+        world.hiccups[what] = 5  # nothing answers for five rounds, more than MAX_TRIES
+    make(ws, world).run()
+    assert states(ws) == {1: "merged", 2: "merged"}
+
+
+def test_a_group_moved_to_another_base_is_never_merged_there(ws, world):
+    add(ws, 1, 2)
+
+    def on_wait(u):
+        if u in world.groups and world.groups[u]["base"] == "develop" and len(world.groups) == 1:
+            world.groups[u]["base"] = "main"  # someone retargets the group pull request itself
+
+    world.on_wait = on_wait
+    make(ws, world).run()
+    first = next(iter(world.groups.values()))
+    assert first["state"] == "CLOSED"
+    assert states(ws) == {1: "merged", 2: "merged"}  # merged into develop by the next group
+    assert out(world.bare, "for-each-ref", "refs/heads/main") == ""
+    nothing_left_behind(ws, world)
 
 
 def test_a_real_red_member_still_leaves(ws, world):

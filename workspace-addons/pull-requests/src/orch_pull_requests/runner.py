@@ -69,6 +69,8 @@ class Runner:
         self.recover()
         rounds = 0
         while True:
+            if rounds and not self.sign_in():  # the login is checked again before every round
+                return rounds
             batch = self.next_batch()
             if batch is None:
                 return rounds
@@ -131,11 +133,15 @@ class Runner:
             self.sleep(PAUSE_SECS)
             return []
         bases = settings.bases(self.root)
-        repo, base, batch = rows[0]["repo"], None, []
+        repo, base, batch, unseen, answered = rows[0]["repo"], None, [], [], False
         for r in rows:
             if r["repo"] != repo or len(batch) >= MAX_GROUP:
                 continue
             v, kind, line, status = self.look(dict(r, head=None), cards, bases)
+            answered = answered or kind != UNKNOWN
+            if kind == UNKNOWN:
+                unseen.append((r, line))
+                continue
             if kind != OK:
                 self.settle(r, kind, line, status)
                 continue
@@ -152,6 +158,10 @@ class Runner:
                 title=str(v.get("title") or "")[:200], closes=_closes(r["repo"], v),
             )  # fmt: skip
             batch.append(r)
+        if unseen and not answered:  # GitHub showed none of them: does it answer at all?
+            answered = self.gh.login() is not None
+        for r, line in unseen:  # no answer from GitHub at all: an outage, which uses up no tries
+            self.retry([r], line, count=answered)
         return store.claim(self.root, batch)
 
     # -- looking at a member again -----------------------------------------------------------------------
@@ -229,6 +239,18 @@ class Runner:
             _, kind, line, _ = self.look(e, cards, bases, base)
             if kind != OK:
                 return line or f"{e['url']} could not be looked at"
+        return None
+
+    def why_not_group(self, url: str, base: str, head: str) -> str | None:
+        """The group pull request itself, right before its merge: still open, same head, same allowed base."""
+        v = self.gh.pr(url)
+        if v is None:
+            return f"GitHub did not show the group {url}"
+        if v.get("state") != "OPEN" or v.get("headRefOid") != head:
+            return f"the group {url} was closed or got another commit"
+        b = v.get("baseRefName") or ""
+        if b != base or b not in settings.bases(self.root):
+            return f"the group {url} was moved to {b or '(unknown)'}"
         return None
 
     # -- rounds ------------------------------------------------------------------------------------------
@@ -347,7 +369,7 @@ class Runner:
         self.log(f"Group {url}: " + ", ".join(f"#{e['number']}" for e in inside))
         for e in inside:
             store.set_state(self.root, e["url"], RUNNING, f"in the group {url}", group=url)
-        o = self.waiter(url, lambda head: self.why_not(inside, base))
+        o = self.waiter(url, lambda head: self.why_not_group(url, base, head) or self.why_not(inside, base))
         self.tidy()  # merged: its branch goes; not merged: the group pull request is closed
         if o.ok and o.status == "merged":
             for e in inside:

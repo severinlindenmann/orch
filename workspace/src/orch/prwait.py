@@ -412,7 +412,9 @@ def run_one(
         if now is None or now.get("headRefOid") != head:
             line = f"{url} got a new commit while its checks ran; not merged."
             return Outcome(url, False, "changed", line, verdict)
-        base = now.get("baseRefName") or base
+        if (now.get("baseRefName") or base) != base:  # moved to another base branch: never merged there
+            line = f"{url} was moved to another base branch while its checks ran; not merged."
+            return Outcome(url, False, "changed", line, verdict)
         landed, changed = src.landed(head, base), src.changed_files()
         if landed is None or changed is None:
             line = f"GitHub did not say what changed on {base} or in {url}; not merged. Run it again."

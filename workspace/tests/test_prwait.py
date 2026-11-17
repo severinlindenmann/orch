@@ -460,3 +460,16 @@ def test_into_main_a_missing_required_check_is_waited_for():
     case["polls"][0]["checks"] = [c for c in case["polls"][0]["checks"] if c["name"] != case["required"][0]]
     v = prwait.wait(prwait.Replay(case))
     assert not v.green and "still waiting" in v.why
+
+
+def test_a_pull_request_moved_to_another_base_while_waiting_is_not_merged(monkeypatch):
+    merges = []
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, t=30: merges.append(argv) or subprocess.CompletedProcess(argv, 0)
+    )
+    src = _Green()
+    seen = iter(["develop", "main"])
+    monkeypatch.setattr(src, "view", lambda: {"state": "OPEN", "isDraft": False, "headRefOid": "a" * 40,
+                                               "baseRefName": next(seen, "main")})  # fmt: skip
+    o = prwait.run_one(src.url, True, src=src)
+    assert not o.ok and o.status == "changed" and "another base branch" in o.line and merges == []
