@@ -97,6 +97,34 @@ def test_status_flow_and_history(proj, run, new_ticket, validate):
         run("ticket", "status", tid, "nonsense")
 
 
+def test_superseded_by_lives_only_on_a_dropped_ticket(proj, run, new_ticket, validate):
+    old, new = new_ticket(), new_ticket()
+    key = read(proj, new).get("key") or new
+    assert run("ticket", "status", old, "open", "--superseded-by", new)[0] == 2  # only with dropped
+    assert run("ticket", "status", old, "dropped", "--superseded-by", old)[0] == 2  # not itself
+    assert run("ticket", "status", old, "dropped", "--superseded-by", "t_nothere1")[0] == 2
+    code, out, _ = run("ticket", "status", old, "dropped", "--superseded-by", key)
+    assert code == 0 and "Superseded" in out
+    t = read(proj, old)
+    validate(t)
+    assert t["status"] == "dropped" and t["superseded_by"] == new
+    assert "Superseded by" in json.dumps(t["history"])
+    assert "Replaced by:" in run("ticket", "show", old)[1]
+    rev = t["revision"]
+    assert run("ticket", "patch", old, "--if-revision", str(rev), '{"status": "open"}')[0] == 0
+    assert "superseded_by" not in read(proj, old)  # any other status clears it
+    rev += 1
+    patch = json.dumps({"status": "dropped", "superseded_by": new})
+    assert run("ticket", "patch", old, "--if-revision", str(rev), patch)[0] == 0
+    assert read(proj, old)["superseded_by"] == new
+    assert run("ticket", "patch", new, "--if-revision", "1", json.dumps({"superseded_by": old}))[0] == 2
+    rev += 1
+    assert run("ticket", "patch", old, "--if-revision", str(rev), '{"superseded_by": null}')[0] == 0
+    t = read(proj, old)
+    assert t["status"] == "dropped" and "superseded_by" not in t
+    assert tickets.status_word(t) == "Won't do"
+
+
 def test_log_actor(proj, run, new_ticket, monkeypatch):
     tid = new_ticket()
     run("log", tid, "by flag", "--by", "agent:codex")

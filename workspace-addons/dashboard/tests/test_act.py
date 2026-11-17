@@ -102,6 +102,14 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"title": "x"}}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"id": "t_other1"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "weird"}, "if_revision": 1}),
+        # ORCH-152: a board wait is a time; Superseded names a ticket
+        (
+            "ticket.patch",
+            {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "ticket", "ref": "x"}}, "if_revision": 1},
+        ),
+        ("ticket.patch", {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "time"}}, "if_revision": 1}),
+        ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": "--all"}, "if_revision": 1}),
+        ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": 5}, "if_revision": 1}),
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
         ("run.start", {"ticket": "t_abcdef", "agent": "x"}),
         ("addon.start", {"name": "x"}),
@@ -169,6 +177,25 @@ def test_argv_snapshot_per_op(act_server, act_orch):
                 "args": {"ticket": "t_abcdef", "data": {"title": "New"}, "if_revision": 3},
             },
             ["ticket", "patch", "t_abcdef", "--if-revision=3", *common, "--", '{"title": "New"}'],
+        ),
+        (  # ORCH-152: the board's Superseded lane
+            {
+                "op": "ticket.patch",
+                "args": {
+                    "ticket": "t_abcdef",
+                    "data": {"status": "dropped", "superseded_by": "ORCH-7"},
+                    "if_revision": 3,
+                },
+            },
+            [
+                "ticket",
+                "patch",
+                "t_abcdef",
+                "--if-revision=3",
+                *common,
+                "--",
+                '{"status": "dropped", "superseded_by": "ORCH-7"}',
+            ],
         ),
         (
             {
