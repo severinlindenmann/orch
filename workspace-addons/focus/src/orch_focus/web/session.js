@@ -37,7 +37,6 @@
     }
   }
   /* Earlier conversations: the ticket's other helper sessions; a click reads one back (read-only, plain turns) */
-  const TOOL = {claude: 'Claude', codex: 'Codex'};
   let earlierAt = 0;
   async function earlier(box) {
     if (Date.now() - earlierAt < 30000) return;  /* the page re-renders often: ask at most every 30 s */
@@ -49,7 +48,7 @@
     box.replaceChildren(h('h3', {text: 'Earlier conversations'}));
     for (const r of rows) {
       const view = h('div', {class: 'meta', hidden: true});
-      const label = (TOOL[r.agent] || r.agent) + ' · ' + (stamp(r.last_used) || 'earlier') + (r.title ? ' · ' + r.title : '');
+      const label = (r.label || r.agent) + ' · ' + (stamp(r.last_used) || 'earlier') + (r.title ? ' · ' + r.title : '');
       const btn = h('button', {class: 'btn ghost xs', text: 'Show', onclick: async () => {
         if (!view.hidden) { view.hidden = true; btn.textContent = 'Show'; return; }
         let x = null;

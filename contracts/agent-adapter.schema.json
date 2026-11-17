@@ -226,6 +226,16 @@
             "hand_started": { "oneOf": [{ "$ref": "#/$defs/signal" }, { "type": "null" }], "description": "How a session started by hand reports its id, or null." },
             "parse": { "type": "string", "pattern": "^[a-z0-9:-]{1,40}/[0-9]{1,3}$", "description": "For from-output: name of the output parser." },
             "missing": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional. Case-insensitive regex for the tool's output when a resumed session does not exist. Only then does orch start fresh; any other failure is a failure. Absent = never falls back." },
+            "history": {
+              "type": "object", "required": ["home", "glob", "lines"], "additionalProperties": false,
+              "description": "Optional. Where the tool keeps a session's conversation so a person can read it back (read-only) and what its lines look like: chat = one message per line, items = one response item per line.",
+              "properties": {
+                "dir_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$", "description": "Environment variable naming the tool's folder; else home is used." },
+                "home": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$", "description": "The tool's folder in the person's home." },
+                "glob": { "type": "string", "pattern": "^[A-Za-z0-9_.*{}/-]{1,120}$", "description": "File pattern below that folder; {session} = the session id." },
+                "lines": { "enum": ["chat", "items"] }
+              }
+            },
             "transcript": {
               "type": "object", "required": ["home", "path"], "additionalProperties": false,
               "description": "Optional. Where the tool saves a session's conversation. A session whose folder exists but whose file does not is never resumed (it starts fresh), and a new session id is kept only once its file exists.",

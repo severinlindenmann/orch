@@ -693,6 +693,30 @@ def transcript_path(
     return base.joinpath(*parts)
 
 
+def history_file(
+    name: str, sid: str, root: Path | None = None, environ: Mapping[str, str] | None = None
+) -> tuple[Path, str] | None:
+    """The saved conversation file of session `sid` and its line format ("chat" | "items"), read from the
+    adapter's session.history (<home> + glob); None when none is declared or the file is not there."""
+    if not valid_session_id(sid):
+        return None
+    try:
+        h = (load(name, root).get("session") or {}).get("history")
+    except Refused:
+        return None
+    if not h:
+        return None
+    env = os.environ if environ is None else environ
+    base = Path(env.get(h.get("dir_env") or "", "") or Path(env.get("HOME") or Path.home()) / h["home"])
+    try:
+        for f in base.glob(h["glob"].replace("{session}", sid)):
+            if f.is_file() and not f.is_symlink() and not f.parent.is_symlink():
+                return f, h["lines"]
+    except OSError:
+        return None
+    return None
+
+
 def session_missing(name: str, output: str, root: Path | None = None) -> bool:
     """True when the output says the resumed session does not exist (the only case for starting fresh)."""
     pat = load(name, root)["session"].get("missing")

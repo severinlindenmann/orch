@@ -398,7 +398,7 @@ def _unsend(args, root: Path, tid: str, by: str) -> None:
 def _history(args, root: Path, tid: str) -> None:
     t = tickets.load(root, tid)
     if not args.session:
-        rows = session_history.sessions(t)
+        rows = session_history.sessions(t, root=root)
         lines = [
             f"{r['last_used'] or '?'}  {r['agent']}  {r['id']}  "
             f"{r['title'] or ('(empty)' if r['readable'] else '(history not on this computer)')}"
@@ -406,7 +406,7 @@ def _history(args, root: Path, tid: str) -> None:
         ]
         _out(args, {"sessions": rows}, "\n".join(lines) or "No earlier chat sessions on this ticket.")
         return
-    rec = next((r for r in session_history.sessions(t) if r["id"] == args.session), None)
+    rec = next((r for r in session_history.sessions(t, root=root) if r["id"] == args.session), None)
     if rec is None:
         raise Refused("That session does not belong to this ticket. List them: orch run history <ticket>")
     if args.resume:
@@ -420,7 +420,7 @@ def _history(args, root: Path, tid: str) -> None:
         tickets.record_session(root, tid, rec["agent"], args.session, runs.host())
         _out(args, {"continued": args.session}, "The next run continues that conversation.")
         return
-    h = session_history.read(rec["agent"], args.session)
+    h = session_history.read(rec["agent"], args.session, root=root)
     if not h["found"]:
         raise Refused("The history of that session is not on this computer.")
     text = "\n\n".join(f"{'You' if x['role'] == 'user' else 'Helper'}: {x['text']}" for x in h["turns"])
