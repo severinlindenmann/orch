@@ -4,7 +4,7 @@ const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false, ticketPerson = '', ticketGroup = '';
 // Saved views live on the address: #tickets?view=needs-you|working|done-week.
-const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['working', 'Working'], ['backlog', 'To do'], ['done-week', 'Done this week']];
+const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['working', 'Working'], ['backlog', 'Backlog'], ['done-week', 'Done this week']];
 // Views reached only by a link (Home's "All finished today"), with no chip of their own.
 const LINK_VIEWS = [['done-today', 'Finished today']];
 function savedView() {

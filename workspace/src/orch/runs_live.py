@@ -133,11 +133,14 @@ def _finished(root: Path, tid: str) -> bool:
 
 
 def live_all(root: Path) -> list[dict]:
-    """Every alive live run except the hidden General ticket's."""
+    """Every alive live run except the hidden General (Chat) and Manager tickets': they never take a slot."""
     return [
         r
         for r in records(root)
-        if r.get("mode") == "live" and runs.state(r) == "alive" and not tickets.is_general(root, r["ticket"])
+        if r.get("mode") == "live"
+        and runs.state(r) == "alive"
+        and not tickets.is_general(root, r["ticket"])
+        and not tickets.is_manager(root, r["ticket"])
     ]
 
 
@@ -239,6 +242,11 @@ def _held(root: Path, by: str = "agent:tend") -> str | None:
         return why
     if by.startswith("human:"):
         return None
+    from orch import limitstop
+
+    limit = limitstop.held_words(root)  # ORCH-179: it would only stop on the limit again
+    if limit:
+        return limit
     return "other helpers are just starting" if _too_soon(root) else None
 
 
@@ -291,7 +299,7 @@ def start_live(
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
-    hit = None if mine else _full(root)
+    hit = None if mine or tickets.is_manager(root, tid) else _full(root)  # the Manager never waits in line
     held = None if (mine or hit) else _held(root, by)
     if held:
         _queue_for_slot(root, tid, by, busy_text, priority)
@@ -1444,6 +1452,8 @@ def stop_hidden(root: Path) -> list[str]:
     with contextlib.suppress(Exception):
         if (g := tickets.general_id(root)) is not None:
             ids.append(g)
+        if (m := tickets.manager_id(root)) is not None:
+            ids.append(m)
     d = runs.run_dir(root) / "pending"
     with contextlib.suppress(OSError):
         ids += [f.stem for f in sorted(d.glob("t_*.jsonl")) if f.is_file() and not f.is_symlink()]
@@ -1519,6 +1529,8 @@ def cleanup(root: Path) -> list[str]:
                 continue
         if st != "alive" or live.get("state") not in ("idle", "attention") or runs.undelivered(root, tid):
             continue
+        if tickets.is_manager(root, tid):
+            continue  # ORCH-147: the Manager is always on; only the person stops it or starts it fresh
         if _runs_check_wait(rec):
             continue  # it waits for pull request checks on purpose: a close would kill the merge (ORCH-221)
         try:
