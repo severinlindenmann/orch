@@ -42,7 +42,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, keeps the log |
 | `log <id> [--lines N]` (default 20, max 1000) | `{"id", "lines": [...]}`; every line goes through the core secret scan, a hit shows `••••••` in place of the value (the whole line when the value cannot be told apart) |
 | `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, remove`; same answers as the commands |
-| `view` | `orch.addon-view/1`, one `list` block (the real page is ORCH-272) |
+| `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 20 log lines masked, Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
 
 `failing` (a service that keeps crashing), found services and the health check come in ORCH-270 / ORCH-271.
 
