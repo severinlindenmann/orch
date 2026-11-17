@@ -29,6 +29,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 
+from orch import ghlimit
 from orch.errors import Refused
 from orch.ghmerge import is_pr_url  # noqa: F401  (orch ref wait checks addresses with it)
 
@@ -90,6 +91,9 @@ class Replay:
     def elapsed(self) -> float:
         return self.t
 
+    def take(self, kind: str, what: str) -> bool:
+        return True  # a recorded case writes nothing to GitHub
+
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
     """One gh call with the helper's own environment; a connection-level failure is retried (the request
@@ -123,6 +127,10 @@ class Live:
         self.gh, self.url, self.repo, self.num = gh, url, m[1], m[2]
         self.start = time.monotonic()
         self.base = ""
+
+    def take(self, kind: str, what: str) -> bool:
+        """Wait for room in this computer's hourly GitHub write limit (orch github writes), then count it."""
+        return ghlimit.take(kind, what)
 
     def gh_json(self, *args: str):
         got = _run([self.gh, *args])
@@ -338,6 +346,13 @@ class Outcome:
     verdict: Verdict | None = None
 
 
+def _no_room(url: str, kind: str) -> str:
+    return (
+        f"Checks of {url} passed, but this computer's GitHub limit for {ghlimit.WHAT[kind]} had no room "
+        "within an hour (orch github writes); not merged. Run it again later."
+    )
+
+
 def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | None = None) -> Outcome:
     """Wait for one pull request's checks; with merge, merge it on green as GitHub's branch rules allow, only
     its checked commit. When the base branch got commits since the branch last took it in, and they touch a
@@ -386,6 +401,8 @@ def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | No
         rounds += 1
         note = f"{base} changed files of this pull request since it took {base} in ({shown}): "
         print(note + f"taking {base} in and waiting for the checks once more.", file=sys.stderr, flush=True)
+        if not src.take("other", f"{url} take {base} in"):
+            return Outcome(url, False, "checks passed", _no_room(url, "other"), verdict)
         new = src.update_branch(head)
         if new is None:
             line = (
@@ -398,6 +415,8 @@ def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | No
         if not verdict.green:
             line = f"Checks of {url} after taking {base} in: {verdict.line()}"
             return Outcome(url, False, "checks failed", line, verdict)
+    if not src.take("merge", url):
+        return Outcome(url, False, "checks passed", _no_room(url, "merge"), verdict)
     done = _run([src.gh, "pr", "merge", url, "--merge", "--match-head-commit", head], 60)
     if done.returncode != 0:
         why = next((x.strip() for x in (done.stderr or done.stdout).splitlines() if x.strip()), "no reason")

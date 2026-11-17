@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, autoupdate, config, diag, history, nextstep, tickets
+from orch import adapters, autoupdate, config, diag, ghlimit, history, nextstep, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -35,6 +35,7 @@ KEYS = (
     "focus.session_typing",
     "update.auto",
     *config.INSIGHTS_KEYS,
+    *ghlimit.SETTING_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
@@ -281,6 +282,7 @@ def _config(args, root: Path) -> None:
             "insights.share_names": lambda: config.insights_share_names(root),
             "insights.keep_days": lambda: config.record_keep_days(root),
             "insights.max_mb": lambda: config.record_max_mb(root),
+            **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
         }
         if args.key:
             key = args.key
@@ -296,6 +298,10 @@ def _config(args, root: Path) -> None:
             )
     elif args.sub == "set" and args.key in config.INSIGHTS_KEYS:
         _insights_set(args, root)
+    elif args.sub == "set" and args.key in ghlimit.SETTING_KEYS:
+        kind = ghlimit.SETTING_KEYS[args.key]
+        v = ghlimit.set_limit(kind, args.value)
+        _out(args, {args.key: v}, f"Saved: at most {v} {ghlimit.WHAT[kind]} per hour on this computer.")
     elif args.sub == "set" and args.if_current is not None:
         raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":

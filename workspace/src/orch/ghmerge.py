@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 
+from orch import ghlimit
 from orch.errors import Refused
 
 PR_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}")
@@ -199,4 +200,5 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
     done = _gh(gh, ["pr", "merge", url, "--merge", "--match-head-commit", head], 25)
     if done.returncode != 0:
         raise Refused(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
+    ghlimit.count("merge", url)  # the person's own click never waits, but it uses up the hour too
     return {"login": login, "already": False}
