@@ -690,3 +690,17 @@ test('tickets list: number before the title, and a search hit is visible without
   vm.runInContext("ticketSearch = ''", c);
   assert.deepEqual(titles(c.ticketTable(c.filteredTickets())), ['ORCH-63 Open one'], 'clearing the search folds Done again');
 });
+test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All clear"; one that runs out soon counts on Home only', () => {
+  const stop = {name:'gh', label:'GitHub', kind:'login', state:'renew', chosen:false, stops:[]};
+  const soon = {name:'claude', label:'Claude Code', kind:'login', state:'soon', ends_at:'2026-11-19T08:00:00Z', chosen:true, stops:[]};
+  const page = logins => { const c = context([], {snapshot:false, state:{logins}, locks:new Set(), button:label => ({tag:'button', children:[label], dataset:{}})}); return {c, text:JSON.stringify(c.home())}; };
+  const stopped = page({items:[stop]});
+  assert.match(stopped.text, /The GitHub login stopped working/);
+  assert.match(stopped.text, /Things to look at/);
+  assert.doesNotMatch(stopped.text, /All clear|Nothing needs you/);
+  const runs = page({items:[soon]});
+  assert.match(runs.text, /1 thing needs you/);
+  assert.match(runs.text, /The Claude Code login ends on/);
+  assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
+  assert.match(page({items:[]}).text, /All clear/);
+});

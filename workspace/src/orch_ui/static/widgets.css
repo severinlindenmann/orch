@@ -618,7 +618,7 @@ dialog.report-dialog .actions{margin-top:12px}
 .sync-options label{display:flex;gap:12px;align-items:center;padding:16px;border-top:1px solid var(--border);cursor:pointer}
 .sync-options label:hover{background:var(--surface-2)}
 @media(max-width:1000px){.blk-pair{grid-template-columns:1fr}.blk-settings .setting-row{grid-template-columns:112px minmax(0,1fr)}.setting-row .row-action{grid-column:2;justify-content:flex-start}}
-@media(max-width:600px){.blk-settings .setting-row{grid-template-columns:1fr}.setting-row .row-action{grid-column:1}}
+@media(max-width:600px){.setting-row{grid-template-columns:112px minmax(0,1fr)}.blk-settings .setting-row{grid-template-columns:1fr}.setting-row .row-action{grid-column:1}}
 .blk-settings .setting-row{border-top:1px solid var(--border)}
 
 /* from Insights (#795 B1): metric card, chart, bar rows, notes, loading mask, settings rows. Tokens only. */

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from orch import health, history, net, nextstep
 
-NONE_SET = "Nothing here tells orch whether its login works."
+NONE_SET = "Nothing here tells orch whether it works."
 
 
 def _out(args, data, text: str) -> None:
@@ -30,19 +30,20 @@ def add_parsers(sub, common) -> None:
 def line(r: dict) -> str:
     """One plain sentence per row of health.overview."""
     label = r["label"]
+    kind = r.get("kind") or "login"  # older saved results have no kind: they were all logins
     when = net.when(r["ends_at"]) if r["ends_at"] else ""
     n = len(r["stops"])
     on = "; ".join(f"{t['key']} {t['title']}".strip() for t in r["stops"])
     work = f"{n} ticket{'' if n == 1 else 's'}: {on}"
     if r["state"] == "renew":
-        text = f"The {label} login ran out {when}." if when else f"The {label} login no longer works."
+        text = f"The {label} {kind} ran out {when}." if when else f"The {label} {kind} no longer works."
         text += f" The helper cannot go on with {work}." if n else ""
         return text + (" No new work starts until it is renewed." if r["chosen"] else " Renew it.")
     if r["state"] == "soon":
-        return f"The {label} login runs out {when}." + (f" The helper then stops on {work}." if n else "")
+        return f"The {label} {kind} runs out {when}." + (f" The helper then stops on {work}." if n else "")
     if r["state"] == "works":
-        return f"The {label} login works until {when}." if when else f"The {label} login works."
-    return f"{label} did not answer, so orch cannot tell whether its login works."
+        return f"The {label} {kind} works until {when}." if when else f"The {label} {kind} works."
+    return f"{label} did not answer, so orch cannot tell whether its {kind} works."
 
 
 def dispatch(args, root: Path) -> bool:

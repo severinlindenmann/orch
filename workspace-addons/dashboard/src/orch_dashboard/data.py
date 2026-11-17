@@ -1280,10 +1280,41 @@ def load_state(
         "auto_update_note": _auto_update_note() if with_settings else None,
         # Where this orch came from ('release' / 'development'): the top bar marks a development build; live page only
         "build": _build() if with_settings else None,
+        # Home and Settings > Helper: what helpers need (tool logins, connections, keys); live page only
+        "logins": load_logins(root) if with_settings else None,
     }
     add_warmth(root, tickets, state["runs"])
     state["rev"] = state_rev(state)
     return state
+
+
+def load_logins(root: Path) -> dict | None:
+    """The last check of every tool login, connection and key a helper needs here (orch.health, ORCH-45): states,
+    end times and the tickets they stop, never a secret. Live page only; None when never checked."""
+    try:
+        from orch import health
+    except ImportError:  # an older orch without the check: nothing to show
+        return None
+    try:
+        doc = health.last(root)
+    except Exception:  # noqa: BLE001  a broken result never breaks the page
+        return None
+    if not doc:
+        return None
+    keep = ("name", "label", "kind", "state", "ends_at", "helper", "chosen")
+    items = []
+    for r in doc["items"]:
+        if not isinstance(r, dict) or r.get("state") not in health.STATES:
+            continue
+        row = {k: r.get(k) for k in keep}
+        row["kind"] = row["kind"] if row["kind"] in ("login", "connection", "key") else "login"
+        row["stops"] = [
+            {"id": t.get("id"), "key": t.get("key"), "title": t.get("title")}
+            for t in (r.get("stops") or [])
+            if isinstance(t, dict)
+        ]
+        items.append(row)
+    return {"checked_at": doc.get("checked_at"), "items": items}
 
 
 def _build() -> str | None:
