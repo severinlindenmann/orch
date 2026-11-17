@@ -3,7 +3,7 @@
   'use strict';
   /* ---------- the features: what it does, how it works in orch, size of new work, the demo state that shows it ---------- */
   var F = [
-    { t: 'Start page: who needs you first', what: 'One calm screen of every helper: who needs you first, then who is working, then what is quiet.', how: 'orch run list already gives each ticket its signal (working, idle, waiting) and what it waits on. The preview is the last lines of its screen.', size: 'Medium', show: { mode: 'full', view: 'start' } },
+    { t: 'Start page: who needs you first', what: 'One calm screen of every helper: who needs you first, then who is working, then what is quiet.', how: 'orch run list already gives each ticket its signal (working, idle, waiting) and what it waits on. The preview is the last lines of its screen.', size: 'Medium', show: { mode: 'right', view: 'start' } },
     { t: 'One Focus button on every ticket', what: 'Each ticket has one button that fits what its helper is doing: Answer, Watch, Open or Start.', how: 'The same run signal per ticket. Start, watch and send exist as commands today.', size: 'Small', show: { page: 'tickets', mode: 'strip' } },
     { t: 'Continue or start clean', what: 'Start asks one thing: carry on the last conversation, or begin with a fresh memory.', how: 'The session id is kept on the ticket, so the next start resumes it. Only the last session is kept today: a list of older ones needs new storage.', size: 'Small', show: { page: 'tickets', mode: 'strip', ask: 4 } },
     { t: 'Chat or real terminal', what: 'Chat is plain messages. Terminal is the helper’s real screen: type, select, copy and paste as in the Mac Terminal.', how: 'Every helper already runs in its own tmux session. The terminal in the browser (xterm.js and a bridge) is new. No chat transcript exists: Chat shows helper messages and ticket events.', size: 'Large', show: { mode: 'right', view: 'session', cur: 1, term: 'terminal' } },
@@ -31,10 +31,10 @@
     { k: 'Manager', t: 'No ticket', free: true, s: 'run', note: 'Looking after 4 helpers', step: null,
       log: ['● Looking after 4 helpers', '● ORCH-238 waits for an answer', '● Checking again in 5 min'], next: ['● ORCH-228 opened its pull request'], res: [] }
   ];
-  var WORD = { wait: 'Needs you', run: 'Working', idle: 'Idle', none: 'No session' };
-  var BTN = { wait: 'Answer', run: 'Watch', idle: 'Open', none: 'Start' };
+  var WORD = { wait: 'Needs you', run: 'Working', idle: 'Idle', none: 'No session', line: 'In line' };
+  var BTN = { wait: 'Answer', run: 'Watch', idle: 'Open', none: 'Start', line: 'Open' };
   var KIND = { shot: 3, page: 4, chart: 5, pr: 0, table: 9 };
-  var LIVE_MAX = 5, MAC = /Mac|iPhone|iPad/.test(navigator.platform || ''), KEY = MAC ? '⌘J' : 'Ctrl J';
+  var LIVE_MAX = 6, MAC = /Mac|iPhone|iPad/.test(navigator.platform || ''), KEY = MAC ? '⌘J' : 'Ctrl J';
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   function h(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -43,7 +43,7 @@
   var picks = {}; try { picks = JSON.parse(store.get('fv4-picks') || '{}') || {}; } catch (e) { picks = {}; }
 
   /* ---------- state, also readable from the address: ?page=&mode=&view=&term=&split=&cur=&ask=&sheet=1 ---------- */
-  var st = { page: 'tickets', mode: 'right', view: 'start', term: 'terminal', split: false, cur: 1, cur2: 0, ap: 0, ask: -1, sheet: false, f: 0, menu: '', peek: '', tk: 4, type: true, back: 'right' };
+  var st = { page: 'tickets', mode: 'right', view: 'start', term: 'terminal', split: false, cur: 1, cur2: 0, ap: 0, ask: -1, sheet: false, f: 0, menu: '', peek: '', tk: 4, type: false, marks: true, back: 'right' };
   var q = new URLSearchParams(location.search);
   var OK = { page: ['home', 'tickets', 'review', 'ticket'], mode: ['right', 'bottom', 'full', 'strip'], view: ['start', 'session'], term: ['chat', 'terminal'], menu: ['new'] };
   Object.keys(OK).forEach(function (k) { if (OK[k].indexOf(q.get(k)) >= 0) st[k] = q.get(k); });
@@ -55,6 +55,8 @@
   if (num('f', F.length) != null) st.f = num('f', F.length);
   if (q.get('split') === '1') { st.split = true; if (!q.get('view')) st.view = 'session'; }
   if (q.get('sheet') === '1') st.sheet = true;
+  if (q.get('marks') === '0') st.marks = false;
+  if (!q.get('mode') && window.matchMedia && matchMedia('(max-width:720px)').matches) st.mode = 'strip';
   if (st.cur2 === st.cur) st.cur2 = st.cur === 0 ? 1 : 0;
   if (st.mode === 'right' || st.mode === 'bottom') st.back = st.mode;
   var LIVE = q.get('live') !== '0';
@@ -63,13 +65,13 @@
 
   function writeUrl() {
     var p = new URLSearchParams(); p.set('page', st.page); p.set('mode', st.mode); p.set('view', st.view); p.set('term', st.term); p.set('cur', st.cur);
-    if (st.split) p.set('split', '1'); if (st.ask >= 0) p.set('ask', st.ask); if (st.sheet) p.set('sheet', '1'); if (st.page === 'ticket') p.set('tk', st.tk); if (!LIVE) p.set('live', '0');
+    if (st.split) p.set('split', '1'); if (st.ask >= 0) p.set('ask', st.ask); if (st.sheet) p.set('sheet', '1'); if (st.page === 'ticket') p.set('tk', st.tk); if (!LIVE) p.set('live', '0'); if (!st.marks) p.set('marks', '0');
     try { history.replaceState(null, '', location.pathname + '?' + p.toString()); } catch (e) {}
   }
   /* redraw only the named parts: p page, l layer, b bar, s sheet, r ribbon. A page switch never redraws the layer, so its terminal stays as it was. */
   function draw(parts) {
     var a = document.activeElement, fk = a && a.dataset ? a.dataset.fk : '';
-    document.body.dataset.mode = st.mode;
+    document.body.dataset.mode = st.mode; document.body.dataset.marks = st.marks ? '1' : '0';
     if (parts.indexOf('p') >= 0) { nav(); page(); }
     if (parts.indexOf('l') >= 0) layer();
     if (parts.indexOf('b') >= 0) bar();
@@ -86,10 +88,13 @@
     st.view = 'session'; st.ask = -1; st.menu = ''; st.peek = ''; if (st.mode === 'strip') st.mode = st.back; draw('plb');
   }
   function openStart() { st.view = 'start'; st.menu = ''; if (st.mode === 'strip') st.mode = st.back; draw('lb'); }
-  function liveCount() { return S.filter(function (s) { return s.s !== 'none' && !s.free; }).length; }
-  function order() { var w = { wait: 0, run: 1, idle: 2, none: 3 }; return S.map(function (x, i) { return i; }).sort(function (a, b) { return w[S[a].s] - w[S[b].s] || a - b; }); }
+  function liveCount() { return S.filter(function (s) { return s.s === 'wait' || s.s === 'run' || s.s === 'idle'; }).length; }
+  function anyWait() { return S.some(function (s) { return s.s === 'wait'; }); }
+  function off(i) { return S[i].s === 'none' || S[i].s === 'line'; }
+  function order() { var w = { wait: 0, run: 1, idle: 2, line: 3, none: 4 }; return S.map(function (x, i) { return i; }).sort(function (a, b) { return w[S[a].s] - w[S[b].s] || a - b; }); }
   function begin(i, clean) {
-    var s = S[i]; s.s = 'run'; s.step = s.step && [1, s.step[1]];
+    var s = S[i]; if (liveCount() >= LIVE_MAX) { s.s = 'line'; s.note = 'Waits for a free place'; openSess(i); return; }
+    s.s = 'run'; s.step = s.step && [1, s.step[1]];
     s.log = clean ? ['● New session, fresh memory', '● Reading the ticket and its files'] : ['● Picked up the last conversation (yesterday 16:40)', '● Carrying on with step 1 of ' + (s.step ? s.step[1] : 1)];
     s.note = clean ? 'Reading the ticket' : 'Carrying on'; chats[i] = [['ev', clean ? 'New session started' : 'Last conversation continued'], ['helper', s.note + '.']];
     openSess(i);
@@ -98,13 +103,13 @@
     var s = S[i]; s.s = 'run'; s.note = 'Carrying on with step ' + (s.step[0] + 1); s.log.push('> ' + text, '● Thanks. ' + s.note + '.'); chats[i].push(['me', text], ['helper', 'Thanks. ' + s.note + '.']);
     draw('plb');
   }
-  function addFree(name, first) { S.push({ k: name, t: 'No ticket', free: true, s: 'run', note: first.slice(2), step: null, log: [first], next: [], res: [] }); chats[S.length - 1] = [['ev', 'Session started'], ['helper', first.slice(2)]]; openSess(S.length - 1); }
+  function addFree(name, first) { var full = liveCount() >= LIVE_MAX; S.push({ k: name, t: 'No ticket', free: true, s: full ? 'line' : 'run', note: full ? 'Waits for a free place' : first.slice(2), step: null, log: [first], next: [], res: [] }); chats[S.length - 1] = [['ev', 'Session started'], ['helper', first.slice(2)]]; openSess(S.length - 1); }
 
   /* ---------- small pieces ---------- */
-  function glyph(s) { var g = h('span', 'v4-st ' + s, s === 'wait' ? '!' : ''); g.setAttribute('role', 'img'); g.setAttribute('aria-label', WORD[s]); return g; }
+  function glyph(s) { var g = h('span', 'v4-st ' + (s === 'line' ? 'none' : s), s === 'wait' ? '!' : ''); g.setAttribute('role', 'img'); g.setAttribute('aria-label', WORD[s]); return g; }
   function pill(s) { var p = h('span', 'v4-pill ' + s); p.append(glyph(s), document.createTextNode(WORD[s])); return p; }
   function mark(n) {
-    var b = h('button', 'v4-n', String(n)); b.type = 'button'; b.dataset.n = n; b.dataset.fk = 'n' + n;
+    var b = h('button', 'v4-n', String(n)); b.type = 'button'; b.tabIndex = -1; b.dataset.n = n; b.dataset.fk = 'n' + n;
     b.addEventListener('click', function (e) { e.stopPropagation(); st.sheet = true; st.f = n; draw('sr'); var r = $('#v4-f-' + n); if (r) { r.scrollIntoView({ block: 'center' }); r.focus(); } });
     return b;
   }
@@ -119,8 +124,8 @@
   function choices(i) {
     var s = S[i], w = h('div', 'v4-choices');
     function one(cls, title, sub, clean, fk) { var b = h('button', 'v4-choice ' + cls); b.type = 'button'; b.dataset.fk = fk + i; b.append(h('b', '', title), h('span', '', sub)); b.addEventListener('click', function (e) { e.stopPropagation(); begin(i, clean); }); return b; }
-    w.append(one('primary', 'Continue where it stopped', 'Yesterday 16:40. The helper remembers what it did.', false, 'cont'), one('', 'Start clean', 'A fresh memory. The ticket and its files stay.', true, 'clean'));
-    w.append(h('p', 'meta', liveCount() >= LIVE_MAX ? 'All ' + LIVE_MAX + ' places are in use: this start waits in line.' : liveCount() + ' of ' + LIVE_MAX + ' places in use.'));
+    w.append(h('p', 'meta', 'Uses 1 of ' + LIVE_MAX + ' places. If all are in use it waits in line.'));
+    w.append(one('', 'Continue where it stopped', 'Yesterday 16:40. The helper remembers what it did.', false, 'cont'), one('', 'Start clean', 'A fresh memory. The ticket and its files stay.', true, 'clean'));
     w.setAttribute('aria-label', 'Start ' + s.k); return w;
   }
   function thumb(kind, big) {
@@ -148,7 +153,7 @@
   function go(p, tk) { st.page = p; if (tk != null) st.tk = tk; st.ask = -1; draw('p'); }
   function focusBtn(i, big) {
     var s = S[i], w = h('span', 'v4-act');
-    var b = btn(BTN[s.s] + (big ? ' in Focus' : ''), (s.s === 'wait' || big ? 'primary ' : '') + (big ? '' : 'sm'), function (e) { e.stopPropagation(); if (s.s === 'none') { st.ask = st.ask === i ? -1 : i; draw('p'); } else openSess(i); }, 'act' + i);
+    var b = btn(BTN[s.s] + (big ? ' in Focus' : ''), (big && !anyWait() ? 'primary ' : '') + (big ? '' : 'sm'), function (e) { e.stopPropagation(); if (s.s === 'none') { st.ask = st.ask === i ? -1 : i; draw('p'); } else openSess(i); }, 'act' + i);
     b.setAttribute('aria-label', BTN[s.s] + ' ' + s.k + ' in Focus'); if (s.s === 'none') b.setAttribute('aria-expanded', st.ask === i);
     w.append(b);
     if (st.ask === i) { var p = h('div', 'v4-pop'); p.setAttribute('role', 'group'); var t = h('div', 'v4-pop-t'); t.append(h('b', '', 'Start ' + s.k), mark(3)); p.append(t, choices(i)); p.addEventListener('click', function (e) { e.stopPropagation(); }); w.append(p); }
@@ -157,10 +162,10 @@
   function page() {
     var p = $('#v4-page'); p.textContent = '';
     if (st.page === 'home') {
-      p.append(h('h1', '', 'Home'), h('p', 'v4-lead', 'Your pages work as before. Focus sits under all of them and never reloads.'));
+      p.append(h('h1', '', 'Home'), h('p', 'v4-lead', 'Your pages work as before. Focus sits under all of them and stays open when you change pages.'));
       p.append(h('h2', '', 'Needs you'));
       var g = h('div', 'v4-cards'), w = S.map(function (s, i) { return i; }).filter(function (i) { return S[i].s === 'wait'; });
-      w.forEach(function (i) { var s = S[i], c = h('div', 'v4-card'); c.append(pill('wait'), h('b', '', s.k + ' · ' + s.t), h('p', '', s.q), focusBtn(i)); g.append(c); });
+      w.forEach(function (i) { var s = S[i], c = h('div', 'v4-card'); c.append(pill('wait'), h('b', '', s.k + ' · ' + s.t), h('p', 'meta', 'Has a question for you. Answer it in Focus.'), focusBtn(i)); g.append(c); });
       if (!w.length) g.append(h('p', 'meta', 'Nothing needs you right now.'));
       p.append(g, h('h2', '', 'At work'));
       var l = h('div', 'v4-rows'); S.forEach(function (s, i) { if (s.s !== 'run' || s.free) return; var r = h('div', 'v4-row'); r.append(glyph(s.s), h('b', '', s.k), h('span', 'v4-rt', s.t), focusBtn(i)); l.append(r); }); p.append(l);
@@ -190,11 +195,12 @@
     var hd = h('header', 'v4-lh'), left = h('div', 'v4-lh-l'), right = h('div', 'v4-lh-r');
     if (st.view === 'start') { left.append(h('h2', '', 'Focus'), mark(1)); }
     else { left.append(btn('‹ All sessions', 'ghost sm', openStart, 'all')); }
+    var showSeg = st.view === 'session' && !(off(st.cur) && (!st.split || off(st.cur2)));
     if (st.view === 'session') {
       var seg = h('div', 'segmented'); seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', 'Chat or Terminal');
       [['chat', 'Chat'], ['terminal', 'Terminal']].forEach(function (m) { var b = btn(m[1], 'sm', function () { st.term = m[0]; draw('l'); }, 'term' + m[0]); b.setAttribute('aria-pressed', st.term === m[0]); seg.append(b); });
       var sp = btn('Side by side', 'ghost sm v4-split', function () { st.split = !st.split; st.ap = 0; if (st.cur2 === st.cur) st.cur2 = order().filter(function (i) { return i !== st.cur && S[i].s !== 'none'; })[0]; draw('lb'); }, 'split'); sp.setAttribute('aria-pressed', st.split);
-      right.append(seg, mark(4), sp, mark(9));
+      if (showSeg) right.append(seg, mark(4)); right.append(sp, mark(9));
     }
     var lay = h('div', 'segmented v4-lays'); lay.setAttribute('role', 'group'); lay.setAttribute('aria-label', 'Where Focus sits');
     lay.append(layIcon('right', 'Dock right'), layIcon('bottom', 'Dock bottom'), layIcon('full', st.mode === 'full' ? 'Leave full screen (Esc)' : 'Full screen'));
@@ -204,10 +210,11 @@
     else { if (st.split) body.dataset.split = '2'; body.append(pane(st.cur, 0)); if (st.split) body.append(pane(st.cur2, 1)); }
     L.append(body);
     $$('.v4-scroll', L).forEach(function (x) { x.scrollTop = x.scrollHeight; });
+    $$('.v4-shelf', L).forEach(function (x) { var f = function () { x.classList.toggle('is-clipped', x.scrollWidth - x.clientWidth - x.scrollLeft > 4); }; x.addEventListener('scroll', f); f(); });
   }
   function startView() {
     var v = h('div', 'v4-start'), ord = order();
-    var wait = ord.filter(function (i) { return S[i].s === 'wait'; }), run = ord.filter(function (i) { return S[i].s === 'run' && !S[i].free; }), quiet = ord.filter(function (i) { return (S[i].s === 'idle' || S[i].s === 'none') && !S[i].free; }), free = ord.filter(function (i) { return S[i].free; });
+    var wait = ord.filter(function (i) { return S[i].s === 'wait'; }), run = ord.filter(function (i) { return S[i].s === 'run' && !S[i].free; }), quiet = ord.filter(function (i) { return (S[i].s === 'idle' || off(i)) && !S[i].free; }), free = ord.filter(function (i) { return S[i].free; });
     function sec(title, count) { var s = h('section', 'v4-sec'), t = h('h3', '', title); if (count != null) t.append(h('span', 'meta', ' ' + count)); s.append(t); v.append(s); return s; }
     var a = sec('Needs you', wait.length || null);
     if (!wait.length) a.append(h('p', 'v4-calm', '✓ Nothing needs you. Your helpers are getting on with it.'));
@@ -227,9 +234,9 @@
     quiet.forEach(function (i) { var s = S[i], r = h('div', 'v4-row'); r.append(glyph(s.s), h('b', '', s.k), h('span', 'v4-rt', s.t), h('span', 'meta v4-rw', s.note), btn(BTN[s.s], 'sm', function () { openSess(i); }, 'q' + i)); rows.append(r); });
     c3.append(rows);
     var d = sec('Without a ticket'); d.firstChild.append(mark(5)); var fr = h('div', 'v4-rows');
-    free.forEach(function (i) { var s = S[i], r = h('div', 'v4-row'); r.append(glyph(s.s), h('b', '', s.k), h('span', 'v4-rt', s.note), btn('Open', 'sm', function () { openSess(i); }, 'q' + i)); fr.append(r); });
+    free.forEach(function (i) { var s = S[i], r = h('div', 'v4-row'); r.append(glyph(s.s), h('b', '', s.k), h('span', 'v4-rt', s.note), h('span', 'meta v4-rw', WORD[s.s]), btn('Open', 'sm', function () { openSess(i); }, 'q' + i)); fr.append(r); });
     d.append(fr, newChoices());
-    v.append(h('p', 'meta v4-slots', liveCount() + ' of ' + LIVE_MAX + ' helpers can work at once right now. More starts wait in line. Idle sessions close after about an hour; the conversation is kept.'));
+    v.append(h('p', 'meta v4-slots', liveCount() + ' of ' + LIVE_MAX + ' places in use (the Manager counts as one). More starts wait in line. Idle sessions close after about an hour; the conversation is kept.'));
     return v;
   }
   function newChoices() {
@@ -246,12 +253,13 @@
     var top = h('div', 'v4-ph'); top.append(h('b', 'v4-pk', s.k), h('span', 'v4-rt', s.t), pill(s.s));
     if (slot === 1) { var x = btn('×', 'ghost icon sm', function () { st.split = false; st.ap = 0; draw('lb'); }, 'x2'); x.setAttribute('aria-label', 'Close the second session'); top.append(x); }
     d.append(top);
-    if (s.s === 'none') { var e = h('div', 'v4-empty'); var et = h('div', 'v4-pop-t'); et.append(h('b', '', 'No helper is on ' + s.k + ' yet'), mark(3)); e.append(et, choices(i), h('p', 'meta', 'Older sessions: only the last one is kept today.')); d.append(e); return d; }
+    if (s.s === 'line') { var ln = h('div', 'v4-empty'); ln.append(h('b', '', s.k + ' is in line'), h('p', 'meta', 'All ' + LIVE_MAX + ' places are in use. It starts by itself when one is free.')); d.append(ln); return d; }
+    if (s.s === 'none') { var e = h('div', 'v4-empty'); var et = h('div', 'v4-pop-t'); et.append(h('b', '', 'No helper is on ' + s.k + ' right now'), mark(3)); e.append(et, choices(i), h('p', 'meta', 'Older sessions: only the last one is kept today.')); d.append(e); return d; }
     if (s.s === 'wait') { var ask = h('div', 'v4-ask'), o = h('div', 'v4-opts'); s.opts.forEach(function (t, n) { o.append(btn(t, n ? 'sm' : 'primary sm', function () { answer(i, t); }, 'popt' + i + n)); }); ask.append(h('p', 'v4-q', s.q), o); d.append(ask); }
     if (s.res.length) {
       var sh = h('div', 'v4-shelf'); sh.setAttribute('aria-label', 'Results of ' + s.k);
       s.res.forEach(function (r) { var id = i + r[1], c = h('button', 'v4-rc'); c.type = 'button'; c.dataset.fk = 'rc' + id; c.setAttribute('aria-pressed', st.peek === id); c.append(thumb(r[0]), h('b', '', r[1]), h('span', 'meta', r[2])); c.addEventListener('click', function () { st.peek = st.peek === id ? '' : id; draw('l'); }); sh.append(c); });
-      if (slot === 0) sh.append(mark(10)); d.append(sh);
+      var shw = h('div', 'v4-shelf-w'); shw.append(sh); if (slot === 0) shw.append(mark(10)); d.append(shw);
       s.res.forEach(function (r) { if (st.peek !== i + r[1]) return; var pk = h('div', 'v4-peek'), tx = h('div', 'v4-peek-t'); tx.append(h('b', '', r[1]), h('span', 'meta', r[2] + ' on ' + s.k + '. In the product this opens the real file.'), btn('Close', 'sm', function () { st.peek = ''; draw('l'); }, 'pkx')); pk.append(thumb(r[0], true), tx); d.append(pk); });
     }
     d.append(st.term === 'terminal' ? terminal(i) : chat(i)); return d;
@@ -264,7 +272,7 @@
     inp.addEventListener('keydown', function (e) { if (e.key !== 'Enter' || !inp.value.trim()) return; s.log.push('> ' + inp.value, '● (demo) The helper got your line.'); drafts['t' + i] = ''; draw('l'); touch(i); });
     pr.append(inp); sc.append(lines, pr); t.addEventListener('click', function (e) { if (e.target === sc || e.target === lines || e.target.classList.contains('v4-l')) { if (!String(getSelection())) inp.focus(); } });
     var tm = h('div', 'v4-tmux'); tm.append(h('span', '', '[' + s.k.toLowerCase().replace(/\s+/g, '-') + '] 0:helper*'));
-    var lt = h('label', 'v4-type'), cb = h('input', 'switch'); cb.type = 'checkbox'; cb.checked = st.type; cb.dataset.fk = 'type' + i; cb.addEventListener('change', function () { st.type = cb.checked; draw('l'); }); lt.append(cb, h('span', '', st.type ? 'I can type' : 'Watching only')); tm.append(lt);
+    var lt = h('label', 'v4-type'), cb = h('input', 'switch'); cb.type = 'checkbox'; cb.checked = st.type; cb.dataset.fk = 'type' + i; cb.setAttribute('aria-label', 'Let me type into the terminal of ' + s.k); cb.addEventListener('change', function () { st.type = cb.checked; draw('l'); }); lt.append(cb, h('span', '', st.type ? 'I can type' : 'Watching only')); tm.append(lt);
     t.append(sc, tm); return t;
   }
   function chat(i) {
@@ -272,30 +280,34 @@
     chats[i].forEach(function (m) { if (m[0] === 'ev') { sc.append(h('p', 'v4-ev', m[1])); return; } var b = h('div', 'v4-bub' + (m[0] === 'me' ? ' me' : '')); b.append(h('span', 'meta', m[0] === 'me' ? 'You' : 'Helper'), h('p', '', m[1])); sc.append(b); });
     var f = h('form', 'v4-compose'), inp = h('input', 'input'); inp.type = 'text'; inp.autocomplete = 'off'; inp.dataset.fk = 'msg' + i; inp.placeholder = 'Message the helper'; inp.setAttribute('aria-label', 'Message the helper on ' + s.k); inp.value = drafts['c' + i] || '';
     inp.addEventListener('input', function () { drafts['c' + i] = inp.value; });
-    var send = btn('Send', 'primary', null, 'send' + i); send.type = 'submit';
+    var send = btn('Send', anyWait() ? '' : 'primary', null, 'send' + i); send.type = 'submit';
     f.addEventListener('submit', function (e) { e.preventDefault(); if (!inp.value.trim()) return; chats[i].push(['me', inp.value], ['helper', '(demo) Got it.']); s.log.push('> ' + inp.value); drafts['c' + i] = ''; draw('l'); touch(i); var n = $('[data-fk="msg' + i + '"]'); if (n) n.focus(); });
     f.append(inp, send); c.append(sc, f); return c;
   }
 
   /* ---------- the bar: always there ---------- */
-  function lastLine(s) { return s.s === 'wait' ? 'Needs you' : s.s === 'idle' ? s.note : (s.log[s.log.length - 1] || '').replace(/^[●✓>$?] /, ''); }
+  function lastLine(s) { return s.s === 'idle' ? s.note : WORD[s.s] + (s.step && s.s !== 'line' ? ' · Step ' + s.step[0] + '/' + s.step[1] : ''); }
   function bar() {
     var B = $('#v4-bar'); B.textContent = '';
     var open = st.mode !== 'strip', nw = S.filter(function (s) { return s.s === 'wait'; }).length;
     var home = h('button', 'v4-home'); home.type = 'button'; home.dataset.fk = 'home'; home.append(h('b', '', 'Focus')); home.setAttribute('aria-pressed', open && st.view === 'start');
     var cn = h('span', nw ? 'v4-cnt' : 'v4-cnt none'); if (nw) cn.append(h('b', '', String(nw)), h('span', 'v4-cnt-w', ' need' + (nw === 1 ? 's' : '') + ' you')); else cn.textContent = 'All calm'; home.append(cn); home.setAttribute('aria-label', 'Focus, all sessions. ' + (nw ? nw + ' waiting for you' : 'Nothing waiting'));
     home.addEventListener('click', openStart); B.append(home, mark(6));
-    var chips = h('div', 'v4-chips'); chips.setAttribute('role', 'list');
+    var chips = h('div', 'v4-chips'), shown = 0, more = 0;
     order().forEach(function (i) {
       var s = S[i]; if (s.s === 'none') return;
-      var on = open && st.view === 'session' && (i === st.cur || (st.split && i === st.cur2)), c = h('button', 'v4-chip ' + s.s); c.type = 'button'; c.dataset.fk = 'chip' + i; c.dataset.chip = i; c.setAttribute('role', 'listitem');
+      if (s.s === 'run' && ++shown > 4 && i !== st.cur && !(st.split && i === st.cur2)) { more++; return; }
+      var on = open && st.view === 'session' && (i === st.cur || (st.split && i === st.cur2)), c = h('button', 'v4-chip ' + s.s); c.type = 'button'; c.dataset.fk = 'chip' + i; c.dataset.chip = i;
       if (on) c.setAttribute('aria-current', 'true'); c.title = s.k + ' · ' + s.t + ' · ' + WORD[s.s] + (s.s === 'wait' ? ': ' + s.q : '');
-      c.append(glyph(s.s), h('b', '', s.k), h('span', 'v4-last', lastLine(s))); c.addEventListener('click', function () { openSess(i); }); chips.append(c);
+      var kb = h('b'), kp = s.k.indexOf('ORCH-') === 0; if (kp) kb.append(h('span', 'v4-kp', 'ORCH-')); kb.append(document.createTextNode(kp ? s.k.slice(5) : s.k)); c.setAttribute('aria-label', s.k + ', ' + lastLine(s));
+      c.append(glyph(s.s), kb, h('span', 'v4-last', lastLine(s))); c.addEventListener('click', function () { openSess(i); }); chips.append(c);
     });
+    if (more) { var mc = h('button', 'v4-chip v4-more'); mc.type = 'button'; mc.dataset.fk = 'more'; mc.append(h('b', '', '+' + more + ' working')); mc.addEventListener('click', openStart); chips.append(mc); }
     B.append(chips, mark(8));
     var nb = btn('+ New', 'ghost sm', function (e) { e.stopPropagation(); st.menu = st.menu === 'new' ? '' : 'new'; draw('b'); }, 'newb'); nb.setAttribute('aria-expanded', st.menu === 'new'); nb.setAttribute('aria-label', 'New session without a ticket'); B.append(nb, mark(5));
     if (st.menu === 'new') { var p = h('div', 'v4-newpop'); p.addEventListener('click', function (e) { e.stopPropagation(); }); p.append(h('b', '', 'New session without a ticket'), newChoices()); B.append(p); }
-    var tg = btn(open ? 'Hide' : 'Show', 'ghost sm v4-toggle', toggle, 'toggle'); tg.setAttribute('aria-expanded', open); tg.setAttribute('aria-label', (open ? 'Hide' : 'Show') + ' Focus (' + KEY + ')'); tg.append(h('kbd', '', KEY)); B.append(tg);
+    var tg = btn(open ? 'Hide' : 'Show', 'ghost sm v4-toggle', toggle, 'toggle'); tg.setAttribute('aria-expanded', open); tg.setAttribute('aria-label', (open ? 'Hide' : 'Show') + ' Focus (' + KEY + ')'); tg.append(h('kbd', '', KEY));
+    if (st.mode === 'full') { var es = h('span', 'v4-esc meta'); es.append(h('kbd', '', 'Esc'), document.createTextNode(' leaves full screen')); B.append(es); } else B.append(tg);
   }
   /* a new line arrived for session i: update the places that show it, without redrawing (keeps what you type) */
   function touch(i) {
@@ -309,7 +321,7 @@
   function ribbon() {
     var k = Object.keys(picks).filter(function (n) { return picks[n]; }).length, c = $('#v4-cap'); c.textContent = '';
     if (st.f) { var f = F[st.f - 1]; c.append(h('span', 'v4-n static', String(st.f)), h('b', '', f.t + '. '), document.createTextNode(f.what)); c.firstChild.dataset.n = st.f; }
-    else c.append(document.createTextNode('Focus is the bar at the bottom. Change pages, type in a terminal, change pages again: it stays. Numbers open a feature.'));
+    else c.append(document.createTextNode('Focus is the bar at the bottom. It stays while you change pages. Numbers open a feature.'));
     $('#v4-count').textContent = k + ' of ' + F.length + ' picked';
     var b = $('#v4-features'); b.setAttribute('aria-expanded', st.sheet);
   }
@@ -344,6 +356,7 @@
 
   /* ---------- keys, outside clicks, the live tick ---------- */
   $('#v4-features').addEventListener('click', function () { st.sheet = !st.sheet; draw('sr'); if (st.sheet) { var t = $('#v4-sheet h2'); t.tabIndex = -1; t.focus(); } });
+  var mk = $('#v4-marks'); mk.checked = !st.marks; mk.addEventListener('change', function () { st.marks = !mk.checked; draw('r'); });
   document.addEventListener('keydown', function (e) {
     if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'j') { e.preventDefault(); toggle(); return; }
     if (e.key !== 'Escape') return;

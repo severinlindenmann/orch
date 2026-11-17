@@ -184,3 +184,10 @@ focus-v2.html: eight numbered features the owner can mark Keep / Maybe / Drop (o
 
 ## Focus layer draft v3 (ORCH-251, 17 Nov, after the owner's answer)
 focus-layer.html replaces the idea of a drawer inside a page: one always-open layer over every dashboard page (right, bottom, full screen, or a thin status strip), a Focus start page, session tabs, Chat or Terminal, results shelf, side by side. Nine numbered features with "Uses" and "To build" lines taken from what orch has (tmux session per ticket, run signal, saved session id, live slot limit). A second model's critique (slots, closed idle sessions, no chat transcript, terminal risk, page-swap options) is in the feature text. focus-v2.html stays as the first draft.
+
+## Focus v4: three drafts to pick from (ORCH-251, 17 Nov)
+Built by Fable from the owner's eight wishes, each challenged by Opus (UX checklist, IT engineer, business manager, marketing) and fixed.
+- focus-v4.html, draft A "the layer": a bar under every page with one chip per session; opens right, bottom or full screen.
+- focus-v4b.html, draft B "the wall": Needs you as a big card, working tiles, idle rows; zoom into one; a bottom drawer on other pages.
+- focus-v4c.html, draft C "the inbox": helpers as conversations, terminal as a flip, quick switcher, side by side, a panel on other pages.
+All are drafts with demo data and a simulated terminal; none is in the product. Earlier drafts focus-v2.html and focus-layer.html stay for comparison.
