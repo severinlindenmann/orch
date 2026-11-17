@@ -248,3 +248,21 @@ def test_a_secret_in_the_command_is_refused_and_never_shown(cli, ws, fake):
     for argv in (("start", "web"), ("act", "stop", "--", "web")):
         code, out = jrun(cli, *argv)
         assert code == 0 and token not in json.dumps(out)
+
+
+def test_hidden_words_cannot_slip_past_the_scan(cli, ws, stored_keys):
+    stored_keys["SPLIT"] = "alpha-part-91 beta-part-37"
+    _add(cli)
+    p = ws / ".orch/addons/services/services/web.json"
+    rec = json.loads(p.read_text(encoding="utf-8"))
+    token = "sk-ant-api03-" + "Qq7Rr6Ss" * 6
+    rec["command"] = ["python3", "x\ny", token, "alpha-part-91", "beta-part-37"]
+    p.write_text(json.dumps(rec), encoding="utf-8")
+    shown = json.dumps(jrun(cli, "list")[1])
+    for word in ("x\\ny", token, "alpha-part-91", "beta-part-37"):
+        assert word not in shown
+    stored_keys["SPAN"] = "gamma-part-55\ndelta-part-73"  # a stored value over two lines of the log
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text("ok line\ngamma-part-55\ndelta-part-73\n", encoding="utf-8")
+    lines = jrun(cli, "log", "web")[1]["lines"]
+    assert "gamma-part-55" not in lines and "delta-part-73" not in lines

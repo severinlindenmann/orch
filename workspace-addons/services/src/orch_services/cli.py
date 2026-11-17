@@ -160,10 +160,13 @@ def _masked_command(root: Path, argv: list[str]) -> list[str]:
     try:
         from orch import secretscan
 
-        hits = {h["line"] for h in secretscan.find("\n".join(argv), root)}
-    except Exception:  # noqa: BLE001 - never a pass: hide every word but the program
-        return [argv[0], *(MASK for _ in argv[1:])]
-    return [MASK if (i + 1) in hits else a for i, a in enumerate(argv)]
+        out = [MASK if "\n" in a or "\r" in a or secretscan.find(a, root) else a for a in argv]
+        # a value split over several words: hide all but the program
+        if any(secretscan.find(sep.join(out), root) for sep in ("\n", " ")):
+            out = [out[0] if not secretscan.find(out[0], root) else MASK, *(MASK for _ in out[1:])]
+    except Exception:  # noqa: BLE001 - never a pass: hide every word
+        return [MASK for _ in argv]
+    return out
 
 
 # ---------------------------------------------------------------- log lines
@@ -208,7 +211,13 @@ def tail_masked(root: Path, path: Path, lines: int) -> list[str]:
         hits = {h["line"] for h in secretscan.find(text, root)}
     except Exception:  # noqa: BLE001 - never a pass: hide everything
         return [MASK for _ in got]
-    return [_mask_line(ln, root) if (i + 1) in hits else ln for i, ln in enumerate(got)]
+    out = [_mask_line(ln, root) if (i + 1) in hits else ln for i, ln in enumerate(got)]
+    try:
+        if secretscan.find("\n".join(out), root):  # e.g. a stored value split over lines: hide everything
+            return [MASK for _ in out]
+    except Exception:  # noqa: BLE001 - never a pass
+        return [MASK for _ in out]
+    return out
 
 
 # ---------------------------------------------------------------- commands
