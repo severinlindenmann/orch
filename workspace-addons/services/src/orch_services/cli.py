@@ -38,6 +38,19 @@ def _workspace_id(root: Path) -> str:
     return wid.lower()
 
 
+def _key_from_files(root: Path, ref: str) -> str:
+    """A ticket key (DM1-12, any case) to its id from the plain ticket files; anything else comes back as is."""
+    want = ref.strip().upper()
+    for p in sorted((root / ".orch" / "tickets").glob("t_*.json")):
+        try:
+            t = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(t, dict) and t.get("id") == p.stem and str(t.get("key", "")).upper() == want:
+            return p.stem
+    return ref
+
+
 def _ticket_key(root: Path, ref: str | None) -> str | None:
     if not ref:
         return None
@@ -49,6 +62,7 @@ def _ticket_key(root: Path, ref: str | None) -> str | None:
     except Exception as e:  # noqa: BLE001 - Refused from the core already says what to do
         if e.__class__.__name__ == "Refused":
             raise Refused(str(e)) from None
+        tid = _key_from_files(root, tid)  # the core could not be asked: read the ticket files themselves
     f = root / ".orch" / "tickets" / f"{tid}.json"
     if not isinstance(tid, str) or not re.fullmatch(r"t_[a-z0-9]{6,16}", tid) or not f.is_file():
         raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")

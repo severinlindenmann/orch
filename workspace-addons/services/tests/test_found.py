@@ -411,3 +411,16 @@ def test_a_bare_process_is_never_adopted_or_stopped(cli, mac, tools, ws):
     assert TOKEN not in out["error"]
     assert not (ws / ".orch/addons/services/services").exists()
     assert {c[1] for c in tools.calls("launchctl")} <= {"print"}
+
+
+def test_a_ticket_key_resolves_even_when_the_core_cannot_be_asked(ws, monkeypatch):
+    """CI 17 Nov: the core's lookup failed with an unexpected error and the key was reported as missing."""
+    from orch import tickets
+
+    from orch_services import cli
+
+    def broken(root, ref):
+        raise RuntimeError("core not usable here")
+
+    monkeypatch.setattr(tickets, "resolve", broken)
+    assert cli._ticket_key(ws, "dm1-12") == "DM1-12"
