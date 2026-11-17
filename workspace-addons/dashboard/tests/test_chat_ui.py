@@ -116,7 +116,9 @@ def test_open_agent_proposal_and_moved_conversation():
     index = (webjs.WEB / "index.html").read_text()
     assert 'data-action="open-agent"' in index
     assert "getElementById('open-agent').hidden = snapshot" in app
-    assert ">Ask the helper</button>" in index and ">Open agent<" not in index
+    assert (
+        '<span class="btn-word-wide">Ask the helper</span></button>' in index and ">Open agent<" not in index
+    )
     for text in (
         "New conversation with your helper",
         "Talk it through first. When you are ready, the helper can make the ticket.",
