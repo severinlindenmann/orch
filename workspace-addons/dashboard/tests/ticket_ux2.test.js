@@ -247,50 +247,11 @@ test('ORCH-236: a key typed without its dash finds the ticket ("dem36", "dem 36"
   assert.equal(hits('dem-36'), 'a');
   assert.equal(hits('36'), 'a');
 });
-function savedCtx(stored = [], hash = '#tickets') {
-  const store = {'orch.tickets.saved':JSON.stringify(stored)}, dialogs = [], toasts = [];
-  const node = (tag, attrs = {}, ...kids) => { const n = h(tag, attrs, ...kids); n.listeners = {}; n.addEventListener = (k, f) => { n.listeners[k] = f; }; n.append = (...more) => n.children.push(...more.flat(Infinity).filter(Boolean)); n.focus = () => {}; n.select = () => {}; return n; };
-  const c = listCtx({h:node, URLSearchParams, location:{hash}, history:{replaceState(_, __, next) { c.location.hash = next; }},
-    localStorage:{getItem:k => store[k] ?? null, setItem:(k, v) => { store[k] = v; }},
-    dialog:title => { const d = node('dialog', {}, title), actions = node('div'); dialogs.push(d); return {d, actions}; },
-    button:(label, cls, fn) => { const b = node('button', {className:'btn ' + cls}, label); b.onclick = fn; b.click = () => fn(); return b; }});
-  c.window.orch = {open() {}, close() {}, toast:(t) => toasts.push(t)};
-  return {c, store, dialogs, toasts, saved:() => JSON.parse(store['orch.tickets.saved'] || '[]')};
-}
-const find = (n, key) => nodes(n).find(x => x.attrs?.['data-key'] === key);
-test('ORCH-236: + Save view asks for a name (never copies a chip name) and refuses a taken one', () => {
-  const {c, dialogs, saved} = savedCtx([], '#tickets?view=working');
-  const save = find(c.viewChips(), 'save-view');
-  save.listeners.click();
-  assert.equal(dialogs.length, 1, 'a name dialog opens; nothing is saved yet');
-  assert.deepEqual(saved(), []);
-  const input = find(dialogs[0], 'saved-view-name'), ok = nodes(dialogs[0]).find(n => n.tag === 'button' && text(n) === 'Save');
-  assert.equal(input.value, '', 'the chip name "Working" is not offered as the name');
-  input.value = 'Working'; ok.click();
-  assert.deepEqual(saved(), [], 'a built-in chip name is refused');
-  input.value = '  My open work '; ok.click();
-  assert.deepEqual(saved().map(v => [v.label, v.view]), [['My open work', 'working']]);
-});
-test('ORCH-236: the active saved view can be renamed and deleted; no second Save of the same view', () => {
-  const {c, dialogs, saved} = savedCtx([{label:'Invoices', view:'', search:'invoice', person:''}], '#tickets?q=invoice');
-  c.syncTicketAddress();
-  const chips = c.viewChips();
-  assert.equal(find(chips, 'saved-view-0').attrs.className.includes('active'), true);
-  assert.equal(find(chips, 'save-view'), undefined);
-  find(chips, 'saved-view-rename').click();
-  const input = find(dialogs[0], 'saved-view-name');
-  assert.equal(input.value, 'Invoices');
-  input.value = 'Bills'; nodes(dialogs[0]).find(n => n.tag === 'button' && text(n) === 'Rename').click();
-  assert.deepEqual(saved().map(v => v.label), ['Bills']);
-  find(c.viewChips(), 'saved-view-delete').click();
-  assert.deepEqual(saved(), []);
-});
-test('ORCH-236: the Person filter is kept in the address and read back from it', () => {
-  const {c} = savedCtx();
-  assert.match(vm.runInContext("ticketPerson = 'anna'; ticketAddress()", c), /who=anna/);
-  c.location.hash = '#tickets?who=ben';
-  vm.runInContext('syncTicketAddress()', c);
-  assert.equal(vm.runInContext('ticketPerson', c), 'ben');
+test('ORCH-236 (owner, 17 Nov): no saved views: only the built-in chips, no + Save view', () => {
+  const c = listCtx({URLSearchParams});
+  const keys = nodes(c.viewChips()).map(n => n.attrs?.['data-key']).filter(Boolean);
+  assert.deepEqual(keys, ['view-chips', 'view-chip-all', 'view-chip-needs-you', 'view-chip-working', 'view-chip-backlog', 'view-chip-done-week']);
+  assert.doesNotMatch(listSrc, /Save view|orch\.tickets\.saved/);
 });
 test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an empty Add says so', () => {
   assert.match(ticketSrc, /act\('check\.edit', \{ticket:t\.id, check:task\.id, text, was:task\.text\}\)/);

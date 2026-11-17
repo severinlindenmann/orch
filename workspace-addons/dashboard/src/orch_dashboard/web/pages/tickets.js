@@ -125,51 +125,13 @@ function ticketSelect(label, key, choices, value, onChange) {
   select.addEventListener('change', event => onChange(event.currentTarget.value));
   return select;
 }
-// Views as chips on the Tickets page: All, Needs me, Working, Done this week, and the ones saved here.
-const SAVED_VIEWS = 'orch.tickets.saved';
-function savedViews() { try { const v = JSON.parse(localStorage.getItem(SAVED_VIEWS) || '[]'); return Array.isArray(v) ? v.filter(x => x && typeof x.label === 'string') : []; } catch (_) { return []; } }
-function writeSavedViews(list) { try { localStorage.setItem(SAVED_VIEWS, JSON.stringify(list.slice(0, 6))); } catch (_) { /* no storage: nothing is kept */ } }
-function applySaved(v) { ticketSearch = v.search || ''; ticketPerson = v.person || ''; ticketGroup = v.group || ''; ticketMine = false; location.hash = ticketAddress({view:v.view || '', q:ticketSearch.trim(), who:ticketPerson}); render(); }
-// ORCH-236: what a saved view keeps, compared to what is shown now (the active saved chip, a second save of the same view).
-const viewState = () => ({view:savedView(), search:String(ticketSearch).trim(), person:ticketPerson, group:ticketGroup});
-const sameView = (v, now) => (v.view || '') === now.view && String(v.search || '').trim() === now.search && (v.person || '') === now.person && (v.group || '') === now.group;
-// A name the person types (never a copy of a chip's name): new, or a rename of saved view `old`. Refused: empty or taken.
-function nameSavedView(suggest, old = null) {
-  const {d, actions} = dialog(old ? 'Rename view' : 'Save this view');
-  const input = h('input', {className:'input', id:'saved-view-name', maxlength:40, 'data-key':'saved-view-name', placeholder:'For example: My open work'});
-  input.value = suggest || '';
-  const error = h('p', {className:'meta bad', role:'alert', hidden:true});
-  const save = button(old ? 'Rename' : 'Save', 'primary', () => {
-    const label = input.value.trim().replace(/\s+/g, ' ');
-    const taken = TICKET_VIEWS.some(([, text]) => text.toLowerCase() === label.toLowerCase()) || savedViews().some(v => (!old || v.label !== old.label) && v.label.toLowerCase() === label.toLowerCase());
-    if (!label || taken) { error.textContent = label ? 'A view with this name exists. Choose another name.' : 'Give the view a name.'; error.hidden = false; input.focus(); return; }
-    const list = savedViews();
-    if (old) { const at = list.findIndex(v => v.label === old.label); if (at >= 0) list[at] = {...list[at], label}; }
-    else list.push({label, ...viewState()});
-    writeSavedViews(list); window.orch.close(d); window.orch.toast((old ? 'Renamed: ' : 'Saved: ') + label, 'ok'); render();
-  });
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } });
-  actions.append(save);
-  d.append(h('div', {className:'stack'}, h('label', {className:'field', for:input.id}, 'Name', input), error), actions);
-  window.orch.open(d); input.focus(); input.select?.();
-}
-function deleteSavedView(v) {
-  writeSavedViews(savedViews().filter(x => x.label !== v.label));
-  window.orch.toast('Deleted: ' + v.label, 'ok'); render();
-}
+// Views as chips on the Tickets page: All, Needs you, Working, To do, Done this week. ORCH-236 (owner, 17 Nov): no
+// saved views of one's own.
 function viewChips() {
-  const current = savedView(), now = viewState(), filtered = !!(now.search || now.person || now.group);
+  const current = savedView(), filtered = !!(ticketSearch || ticketPerson || ticketGroup);
   const chip = (label, active, attrs) => h('a', Object.assign({className:'chip view-chip' + (active ? ' active' : ''), 'aria-current':active ? 'true' : null}, attrs), label);
-  const mine = savedViews(), activeSaved = mine.find(v => sameView(v, now));
-  const own = mine.map((v, i) => { const c = chip(v.label, v === activeSaved, {href:'#tickets', 'data-key':'saved-view-' + i}); c.addEventListener('click', e => { e.preventDefault(); applySaved(v); }); return c; });
-  // The name offered is only a start (the search words or the person); a chip's own name is never copied.
-  const suggest = now.search || (now.person && (name(now.person) || now.person)) || '';
-  const save = activeSaved || !(filtered || current) ? null : h('button', {type:'button', className:'chip view-chip add', 'data-key':'save-view', 'aria-label':'Save this view'}, '+ Save view');
-  save?.addEventListener('click', () => nameSavedView(suggest));
-  const manage = activeSaved && !snapshot ? [button('Rename', 'ghost sm', () => nameSavedView(activeSaved.label, activeSaved)), button('Delete', 'ghost sm', () => deleteSavedView(activeSaved))] : null;
-  manage?.forEach((b, i) => { b.setAttribute('data-key', i ? 'saved-view-delete' : 'saved-view-rename'); b.setAttribute('aria-label', (i ? 'Delete view ' : 'Rename view ') + activeSaved.label); });
   return h('div', {className:'view-chips row', role:'group', 'aria-label':'Ticket views', 'data-key':'view-chips'},
-    TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered && !activeSaved, {href:ticketAddress({view:id}), 'data-key':'view-chip-' + (id || 'all')})), own, save, manage);
+    TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered, {href:ticketAddress({view:id}), 'data-key':'view-chip-' + (id || 'all')})));
 }
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
