@@ -18,6 +18,12 @@ in your own terminal. It prints a one-time sign-in link (10 minutes). Open it th
 part from `/#launch=` on. After that the browser stays signed in (30 days, also across restarts and updates), and every
 action works there exactly as on the computer orch runs on.
 
+**Without a proxy:** `orch dashboard remote on --port 8791 --name <this computer's name>` lets the dashboard answer
+other computers itself (off by default; `--listen <address>` limits it to one network, default all). Restart it
+(`orch stop`, `orch start`). The printed sign-in link then names `http://<name>:8791`. Before signing in, another
+computer gets only the empty page: no tickets, no actions, whatever address it uses. `orch dashboard remote off` turns
+it off again.
+
 - **Home:** Needs you first (questions, failed runs), then your tickets, then which agents are working.
 - **Ticket page:** tasks with proof, questions, history, owner and due day, and a Continue or Start button for the agent.
   Your clicks count as you; an agent's changes count as the agent.

@@ -68,6 +68,29 @@ def printable_launch_url(root: Path, server: str, base_url: str) -> str:
     return f"{base_url.rstrip('/')}/#launch={token}"
 
 
+def remote_base(root: Path, server: str) -> str | None:
+    """The address other computers use for this page server when it listens for them (the dashboard's
+    [dashboard] listen, listen_port and listen_name settings), read from the settings file here and never
+    taken from the add-on. None when off, without a name, or not a valid name and port."""
+    if server != "dashboard":
+        return None
+    from orch import config
+    from orch_ui.origin import any_host_ok
+
+    try:
+        table = config.read(root).get("dashboard")
+    except Refused:
+        return None
+    if not isinstance(table, dict) or not table.get("listen"):
+        return None
+    name, port = table.get("listen_name"), table.get("listen_port")
+    if not isinstance(name, str) or ":" in name or not any_host_ok(name):
+        return None
+    if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+        return None
+    return f"http://{name.lower()}:{port}"
+
+
 LAUNCH_LIFE = 30  # seconds: the token is single use and dies on the first page load
 PRINTED_LIFE = 600  # seconds a printed sign-in link lasts: time to open it on another computer
 

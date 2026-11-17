@@ -7,17 +7,18 @@ import errno
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
-from . import service
+from . import remote, service
 from .actions import SELF
 from .data import find_workspace
 from .server import DEFAULT_PORT, make_server
 from .snapshot import publish_snapshot, write_snapshot
 
 
-def _bind_again(root: Path, port: int, wait: float = 15.0):
+def _bind_again(root: Path, port: int, wait: float = 15.0, listen=None):
     """A fixed port that is busy right after a self-update restart: the old process is the same pid and has
     closed its listener at exec, but a short-lived client socket of the machine may hold the number (the
     port came from the OS, so a busy host can use it as a source port). It frees within moments: retry until
@@ -25,7 +26,7 @@ def _bind_again(root: Path, port: int, wait: float = 15.0):
     end = time.monotonic() + wait
     while True:
         try:
-            return make_server(root, port, orch_bin=_orch_bin())
+            return make_server(root, port, orch_bin=_orch_bin(), remote=listen)
         except OSError as e:
             if e.errno != errno.EADDRINUSE or time.monotonic() >= end:
                 raise
@@ -60,6 +61,12 @@ def main(argv: list[str] | None = None) -> int:
         ("status", "is it running, and where?"),
     ):
         sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    rm = sub.add_parser("remote", help="let other computers open the dashboard (with a sign-in link)")
+    rm.add_argument("action", nargs="?", choices=("on", "off", "status"), default="status")
+    rm.add_argument("--listen", default="0.0.0.0", help="address to listen on (default 0.0.0.0: all)")
+    rm.add_argument("--port", help="the fixed port other computers use")
+    rm.add_argument("--name", help="the name other computers use for this computer")
+    rm.add_argument("--json", action="store_true")
     sn = sub.add_parser("snapshot", help="write a static read-only HTML snapshot")
     sn.add_argument("--out", default="dashboard-snapshot.html")
     sn.add_argument(
@@ -73,28 +80,82 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.cmd in ("start", "stop", "status"):
         return _service(args, root)
+    if args.cmd == "remote":
+        return _remote(args, root)
     if args.cmd == "snapshot":
         if args.publish:
             return publish_snapshot(root, with_addons=args.with_addons)
         print(write_snapshot(root, Path(args.out), args.with_addons))
         return 0
     port = getattr(args, "port", DEFAULT_PORT)
+    listen, why = _listen(root)
     try:
-        srv = make_server(root, port, orch_bin=_orch_bin())
+        srv = make_server(root, port, orch_bin=_orch_bin(), remote=listen)
     except OSError as e:
         if getattr(args, "auto_port", False):
-            srv = make_server(root, 0, orch_bin=_orch_bin())  # another workspace has 8420
+            srv = make_server(root, 0, orch_bin=_orch_bin(), remote=listen)  # another workspace has 8420
         elif e.errno == errno.EADDRINUSE:
-            srv = _bind_again(root, port)  # a self-update restart keeps its port (see _bind_again)
+            srv = _bind_again(
+                root, port, listen=listen
+            )  # a self-update restart keeps its port (see _bind_again)
         else:
             raise
     if getattr(args, "ready_file", None):
         service.write_ready(Path(args.ready_file), srv.server_address[1])
     print(f"orch dashboard for {root.name}: http://127.0.0.1:{srv.server_address[1]}  (Ctrl+C to stop)")
+    why = why or srv.remote_error
+    if why:
+        print(f"Other computers cannot open it: {why}", flush=True)
+    elif srv.remote_server is not None:
+        threading.Thread(target=srv.remote_server.serve_forever, daemon=True, name="remote").start()
+        print(f"Other computers: port {listen[1]} on {listen[0]} (sign in with a link from orch)", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    return 0
+
+
+def _listen(root: Path) -> tuple[tuple[str, int] | None, str | None]:
+    """(address, port) for other computers from the [dashboard] setting, or None; a broken setting says why."""
+    try:
+        s = remote.settings(root)
+    except Exception as e:  # noqa: BLE001 - a bad setting leaves the dashboard local, never down
+        return None, str(e)
+    return ((s["listen"], s["port"]), None) if s else (None, None)
+
+
+def _remote(args, root: Path) -> int:
+    def out(data: dict, text: str) -> None:
+        print(json.dumps(data) if args.json else text)
+
+    try:
+        if args.action == "on":
+            if not args.port:
+                raise remote.Invalid("Say which port other computers use: --port <number>.")
+            s = remote.turn_on(root, args.listen, args.port, args.name)
+        elif args.action == "off":
+            remote.turn_off(root)
+            s = None
+        else:
+            s = remote.settings(root)
+    except remote.Invalid as e:
+        print(
+            json.dumps({"error": str(e)}) if args.json else f"Refused: {e}",
+            file=None if args.json else sys.stderr,
+        )
+        return 2
+    if s is None:
+        text = "Other computers cannot open the dashboard (off)."
+    else:
+        where = remote.url(s) or f"port {s['port']} of this computer"
+        text = (
+            f"Other computers can open the dashboard at {where} after signing in."
+            " A sign-in link: orch start --print-launch-url (in your own terminal)."
+        )
+    if args.action != "status":
+        text += " Restart the dashboard to apply it: orch stop, then orch start."
+    out({"on": s is not None, **({"url": remote.url(s), **s} if s else {})}, text)
     return 0
 
 
