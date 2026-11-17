@@ -23,6 +23,7 @@ from orch import (
     ghlimit,
     history,
     nextstep,
+    releasekeeper,
     report_tickets,
     tickets,
 )
@@ -53,6 +54,7 @@ KEYS = (
     *ghlimit.SETTING_KEYS,
     "github.dev_expert",
     "github.dev_expert_repo",
+    *releasekeeper.SETTING_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
@@ -306,6 +308,7 @@ def _config(args, root: Path) -> None:
             **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
             "github.dev_expert": lambda: devexpert.role(root),
             "github.dev_expert_repo": lambda: devexpert.repo(root),
+            **{key: (lambda k=key: releasekeeper.get(root, k)) for key in releasekeeper.SETTING_KEYS},
         }
         if args.key:
             key = args.key
@@ -339,6 +342,9 @@ def _config(args, root: Path) -> None:
             {args.key: v},
             f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
         )
+    elif args.sub == "set" and args.key in releasekeeper.SETTING_KEYS:
+        v = releasekeeper.set_setting(root, args.key, args.value)
+        _out(args, {args.key: v}, f"Saved: {args.key} = {v}." if v else f"Cleared: {args.key}.")
     elif args.sub == "set" and args.if_current is not None:
         raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
