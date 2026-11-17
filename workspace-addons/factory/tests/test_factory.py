@@ -28,7 +28,8 @@ def setup(run, proposal):
 def test_idea_draft_propose(ws, run, proposal):
     idea = run("idea", "Booking page")
     order = idea["order"]
-    assert Path(idea["draft"]).read_bytes() == b""
+    # bug hunt 17 Nov: without draft text the title is v1, never an empty file (Read draft showed an empty box)
+    assert Path(idea["draft"]).read_bytes() == b"Booking page\n"
     draft = run("draft", order, "--file", "-", data=b"# Approved draft\r\n")
     assert Path(draft["draft"]).name == "v2.md"
     assert Path(draft["draft"]).read_bytes() == b"# Approved draft\r\n"

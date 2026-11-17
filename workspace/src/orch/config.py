@@ -663,6 +663,19 @@ def set_reviewer_answers(root: Path, value: bool, by: str | None = None) -> bool
     return value
 
 
+def reviewer_look_on(root: Path | None) -> bool:
+    """[workflow] reviewer_look (default off): the Reviewer's second look (ORCH-175) checks bigger finished
+    work point by point with a helper on the small model and accepts it for the owner or sends it back."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "reviewer_look", False) is True
+
+
+def set_reviewer_look(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "reviewer_look", value)
+    return value
+
+
 def release_merge_on(root: Path | None) -> bool:
     """[workflow] release_merge (default off): a release Merge card (`orch ask ... --merge --release`) merges
     by itself once every check of its pull request is green (`orch review tend-releases`). Owner's choice."""
