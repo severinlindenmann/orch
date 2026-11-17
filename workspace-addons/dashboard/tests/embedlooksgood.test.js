@@ -43,7 +43,7 @@ test('only tickets in review move to done, quietly, with ONE toast and the page 
   await ctx.looksGoodAll(ctx.embedLooksGoodRequest(msg(frameWindow, {tickets:['t_aaaaaa', 't_bbbbbb', 't_cccccc', 't_zzzzzz']})));
   assert.deepEqual(plain(calls.moves.map(m => [m[0], m[1], m[3].quiet])), [['t_aaaaaa', 'done', true], ['t_bbbbbb', 'done', true]]);
   assert.deepEqual(plain(calls.toasts), [['Looks good on 2 results', 'ok']]);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.looksgood.done', moved:2, id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.looksgood.done', moved:2, id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 
 test('Undo moves the same tickets back to review', async () => {
