@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 from diag_fixtures import SECRET, claim_dead, reset_diag, stuck
 
-from orch import diag, diag_incident, diag_report, hider, relay, runs, tickets
+from orch import cli_report, diag, diag_incident, diag_report, hider, relay, runs, tickets
+from orch.errors import Refused
 from orch.hider import Hider
 
 
@@ -195,6 +196,21 @@ def test_over_the_report_room_only_ticketed_reports_go_oldest_first(proj, hid, m
     assert diag_report.prune(proj) == [refs[0].name, refs[2].name]
     assert not refs[0].exists() and refs[1].exists() and refs[3].exists()
     assert [e for e in diag.read_events(proj) if e["ev"] == "diag.report_pruned"]
+
+
+def test_report_problem_says_plainly_it_was_kept(proj, hid):
+    res = cli_report.report(proj, "problem", "something broke", send=False)
+    assert res["kept"] is True and Path(res["path"]).is_dir()
+    text = cli_report._text(res)
+    assert "is kept here until it becomes a ticket" in text and "saved here" not in text
+
+
+def test_report_problem_refuses_when_the_report_is_gone(proj, hid, monkeypatch):
+    monkeypatch.setattr(
+        diag_report, "prune", lambda root: shutil.rmtree(next((proj / ".orch/diag/reports").iterdir())) or []
+    )
+    with pytest.raises(Refused, match="NOT kept"):
+        cli_report.report(proj, "problem", "something broke", send=False)
 
 
 def test_a_name_that_has_a_ticket_is_not_given_out_again(proj, hid):

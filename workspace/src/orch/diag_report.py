@@ -503,6 +503,12 @@ def delete_all(root: Path) -> int:
     return gone
 
 
+def is_kept(path: str | Path) -> bool:
+    """True when the report folder is still on disk and complete (manifest.json written)."""
+    p = Path(path)
+    return p.is_dir() and not p.is_symlink() and (p / "manifest.json").is_file()
+
+
 def _ticketed(root: Path) -> set[str]:
     """Report names the ticket pass has seen: a ticket was made, or it was here when the setting went on."""
     try:

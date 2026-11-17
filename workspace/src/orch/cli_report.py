@@ -77,7 +77,17 @@ def report(
         content=(about == "problem") if content is None else bool(content),
         about=about,
     )
-    out = {"ref": made["ref"], "about": about, "path": made["path"], "problems": made["problems"]}
+    if not diag_report.is_kept(made["path"]):
+        raise Refused(
+            f"The report {made['ref']} is NOT kept: it is no longer on this computer. Report again."
+        )
+    out = {
+        "ref": made["ref"],
+        "about": about,
+        "path": made["path"],
+        "problems": made["problems"],
+        "kept": True,
+    }
     if send and _relay_ready(root):
         from orch import relay_problems
 
@@ -91,7 +101,7 @@ def report(
 
 def _text(res: dict) -> str:
     what = "Feature wish" if res["about"] == "feature" else "Problem report"
-    lines = [f"{what} {res['ref']} saved here.", res["path"]]
+    lines = [f"{what} {res['ref']} is kept here until it becomes a ticket or you delete it.", res["path"]]
     if res.get("shared"):
         lines.append(f"Sent to the admin of {res['shared']['to']}.")
     elif res.get("share_error"):
