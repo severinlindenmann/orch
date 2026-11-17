@@ -208,9 +208,14 @@ def test_the_schedule_ignores_ticket_status_and_pause(ws, monkeypatch):
     assert doctorpass.due(ws)
 
 
-def test_doctor_shows_when_the_scheduled_checks_stopped(ws, run):
+def test_doctor_shows_when_the_scheduled_checks_stopped(ws, run, monkeypatch):
+    from orch import cli_diag
+
+    many = [{"name": f"c{i}", "verdict": "ok", "fact": "fine"} for i in range(5)]
+    monkeypatch.setattr(cli_diag, "inspect", lambda root: {"checks": many})
     _pass(ws)
     d = json.loads(run("doctor", "--json")[1])
+    assert [r["name"] for r in d["checks"]].count("scheduled checks") == 1  # once, whatever the run checks
     row = next(r for r in d["checks"] if r["name"] == "scheduled checks")
     assert row["ok"]
     old = doctorpass.last(ws)
