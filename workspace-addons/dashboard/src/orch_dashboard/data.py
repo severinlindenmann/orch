@@ -1308,6 +1308,11 @@ def load_logins(root: Path) -> dict | None:
             continue
         row = {k: r.get(k) for k in keep}
         row["kind"] = row["kind"] if row["kind"] in ("login", "connection", "key") else "login"
+        # the renew step (ORCH-46) adds these two: orch can start the tool's own sign-in / the key's name to replace
+        if r.get("renew") is True:
+            row["renew"] = True
+        if isinstance(r.get("key"), str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", r["key"]):
+            row["key"] = r["key"]
         row["stops"] = [
             {"id": t.get("id"), "key": t.get("key"), "title": t.get("title")}
             for t in (r.get("stops") or [])

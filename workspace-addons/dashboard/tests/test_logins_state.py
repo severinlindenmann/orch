@@ -54,3 +54,16 @@ def test_check_again_runs_orch_logins_and_takes_nothing_else():
     assert build_argv("logins.check", {}) == ["logins", "--json"]
     with pytest.raises(BadRequest):
         build_argv("logins.check", {"command": "rm"})
+
+
+def test_the_renew_step_fields_pass_only_when_they_are_plain(ws):
+    health.save(
+        ws,
+        [
+            {**ROW, "renew": True, "key": "PAYMENTS_KEY"},
+            {**ROW, "name": "b", "renew": "yes", "key": "$(rm -rf x)"},
+        ],
+    )
+    first, second = load_logins(ws)["items"]
+    assert first["renew"] is True and first["key"] == "PAYMENTS_KEY"
+    assert "renew" not in second and "key" not in second
