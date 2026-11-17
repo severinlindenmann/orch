@@ -204,6 +204,23 @@ def test_answer_choose_picked_and_change_again(tk, run):
     assert json.loads(out)["decision"]["replaces"] == qid
 
 
+def test_answer_choose_in_own_words_is_the_answer_not_a_send_back(tk, run):
+    """ORCH-246: words on a question with options are the person's answer, as on Home's "Write your own"."""
+    root, tid = tk
+    code, out, _ = _add(
+        run, tid, "--choose", "Which?", "--option", "A=One", "--option", "B=Two", "--then", "x"
+    )
+    qid = json.loads(out)["id"]
+    note = json.dumps({"changes": ["Neither: use a drop-down."]})
+    code, out, err = run(
+        "review", "answer", tid, qid, "--verdict", "talk", "--note", note, "--by", ME, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out)["decision"]["summary"] == "Neither: use a drop-down."
+    q = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == qid)
+    assert "Send back" not in str(q["answer"]) and "drop-down" in str(q["answer"])
+
+
 def test_answer_digest_changed(tk, run):
     root, tid = tk
     q = _draft(run, tid)

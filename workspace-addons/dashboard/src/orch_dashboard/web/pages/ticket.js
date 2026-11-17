@@ -1129,6 +1129,121 @@ function ticketPhone(q) {
   const title = q.delivered ? 'Delivered to your phone' : 'Also sent to your phone';
   return h('span', {className:'ticket-phone', title, 'aria-label':title}, ticketGlyph('phone'));
 }
+// ORCH-238 (owner, 17 Nov): "Add to this ticket" on the ticket page itself, needs no add-on. A person writes what is
+// new, pastes screenshots or adds files; one click puts the files on the ticket (`ticket.attach`) and tells the helper
+// (`run.send`, and `run.start` when no helper is on it; `ticket.changes` for a ticket in Review). The helper's live
+// screen (the dashboard's read-only /api/term) sits above the box, so the person sees the conversation it goes into.
+const TALK_SEND_MAX = 2000;  // run.send's limit (actions.MAX_TEXT)
+const TALK_TYPED_MAX = 1500;  // what the box takes; the rest is the line that names the files
+const TALK_TYPES = ['txt', 'md', 'csv', 'tsv', 'json', 'log', 'yml', 'yaml', 'toml', 'ini', 'png', 'jpg', 'jpeg', 'gif', 'webp'];  // orch ticket attach
+const TALK_FILE_MAX = 25 * 1024 * 1024, TALK_FILES = 10, TALK_POLL = 2000;
+function ticketTalkCard(t) {
+  if (snapshot || !t || t.status === 'done') return null;
+  return h('section', {className:'card ticket-talk', 'data-key':'ticket-talk-' + t.id}, h('h2', {}, 'Add to this ticket'),
+    h('div', {className:'stack', 'data-ticket-talk':t.id, 'data-key':'ticket-talk-host-' + t.id}));
+}
+// What the helper is told: the person's words, then one line naming the files (they are on the ticket already).
+function ticketTalkText(typed, names) {
+  const said = String(typed || '').trim();
+  const count = names.length === 1 ? 'a file' : names.length + ' files';
+  let files = names.length ? 'I added ' + count + ' to this ticket: ' + names.join(', ') + '.' : '';
+  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to this ticket.';
+  if (!said) return files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' and carry on.';
+  return files ? said + '\n\n' + files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' first.' : said;
+}
+const talkFailed = result => result.status === 0 ? "Can't reach orch. Nothing was sent." : window.DashHelpers.scrubText(String(result.text || '')).slice(0, 300) || 'That did not work. Try again.';
+async function ticketTalkSend(tid, message) {
+  const t = ticketOf(tid);
+  if (!t) return {ok:false, text:'This ticket is no longer here.'};
+  const files = array(message.files);
+  if (files.length) {
+    const added = await act('ticket.attach', {ticket:tid, files:files.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)}))});
+    if (!added.ok) return {ok:false, text:talkFailed(added)};
+    artifactData.delete(tid);  // the Files tab counts the new files on the next draw
+  }
+  const text = ticketTalkText(message.text, files.map(f => f.name));
+  const partial = r => ({ok:false, dropFiles:files.length > 0, text:(files.length ? 'The files are on the ticket, but the helper was not told: ' : '') + talkFailed(r)});
+  if (t.status === 'review') {  // the same call as Send back: Ready, the note queued, a helper starts from it
+    const back = await act('ticket.changes', {ticket:tid, text});
+    return back.ok ? {ok:true, text:'Sent back to the helper with your note.'} : partial(back);
+  }
+  const sent = await act('run.send', {ticket:tid, text});
+  if (!sent.ok) return partial(sent);
+  const r = sent.state?.send_result;
+  const delivered = !!r && Number.isInteger(r.delivered) && r.delivered > 0;
+  if (!delivered && !(r && typeof r.id === 'string' && r.id)) return partial({status:200, text:'orch did not confirm that your message was saved.'});
+  if (delivered) return {ok:true, text:'Sent. The helper reads it now.'};
+  if (r.state !== 'none') return {ok:true, text:'Sent. The helper reads it when it finishes what it is doing.'};
+  const started = await act('run.start', {ticket:tid});  // nothing on the ticket: start a helper, it reads this first
+  return started.ok ? {ok:true, text:'Sent. A helper starts and reads it first.'} : {ok:true, text:'Saved on the ticket. Start the helper to go on.'};
+}
+// The helper's screen as plain text: colours and cursor codes dropped (the kit's dock shows text only).
+function talkScreenText(screen) { return String(screen || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b[@-_]/g, '').replace(/\s+$/, ''); }
+function ticketTalkLabel(t, run) {
+  if (t?.status === 'review') return 'Send back with this';
+  return window.DashHelpers.helperAlive(t, run) ? 'Send to helper' : 'Send and start helper';
+}
+function ticketTalk(host, tid) {
+  const dot = el('span', 'live-dot'); dot.setAttribute('aria-hidden', 'true');
+  const title = el('b', '', 'Helper conversation'), when = el('span', 'meta');
+  const head = el('div', 'session-dock-h'); head.append(dot, title, el('span', 'grow'), when);
+  const body = el('div', 'session-dock-b'); body.tabIndex = 0; body.setAttribute('role', 'log'); body.setAttribute('aria-label', 'The helper’s screen, read only');
+  const quiet = el('div', 'session-dock-state');
+  const dock = el('div', 'session-dock in-card'); dock.dataset.key = 'ticket-talk-dock'; dock.append(head, body, quiet);
+  const box = el('div'); box.id = 'ticket-composer-' + tid;
+  host.append(dock, box);
+  const composer = window.UI.composer(box, {label:'Add to this ticket', placeholder:'Write what is new, paste a screenshot or drop files…',
+    sendLabel:ticketTalkLabel(ticketOf(tid), state.runs?.[tid]), interrupt:false, accept:TALK_TYPES, maxFiles:TALK_FILES, maxBytes:TALK_FILE_MAX, maxLength:TALK_TYPED_MAX,
+    hint:'Text files and pictures · Cmd/Ctrl+V pastes a screenshot · Cmd/Ctrl+Enter sends', sendStyle:'outline',  // the page keeps its one filled button (Start, Watch live)
+    acceptError:'Only text files and pictures can be added.', emptyError:'Write something or add a file.',
+    dropTarget:host, dropLabel:'Drop to add to this ticket', sendingText:'Sending…',
+    onSend:async message => { const result = await ticketTalkSend(tid, message); render(); return result; }});
+  let timer = null, last = null, busy = false;
+  const show = (live, text) => {
+    body.hidden = !live; quiet.hidden = live; dot.hidden = !live;
+    if (!live) { if (quiet.textContent !== text) quiet.textContent = text; when.textContent = ''; return; }
+    if (text === last) return;
+    const atEnd = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
+    last = text; body.textContent = text || 'The helper is starting…';
+    if (atEnd || !body.dataset.seen) { body.scrollTop = body.scrollHeight; body.dataset.seen = '1'; }
+    when.textContent = 'Live';
+  };
+  const idle = t => t?.status === 'review' ? 'No helper is working on this ticket. What you send goes back to it with Send back.'
+    : 'No helper is working on this ticket right now. What you send is read when it starts.';
+  async function poll() {
+    const t = ticketOf(tid), run = state.runs?.[tid];
+    if (!t || busy || document.hidden) return;
+    // Any run on the ticket (also one that is starting or could not start) may have a screen worth seeing; no run, no ask.
+    if (!run?.claim && !window.DashHelpers.helperAlive(t, run)) { show(false, idle(t)); return; }
+    if (run?.claim?.mode === 'oneshot') { show(false, 'The helper works in the background; its screen is not shown here.'); return; }
+    busy = true;
+    try {
+      const res = await fetch('/api/term?ticket=' + encodeURIComponent(tid), {cache:'no-store'});
+      const snap = res.ok ? await res.json() : null;
+      if (snap?.state === 'live') show(true, talkScreenText(snap.screen));
+      else show(false, window.DashHelpers.helperAlive(t, run) ? 'The helper is working; its screen is not available yet.' : idle(t));
+    } catch (_) { /* the next poll tries again */ }
+    finally { busy = false; }
+  }
+  const submit = box.querySelector('[type=submit]');
+  return {
+    update() {
+      const label = ticketTalkLabel(ticketOf(tid), state.runs?.[tid]);
+      if (submit && submit.textContent !== label) submit.textContent = label;
+      if (!timer) { poll(); timer = setInterval(poll, TALK_POLL); }
+    },
+    destroy() { clearInterval(timer); timer = null; composer.destroy?.(); },
+  };
+}
+// Called after each render: the box and the screen are built once per ticket page and kept (mounts skip reconcile).
+function mountTicketTalk(main) {
+  if (!window.UI?.composer) return;
+  main.querySelectorAll('[data-ticket-talk]').forEach(host => {
+    let mounted = mounts.get(host);
+    if (!mounted) { mounted = ticketTalk(host, host.dataset.ticketTalk); mounts.set(host, mounted); }
+    mounted.update();
+  });
+}
 async function ticketSendChanges(t, note) {
   const text = String(note || '').trim();
   if (snapshot || !text) return false;
@@ -1632,6 +1747,7 @@ function detail(t) {
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
     working && !helperLive ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,
+    ticketTalkCard(t),
     t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
     note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
