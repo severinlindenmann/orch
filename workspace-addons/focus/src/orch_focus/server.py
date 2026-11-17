@@ -504,6 +504,8 @@ class Tracker:
                 "revision": ticket.get("revision", 0), "checklist": checks,
                 # ORCH-71: the ticket page's state rule reads changes waiting for the person
                 "bring_back": ticket.get("bring_back") if isinstance(ticket.get("bring_back"), dict) else None,
+                # ORCH-235: a wait for a date or the outside reads Waiting, a wait on a question Needs you
+                "waiting_on": ticket.get("waiting_on") if isinstance(ticket.get("waiting_on"), dict) else None,
                 "questions": [{**q, "digest": livecards.question_digest(q)} if isinstance(q, dict) else q for q in questions],
                 "history": (ticket.get("history") or [])[-80:],
             },
