@@ -114,7 +114,11 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
  cols.forEach(c=>{const th=el('th','',c.label);th.scope='col';if(c.sort){th.setAttribute('aria-sort','none');th.tabIndex=0;th.append(UI.chevron());const go=()=>{dir=sortKey===c.key?-dir:1;sortKey=c.key;draw()};th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}}}tr.append(th)});
  thead.append(tr);table.append(thead,tbody);wrap.append(table);draw();return wrap};
 /* Swipe review deck (draft 15 Nov, revised after the Codex challenge): UI.swipeDeck(host, items, o)
-   o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), onUndo(item), onChange()}
+   o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), onUndo(item), onChange(),
+       canUndo(item) (false once the answer is saved for good: Undo is then not offered, ORCH-183)}
+   item.files: [{label, type:'img'|'page'|'file', src}] the result's own files (a Check card), as tiles that open them
+   item.answers: [{label, picked}] the card's own answer buttons in place of the three (a Factory start: Not now, Change it,
+       Start); all outlined, so the costly one is never the easiest click; each answers ok with that pick
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -122,6 +126,16 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    it, a tap on the picture opens it bigger. The answered card fades; nothing flies. Every card says what happens
    when you approve (it.then). Item extras: text (the question), group, suggest ('ok'|'no'), links [{label,url}].
    verdicts: ok | no | talk | later. note: {picked, changes:{text, clips, pins:[{n,on,x,y,text}]}, about} */
+/* The words box of a card (UI.docBox(preview, headingTag)): heading, paras, numbered steps, and the little structure
+   a merge card carries (ORCH-183): a status line with a tone (done | working | failed, a pill with its icon), rows
+   (title, a ticket key chip, the number on the right) and a small footer. Text only via textContent. */
+UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
+ if(st&&st.text){const tone=st.tone==='failed'?'failed':st.tone==='working'?'working':'done',s=el('p','pill doc-status '+tone);s.append(UI.statusIcon(tone==='failed'?'needs':tone),el('span','',st.text));d.append(s)}
+ if(p.heading)d.append(el(hTag||'h4','',p.heading));(p.paras||[]).forEach(x=>d.append(el('p','',x)));
+ if(Array.isArray(p.rows)&&p.rows.length){const ul=el('ul','doc-rows');p.rows.forEach(r=>{if(!r||!r.title)return;const li=el('li','doc-row');li.append(el('span','doc-row-title',r.title));
+   if(r.key)li.append(el('span','chip doc-row-key',r.key));if(r.n)li.append(el('span','doc-row-n','#'+r.n));ul.append(li)});d.append(ul)}
+ if(p.steps){const ol=el('ol');p.steps.forEach(x=>ol.append(el('li','',x)));d.append(ol)}
+ if(p.foot)d.append(el('p','doc-foot',p.foot));return d};
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
  let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
  Object.assign(pins,o.pins);Object.entries(o.answered||{}).forEach(([id,a])=>{const it=items.find(x=>x.id===id);if(it)ans[id]={verdict:a.verdict,note:a.note||null,item:it}});
@@ -131,20 +145,26 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const top=el('div','swipe-top'),count=el('span'),bar=el('div','progress'),fill=el('span');bar.append(fill);
  const allBtn=btn('btn ghost sm',[ic('cards',16),'All'],'All cards');allBtn.onclick=()=>openOverview();
  const undoBtn=btn('btn ghost sm',[ic('undo',16),'Undo']);undoBtn.onclick=()=>undo();
+ /* Undo only while the last move can still be taken back (a Later always; an answer while o.canUndo says so) */
+ const undoable=()=>{const l=done[done.length-1];return !!l&&(l.laterOnly||!o.canUndo||!!o.canUndo(l.item))};
  top.append(count,bar,allBtn,undoBtn);
  const stage=el('div','swipe-stage'),live=el('div','sr-only');live.setAttribute('aria-live','polite');
  /* bottom: the three answers + Later */
  const acts=el('div','swipe-actions');
- const mk=(cls,icon,label,key,fn)=>{const r=el('span','ring');r.append(ic(icon,cls==='ok'?28:24));const l=el('span','act-label'),w=el('span','act-word',label);l.append(w);if(key)l.append(el('kbd','',key));const b=btn('swipe-act '+cls,[r,l]);b.onclick=fn;return b};
+ const mk=(cls,icon,label,key,fn)=>{const r=el('span','ring');if(icon)r.append(ic(icon,18));const l=el('span','act-label'),w=el('span','act-word',label);l.append(w);if(key)l.append(el('kbd','',key));const b=btn('swipe-act '+cls,icon?[r,l]:[l]);b.onclick=fn;return b};
  const noBtn=mk('no','x',"Don't do",'←',()=>fly('no')),talkBtn=mk('talk',o.voice?'mic':'comment','Comment','↓',()=>fly('talk')),okBtn=mk('ok','check','Looks good','→',()=>fly('ok'));
  const laterBtn=btn('btn ghost sm swipe-later',['Later']);laterBtn.append(el('kbd','','↑'));laterBtn.onclick=()=>fly('later');
- acts.append(noBtn,talkBtn,okBtn);const laterRow=el('div','swipe-later-row');laterRow.append(laterBtn);
+ const ownRow=el('div','swipe-own');ownRow.hidden=true;
+ acts.append(noBtn,talkBtn,okBtn,ownRow);const laterRow=el('div','swipe-later-row');laterRow.append(laterBtn);
  host.replaceChildren(top,stage,acts,laterRow,live);
  /* words */
  const isOpt=it=>!!(it&&it.preview&&it.preview.type==='options');
+ const ownAnswers=it=>{const a=it&&Array.isArray(it.answers)?it.answers.filter(x=>x&&x.label&&x.picked):[];return a.length?a:null};
+ const answerOwn=a=>{if(!cur||overlay||busy)return;const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;commit('ok',{picked:a.picked})},120)};
+ const sendsBack=it=>!!it&&it.kind==='check';/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
  const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
  const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
- const ansWord=a=>!a?'':a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?'Sent back for changes':'Later';
+ const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?'Sent back for changes':'Later';
  /* previews */
  const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||(p.paras||[]).length||(p.steps||[]).length);return true};
  const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');fr.addEventListener('load',()=>fr.classList.remove('loading'),{once:true});return fr};
@@ -154,7 +174,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(p.type==='img'){const i=el('img');i.src=p.src;i.alt=p.alt||it.title;i.draggable=false;f.append(i)}
   else if(p.type==='page')f.append(el('span','preview-wait','Loading the preview…'),frame(p.src,it.title));
   else if(p.type==='table'){const t=el('table','mini-table'),h=el('tr');(p.cols||[]).forEach(c=>h.append(el('th','',c)));const th=el('thead');th.append(h);const tb=el('tbody');(p.rows||[]).slice(0,big?50:7).forEach(r=>{const tr=el('tr');r.forEach(c=>tr.append(el('td','',c)));tb.append(tr)});t.append(th,tb);f.append(t)}
-  else{const d=el('div','doc');if(p.heading)d.append(el('h4','',p.heading));(p.paras||[]).forEach(x=>d.append(el('p','',x)));if(p.steps){const ol=el('ol');p.steps.forEach(x=>ol.append(el('li','',x)));d.append(ol)}f.append(d)}
+  else f.append(UI.docBox(p,'h4'));
   return f};
  /* Before / after. Card: Before · After · Both. Viewer: Slide (drag the handle, or the slider keys) · Side by side · Before · After. */
  const buildCompare=(it,big)=>{const p=it.preview,w=el('div','swipe-compare');const views=big?[['slide','Slide'],['both','Side by side'],['before','Before'],['after','After']]:[['before','Before'],['after','After'],['both','Both']];
@@ -193,7 +213,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   syncWords();live.textContent=id?'Picked '+id:'Nothing picked'};
  const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
-  okBtn.classList.toggle('wait',okWord(it)==='Pick one');
+  okBtn.classList.toggle('wait',okWord(it)==='Pick one');talkBtn.hidden=sendsBack(it);
+  const own=ownAnswers(it);[noBtn,okBtn].forEach(b=>{b.hidden=!!own});if(own)talkBtn.hidden=true;ownRow.hidden=!own;
+  ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
@@ -208,6 +230,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(pv){pv.append(buildPreview(it,false));
   if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
+  const fl=filesRow(it);
   const ft=el('footer','swipe-foot');
   if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
   const row=el('div','swipe-foot-row');
@@ -215,13 +238,19 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   ft.append(row);
-  c.append(...[h,pv,ft].filter(Boolean));return c};
+  c.append(...[h,pv,fl,ft].filter(Boolean));return c};
+ /* The result's own files (a picture, a page, a PDF): tiles that open the file in a new tab */
+ const filesRow=it=>{const fs=(Array.isArray(it.files)?it.files:[]).filter(f=>f&&f.src&&f.label);if(!fs.length)return null;
+  const r=el('div','swipe-files');r.setAttribute('role','list');r.setAttribute('aria-label','Files');
+  fs.forEach(f=>{const a=el('a','swipe-file');a.href=f.src;a.target='_blank';a.rel='noopener';a.setAttribute('role','listitem');a.setAttribute('aria-label','Open '+f.label);a.addEventListener('pointerdown',e=>e.stopPropagation());
+   const th=el('span','swipe-file-thumb');if(f.type==='img'){const i=el('img');i.src=f.src;i.alt='';i.draggable=false;i.loading='lazy';th.append(i)}else if(f.type==='page')th.append(frame(f.src,f.label));else th.append(ic('file',24));
+   a.append(th,el('span','swipe-file-name',f.label));r.append(a)});return r};
  /* order: waiting cards first (Later ones at the end), then answered */
  const waiting=()=>{const w=items.map((_,i)=>i).filter(i=>!ans[items[i].id]);return w.filter(i=>!later.has(items[i].id)).concat(w.filter(i=>later.has(items[i].id)))};
  const nextIdx=from=>{const w=waiting();const pos=w.indexOf(from);return w.length?(pos>=0?w[pos]:w.find(i=>i>from&&!later.has(items[i].id))??w[0]):items.length};
  let ready=false;const change=()=>{if(ready&&o.onChange)o.onChange()};/* the first onChange comes after the constructor returns, so a handler may use the deck */
  const render=()=>{stage.replaceChildren();cur=null;const n=items.length,k=Object.keys(ans).length;
-  count.textContent=k+' answered · '+(n-k)+' waiting';fill.style.width=(k/n*100)+'%';undoBtn.disabled=!done.length;
+  count.textContent=k+' answered · '+(n-k)+' waiting';fill.style.width=(k/n*100)+'%';undoBtn.disabled=!undoable();
   if(idx>=n){acts.hidden=laterRow.hidden=true;stage.append(summary());change();return}acts.hidden=laterRow.hidden=false;
   const behind=waiting().filter(i=>i!==idx);
   if(behind[1]!=null)stage.append(card(items[behind[1]],'under2'));if(behind[0]!=null)stage.append(card(items[behind[0]],'under'));
@@ -249,7 +278,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(UI.toast&&!o.quiet)UI.toast(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
-  if(verdict==='talk')return openComment();
+  if(ownAnswers(it)&&verdict!=='later')return;/* its own buttons answer it */
+  if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
   busy=true;c.classList.add('leaving');/* a short fade, no swipe */
   setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
@@ -258,8 +288,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const commit=(verdict,note)=>{const it=items[idx];done.push({item:it,verdict,note,idx,prev:ans[it.id],prevPick:ans[it.id]&&ans[it.id].note?ans[it.id].note.picked:undefined});ans[it.id]={verdict,note,item:it};later.delete(it.id);
   const from=idx;idx=nextIdx(from)===from?items.length:nextIdx(from);if(idx===from)idx=items.length;
   const word=ansWord(ans[it.id]);live.textContent=word+': '+it.title;o.onDecide&&o.onDecide(it,verdict,note);render();
-  if(UI.toast&&!o.quiet)UI.toast(word+': '+it.title,()=>undo())};
- const undo=()=>{const last=done.pop();if(!last)return;if(last.laterOnly)later.delete(last.item.id);else if(last.prev){ans[last.item.id]=last.prev;if(last.prevPick)picked[last.item.id]=last.prevPick}else delete ans[last.item.id];
+  if(UI.toast&&!o.quiet)UI.toast(word+': '+it.title,()=>{if(undoable())undo();else UI.toast('Already saved. You can answer it again on its ticket.')})};
+ const undo=()=>{if(!undoable())return;const last=done.pop();if(last.laterOnly)later.delete(last.item.id);else if(last.prev){ans[last.item.id]=last.prev;if(last.prevPick)picked[last.item.id]=last.prevPick}else delete ans[last.item.id];
   idx=last.idx;closeOverlay();render();live.textContent='Back: '+last.item.title;o.onUndo&&o.onUndo(last.item);host.focus()};
  const jump=i=>{if(i<0||i>=items.length)return;closeOverlay();idx=i;render();host.focus()};
  /* overlays: inside the deck (a phone frame keeps them); the rest of the deck is inert; Tab stays inside; Esc closes */
@@ -367,5 +397,5 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   else if((k==='b'||k==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
  if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
- return {jump,openOverview,answers:ans,items,fly,undo,pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx}}};
+ return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>{undoBtn.disabled=!undoable()},pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx}}};
 })();

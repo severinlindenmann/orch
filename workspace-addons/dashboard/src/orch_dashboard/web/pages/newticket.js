@@ -361,6 +361,13 @@ function ticketForm(t) {
       const longText = pastedText, shortText = inputs.text.value;
       const base = ticketFromText(fullText, shortText, longText, files);
       values.title = base.title;
+      // ORCH-156: an empty ticket box is refused with a plain message (it used to drop out silently, and an epic
+      // with only empty boxes was saved as a plain ticket with no epic mark).
+      const emptyStep = steps.findIndex(step => !ticketStepArgs(step.input.value, step.files, 'x'));
+      if (emptyStep >= 0) {
+        error.textContent = 'Ticket ' + (emptyStep + 1) + ' is empty. Write what needs doing in it, or remove it.';
+        steps[emptyStep].input.focus(); submit.disabled = false; idle(); return;
+      }
       // Every ticket is checked before anything is created, so a too-big one never leaves half the tickets behind.
       const bigStep = steps.findIndex(step => ticketTooBig(ticketStepArgs(step.input.value, step.files, 'x', values.owner) || {}));
       if (bigStep >= 0) { error.textContent = 'Ticket ' + (bigStep + 1) + ' is too big to send at once (over 4.9 MB). Remove a file or shorten its text.'; submit.disabled = false; idle(); return; }

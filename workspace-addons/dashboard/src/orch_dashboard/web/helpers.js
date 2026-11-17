@@ -364,6 +364,35 @@
     return arr(all).find(p => p && p.id !== t.id && matchesTicket(t.parent, p)) ||
       arr(all).find(p => p && p.id !== t.id && arr(p.children).includes(t.id)) || null;
   }
+  /* ORCH-156: the tickets a ticket can be put under ("Part of" in Edit ticket): not itself, not one of its own
+     sub-tickets (a loop), not closed (its current parent stays listed). Epics first, then tickets that already
+     hold others, then the rest; newest first inside each group. */
+  function parentChoices(all, t) {
+    const list = arr(all).filter(x => x && x.id), inside = new Set([t.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const x of list) if (!inside.has(x.id) && list.some(p => inside.has(p.id) && matchesTicket(x.parent, p))) { inside.add(x.id); grew = true; }
+    }
+    const current = parentOf(list, t), holds = new Set(list.map(x => (parentOf(list, x) || {}).id).filter(Boolean));
+    const rank = x => x.epic ? 0 : holds.has(x.id) ? 1 : 2;
+    return list.filter(x => !inside.has(x.id) && (!['done', 'dropped'].includes(x.status) || (current && x.id === current.id)))
+      .sort((x, y) => rank(x) - rank(y) || creationOrder(y, x));
+  }
+  /* ORCH-156: the order inside one board lane. A ticket the person placed in this lane (lane_order) keeps its
+     place; tickets that came in since (no place in this lane) stay on top in the order given, newest news first. */
+  const lanePlace = (t, lane) => t && t.lane_order && t.lane_order.lane === lane && Number.isFinite(t.lane_order.n) ? t.lane_order.n : null;
+  function laneSorted(list, lane) {
+    const all = arr(list), fresh = all.filter(t => lanePlace(t, lane) == null);
+    const placed = all.filter(t => lanePlace(t, lane) != null).map((t, i) => [t, i]).sort((x, y) => lanePlace(x[0], lane) - lanePlace(y[0], lane) || x[1] - y[1]).map(x => x[0]);
+    return [...fresh, ...placed];
+  }
+  /* The lane's ids after `moved` goes right before `before` (null: to the end of the lane). */
+  function laneReorder(ids, moved, before) {
+    if (moved === before) return arr(ids).slice();  // dropped onto itself: nothing moves
+    const rest = arr(ids).filter(id => id !== moved), at = before == null ? -1 : rest.indexOf(before);
+    rest.splice(at < 0 ? rest.length : at, 0, moved);
+    return rest;
+  }
   const plainFileName = value => String(value || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/^./, c => c.toUpperCase());
   const cleanOutcome = value => String(value || '').replace(/\b\d+(?:\.\d+)?\s*(?:[KMGT]?i?B|bytes?)\b/gi, '').replace(/(?:[\w-]+\/)*[\w-]+\.(?:md|txt|html?|csv|json|pdf|png|jpe?g|webp)\b/gi, name => plainFileName(name)).replace(/^[\s✓✔·—,:;-]+|[\s·—,:;-]+$/g, '').replace(/\s+/g, ' ').trim();
   const resolved = task => !!(task.done || task.wont_do);
@@ -711,5 +740,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {historyChange, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {historyChange, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });

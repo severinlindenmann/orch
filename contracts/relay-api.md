@@ -444,7 +444,7 @@ Fields: `{v, id, type, workspace: {id, name}, ticket, key, at}` on every event (
 `options`, `answerable` (this subscriber may answer and no one has yet), `answered` (`null`, or `{answer, answered_by}`
 at read time); `answered` → `question_id` (the question's id), `answer`, `answered_by` (a display name: the phone's name,
 or `<name> (system)`). `closed` → `question_id` (the question's id), `reason` (the take-back reason, e.g. `Answered in orch`; a
-`text` event is not made for it). `ticket_view` = a smaller copy of the message's `body.ticket_view`, else `null`: `{title, status,
+`text` event is not made for it; only for a question stored after the subscriber was made, like `answered`). `ticket_view` = a smaller copy of the message's `body.ticket_view`, else `null`: `{title, status,
 agent, summary, done, total, refs: [{kind, title, url}], files}`, no checklist and no history; `files` (`[{name, size,
 blob_id}]`, the image and file attachments) only when **Files** is on, else `[]`.
 
