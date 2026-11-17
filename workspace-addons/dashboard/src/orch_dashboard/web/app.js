@@ -363,6 +363,7 @@ function render(arrived = new Set()) {
     state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
     // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
+  paintTabbar(here, needCount, needsWords);
   const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
@@ -576,18 +577,37 @@ document.getElementById('open-agent').addEventListener('click', () => chatOpenAg
 document.getElementById('report-problem').hidden = snapshot;
 document.getElementById('report-problem').addEventListener('click', () => reportOpen());
 const toggle = document.getElementById('menu-toggle');
-toggle.addEventListener('click', () => {
-  const open = toggle.getAttribute('aria-expanded') !== 'true';
+// The side menu opens from the top-bar Menu button (tablet) or from More in the phone bottom bar (ORCH-73).
+function setMenu(open) {
   toggle.setAttribute('aria-expanded', String(open));
   document.querySelector('.sidebar').dataset.open = String(open);
-});
+  const more = document.querySelector('#tabbar [data-tab="more"]');
+  if (more) more.setAttribute('aria-expanded', String(open));
+  if (open && more) window.scrollTo(0, 0);
+}
+toggle.addEventListener('click', () => setMenu(toggle.getAttribute('aria-expanded') !== 'true'));
 document.querySelector('.sidebar').addEventListener('click', event => {
   const helper = event.target.closest('[data-nav="open-agent"]');
   if (!event.target.closest('a') && !helper) return;
-  toggle.setAttribute('aria-expanded', 'false');
-  document.querySelector('.sidebar').dataset.open = 'false';
+  setMenu(false);
   if (helper) chatOpenAgent();
 });
+// Phone bottom bar (ORCH-73, master UI.tabbar): Home, Tickets, Review with the one needs-you number, More = the side menu.
+// Shown only up to 720 px (master CSS); the top bar comes back while the side menu is open.
+function paintTabbar(here, needCount, needsWords) {
+  if (!window.UI?.tabbar) return;
+  const open = document.querySelector('.sidebar')?.dataset.open === 'true';
+  const items = [{key:'home', label:'Home', href:'#home', current:here === '#home'}, {key:'tickets', label:'Tickets', href:'#tickets', current:here === '#tickets'},
+    snapshot ? null : {key:'review', label:'Review', href:'#review', current:here === '#review', count:needCount, countLabel:needsWords},
+    {key:'more', label:'More', expanded:open, controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
+  let bar = document.getElementById('tabbar');
+  if (!bar || bar.children.length !== items.length) {
+    bar?.remove();
+    bar = window.UI.tabbar(items, {id:'tabbar', label:'Main'});
+    bar.dataset.testid = 'tabbar';
+    document.body.append(bar);
+  } else window.UI.tabbar.update(bar, items);
+}
 let dragging = '';
 const columnOf = event => event.target.closest?.('.kanban-col');
 main.addEventListener('dragstart', event => {

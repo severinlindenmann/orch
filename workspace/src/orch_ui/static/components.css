@@ -34,7 +34,7 @@ button svg,a svg{pointer-events:none}
 .muted{color:var(--text-muted)}
 .meta.muted{color:var(--text-muted)}
 .eyebrow{font-weight:500;letter-spacing:.02em;text-transform:none}
-.key{color:var(--text-faint)}
+.key{color:var(--text-faint);white-space:nowrap}
 .mono,code,pre,kbd{font-family:var(--font-mono);font-size:12px;line-height:16px;font-variant-numeric:tabular-nums}
 code{padding:2px 4px;background:var(--surface-3);border-radius:4px}
 pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -341,9 +341,9 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .file-chip:hover{border-color:var(--border-strong)}
 .file-type{display:inline-grid;place-items:center;min-width:32px;height:32px;border-radius:4px;background:var(--surface-3);color:var(--text-muted);font-size:12px;font-weight:600}
 .thumbnail{width:64px;height:64px;object-fit:cover;border:1px solid var(--border);border-radius:4px;flex:none}
-/* Breakpoints: rail (new markup only, it has .nav-label) < 1280, 16 px gutter < 900, single column < 600. */
+/* Breakpoints: rail (new markup only, it has .nav-label) 721-1279 (a phone opens the full menu with words, ORCH-73), 16 px gutter < 900, single column < 600. */
 @media(min-width:1600px){:root{--page-gutter:32px;--panel-width:320px}}
-@media(max-width:1279px){
+@media(min-width:721px) and (max-width:1279px){
 .shell:has(.nav-label){--sidebar-width:64px}
 .sidebar:has(.nav-label){padding:16px 8px}
 .sidebar:has(.nav-label) .brand{padding:0 12px}
