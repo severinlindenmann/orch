@@ -994,14 +994,68 @@ def _own_names(root: Path) -> set[str]:
     return names
 
 
-def _link_workspace(root: Path, group: Path, projects: set[str]) -> tuple[set[str], list[str]]:
-    """Links in the copy folder to the workspace's other top-level entries (instruction files, the agent
-    tools' settings and skills, shared files), made once and kept: (names that are links to the workspace,
-    notes). Never the projects (they are copies), the store, git, or what orch writes itself; nothing that
-    is already there is replaced."""
-    skip = projects | _own_names(root) | {".orch", ".git", TRASH}
-    linked: set[str] = set()
+_IMPORT_LINE = re.compile(r"^[ \t]*@(\S+)[ \t]*$", re.M)
+
+
+def _rule_names(root: Path) -> list[str]:
+    """The workspace's own top-level instruction files (CLAUDE.md, AGENTS.md) and the top-level files they
+    import (`@RULES.md`): plain files, never links. A copy folder gets them as files of its own, not as links:
+    an import whose real path is outside the folder the tool runs in is an external import to Claude Code (it
+    asks "Allow external CLAUDE.md file imports?", and an unattended run drops the import without a word)."""
+    names: list[str] = []
+
+    def plain(name: str) -> bool:
+        p = root / name
+        return not _is_link(p) and p.is_file()
+
+    todo = [n for n in adapters.GUIDE_FILES if plain(n)]
+    while todo:
+        name = todo.pop(0)
+        if name in names:
+            continue
+        names.append(name)
+        try:
+            text = (root / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for imp in _IMPORT_LINE.findall(text):
+            one = len(PurePosixPath(imp).parts) == 1 and "\\" not in imp
+            if one and not imp.startswith((".", "~")) and plain(imp) and imp not in names:
+                todo.append(imp)
+    return names
+
+
+def _copy_rules(root: Path, group: Path, names: list[str]) -> list[str]:
+    """The workspace's instruction files as plain files in the copy folder, written again at each start (the
+    workspace's text wins). A link orch made there before is replaced, its target untouched; anything else
+    in the way is kept. Returns notes in plain words."""
     notes: list[str] = []
+    for name in names:
+        here = group / name
+        try:
+            there = os.path.lexists(here)
+            if there and _is_link(here) and not (here.is_symlink() and os.readlink(here) == str(root / name)):
+                notes.append(f"{name} in the copy is a link orch did not make; it was left as it is")
+                continue
+            text = (root / name).read_text(encoding="utf-8")
+            same = there and not here.is_symlink() and here.is_file()
+            if same and here.read_text(encoding="utf-8") == text:
+                continue
+            harness.write_text(here, text, replace_link=True)
+        except (OSError, UnicodeError, Refused) as e:
+            notes.append(f"{name} could not be put in the copy ({getattr(e, 'strerror', None) or e})")
+    return notes
+
+
+def _link_workspace(root: Path, group: Path, projects: set[str]) -> tuple[set[str], list[str]]:
+    """Links in the copy folder to the workspace's other top-level entries (the agent tools' settings and
+    skills, shared files), made once and kept: (names that are links to the workspace, notes). Never the
+    projects (they are copies), the store, git, or what orch writes itself; nothing that is already there is
+    replaced. The instruction files are plain files of their own (_copy_rules), written at each start."""
+    rules = _rule_names(root)
+    skip = projects | _own_names(root) | set(rules) | {".orch", ".git", TRASH}
+    linked: set[str] = set()
+    notes: list[str] = _copy_rules(root, group, rules)
     try:
         names = sorted(e.name for e in os.scandir(root))
     except OSError:
@@ -3659,7 +3713,11 @@ def _drop_group(root: Path, ticket: str, group: Path) -> str:
         return "kept: not a folder"
     from orch import skills
 
-    own = _own_names(root) | {PurePosixPath(w).parts[0] for w in skills._skill_places(root)}
+    own = (
+        _own_names(root)
+        | set(_rule_names(root))
+        | {PurePosixPath(w).parts[0] for w in skills._skill_places(root)}
+    )
     try:
         for e in os.scandir(group):
             p = Path(e.path)
