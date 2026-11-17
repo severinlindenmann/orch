@@ -14,35 +14,35 @@
     [9, 'Pin and name', 'Pin any session to keep it first on the wall and in the bar. Click its name to give it your own.', 'To build: a pinned flag and a display name per session, kept next to the session id.', 'Small', 'two small values to store', { page: 'focus', view: 'zoom', cur: 'Manager', ren: 'Manager' }],
     [10, 'Result widgets with a big preview', 'Every kind of result gets a small widget and a big preview on top of the page: documents, code, tables, pages, PDFs, pictures, recordings, charts, changes. The Widgets page is the proposal, one real example each.', 'Files and evidence attached to the ticket, and the links on it. The style guide already previews pictures, PDFs, pages, tables, Markdown, code, text, audio and video; charts, changes and the tree view are new.', 'Medium', 'one widget and one preview per type, built once in the style guide', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: false, ov: { src: 'ORCH-228', i: 0 } }, ['See the widget proposal', { page: 'widgets' }]],
     [11, 'Works with 20 to 30 sessions', 'The bar shows the sessions that need you and your pinned ones; everything else is a count such as "9 in line" that opens a list you can search. The wall bands collapse, scroll and filter.', 'The same run list, grouped by signal. Live places are limited (8 in this demo): the other tickets wait in line and start by themselves.', 'Small', 'grouping and a search box', { page: 'home', mode: 'bar', many: true, list: 'queue' }],
-    [12, 'Tool and model, seen and chosen', 'Every session shows its tool and model (Claude CLI · Opus, Codex · GPT-5), how long it has been open and when it closes for being idle. A new session or a fresh start lets you pick tool and model; the usual one is preselected, so it stays one click.', 'Today orch picks a model per ticket (the small one first) and a person can move it up. To build: choosing the tool and model at the start, and showing them per session. A change of model takes effect with a fresh start.', 'Medium', 'a choice at the start and a label per session', { page: 'home', mode: 'bar', menu: 'new' }],
+    [12, 'Tool and model, seen and chosen', 'Every session shows its tool and model (' + window.MW_TOOLS.t1.label + ' · Opus, ' + window.MW_TOOLS.t2.label + ' · GPT-5), how long it has been open and when it closes for being idle. A new session or a fresh start lets you pick tool and model; the usual one is preselected, so it stays one click.', 'Today orch picks a model per ticket (the small one first) and a person can move it up. To build: choosing the tool and model at the start, and showing them per session. A change of model takes effect with a fresh start.', 'Medium', 'a choice at the start and a label per session', { page: 'home', mode: 'bar', menu: 'new' }],
     [13, 'Files, screenshots and voice in the message box', 'Attach files, paste or drop a screenshot, and see each one as a small preview before you send. Speak instead of typing: the words land in the box for you to check and edit, never sent by themselves.', 'Attachments to a helper message exist today (the composer: paste a screenshot or drop files, up to 25 MB each). Voice needs the relay turned on, which has a speech-to-text key, so the microphone only shows then. To build and to check: recording in the browser and the text coming back.', 'Medium', 'previews before sending; voice is new', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: false, att: true, voice: 'done' }]
   ];
   var HIST = [['Yesterday 16:40', 'step 2 of 4', 'Made the sketch, then stopped'], ['12 Nov 10:15', 'step 1 of 4', 'Read the ticket and asked about the size of the job'], ['11 Nov 09:02', 'step 1 of 4', 'First try, went off track']];
   var S = [
-    { k: 'ORCH-238', t: 'Add files and notes to a ticket', kind: 'ticket', s: 'wait', tool: 'claude', up: 64, step: [3, 5], now: 'Waits for your answer.', qn: 4,
+    { k: 'ORCH-238', t: 'Add files and notes to a ticket', kind: 'ticket', s: 'wait', tool: 't1', up: 64, step: [3, 5], now: 'Waits for your answer.', qn: 4,
       q: { t: 'Keep the old file name when the same file is added twice?', why: 'The helper suggests keeping it: links people already shared keep working.', a: ['Keep the old name', 'Use the new name'] },
       lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)', '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ The upload works. One thing only you can decide:', '  Keep the old file name when the same file is added twice?', '  1. Keep the old name (suggested)', '  2. Use the new name', '  Waiting for your answer…'],
       chat: [['e', 'Step 2 done: files can be dropped on a ticket', '14:21'], ['h', 'Uploading works for pictures, pages and tables. Notes sit below the files.', '14:38', 0, 0], ['h', 'One thing I need from you before I go on: when the same file is added twice, should the old name stay?', '14:52', 1]],
       files: [['img', 'ticket-files.png', 'Picture · 14:36'], ['table', 'upload-sizes.csv', 'Table · 3 rows', [['Picture', '2.1 MB'], ['Page', '48 KB'], ['Table', '12 KB']]]] },
-    { k: 'ORCH-228', t: 'Phone width and zoom', kind: 'ticket', s: 'run', tool: 'claude', model: 'Opus', up: 38, step: [4, 5], now: 'Opening the pull request.',
+    { k: 'ORCH-228', t: 'Phone width and zoom', kind: 'ticket', s: 'run', tool: 't1', model: 'Opus', up: 38, step: [4, 5], now: 'Opening the pull request.',
       lines: ['⏺ All 3 widths pass: 1280, 1920 and 390.', '⏺ Bash(git push -u origin fix/phone-width)', '  ⎿ branch fix/phone-width set up to track origin', '⏺ Writing the pull request text.', '⏺ Bash(gh pr create --base develop --draft)', '  ⎿ Creating pull request…'],
       feed: ['  ⎿ pull request 1318 opened as a draft', '⏺ Linking the pull request to the ticket.', '  ⎿ linked', '⏺ Waiting for the checks: 3 of 12 green.', '⏺ Waiting for the checks: 7 of 12 green.', '⏺ Waiting for the checks: 11 of 12 green.'],
       chat: [['e', 'Step 3 done: the page fits a phone at 390', '14:31'], ['h', 'The Home page no longer scrolls sideways on a phone. Here is the picture.', '14:40', 0, 0], ['h', 'Opening the pull request now. I will tell you when the checks are green.', '15:02', 0, 4]],
       files: [['img', 'home-390.png', 'Picture · 14:39'], ['html', 'phone-widths.html', 'Page · before and after'], ['chart', 'Width check', 'Chart · 3 widths'], ['table', 'widths.csv', 'Table · 3 rows', [['1280', 'fits'], ['1920', 'fits'], ['390', 'fits']]], ['pr', 'Pull request 1318', 'Draft · 3 of 12 checks green', [['State', 'Draft'], ['Checks', '3 of 12 green'], ['Changes', '6 files']]], ['link', 'Notes on phone widths', 'Link · team wiki']] },
-    { k: 'ORCH-232', t: 'Insights and usage counts', kind: 'ticket', s: 'run', tool: 'codex', up: 22, step: [2, 6], now: 'Running the tests.',
+    { k: 'ORCH-232', t: 'Insights and usage counts', kind: 'ticket', s: 'run', tool: 't2', up: 22, step: [2, 6], now: 'Running the tests.',
       lines: ['⏺ Bash(node --test tests/insights.test.js)', '  ⎿ ✔ counts skills per day (41 ms)', '  ⎿ ✔ counts keys that were never used (9 ms)', '  ⎿ ✔ empty workspace shows zero, not an error (6 ms)'],
       feed: ['  ⎿ ✔ week view adds up to the day view (17 ms)', '  ⎿ ✔ a failed call counts as failed (8 ms)', '  ⎿ ℹ tests 14 · pass 14 · fail 0', '⏺ Bash(uv run python -m pytest -q tests/test_insights.py)', '  ⎿ ......................  22 passed in 3.1s', '⏺ Tests are green. Drawing the usage chart next.', '⏺ Running the tests once more after the chart.'],
       chat: [['e', 'Step 1 done: counts are collected per day', '13:58'], ['h', 'The counts are in. I am running the tests before I draw the chart.', '15:04', 0, 0]],
       files: [['chart', 'Usage by day', 'Chart · 14 days'], ['html', 'insights-preview.html', 'Page · draft'], ['link', 'usage-raw.json', 'Link · data file']] },
-    { k: 'ORCH-247', t: 'Steer a helper from the dashboard', kind: 'ticket', s: 'idle', sl: 'Idle 18 min', tool: 'claude', model: 'Opus', up: 96, close: 42, step: [5, 5], now: 'Finished and merged. Ready for your review.',
+    { k: 'ORCH-247', t: 'Steer a helper from the dashboard', kind: 'ticket', s: 'idle', sl: 'Idle 18 min', tool: 't1', model: 'Opus', up: 96, close: 42, step: [5, 5], now: 'Finished and merged. Ready for your review.',
       lines: ['⏺ Bash(orch ref wait ORCH-247 --merge)', '  ⎿ 12 of 12 checks green · merged', '⏺ Done. The Steer button is on the ticket page and', '  pull request 1309 is merged. Ready for your review.'],
       chat: [['e', 'Step 5 done: merged on green checks', '14:44'], ['h', 'Finished. You can try the Steer button on any working ticket.', '14:45', 0, 0]],
       files: [['pr', 'Pull request 1309', 'Merged · 12 of 12 checks green', [['State', 'Merged'], ['Checks', '12 of 12 green'], ['Changes', '9 files']]], ['img', 'steer-button.png', 'Picture · 14:30']] },
-    { k: 'ORCH-189', t: 'Manager view', kind: 'ticket', s: 'none', sl: 'No session', tool: 'claude', last: 'yesterday 16:40', step: [2, 4], now: 'Stopped at step 2 of 4, yesterday 16:40.',
+    { k: 'ORCH-189', t: 'Manager view', kind: 'ticket', s: 'none', sl: 'No session', tool: 't1', last: 'yesterday 16:40', step: [2, 4], now: 'Stopped at step 2 of 4, yesterday 16:40.',
       lines: ['⏺ Stopped at step 2 of 4: the sketch is attached.', '  Next would be the list of helpers.', '', '  Session ended yesterday 16:40'],
       chat: [['e', 'Step 2 done: sketch of the Manager view', 'yesterday 16:31'], ['h', 'I stopped here. The sketch is on the shelf; the helper list is next.', 'yesterday 16:40', 0, 0]],
       files: [['img', 'manager-sketch.png', 'Picture · yesterday']] },
-    { k: 'Manager', t: 'Looks after the helpers', kind: 'free', s: 'run', tool: 'claude', up: 185, pin: true, now: '4 helpers are live. One waits for you. Nothing is stuck.',
+    { k: 'Manager', t: 'Looks after the helpers', kind: 'free', s: 'run', tool: 't1', up: 185, pin: true, now: '4 helpers are live. One waits for you. Nothing is stuck.',
       lines: ['⏺ Bash(orch run list)', '  ⎿ ORCH-238  waiting   an answer from you', '    ORCH-228  working   step 4 of 5', '    ORCH-232  working   step 2 of 6', '    ORCH-247  idle      18 min', '⏺ 4 helpers are live. One waits for you. Nothing is stuck.'],
       feed: ['⏺ Checked again: no change.', '⏺ ORCH-228 opened its pull request.', '⏺ Checked again: tests on ORCH-232 are green.', '⏺ ORCH-247 is idle; it closes by itself after about an hour.'],
       chat: [['h', 'I look at every helper once a minute. One waits for you: ORCH-238.', '15:05', 0, 0]],
@@ -55,9 +55,9 @@
   var ST = { wait: ['◆', 'Needs you'], run: ['●', 'Working'], idle: ['◐', 'Idle'], none: ['○', 'No session'], queue: ['◷', 'In line'], open: ['▸', 'Open'] };
   var ORDER = { wait: 0, run: 1, open: 2, idle: 3, queue: 4, none: 5 };
   var PAGES = { focus: 'Focus', home: 'Home', tickets: 'Tickets', ticket: 'Tickets', review: 'Review', widgets: 'Widgets' };
-  var TOOL = { claude: 'Claude CLI', codex: 'Codex', shell: 'Plain terminal' };
+  var AG = window.MW_TOOLS, TOOL = { t1: AG.t1.label, t2: AG.t2.label, shell: 'Plain terminal' };
   var NEW = [['Empty helper', 'A helper with no ticket and no task yet'], ['Chat helper', 'Ask anything, no ticket'], ['Plain terminal', 'An empty terminal in this workspace'], ['Manager', 'Looks after all helpers']];
-  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', ov: null, nt: 'claude', nm: 'Sonnet', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
+  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', ov: null, nt: 't1', nm: 'Sonnet', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238' };
   var drafts = {}, picks = {}, uid = 0, feedAt = 0;
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   try { picks = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { picks = {}; }
@@ -107,7 +107,7 @@
     file: ic('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>'), play: ic('<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>'), wave: ic('<path d="M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4"/>'),
     clip: ic('<path d="m20 11-8 8a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7"/>'), mic: ic('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'), stop: ic('<rect x="7" y="7" width="10" height="10" rx="1"/>'),
     x: ic('<path d="M6 6l12 12M18 6 6 18"/>'), more: ic('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'), ext: ic('<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>'),
-    claude: ic('<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/>'), codex: ic('<path d="m8 7-5 5 5 5m8-10 5 5-5 5"/>'), shell: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m5 0h5"/>'),
+    t1: ic('<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/>'), t2: ic('<path d="m8 7-5 5 5 5m8-10 5 5-5 5"/>'), shell: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m5 0h5"/>'),
     img: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 4 4 2-2 3 3"/>'),
     html: ic('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>'),
     table: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M10 4v16"/>'),
@@ -122,15 +122,15 @@
   };
   var BL = 0; /* how far the bar is folded: 0 all chips, 1 pinned as a count, 2 counts as More, 3 symbols and counts only */
   var GRP = { run: ['●', 'working', 'Working'], queue: ['◷', 'in line', 'In line'], idle: ['◐', 'idle', 'Idle'] };
-  var MODELS = { claude: ['Opus', 'Sonnet', 'Haiku', 'Fable'], codex: ['GPT-5', 'GPT-5 mini'] };
+  var MODELS = { t1: AG.t1.models, t2: AG.t2.models };
   var KIND = { file: 'file', img: 'picture', html: 'page', table: 'table', chart: 'chart', pr: 'pull request', link: 'link' };
-  function mdl(s) { return s.model || (s.tool === 'codex' ? 'GPT-5' : 'Sonnet'); }
-  function tlabel(s) { return s.kind === 'shell' ? TOOL.shell : TOOL[s.tool || 'claude'] + ' · ' + mdl(s); }
-  function tool(s) { var t = s.kind === 'shell' ? 'shell' : (s.tool || 'claude'); return '<span class="mw-tool">' + I[t] + tlabel(s) + '</span>'; }
+  function mdl(s) { return s.model || AG[s.tool || 't1'].usual; }
+  function tlabel(s) { return s.kind === 'shell' ? TOOL.shell : TOOL[s.tool || 't1'] + ' · ' + mdl(s); }
+  function tool(s) { var t = s.kind === 'shell' ? 'shell' : (s.tool || 't1'); return '<span class="mw-tool">' + I[t] + tlabel(s) + '</span>'; }
   /* tool and model for a new session or a fresh start: the usual choice is preselected, so starting stays one click */
   function pickHTML() {
     var sg = function (label, list, cur, act, name) { return '<span class="segmented" role="group" aria-label="' + label + '">' + list.map(function (x) { return btn('btn sm', act, name ? name(x) : x, { 'data-v': x, 'aria-pressed': String(cur === x) }); }).join('') + '</span>'; };
-    return '<div class="mw-pick" role="group" aria-label="Runs on"><span class="mw-bl">Runs on</span>' + sg('Tool', ['claude', 'codex'], st.nt, 'ntool', function (x) { return TOOL[x]; }) + sg('Model', MODELS[st.nt], st.nm, 'nmodel') + mk(12) + '</div>';
+    return '<div class="mw-pick" role="group" aria-label="Runs on"><span class="mw-bl">Runs on</span>' + sg('Tool', ['t1', 't2'], st.nt, 'ntool', function (x) { return TOOL[x]; }) + sg('Model', MODELS[st.nt], st.nm, 'nmodel') + mk(12) + '</div>';
   }
   function meta(s, bare) { return '<span class="mw-meta meta">' + (bare ? '' : tool(s)) + (live(s) && s.up !== undefined ? '<span>open ' + dur(s.up) + '</span>' : '') + '<span>' + warm(s) + '</span></span>'; }
 
@@ -332,7 +332,7 @@
     var it = function (act, label, x) { x = x || {}; x['data-k'] = s.k; return btn('mw-opt', act, label, x); }, m = eff(), segOk = s.kind !== 'shell' && live(s) && s.s !== 'queue';
     var place = it('mode', I.bottom + '<span>At the bottom</span>', { 'data-m': 'bottom', 'aria-pressed': String(m === 'bottom') }) + '<span class="mw-nophone">' + it('mode', I.right + '<span>On the right</span>', { 'data-m': 'right', 'aria-pressed': String(m === 'right') }) + '</span>' + it('full', I.full + '<span>Full screen</span>', { 'aria-pressed': String(m === 'full') });
     if (kind === 'place') return '<div class="mw-pmenu" role="group" aria-label="Where Focus sits"><p class="mw-poph">Where Focus sits</p>' + place + '</div>';
-    if (kind === 'model') return '<div class="mw-pmenu" role="group" aria-label="Model"><p class="mw-poph">' + TOOL[s.tool || 'claude'] + ': model</p>' + MODELS[s.tool || 'claude'].map(function (x) { return it('smodel', x + (x === mdl(s) ? ' (now)' : ''), { 'data-v': x, 'aria-pressed': String((s.next || mdl(s)) === x) }); }).join('') + '<p class="meta">A change takes effect with a fresh start.</p></div>';
+    if (kind === 'model') return '<div class="mw-pmenu" role="group" aria-label="Model"><p class="mw-poph">' + TOOL[s.tool || 't1'] + ': model</p>' + MODELS[s.tool || 't1'].map(function (x) { return it('smodel', x + (x === mdl(s) ? ' (now)' : ''), { 'data-v': x, 'aria-pressed': String((s.next || mdl(s)) === x) }); }).join('') + '<p class="meta">A change takes effect with a fresh start.</p></div>';
     return '<div class="mw-pmenu" role="group" aria-label="More for ' + esc(s.k) + '">' + (segOk ? it('view', st.term ? 'Show chat' : 'Show terminal', { 'data-v': st.term ? 'chat' : 'term' }) : '') + (s.kind !== 'shell' ? it('ask', 'History') + it('pm', 'Model: ' + mdl(s), { 'data-kind': 'model' }) : '') + (o.narrow ? it('pin', s.pin ? 'Unpin' : 'Pin') + place : '') + (s.kind === 'ticket' ? it('ticket', 'Open ticket') : '') + '</div>';
   }
   function ctlHTML(s, o) {
@@ -347,7 +347,7 @@
   }
   function mdlBtn(s, can) {
     if (s.kind === 'shell') return tool(s);
-    var t = I[s.tool || 'claude'] + tlabel(s) + (s.next && s.next !== mdl(s) ? ' → ' + s.next + ' at the next fresh start' : '');
+    var t = I[s.tool || 't1'] + tlabel(s) + (s.next && s.next !== mdl(s) ? ' → ' + s.next + ' at the next fresh start' : '');
     return can ? btn('mw-mdl', 'pm', t, { 'data-k': s.k, 'data-kind': 'model', 'aria-expanded': String(pmOpen(s.k, 'model')), title: 'See or change the model' }) : '<span class="mw-tool">' + t + '</span>';
   }
   function histBtn(s) { return s.kind !== 'shell' ? btn('btn sm ghost', st.ask ? 'askoff' : 'ask', 'History', { 'aria-pressed': String(!!st.ask && live(s)) }) : ''; }
@@ -546,7 +546,7 @@
     if (st.list) p.push('list=' + st.list);
     if (st.menu) p.push('menu=' + st.menu);
     if (st.pm) p.push('pm=' + encodeURIComponent(st.pm.replace('|', ':')));
-    if (st.nt !== 'claude' || st.nm !== 'Sonnet') p.push('tool=' + st.nt, 'model=' + encodeURIComponent(st.nm));
+    if (st.nt !== 't1' || st.nm !== 'Sonnet') p.push('tool=' + st.nt, 'model=' + encodeURIComponent(st.nm));
     if ((by(st.cur).att || []).length) p.push('att=1');
     if (st.voice) p.push('voice=' + st.voice);
     if (st.f) p.push('q=' + encodeURIComponent(st.f));
@@ -677,7 +677,7 @@
     st.many = on;
     if (on) {
       if (!EXTRA) EXTRA = MORE.map(function (m, i) {
-        var s = { k: 'ORCH-' + m[0], t: m[1], kind: 'ticket', s: m[2], tool: i % 3 === 1 ? 'codex' : 'claude', up: 12 + i * 7, step: [1 + i % 4, 4 + i % 3], now: NOWS[i % NOWS.length], lines: ['⏺ Read(ticket notes)', '⏺ ' + NOWS[i % NOWS.length]], chat: [['h', NOWS[i % NOWS.length], '15:0' + (i % 10), 0, 0]], files: [] };
+        var s = { k: 'ORCH-' + m[0], t: m[1], kind: 'ticket', s: m[2], tool: i % 3 === 1 ? 't2' : 't1', up: 12 + i * 7, step: [1 + i % 4, 4 + i % 3], now: NOWS[i % NOWS.length], lines: ['⏺ Read(ticket notes)', '⏺ ' + NOWS[i % NOWS.length]], chat: [['h', NOWS[i % NOWS.length], '15:0' + (i % 10), 0, 0]], files: [] };
         if (m[2] === 'wait') { s.q = QS[i % 2]; s.now = 'Waits for your answer.'; }
         if (m[2] === 'idle') { s.sl = 'Idle ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
         if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. The conversation is kept.'; }
@@ -741,7 +741,7 @@
     var a = b.dataset.act, k = b.dataset.k, s;
     if (a === 'pm') { var pk = k + '|' + b.dataset.kind; st.pm = st.pm === pk ? '' : pk; st.menu = ''; st.list = ''; render(st.pm ? '.mw-pmenu .mw-opt' : '[data-act=pm][data-k="' + k + '"][data-kind=' + b.dataset.kind + ']'); return; }
     if (st.pm) { st.pm = ''; if (k && has(k) && (a === 'ask' || a === 'view')) st.cur = k; }
-    if (a === 'ntool') { st.nt = b.dataset.v; st.nm = st.nt === 'codex' ? 'GPT-5' : 'Sonnet'; render('[data-act=ntool][data-v=' + st.nt + ']'); return; }
+    if (a === 'ntool') { st.nt = b.dataset.v; st.nm = AG[st.nt].usual; render('[data-act=ntool][data-v=' + st.nt + ']'); return; }
     if (a === 'nmodel') { st.nm = b.dataset.v; render('[data-act=nmodel][aria-pressed=true]'); return; }
     if (a === 'smodel') { s = by(k); s.next = b.dataset.v === mdl(s) ? '' : b.dataset.v; render('[data-act=pm][data-k="' + k + '"][data-kind=model]'); say(s.next ? 'Model ' + s.next + ' is used from the next fresh start.' : 'The model stays ' + mdl(s) + '.'); return; }
     if (a === 'min') { setMode('bar'); return; }
@@ -896,8 +896,8 @@
     if (q.get('ren') === '1') st.ren = st.cur;
     if (/^(wait|pin|run|queue|idle|more)$/.test(v = q.get('list') || '')) st.list = v;
     if (/^(new|pos)$/.test(v = q.get('menu') || '')) st.menu = v;
-    if (MODELS[v = q.get('tool')]) { st.nt = v; st.nm = MODELS[v].indexOf(q.get('model')) >= 0 ? q.get('model') : (v === 'codex' ? 'GPT-5' : 'Sonnet'); }
-    else if (MODELS.claude.indexOf(q.get('model')) >= 0) st.nm = q.get('model');
+    if (MODELS[v = q.get('tool')]) { st.nt = v; st.nm = MODELS[v].indexOf(q.get('model')) >= 0 ? q.get('model') : AG[v].usual; }
+    else if (MODELS.t1.indexOf(q.get('model')) >= 0) st.nm = q.get('model');
     if ((v = q.get('pm'))) { var pc = v.lastIndexOf(':'); if (pc > 0 && has(v.slice(0, pc)) && /^(place|model|more)$/.test(v.slice(pc + 1))) st.pm = v.slice(0, pc) + '|' + v.slice(pc + 1); }
     if (q.get('att') === '1') by(st.cur).att = DEMO.slice();
     if (/^(rec|done)$/.test(v = q.get('voice') || '')) { st.voice = v; st.vk = st.cur; if (v === 'done') drafts['c:' + st.cur] = 'Please keep the old file name, and add a note for the support team.'; }
