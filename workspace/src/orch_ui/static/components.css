@@ -361,6 +361,9 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar:has(.nav-label) .side-foot{gap:8px}
 .sidebar:has(.nav-label) .workspace .menu{left:48px;top:0}
 .sidebar:has(.nav-label) .sidebar-scroll{overflow:visible}
+/* a short screen (150% zoom): when the list does not fit above the foot it scrolls instead of running under it; the
+   page sets .cramped only then, so the hover labels still stick out wherever it fits (report r-1117-1256-ws-2) */
+.sidebar:has(.nav-label) .sidebar-scroll.cramped{overflow-x:hidden;overflow-y:auto}
 .sidebar:has(.nav-label) .nav-item:focus-visible:after,.sidebar:has(.nav-label) .nav-item:hover:after{content:attr(aria-label);position:absolute;left:52px;top:0;padding:8px 12px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:8px;white-space:nowrap;z-index:80;font-size:12px;color:var(--text)}
 .sidebar:has(.nav-label) .nav-group[open]>.saved-views{display:grid;position:absolute;left:48px;top:0;margin:0;padding:8px;width:192px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;box-shadow:var(--lift-shadow);z-index:70}
 .sidebar:has(.nav-label) .saved-views .nav-item{justify-content:flex-start}

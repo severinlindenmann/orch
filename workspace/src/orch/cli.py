@@ -249,6 +249,8 @@ def _show(t: dict, root: Path) -> str:
         for k, label in (("changed", "Changed"), ("why", "Why"), ("not_included", "Not included")):
             if t["outcome"].get(k):
                 out.append(f"{label}: {t['outcome'][k]}")
+    if t.get("release"):
+        out.append("Release: the epics and tickets under it ship together")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(
@@ -478,6 +480,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help="an epic: its sub-tickets (--parent) are the work; a run goes through them in order",
     )
     x.add_argument(
+        "--release",
+        action="store_true",
+        help="a release: the epics and tickets that ship together go under it (--parent)",
+    )
+    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -513,6 +520,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--done-when", help="what should be true when it is done (empty clears)")
     x.add_argument(
         "--parent", metavar="ID", help="put it under this ticket, e.g. an epic (empty takes it out)"
+    )
+    x.add_argument(
+        "--release", choices=("yes", "no"), help="yes marks it as a release, no takes the mark off"
     )
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x = t.add_parser("order", parents=[common], help="the order of the tickets in one board lane")
@@ -1016,6 +1026,7 @@ def run(args: argparse.Namespace) -> None:
             title_auto=args.title_auto,
             plan_first=args.plan_first,
             epic=args.epic,
+            release=args.release,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -1071,12 +1082,18 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
-        if args.title is None and not fields and args.parent is None:
-            raise Refused("Say what to change: --title, --owner, --due, --note, --done-when or --parent.")
+        if args.title is None and not fields and args.parent is None and args.release is None:
+            raise Refused(
+                "Say what to change: --title, --owner, --due, --note, --done-when, --parent or --release."
+            )
         if args.parent is not None:  # first, so a refused parent changes nothing else
             t = tickets.set_parent(root, args.id, args.parent, by(), args.if_revision)
             if args.if_revision is not None and t.get("revision") != args.if_revision:
                 args.if_revision = t.get("revision")  # our own write: the other fields follow it
+        if args.release is not None:
+            t = tickets.set_release(root, args.id, args.release == "yes", by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other changes follow it
         if args.title is not None or fields:
             t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
         _out(args, t, f"Saved (revision {t['revision']}).")
