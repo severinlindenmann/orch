@@ -680,10 +680,10 @@ function buildLine(info, phase) {
   const idle = phase === 'idle' || phase === 'failed';
   return [
     h('span', {className:dev ? 'badge needs' : 'badge', 'data-key':'update-build'}, dev ? 'Development build' : 'Release'),
-    idle && !snapshot ? settingsText('p', {className:'meta', 'data-key':'update-build-note'}, dev
-      ? 'Not yet tested as a release. orch installs the newest release and restarts. Your helpers keep their work.'
-      : 'Want the newest changes before they are tested as a release? orch installs the development build and restarts. Your helpers keep their work.') : null,
-    idle && !snapshot ? h('div', {className:'row'}, (() => { const b = button(dev ? 'Switch to release' : 'Switch to development build', 'outline sm', () => updStart(dev ? 'release' : 'development')); b.dataset.key = 'update-switch'; return b; })()) : null];
+    // What the build is sits under its name; what the button does sits beside the button (manager, 17 Nov).
+    dev ? settingsText('p', {className:'meta', 'data-key':'update-build-note'}, 'The newest changes, not yet tested as a release.') : null,
+    idle && !snapshot ? h('div', {className:'row'}, (() => { const b = button(dev ? 'Switch to release' : 'Switch to development build', 'outline sm', () => updStart(dev ? 'release' : 'development')); b.dataset.key = 'update-switch'; return b; })(),
+      settingsText('span', {className:'meta', 'data-key':'update-switch-note'}, (dev ? 'Installs the newest release' : 'Installs the newest changes, not yet tested as a release,') + ' and restarts. Your helpers keep their work.')) : null];
 }
 function updNum(v) { return typeof v === 'number' ? 'orch ' + v : String(v || ''); }
 function aboutPanel() {

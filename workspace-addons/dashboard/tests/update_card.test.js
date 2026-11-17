@@ -89,7 +89,7 @@ test('a release says so and offers the development build in one click', async ()
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   const view = c.aboutPanel(), t = text(view);
   assert.match(t, /Installed orch 15 Release/);
-  assert.match(t, /installs the development build and restarts\. Your helpers keep their work\./);
+  assert.match(t, /Switch to development build Installs the newest changes, not yet tested as a release, and restarts\. Your helpers keep their work\./);
   const btn = all(view, n => n.tag === 'button').find(b => text(b) === 'Switch to development build');
   assert.ok(btn);
   await btn.listeners.click[0]();
@@ -100,7 +100,8 @@ test('a development build says so plainly and switches back to the release', asy
   const {c, posts} = context({...INFO, build:'development'});
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   const view = c.aboutPanel(), t = text(view);
-  assert.match(t, /Development build/); assert.doesNotMatch(t, /Installed orch 15 Release/);
+  assert.match(t, /Development build The newest changes, not yet tested as a release\. Switch to release Installs the newest release and restarts\./);
+  assert.doesNotMatch(t, /Installed orch 15 Release|branch/);
   const btn = all(view, n => n.tag === 'button').find(b => text(b) === 'Switch to release');
   await btn.listeners.click[0]();
   assert.deepEqual(posts, [{op:'update.start', args:{to:'release'}}]);
