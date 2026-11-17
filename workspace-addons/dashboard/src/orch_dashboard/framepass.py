@@ -7,12 +7,16 @@ Two passes are minted together:
 - the pass (`kind="header"`), sent only as X-Orch-Frame: the add-on's pages under /addon/<name>/ and the dashboard
   calls that add-on's page makes (FRAME_ROOT); it acts when the page that asked could act;
 - the file pass (`kind="file"`), sent only as the `orch-frame` query value of a picture, file or download address
-  (an <img> or a link cannot send a header): GET under /addon/<name>/ only, never acts. A file pass seen in a
-  log or a history can only read that add-on's pages for the rest of its short life.
+  (an <img> or a link cannot send a header): GET of the add-on's file and picture addresses only, never acts. A
+  file pass seen in a log or a download history can only read those files for the rest of its short life.
 
-Every pass belongs to the page session that minted it and to the address it was minted on (host name, and this
-computer's port or the port for other computers): a new or revoked sign-in, another host name or the other port
-ends it. Kept in memory only (a hash of it), LIFE seconds, at most MAX at a time.
+What a pass may do through the dashboard's /api/act is a fixed list per add-on (FRAME_OPS): the person's actions
+that add-on page offers, nothing else (never settings, keys, updates, add-ons or helpers' starts).
+
+Every pass belongs to the server's page secret and to the address it was minted on (host name, and this
+computer's port or the port for other computers): a revoked sign-in (every pass is then dropped), another host
+name or the other port ends it. A second normal sign-in keeps the same secret, so passes live on until LIFE ends.
+Kept in memory only (a hash of it), LIFE seconds, at most MAX at a time.
 """
 
 from __future__ import annotations
@@ -33,7 +37,40 @@ ALL_ROOT_PATHS = frozenset(p for paths in FRAME_ROOT.values() for p in paths)
 PASS_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
 # the addresses a file pass may read: an add-on's file and picture answers (Focus /api/file, Factory order files)
 FILE_PATH = re.compile(r"/api/(?:file|order/[A-Za-z0-9_-]{1,64}/file/[A-Za-z0-9_./%-]{1,300})")
-LIFE = 3600
+LIFE = 900  # 15 minutes: the frame asks for new passes by itself when a call answers 401
+# What each add-on's pass may run through the dashboard's /api/act (Focus's store.js EMBED_HUMAN, `ticket.done`
+# arriving as `ticket.patch` to done). Everything else is refused (ORCH-186 review M1).
+FRAME_OPS = {
+    "focus": frozenset(
+        {
+            "answer",
+            "ticket.patch",
+            "run.send",
+            "check.wont_do",
+            "check.reopen",
+            "check.edit",
+            "check.remove",
+            "ticket.attach",
+            "run.take_back",
+        }
+    )
+}
+REFUSED_OP = "This page may not do that. Do it in the dashboard."
+
+
+def op_refusal(addon: str, body: dict) -> str | None:
+    """None when the add-on page's pass may run this /api/act body, else the refusal words."""
+    op, args = body.get("op"), body.get("args")
+    if op not in FRAME_OPS.get(addon, ()) or not isinstance(args, dict):
+        return REFUSED_OP
+    # ticket.patch: only Done (Focus's "Looks good"), nothing else of the ticket
+    if op == "ticket.patch" and (
+        set(args) - {"ticket", "data", "if_revision"} or args.get("data") != {"status": "done"}
+    ):
+        return REFUSED_OP
+    return None
+
+
 MAX = 128
 KINDS = ("header", "file")
 
