@@ -168,3 +168,10 @@ test('an answer the server never returns is an error after 30 s, and the person 
   assert.equal(sent.length, 1);
   assert.ok(card.choose('Yes').ok); // buttons are usable again
 });
+
+test('who and where are said in plain words: a name, and terminal for the stored word cli', () => {
+  assert.equal(Q.whoWord('human:lume'), 'Lume');
+  assert.equal(Q.viaWord('cli'), 'terminal');
+  assert.equal(Q.viaWord('dashboard'), 'dashboard');
+  assert.equal(Q.otherLine({text: 'Yes', who: 'human:marco', via: 'cli'}), 'Yes · Marco · terminal');
+});
