@@ -318,7 +318,7 @@ def _tree(all_: list[dict], t: dict, prefix: str = "", seen: frozenset = frozens
 CORE_EXT = {"relay"}  # ext keys the core itself writes (relay-created tickets)
 
 
-def _visible(root: Path, t: dict) -> dict:
+def visible(root: Path, t: dict) -> dict:
     """Ticket data as the CLI shows it: ext keys of add-ons that are not on stay in the file, hidden."""
     ext = t.get("ext")
     if not ext:
@@ -328,7 +328,7 @@ def _visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -420,6 +420,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x = sub.add_parser("work-check", parents=[common], help="say so when files changed without a ticket")
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
+    x = sub.add_parser("usage", parents=[common], help="tokens per model and per ticket (read-only)")
+    x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
@@ -518,10 +520,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--done-when", dest="done_when")
     x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
     x = t.add_parser(
-        "model", parents=[common], help="which model this ticket's helper runs on: sonnet, opus or auto"
+        "model",
+        parents=[common],
+        help="the model of this ticket's helper: sonnet, opus or auto (a person); up --why (the helper)",
     )
     x.add_argument("id")
-    x.add_argument("name", choices=("sonnet", "opus", "auto"))
+    x.add_argument("name", choices=("sonnet", "opus", "auto", "up"))
+    x.add_argument("--why", help="with up: why the work needs Opus, in a few plain words")
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
     x.add_argument("--goal", required=True)
@@ -712,6 +717,19 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--head", required=True, metavar="COMMIT", help="merge only while this is its newest commit"
     )
 
+    x = lk.add_parser(
+        "wait",
+        parents=[common],
+        help="wait for the ticket's pull requests' checks (no AI call), write the verdict, merge on green",
+    )
+    x.add_argument("id")
+    x.add_argument(
+        "targets", nargs="*", metavar="target", help="numbers from `orch ref list` or addresses, in order "
+        "(default: every pull request not merged or closed yet)"
+    )  # fmt: skip
+    x.add_argument("--merge", action="store_true", help="merge each one on green, one after the other")
+    x.add_argument("--timeout", type=int, default=60, metavar="MIN", help="give up after this (default 60)")
+
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
     x = e.add_parser("set", parents=[common])
     x.add_argument("id")
@@ -879,6 +897,11 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "work-check":
         workcheck.run(root, args.json)
+    elif cmd == "usage":
+        from orch import usage
+
+        data = usage.workspace_usage(root, max(args.days, 1))
+        _out(args, data, usage.text(data))
     elif cmd == "update":
         if not args.project_only:  # first: with another ORCH_HOME there is nothing to update
             addons.tool_env_change_ok()
@@ -946,28 +969,18 @@ def run(args: argparse.Namespace) -> None:
             f'Created {t["key"]} "{t["title"]}" [{t["id"]}]{part}',
         )
     elif cmd == "ticket" and sub == "tree":
-        top = _visible(root, tickets.load(root, args.id))
+        top = visible(root, tickets.load(root, args.id))
         everything = tickets.list_all(root)
         _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
-        all_ = [_visible(root, t) for t in tickets.list_all(root)]
-        ts = [
-            t
-            for t in all_
-            if (
-                t["status"] == args.status
-                if args.status
-                else args.all or t["status"] not in ("done", "dropped")
-            )
-        ]
-        hidden = 0 if args.status or args.all else sum(1 for t in all_ if t["status"] in ("done", "dropped"))
-        ts.sort(key=lambda t: tuple(tickets.STATUS_WORDS).index(t["status"]))
+        from orch import reads
+
+        ts = reads.ticket_rows(root, args.status, args.all)  # the dashboard reads the same rows in-process
         everything = tickets.list_all(root)
         ids = {x["id"] for x in everything}
-        for t in ts:
-            t["children"] = tickets.children_counts(everything, t["id"])
-            if quiet := tickets.quiet_since(t):
-                t["quiet_since"] = quiet
+        hidden = (
+            0 if args.status or args.all else sum(1 for t in everything if t["status"] in ("done", "dropped"))
+        )
         txt = (
             "\n".join(
                 _line(t) + (" - parent missing" if t.get("parent") and t["parent"] not in ids else "")
@@ -979,7 +992,7 @@ def run(args: argparse.Namespace) -> None:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
-        t = _visible(root, tickets.load(root, args.id))
+        t = visible(root, tickets.load(root, args.id))
         _out(args, t, _show(t, root))
     elif cmd == "ticket" and sub == "status":
         who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
@@ -1034,9 +1047,35 @@ def run(args: argparse.Namespace) -> None:
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
         t = tickets.tidy(root, args.id, args.title, by(), fields, args.description)
         _out(args, t, f'Tidied: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "model" and args.name == "up":
+        from orch import runs_live as _live
+
+        tid = tickets.resolve(root, args.id)
+        mine = os.environ.get("ORCH_TICKET")
+        helper = os.environ.get("ORCH_RUN") or tickets.agent_tool()
+        if helper and mine and tickets.resolve(root, mine) != tid:
+            raise Refused(
+                f"This run works on {mine}, not on {args.id}: a helper moves up only its own ticket."
+            )
+        t, moved = tickets.move_up(root, tid, args.why or "", by())
+        live = _live.switch_model(root, t["id"], "opus", by()) if moved else False
+        _out(
+            args,
+            t,
+            "It already runs on Opus."
+            if not moved
+            else "Moved up to Opus. "
+            + (
+                "Finish this reply now: orch switches this conversation to Opus and you go on from there."
+                if live
+                else "The next start runs on Opus."
+            ),
+        )
     elif cmd == "ticket" and sub == "model":
         from orch import modelpick
 
+        if args.why:
+            raise Refused("--why goes with up only.")
         t = tickets.set_model(root, args.id, args.name, by())
         _out(
             args,
@@ -1319,6 +1358,67 @@ def _ref_merge(args, root: Path, who: str) -> None:
     _out(args, {"merged": True, "already": got["already"], "url": url}, line)
 
 
+def _ref_wait(args, root: Path, who: str) -> None:
+    """Wait for the ticket's pull requests' checks one after the other, without an AI call (prwait). Each
+    verdict goes on the ticket (a history line and the reference's state); with --merge each one is merged on
+    green before the next is waited for. Stops at the first that is not green (or not merged). Exit 1 then."""
+    from orch import prwait, stuck
+
+    t = tickets.load(root, args.id)
+    key = t.get("key") or t["id"]
+    rows = refs.all_refs(root, t)
+    if args.targets:
+        urls = []
+        for target in args.targets:
+            ref = next(
+                (r for n, r in rows if (str(n) == target if target.isdigit() else r.get("url") == target)),
+                None,
+            )
+            if ref is None or not prwait.is_pr_url(ref.get("url")):
+                raise Refused(f"{key} has no GitHub pull request {target}. Link it: orch ref add {key} <url>")
+            urls.append(ref["url"])
+    else:
+        urls = stuck.open_pulls(t)
+        if not urls:
+            raise Refused(f"{key} has no open GitHub pull request. Link one: orch ref add {key} <url>")
+    if args.merge:
+        for q in t.get("questions") or []:
+            if q.get("answer") is None and review.merge_url(q) in urls:
+                url = review.merge_url(q)
+                raise Refused(f"A person merges {url} with the Merge card on {key}; it is not merged here.")
+    if args.timeout < 1:
+        raise Refused("--timeout is a number of minutes, at least 1.")
+    done = []
+    for url in urls:
+        o = prwait.run_one(url, args.merge, timeout=args.timeout * 60)
+        done.append(o)
+        if not args.json:
+            for name, state in o.verdict.checks if o.verdict else []:
+                print(f"  {name}\t{state}")
+            print(o.line)
+        with contextlib.suppress(Refused, OSError):  # the verdict is said; the ticket lines are extras
+            tickets.note_history(root, t["id"], who, o.line)
+            if o.status:
+                tickets.ref_set(root, t["id"], url, o.status, who)
+        if not o.ok:
+            break
+    args._exit = 0 if all(o.ok for o in done) and len(done) == len(urls) else 1
+    shown = [
+        {
+            "url": o.url,
+            "ok": o.ok,
+            "status": o.status,
+            "line": o.line,
+            "green": bool(o.verdict and o.verdict.green),
+        }
+        for o in done
+    ]
+    if args.json:
+        _out(args, shown, "")
+    else:
+        nextstep.remember(args, shown)
+
+
 def _ref(args, root: Path, by) -> None:
     kinds = refs.active_kinds(root)
     if args.sub == "add":
@@ -1349,6 +1449,8 @@ def _ref(args, root: Path, by) -> None:
                 )
     elif args.sub == "merge":
         _ref_merge(args, root, by())
+    elif args.sub == "wait":
+        _ref_wait(args, root, by())
     elif args.sub == "set":
         t, ref, changed = tickets.ref_set(root, args.id, args.target, args.status, by())
         d = refs.describe(ref, kinds, root)
@@ -1501,4 +1603,4 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
     except Exception as e:  # an unexpected crash: freeze what is there before the traceback ends the program
         diag_incident.on_crash(diag._state.get("root"), e, argv)
         raise
-    return 0
+    return getattr(args, "_exit", 0)  # 1: a waited-for check is not green (orch ref wait)

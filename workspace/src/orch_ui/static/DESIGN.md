@@ -17,6 +17,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `tokens.css` | Generated tokens: colour, type, spacing, shape, motion durations and easings. |
 | `components.css` | Shell, sidebar, topbar, page, card, button, input, badge, chip, table, tabs, segmented, progress, empty/error, skeleton, tooltip, toast, dialog, sheet, menu, the one `.chev` chevron. |
 | `widgets.css`, `widgets.js` | Added 14 Nov: status icon set, pill, empty/error/loading state, stat tile, labelled progress, sortable table, `data-tip` tooltip, sheet, dialog S/M/L, strip, board, file card, type utilities. `UI.statusIcon`, `UI.state`, `UI.stat`, `UI.progress`, `UI.table`, `UI.sheet`, `UI.chevron`. |
+| `widgets.css`, `widgets.js` (17 Nov, ORCH-73) | Phone: `.tabbar` / `UI.tabbar(items)` bottom bar (Home, Tickets, Review with the one needs-you number, More = the side menu; only up to 720 px, the top bar and side menu step aside), `.short-group` / `UI.shortGroup` short rows (number and title, one fact, one thing on the right: steps pill, chip or Answer), `.phone-only` / `.wide-only` to show one of two layouts by width. |
 | `review.js`, `review.html`, `review-boot.js` | Review stack (15 Nov): `UI.reviewPage` (Waiting deck on `UI.swipeDeck` + Answered list), `UI.answerRecord` and `UI.appliesNow` (answers under a ticket's questions), `UI.reviewFetchApi` (same-origin api of the page `orch review` serves). `review.html` is that page, `review-boot.js` signs in from the `#t=` fragment and starts it. Voice in the deck only with `voice:true`. |
 | `interaction.css`, `overlay.js`, `select.js`, `date.js`, `components.js` | Dialog lifecycle, custom select (one SVG chevron), calendar, toast with Undo (`UI.toast`), menus, tabs and segments keyboard. |
 | `motion.css`, `motion.js` | Motion tokens in use (see Motion contract). |
@@ -152,6 +153,8 @@ the first rows without any extra work.
 - SX-19 Dates: "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32", 24 h, elapsed as "running 53 min" (F4, round-2 note).
   Built: `UI.stamp(value, {time:false, now})` and `UI.clock(value)` in `date.js` are the only way to write a date or time on a page (the dashboard's `date()`, `time()` and `DashHelpers.stamp` call the same rules). Never `toLocaleString`.
 - Ticket header strip (14 Nov): `.strip` = one status pill (`UI.statusIcon`), the title, one sentence, one main action, then the tabs. No stepper. The helper is just "Helper"; the review state is always "Check" with "Looks good" / "Send back".
+- Working ticket (ORCH-70, owner 16 Nov): `.strip.strip-plain` without a box; `.strip-kicker` above the `t-title`
+  (key · helper pill · helper · minutes); one Watch live; Stop and the copy commands in the ⋯ menu; no helper bar.
 - File cards (14 Nov): one `.file-tile` per file (thumbnail, name, kind · size · date). A CSV thumbnail is a `.mini-table`, Markdown is rendered (`FileViewer.renderMd`). A toolbar (search, sort, cards/list) only above 6 files.
 - SX-20 One source per count and status: sidebar badge = Home headline = Tickets group count; a newer system event
 
@@ -216,6 +219,8 @@ Only Home carries an attention count. Do not give every destination a badge. A t
 **Contacts lives under Add-ons.** It manages devices and workspace access. The bottom sidebar switch “Send questions to my phone” is a quick control, not a navigation shortcut. Settings contains notification preferences and the timeout, saved in place. Never give Settings a tab that silently redirects. If a Settings section needs device management, show an explicit link “Manage devices in Contacts →” while leaving the Settings section open (BP-47–49).
 
 Topbar: current location and Ask the helper / New ticket. These are navigation actions. Inside a decision view, make the decision its sole prominent action and style global New ticket as outline. Breadcrumbs only for nested pages: Tickets › Customer survey; current location is not a link (BP-24, BP-51). Demo new-ticket links use `../board/board.html?new=1`; area authors should wire that query to their composer. The shell intentionally has no active route until it is adopted by an area.
+
+**Phone (up to 720 px, ORCH-73, owner 16 Nov).** One bottom bar replaces the side menu and the top bar: Home, Tickets, Review (the one needs-you number), More (opens the side menu, which brings the top bar and its actions back). Lists are short rows, never a squeezed table: render the table with `.wide-only` and the `UI.shortGroup` list with `.phone-only`. Every page fits 390 px and 320 px without sideways scroll.
 
 ## Layout at both desktop sizes
 

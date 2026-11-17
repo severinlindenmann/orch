@@ -64,6 +64,10 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 /* Strip (ticket header), list-row link, history list, key/value helper */
 .strip{border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}
 .strip-h{display:flex;align-items:center;gap:16px;padding:16px 20px;flex-wrap:wrap}.strip .tabs{padding:0 20px;gap:20px}
+/* Plain strip (ORCH-70, working ticket): no box; one kicker line (key · state · helper · minutes) above a page title,
+   actions top right (they wrap under the title on a phone), tabs underneath. */
+.strip.strip-plain{border:0;border-radius:0;background:none}.strip-plain .strip-h{align-items:flex-start;padding:0 0 16px}.strip-plain .tabs{padding:0}
+.strip-kicker{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 0 4px}.strip-plain h1.t-title{margin:0}.strip-plain h1 .ed{padding-left:0;margin-left:0;border-color:transparent;text-align:left;overflow-wrap:anywhere}
 .rowlink{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:16px;align-items:center;padding:16px;border-top:1px solid var(--border);color:inherit;text-decoration:none;transition:background var(--dur-fast) ease}.rowlink:hover{background:var(--surface-2)}
 .hist{list-style:none;margin:0;padding:0}.hist li{display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:center;padding:12px 16px}.hist li+li{border-top:1px solid var(--border)}
 .tag{font-size:12px;color:var(--text-muted);border:1px solid var(--border);border-radius:99px;padding:0 8px}
@@ -445,6 +449,14 @@ iframe.loading{opacity:0}
 .opt-thumb>img{display:block;width:100%;height:100%;object-fit:contain;background:var(--ink)}
 .swipe-opt.today{cursor:default;border-style:dashed;background:var(--bg)}
 .swipe-opt.today .opt-letter{display:grid;place-items:center;color:var(--text-muted)}
+/* Options without any picture (a plain question, ORCH-110): plain rows with the whole title and its description;
+   no dark frame, no empty picture box, no zoom. */
+.swipe-preview.plain{flex:none;background:none;border:0;border-radius:0;overflow:visible;cursor:default}
+.swipe .swipe-preview.plain .swipe-opts{position:relative;inset:auto;grid-template-columns:1fr;grid-auto-rows:auto;padding:0;overflow:visible}
+.swipe .swipe-preview.plain .swipe-opt,.swipe-viewer .swipe-opts.plain .swipe-opt{flex-direction:column;align-items:stretch;gap:2px;padding:var(--s3)}
+.swipe .swipe-preview.plain .opt-h,.swipe-viewer .swipe-opts.plain .opt-h{flex-direction:row;align-items:center;width:auto}
+.swipe .swipe-preview.plain .opt-title,.swipe-viewer .swipe-opts.plain .opt-title{overflow:visible;white-space:normal;overflow-wrap:anywhere}
+.swipe .swipe-preview.plain .opt-text{display:block}
 .review-group{display:grid;gap:2px}
 .review-group+.review-group{margin-top:var(--s3)}
 .review-group-head{display:flex;align-items:baseline;gap:var(--s2);margin:0;padding:0 var(--s2);font-size:13px;line-height:18px;font-weight:600;color:var(--text)}
@@ -795,3 +807,44 @@ a.helper-title:hover{text-decoration:underline}
 .helper-key{color:var(--text-muted);font-weight:400}
 .helper-side{display:flex;align-items:center;gap:var(--s2);flex:none}
 @media (max-width:480px){.card-row.helper-row{flex-wrap:wrap}.helper-side{width:100%}}
+
+/* Phone bottom bar (ORCH-73, owner 16 Nov): below 721 px the side menu and top bar give way to one bar at the bottom,
+   Home · Tickets · Review · More, with the one needs-you number on Review. More opens the side menu (data-open=true on
+   .sidebar), which brings the top bar back with it. UI.tabbar builds it; .tabbar-sample shows it inline in the gallery. */
+.tabbar{display:none}
+.tabbar>a,.tabbar>button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:var(--touch);padding:var(--s3) var(--s1) var(--s2);border:0;background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);text-decoration:none;cursor:pointer}
+.tabbar>a:hover,.tabbar>button:hover{color:var(--text)}
+.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true]{color:var(--text);font-weight:500}
+.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
+.tabbar .tab-ic{display:inline-flex}.tabbar .tab-ic svg{width:20px;height:20px}
+.tabbar .count{position:absolute;top:4px;left:calc(50% + 6px);min-width:16px;min-height:16px;padding:0 4px;font-size:11px;line-height:16px}
+.tabbar.tabbar-sample{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));max-width:390px;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
+@media(max-width:720px){
+  .tabbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--surface);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom)}
+  .tabbar.tabbar-sample{position:static;z-index:auto}
+  body:has(>.tabbar) .sidebar:not([data-open=true]),body:has(>.tabbar):not(:has(.sidebar[data-open=true])) .topbar,body:has(>.tabbar) .btn.mobile-menu{display:none}
+  body:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s7) + env(safe-area-inset-bottom))}
+  body:has(>.tabbar) .toasts{bottom:calc(var(--touch) + var(--s4) + env(safe-area-inset-bottom))}
+}
+
+/* Show one of two layouts by screen width (ORCH-73): .wide-only from 721 px, .phone-only up to 720 px. */
+@media(min-width:721px){.phone-only{display:none!important}}
+@media(max-width:720px){.wide-only{display:none!important}}
+
+/* Short rows (ORCH-73, phone ticket list): a group card of one-line rows, number and title, one fact, one thing on the
+   right (a steps pill, a chip or an Answer button). UI.shortGroup builds it. */
+.short-group{margin-bottom:var(--s4)}
+.short-group>.card-h{gap:var(--s2);padding:0}
+.short-group>.card-h>button{display:flex;align-items:center;gap:var(--s2);width:100%;min-height:var(--touch);padding:0 var(--s4);border:0;background:none;color:var(--text);font:inherit;font-weight:600;text-align:left;cursor:pointer}
+.short-group>.card-h .count{font-weight:500}
+.short-group>.card-h .chev{margin-left:auto}
+.short-group>.card-h>button[aria-expanded=false] .chev{transform:rotate(-90deg)}
+.short-row{display:flex;align-items:center;gap:var(--s3);min-height:var(--touch);padding:var(--s3) var(--s4);border-top:1px solid var(--border);color:var(--text);text-decoration:none}
+.short-group>.card-h+.short-row{border-top:0}
+.short-row>.grow{display:grid;gap:2px;flex:1;min-width:0}
+.short-row .short-title{font-weight:500;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.short-row .short-fact{font-size:var(--fs-meta);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.short-row .short-side{flex:none;display:flex;align-items:center;gap:var(--s2)}
+.short-row.child{padding-left:var(--s7)}
+a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-decoration:underline}
+.short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}

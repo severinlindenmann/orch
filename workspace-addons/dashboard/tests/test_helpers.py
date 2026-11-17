@@ -365,13 +365,18 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
 def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     src = webjs.all_js()
     tree = src[src.index("function treeBranch") : src.index("let ticketView")]
-    assert tree.count("statusBadge(t)") == 1  # one status badge per table row
+    assert (
+        "statusBadge(t)" not in tree and "helperChip(t)" in tree
+    )  # ORCH-62: the group says the status; a chip only for Idle or Stuck
     assert "ticketAttentionChip(t)" not in tree
     chip = src[src.index("function ticketAttentionChip") : src.index("const localDay")]
     assert "section === 'waiting' ? null" in chip  # Needs you is left out in the waiting section
     assert "columnOf(status) === section) return null" in chip  # the status word is left out where it matches
     nxt = src[src.index("function ticketNext") : src.index("function ticketMenu")]
-    assert "'Next step: '" in nxt and "text = 'Paused'" in nxt  # text only when it adds something
+    assert "'Question: '" in nxt and "text = 'Paused'" in nxt  # text only when it adds something
+    assert (
+        "'Start helper'" not in nxt and "'Resume'" not in nxt and "run.start" not in nxt
+    )  # ORCH-69: no start on cards
     assert "ticketNext(t)" in tree and "ticketMenu(t, 'tree')" in tree
     assert "activity(t," not in tree
 
@@ -700,7 +705,10 @@ def test_review_ticket_without_run_offers_no_start():
     src = webjs.all_js()
     assert "line.primary && !['answer', 'open'].includes(line.primary.op)" in src
     # the helper bar only shows while the ticket is being worked on (never on review/done)
-    assert "!['done', 'review'].includes(t.status)" in src and "working ? agentBar(t) : null" in src
+    assert (
+        "!['done', 'review'].includes(t.status)" in src
+        and "working && !helperLive ? agentBar(t) : null" in src
+    )
 
 
 def test_ui2_small_bugs_in_markup_and_css():

@@ -56,6 +56,7 @@ In a live session, when you see `New input on orch ticket <id>` or `Your task fo
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
 Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, reminds a helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
+The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes stay in Review with one line why; `--dry-run` only says it. What it accepted: `orch review accepted [--since yesterday]`.
 
 **Finish a step**
 
@@ -113,6 +114,20 @@ To keep a text file or picture with a ticket yourself: `orch ticket attach <id> 
     orch check remove <id> <c>            # stays in the history
     orch check reopen <id> <c>            # a done step that turned out wrong
     orch check stop <id> <c>              # stop working on it without finishing
+
+**The work needs a bigger model**
+
+orch starts most tickets on Sonnet and hard ones (design, security, a migration, a crash or
+flaky test, part of a bigger plan) on Opus. When your plan shows design, security or several parts, or you
+failed twice at the same problem, move the ticket up; one history line says why:
+
+    orch ticket model <id> up --why "<what makes it hard, a few plain words>"
+
+In a live session finish your reply: orch switches the same conversation to Opus and you go on. orch also moves
+a ticket up by itself after two failed check runs on one step. It never moves down by itself, and a person's
+choice of model always stays (ask them instead). Your own subagents follow the same rule: the small model for
+searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
+Tokens per model and per ticket, and how many tickets moved up: `orch usage` (Insights shows the same).
 
 **Need an answer or blocked**
 
@@ -188,6 +203,7 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
     orch ref add <id> <https url> [--title "<name>"]   # PR, wiki page, design, video …
     orch ref list <id>   /   orch ref rm <id> <n>
     orch ref set <id> <n> --status <word>   # the state you last saw of a web reference: open, closed, merged
+    orch ref wait <id> [--merge]            # wait for its pull requests' checks (no AI call), note GREEN / NOT green
     orch ticket set <id> <addon>.<field> <value>   # an add-on field under Details
     orch ticket edit <id> --owner <name> --due YYYY-MM-DD --note "<text>"
     orch ext set <id> <addon> '<json object>'       # data an add-on keeps on the ticket

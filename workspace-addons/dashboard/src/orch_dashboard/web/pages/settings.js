@@ -134,6 +134,17 @@ function workflowCard(settings) {
       h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
 }
+// Accept small finished work for me (ORCH-77): one switch that saves at once; the Reviewer's work shows on Review.
+function reviewerCard(settings) {
+  return h('div', {className:'stack', 'data-key':'settings-reviewer'},
+    h('div', {className:'card'}, h('div', {className:'card-row'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Accept small finished work for me'),
+        settingsText('p', {className:'meta'}, 'Merged bug fixes with green checks and no change to looks, words or rules are marked Done for you. You see them on Review and can send any back.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')}))));
+}
+async function reviewerSwitch() {
+  await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');
+}
 // Separate copies (draft 1f, owner pass 11 Nov): one plain row with a switch; when, how many, what is on this
 // computer, how a copy is prepared and what it needs sit behind Details.
 const COPY_CHOICES = [['together', 'When helpers work at the same time'], ['always', 'Every time, even for one helper']];
@@ -604,7 +615,7 @@ function settingsPage() {
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings)), diagCard(settings)]),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), reviewerCard(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings), helpersAtOnceCard(settings)]),
@@ -881,7 +892,7 @@ function pageStopped(r) {
 function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
-  const src = '/addon/' + r.id + '/' + r.path;
+  const src = '/addon/' + r.id + '/' + r.path + (r.inner ? '#' + r.inner : '');
   const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };

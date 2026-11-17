@@ -57,29 +57,30 @@ function showMessage(text) {
   overview = null;
 }
 
-// First day, nothing recorded yet: the same three tiles as the overview, at 0, each saying when it fills.
+// The stat tiles. A number is shown only when it is measured; an unmeasured one says "Not measured yet" (ORCH-72).
+function metric(label, value, small) {
+  const card = node('article', undefined, 'card metric');
+  card.append(node('p', label, 'meta'), value === null ? node('p', 'Not measured yet') : node('strong', value), node('small', small));
+  return card;
+}
+
+function servicesTile(view, small) {
+  const {count, known} = view.tabs.connections;
+  if (known) return metric('Connected services', String(count), small || (count ? 'Used by your helpers' : 'None connected'));
+  return metric('Connected services', null, count ? `${plural(count, 'service')} used by your helpers` : 'Orch can’t see this list yet');
+}
+
+// First day, nothing recorded yet: the same tiles as the overview, each saying when it fills.
 function emptyTiles(view) {
   const note = 'Fills after the first helper run';
-  const cards = [['Times helpers worked', '0'], ['Connected services', String(view.tabs.connections.count)]];
-  return cards.map(([label, value]) => {
-    const card = node('article', undefined, 'card metric');
-    card.append(node('p', label, 'meta'), node('strong', value), node('small', note));
-    return card;
-  });
+  return [metric('Times helpers worked', '0', note), servicesTile(view, note)];
 }
 
 function fillMetrics() {
   const first = overview.since && (Date.now() - Date.parse(overview.since)) < 31 * 86400000;
-  const cards = [
-    ['Times helpers worked', String(overview.runs), first ? 'First month of data' : 'In the last 30 days'],
-    ['Connected services', String(overview.tabs.connections.count),
-      overview.tabs.connections.count ? 'Used by your helpers' : 'None connected'],
-  ];
-  byId('metrics').replaceChildren(...cards.map(([label, value, small]) => {
-    const card = node('article', undefined, 'card metric');
-    card.append(node('p', label, 'meta'), node('strong', value), node('small', small));
-    return card;
-  }));
+  byId('metrics').replaceChildren(
+    metric('Times helpers worked', String(overview.runs), first ? 'First month of data' : 'In the last 30 days'),
+    servicesTile(overview));
 }
 
 function fillTrend() {
@@ -109,6 +110,50 @@ function fillBars() {
     bar.append(head, meter);
     bars.append(bar);
   });
+}
+
+const short = (n, d, unit) => `${(n / d).toFixed(1).replace(/\.0$/, "")}${unit}`;
+const fmt = n => n >= 1e6 ? short(n, 1e6, "M") : n >= 1e3 ? short(n, 1e3, "k") : String(n);
+
+function renderModels(view) {
+  const host = byId('models');
+  if (!view || view.error) { host.hidden = true; return; }
+  host.hidden = false;
+  const bars = byId('models-bars'), rows = byId('models-rows');
+  bars.replaceChildren();
+  rows.replaceChildren();
+  rows.hidden = view.empty;
+  if (view.empty) { byId('models-text').textContent = view.text; return; }
+  byId('models-text').textContent = view.moved_text + '.';
+  const most = Math.max(...view.models.map(m => m.tokens));
+  view.models.forEach((m, index) => {
+    const bar = node('div', undefined, index ? 'bar-row secondary' : 'bar-row');
+    const head = node('div', undefined, 'row between');
+    head.append(node('span', m.label), node('strong', `${fmt(m.tokens)} tokens`));
+    const meter = node('div', undefined, 'progress');
+    meter.setAttribute('aria-label', `${m.label}: ${m.tokens} tokens`);
+    const fill = node('span');
+    fill.style.setProperty('--value', `${Math.round(100 * m.tokens / most)}%`);
+    meter.append(fill);
+    bar.append(head, meter);
+    bars.append(bar);
+  });
+  for (const t of view.tickets) {
+    // one line per ticket: the title is cut with an ellipsis, the tokens stay right-aligned on the same row
+    const item = node('div', undefined, 'list-row');
+    item.setAttribute('role', 'listitem');
+    const name = node('div', undefined, 'grow');
+    name.append(node('strong', t.key), node('div', t.title, 'meta truncate'));
+    const tokens = node('div', undefined, 'numeric');  // one short line per model, right-aligned
+    const parts = t.parts.length ? t.parts : [{ label: '', tokens: t.tokens }];
+    tokens.append(...parts.map(p => node('div', `${p.label} ${fmt(p.tokens)}`.trim(), 'meta truncate')));
+    item.append(name, tokens);
+    rows.append(item);
+  }
+}
+
+async function loadModels() {
+  try { renderModels(await read('/api/models')); } catch { renderModels(null); }
 }
 
 function stateBadge(row) {
@@ -188,11 +233,11 @@ function renderTabs() {
 }
 
 function renderServices() {
-  const count = overview.tabs.connections.count;
-  byId('services-title').textContent = `Connected services · ${count}`;
+  const {count, known} = overview.tabs.connections;
+  byId('services-title').textContent = known || count ? `Connected services · ${count}` : 'Connected services';
   const box = byId('services');
   const answer = lists.connections;
-  if (!count) { box.textContent = 'No connected services are recorded.'; return; }
+  if (!count) { box.textContent = known ? 'No connected services are recorded.' : 'Not measured yet.'; return; }
   if (!answer) { box.textContent = `${plural(count, 'connected service')} recorded.`; return; }
   box.replaceChildren(...answer.rows.map(row => {
     const line = node('p');
@@ -277,6 +322,7 @@ async function refresh() {
     if (!await loadList('skills')) return;
     showView('overview');
     renderAll();
+    loadModels();
     for (const tab of ['connections', 'keys']) {
       if (overview.tabs[tab].count && await loadList(tab)) { renderServices(); if (tab === active) renderTable(); }
     }

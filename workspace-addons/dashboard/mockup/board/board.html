@@ -37,7 +37,7 @@
   <span class="grow"></span>
   <button class="btn ghost sm" type="button" id="clear" hidden>Clear filters</button>
   <label class="filter">Person <select id="person"><option value="">Everyone</option><option value="Anna">Anna</option><option value="Ben">Ben</option></select></label>
-  <div class="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input type="search" id="q" placeholder="Search tickets" aria-label="Search tickets"><kbd aria-hidden="true">/</kbd></div>
+  <div class="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input type="search" id="q" placeholder="58 or words" aria-label="Search tickets"><kbd aria-hidden="true">/</kbd></div>
  </div>
 
  <!-- LOADED -->
@@ -46,25 +46,25 @@
    <header class="col-h"><h2 id="h-todo" title="To do yet"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/></svg>To do</h2><span class="count-n" data-count="todo">4</span><a class="btn ghost icon xs add" href="../board/new.html" aria-label="New ticket"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></a></header>
    <div class="col-body">
     <article class="tcard" data-state="todo" data-person="Anna" data-ref="t_ceu9qj">
-     <a class="tc-title" href="../ticket/ticket-copy.html">Set up the weekly sales report</a>
+     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-18</span> Set up the weekly sales report</a>
      <div class="tc-line">2 steps planned</div>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">Added yesterday</span><span class="when">Due 18:30</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">Added yesterday</span><span class="when">Due 18:30</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Set up the weekly sales report"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_05uo1r">
-     <a class="tc-title" href="../ticket/ticket-copy.html">Redesign the logo</a>
+     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-19</span> Redesign the logo</a>
      <div class="tc-line"><span>Paused</span><span class="bar"><i style="--v:50%"></i></span><span class="n">1 of 2 steps</span></div>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">2 days ago</span><span class="when warn">Late since 09:00</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">2 days ago</span><span class="when warn">Late since 09:00</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Redesign the logo"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_3lhp1y">
-     <a class="tc-title" href="../ticket/ticket-copy.html">Thank-you notes for our top customers</a>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-20</span> Thank-you notes for our top customers</a>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Thank-you notes for our top customers"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_8yfw3d">
-     <a class="tc-title" href="../ticket/ticket-copy.html">Answer customer emails from last week</a>
-     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <a class="tc-title" href="../ticket/ticket-copy.html"><span class="key">ORCH-21</span> Answer customer emails from last week</a>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Answer customer emails from last week"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <p class="col-empty" data-empty="Nothing to start. Add a ticket with +">Nothing to start. Add a ticket with +</p>
@@ -75,19 +75,19 @@
    <header class="col-h"><h2 id="h-working" title="A helper is on it"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>Working</h2><span class="count-n" data-count="working">3</span></header>
    <div class="col-body">
     <article class="tcard" data-state="working" data-person="Anna" data-ref="t_9w3xrs">
-     <a class="tc-title" href="../ticket/ticket-working.html">Plan the autumn newsletter</a>
+     <a class="tc-title" href="../ticket/ticket-working.html"><span class="key">ORCH-12</span> Plan the autumn newsletter</a>
      <div class="tc-line working"><span class="live" aria-hidden="true"></span><span>Helper working</span><span class="bar" role="img" aria-label="3 of 4 steps"><i style="--v:75%"></i></span><span class="n">3 of 4 steps</span></div>
      <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when" data-demo="newsletter-time">23 min ago</span><a class="btn xs outline tc-act hover" href="../focus/focus.html">Watch live</a></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Plan the autumn newsletter"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="working" data-person="Ben" data-ref="t_0qu0pr">
-     <a class="tc-title" href="../ticket/ticket-working.html?quiet=1">Book the spring workshop room</a>
+     <a class="tc-title" href="../ticket/ticket-working.html?quiet=1"><span class="key">ORCH-15</span> Book the spring workshop room</a>
      <div class="tc-line working"><span class="live" aria-hidden="true"></span><span>Helper working</span><span class="bar" role="img" aria-label="1 of 3 steps"><i style="--v:33%"></i></span><span class="n">1 of 3 steps</span></div>
      <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">No news since 09:20</span><a class="btn xs outline tc-act hover" href="../focus/focus.html">Watch live</a></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Book the spring workshop room"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="working" data-person="Anna" data-ref="t_fswaap">
-     <a class="tc-title" href="../ticket/ticket-change.html">Update the price list</a>
+     <a class="tc-title" href="../ticket/ticket-change.html"><span class="key">ORCH-14</span> Update the price list</a>
      <div class="tc-line working"><span class="live" aria-hidden="true"></span><span>Helper working</span><span class="bar" role="img" aria-label="2 of 3 steps"><i style="--v:67%"></i></span><span class="n">2 of 3 steps</span></div>
      <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">24 min ago</span><a class="btn xs outline tc-act hover" href="../focus/focus.html">Watch live</a></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Update the price list"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
@@ -100,7 +100,7 @@
    <header class="col-h"><h2 id="h-needs" title="A helper asked you something"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M10 10a2 2 0 1 1 3 1.7c-.6.4-1 .8-1 1.6M12 16.5h.01"/></svg>Needs you</h2><span class="count-n" data-count="needs">1</span></header>
    <div class="col-body">
     <article class="tcard" data-state="needs" data-person="Ben" data-ref="t_rpcqdr">
-     <a class="tc-title" href="../ticket/ticket-question.html">Which supplier for the gift boxes?</a>
+     <a class="tc-title" href="../ticket/ticket-question.html"><span class="key">ORCH-9</span> Which supplier for the gift boxes?</a>
      <div class="tc-line needs"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4z"/></svg>Question for you · asked 27 min ago</div>
      <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><a class="btn xs tc-act attn" href="../ticket/ticket-question.html#answer">Answer</a></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Which supplier for the gift boxes?"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
@@ -113,7 +113,7 @@
    <header class="col-h"><h2 id="h-check" title="Ready for your look"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Check</h2><span class="count-n" data-count="check">1</span></header>
    <div class="col-body">
     <article class="tcard" data-state="check" data-person="Anna" data-ref="t_bjv2j0">
-     <a class="tc-title" href="../ticket/ticket-review.html">Summarise the customer survey</a>
+     <a class="tc-title" href="../ticket/ticket-review.html"><span class="key">ORCH-11</span> Summarise the customer survey</a>
      <div class="tc-line needs"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5"/></svg>Check · Finished <span data-demo="survey-time">12:26</span></div><a class="result-snippet" href="../ticket/ticket-review.html"><span class="preview-thumbnail" aria-label="Preview of survey summary"><span>Survey</span><i></i><i></i><i></i></span><span>112 answers read · Preview →</span></a>
      <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><a class="btn xs tc-act attn" href="../ticket/ticket-review.html#result">Check result</a></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Summarise the customer survey"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
@@ -127,13 +127,13 @@
    <header class="col-h"><h2 id="h-done" title="Finished work"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>Done</h2><span class="count-n" data-count="done">2</span><button class="btn ghost icon xs collapse-done" type="button" id="collapse" aria-label="Hide Done" style="margin-left:auto"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></header>
    <div class="col-body">
     <article class="tcard" data-state="done" data-person="Anna" data-ref="t_4ksrp6">
-     <a class="tc-title" href="../ticket/ticket-done.html">Prepare the new opening hours sign</a>
+     <a class="tc-title" href="../ticket/ticket-done.html"><span class="key">ORCH-16</span> Prepare the new opening hours sign</a>
      <div class="tc-line done"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg>Finished today <span data-demo="sign-time">12:32</span></div><div class="tc-line needs">Changes to add</div><a class="btn primary xs" href="../ticket/ticket-done.html#changes">Apply changes</a>
      <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><a class="btn xs outline tc-act hover" href="../ticket/ticket-done.html#result">Open result</a></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Prepare the new opening hours sign"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     </article>
     <article class="tcard" data-state="done" data-person="Anna" data-ref="t_9sxr4o">
-     <a class="tc-title" href="../ticket/ticket-done.html">Fix the typo on the opening hours page</a>
+     <a class="tc-title" href="../ticket/ticket-done.html"><span class="key">ORCH-17</span> Fix the typo on the opening hours page</a>
      <div class="tc-line done"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg>Finished today <span data-demo="typo-time">12:27</span></div>
      <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><a class="btn xs outline tc-act hover" href="../ticket/ticket-done.html#result">Open result</a></div>
      <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Fix the typo on the opening hours page"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
@@ -181,6 +181,6 @@
 root.dataset.state=new URLSearchParams(location.search).get('state')||'loaded';
 const params=new URLSearchParams(location.search);q.value=params.get('q')||'';person.value=params.get('person')||'';const view=params.get('view');const filter=()=>{document.querySelectorAll('.tcard').forEach(c=>c.hidden=!(c.textContent.toLowerCase().includes(q.value.toLowerCase())&&(!person.value||c.dataset.person===person.value)&&(!view||view==='working'&&c.dataset.state==='working'||view==='done-week'&&c.dataset.state==='done'||view==='needs-you'&&(c.dataset.state==='needs'||c.dataset.state==='check'||c.dataset.ref==='t_4ksrp6'))));document.querySelectorAll('.col').forEach(c=>{const n=c.querySelectorAll('.tcard:not([hidden])').length;c.querySelector('.count-n').textContent=n;c.classList.toggle('is-empty',!n)});document.querySelector('#clear').hidden=!q.value&&!person.value};q.oninput=person.onchange=filter;document.querySelector('#clear').onclick=()=>{q.value=person.value='';filter()};
 document.querySelector('#skel').innerHTML=Array.from({length:5},()=>'<div class="sk-col"><div class="sk-card skeleton"></div><div class="sk-card skeleton"></div></div>').join('');
-document.querySelectorAll('.tc-more').forEach(b=>b.remove());document.querySelectorAll('[data-act="start"]').forEach(b=>b.onclick=()=>location.href='../ticket/ticket-copy.html');
+document.querySelectorAll('.tc-more').forEach(b=>b.remove());
 filter();document.querySelector('#waitn').textContent='3';document.querySelector('#nav-count').textContent='3';
 })();</script><script src="../home/demo-data.js"></script><script src="../../../../workspace/src/orch_ui/static/state-controls.js"></script></body></html>

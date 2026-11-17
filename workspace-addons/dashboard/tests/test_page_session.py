@@ -434,6 +434,7 @@ ACT_ARGS = {
     "addon.uninstall": {"name": "scheduler"},
     "share.set": {"on": True},
     "workflow.set": {"on": True},
+    "reviewer.set": {"on": True},
     "live.set": {"max": 3},
     "copies.set": {"mode": "off"},
     "workspace.set": {"field": "name", "text": "Demo"},

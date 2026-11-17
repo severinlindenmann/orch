@@ -29,11 +29,13 @@ test('Dash 21: no chip when it matches the section; Done shows the finish day; n
   assert.doesNotMatch(text(c.ticketNext({id:'r', status:'review'})), /Next step|Read the result/);
   assert.equal(c.ticketNext({id:'a', status:'active', checklist:[{text:'Draft it'}]}), null);
 });
-test('Dash 23: a ticket a helper worked on that is not running offers Resume with a Paused line', () => {
+test('ORCH-69: board and list cards carry no Start helper or Resume button; a paused ticket keeps its Paused line', () => {
   const c = listCtx();
-  assert.match(text(c.ticketNext({id:'p', status:'open', sessions:[{id:'s1'}], updated_at:'2026-11-12T10:00:00Z'})), /^Paused .*Resume$/);
-  assert.equal(text(c.ticketNext({id:'n', status:'open'})), 'Start helper');
-  assert.equal(text(c.ticketNext({id:'t', status:'open', checklist:[{text:'typed by me'}]})), 'Start helper', 'typed tasks alone are not paused');
+  const paused = c.ticketNext({id:'p', status:'open', sessions:[{id:'s1'}], updated_at:'2026-11-12T10:00:00Z'});
+  assert.match(text(paused), /^Paused /);
+  assert.doesNotMatch(text(paused), /Resume|Start helper/);
+  assert.equal(c.ticketNext({id:'n', status:'open'}), null, 'a To do card has no button');
+  assert.equal(c.ticketNext({id:'t', status:'open', checklist:[{text:'typed by me'}]}), null, 'typed tasks alone: no button');
 });
 test('the list takes the finish day from the done history entry, like the ticket page', () => {
   const c = listCtx();
@@ -84,7 +86,7 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(nodes(all.find(n => n.attrs.id === 'ticket-panel-overview')).some(n => n.attrs['data-field'] === 'note'), 'Note in Overview');
   assert.match(text(all.find(n => n.attrs.className === 'side-panel properties')), /Properties.*Owner.*Due.*Done when/);
   assert.ok(!all.some(n => n.tag === 'details' && /Details/.test(text(n))) && !/Technical details|\+ Add detail/.test(body), 'no Details toggles');
-  assert.equal(body.split('PIL-54').length, 1, 'no footer line with the key under Properties (linked work, 15 Nov)');
+  assert.equal(body.split('PIL-54').length, 2, 'the key shows once, before the title (ORCH-58); no footer line with it under Properties (linked work, 15 Nov)');
   assert.match(body, /Add a rain planYou asked: Please add a rain plan\./);
   const typed = {...t, id:'t2', sessions:[]};
   ctx.tickets = () => [typed];
@@ -110,4 +112,53 @@ test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch pick, an
   assert.equal(ctx.modelField({id:'t1', model:{name:'fable', by:'human:x'}}).value, 'auto', 'an unknown model is not shown as chosen');
   ctx.snapshot = true;
   assert.equal(text(ctx.modelField({id:'t1'})), 'orch picks it when work starts');
+});
+test('ORCH-62: every ticket sits in its own status group, so group counts match the rows and the filters', () => {
+  const items = [
+    {id:'p', status:'active', title:'Parent'},
+    {id:'c1', parent:'p', status:'done'}, {id:'c2', parent:'p', status:'open'}, {id:'c3', parent:'p', status:'review'},
+    {id:'w', status:'active'}, {id:'q', status:'waiting', questions:[{text:'Which?'}]},
+    {id:'b', status:'waiting', waiting_on:{kind:'ticket', ref:'w'}},
+  ];
+  const c = listCtx({tickets:() => items});
+  const groups = JSON.parse(JSON.stringify(Object.fromEntries(c.ticketGroups(items).map(g => [g.status, g.tickets.map(t => t.id)]))));
+  assert.deepEqual(groups.active, ['p', 'w']);
+  assert.deepEqual(groups.done, ['c1']);
+  assert.deepEqual(groups.open, ['c2']);
+  assert.deepEqual(groups.review, ['c3']);
+  assert.deepEqual(groups.waiting, ['q'], 'only a ticket with an open question needs you');
+  assert.deepEqual(groups.blocked, ['b']);
+  assert.equal(c.ticketGroups(items).find(g => g.status === 'blocked').title, 'Waiting for another ticket');
+  assert.equal(items.filter(t => c.inView(t, 'working')).length, groups.active.length, 'Working filter = Working group');
+  assert.ok(!c.inView(items[6], 'needs-you'), 'waiting for another ticket is not Needs you');
+  assert.ok(c.inView(items[5], 'needs-you'));
+});
+test('ORCH-62: a ticket waiting for another names it; a time wait says until when', () => {
+  const items = [{id:'t_a', key:'ORCH-56', status:'active'}, {id:'b', status:'waiting', waiting_on:{kind:'ticket', ref:'t_a'}}];
+  const c = listCtx({tickets:() => items});
+  assert.equal(text(c.waitsLine(items[1])), 'Waits for ORCH-56');
+  assert.match(text(c.waitsLine({id:'x', status:'waiting', waiting_on:{kind:'time', until:'2026-11-17T08:00:00Z'}})), /^Waits until /);
+  assert.equal(c.waitsLine({id:'q', status:'waiting', questions:[{text:'Which?'}]}), null);
+  assert.equal(c.ticketGroups([{id:'x', status:'waiting', waiting_on:{kind:'time', until:'2026-11-17T08:00:00Z'}}]).find(g => g.status === 'blocked').title, 'Waiting');
+});
+test('ORCH-62: steps read 3/4 on one line, never "3 of 4 steps" split over lines', () => {
+  const c = listCtx({h:(...a) => Object.assign(h(...a), {style:{}})});
+  const cell = c.stepsCell({checklist:[{done:true}, {done:true}, {done:true}, {}]}, {});
+  assert.equal(nodes(cell).find(n => /steps-count/.test(n.attrs?.className || '')).children.join(''), '3/4');
+  assert.equal(text(c.stepsCell({status:'waiting', questions:[{text:'Which?'}]}, {})), '–', 'no "Question for you" in the steps column');
+});
+test('ORCH-62: a chip only for an Idle or Stuck helper, with how long nothing ran', () => {
+  const idle = {running:true, idle_seconds:18 * 60, helper:{state:'idle'}}, busy = {running:true, helper:{state:'working'}};
+  const c = listCtx({state:{runs:{i:idle, w:busy, s:{state:'maybe-stale'}}}});
+  const i = c.helperChip({id:'i', status:'active'});
+  assert.equal(text(i.chip), 'Idle');
+  assert.equal(i.line, 'Nothing running for 18 min');
+  assert.equal(text(c.helperChip({id:'s', status:'active'}).chip), 'Stuck');
+  assert.equal(c.helperChip({id:'w', status:'active'}), null, 'a working helper gets no chip');
+  assert.equal(c.helperChip({id:'n', status:'open'}), null);
+  assert.doesNotMatch(listSrc, /'Owner', 'Steps done'|'Status', 'Owner'/, 'no Status or Owner column');
+});
+test('ORCH-62: an open question reads "Question: ..." under the title', () => {
+  const c = listCtx();
+  assert.match(text(c.ticketNext({id:'q', status:'waiting', questions:[{text:'Start the run?'}]})), /^Question: /);
 });

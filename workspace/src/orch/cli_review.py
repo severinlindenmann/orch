@@ -12,7 +12,7 @@ from pathlib import Path
 from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link")
+SUBS = ("list", "answer", "wait", "link", "tend", "accepted")
 CARD_KINDS = ("draft", "link", "plan", "choose")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
@@ -55,6 +55,15 @@ def add_parsers(sub, common) -> None:
     x.add_argument("question", nargs="?", help="the question (default: the latest card)")
     x.add_argument("--timeout", type=int, default=600, metavar="SECONDS")
     s.add_parser("link", parents=[common], help="the address of the review page")
+    x = s.add_parser(
+        "tend", parents=[common], help="the Reviewer's pass: accept small finished work for the owner"
+    )
+    x.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
+    x.add_argument(
+        "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
+    )
+    x.add_argument("--phone", action="store_true", help="also send the list to your phones (relay)")
 
 
 def _ticket(root: Path, args) -> dict:
@@ -381,6 +390,37 @@ def _link(args, root: Path) -> None:
     _out(args, data, "No review page runs. Start it in your terminal: orch review")
 
 
+def _tend(args, root: Path) -> None:
+    from orch import reviewer
+
+    res = reviewer.run(root, dry_run=args.dry_run)
+    _out(args, res, reviewer.text(res, args.dry_run))
+
+
+def _accepted(args, root: Path) -> None:
+    from orch import relay, reviewer
+
+    rows = reviewer.accepted(root, reviewer.since_time(args.since))
+    word = args.since if args.since in ("today", "yesterday") else "since " + args.since
+    text = reviewer.accepted_text(rows, word)
+    data: dict = {"since": args.since, "accepted": rows}
+    if args.phone:
+        data["sent"] = False
+        if rows:  # nothing accepted: no message
+            try:
+                relay.send_text(root, "phones", text, general=True)
+                data["sent"] = True
+            except Refused as e:
+                data["not_sent"] = str(e)
+        text += "\n" + (
+            "Sent to your phones."
+            if data["sent"]
+            else "Not sent to your phones"
+            + (f": {data['not_sent']}" if "not_sent" in data else " (nothing to send).")
+        )
+    _out(args, data, text)
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "review":
         return False
@@ -389,5 +429,7 @@ def dispatch(args, root: Path) -> bool:
         if rc:
             raise SystemExit(rc)
         return True
-    {"list": _list, "answer": _answer, "wait": _wait, "link": _link}[args.sub](args, root)
+    {"list": _list, "answer": _answer, "wait": _wait, "link": _link, "tend": _tend, "accepted": _accepted}[
+        args.sub
+    ](args, root)
     return True

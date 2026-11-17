@@ -144,6 +144,8 @@ if args == ["record", "counts", "--days", "30", "--json"]:
     answer("answer")
 if args == ["record", "settings", "--json"]:
     answer("settings")
+if args == ["usage", "--days", "30", "--json"]:
+    answer("usage")
 if args == ["ticket", "list", "--all", "--json"]:
     answer("tickets")
 if plain[:2] == ["config", "set"] and len(plain) >= 5:

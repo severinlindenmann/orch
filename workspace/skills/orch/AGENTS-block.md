@@ -5,5 +5,6 @@
 3. A task is done only with evidence: `orch check done <id> <c> --command "<what you ran>" --summary "<what came out, one line>"` (or --note, --pr, --commit, --file, --url).
 4. Need an answer (only for irreversible, paid, production, real-data or outside-visible steps, or what `.orch/ask-when.md` lists when it exists) or blocked: `orch ask <id> "<question>" --option A --option B --recommend A`, then keep working on the steps that do not depend on the answer.
 5. Before you finish run `orch work-check` (it says when files changed with no ticket), then end every run with `orch ticket summary <id> "<what was done and what is left>"`, then `orch ticket status <id> done` (orch moves it to Review; never claim it is Done). When the ticket reaches Review, orch sends its summary and files to the person by itself: add no task for that and don't write that it was sent. Answering a person's message is still your job.
+6. Model: a ticket on Sonnet whose plan shows design, security or several parts, or that failed twice at the same problem, moves up: `orch ticket model <id> up --why "<reason>"`. Your own subagents follow the same rule: the small model first, Opus only where it is needed.
 
 Plans may change. There are no signing or planning gates. Details, notes, files and icon: the orch skill (`.agents/skills/orch/SKILL.md`).

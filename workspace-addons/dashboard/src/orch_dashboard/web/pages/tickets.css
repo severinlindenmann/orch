@@ -67,7 +67,7 @@
 .ticket-table .ticket-actions-row{display:flex;align-items:center;justify-content:flex-end;gap:4px}
 .page:has(.board-toolbar){max-width:none}
 .page:has(.board-toolbar)>.table-wrap{min-width:0;max-width:100%;overflow-x:auto}
-@media(max-width:899px){.ticket-table{min-width:680px}.ticket-table .ticket-cell{min-width:220px}.ticket-table .who{white-space:nowrap}}
+@media(max-width:899px){.ticket-table{min-width:520px}.ticket-table .ticket-cell{min-width:220px}.ticket-table .who{white-space:nowrap}}
 .table-wrap{position:relative}
 
 /* Owner feedback 14 Nov (lane v1): view chips, collapsed empty board columns, clickable rows, one action on hover */
@@ -83,7 +83,7 @@
 .ticket-table tr.row-click:hover td{background:var(--surface-2)}
 @media(hover:hover){.ticket-table tr.row-click .ticket-menu,.ticket-table tr.row-click .ticket-actions-row>:not(:first-child){opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
   .ticket-table tr.row-click:hover .ticket-actions-row>*,.ticket-table tr.row-click:focus-within .ticket-actions-row>*{opacity:1}}
-.ticket-table th{white-space:nowrap}.ticket-table .ticket-actions .btn{white-space:nowrap}.ticket-table td:nth-child(4){min-width:96px}
+.ticket-table th{white-space:nowrap}.ticket-table .ticket-actions .btn{white-space:nowrap}.ticket-table td.steps{width:1%;white-space:nowrap}.ticket-table .step-progress .progress{width:80px}
 .ticket-table .group-head{display:flex;align-items:center;gap:8px;padding-right:12px}.ticket-table .group-head .group-toggle{flex:1}
 .ticket-table .group-action{white-space:nowrap}
 /* Owner 15 Nov (fb3): the card's "..." is a small icon button in the top-right corner; the title uses the full width */

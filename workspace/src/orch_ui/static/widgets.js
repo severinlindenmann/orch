@@ -40,6 +40,31 @@ UI.helperList=(rows,o)=>{o=o||{};rows=rows||[];const box=el('section','card help
  return box};
 /* Status icon: UI.statusIcon('needs') -> <svg class="st needs"> (todo | working | needs | check | done) */
 UI.statusIcon=name=>svg('st '+(ST[name]?name:'todo'),ST[name]||ST.todo);
+/* Phone bottom bar (ORCH-73): UI.tabbar(items) -> <nav class="tabbar">. items: {label, href | onClick, current, count,
+   countLabel, icon (an svg node or markup from icon()), testid}. A count shows only when it is above 0. A button item (no href) is a toggle:
+   o.expanded sets aria-expanded, o.controls its aria-controls. Same item keys update in place via UI.tabbar.update(nav, items). */
+const tabItem=it=>{const n=it.href!=null?el('a'):el('button');if(it.href!=null)n.href=it.href;else{n.type='button';if(it.controls)n.setAttribute('aria-controls',it.controls)}
+ n.dataset.tab=it.key||it.label;if(it.testid)n.dataset.testid=it.testid;fillTab(n,it);if(it.onClick)n.addEventListener('click',it.onClick);return n};
+const fillTab=(n,it)=>{const kids=[];if(it.icon){const i=el('span','tab-ic');i.setAttribute('aria-hidden','true');if(typeof it.icon==='string')i.innerHTML=it.icon;else i.append(it.icon);kids.push(i)}
+ kids.push(el('span','tab-label',it.label));const c=Number(it.count)||0;
+ if(c>0){const b=el('span','count',String(c));kids.push(b)}
+ n.replaceChildren(...kids);n.setAttribute('aria-label',c>0?it.label+', '+(it.countLabel||String(c)):it.label);
+ if(it.href!=null){if(it.current)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current')}
+ else n.setAttribute('aria-expanded',String(!!it.expanded))};
+UI.tabbar=(items,o)=>{o=o||{};const nav=el('nav','tabbar'+(o.sample?' tabbar-sample':''));nav.setAttribute('aria-label',o.label||'Main');if(o.id)nav.id=o.id;
+ (items||[]).forEach(it=>nav.append(tabItem(it)));return nav};
+UI.tabbar.update=(nav,items)=>{(items||[]).forEach(it=>{const n=[...nav.children].find(x=>x.dataset.tab===(it.key||it.label));if(n)fillTab(n,it)})};
+/* Short rows (ORCH-73): UI.shortGroup({title, icon:'needs'|'working'|..., count, folded, onToggle, rows, more, key}) -> <section class="card short-group">.
+   rows: {key (the ticket number), title, href, fact, side (a node: pill, chip or button), child}. more: {label, onClick}. */
+UI.shortRow=r=>{const row=el('div','short-row'+(r.child?' child':''));const g=el('span','grow');const t=r.href?el('a','short-title'):el('span','short-title');
+ if(r.href)t.href=r.href;if(r.key){const k=el('span','key',r.key);t.append(k,document.createTextNode(' '))}t.append(document.createTextNode(r.title||''));g.append(t);
+ if(r.fact)g.append(el('span','short-fact',r.fact));row.append(g);if(r.side){const s=el('span','short-side');s.append(r.side);row.append(s)}
+ if(r.dataKey)row.dataset.key=r.dataKey;return row};
+UI.shortGroup=o=>{o=o||{};const sec=el('section','card short-group');if(o.key)sec.dataset.key=o.key;const h=el('header','card-h');const b=el('button');b.type='button';
+ b.setAttribute('aria-expanded',String(!o.folded));if(o.icon)b.append(UI.statusIcon(o.icon));b.append(el('span','',o.title||''));
+ if(o.count!=null)b.append(el('span','count',String(o.count)));b.append(UI.chevron());if(o.onToggle)b.addEventListener('click',o.onToggle);h.append(b);sec.append(h);
+ if(!o.folded){(o.rows||[]).forEach(r=>sec.append(UI.shortRow(r)));if(o.more){const m=el('div','short-more');const mb=el('button','btn ghost sm',o.more.label);mb.type='button';if(o.more.onClick)mb.addEventListener('click',o.more.onClick);m.append(mb);sec.append(m)}}
+ return sec};
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
 /* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
@@ -123,14 +148,18 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(p.note)w.append(el('span','cmp-note',p.note));
   w.cycle=()=>{const i=views.findIndex(([v])=>v===w.dataset.view);set(views[(i+1)%views.length][0])};w.view=set;
   set(big?'slide':(mode==='phone'||(host.clientWidth&&host.clientWidth<560)?'after':'both'));return w};
+ /* An option's letter chip only for a short id of its own (A, B, 2); a plain question's option has id = its text. */
+ const optLetter=op=>{const id=String(op&&op.id||'');return id&&id.length<=2&&id!==op.title?id:''};
+ /* Options with no picture at all (a plain orch ask --option question): plain rows, title and description, no frame. */
+ const plainOpts=it=>{const p=it&&it.preview;return !!(p&&p.type==='options'&&!p.before&&!(p.options||[]).some(op=>op.preview))};
  /* Options A / B / C: tap to pick (ring + Picked). On the card a drag that starts on a tile still swipes; a tap picks. */
- const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':''));w.style.setProperty('--n',String((p.options||[]).length+(p.before?1:0)));
+ const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':'')+(plainOpts(it)?' plain':''));w.style.setProperty('--n',String((p.options||[]).length+(p.before?1:0)));
   if(p.before){const t=el('div','swipe-opt today');t.dataset.on='before';const h=el('span','opt-h');h.append(el('b','opt-letter',''),el('span','opt-title','Today'));h.firstChild.append(ic('clock',14));
    const th=el('span','opt-thumb');th.append(buildPreview({title:'Today',preview:p.before},big));t.append(h,th);if(p.beforeText)t.append(el('span','opt-text',p.beforeText));w.append(t)}
-  (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label','Option '+op.id+': '+op.title+(op.suggested?' (suggested)':''));
-   const h=el('span','opt-h');h.append(el('b','opt-letter',op.id),el('span','opt-title',op.title));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
-   const th=el('span','opt-thumb');if(op.preview)th.append(buildPreview({title:op.title,preview:op.preview},big));
-   b.append(h,th);if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
+  (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
+   const h=el('span','opt-h');if(lt)h.append(el('b','opt-letter',lt));h.append(el('span','opt-title',op.title||op.id));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
+   b.append(h);if(op.preview){const th=el('span','opt-thumb');th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
+   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
    b.onclick=e=>{e.stopPropagation();if(b.closest('.swipe-card')&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */pick(it,picked[it.id]===op.id?null:op.id)};
    w.append(b)});
   return w};
@@ -149,9 +178,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));h.append(el('h3','',it.title));
   if(it.text&&it.text!==it.title)h.append(el('p','swipe-text',it.text));/* the whole question; a long one scrolls inside the head */
   if(it.why)h.append(el('p','swipe-why',it.why));
-  const pv=hasPreview(it)?el('div','swipe-preview'):null;/* nothing to preview: no empty box */
+  const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
   if(pv){pv.append(buildPreview(it,false));
-  const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex);
+  if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const ft=el('footer','swipe-foot');
   if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
@@ -189,7 +218,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy});/* the card does not move: answers are buttons and keys (owner 16 Nov) */
   const end=e=>{pts.delete(e.pointerId);if(e.pointerId!==id)return;id=null;c.classList.remove('dragging');const dt=performance.now()-t0,dist=Math.hypot(dx,dy);
    if(dist<8&&dt<400){reset(c);const opt=start&&start.closest&&start.closest('.swipe-opt');if(opt){pick(items[idx],picked[items[idx].id]===opt.dataset.opt?null:opt.dataset.opt);return}
-    if(start&&start.closest&&start.closest('.swipe-preview')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
+    if(start&&start.closest&&start.closest('.swipe-preview:not(.plain)')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
    reset(c)};
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(UI.toast&&!o.quiet)UI.toast(msg)};

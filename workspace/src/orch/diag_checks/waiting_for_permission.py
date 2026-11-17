@@ -20,7 +20,7 @@ def check(snap):
         except (KeyError, ValueError, TypeError):
             continue
         if waited > WAIT_S:
-            bad.append(f"{tid} run {r['run']}: waiting for an answer for {int(waited)} s")
+            bad.append(f"{tid} run {r['run']} - waiting for an answer for {int(waited)} s")
     if bad:
         return verdict(NAME, "problem", "a helper is waiting for permission", bad)
     return verdict(NAME, "ok", "no helper is waiting on a prompt")

@@ -284,8 +284,10 @@ function route() {
     // One address per add-on page: #addon/<name>[/<path>]. The old #open/<name>/<path> forwards to it.
     const open = /^#open\/([a-z][a-z0-9-]{1,31})\/([A-Za-z0-9_./-]*)$/.exec(hash);
     if (open && !open[2].startsWith('/') && !open[2].includes('..') && addons().some(a => a.name === open[1] && a.page)) return {kind:'page', id:open[1], path:open[2], hash:'#addon/' + open[1] + (open[2] ? '/' + open[2] : '')};
-    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?$/.exec(hash);
-    if (own && !(own[2] || '').startsWith('/') && !(own[2] || '').includes('..') && addons().some(a => a.name === own[1] && a.page)) return {kind:'page', id:own[1], path:own[2] || '', hash};
+    // An add-on page's own place can follow a second # (#addon/factory/#/order/<id>/proposal, Home's link to a
+    // proposal): it goes to the frame as the page's own hash.
+    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?(?:#(\/[A-Za-z0-9_/-]*))?$/.exec(hash);
+    if (own && !(own[2] || '').startsWith('/') && !(own[2] || '').includes('..') && addons().some(a => a.name === own[1] && a.page)) return {kind:'page', id:own[1], path:own[2] || '', ...(own[3] ? {inner:own[3]} : {}), hash};
     if (hash.startsWith('#addon/')) {
       const id = decodeURIComponent(hash.slice(7));
       if (addons().some(a => a.name === id && a.dashboard)) return {kind:'addon', id, hash};
@@ -326,7 +328,10 @@ function render(arrived = new Set()) {
   if (r.kind === 'ticket') {
     const tk = ticketOf(r.id);
     title = clean(tk?.title) || 'Ticket';
-    crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' › ', title);
+    // ORCH-70: the ticket number alone (the page's own title says the rest), so the top bar stays one row
+    const key = window.DashHelpers.ticketKey(tk);
+    crumb.replaceChildren(...[h('a', {href:'#tickets'}, 'Tickets'), ' › ', key ? h('span', {className:'key', title}, key) : title]);
+    if (window.DashHelpers.ticketKey(tk)) title = window.DashHelpers.ticketKey(tk) + ' ' + title;
   } else if (r.kind === 'page') {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
     title = clean(tk?.title) || last || pageName;
@@ -360,6 +365,7 @@ function render(arrived = new Set()) {
     state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
     // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
+  paintTabbar(here, needCount, needsWords);
   const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
@@ -465,8 +471,30 @@ async function addonUninstall(name, tries = 20, pause = 1500) {
   }
   return result;
 }
+// The button a person just pressed shows the kit's busy state at once (aria-busy + aria-disabled), before the
+// answer comes, and until it came (ORCH-102: a click showed nothing for seconds while helpers ran).
+let pressed = null;
+document.addEventListener('click', event => {
+  const control = event.target.closest?.('button, .btn');
+  pressed = control ? {control, at:Date.now()} : null;
+}, true);
+function busyOn() {
+  const p = pressed;
+  pressed = null;
+  if (!p || Date.now() - p.at > 1500 || !p.control.isConnected || p.control.getAttribute('aria-busy') === 'true') return null;
+  const was = p.control.getAttribute('aria-disabled');
+  p.control.setAttribute('aria-busy', 'true');
+  p.control.setAttribute('aria-disabled', 'true');
+  return {control:p.control, was};
+}
+function busyOff(busy) {
+  if (!busy) return;
+  busy.control.removeAttribute('aria-busy');
+  if (busy.was === null) busy.control.removeAttribute('aria-disabled'); else busy.control.setAttribute('aria-disabled', busy.was);
+}
 async function act(op, args) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
+  const busy = busyOn();
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
   let succeeded = false;
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
@@ -483,6 +511,7 @@ async function act(op, args) {
     return {ok:true, status:200, state:next};
   } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.'}; }
   finally {
+    busyOff(busy);
     writing--;
     if (!writing && refreshAgain) refresh();  // a change notice that came during the write
     if (before) {
@@ -550,18 +579,37 @@ document.getElementById('open-agent').addEventListener('click', () => chatOpenAg
 document.getElementById('report-problem').hidden = snapshot;
 document.getElementById('report-problem').addEventListener('click', () => reportOpen());
 const toggle = document.getElementById('menu-toggle');
-toggle.addEventListener('click', () => {
-  const open = toggle.getAttribute('aria-expanded') !== 'true';
+// The side menu opens from the top-bar Menu button (tablet) or from More in the phone bottom bar (ORCH-73).
+function setMenu(open) {
   toggle.setAttribute('aria-expanded', String(open));
   document.querySelector('.sidebar').dataset.open = String(open);
-});
+  const more = document.querySelector('#tabbar [data-tab="more"]');
+  if (more) more.setAttribute('aria-expanded', String(open));
+  if (open && more) window.scrollTo(0, 0);
+}
+toggle.addEventListener('click', () => setMenu(toggle.getAttribute('aria-expanded') !== 'true'));
 document.querySelector('.sidebar').addEventListener('click', event => {
   const helper = event.target.closest('[data-nav="open-agent"]');
   if (!event.target.closest('a') && !helper) return;
-  toggle.setAttribute('aria-expanded', 'false');
-  document.querySelector('.sidebar').dataset.open = 'false';
+  setMenu(false);
   if (helper) chatOpenAgent();
 });
+// Phone bottom bar (ORCH-73, master UI.tabbar): Home, Tickets, Review with the one needs-you number, More = the side menu.
+// Shown only up to 720 px (master CSS); the top bar comes back while the side menu is open.
+function paintTabbar(here, needCount, needsWords) {
+  if (!window.UI?.tabbar) return;
+  const open = document.querySelector('.sidebar')?.dataset.open === 'true';
+  const items = [{key:'home', label:'Home', href:'#home', current:here === '#home'}, {key:'tickets', label:'Tickets', href:'#tickets', current:here === '#tickets'},
+    snapshot ? null : {key:'review', label:'Review', href:'#review', current:here === '#review', count:needCount, countLabel:needsWords},
+    {key:'more', label:'More', expanded:open, controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
+  let bar = document.getElementById('tabbar');
+  if (!bar || bar.children.length !== items.length) {
+    bar?.remove();
+    bar = window.UI.tabbar(items, {id:'tabbar', label:'Main'});
+    bar.dataset.testid = 'tabbar';
+    document.body.append(bar);
+  } else window.UI.tabbar.update(bar, items);
+}
 let dragging = '';
 const columnOf = event => event.target.closest?.('.kanban-col');
 main.addEventListener('dragstart', event => {
@@ -684,6 +732,7 @@ main.addEventListener('click', async event => {
   // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
+  if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
@@ -848,15 +897,48 @@ else {
   const cadence = up => { clearInterval(poll); poll = setInterval(whenShown(refresh), up ? 20000 : 3000); };
   document.addEventListener('visibilitychange', whenShown(refresh));
   if (typeof EventSource !== 'undefined') {
+    const onRev = () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); };
+    sharedEvents(window, onRev, cadence);
+  }
+}
+// One event stream per browser, not one per tab (ORCH-102): a browser opens at most 6 connections to this server,
+// and every open tab held one for good, so a new tab or a cold load waited behind them. The tab that holds the
+// lock opens the stream and tells the other tabs; when it closes, the next tab takes the lock and the stream.
+// Without locks or BroadcastChannel (an old browser) each tab keeps its own stream, as before.
+function sharedEvents(win, onRev, onUp) {
+  const own = () => {
     let stream;
     const connect = () => {
-      stream = new EventSource('/api/events');
-      stream.onopen = () => cadence(true);
-      stream.onerror = () => cadence(false);
-      stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); });
+      stream = new win.EventSource('/api/events');
+      stream.onopen = () => onUp(true);
+      stream.onerror = () => onUp(false);
+      stream.addEventListener('rev', onRev);
     };
     connect();
-    window.addEventListener('pagehide', () => { stream.close(); cadence(false); });
-    window.addEventListener('pageshow', event => { if (event.persisted) connect(); });
-  }
+    win.addEventListener('pagehide', () => { stream.close(); onUp(false); });
+    win.addEventListener('pageshow', event => { if (event.persisted) connect(); });
+  };
+  if (!win.navigator?.locks || typeof win.BroadcastChannel === 'undefined') return own();
+  const channel = new win.BroadcastChannel('orch-events');
+  let up = false, leading = null;
+  const say = what => { try { channel.postMessage(what); } catch (_) { /* the other tabs poll */ } };
+  channel.onmessage = event => {
+    if (event.data === 'rev') onRev();
+    else if (event.data === 'up' || event.data === 'down') onUp(event.data === 'up');
+    else if (event.data === 'hello' && leading) say(up ? 'up' : 'down');  // a new tab asks how the stream is
+  };
+  const lead = () => win.navigator.locks.request('orch-events', () => new Promise(release => {
+    const stream = new win.EventSource('/api/events');
+    leading = {stream, release};
+    stream.onopen = () => { up = true; onUp(true); say('up'); };
+    stream.onerror = () => { up = false; onUp(false); say('down'); };
+    stream.addEventListener('rev', () => { onRev(); say('rev'); });
+  })).catch(() => {});
+  win.addEventListener('pagehide', () => {
+    if (leading) { leading.stream.close(); leading.release(); leading = null; say('down'); }
+    onUp(false);
+  });
+  win.addEventListener('pageshow', event => { if (event.persisted) lead(); });
+  lead();
+  say('hello');
 }

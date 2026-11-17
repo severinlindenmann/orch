@@ -480,6 +480,21 @@ def _agent_actor(by: str) -> bool:
     return by.startswith("agent:") or (by.startswith("human:") and bool(agent_tool()))
 
 
+def _addon_keeps_its_ticket(root: Path, ticket: dict, by: str) -> bool:
+    """An add-on's work can go on after its ticket is Done (a repeat survives Done, #194): an ACTIVE add-on,
+    writing as agent:<its name>, still keeps up a done ticket that carries its own ext block (its record, a
+    history line, opening it again for the next run). Never from inside an agent run (a run sets ORCH_AGENT),
+    never on a dropped ticket, never on a ticket the add-on has no data on."""
+    name = by.removeprefix("agent:")
+    if by == name or ticket.get("status") != "done" or agent_tool():
+        return False
+    if not isinstance((ticket.get("ext") or {}).get(name), dict):
+        return False
+    from orch import addons  # addons is a leaf here; imported late like the other helpers
+
+    return name in addons.active(root)
+
+
 def _refuse_closed_agent(root: Path, tid: str, by: str) -> None:
     """The closed-ticket guard for a write that happens outside apply_op (a file copy): same rule, checked
     under the caller's ticket lock BEFORE anything is written."""
@@ -545,7 +560,7 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         ticket = _load_raw(root, tid)
         eff_status = ticket.get("status")
         info.update(status=eff_status, revision=revision(ticket))
-        if eff_status in CLOSED and _agent_actor(by):
+        if eff_status in CLOSED and _agent_actor(by) and not _addon_keeps_its_ticket(root, ticket, by):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
@@ -1080,6 +1095,50 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
     return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away (worktrees.on_closed)
 
 
+REVIEWER = "agent:reviewer"  # the Reviewer role (reviewer.py): acts for the owner, never as a person
+REVIEWER_VIA = "reviewer"
+ACCEPTED_LINE = "Accepted for you by the Reviewer: "
+SENT_BACK_LINE = "Sent back by the Reviewer: "
+
+
+def accepted_by_reviewer(root: Path, ticket: dict) -> bool:
+    """Done, and the line that made it Done is the Reviewer's (the owner may still send it back)."""
+    if ticket.get("status") != "done":
+        return False
+    for h in reversed(history.lines(root, ticket)):
+        if isinstance(h, dict) and re.fullmatch(r"Status \w+ -> done", str(h.get("text", ""))):
+            return h.get("by") == REVIEWER
+    return False
+
+
+def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
+    """The Reviewer accepts a ticket in Review for the owner (Review -> Done), only while the owner turned it
+    on (`workflow.reviewer`), every task is done with evidence and no question waits. The history says who did
+    it and why: a role acting for the owner, not a second approver (R4.1). The owner can send it back."""
+    if not config.reviewer_on(root):
+        raise Refused("The Reviewer is off here. Turn it on: orch config set workflow.reviewer on")
+    why = _one_line(reasons)
+
+    def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused(GENERAL_REFUSAL)
+        if ticket["status"] != "review":
+            raise Refused("This ticket is not in Review.")
+        _check_can_finish(ticket)
+        if _open_questions(ticket):
+            raise Refused("A question on this ticket still waits for an answer.")
+        ticket["status"] = "done"
+        ticket["waiting_on"] = None
+        add_history(ticket, REVIEWER, "Status review -> done", REVIEWER_VIA)
+        add_history(ticket, REVIEWER, ACCEPTED_LINE + why, REVIEWER_VIA)
+
+    return apply_op(root, tid, op, by=REVIEWER)[0]
+
+
+def _one_line(text: str, limit: int = 300) -> str:
+    return " ".join(str(text or "").split())[:limit]
+
+
 def ask_for_changes(
     root: Path,
     tid: str,
@@ -1092,8 +1151,11 @@ def ask_for_changes(
 ) -> dict:
     """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
     Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
-    automation host starts exactly one run for it (a person's pending input is what starts runs; #287)."""
-    if not by.startswith("human:") or agent_tool():
+    automation host starts exactly one run for it (a person's pending input is what starts runs; #287).
+    A ticket the Reviewer accepted for the person (Done) can be sent back the same way.
+    The Reviewer itself (by REVIEWER) sends a Review ticket back once when work is missing (reviewer.py)."""
+    role = by == REVIEWER
+    if not role and (not by.startswith("human:") or agent_tool()):
         raise Refused("Only a person can ask for changes.")
     note = (text or "").strip()
     if not note:
@@ -1101,27 +1163,35 @@ def ask_for_changes(
     if len(note) > 2000:
         raise Refused("A note for changes is at most 2000 characters.")
 
+    def may_send_back(ticket) -> bool:
+        return ticket["status"] == "review" or (not role and accepted_by_reviewer(root, ticket))
+
     def op(ticket):
-        if ticket["status"] != "review":
+        if not may_send_back(ticket):
             raise Refused("This ticket is not waiting for your review.")
-        ticket["checklist"].append(
-            {
-                "id": _next_id(ticket["checklist"], "c"),
-                "text": note,
-                "origin": "change_request",  # structured: the dashboard shows "You asked: <note>"
-                "done": False,
-                "evidence": [],
-            }
-        )
+        item = {"id": _next_id(ticket["checklist"], "c"), "text": note, "done": False, "evidence": []}
+        if not role:
+            item["origin"] = "change_request"  # structured: the dashboard shows "You asked: <note>"
+        ticket["checklist"].append(item)
         ticket["status"] = "ready"  # any wait the ticket has is not this review's: left as it is
-        add_history(ticket, by, "Asked for changes: " + note[:200], via)
+        line = SENT_BACK_LINE if role else "Asked for changes: "
+        add_history(ticket, by, line + note[:200], REVIEWER_VIA if role else via)
 
     from orch import runs  # runs imports tickets
 
-    if load(root, tid)["status"] != "review":
+    if not may_send_back(load(root, tid)):
         raise Refused("This ticket is not waiting for your review.")
     # Queue the note first, then commit the ticket: a failure of either leaves nothing half done.
-    item = runs.pending_add(root, tid, by, "message", note, via or _env_via(), pid, phone=phone)
+    item = runs.pending_add(
+        root,
+        tid,
+        by,
+        "event" if role else "message",
+        note,
+        REVIEWER_VIA if role else via or _env_via(),
+        pid,
+        phone=phone,
+    )
     try:
         return apply_op(root, tid, op, by=SYSTEM)[0]
     except BaseException:
@@ -1419,10 +1489,40 @@ LONG_NOTE = (
 PLACEHOLDER_TITLE = 80  # characters of a person's text kept as the title until the agent writes one
 
 
+_TITLE_ABBR = re.compile(
+    r"(?:^|\s)(?:e\.\s?g\.|i\.\s?e\.|etc\.|z\.\s?B\.|d\.\s?h\.|u\.\s?a\.|bzw\.|vs\.|ca\.|approx\.)$", re.I
+)
+
+
+_TITLE_TAIL = re.compile(  # a cut never ends on a small word
+    r"\s(?:and|or|but|then|for|to|of|the|a|an|with|in|on|at|by|like|und|oder|dann|für|mit|der|die|das|zu)$",
+    re.I,
+)
+
+
+def cut_title(line: str, limit: int = PLACEHOLDER_TITLE) -> str:
+    """ORCH-62: a line longer than `limit` is cut at a whole word, never right after an abbreviation such as
+    "e.g." (it read like the end of a sentence), and ends with "…" so it reads as cut. The dashboard's New
+    ticket dialog cuts the same way (ticketTextTitle)."""
+    if len(line) <= limit:
+        return line
+    cut = line[: limit - 1]
+    space = cut.rfind(" ")
+    if line[limit - 1] != " " and space > limit / 2:
+        cut = cut[:space]
+    prev = None
+    while prev != cut:
+        prev = cut
+        cut = re.sub(r"[\s,;:.\-–—(]+$", "", _TITLE_ABBR.sub("", cut))
+        if len(cut) > limit / 2:
+            cut = _TITLE_TAIL.sub("", cut)
+    return (cut or line[: limit - 1].strip()) + "…"
+
+
 def placeholder_title(text: str) -> str:
     """The first words of what a person wrote, on one line: the title until the agent writes the real one."""
     first = next((x for x in clean_untrusted(str(text), 4000).splitlines() if x.strip()), "")
-    return " ".join(first.split())[:PLACEHOLDER_TITLE].strip() or "New ticket"
+    return cut_title(" ".join(first.split())).strip() or "New ticket"
 
 
 def needs_agent_title(text: str) -> bool:
@@ -1564,24 +1664,71 @@ def pick_model(root: Path, tid: str, by: str) -> str:
 
     out: dict = {}
 
-    def op(ticket):
+    def keep(ticket) -> str | None:
+        """The model that stays as it is: a person's choice, or Opus once a helper ran on it (never down by
+        itself: a ticket picked or moved up to Opus does not drop to Sonnet in the middle of its work)."""
         cur = modelpick.chosen(ticket)
-        if cur and modelpick.by_person(ticket):
-            out["name"] = cur["name"]
+        if not cur:
+            return None
+        if modelpick.by_person(ticket) or cur["name"] == modelpick.pick(ticket)[0]:
+            return cur["name"]
+        if cur["name"] == "opus" and (cur.get("up") or ticket.get("sessions")):
+            return "opus"
+        return None
+
+    def op(ticket):
+        kept = keep(ticket)
+        if kept:
+            out["name"] = kept
             return
         name, why = modelpick.pick(ticket)
         out["name"] = name
-        if cur and cur["name"] == name:
-            return
         ticket["model"] = {"name": name, "by": modelpick.BY_ORCH, "why": why[:200]}
         add_history(ticket, by, f"Model picked: {modelpick.LABELS[name]} ({why[:200]})")
 
-    t = load(root, tid)
-    cur = modelpick.chosen(t)
-    if cur and (modelpick.by_person(t) or cur["name"] == modelpick.pick(t)[0]):
-        return cur["name"]  # nothing to write
+    kept = keep(load(root, tid))
+    if kept:
+        return kept  # nothing to write
     apply_op(root, tid, op, by=by)
     return out["name"]
+
+
+def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
+    """Move a ticket orch put on Sonnet up to Opus (the helper when its plan shows design, security or
+    several parts; orch after two failed checks on one step). One history line says why. A person's choice
+    is never changed. Returns (ticket, moved): moved False when it already runs on Opus."""
+    from orch import modelpick
+
+    why = " ".join(clean_untrusted(why or "", 200).split())
+    if len(why) < 3:
+        raise Refused('Say why in a few words, e.g. --why "the plan needs a new design".')
+    out = {"moved": False}
+
+    def op(ticket):
+        cur = modelpick.chosen(ticket)
+        if cur and modelpick.by_person(ticket):
+            if cur["name"] == "opus":
+                return
+            raise Refused(
+                f"A person chose {modelpick.LABELS[cur['name']]} for this ticket. Ask instead: "
+                f'orch ask {tid} "Move this ticket up to Opus? {why[:80]}" --option yes --option no'
+            )
+        if cur and cur["name"] == "opus":
+            return
+        ticket["model"] = {
+            "name": "opus",
+            "by": modelpick.BY_ORCH,
+            "why": why,
+            "up": {"from": (cur or {}).get("name") or "sonnet", "at": now(), "by": by[:100]},
+        }
+        add_history(ticket, by, f"{modelpick.UP_PREFIX}: {why}")
+        out["moved"] = True
+
+    t = load(root, tid)
+    if (modelpick.chosen(t) or {}).get("name") == "opus":
+        return t, False  # already on Opus: nothing to write
+    t = apply_op(root, tid, op, by=by)[0]
+    return t, out["moved"]
 
 
 def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
@@ -1958,7 +2105,34 @@ def check_record(
         )
         return item
 
-    return apply_op(root, tid, op, by=by)
+    t, item = apply_op(root, tid, op, by=by)
+    if exit_code and _failed_twice(item):
+        _up_after_failures(root, tid, item)
+    return t, item
+
+
+def _failed_twice(item: dict) -> bool:
+    """The step's last two recorded check runs both failed (a non-zero exit)."""
+    runs_ = [e for e in item.get("evidence") or [] if e.get("type") == "command" and "exit" in e]
+    return len(runs_) >= 2 and all(e.get("exit") not in (0, None) for e in runs_[-2:])
+
+
+def _up_after_failures(root: Path, tid: str, item: dict) -> None:
+    """Two failed checks on one step: a ticket orch put on Sonnet moves up to Opus by itself. Never fails
+    the record (a person's choice stays; a live session switches at its next turn end)."""
+    from orch import modelpick, runs_live
+
+    t = load(root, tid)
+    cur = modelpick.chosen(t)
+    if not cur or cur["name"] != "sonnet" or modelpick.by_person(t):
+        return
+    step = " ".join(str(item.get("text") or "").split())[:80]
+    why = f'two checks failed on the step "{step}"' if step else "two checks failed on one step"
+    with contextlib.suppress(Refused):
+        t, moved = move_up(root, tid, why, "orch")
+        if moved:
+            with contextlib.suppress(Exception):
+                runs_live.switch_model(root, tid, "opus", "orch")
 
 
 def check_exists(root: Path, tid: str, cid: str) -> None:
