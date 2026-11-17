@@ -85,6 +85,27 @@ def test_request_holds_the_ticket_facts_and_the_choices(proj, asker):
     assert "history" not in req and "note" not in req
 
 
+def test_request_says_whose_sign_in_each_tool_runs_on_and_a_move_up(proj, asker, monkeypatch):
+    """ORCH-342: an add-on can hold a start that would spend a full subscription, and may narrow the model
+    only until orch or the helper moved the ticket up."""
+    names = adapters.builtin_names()
+    monkeypatch.setattr(adapters, "detect", lambda: [{"name": n, "found": True} for n in names])
+    tid = _new(proj)
+    startask.ask(proj, tid, "agent:automation", None, "generic", False)
+    req = json.loads((proj / "asked.json").read_text())
+    assert _valid("request", req) == []
+    want = {n: adapters.load(n)["provider"] for n in names if adapters.load(n).get("provider")}
+    assert req["providers"] == want and len(want) >= 2 and "generic" not in want
+    assert req["model_up"] is False
+
+    def op(t):
+        t["model"] = {"name": "opus", "by": modelpick.BY_ORCH, "why": "hard", "up": True}
+
+    tickets.apply_op(proj, tid, op, by="human:t")
+    startask.ask(proj, tid, "agent:automation", None, "generic", False)
+    assert json.loads((proj / "asked.json").read_text())["model_up"] is True
+
+
 def test_answer_tool_model_and_account_are_used(proj, asker, monkeypatch):
     monkeypatch.setattr(adapters, "detect", lambda: [{"name": "generic", "found": True}])
     tid = _new(proj)

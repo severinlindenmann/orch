@@ -24,6 +24,8 @@
         "agent": { "$ref": "#/$defs/name", "description": "The helper tool this start would use." },
         "agents": { "type": "array", "items": { "$ref": "#/$defs/name" }, "description": "Helper tools found on this machine." },
         "model": { "type": ["string", "null"], "description": "The ticket's model as it is now (null: not picked yet)." },
+        "model_up": { "type": "boolean", "description": "orch or the helper moved this ticket up to the big model (it may use it now)." },
+        "providers": { "type": "object", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/name" }, "description": "Whose sign-in each helper tool of `agents` runs on, when the tool says (e.g. a subscription of this provider)." },
         "chosen": {
           "type": "object", "required": ["agent", "model"], "additionalProperties": false,
           "properties": {

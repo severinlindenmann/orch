@@ -4,6 +4,7 @@
   "adapters": {
     "claude": {
       "label": "Claude",
+      "provider": "anthropic",
       "detect": { "binary": "claude", "env_any": ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] },
       "prompt_via": "arg",
       "model_args": ["--model", "{model}"],
@@ -46,6 +47,7 @@
     },
     "codex": {
       "label": "Codex",
+      "provider": "openai",
       "detect": { "binary": "codex", "env_prefix": "CODEX_" },
       "prompt_via": "arg",
       "oneshot": {

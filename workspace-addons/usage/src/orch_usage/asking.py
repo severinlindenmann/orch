@@ -1,7 +1,7 @@
 """`orch usage ask <kind>`: a credit skill or a helper's own subagent asks before it spends.
 
 1. The accounts that count: on, and `for` empty (every kind) or holding the kind, in their order. With `--provider`
-   (a credit skill: anthropic = Claude API, openai = OpenAI) only that provider's API credits; with `--name`
+   (a credit skill: anthropic = Anthropic API, openai = OpenAI) only that provider's API credits; with `--name`
    only the one credit the caller was told to use (a person's own choice wins, it is only checked for room).
 2. A credit skill may tell Usage the credits it knows (`--known -`, JSON on stdin); one Usage does not list yet is added
    with the skill's starting rule (a monthly $ limit from its reset day, its kinds of work) and one history line. A
@@ -59,13 +59,14 @@ def ask(
             f"'{kind}' is not a kind of work. Pick from: " + ", ".join(store.KIND_WORDS.values()) + "."
         )
     if provider is not None and provider not in store.PROVIDERS:
-        raise store.Refused("Usage counts API credits of Claude API (anthropic) and OpenAI (openai) only.")
+        raise store.Refused("Usage counts API credits of Anthropic (anthropic) and OpenAI (openai) only.")
     word = store.KIND_WORDS[kind]
     with store.change(root) as (accounts, rows):
         store.expire(accounts, rows, at)
         if known and provider:
             store.sync_known(accounts, rows, provider, known)
-    accounts = store.load(root)["accounts"]
+    doc = store.load(root)
+    accounts = doc["accounts"]
     allowed = [a for a in accounts if a["on"] and (not a["rule"].get("for") or kind in a["rule"]["for"])]
     if provider is not None:
         allowed = [a for a in allowed if a["type"] == "api-key" and a.get("provider") == provider]
@@ -89,20 +90,20 @@ def ask(
                 found = found if found is not None else []
             f = next((x for x in found if x.key == a.get("source", {}).get("key")), None)
             if f is None:
-                return _go(root, kind, a, provider, at)  # use cannot be read: never block on it
+                return _go(root, kind, a, provider, at, accounts, doc["together"])  # unread: never block
             memory = switching._read(switching.memory_path(root))
             pace = memory.get("pace") if isinstance(memory.get("pace"), dict) else {}
             c = switching.judge(a, f, pace, float(switching.config(root)["ahead_minutes"]))
             if c.good or (c.under and f.active):
-                return _go(root, kind, a, provider, at)
+                return _go(root, kind, a, provider, at, accounts, doc["together"])
             reasons.append(f"{a['label']}: {c.why}" if c.why else a["label"])
             r = routing._sub_resets(c)
             if r:
                 wakes.append(r)
         elif a["type"] == "api-key":
-            room, why, nxt = routing._credit_room(a, at)
+            room, why, nxt = routing._credit_room(a, at, accounts, doc["together"])
             if room:
-                return _go(root, kind, a, provider, at)
+                return _go(root, kind, a, provider, at, accounts, doc["together"])
             reasons.append(why)
             if nxt:
                 wakes.append(nxt)
@@ -121,7 +122,15 @@ def ask(
     return {"go": False, "why": why[:200], **({"until": until} if until else {})}
 
 
-def _go(root: Path, kind: str, a: dict, provider: str | None, at: datetime) -> dict:
+def _go(
+    root: Path,
+    kind: str,
+    a: dict,
+    provider: str | None,
+    at: datetime,
+    accounts: list[dict] | None = None,
+    together: list[dict] | None = None,
+) -> dict:
     if provider is None:
         routing._room_again(root, kind, at)
     out: dict = {"go": True, "account": a["label"][:64]}
@@ -131,6 +140,12 @@ def _go(root: Path, kind: str, a: dict, provider: str | None, at: datetime) -> d
         if isinstance(nm, str):
             out["name"] = nm
         left = _left(a, at)
+        for t in together or []:  # a limit over every account of the provider leaves less
+            if t["provider"] == a.get("provider"):
+                spent = routing.together_spent(accounts or [a], t, at)
+                if spent is not None:
+                    x = round(max(0.0, t["limit"]["value"] - spent), 4)
+                    left = x if left is None else min(left, x)
         if left is not None:
             out["left"] = left
     return out

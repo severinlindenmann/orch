@@ -43,7 +43,7 @@ def request(
 ) -> dict:
     """What the add-on gets on stdin: the ticket's plain facts (no history, no note), the start and the
     choices."""
-    from orch import modelpick
+    from orch import adapters, modelpick
 
     t = tickets.load(root, tid)
     cur = modelpick.chosen(t)
@@ -62,6 +62,8 @@ def request(
         "agent": agent,
         "agents": agents,
         "model": cur["name"] if cur else None,
+        "model_up": modelpick.moved_up(t),
+        "providers": adapters.providers(agents, root),
         "chosen": {"agent": agent_given, "model": bool(cur) and modelpick.by_person(t)},
     }
 

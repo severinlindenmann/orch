@@ -191,7 +191,9 @@ Any add-on can say which helper tool, model and account a start uses, or that th
 - `orch run start` (live or one turn at a time, every caller) runs, before anything is claimed, for each active add-on
   with the key, in name order: `<orch's python> -m <run> before-start --json`, stdin = one `request` (the ticket's
   plain facts without history or note, `ext` of active add-ons only, who starts it, the tool it would use, the tools
-  found here, the ticket's model, and `chosen`: what a person or the caller set). 15 seconds at most.
+  found here, `providers` (whose sign-in each of those tools runs on, from the tool's `provider` in agents.json),
+  the ticket's model, `model_up` (orch or the helper moved it up to the big model), and `chosen`: what a person or
+  the caller set). 15 seconds at most.
 - Answer `{"go": true, "agent"?, "model"?, "account"?, "say"?}`: the core uses `agent` only when no tool was given for
   this start and it is one of the tools found here, `model` only when a person did not set the ticket's model, shows
   `say` as a note. The first add-on that names a tool or model wins. `account` is a label, never a key or login.

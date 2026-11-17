@@ -334,6 +334,11 @@
  },
  "usage": {
   "acts": {
+   "add": {
+    "summary": "Add an API credit or helper tool",
+    "who": "people",
+    "writes": []
+   },
    "end": {
     "summary": "End an account's rule on a date, then go back to the rule before it",
     "who": "people",
@@ -346,6 +351,11 @@
    },
    "limit": {
     "summary": "Set or remove one limit of an account",
+    "who": "people",
+    "writes": []
+   },
+   "model": {
+    "summary": "Say which model the kinds of work on an account may use",
     "who": "people",
     "writes": []
    },
@@ -369,8 +379,18 @@
     "who": "people",
     "writes": []
    },
+   "remove": {
+    "summary": "Take an API credit or helper tool off the list",
+    "who": "people",
+    "writes": []
+   },
    "switching": {
     "summary": "Switch accounts by itself, or only show and warn",
+    "who": "people",
+    "writes": []
+   },
+   "together": {
+    "summary": "Set one money limit over every account of a provider",
     "who": "people",
     "writes": []
    }

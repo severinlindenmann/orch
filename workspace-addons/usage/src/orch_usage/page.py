@@ -81,6 +81,24 @@ def _state(row: dict) -> str:
     return "ready"
 
 
+def _together(data: dict, accounts: list[dict]) -> list[dict]:
+    have = {t["provider"]: t for t in data.get("together") or []}
+    providers = []
+    for a in accounts:
+        if a["type"] in store.MONEY_TYPES and a["provider"] and a["provider"] not in providers:
+            providers.append(a["provider"])
+    out = []
+    for p in providers:
+        t = have.get(p)
+        row = {"provider": p, "label": store.together_label(p), "limit": None, "spent": None, "resets_at": None}
+        if t:
+            row.update(limit=t["limit"]["value"], period=t["limit"]["period"], spent=t["spent"])
+            row["resets_at"] = t.get("resets_at")
+        row["accounts"] = [a["label"] for a in accounts if a["type"] in store.MONEY_TYPES and a["provider"] == p]
+        out.append(row)
+    return out
+
+
 def build(data: dict, root: Path) -> dict:
     """The page model from `cli.gather()` (accounts with use) plus switching, the warning and the history."""
     memory = switching._read(switching.memory_path(root))
@@ -101,6 +119,9 @@ def build(data: dict, root: Path) -> dict:
                 "unit": store.default_unit(row),
                 "ends": rule.get("ends"),
                 "for": list(rule.get("for") or []),
+                "model": rule.get("model"),
+                "provider": row.get("provider") or "",
+                "removable": row["type"] in store.MONEY_TYPES,
                 "falls_back": bool(row.get("prev")),
                 "fetched_at": row.get("fetched_at"),
             }
@@ -122,5 +143,8 @@ def build(data: dict, root: Path) -> dict:
             for k, h in sorted(routing.held(root).items(), key=lambda kv: store.KINDS.index(kv[0]))
         ],
         "accounts": accounts,
+        # one money limit over every account of a provider (one row per provider with a money account)
+        "together": _together(data, accounts),
+        "providers": [{"id": p, "label": store.provider_words(p)} for p in store.PROVIDERS],
         "history": history_rows(root),
     }

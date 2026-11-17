@@ -1,6 +1,6 @@
 ---
 name: orch-usage
-description: Use when the person asks how far a subscription or API credit is used, which account is in use, whether Usage switches by itself, or asks to change an account's limit, the period it counts over, its order, to turn it on or off, or to make a rule temporary. Usage keeps only labels, numbers, rules and a history, never a login or key. Not for buying, topping up, adding or removing accounts.
+description: Use when the person asks how far a subscription or API credit is used, which account is in use, whether Usage switches by itself, or asks to change an account's limit, the period it counts over, its order, to turn it on or off, to make a rule temporary, to set one limit over several accounts, which model a kind of work may use, or to add or remove an API credit or helper tool. Usage keeps only labels, names, numbers, rules and a history, never a login or key. Not for buying or topping up credit.
 ---
 # orch usage
 
@@ -32,16 +32,26 @@ The person sees and changes the same on the Usage page of the dashboard; its cli
     orch usage order <account> 1                   # first in the order
     orch usage on <account>
     orch usage off <account>
+    orch usage model <account> first               # small model first, the big one only once orch moves it up
+    orch usage model <account> small               # the small model only (or: any). A model a person set wins
+    orch usage together openai $100                # one limit over every OpenAI account together (or: none)
+
+**Add or remove an API credit or helper tool** (only when the person asks; never a key, only the name the credit
+skill already uses to find it):
+
+    orch usage add "OpenAI credit" --provider openai --name openai --for reviews --limit $100 --resets 2026-11-17 --first
+    orch usage remove "OpenAI credit"              # its history stays; a subscription is turned off instead
 
 **Temporary rules**: add `--end YYYY-MM-DD` (to the end of that day) to a change, or end the current rule:
 
     orch usage limit <account> 20% --end 2026-11-20
+    orch usage order <account> 1 --end 2026-11-13  # first until then, then back to its place before
     orch usage end <account> 2026-11-20
     orch usage end <account> none                  # keep the rule, no end
 
-When a rule ends it falls back to the rule before its last change, and the history says so.
+When a rule ends it falls back to the rule before its last change (and to its place in the order), and the history says so.
 
-**Before you spend** (your own subagent, or a credit skill such as a Claude API or OpenAI call)
+**Before you spend** (your own subagent, or a credit skill such as an Anthropic API or OpenAI call)
 
     orch usage ask reviews                         # a subagent: Lead, Code, Reviews, Builds, Scripts or Helpers
     orch usage ask reviews --provider openai       # a credit skill: only OpenAI credits (or anthropic)

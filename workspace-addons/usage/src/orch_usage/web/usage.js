@@ -1,4 +1,5 @@
-// The Usage page (stage 1): accounts with their use, resets and rule; switching by itself; the history.
+// The Usage page: accounts with their use, resets and rule; one limit over all accounts of a provider; adding an API
+// credit or helper tool; switching by itself; the history.
 // It only reads from its own server (GET api/page). Every change is a click the dashboard runs as the person:
 // the page names a verb and a target (postMessage `orch.act`), the dashboard runs `orch usage act` and answers.
 // All text is set with textContent; the look is the master kit only (no page sheet).
@@ -14,7 +15,10 @@
   // The toast names what was saved: the account's name and the kind of change.
   const nameOf = target => model?.accounts.find(a => a.id === target.split(':')[0])?.label || 'Account';
   const WHAT = {limit: t => nameOf(t) + ': limit', period: t => nameOf(t) + ': what the limit counts', order: t => nameOf(t) + ': order',
-    on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself'};
+    on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself',
+    for: t => nameOf(t) + ': kinds of work', model: t => nameOf(t) + ': model', remove: t => nameOf(t) + ' removed',
+    together: t => 'All ' + providerWord(t.split(':')[0]) + ' accounts together: limit', add: t => t.split(':').slice(6).join(':') + ' added'};
+  const providerWord = id => model?.providers?.find(p => p.id === id)?.label || id;
 
   function h(tag, props, ...kids) {
     const n = document.createElement(tag);
@@ -177,6 +181,21 @@
       picked.size ? null : h('span', {className: 'meta', text: 'every kind of work'}));
   }
 
+  // Which model the kinds of work on this account may use: never more than orch's own pick; a person's choice wins.
+  const MODELS = [['any', 'Any'], ['first', 'Small first'], ['small', 'Small only']];
+  function modelRow(a) {
+    const cur = a.model || 'any';
+    return h('div', {className: 'row'}, h('span', {className: 'meta', text: 'Model'}),
+      MODELS.map(([m, word]) => h('button', {type: 'button', className: 'chip-btn' + (m === cur ? ' sel' : ''),
+        'aria-pressed': m === cur ? 'true' : 'false', 'data-model': m,
+        onclick: e => { if (m !== cur) act('model', a.id + ':' + m, e.currentTarget); }}, word)));
+  }
+
+  function useText(a) {
+    if (a.state === 'missing') return 'No longer in the account switcher.';
+    return 'No use read yet.';
+  }
+
   function card(a, i, list) {
     const [stateText, stateClass] = STATE[a.state] || STATE.ready;
     const move = (way, to) => h('button', {type: 'button', className: 'btn ghost sm', disabled: !to || null,
@@ -192,14 +211,76 @@
       addLimit = h('button', {type: 'button', className: 'btn ghost sm', onclick: () => { addLimit.replaceWith(limitRow(a, null, true)); }}, 'Add a second limit');
     }
     return h('div', {className: 'card pad stack', role: 'listitem', 'data-acc': a.id},
+      // the order arrows stay on the name line at phone width; the type and state go on the line below
       h('div', {className: 'row between'},
-        h('div', {className: 'row'}, h('span', {className: 'badge', text: String(i + 1)}), h('h3', {text: a.label}), a.type === 'subscription' ? null : h('span', {className: 'meta', text: TYPE[a.type] || ''}), h('span', {className: stateClass, text: stateText})),
+        h('div', {className: 'row'}, h('span', {className: 'badge', text: String(i + 1)}), h('h3', {text: a.label})),
         list.length > 1 ? h('div', {className: 'row'}, move('up', list[i - 1]), move('down', list[i + 1])) : null),
-      a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: 'No use read yet.'}),
+      h('div', {className: 'row'}, a.type === 'subscription' ? null : h('span', {className: 'meta', text: TYPE[a.type] || ''}), h('span', {className: stateClass, text: stateText})),
+      a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: useText(a)}),
       h('div', {className: 'row between'}, h('div', {className: 'row'}, rows, addLimit),
         h('label', {className: 'row'}, h('span', {className: 'meta', text: 'On'}), on)),
       kindsRow(a),
-      endRow(a));
+      modelRow(a),
+      h('div', {className: 'row between'}, endRow(a),
+        a.removable ? h('button', {type: 'button', className: 'btn ghost sm', 'aria-label': 'Remove ' + a.label,
+          onclick: e => act('remove', a.id, e.currentTarget)}, 'Remove') : null));
+  }
+
+  // One money limit over every API credit and helper tool of a provider: spending on any of them counts.
+  function togetherCard(t) {
+    const value = h('input', {className: 'input', inputmode: 'decimal', size: '6', value: t.limit != null ? num(t.limit) : '', placeholder: 'none',
+      'aria-label': 'Limit for ' + t.label});
+    value.addEventListener('change', () => {
+      const v = value.value.trim().replace(/[\s$]/g, '');
+      if (v && !/^\d{1,7}(\.\d{1,4})?$/.test(v)) { value.setAttribute('aria-invalid', 'true'); return say('Write a number, like 100, or leave it empty for no limit.', 'error'); }
+      value.removeAttribute('aria-invalid');
+      if ((v ? Number(v) : null) === t.limit) return;
+      act('together', t.provider + ':' + (v ? '$' + v : 'none'), value);
+    });
+    const b = t.limit != null ? bar({label: 'This month', unit: '$', used: t.spent, limit: t.limit, limit_unit: '$', resets_at: t.resets_at}) : null;
+    return h('div', {className: 'card pad stack', 'data-together': t.provider},
+      h('div', {className: 'row'}, h('h3', {text: t.label})),
+      h('p', {className: 'meta', text: t.accounts.join(', ')}),
+      b,
+      h('div', {className: 'row'}, h('label', {className: 'field meta'}, 'Limit in $ per month', value)));
+  }
+
+  // Add an API credit or helper tool: its name here, the provider, the name the credit skill already uses to find
+  // its key (never the key), the kinds of work, a monthly limit and the day the month starts again.
+  function addCard(providers) {
+    const box = h('div', {className: 'card pad stack', 'data-add': ''});
+    const open = h('button', {type: 'button', className: 'btn outline sm', onclick: () => { box.replaceChildren(...form()); box.querySelector('input')?.focus(); }}, 'Add an API credit or helper tool');
+    box.append(h('div', {className: 'row'}, open));
+    function form() {
+      const label = h('input', {className: 'input', autocomplete: 'off', maxlength: '64', 'aria-label': 'Name shown here'});
+      const name = h('input', {className: 'input', autocomplete: 'off', maxlength: '32', size: '10', 'aria-label': 'Name the credit skill uses'});
+      const provider = h('select', {'aria-label': 'Provider'}, providers.map((p, j) => h('option', {value: p.id, selected: j === 0 || null, text: p.label})));
+      const type = h('select', {'aria-label': 'Type'}, h('option', {value: 'api-key', text: 'API credit'}), h('option', {value: 'helper-tool', text: 'Helper tool'}));
+      const limit = h('input', {className: 'input', inputmode: 'decimal', size: '6', placeholder: 'none', 'aria-label': 'Limit in $ per month'});
+      const resets = datePick('Month starts again on', '', () => {});
+      const kinds = new Set();
+      const chips = KINDS.map(([k, word]) => h('button', {type: 'button', className: 'chip-btn', 'aria-pressed': 'false', 'data-kind': k,
+        onclick: e => { const on = !kinds.has(k); if (on) kinds.add(k); else kinds.delete(k); e.currentTarget.classList.toggle('sel', on); e.currentTarget.setAttribute('aria-pressed', String(on)); }}, word));
+      const add = h('button', {type: 'button', className: 'btn outline sm', onclick: e => {
+        const l = label.value.trim(), n = name.value.trim(), v = limit.value.trim().replace(/[\s$]/g, '');
+        if (!/^[A-Za-z0-9][A-Za-z0-9 /._()&+-]{0,63}$/.test(l)) { label.setAttribute('aria-invalid', 'true'); return say('Give it a short name with letters and numbers.', 'error'); }
+        if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$/.test(n)) { name.setAttribute('aria-invalid', 'true'); return say('Write the name the credit skill uses for it, like main. Never the key.', 'error'); }
+        if (v && !/^\d{1,7}(\.\d{1,4})?$/.test(v)) { limit.setAttribute('aria-invalid', 'true'); return say('Write a number, like 100, or leave it empty for no limit.', 'error'); }
+        const list = KINDS.map(x => x[0]).filter(x => kinds.has(x));
+        act('add', [provider.value, type.value, n, list.length ? list.join(',') : 'any', v ? '$' + v : 'none',
+          resets.field.value ? day(resets.field.value) : '-', l].join(':'), e.currentTarget);
+      }}, 'Add');
+      return [
+        h('h3', {text: 'Add an API credit or helper tool'}),
+        h('div', {className: 'row'}, h('label', {className: 'field meta'}, 'Name shown here', label),
+          h('label', {className: 'field meta'}, 'Provider', provider), h('label', {className: 'field meta'}, 'Type', type)),
+        h('div', {className: 'row'}, h('label', {className: 'field meta'}, 'Name the credit skill uses', name),
+          h('label', {className: 'field meta'}, 'Limit in $ per month', limit), h('div', {className: 'field meta'}, 'Month starts again on', resets.node)),
+        h('div', {className: 'row'}, h('span', {className: 'meta', text: 'For'}), chips),
+        h('p', {className: 'meta', text: 'Only the name the credit skill already uses to find its key. Never the key itself.'}),
+        h('div', {className: 'row'}, h('button', {type: 'button', className: 'btn ghost sm', onclick: () => { box.replaceChildren(h('div', {className: 'row'}, open)); }}, 'Cancel'), add)];
+    }
+    return box;
   }
 
   function section(title, note, list) {
@@ -245,7 +326,10 @@
     }
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
     if (subs.length) parts.push(section('Subscriptions', subsNote, subs));
-    if (other.length) parts.push(section('API keys and helper tools', 'Each one stops at its limit.', other));
+    const apiSection = section('API keys and helper tools', 'Each one stops at its limit.', other);
+    for (const t of m.together || []) apiSection.append(togetherCard(t));
+    apiSection.append(addCard(m.providers || []));
+    parts.push(apiSection);
     parts.push(history(m.history || []));
     parts.push(h('p', {className: 'meta', text: 'Logins and keys are never shown or kept here.'}));
     if (!embedded) {

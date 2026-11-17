@@ -9,6 +9,11 @@ the rules, refusals and history lines are the CLI's own:
     on, off    <account>
     end        <account>:<YYYY-MM-DD> | <account>:none
     for        <account>:<kind>[,<kind>...] | <account>:any      kinds: lead code reviews builds scripts helpers
+    model      <account>:small | <account>:first | <account>:any
+    together   <provider>:<value>                                   value: $100 or none (all its accounts together)
+    add        <provider>:<api-key|helper-tool>:<name>:<kinds|any>:<value|none>:<YYYY-MM-DD|->:<label>
+               name: what the credit skill calls it (never the key); the day: when its month starts again
+    remove     <account>
     switching  on | off
 """
 
@@ -20,12 +25,30 @@ from pathlib import Path
 from . import store
 from .store import Refused
 
-VERBS = ("limit", "period", "order", "on", "off", "end", "switching", "for")
+VERBS = (
+    "limit",
+    "period",
+    "order",
+    "on",
+    "off",
+    "end",
+    "switching",
+    "for",
+    "model",
+    "together",
+    "add",
+    "remove",
+)
 _ACC = r"a_[a-z0-9]{6}"
 _PERIOD = r"5h|week|month|until"
 _DAY = r"\d{4}-\d\d-\d\d"
 _KIND = r"(?:lead|code|reviews|builds|scripts|helpers)"
 _VALUE = r"none|\$?\d{1,7}(?:\.\d{1,4})?[%$]?"
+_MONEY = r"none|\$?\d{1,7}(?:\.\d{1,4})?\$?"
+_PROVIDER = r"[a-z][a-z0-9-]{0,31}"
+_NAME = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}"
+_LABEL = r"[A-Za-z0-9][A-Za-z0-9 /._()&+-]{0,63}"
+_KINDS = rf"any|{_KIND}(?:,{_KIND}){{0,5}}"
 PATTERNS = {
     "limit": re.compile(rf"({_ACC}):({_PERIOD}):({_VALUE})(?::({_DAY}))?"),
     "period": re.compile(rf"({_ACC}):({_PERIOD}):({_PERIOD})(?::({_DAY}))?"),
@@ -34,7 +57,13 @@ PATTERNS = {
     "off": re.compile(rf"({_ACC})"),
     "end": re.compile(rf"({_ACC}):({_DAY}|none)"),
     "switching": re.compile(r"(on|off)"),
-    "for": re.compile(rf"({_ACC}):(any|{_KIND}(?:,{_KIND}){{0,5}})"),
+    "for": re.compile(rf"({_ACC}):({_KINDS})"),
+    "model": re.compile(rf"({_ACC}):(small|first|any)"),
+    "together": re.compile(rf"({_PROVIDER}):({_MONEY})"),
+    "add": re.compile(
+        rf"({_PROVIDER}):(api-key|helper-tool):({_NAME}):({_KINDS}):({_MONEY}):({_DAY}|-):({_LABEL})"
+    ),
+    "remove": re.compile(rf"({_ACC})"),
 }
 NOT_THIS = "That is not something Usage can change. Reload the page and try again."
 
@@ -68,4 +97,17 @@ def argv_for(root: Path, verb: str, target: str, by: str | None) -> list[str]:
         return ["end", g[0], g[1], *who]
     if verb == "for":
         return ["for", g[0], *g[1].split(","), *who]
+    if verb == "model":
+        return ["model", g[0], g[1], *who]
+    if verb == "together":
+        return ["together", g[0], g[1], *who]
+    if verb == "add":
+        provider, type_, name, kinds, value, resets, label = g
+        out = ["add", label.strip(), "--provider", provider, "--type", type_, "--name", name]
+        out += ["--for", *kinds.split(",")] if kinds != "any" else []
+        out += ["--limit", value] if value != "none" else []
+        out += ["--resets", resets] if resets != "-" else []
+        return [*out, *who]
+    if verb == "remove":
+        return ["remove", g[0], *who]
     return ["switching", g[0], *who]

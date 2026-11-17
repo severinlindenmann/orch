@@ -204,7 +204,7 @@ def test_ask_refuses_unknown_kinds_and_providers(cli, ws, monkeypatch):
     code, ans = _ask(cli, monkeypatch, "everything")
     assert code == 2 and "kind of work" in ans["error"]
     code, ans = _ask(cli, monkeypatch, "reviews", "--provider", "gemini")
-    assert code == 2 and "Claude API" in ans["error"]
+    assert code == 2 and "Anthropic" in ans["error"]
 
 
 def test_monthly_reset_day_through_the_limit_command(cli, ws, tmp_path, monkeypatch, no_switcher):

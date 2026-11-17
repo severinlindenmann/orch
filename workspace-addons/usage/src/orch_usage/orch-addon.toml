@@ -50,6 +50,22 @@ who = "people"
 summary = "Say which kinds of work may use an account"
 who = "people"
 
+[acts.model]
+summary = "Say which model the kinds of work on an account may use"
+who = "people"
+
+[acts.together]
+summary = "Set one money limit over every account of a provider"
+who = "people"
+
+[acts.add]
+summary = "Add an API credit or helper tool"
+who = "people"
+
+[acts.remove]
+summary = "Take an API credit or helper tool off the list"
+who = "people"
+
 [acts.switching]
 summary = "Switch accounts by itself, or only show and warn"
 who = "people"
