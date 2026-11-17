@@ -861,6 +861,7 @@ def create(
     title_auto: bool = False,
     plan_first: bool = False,
     epic: bool = False,
+    release: bool = False,
 ) -> dict:
     """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
@@ -901,6 +902,10 @@ def create(
         ticket["plan_first"] = True
     if epic:  # several tickets made at once: its sub-tickets are the work, one run goes through them in order
         ticket["epic"] = True
+    if (
+        release
+    ):  # ORCH-37: a release holds the epics and tickets that ship together (set_release changes it later)
+        ticket["release"] = True
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -1447,7 +1452,7 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by", "model")
+PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "release", "description", "description_by", "model")
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1619,6 +1624,23 @@ def edit(
                 k = next(iter(fields))
                 text += f" (was: {_edit_snip(was[k])} | now: {_edit_snip(ticket.get(k))})"  # ORCH-185
             add_history(ticket, by, text)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+def set_release(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-37: mark a ticket as a release (the epics and tickets that ship together sit under it, put there
+    with set_parent) or take the mark off. Its sub-tickets stay where they are either way."""
+    me = load(root, tid)
+    if bool(me.get("release")) == on:
+        return me  # nothing changes: no write, no history line
+
+    def op(ticket):
+        if on:
+            ticket["release"] = True
+        else:
+            ticket.pop("release", None)
+        add_history(ticket, by, "Marked as a release" if on else "No longer a release")
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
