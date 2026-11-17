@@ -220,3 +220,47 @@ def test_a_long_first_line_is_cut_at_a_whole_word_never_after_e_g(proj):
     assert len(tickets.cut_title("word " * 40)) <= tickets.PLACEHOLDER_TITLE
     assert tickets.cut_title("Use short names, i.e. " + "y" * 90, 30).endswith("names…")
     assert tickets.cut_title("Fix the login page") == "Fix the login page"
+
+
+def test_tidy_stores_the_helpers_estimate_once(proj):
+    """ORCH-189: the first run estimates helper time and cost while it tidies; shown on the ticket."""
+    t = tickets.create(proj, "fix login", "human:t")
+    assert "--estimate-minutes" in runs.fresh_prompt(t, [], proj)
+    t = tickets.tidy(
+        proj, t["id"], "Fix the login page", "agent:claude", estimate={"minutes": 95, "cost": 3.456}
+    )
+    assert {k: t["estimate"][k] for k in ("minutes", "cost", "by")} == {
+        "minutes": 95,
+        "cost": 3.46,
+        "by": "agent:claude",
+    }
+    assert any(h["text"] == "Estimate: about 1 h 35 min · $3.46" for h in t["history"])
+    assert tickets.estimate_words({"minutes": 40}) == "about 40 min"
+    assert tickets.estimate_words({"cost": 0}) == "about $0.00"
+    assert tickets.estimate_words(None) == "" and tickets.estimate_words({"minutes": "x"}) == ""
+    for bad in ({"minutes": 0}, {"minutes": 2.5}, {"cost": -1}, {"cost": True}):
+        other = tickets.create(proj, "other", "human:t")
+        with pytest.raises(Refused):
+            tickets.tidy(proj, other["id"], "Other", "agent:claude", estimate=bad)
+    plain = tickets.create(proj, "no estimate", "human:t")
+    assert "estimate" not in tickets.tidy(proj, plain["id"], "No estimate", "agent:claude")
+
+
+def test_tidy_cli_takes_the_estimate(proj, capsys):
+    from orch import cli
+
+    t = tickets.create(proj, "fix login", "human:t")
+    cli.main(
+        [
+            "ticket",
+            "tidy",
+            t["id"],
+            "Fix login",
+            "--estimate-minutes",
+            "30",
+            "--estimate-cost",
+            "1.5",
+            "--json",
+        ]
+    )
+    assert tickets.load(proj, t["id"])["estimate"]["minutes"] == 30

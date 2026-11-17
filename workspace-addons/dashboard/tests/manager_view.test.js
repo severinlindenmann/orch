@@ -83,3 +83,14 @@ test('tickets list: Due and Time · cost columns, stuck chip and line, This week
   const total = nodes(c.ticketTable(c.filteredTickets()), n => n.attrs?.['data-key'] === 'week-total')[0];
   assert.match(text(total), /This week.*1 h 40 min · \$3\.10/);
 });
+
+test('ticket page: Time · cost puts the first-run estimate beside what it took so far', () => {
+  assert.equal(helpers.costLine({estimate:{minutes:95, cost:3.5}, spend:{seconds:1800, cost:1.1}}),
+    'Estimate: about 1 h 35 min · $3.50 — So far: 30 min · $1.10');
+  assert.equal(helpers.costLine({estimate:{minutes:40}}), 'Estimate: about 40 min');
+  assert.equal(helpers.costLine({spend:{seconds:600, cost:0.3}}), 'So far: 10 min · $0.30');
+  assert.equal(helpers.costLine({estimate:{minutes:'x'}}), '');
+  assert.equal(helpers.costLine({}), '');
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+  assert.match(src, /costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null/);
+});

@@ -657,6 +657,18 @@
   function spendTotal(items) {
     return (items || []).reduce((sum, t) => ({cost:sum.cost + (Number(t?.spend?.cost) || 0), seconds:sum.seconds + (Number(t?.spend?.seconds) || 0)}), {cost:0, seconds:0});
   }
+  // The ticket page's Time · cost: the helper's first-run estimate beside what it took so far (ORCH-189).
+  function costLine(t) {
+    const est = t && t.estimate, parts = [];
+    if (est && typeof est === 'object') {
+      const m = Number.isInteger(est.minutes) && est.minutes > 0 ? durationWords(est.minutes * 60) : '';
+      const c = typeof est.cost === 'number' && est.cost >= 0 ? moneyWords(est.cost) : '';
+      if (m || c) parts.push('Estimate: about ' + [m, c].filter(Boolean).join(' · '));
+    }
+    const so = spendWords(t && t.spend);
+    if (so) parts.push('So far: ' + so);
+    return parts.join(' — ');
+  }
   // The one line under a stuck ticket (the core's reason; a stuck helper says its own words).
   function stuckWords(t, nowMs = Date.now()) {
     const why = t && t.stuck;
@@ -685,5 +697,5 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
-  return {durationWords, moneyWords, spendWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  return {durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });

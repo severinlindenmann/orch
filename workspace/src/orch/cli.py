@@ -530,6 +530,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
     x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
+    x.add_argument("--estimate-minutes", type=int, help="your estimate of the helper time, in whole minutes")
+    x.add_argument("--estimate-cost", type=float, help="your estimate of the cost in dollars at list price")
     x = t.add_parser(
         "model",
         parents=[common],
@@ -1072,7 +1074,8 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, f'Title written: "{t["title"]}"')
     elif cmd == "ticket" and sub == "tidy":
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description)
+        est = {"minutes": args.estimate_minutes, "cost": args.estimate_cost}
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est)
         _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import runs_live as _live

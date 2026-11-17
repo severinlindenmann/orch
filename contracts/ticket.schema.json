@@ -69,6 +69,17 @@
     },
     "description": { "type": "string", "maxLength": 2000, "description": "Optional. What the ticket is about, written by an agent from the person's text (orch ticket title --description). Never the person's words: shown and sent to agents as the agent's description, with description_by." },
     "description_by": { "type": "string", "maxLength": 100, "description": "Optional. Who wrote description (agent:<name>)." },
+    "estimate": {
+      "type": "object",
+      "description": "Optional (ORCH-189). The helper's estimate from its first run (orch ticket tidy --estimate-minutes / --estimate-cost): helper minutes and dollars at list price, who and when. Set once.",
+      "properties": {
+        "minutes": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "cost": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "by": { "type": "string", "maxLength": 100 },
+        "at": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "plan": {
       "type": "object",
       "additionalProperties": false,

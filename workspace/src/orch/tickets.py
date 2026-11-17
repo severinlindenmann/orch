@@ -1716,14 +1716,55 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
+def estimate_words(est: object) -> str:
+    """ "about 45 min · $2.00" for a stored estimate; "" for none."""
+    if not isinstance(est, dict):
+        return ""
+    m, cost = est.get("minutes"), est.get("cost")
+    parts = []
+    if isinstance(m, int) and not isinstance(m, bool) and m > 0:
+        parts.append(f"{m // 60} h {m % 60} min" if m >= 60 else f"{m} min")
+    if isinstance(cost, int | float) and not isinstance(cost, bool) and cost >= 0:
+        parts.append(f"${cost:,.2f}")
+    return "about " + " · ".join(parts) if parts else ""
+
+
+def _estimate(minutes: object, cost: object) -> dict | None:
+    """ORCH-189: the helper's own estimate from its first run (helper minutes, dollars at list price)."""
+    if minutes is None and cost is None:
+        return None
+    if minutes is not None and (
+        not isinstance(minutes, int) or isinstance(minutes, bool) or not 0 < minutes <= 100_000
+    ):
+        raise Refused("An estimate needs whole minutes between 1 and 100000.")
+    if cost is not None and (
+        not isinstance(cost, int | float) or isinstance(cost, bool) or not 0 <= cost <= 100_000
+    ):
+        raise Refused("An estimated cost needs dollars between 0 and 100000.")
+    out: dict = {}
+    if minutes is not None:
+        out["minutes"] = minutes
+    if cost is not None:
+        out["cost"] = round(float(cost), 2)
+    return out
+
+
 def tidy(
-    root: Path, tid: str, title: str, by: str, fields: dict | None = None, description: str | None = None
+    root: Path,
+    tid: str,
+    title: str,
+    by: str,
+    fields: dict | None = None,
+    description: str | None = None,
+    estimate: dict | None = None,
 ) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
     filled only where still empty, and the agent's description (what and why, its own field, never the
-    person's note) when there is none yet. Once."""
+    person's note) when there is none yet, and the helper's time and cost estimate (ORCH-189: made in the same
+    first run, shown on the ticket) when there is none yet. Once."""
     title = title.strip()
+    est = _estimate((estimate or {}).get("minutes"), (estimate or {}).get("cost"))
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
     description = (description or "").strip() or None
@@ -1755,7 +1796,11 @@ def tidy(
             ticket["description"] = description
             ticket["description_by"] = by[:100]
             add_history(ticket, by, f"Description written by {by[:100]}")
-        if (title == old or edited) and not filled and not wrote:
+        estimated = bool(est and not ticket.get("estimate"))
+        if estimated:
+            ticket["estimate"] = {**est, "by": by[:100], "at": now()}
+            add_history(ticket, by, "Estimate: " + estimate_words(est))
+        if (title == old or edited) and not filled and not wrote and not estimated:
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]

@@ -613,7 +613,7 @@ test('the Automation page heading is the add-on menu name, not a second name', (
 test('ticket page: brief heading, Repeats in Properties, plain values with a pencil, no Edit text (UX round 5)', () => {
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(ticket, /h\('h2', \{\}, 'What you asked'\)/);
-  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\)\), addonPropertyRows\(t\)/);
+  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\)\), costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
   assert.match(ticket, /'Set a due date'/);
   assert.match(ticket, /iconEl\('pencil'\)/);
   assert.doesNotMatch(ticket, /'Helper: '/);

@@ -1099,8 +1099,11 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
             "fix typos and write a short clear title, a description (what this is about and why, 1 to 3 "
             "sentences, from their note), and a done-when line (what must be true when it is done; when they "
             "wrote one, keep it). Fill the owner and due date only where the person's text says them: "
+            "Also estimate the helper time in minutes and the cost in dollars at list price for the whole "
+            "ticket (shown on the ticket, next to what it really took): "
             f'orch ticket tidy {tid} "<short clear title>" --description "<what and why>" '
-            '--done-when "<one plain line>" [--owner <name>] [--due YYYY-MM-DD]. '
+            '--done-when "<one plain line>" --estimate-minutes <n> --estimate-cost <dollars> '
+            "[--owner <name>] [--due YYYY-MM-DD]. "
             "Their original title stays in the history. The steps come next, as tasks. "
             "Do this before you add tasks.",
         )
