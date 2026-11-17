@@ -55,6 +55,25 @@ function permissionsCard(settings) {
     h('div', {className:'card'}, h('div', {className:'permission-choices', role:'radiogroup', 'aria-label':'What a helper may do'}, rows),
       current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
 }
+// What helpers need (ORCH-45, drawn and chosen on ORCH-43): every tool login, connection and key a helper needs here,
+// with whether it works, when it runs out and how many tickets it stops. The buttons are Home's (loginAction): Renew
+// from the renew step when it is there, else Check again / Try again. Never checked yet or nothing set: no card.
+function helperNeedsCard() {
+  const D = window.DashHelpers, items = D.needItems(snapshot ? null : state.logins);
+  if (!items.length) return null;
+  const at = state.logins.checked_at, when = typeof age === 'function' ? age(at) : '';
+  const rows = items.map(item => {
+    const key = 'settings-need-' + item.name, st = D.needState(item), stops = D.needStopsWord(item.state === 'works' ? 0 : item.stops.length);
+    const action = typeof loginAction === 'function' ? loginAction(item, key, item.state === 'works') : null;
+    return h('div', {className:'setting-row', 'data-key':key, 'data-state':item.state},
+      h('div', {className:'row-label'}, settingsText('span', {}, D.needListName(item)), settingsText('p', {className:'meta'}, D.needKindWord(item))),
+      h('div', {className:'row-value'}, h('span', {className:'badge ' + st.tone}, st.word), stops ? settingsText('p', {className:'meta'}, stops) : null),
+      h('div', {className:'row-action'}, action));
+  });
+  return h('section', {className:'card', id:'needs', 'data-key':'settings-needs'},
+    h('header', {className:'card-h row between'}, h('h3', {}, 'What helpers need'), when ? settingsText('span', {className:'meta', 'data-key':'settings-needs-when'}, 'Checked ' + when) : null),
+    rows);
+}
 // Share with team: off by default; on writes one short entry into the team's AGENTS.md (the orch files stay local).
 // Helpers at once (ORCH-16): no limit by default; a number makes the next helper wait in line until one is
 // finished. Saved on change, like the copies cap (a select, no typed words).
@@ -630,7 +649,7 @@ function settingsPage() {
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), reviewerCard(settings), releaseMergeCard(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
-      permissionsCard(settings), helpersAtOnceCard(settings)]),
+      helperNeedsCard(), permissionsCard(settings), helpersAtOnceCard(settings)]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
     panel('addons', addonsPanel),
     panel('about', aboutPanel())))
