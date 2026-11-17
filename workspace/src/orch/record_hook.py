@@ -54,9 +54,9 @@ _TOO_BIG = {"input": "x" * (1024**2 + 1), "output": ""}  # a detail over 1 MB: t
 class NotRecorded(Exception):
     """Nothing was written. `note` is the plain sentence for stderr; `reason` is the trace code (or None)."""
 
-    def __init__(self, note: str, reason: str | None = None):
+    def __init__(self, note: str, reason: str | None = None, error: str | None = None):
         super().__init__(note)
-        self.note, self.reason = note, reason
+        self.note, self.reason, self.error = note, reason, error
 
 
 def _ids(environ):
@@ -231,8 +231,12 @@ def record_writer(root):
 
     try:
         return secretrun.record_writer(root)
-    except (Refused, ValueError, TypeError):
-        raise record.RecordOff("Recording is off until key hiding is ready.") from None
+    except (Refused, ValueError, TypeError) as e:
+        # ORCH-189: the trace keeps WHY (the error's type name, never its message), so a workspace whose every
+        # hook line is lost as hider_off shows which check refused in orch diag
+        off = record.RecordOff("Recording is off until key hiding is ready.")
+        off.cause = type(e).__name__
+        raise off from None
 
 
 def hook(root, text: str, environ=None, *, too_large: bool = False, before_write=lambda: None) -> dict | None:
@@ -266,8 +270,10 @@ def hook(root, text: str, environ=None, *, too_large: bool = False, before_write
         before_write()
         try:
             writer = record_writer(root)
-        except record.RecordOff:
-            raise NotRecorded("Recording is off until key hiding is ready.", "hider_off") from None
+        except record.RecordOff as off:
+            raise NotRecorded(
+                "Recording is off until key hiding is ready.", "hider_off", getattr(off, "cause", None)
+            ) from None
         try:
             return writer.append(event, detail=payload, lock_wait=LOCK_WAIT)
         except record.RecordOff:  # no record key either: recording is off, with the same trace
@@ -275,7 +281,7 @@ def hook(root, text: str, environ=None, *, too_large: bool = False, before_write
     except NotRecorded as e:
         if e.reason:
             before_write()
-            record.note_lost(root, ids[0], e.reason)
+            record.note_lost(root, ids[0], e.reason, error=e.error)
         raise
     except record.RecordInvalid:
         before_write()

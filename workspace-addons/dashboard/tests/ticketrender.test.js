@@ -91,7 +91,7 @@ function page(first) {
   const ctx = {window, document:doc, Node, location:{hash:'#ticket/t_x'}, history:{replaceState() {}}, localStorage:{getItem:() => null, setItem() {}},
     CustomEvent:class { constructor(type, init) { this.type = type; this.detail = init?.detail; } }, MutationObserver:class { observe() {} disconnect() {} },
     setInterval:() => 0, clearInterval() {}, setTimeout:() => 0, clearTimeout() {}, addEventListener() {}, console,
-    fetch:url => ['/api/state', '/api/act'].includes(url) ? Promise.resolve(replies.shift()).then(body => ({ok:true, status:200, json:async () => body})) : new Promise(() => {})};
+    fetch:url => ['/api/state', '/api/act'].includes(String(url).split('?')[0]) ? Promise.resolve(replies.shift()).then(body => ({ok:true, status:200, json:async () => body})) : new Promise(() => {})};
   window.window = window;
   vm.createContext(ctx);
   vm.runInContext([...['home', 'tickets', 'ticket', 'newticket', 'settings', 'chat'].map(p => read('pages/' + p + '.js')), read('app.js')].join('\n'), ctx);

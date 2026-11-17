@@ -1658,6 +1658,65 @@ def quiet_since(ticket: dict, now: datetime | None = None) -> str | None:
     return newest[0].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+STUCK_HOURS = (
+    24  # a question unanswered or a Working ticket without news this long counts as stuck (fixed: R4.4)
+)
+
+
+def overdue(ticket: dict, now: datetime | None = None) -> bool:
+    """Past its due date (local time like the due itself): a date-only due from the next day on, a due with a
+    time from that minute on; never for a finished or dropped ticket."""
+    due = ticket.get("due")
+    if not isinstance(due, str) or not due or ticket.get("status") in ("done", "dropped"):
+        return False
+    now = now or datetime.now()
+    try:
+        if "T" in due:
+            return datetime.strptime(due, "%Y-%m-%dT%H:%M") < now.replace(tzinfo=None)
+        return datetime.strptime(due, "%Y-%m-%d").date() < now.date()
+    except ValueError:
+        return False
+
+
+def _utc(text: object) -> datetime | None:
+    if not isinstance(text, str):
+        return None
+    try:
+        at = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=UTC)
+
+
+def stuck_why(ticket: dict, now: datetime | None = None) -> str | None:
+    """ORCH-189, the one Stuck rule beside a stuck helper (which only the run knows): "question" when a
+    question has waited more than STUCK_HOURS, "quiet" when a Working ticket had no news that long, "overdue"
+    past its due date; None otherwise and for finished, dropped or in-Review tickets. Read-only, nothing is
+    stored."""
+    status = ticket.get("status")
+    if status in ("done", "dropped", "review"):
+        return None
+    if now is None:
+        utc_now, local = datetime.now(UTC), None
+    elif now.tzinfo is None:  # a plain time is taken as UTC here and as local time for the due date
+        utc_now, local = now.replace(tzinfo=UTC), now
+    else:
+        utc_now, local = now.astimezone(UTC), now.astimezone().replace(tzinfo=None)
+    limit = timedelta(hours=STUCK_HOURS)
+    for q in ticket.get("questions") or []:
+        if not isinstance(q, dict) or q.get("answer") is not None or q.get("taken_back"):
+            continue
+        sent = _utc(q.get("sent_at") or q.get("at"))
+        if sent is not None and utc_now - sent > limit:
+            return "question"
+    since = quiet_since(ticket, utc_now)
+    if since and utc_now - (_utc(since) or utc_now) > limit:
+        return "quiet"
+    if overdue(ticket, local):
+        return "overdue"
+    return None
+
+
 def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
     """The words "No news since 09:20" (local time; "Mon 09:20" on another day). None when not quiet.
     Same words as the dashboard helper `quietWords`."""
@@ -1955,14 +2014,55 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
+def estimate_words(est: object) -> str:
+    """ "about 45 min · $2.00" for a stored estimate; "" for none."""
+    if not isinstance(est, dict):
+        return ""
+    m, cost = est.get("minutes"), est.get("cost")
+    parts = []
+    if isinstance(m, int) and not isinstance(m, bool) and m > 0:
+        parts.append((f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min")
+    if isinstance(cost, int | float) and not isinstance(cost, bool) and cost >= 0:
+        parts.append(f"${cost:,.2f}")
+    return "about " + " · ".join(parts) if parts else ""
+
+
+def _estimate(minutes: object, cost: object) -> dict | None:
+    """ORCH-189: the helper's own estimate from its first run (helper minutes, dollars at list price)."""
+    if minutes is None and cost is None:
+        return None
+    if minutes is not None and (
+        not isinstance(minutes, int) or isinstance(minutes, bool) or not 0 < minutes <= 100_000
+    ):
+        raise Refused("An estimate needs whole minutes between 1 and 100000.")
+    if cost is not None and (
+        not isinstance(cost, int | float) or isinstance(cost, bool) or not 0 <= cost <= 100_000
+    ):
+        raise Refused("An estimated cost needs dollars between 0 and 100000.")
+    out: dict = {}
+    if minutes is not None:
+        out["minutes"] = minutes
+    if cost is not None:
+        out["cost"] = round(float(cost), 2)
+    return out
+
+
 def tidy(
-    root: Path, tid: str, title: str, by: str, fields: dict | None = None, description: str | None = None
+    root: Path,
+    tid: str,
+    title: str,
+    by: str,
+    fields: dict | None = None,
+    description: str | None = None,
+    estimate: dict | None = None,
 ) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
     filled only where still empty, and the agent's description (what and why, its own field, never the
-    person's note) when there is none yet. Once."""
+    person's note) when there is none yet, and the helper's time and cost estimate (ORCH-189: made in the same
+    first run, shown on the ticket) when there is none yet. Once."""
     title = title.strip()
+    est = _estimate((estimate or {}).get("minutes"), (estimate or {}).get("cost"))
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
     description = (description or "").strip() or None
@@ -1998,7 +2098,11 @@ def tidy(
             ticket["description"] = description
             ticket["description_by"] = by[:100]
             add_history(ticket, by, f"Description written by {by[:100]}")
-        if (title == old or edited) and not filled and not wrote:
+        estimated = bool(est and not ticket.get("estimate"))
+        if estimated:
+            ticket["estimate"] = {**est, "by": by[:100], "at": now()}
+            add_history(ticket, by, "Estimate: " + estimate_words(est))
+        if (title == old or edited) and not filled and not wrote and not estimated:
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]
