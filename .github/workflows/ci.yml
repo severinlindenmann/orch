@@ -41,6 +41,7 @@ jobs:
       relay: ${{ steps.f.outputs.relay }}
       mobile: ${{ steps.f.outputs.mobile }}
       brand: ${{ steps.f.outputs.brand }}
+      dashshots: ${{ steps.f.outputs.dashshots }}
     steps:
       - uses: actions/checkout@v4
       - id: f
@@ -57,6 +58,8 @@ jobs:
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
+            # the dashboard's pages and what takes their pictures (ORCH-312)
+            dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
             brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py']
   contracts:
     needs: changes
@@ -114,9 +117,14 @@ jobs:
       - run: pip install pytest
       - run: python -m pytest -q brand/tests
       - run: python scripts/check_style.py
+  dash-shots:
+    # pictures of the dashboard pages a pull request changes, for its review card (ORCH-312)
+    needs: changes
+    if: needs.changes.outputs.dashshots == 'true' && github.event_name == 'pull_request'
+    uses: ./.github/workflows/dash-shots.yml
   gate:
     if: always()
-    needs: [changes, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, brand]
+    needs: [changes, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, brand, dash-shots]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

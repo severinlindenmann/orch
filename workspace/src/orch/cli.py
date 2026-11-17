@@ -731,6 +731,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     g.add_argument("--after", metavar="FILE", help="the file as it would become")
     g.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
+    g.add_argument(
+        "--ci-shots",
+        metavar="PR_URL",
+        help="show the pictures CI took of the dashboard pages this pull request changes "
+        "(1280, 1920 and 390 px); no screenshots of your own",
+    )
     g.add_argument("--open", metavar="URL", help="an http(s) address to look at")
     g.add_argument(
         "--merge",
@@ -1343,6 +1349,10 @@ def run(args: argparse.Namespace) -> None:
             )
         if args.merge and not card:
             raise Refused("--merge goes with a link card: --link TITLE --open <pull request address>.")
+        if args.ci_shots and not card:
+            raise Refused(
+                "--ci-shots goes with a card, e.g. --draft TITLE --ci-shots <pull request address>."
+            )
         if args.release and not args.merge:
             raise Refused("--release goes with --merge.")
         if card:  # the card goes where every question goes; a phone shows it from the stack
