@@ -170,7 +170,18 @@ def test_overview_names_the_tickets_that_stop_and_leaks_nothing(proj, run, new_t
     assert (r["state"], r["ends_at"], r["helper"]) == ("soon", "2026-11-17T21:24:57Z", "claude")
     assert [t["id"] for t in r["stops"]] == [tid] and other not in json.dumps(rows)
     assert r["stops"][0]["title"] == "Plan the newsletter"
-    assert set(r) == {"name", "label", "kind", "state", "ends_at", "helper", "chosen", "stops", "renew", "key"}
+    assert set(r) == {
+        "name",
+        "label",
+        "kind",
+        "state",
+        "ends_at",
+        "helper",
+        "chosen",
+        "stops",
+        "renew",
+        "key",
+    }
     assert r["renew"] is True and r["key"] is None  # orch can start the Claude Code sign-in (ORCH-46)
     assert HIDDEN not in json.dumps(rows)
 

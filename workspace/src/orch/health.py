@@ -7,10 +7,10 @@ A recipe says which command to run and how to read its answer:
   - a workspace recipe, written by a person on this computer into the guarded orch home (key folder record
     `checks`, keystore.RECORDS): never in the project folder, so a cloned project cannot bring commands that
     run by themselves:
-    {"checks": {name: {"label", "command", "works"?, "ends"?, "kind"?, "key"?}}}. Without "works" the exit code
-    alone answers: 0 = works, anything else = needs renewing. "kind" says what it is for the person: login (the
-    default), connection or key; a helper tool is always a login. "key" names the key (keystore) this check
-    tests: when it fails, the person replaces that key from the warning (renew.replace_key).
+    {"checks": {name: {"label", "command", "works"?, "ends"?, "kind"?, "key"?}}}. Without "works" the exit
+    code alone answers: 0 = works, anything else = needs renewing. "kind" says what it is for the person:
+    login (the default), connection or key; a helper tool is always a login. "key" names the key (keystore)
+    this check tests: when it fails, the person replaces that key from the warning (renew.replace_key).
 
 States: works | soon (runs out within WARN_DAYS) | renew (stopped working, a person renews it) |
 unreachable (the command could not run or gave no readable answer). Nothing else the command prints is
