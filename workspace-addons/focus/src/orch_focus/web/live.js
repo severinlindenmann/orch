@@ -361,7 +361,11 @@
     const r = S.state.view.run.running ? await act('run.stop', {ticket: TID}) : await act('run.start', {ticket: TID});
     if (!r.ok) toast(r.message, 'error'); else toast(S.state.view.run.running ? 'Started. Same conversation.' : 'Stopped. The work done so far is kept.', 'ok');
   }
-  async function startFresh() { const r = await act('run.start', {ticket: TID, fresh: true}); if (!r.ok) toast(r.message, 'error'); else toast('Started fresh from the ticket.', 'ok'); }
+  async function startFresh() {
+    const manager = !!(S.state.view && S.state.view.ticket.manager);  /* ORCH-147: an empty conversation, even while it runs */
+    const r = manager ? await act('manager.start', {fresh: true}) : await act('run.start', {ticket: TID, fresh: true});
+    if (!r.ok) toast(r.message, 'error'); else toast(manager ? 'Started a fresh conversation.' : 'Started fresh from the ticket.', 'ok');
+  }
   function renderWorking(v) {
     const running = v.run.running;
     els.working.hidden = true;
