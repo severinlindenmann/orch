@@ -578,14 +578,16 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
 test('ticket saved views filter by status and the board shows Changes to add', () => {
   const items = [{id:'w',title:'W',status:'active',owner:'anna'}, {id:'r',title:'R',status:'review',owner:'ben'},
     {id:'d',title:'D',status:'done',owner:'anna',done_at:new Date().toISOString(),bring_back:{state:'waiting'}},
-    {id:'o',title:'O',status:'done',owner:'ben',done_at:'2000-01-01T00:00:00Z'}];
+    {id:'o',title:'O',status:'done',owner:'ben',done_at:'2000-01-01T00:00:00Z'},
+    {id:'k',title:'K',status:'waiting',owner:'ben',waiting_on:{kind:'time',until:'2030-01-01T09:00:00Z'}}];
   const c = context(items);
   const ids = (view, person = '') => c.filterTickets(items, '', false, '', person, view).map(t => t.id).join();
   assert.equal(ids('working'), 'w');
   assert.equal(ids('needs-you'), 'r,d');
   assert.equal(ids('done-week'), 'd');
   assert.equal(ids('done-today'), 'd');
-  assert.equal(ids('', 'ben'), 'r,o');
+  assert.equal(ids('waiting'), 'k', 'the Waiting chip shows what waits for a time, a ticket or the outside (ORCH-248)');
+  assert.equal(ids('', 'ben'), 'r,o,k');
   assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
 });

@@ -315,7 +315,7 @@ function fieldSections(t) {
   });
 }
 async function saveAddonField(t, addon, field, value) {
-  const result = await act('ticket.field', {ticket:t.id, addon, field, value:String(value), if_revision:t.revision});
+  const result = await act('ticket.field', {ticket:t.id, addon, field, value:String(value), if_revision:(ticketOf(t.id) || t).revision});
   if (!result.ok) window.orch.toast(changeError(result), 'error');
 }
 function startAddonField(control) {
@@ -1175,7 +1175,7 @@ function ticketAddStep(t) {
     const moved = pick && pick.value ? existing.find(x => x.id === pick.value) : null;
     const title = input.value.trim(); if ((!title && !moved) || send.disabled) return;
     send.disabled = true;
-    const result = moved ? await act('ticket.edit', {ticket:moved.id, parent:t.id, if_revision:moved.revision}) : await act('ticket.new', {title, parent:t.id});
+    const result = moved ? await act('ticket.edit', {ticket:moved.id, parent:t.id, if_revision:(ticketOf(moved.id) || moved).revision}) : await act('ticket.new', {title, parent:t.id});
     if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(changeError(result), 'error'); }
   });
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
@@ -1564,6 +1564,12 @@ function ticketHelperMenuItems(t, run) {
     run?.claim?.mode === 'oneshot' ? null : copy('Copy watch command', 'orch run attach ' + ref + ' --watch', 'watch'),
     run?.claim?.mode === 'oneshot' ? null : copy('Copy take-over command', 'orch run attach ' + ref, 'take')];
 }
+// ORCH-248: "Show me the plan first" stays visible on the ticket after it was made (the plan card only shows while the plan waits).
+function ticketPlanFirstLine(t, planShown) {
+  if (!t.plan_first || planShown || ['done', 'dropped'].includes(t.status)) return null;
+  const planned = array(t.questions).some(q => String(q.text || '').startsWith('Plan ready') && q.answer != null);
+  return h('p', {className:'meta ticket-plan-first', 'data-key':'plan-first-' + t.id}, planned ? 'You asked to see the plan first. You have approved it.' : 'You asked to see the plan first. The helper waits for your OK before work starts.');
+}
 function detail(t) {
   if (!t) return missingTicket(route().id);
   ticketLookups.delete(t.id);
@@ -1590,6 +1596,7 @@ function detail(t) {
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
+    ticketPlanFirstLine(t, !!planQ),
     ticketReleaseLine(t),
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
