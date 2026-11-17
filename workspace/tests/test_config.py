@@ -296,6 +296,7 @@ def test_focus_preview_is_off_by_default_and_switches_both_ways(proj, run):
 
 
 def test_focus_preview_unreadable_or_wrong_value_counts_as_off(proj):
+    (proj / ".orch").mkdir(exist_ok=True)
     (proj / ".orch" / "config.toml").write_text('[focus]\npreview = "yes"\n')
     assert config.focus_preview_on(proj) is False
     (proj / ".orch" / "config.toml").write_text("[focus\npreview = true\n")
