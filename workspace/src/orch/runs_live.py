@@ -731,11 +731,11 @@ def _model_line(rec: dict, root: Path) -> str | None:
     return tmpl.replace("{model}", to)
 
 
-def switch_model(root: Path, tid: str, model: str, by: str) -> bool:
-    """The ticket moved up while a live session runs: at its next turn end orch types the adapter's fixed
-    model line, then the notice for one fixed message saying so (the reason stays in the history only: no
-    caller's words go into the session). True when a live session will switch; False when none runs or its
-    tool cannot switch (then the next start uses the new model)."""
+def switch_model(root: Path, tid: str, model: str, by: str, up: bool = True) -> bool:
+    """The ticket moved up (or a person chose another model, up=False) while a live session runs: at its
+    next turn end orch types the adapter's fixed model line, then the notice for one fixed message saying so
+    (the reason stays in the history only: no caller's words go into the session). True when a live session
+    will switch; False when none runs or its tool cannot switch (then the next start uses the new model)."""
     if model not in modelpick.MODELS:
         return False
     with runs.locked(root, tid):
@@ -746,7 +746,11 @@ def switch_model(root: Path, tid: str, model: str, by: str) -> bool:
             return False
         rec["model_switch"] = {"to": model, "at": tickets.now()}
         runs._write(root, rec)
-    send(root, tid, by, f"Model moved up to {modelpick.LABELS[model]}. Go on with the ticket.")
+    said = "moved up to" if up else "set to"
+    text = f"Model {said} {modelpick.LABELS[model]}. Go on with the ticket."
+    if model == "fable":
+        text += " " + runs.drafts_text(tid)
+    send(root, tid, by, text)
     return True
 
 
