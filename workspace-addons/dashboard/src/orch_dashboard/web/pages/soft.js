@@ -44,7 +44,15 @@ const SoftNav = (() => {
     try { hist.replaceState({...(hist.state && typeof hist.state === 'object' ? hist.state : {}), softNav:fresh}, ''); } catch (_) { return null; }
     return fresh;
   }
-  function remember(win = window) { if (!on() || moving) return; const id = entryId(win.history); if (id) scrolls.set(id, [win.scrollX, win.scrollY]); }
+  const KEEP_SCROLLS = 100;  // the last places only: a long session of page changes must not grow without end (ORCH-340)
+  function remember(win = window) {
+    if (!on() || moving) return;
+    const id = entryId(win.history);
+    if (!id) return;
+    scrolls.delete(id);  // the newest goes last, so the oldest is dropped first
+    scrolls.set(id, [win.scrollX, win.scrollY]);
+    while (scrolls.size > KEEP_SCROLLS) scrolls.delete(scrolls.keys().next().value);
+  }
   // The scroll to show after a page change: where this entry was left, or the top for a new one.
   function scrollAfterChange(hist = history, preview = on()) {
     if (!preview) return [0, 0];
@@ -65,7 +73,7 @@ const SoftNav = (() => {
   function said(from, to, kind, win = window) {
     try { win.dispatchEvent(new CustomEvent('orch:page', {detail:{from, to, kind}})); } catch (_) { /* old browser */ }
   }
-  return {on, keepEl, softHash, dialogsToClose, entryId, remember, hold, scrollAfterChange, fallBack, said, scrolls};
+  return {on, keepEl, softHash, dialogsToClose, entryId, remember, hold, scrollAfterChange, fallBack, said, scrolls, KEEP_SCROLLS};
 })();
 // The one mount place for content that survives a page change (the bar, the layer). It is empty until a later task
 // mounts something; without Preview nothing mounts.

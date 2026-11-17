@@ -1,6 +1,7 @@
 """One small interface over the computer's own service tool, one module per platform (picked by sys.platform).
 
-Every driver works for the person's own account only: never sudo, never a system-wide folder, never `User=`.
+Every driver works for the person's own account only: never sudo or admin rights, never a system-wide folder,
+never `User=`.
 The home folder for its files is `Path.home()` (tests point HOME at a temp folder)."""
 
 from __future__ import annotations
@@ -90,7 +91,14 @@ class Driver:
 def run_tool(argv: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
-            argv, check=False, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL
+            argv,
+            check=False,
+            capture_output=True,
+            text=True,
+            errors="replace",  # Windows tools print in the console code page: never fail on one letter
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+            creationflags=0x08000000 if sys.platform == "win32" else 0,  # CREATE_NO_WINDOW: no console flash
         )
     except FileNotFoundError:
         raise Unavailable(f"{Path(argv[0]).name} is missing") from None
@@ -122,4 +130,8 @@ def get() -> Driver:
         from .systemd import Systemd
 
         return Systemd()
-    raise Unavailable("only macOS and Linux are supported so far")
+    if sys.platform == "win32":
+        from .windows import Windows
+
+        return Windows()
+    raise Unavailable("only macOS, Linux and Windows are supported so far")

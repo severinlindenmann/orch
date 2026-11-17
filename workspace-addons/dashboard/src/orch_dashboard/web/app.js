@@ -983,6 +983,7 @@ window.addEventListener('hashchange', async () => {
   soft?.hold(true);
   for (const d of soft ? soft.dialogsToClose() : document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
+  soft?.hold(false);  // render() returns early before the state arrives: scrolls must not stay unremembered (ORCH-340)
 });
 document.getElementById('side-nav')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;
