@@ -226,7 +226,7 @@ def passes(data: bytes) -> list[tuple[bytes, bool]]:
     the stored-key check (labels=False). Any doubt about the picture: every byte, every rule."""
     from orch import pngpixels
 
-    view = pngpixels.label_view(data) if data.startswith(pngpixels.SIGNATURE) else None
+    view = pngpixels.label_view(data) if data.startswith(pngpixels.MAGIC) else None
     return [(data, True)] if view is None else [(view, True), (data, False)]
 
 

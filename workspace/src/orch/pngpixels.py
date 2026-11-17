@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import zlib
 
-SIGNATURE = b"\x89PNG\r\n\x1a\n"
+MAGIC = b"\x89PNG\r\n\x1a\n"
 MAX_CHUNKS = 10000  # a bounded walk: more chunks than this = no proof
 MAX_PIXEL_BYTES = 1 << 28  # an IHDR that claims more than this = no proof
 # Bounded work (real screenshots up to 870 KB: at most 21 blocks and 180 000 table entries): more = no proof
@@ -291,7 +291,7 @@ def pixel_spans(data: bytes) -> list[tuple[int, int]]:
 
 
 def _spans(data: bytes) -> list[tuple[int, int]]:
-    if not data.startswith(SIGNATURE):
+    if not data.startswith(MAGIC):
         return []
     pos, pieces, ihdr, idat_done = 8, [], b"", False  # pieces: (file offset, length) of each IDAT payload
     for _ in range(MAX_CHUNKS):
