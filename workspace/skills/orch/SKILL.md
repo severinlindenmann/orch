@@ -86,7 +86,7 @@ Only the person marks a step "Won't do"; you cannot. Ask instead, with the step 
 
     orch ask <id> "Mark step c2 as won't do?" --option yes --option no --check c2
 
-Wait for the answer. If it is yes, the person marks it; do not try to tick or reopen it yourself.
+Wait for the answer. A yes marks the step won't do by itself; never tick or reopen it yourself.
 
 **Files you make**
 

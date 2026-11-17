@@ -825,3 +825,29 @@ def test_ask_says_to_keep_working(proj, run, new_ticket):
     tid = with_checks(proj, run, new_ticket)
     code, out, _ = run("ask", tid, "Which date format?", "--option", "A")
     assert code == 0 and "Next: keep working on the steps that do not need the answer." in out
+
+
+def test_a_persons_yes_to_the_wont_do_question_marks_the_step(proj, run, new_ticket, monkeypatch):
+    """ORCH-267: the owner answered yes to "Mark step c2 as won't do?" and the step stayed open until a
+    second click. The yes now marks it; a no, another question or an agent's answer does not."""
+    tid = with_checks(proj, run, new_ticket)
+    assert (
+        run("ask", tid, "Mark step c2 as won't do?", "--option", "yes", "--option", "no", "--check", "c2")[0]
+        == 0
+    )
+    assert run("answer", tid, "q1", "Yes", "--by", "human:tester")[0] == 0
+    c2 = read(proj, tid)["checklist"][1]
+    assert c2["wont_do"] is True and c2["wont_by"] == "human:tester" and c2["done"] is False
+    assert "Mark step c2" in c2["reason"]
+    # no, or a question not about won't do: the step stays as it is
+    run("ask", tid, "Mark step c3 as won't do?", "--option", "yes", "--option", "no", "--check", "c3")
+    run("answer", tid, "q2", "no", "--by", "human:tester")
+    run("ask", tid, "Is step c1 right?", "--option", "yes", "--option", "no", "--check", "c1")
+    run("answer", tid, "q3", "yes", "--by", "human:tester")
+    steps = read(proj, tid)["checklist"]
+    assert "wont_do" not in steps[0] and "wont_do" not in steps[2]
+    # an answer written from inside an agent session never marks it
+    run("ask", tid, "Mark step c3 as won't do, please?", "--option", "yes", "--option", "no", "--check", "c3")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    run("answer", tid, "q4", "yes", "--by", "human:tester")
+    assert "wont_do" not in read(proj, tid)["checklist"][2]

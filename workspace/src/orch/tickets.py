@@ -2533,22 +2533,43 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
         raise Refused("The reason is one line of at most 200 characters.")
 
     def op(t):
-        item = _item(t, cid)
-        if item.get("done"):
-            raise Refused(f"{cid} is already done. Open it again first.")
-        item["evidence"] = []
-        _clear_doing(item)
-        item["wont_do"] = True
-        if why:
-            item["reason"] = why
-        else:
-            item.pop("reason", None)
-        item.update({"by": by, "at": now(), "wont_by": by, "wont_at": now()})
-        history.created("steps", item)  # the step mark is core's own (like check_start)
-        add_history(t, by, f"Marked {cid} as won't do")
-        return item
+        return _mark_wont_do(t, cid, by, why)
 
     return apply_op(root, tid, op, by=by)
+
+
+def _mark_wont_do(t: dict, cid: str, by: str, why: str = "") -> dict:
+    """Inside an apply_op: mark step `cid` won't do for the person `by` (check_wont_do, or their yes to a
+    "won't do?" question tied to the step)."""
+    item = _item(t, cid)
+    if item.get("done"):
+        raise Refused(f"{cid} is already done. Open it again first.")
+    item["evidence"] = []
+    _clear_doing(item)
+    item["wont_do"] = True
+    if why:
+        item["reason"] = why
+    else:
+        item.pop("reason", None)
+    item.update({"by": by, "at": now(), "wont_by": by, "wont_at": now()})
+    history.created("steps", item)  # the step mark is core's own (like check_start)
+    add_history(t, by, f"Marked {cid} as won't do")
+    return item
+
+
+_WONT_DO_Q = re.compile(r"won['\u2019]?t\s+do", re.IGNORECASE)
+_YES = ("yes", "ja", "y", "ok")
+
+
+def _wont_do_yes(q: dict, ans: str) -> bool:
+    """A person's yes to a question tied to a step that asks whether the step is won't do (the question
+    WONT_DO_AGENT tells helpers to ask). ORCH-267: the yes marks the step; no second click."""
+    return (
+        isinstance(q.get("check"), str)
+        and isinstance(q.get("text"), str)
+        and bool(_WONT_DO_Q.search(q["text"]))
+        and ans.strip().casefold() in _YES
+    )
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
@@ -3379,6 +3400,11 @@ def answer(
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
+        if _is_person(by) and _wont_do_yes(q, ans):
+            item = _item(ticket, q["check"])
+            if not item.get("done") and not item.get("wont_do"):
+                why = " ".join(f"Answered yes to: {q['text']}".split())[:200]
+                _mark_wont_do(ticket, q["check"], by, why)
         return q
 
     return apply_op(root, tid, op, by=by)
