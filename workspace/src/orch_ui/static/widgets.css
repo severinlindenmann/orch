@@ -769,7 +769,7 @@ body.dock-max .fx-stage>.fx-pane{display:none}
 .session-dock.side{border-top:0;border-left:1px solid var(--border-strong)}
 /* In a card (ticket page, ORCH-238): a framed box of its own height, the newest line at the bottom; the composer sits under it. */
 .session-dock.in-card{border:1px solid var(--border-strong);border-radius:var(--r2);overflow:hidden}
-.session-dock.in-card .session-dock-b{max-height:320px}
+.session-dock.in-card .session-dock-b{max-height:320px;white-space:pre-wrap;overflow-wrap:anywhere}
 .live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--working);flex:none}
 .session-dock .ask-line{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3);background:var(--warning-soft);color:var(--warning);font-size:13px}
 .session-dock .ask-line .grow{flex:1}
