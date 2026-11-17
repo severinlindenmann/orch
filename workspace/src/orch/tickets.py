@@ -836,7 +836,7 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
                 "Changed " + f + (f" (now {STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
             )
     if m := re.fullmatch(r"Added check (c\d+)", t):
-        return "Added a step" + task(m.group(1))
+        return "Added a task" + task(m.group(1))
     if m := re.fullmatch(r"Check (c\d+) done", t):
         return "Finished a task" + task(m.group(1))
     if m := re.fullmatch(r"Marked (c\d+) as won't do", t):

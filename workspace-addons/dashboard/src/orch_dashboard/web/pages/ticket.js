@@ -1191,7 +1191,7 @@ function ticketCardShown(t, q, card) {
 // A step is named by its title only; the ticket key is a quiet line under Properties.
 const partName = p => clean(p.title);
 function ticketAddStep(t) {
-  const ask = t.release ? 'What ships in this release?' : t.epic ? 'What needs doing in this ticket?' : 'What is this step about?';  // an epic (ORCH-14) or a release (ORCH-37) holds tickets
+  const ask = t.release ? 'What ships in this release?' : t.epic ? 'What needs doing in this ticket?' : 'What is this sub-ticket about?';  // an epic (ORCH-14) or a release (ORCH-37) holds tickets
   const {d, actions} = dialog(ask);
   const input = h('input', {className:'input', 'aria-label':ask, maxlength:200});
   // ORCH-156: or a ticket that already exists moves in (its "Part of" changes). Not this ticket, not one it is
@@ -1215,17 +1215,17 @@ function ticketAddStep(t) {
   actions.append(send); d.append(h('div', {className:'stack'}, input, pick), actions); window.orch.open(d); input.focus();
 }
 function ticketParts(t, children) {
-  const holds = t.epic || t.release, add = snapshot ? null : ticketButton(holds ? '+ Add a ticket' : '+ Add a step', 'ghost add-row', () => ticketAddStep(t));
+  const holds = t.epic || t.release, add = snapshot ? null : ticketButton(holds ? '+ Add a ticket' : '+ Add a sub-ticket', 'ghost add-row', () => ticketAddStep(t));
   // No steps yet: only the add button, so a top-level ticket can get its first step (a step itself gets none).
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
   // ORCH-37: in a release, an epic's row says how far its own tickets are ("Epic · 2 of 4 done").
   const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, 'Epic · ' + kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' done'); };
-  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
-  const {d, actions} = dialog('Rename step');
-  const input = h('input', {className:'input', 'aria-label':'Step title', maxlength:200, value:child.title});
+  const {d, actions} = dialog('Rename sub-ticket');
+  const input = h('input', {className:'input', 'aria-label':'Sub-ticket title', maxlength:200, value:child.title});
   const save = ticketButton('Save', 'primary', async () => {
     const title = input.value.trim(); if (!title || save.disabled) return;
     save.disabled = true;
@@ -1268,8 +1268,8 @@ function ticketPlan(t, q, children) {
               render();
             })) : null)))),
     snapshot ? null : h('div', {className:'row ticket-plan-actions'}, start,
-      ticketButton('Change a step', 'outline', () => { if (editing) ticketPlanEditing.delete(t.id); else ticketPlanEditing.add(t.id); render(); }),
-      editing ? [ticketButton('+ Add a step', 'ghost', () => ticketAddStep(t)),
+      ticketButton('Change sub-tickets', 'outline', () => { if (editing) ticketPlanEditing.delete(t.id); else ticketPlanEditing.add(t.id); render(); }),
+      editing ? [ticketButton('+ Add a sub-ticket', 'ghost', () => ticketAddStep(t)),
         ticketButton('Done editing', 'ghost', () => { ticketPlanEditing.delete(t.id); render(); })] : null));
 }
 const NOTE_LABELS = [['changed', 'Changed'], ['why', 'Why'], ['not_included', 'Not in this ticket']];
@@ -1436,7 +1436,7 @@ function ticketReviewCard(t) {
     h('div', {className:'section-head'}, h('h2', {}, 'Result'), count ? h('span', {className:'meta'}, count + (count === 1 ? ' file' : ' files')) : null),
     t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)) : null,
     t.verdict_needed ? h('p', {className:'meta', 'data-key':'ticket-verdict-needed'}, 'Marked done without your OK. Check the work, then click Looks good.') : null,
-    file ? ticketResultFrame(t, found.kind, file) : h('p', {className:'meta'}, array(t.checklist).length ? 'No result file is attached. Each step below shows what was done and how it was checked.' : 'No result file and no steps are attached.'),
+    file ? ticketResultFrame(t, found.kind, file) : h('p', {className:'meta'}, array(t.checklist).length ? 'No result file is attached. Each task below shows what was done and how it was checked.' : 'No result file and no tasks are attached.'),
     t.done_when ? h('p', {className:'review-check'}, 'Is this what you asked for? “', linkRefs(t, t.done_when), '”') : null,
     ticketProofLine(t));
 }
@@ -1447,7 +1447,7 @@ function ticketHelperDid(t) {
   if (!done.length) return null;
   const shown = done.slice(0, 6);
   return h('section', {className:'card helper-did', 'data-key':'helper-did'}, h('div', {className:'section-head'}, h('h2', {}, 'What the helper did')),
-    h('ul', {className:'lines'}, shown.map(c => h('li', {}, taskTitle(c))), done.length > shown.length ? h('li', {className:'meta'}, '+ ' + (done.length - shown.length) + ' more on the Steps tab') : null));
+    h('ul', {className:'lines'}, shown.map(c => h('li', {}, taskTitle(c))), done.length > shown.length ? h('li', {className:'meta'}, '+ ' + (done.length - shown.length) + ' more on the Tasks tab') : null));
 }
 // What the helper (or you) said when a task was finished: the note shown in Results of a Done ticket.
 function completionNotes(t) {
@@ -1503,7 +1503,7 @@ function ticketAnswerNodes(t, plainRow) {
     .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
 }
-const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
+const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
 function ticketProperties(t, parent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
@@ -1648,7 +1648,7 @@ function detail(t) {
     h('div', {className:'columns ticket-layout' + (selected === 'files' ? ' wide' : '')},
       h('div', {className:'stack story'},
         panel('overview', 'Overview', overview),
-        panel('tasks', 'Steps', card('tasks', 'Steps', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No steps yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
+        panel('tasks', 'Tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
       h('div', {className:'stack ticket-side'}, ticketProperties(t, parent), fieldSections(t)))));

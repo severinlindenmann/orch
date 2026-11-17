@@ -123,14 +123,14 @@
     // the lines orch writes itself (same words as the CLI): a task line names the task, add-on settings their add-on
     const task = id => { const c = (Array.isArray(checklist) ? checklist : []).find(x => x && x.id === id); return c && c.text ? ': ' + c.text : ''; };
     const addon = key => key.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
-    if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a step' + task(m[1]);
+    if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a task' + task(m[1]);
     if ((m = /^Marked (c\d+) as won't do$/.exec(text))) return "Marked as won't do" + task(m[1]);
-    if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a step' + task(m[1]);
+    if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
     // ORCH-240: never a raw task id ("Reopened c1"); the old and new text show below the line (historyChange)
-    if ((m = /^Reopened (c\d+)(?: \(old evidence: [\s\S]*\))?$/.exec(text))) return 'Opened a step again' + task(m[1]);
-    if ((m = /^Renamed (c\d+)( \(was: [\s\S]* \| now: [\s\S]*\))?$/.exec(text))) return 'Renamed a step' + (m[2] ? '' : task(m[1]));
-    if ((m = /^Linked (c\d+) to Done when$/.exec(text))) return 'Linked a step to Done when' + task(m[1]);
-    if ((m = /^Removed step c\d+ '([\s\S]*)' \((?:was done|was open)(?:; evidence: [\s\S]*)?\)$/.exec(text))) return 'Removed a step: ' + m[1];
+    if ((m = /^Reopened (c\d+)(?: \(old evidence: [\s\S]*\))?$/.exec(text))) return 'Opened a task again' + task(m[1]);
+    if ((m = /^Renamed (c\d+)( \(was: [\s\S]* \| now: [\s\S]*\))?$/.exec(text))) return 'Renamed a task' + (m[2] ? '' : task(m[1]));
+    if ((m = /^Linked (c\d+) to Done when$/.exec(text))) return 'Linked a task to Done when' + task(m[1]);
+    if ((m = /^Removed step c\d+ '([\s\S]*)' \((?:was done|was open)(?:; evidence: [\s\S]*)?\)$/.exec(text))) return 'Removed a task: ' + m[1];
     if (/^Title changed(?: \(was: [\s\S]* \| now: [\s\S]*\))?$/.test(text)) return 'Changed the title';
     if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
     if ((m = /^Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?$/.exec(text))) return 'Removed ' + addon(m[1]) + ' settings';
@@ -147,11 +147,11 @@
     if (/^Answered q\d+/.test(text)) return 'Answered a question';
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
     if (/^Summary/.test(text)) return 'Updated the summary';
-    if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a step: ' + m[1];
-    if ((m = /^Finished a (?:task|step)[:\s]+(.+)$/i.exec(text))) return 'Finished a step: ' + m[1];
+    if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a task: ' + m[1];
+    if ((m = /^Finished a (?:task|step)[:\s]+(.+)$/i.exec(text))) return 'Finished a task: ' + m[1];
     if (/^(Updated|Removed) .+ settings$/.test(text)) return text;
-    if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a step';
-    if (/^Added task|^Added check/i.test(text)) return 'Added a step';
+    if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
+    if (/^Added task|^Added check/i.test(text)) return 'Added a task';
     if (/^Linked|^Link added/i.test(text)) return 'Added a reference';
     return plainNames(text).replace(/ moved it to Review$/, ' sent it to Check');
   }
@@ -726,8 +726,8 @@
   // `make` is the page's element maker h(); the result is [<span class="key">ORCH-58</span>, ' '] or null.
   const ticketKey = t => t && typeof t.key === 'string' ? t.key.trim() : '';
   const keyTag = (t, make) => { const k = ticketKey(t); return k ? [make('span', {className:'key'}, k), ' '] : null; };
-  // "x of y steps": one pattern for every step counter (always "steps").
-  const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + (Number(total) === 1 ? ' step' : ' steps');
+  // "x of y tasks": one pattern for every task counter (owner, 17 Nov: the to-do lines are "tasks" everywhere).
+  const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + (Number(total) === 1 ? ' task' : ' tasks');
   // Topbar freshness: when /api/state last answered. Under a minute is "just now".
   function updatedText(at, nowMs) {
     const t = typeof at === 'number' ? at : Date.parse(at);

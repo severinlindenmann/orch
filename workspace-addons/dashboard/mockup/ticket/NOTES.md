@@ -172,3 +172,12 @@ A feature wish (ORCH-81, owner pick A, 16 Nov; `&about=feature`): the button kee
 - Activity: a note edit keeps its own row with "Was: … → Now: …" (at most 200 characters each).
 - Picture viewer (kit): a picture gets the tall window and a smaller header at 700 px and wider, so a 640 × 480 picture is shown whole.
 - `ticket-working.html` shows the attached picture (thumbnail, "attached by you") under What you asked and an Activity row with Was/Now. The picture viewer says "Attached by you" for such a file.
+
+## ORCH-240 (17 Nov, owner's words)
+
+- The tab and card are "Tasks"; sub-tickets of a plain ticket are headed "Sub-tickets"; epic sub-tickets show
+  their ticket number.
+- Overview lists files by their real name with extension, newest first like the Files tab.
+- Activity names the task (never "c1") and shows "Was: … → Now: …" for title, owner, due and task renames.
+- Owner box suggests the workspace's people and warns on a new name; a past due day shows a hint;
+  "Due Mon 16 Nov, 18:30" within a week.

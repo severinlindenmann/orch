@@ -27,7 +27,7 @@ test('board parts span columns, accept keys, and ignore children summaries and a
     const c = context(items);
     if (!useHelpers) c.window = {DashHelpers:{...helpers, childrenOf:undefined, parentOf:undefined}};
     const card = c.boardCard(items[0]);
-    assert.match(JSON.stringify(card), /Steps · 0 of 3 done/);
+    assert.match(JSON.stringify(card), /Sub-tickets · 0 of 3 done/);
     assert.equal(nodes(card, n => n.attrs?.className === 'board-part').length, 3);
     assert.match(JSON.stringify(c.boardCard(items[1])), /Sub-ticket of Parent/);
     assert.doesNotMatch(JSON.stringify(c.boardCard(items[3], true)), /Sub-ticket of Parent/);

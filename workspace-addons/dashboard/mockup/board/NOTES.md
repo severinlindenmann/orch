@@ -125,3 +125,12 @@ Save without starting shows "Saving…" on the button at once and then opens the
   needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
   says so in a notice.
 - Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).
+
+## ORCH-240 (17 Nov, owner's words)
+
+- The filter "Group" is now "Part of", with "Any ticket" for no choice; the list column "Steps" is "Tasks".
+- The to-do lines of a ticket are "tasks" everywhere ("+ Add task", "2 of 5 tasks", "Added a task"); the
+  sub-tickets of a plain ticket are headed "Sub-tickets".
+- The board fits at 1440: lanes shrink to 210 px, empty lanes to 76 px, empty Won't do and Superseded lanes
+  are hidden until they hold a card. A sub-ticket with its own card is not listed again in its parent's card.
+- On the phone the List/Board switch shows too; the Board is lanes side by side that you swipe.
