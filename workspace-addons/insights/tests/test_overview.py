@@ -458,3 +458,33 @@ def test_lost_helper_actions_are_said(answer, nothing):
             "text": "2,136 helper actions in the last 30 days were not recorded, so the counts on this page are too low.",
         }
     assert build_overview({**answer, "lost": {"lines": 0, "reasons": {}, "errors": {}}})["lost"] is None
+
+
+def test_retries_banner_says_what_was_run_again_and_when_a_check_keeps_failing():
+    from orch_insights.overview import retries_view
+
+    assert retries_view(None) is None and retries_view({"total": 0, "checks": []}) is None
+    assert retries_view({"total": "x", "checks": []}) is None
+    one = retries_view({"total": 1, "checks": [{"check": "mac test", "count": 1}]})
+    assert one["tone"] == "info" and one["title"] == "1 check was run again this month"
+    many = retries_view(
+        {"total": 4, "checks": [{"check": "win test", "count": 3}, {"check": "x", "count": 1}]}
+    )
+    assert (
+        many["tone"] == "warn"
+        and "win test was run again 3 times" in many["text"]
+        and "keeps failing" in many["text"]
+    )
+
+
+def test_overview_route_carries_the_retries(server, fake_orch, answer):
+    import json
+    import urllib.request
+
+    (fake_orch.parent / "retries.json").write_text(
+        json.dumps({"total": 2, "checks": [{"check": "t", "count": 2}]})
+    )
+    port = server.server_address[1]
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/overview", timeout=5) as r:
+        data = json.loads(r.read())
+    assert data["retries"]["tone"] == "info" and "t was run again 2 times" in data["retries"]["text"]

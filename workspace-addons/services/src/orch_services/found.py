@@ -34,6 +34,9 @@ PROC = Path("/proc")
 LSOF = "/usr/sbin/lsof"
 ID_RE = re.compile(r"(launchd|systemd):[A-Za-z0-9@._-]{1,200}|process:\d{1,10}")
 TOOL_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+WINDOWS_NOTE = (
+    "On Windows orch cannot look for other background jobs yet; services orch adds are listed as usual."
+)
 
 
 def _tool(argv: list[str], timeout: int = 20) -> subprocess.CompletedProcess | None:
@@ -389,6 +392,11 @@ def _record_pids(root: Path) -> set[int]:
         if st.running and st.pid:
             out.add(st.pid)
     return out
+
+
+def note() -> str | None:
+    """One plain sentence when this computer has no found list yet (Windows), else None."""
+    return WINDOWS_NOTE if sys.platform == "win32" else None
 
 
 def get(root: Path, fid: str) -> dict:

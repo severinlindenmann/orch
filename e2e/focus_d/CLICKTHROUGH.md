@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 5 ready (the script clicks them), 20 pending (not built yet).
+25 steps: 6 ready (the script clicks them), 19 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -165,20 +165,25 @@ Must be seen:
 ## 10. The layer at the bottom, on the right, full screen, to the bar, to the side
 
 - Part: layer (draft D feature 7)
-- State: pending, waits for: The layer: bottom, right, full screen (crew task layer)
+- State: ready, clicked by the script
 - Pictures: `fd-10-layer-1280.png`, `fd-10-layer-1920.png`, `fd-10-layer-390.png`
 
 Do:
 
 1. Open a session from the bar.
-2. Use Place: bottom, right, full screen.
-3. Minimise it to the bar, then put it to the side.
+2. Change to Tickets, Review and Home.
+3. Use Place: bottom, right, full screen; press Esc twice.
+4. Open it again, minimise it to the bar, then put it to the side and open it from the edge.
+5. Make it larger, then reload the page.
 
 Must be seen:
 
-- Each place works and the page stays usable behind it.
+- Each place works and the page stays usable behind it; on a phone there is no right.
+- The layer stays open while the page changes.
+- Esc goes back one step: full screen, then the panel, then the bar.
+- In full screen Tab stays in the layer.
 - Minimise leaves only the bar; to the side leaves a slim edge.
-- The layer opens where it was last.
+- After the reload the layer opens where it was last, at the same size.
 
 ## 11. Zoom and full screen, Esc goes one step back
 
