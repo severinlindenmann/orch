@@ -587,7 +587,10 @@ const evidenceFile = (t, ev) => {
 const uniqueBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
 const proofKey = (t, ev) => evidenceFile(t, ev)?.name ?? (ev.ref ? (ev.type || ev.kind) + ':' + ev.ref : null);
 const artifactFiles = t => uniqueBy(array(artifactData.get(t.id)?.data?.files), f => f.name);
-const reviewFile = t => t.status === 'review' ? artifactFiles(t)[0] : null;
+// Every file of the ticket the way the Files tab groups them (the results and the files its steps proved), so the
+// Overview cards and the Files tab never disagree about whether a result file exists (ORCH-184).
+const resultFiles = t => ticketFileGroups(t).flatMap(g => g.files.map(file => ({kind:g.kind, file})));
+const reviewFile = t => t.status === 'review' ? resultFiles(t)[0] || null : null;
 function ticketResultCard(t, ev, file = null, kind = 'evidence') {
   const helpers = window.DashHelpers;
   const name = file ? file.name.split('/').pop() : '';
@@ -790,7 +793,7 @@ function artifactsPanel(t) {
 }
 function ticketActor(by) {
   if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
-  return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(by);
+  return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(window.DashHelpers.personName(by, state));
 }
 function ticketTaskOutcome(task) {
   const ev = array(task.evidence).slice(-1)[0];
@@ -1311,8 +1314,8 @@ function ticketDoneEvent(t) {
 function ticketDoneLine(t) {
   if (t.status !== 'done') return null;
   const event = ticketDoneEvent(t);
-  const at = event?.at || t.done_at || t.updated_at;
-  return h('p', {className:'ticket-done'}, '✓ Finished' + (at ? ' ' + localStamp(at) : '') + (event?.by ? ' by ' + name(event.by) : ''));
+  const at = window.DashHelpers.doneAt(t);
+  return h('p', {className:'ticket-done'}, '✓ Finished' + (at ? ' ' + localStamp(at) : '') + (event?.by ? ' by ' + ticketActor(event.by) : ''));
 }
 // One local format for every time on the ticket page (master UI.stamp): "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32".
 function localStamp(at, withTime = true) {
@@ -1329,13 +1332,13 @@ const openChanges = t => array(t.checklist).filter(c => !c.done && !c.wont_do &&
 // Pill names are the master's status icons: todo, working, needs, check, done. The helper is just "Helper".
 const stripHelperPill = helper => { const p = window.UI.helperPill(helper.state, helper.word); p.dataset.key = 'status-helper-' + helper.state; return p; };
 function ticketStripModel(t, run, fresh) {
-  const q = questions(t)[0], at = t.updated_at ? time(t.updated_at) : '';
+  const q = questions(t)[0], asked = window.DashHelpers.askedAt(t, typeof needsList === 'function' ? needsList() : []), at = asked ? time(asked) : '';
   // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
   const s = window.UI.ticketState(t, run?.running ? window.DashHelpers.helperState(run, t) : null);
   const m = sentence => ({pill:s.pill, word:s.word, helper:s.helper || undefined, sentence});
   if (t.status === 'done') {
-    const ev = ticketDoneEvent(t), when = ev?.at || t.done_at || t.updated_at;
-    return m('Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + name(ev.by) : '') + '.');
+    const ev = ticketDoneEvent(t), when = window.DashHelpers.doneAt(t);
+    return m('Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + ticketActor(ev.by) : '') + '.');
   }
   if (q) {
     const ask = clean(q.text || '').replace(/\s+/g, ' ').trim();
@@ -1375,12 +1378,12 @@ function ticketProgress(t, run) {
 }
 // The review card: "Result" = in short + the result preview (the verdict buttons live in the header strip).
 function ticketReviewCard(t) {
-  const file = reviewFile(t), count = artifactFiles(t).length;
+  const found = reviewFile(t), file = found?.file, count = ticketFileCount(t);
   return h('section', {className:'card attention decision review-card', 'data-key':'review-card-' + t.id},
     h('div', {className:'section-head'}, h('h2', {}, 'Result'), count ? h('span', {className:'meta'}, count + (count === 1 ? ' file' : ' files')) : null),
     t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)) : null,
     t.verdict_needed ? h('p', {className:'meta', 'data-key':'ticket-verdict-needed'}, 'Marked done without your OK. Check the work, then click Looks good.') : null,
-    file ? ticketResultFrame(t, 'artifacts', file) : h('p', {className:'meta'}, array(t.checklist).length ? 'No result file is attached. Each step below shows what was done and how it was checked.' : 'No result file and no steps are attached.'),
+    file ? ticketResultFrame(t, found.kind, file) : h('p', {className:'meta'}, array(t.checklist).length ? 'No result file is attached. Each step below shows what was done and how it was checked.' : 'No result file and no steps are attached.'),
     t.done_when ? h('p', {className:'review-check'}, 'Does this match “', linkRefs(t, t.done_when), '”?') : null,
     ticketProofLine(t));
 }
@@ -1410,12 +1413,12 @@ function ticketCompletionNote(n, t) {
     h('h2', {}, linkRefs(t, n.head)), n.body ? h('p', {className:'muted preserve-lines'}, linkRefs(t, n.body)) : null);
 }
 function ticketResultsCard(t) {
-  const files = artifactFiles(t), notes = completionNotes(t);
+  const all = resultFiles(t), files = all.map(x => x.file), notes = completionNotes(t);
   if (!files.length && !notes.length) return null;
   const count = [notes.length ? notes.length + (notes.length === 1 ? ' note' : ' notes') : '', files.length ? files.length + (files.length === 1 ? ' file' : ' files') : ''].filter(Boolean).join(' · ');
   return h('section', {className:'card results', 'data-key':'results'}, h('div', {className:'section-head'}, h('h2', {}, 'Result'), h('span', {className:'meta'}, count)),
     notes.map(n => ticketCompletionNote(n, t)),
-    files.length ? (t.status === 'done' ? ticketResultFrame(t, 'artifacts', files[0]) : ticketFileRow(t, 'artifacts', files[0])) : null, files.slice(1, 4).map(f => ticketFileRow(t, 'artifacts', f)), files.length ? headerProof(t) : null);
+    all.length ? (t.status === 'done' ? ticketResultFrame(t, all[0].kind, all[0].file) : ticketFileRow(t, all[0].kind, all[0].file)) : null, all.slice(1, 4).map(x => ticketFileRow(t, x.kind, x.file)), files.length ? headerProof(t) : null);
 }
 // A change you asked for: what you asked, and that new changes wait for your approval.
 function ticketRequestCard(t) {
@@ -1448,7 +1451,7 @@ function ticketAnswerNodes(t, plainRow) {
 const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
 function ticketProperties(t, parent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
-  const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = ev?.at || t.done_at || t.updated_at;
+  const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
     h('dl', {className:'ticket-details ed-list'}, parent ? field('Sub-ticket of', h('a', {href:href(parent.id)}, partName(parent))) : null,
