@@ -26,13 +26,6 @@ sys.path.insert(0, str(REPO / "workspace" / "src"))
 
 from orch import dashshots  # noqa: E402
 
-MACHINERY = {
-    "e2e/dash_ci_shots.py",
-    ".github/workflows/dash-shots.yml",
-    "workspace/src/orch/cli_shot.py",
-    "workspace/src/orch/dashshots.py",
-}
-
 
 def changed_files(base: str) -> list[str]:
     r = subprocess.run(["git", "diff", "--name-only", base, "HEAD"], cwd=REPO, capture_output=True, text=True)
@@ -160,7 +153,7 @@ def main() -> int:
     a = ap.parse_args()
     files = a.files.split(",") if a.files is not None else changed_files(a.base)
     pages = dashshots.pages_for(files)
-    if not pages and any(f.strip() in MACHINERY for f in files):
+    if not pages and any(f.strip().startswith(dashshots.MACHINERY) for f in files):
         pages = ["home"]  # a change to what takes the pictures proves itself on one page
     gh_out = os.environ.get("GITHUB_OUTPUT")
     if gh_out:

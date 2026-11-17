@@ -23,6 +23,14 @@ from pathlib import Path
 from orch import ghmerge
 from orch.errors import Refused
 
+CI_WORKFLOW = ".github/workflows/ci.yml"  # the workflow whose runs may carry the pictures
+# A pull request that changes these takes its own pictures with its own code: the card says so.
+MACHINERY = (
+    "e2e/dash_ci_shots.py",
+    ".github/workflows/",
+    "workspace/src/orch/cli_shot.py",
+    "workspace/src/orch/dashshots.py",
+)
 ARTIFACT = "dashboard-shots"  # the name of the CI job's upload (.github/workflows/addons.yml, dash-shots)
 SCHEMA = "orch.dashboard-shots/1"
 WIDTHS = (1280, 1920, 390)
@@ -177,8 +185,11 @@ def _pr(url: str) -> tuple[str, int]:
 
 def find_run(repo: str, head: str) -> int:
     """The newest finished CI run of this commit that kept the dashboard pictures."""
-    r = _gh(["api", f"repos/{repo}/actions/runs?head_sha={head}&per_page=30",
-             "--jq", '.workflow_runs[] | [.id, .status] | @tsv'])  # fmt: skip
+    # only the pull request runs of the ci workflow (it calls dash-shots): no other workflow's upload of the
+    # same name counts
+    pick = f'.path == "{CI_WORKFLOW}" and .event == "pull_request"'
+    jq = f".workflow_runs[] | select({pick}) | [.id, .status] | @tsv"
+    r = _gh(["api", f"repos/{repo}/actions/runs?head_sha={head}&per_page=50", "--jq", jq])
     if r.returncode != 0:
         raise Refused(f"GitHub did not list the checks of the pull request: {_first(r.stderr)}.")
     running = False
@@ -206,8 +217,9 @@ def find_run(repo: str, head: str) -> int:
 def fetch(url: str, dest: Path) -> tuple[dict, list[dict]]:
     """Download the pictures CI took of the pull request's newest commit into dest: (manifest, rows)."""
     repo, number = _pr(url)
-    v = _gh(["pr", "view", url, "--json", "headRefOid", "--jq", ".headRefOid"])
-    head = v.stdout.strip()
+    v = _gh(["pr", "view", url, "--json", "headRefOid,files", "--jq", ".headRefOid, .files[].path"])
+    head, *files = v.stdout.split("\n") if v.returncode == 0 else ("",)
+    head = head.strip()
     if v.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", head):
         raise Refused(f"GitHub did not show the pull request: {_first(v.stderr)}.")
     run = find_run(repo, head)
@@ -229,6 +241,7 @@ def fetch(url: str, dest: Path) -> tuple[dict, list[dict]]:
                 shutil.copyfile(tmp / name, dest / name)
         (dest / "manifest.json").write_text(json.dumps(m, indent=1), encoding="utf-8")
         m["pr"] = number
+        m["own_machinery"] = any(f.strip().startswith(MACHINERY) for f in files)
         return m, rows
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -245,6 +258,8 @@ def card_file(root: Path, tid: str, url: str) -> str:
     m, rows = fetch(url, folder)
     widths = " · ".join(f"{WIDTH_NAMES[w].lower()} {w} px" for w in WIDTHS)
     note = f"Taken by CI on the real dashboard with sample tickets, commit {m['head'][:7]}: {widths}."
+    if m.get("own_machinery"):
+        note += " This pull request also changes how the pictures are taken: check them with that in mind."
     page = sheet_html(f"Pull request #{number}: the changed pages", rows, folder, note)
     if len(page.encode("utf-8")) > MAX_SHEET:
         raise Refused("The pictures from CI are too large for one card. Show fewer pages.")

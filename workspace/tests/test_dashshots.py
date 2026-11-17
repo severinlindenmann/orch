@@ -85,7 +85,7 @@ def test_the_sheet_holds_every_picture_inline(tmp_path):
     assert "prefers-color-scheme: dark" in page and "http" not in page.replace("http-equiv", "")
 
 
-def _fake_github(monkeypatch, folder: Path, head="a" * 40, runs="11\tcompleted\n", artifact="99"):
+def _fake_github(monkeypatch, folder: Path, head="a" * 40, runs="11\tcompleted\n", artifact="99", files=()):
     calls = []
 
     def gh(args, timeout=30):
@@ -98,7 +98,7 @@ def _fake_github(monkeypatch, folder: Path, head="a" * 40, runs="11\tcompleted\n
 
         r = R()
         if args[:2] == ["pr", "view"]:
-            r.stdout = head + "\n"
+            r.stdout = head + "\n" + "\n".join(files) + "\n"
         elif args[0] == "api" and "actions/runs?" in args[1]:
             r.stdout = runs
         elif args[0] == "api" and args[1].endswith("/artifacts"):
@@ -197,3 +197,14 @@ def test_shot_pages_sign_in_once_then_each_page_at_each_width(tmp_path, monkeypa
                     "http://x:1/#ticket/DM1-2", "http://x:1/#ticket/DM1-2"]  # fmt: skip
     with pytest.raises(Refused):
         cli_shot.shoot(str(tmp_path / "f.html"), [1280], tmp_path, "d", None, 1, [("home", "home")])
+
+
+def test_only_the_ci_workflow_runs_count_and_own_machinery_is_said(tmp_path, monkeypatch):
+    d = _ci_folder(tmp_path)
+    calls = _fake_github(monkeypatch, d, files=[dashshots.WEB + "app.js", "e2e/dash_ci_shots.py"])
+    m, _ = dashshots.fetch(PR, tmp_path / "dest")
+    runs = next(c for c in calls if c[0] == "api" and "actions/runs?" in c[1])
+    assert '.path == ".github/workflows/ci.yml"' in runs[-1] and '.event == "pull_request"' in runs[-1]
+    assert m["own_machinery"] is True
+    _fake_github(monkeypatch, d, files=[dashshots.WEB + "app.js"])
+    assert dashshots.fetch(PR, tmp_path / "dest2")[0]["own_machinery"] is False
