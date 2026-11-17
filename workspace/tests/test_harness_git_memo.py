@@ -102,3 +102,29 @@ def test_the_exclude_file_question_follows_the_same_rule(tmp_path, asked):
     n = len(asked)
     assert harness._git_exclude(root) == found
     assert len(asked) == n  # kept while nothing changed
+
+
+def test_a_bare_repository_made_in_place_is_seen(tmp_path, asked):
+    root = tmp_path / "r"
+    root.mkdir()
+    assert harness._in_git_repo(root) is False
+    n = len(asked)
+    _git(root, "init", "-q", "--bare")  # no .git entry: HEAD and objects appear in the folder itself
+    harness._in_git_repo(root)
+    assert len(asked) == n + 1  # git was asked again
+
+
+def test_a_link_retargeted_later_is_not_a_stale_answer(tmp_path, asked):
+    plain, repo = tmp_path / "plain", tmp_path / "repo"
+    plain.mkdir()
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(plain, target_is_directory=True)
+    except OSError:
+        pytest.skip("links need a right this account does not have")
+    assert harness._in_git_repo(link) is False
+    link.unlink()
+    link.symlink_to(repo, target_is_directory=True)  # the same path now leads into a repository
+    assert harness._in_git_repo(link) is True

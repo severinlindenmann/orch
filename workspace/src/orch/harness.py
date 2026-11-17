@@ -368,12 +368,18 @@ _REV_PARSE_MAX = 256
 
 def _git_state_key(root: Path):
     """What decides git's answer to "is this inside a work tree", read with plain stats (no process): for the
-    folder and every parent, the .git entry (a real folder only) with its config and HEAD. None = cannot tell
-    cheaply (a .git file or link, an odd entry, a GIT_ variable): then git is asked every time."""
+    PHYSICAL folder (links resolved, as git sees it) and every parent, the .git entry (a real folder only) with
+    its config and HEAD, and the HEAD and objects entries of a bare repository. None = cannot tell cheaply (a
+    .git file or link, an odd entry, a GIT_ variable): then git is asked every time."""
     key = [tuple(sorted((k, v) for k, v in os.environ.items() if k.startswith("GIT_")))]
     try:
-        base = root.absolute()
+        base = Path(os.path.realpath(root))
         for d in (base, *base.parents):
+            for bare in ("HEAD", "objects"):  # a bare repository made in place has no .git entry
+                try:
+                    key.append(os.lstat(d / bare).st_ino)
+                except FileNotFoundError:
+                    key.append(None)
             try:
                 st = os.lstat(d / ".git")
             except FileNotFoundError:
@@ -391,7 +397,7 @@ def _git_state_key(root: Path):
             key.append((str(d), *parts))
     except OSError:
         return None
-    return tuple(key)
+    return (str(base), *key)
 
 
 def _rev_parse(sg, root: Path, argv=("rev-parse", "--is-inside-work-tree")):
@@ -399,7 +405,7 @@ def _rev_parse(sg, root: Path, argv=("rev-parse", "--is-inside-work-tree")):
     kept while the stat key of the repository files is unchanged: a new `git init`, a removed .git or a changed
     config (core.bare) asks git again. A timeout, a refusal or any other failure is never kept."""
     key = _git_state_key(root)
-    name = (str(root.absolute()), argv)
+    name = (os.path.realpath(root), argv)
     if key is not None:
         hit = _REV_PARSE.get(name)
         if hit and hit[0] == key:
