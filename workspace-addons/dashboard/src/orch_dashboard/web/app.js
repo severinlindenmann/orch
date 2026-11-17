@@ -840,9 +840,10 @@ main.addEventListener('click', async event => {
     const send = async () => {
       // Turning off: the link and the page go at once, not after the services restart (ORCH-242).
       const before = state.addons;
-      if (addon.active) state.addons = array(before).filter(a => a.name !== addon.name);
-      const result = await settingsSend('addon.set', {name:addon.name, on:!addon.active}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
-      if (!result.ok && addon.active) { state.addons = before; render(); }
+      const wasActive = addon.active;
+      if (wasActive) { state.addons = array(before).filter(a => a.name !== addon.name); addon.active = false; }
+      const result = await settingsSend('addon.set', {name:addon.name, on:!wasActive}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
+      if (!result.ok && wasActive) { state.addons = before; addon.active = true; render(); }
       return result;
     };
     if (addon.active) await send();
