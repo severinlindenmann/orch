@@ -2557,19 +2557,19 @@ def _mark_wont_do(t: dict, cid: str, by: str, why: str = "") -> dict:
     return item
 
 
-_WONT_DO_Q = re.compile(r"won['\u2019]?t\s+do", re.IGNORECASE)
-_YES = ("yes", "ja", "y", "ok")
+_YES = "yes"
 
 
 def _wont_do_yes(q: dict, ans: str) -> bool:
-    """A person's yes to a question tied to a step that asks whether the step is won't do (the question
-    WONT_DO_AGENT tells helpers to ask). ORCH-267: the yes marks the step; no second click."""
-    return (
-        isinstance(q.get("check"), str)
-        and isinstance(q.get("text"), str)
-        and bool(_WONT_DO_Q.search(q["text"]))
-        and ans.strip().casefold() in _YES
-    )
+    """A person's yes to exactly the question WONT_DO_AGENT tells helpers to ask ("Mark step c2 as won't do?",
+    tied to that step, with a yes option). ORCH-267: the yes marks the step; no second click. Only that exact
+    wording counts, so a helper cannot word another question so that its yes also drops a step."""
+    cid, text = q.get("check"), q.get("text")
+    if not isinstance(cid, str) or not isinstance(text, str):
+        return False
+    canon = re.compile(rf"Mark step {re.escape(cid)} as won['\u2019]t do\??", re.IGNORECASE)
+    options = [o.casefold() for o in q.get("options") or [] if isinstance(o, str)]
+    return bool(canon.fullmatch(text.strip())) and _YES in options and ans.strip().casefold() == _YES
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
@@ -3403,8 +3403,7 @@ def answer(
         if _is_person(by) and _wont_do_yes(q, ans):
             item = _item(ticket, q["check"])
             if not item.get("done") and not item.get("wont_do"):
-                why = " ".join(f"Answered yes to: {q['text']}".split())[:200]
-                _mark_wont_do(ticket, q["check"], by, why)
+                _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
     return apply_op(root, tid, op, by=by)

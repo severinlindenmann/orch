@@ -838,7 +838,7 @@ def test_a_persons_yes_to_the_wont_do_question_marks_the_step(proj, run, new_tic
     assert run("answer", tid, "q1", "Yes", "--by", "human:tester")[0] == 0
     c2 = read(proj, tid)["checklist"][1]
     assert c2["wont_do"] is True and c2["wont_by"] == "human:tester" and c2["done"] is False
-    assert "Mark step c2" in c2["reason"]
+    assert c2["reason"] == "Answered yes to q1"
     # no, or a question not about won't do: the step stays as it is
     run("ask", tid, "Mark step c3 as won't do?", "--option", "yes", "--option", "no", "--check", "c3")
     run("answer", tid, "q2", "no", "--by", "human:tester")
@@ -846,8 +846,24 @@ def test_a_persons_yes_to_the_wont_do_question_marks_the_step(proj, run, new_tic
     run("answer", tid, "q3", "yes", "--by", "human:tester")
     steps = read(proj, tid)["checklist"]
     assert "wont_do" not in steps[0] and "wont_do" not in steps[2]
-    # an answer written from inside an agent session never marks it
-    run("ask", tid, "Mark step c3 as won't do, please?", "--option", "yes", "--option", "no", "--check", "c3")
-    monkeypatch.setenv("CLAUDECODE", "1")
-    run("answer", tid, "q4", "yes", "--by", "human:tester")
+    # only the exact question counts: other wording, another step's number, or no yes option
+    for i, (text, opts) in enumerate(
+        [
+            ("Is the layout fine? If yes I mark step c3 as won't do.", ("yes", "no")),
+            ("Mark step c1 as won't do?", ("yes", "no")),
+            ("Mark step c3 as won't do?", ("ok", "no")),
+        ],
+        start=4,
+    ):
+        run("ask", tid, text, *[x for o in opts for x in ("--option", o)], "--check", "c3")
+        run("answer", tid, f"q{i}", opts[0], "--by", "human:tester")
     assert "wont_do" not in read(proj, tid)["checklist"][2]
+    # an answer written from inside an agent session never marks it
+    run("ask", tid, "mark step c3 as won\u2019t do?", "--option", "Yes", "--option", "No", "--check", "c3")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    run("answer", tid, "q7", "yes", "--by", "human:tester")
+    assert "wont_do" not in read(proj, tid)["checklist"][2]
+    monkeypatch.delenv("CLAUDECODE")
+    run("ask", tid, "mark step c3 as won\u2019t do", "--option", "Yes", "--option", "No", "--check", "c3")
+    run("answer", tid, "q8", "yes", "--by", "human:tester")
+    assert read(proj, tid)["checklist"][2]["wont_do"] is True
