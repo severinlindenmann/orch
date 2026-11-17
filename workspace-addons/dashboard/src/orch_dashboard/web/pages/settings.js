@@ -735,7 +735,7 @@ function autoUpdateCard(info) {
   return h('div', {className:'card', 'data-key':'settings-auto-update'}, h('div', {className:'card-row'},
     h('div', {className:'grow'}, settingsText('h3', {}, 'Update automatically when a new release is out'),
       settingsText('p', {}, 'orch installs it by itself at a quiet moment, never while a helper is working, and shows on Home what changed.'),
-      auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a development build: it updates to every new version of the newest changes, not only to releases.') : null),
+      auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a development build: it gets every new change as soon as it is ready, not only releases.') : null),
     h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':auto.on, 'aria-label':'Update automatically when a new release is out', 'data-key':'settings-switch-auto-update', 'data-action':'auto-update-set', disabled:snapshot || settingsBusy.has('auto-update')})));
 }
 async function autoUpdateSwitch() {

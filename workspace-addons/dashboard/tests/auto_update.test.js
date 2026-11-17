@@ -35,7 +35,7 @@ test('Settings: one switch, off at first, the owner’s words', () => {
 
 test('Settings: a development build says plainly that it follows its branch', () => {
   const dev = text(settingsCard({on:true, ref:'develop', branch:true}));
-  assert.match(dev, /development build: it updates to every new version of the newest changes/); assert.doesNotMatch(dev, /branch|develop\b/i);
+  assert.match(dev, /development build: it gets every new change as soon as it is ready/); assert.doesNotMatch(dev, /branch|develop\b/i);
 });
 
 test('Settings: no card without data from orch', () => { assert.equal(settingsCard(undefined), null); });
