@@ -144,7 +144,7 @@ if args == ["record", "counts", "--days", "30", "--json"]:
     answer("answer")
 if args == ["record", "settings", "--json"]:
     answer("settings")
-if args == ["usage", "--days", "30", "--json"]:
+if args == ["tokens", "--days", "30", "--json"]:
     answer("usage")
 if args == ["ticket", "list", "--all", "--json"]:
     answer("tickets")
