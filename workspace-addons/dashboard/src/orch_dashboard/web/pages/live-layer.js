@@ -110,7 +110,9 @@ function liveLayerName() {
 function liveLayerSession(key) {
   const t = array(state?.tickets).find(x => x.id === key || x.key === key);
   if (!t) return null;
-  return {key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(t.title) || 'Untitled', running:!!state.runs?.[t.id]?.running};
+  const run = state.runs?.[t.id], helper = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
+  const pill = window.UI?.ticketState && window.UI?.ticketPill ? window.UI.ticketPill(window.UI.ticketState(t, helper)) : null;
+  return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(t.title) || 'Untitled', running:!!state.runs?.[t.id]?.running};
 }
 // What Open shows when nothing was open yet: the first working helper.
 function liveLayerFirst() {
@@ -160,6 +162,7 @@ function livePane(key, where, s) {
   const title = sess ? sess.title : 'This session has ended';
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
     h('header', {className:'live-ph'},
+      sess?.pill || null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
       h('span', {className:'live-pt', title}, title),
       h('span', {className:'live-ctl'},
@@ -173,23 +176,33 @@ function livePane(key, where, s) {
       sess ? h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket'}, 'Open ticket') : null,
       h('p', {className:'meta'}, 'The chat and the terminal of ' + name + ' come here next.')));
 }
-function liveBar(where, s) {
+// The layer's part of the bar: Open (when only the bar shows), Place with its menu, and in full screen the way out.
+function liveBarEnd(where, s) {
   const name = liveLayerName(), open = where === 'bottom' || where === 'right' || where === 'full';
-  return h('div', {className:'live-bar', role:'group', 'aria-label':name + ' bar', 'data-key':'live-bar'},
-    h('a', {className:'live-home', href:'#addon/' + encodeURIComponent(liveLayerPage()?.name || ''), title:name + ' start page'}, name),
-    h('div', {className:'live-bar-sessions', 'data-key':'live-bar-sessions'}),
+  return h('span', {className:'live-end', 'data-key':'live-end'},
     where === 'full' ? h('span', {className:'meta live-word'}, 'Esc to leave') : null,
     open ? null : liveBtn('btn sm ghost', 'reopen', 'Open ' + name + ' where it was last', 'up', {'data-key':'live-open'}, 'Open'),
     where === 'full' ? liveBtn('btn icon sm ghost', 'leave-full', 'Leave full screen', 'full-exit', {'data-key':'live-bar-leave'})
       : liveBtn('btn sm ghost', 'menu', 'Where ' + name + ' sits', where === 'right' ? 'dock-right' : 'dock-bottom', {'data-menu':'bar', 'aria-expanded':String(s.menu === 'bar'), 'data-key':'live-place'}, open ? (where === 'right' ? 'Right' : 'Bottom') : ''),
     s.menu === 'bar' ? livePlaceMenu(where, false) : null);
 }
+// The bar of the bar task (pages/livebar.js, window.LiveBar) when it is there; else a minimal bar of the layer's own.
+function liveBarShared() {
+  return window.LiveBar && typeof window.LiveBar.mount === 'function' && typeof window.LiveBar.end === 'function' ? window.LiveBar : null;
+}
+function liveBar(where, s) {
+  const name = liveLayerName();
+  return h('div', {className:'live-bar', role:'group', 'aria-label':name + ' bar', 'data-key':'live-bar'},
+    h('a', {className:'live-home', href:'#addon/' + encodeURIComponent(liveLayerPage()?.name || ''), title:name + ' start page'}, name),
+    h('div', {className:'live-bar-sessions', 'data-key':'live-bar-sessions'}),
+    liveBarEnd(where, s));
+}
 function liveLayerTree(s, where) {
   if (where === 'side') {
     const name = liveLayerName();
     return h('button', {type:'button', className:'live-edge', 'data-live':s.panes.length ? 'reopen' : 'place', 'data-mode':'bar', 'data-key':'live-edge', 'aria-label':'Open ' + name + ' again'}, liveIc('dock-side'), h('span', {}, name));
   }
-  const bar = liveBar(where, s);
+  const bar = liveBarShared() ? null : liveBar(where, s);
   if (where === 'bar' || !s.panes.length) return bar;
   const dim = where === 'right' ? 'width' : 'height', px = s[dim];
   const panel = h('div', {className:'live-panel', 'data-mode':where, 'data-n':String(s.panes.length), 'data-key':'live-panel'},
@@ -203,7 +216,7 @@ function liveLayerTree(s, where) {
 // keyboard place and any open menu stay).
 function liveLayerPaint() {
   const host = liveDockHost(), s = liveLayerModel(), where = liveLayerWhere(s, liveLayerPhone());
-  const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running]);
+  const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '']);
   const key = JSON.stringify([where, s.menu, s.panes, shown, liveLayerName(), liveLayerPage()?.name]);
   host.dataset.mode = where;
   host.style.setProperty('--live-h', s.height ? s.height + 'px' : '');
@@ -213,7 +226,13 @@ function liveLayerPaint() {
   if (key !== liveLayerPainted) {
     // the panel animates only when it appears or moves, not on every repaint
     if (where === liveLayerWas) host.dataset.still = ''; else delete host.dataset.still;
-    host.replaceChildren(liveLayerTree(s, where));
+    const shared = liveBarShared(), keepBar = shared ? document.getElementById('live-bar') : null;
+    host.replaceChildren(...[liveLayerTree(s, where)].filter(Boolean), ...(keepBar ? [keepBar] : []));
+    if (shared) {
+      // the shared bar goes after the panel in the dock (on top in full screen) and carries Open and Place at its end
+      if (!keepBar || keepBar.parentNode !== host) shared.mount(host, {docked:true});
+      shared.end(() => [liveBarEnd(liveLayerWhere(liveLayerModel(), liveLayerPhone()), liveLayerModel())]);
+    }
     liveLayerPainted = key;
     liveLayerWas = where;
   }
@@ -247,7 +266,7 @@ function liveDockSync() {
 }
 // For the bar, the wall and the ticket page: open a session in the layer.
 window.LiveLayer = {
-  open(key) { liveLayerDo({type:'open', key}); },
+  open(key) { liveLayerDo({type:'open', key:liveLayerSession(key)?.id || key}); },  // the bar marks chips by ticket id
   place(mode) { liveLayerDo({type:'place', mode}); },
   get mode() { return liveLayerWhere(liveLayerModel(), liveLayerPhone()); },
   get panes() { return [...liveLayerModel().panes]; },

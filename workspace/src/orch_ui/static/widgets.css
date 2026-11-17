@@ -954,13 +954,14 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-dock[data-mode=full]{inset:0;z-index:70;flex-direction:column-reverse;background:var(--bg)}
 .live-bar{position:relative;display:flex;gap:var(--s2);align-items:center;min-width:0;min-height:var(--s8);padding:var(--s1) var(--s3);border-top:1px solid var(--border-strong);background:var(--sidebar)}
 .live-dock[data-mode=full] .live-bar{border-top:0;border-bottom:1px solid var(--border)}
-.live-dock[data-mode=side] .live-bar{display:none}
+.live-dock[data-mode=side] .live-bar,.live-dock[data-mode=side] .lbar{display:none}
+.live-end{position:relative;display:flex;flex:none;gap:var(--s2);align-items:center}
 .live-home{display:inline-flex;gap:var(--s2);align-items:center;flex:none;min-height:32px;padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text);font:inherit;font-weight:600;text-decoration:none;white-space:nowrap;cursor:pointer}
 .live-home:hover{background:var(--surface-2)}
 .live-bar-sessions{display:flex;flex:1 1 0;gap:var(--s2);align-items:center;min-width:0;overflow:hidden}
 .live-bar .btn{flex:none;white-space:nowrap}
 .live-bar .ic,.live-pane .ic,.live-edge .ic{width:18px;height:18px}
-.live-pop{position:absolute;right:var(--s3);bottom:calc(100% + var(--s2));z-index:6;display:grid;gap:var(--s1);width:min(280px,calc(100vw - var(--s5)));padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
+.live-pop{position:absolute;right:0;bottom:calc(100% + var(--s2));z-index:6;display:grid;gap:var(--s1);width:min(280px,calc(100vw - var(--s5)));padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
 .live-dock[data-mode=full] .live-pop{top:calc(100% + var(--s2));bottom:auto}
 .live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta)}
 .live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
