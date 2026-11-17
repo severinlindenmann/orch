@@ -134,3 +134,11 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - `../insights/insights.html`: Helper time, Cost, Tickets finished, Stuck now and a By person table on top.
 - `../ticket/ticket-change.html`, `ticket-question.html`: Time · cost in Properties (the helper's first-run estimate
   beside what it took so far).
+## ORCH-240 (17 Nov, owner's words)
+
+- The filter "Group" is now "Part of", with "Any ticket" for no choice; the list column "Steps" is "Tasks".
+- The to-do lines of a ticket are "tasks" everywhere ("+ Add task", "2 of 5 tasks", "Added a task"); the
+  sub-tickets of a plain ticket are headed "Sub-tickets".
+- The board fits at 1440: lanes shrink to 210 px, empty lanes to 76 px, empty Won't do and Superseded lanes
+  are hidden until they hold a card. A sub-ticket with its own card is not listed again in its parent's card.
+- On the phone the List/Board switch shows too; the Board is lanes side by side that you swipe.
