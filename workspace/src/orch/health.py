@@ -7,8 +7,9 @@ A recipe says which command to run and how to read its answer:
   - a workspace recipe, written by a person on this computer into the guarded orch home (key folder record
     `checks`, keystore.RECORDS): never in the project folder, so a cloned project cannot bring commands that
     run by themselves:
-    {"checks": {name: {"label", "command", "works"?, "ends"?}}}. Without "works" the exit code alone
-    answers: 0 = works, anything else = needs renewing.
+    {"checks": {name: {"label", "command", "works"?, "ends"?, "key"?}}}. Without "works" the exit code alone
+    answers: 0 = works, anything else = needs renewing. "key" names the key (keystore) this check tests: when
+    it fails, the person replaces that key from the warning (renew.replace_key).
 
 States: works | soon (runs out within WARN_DAYS) | renew (stopped working, a person renews it) |
 unreachable (the command could not run or gave no readable answer). Nothing else the command prints is
@@ -46,6 +47,7 @@ _NOT_A_TOOL = frozenset(
 )
 _FIELD = re.compile(r"[A-Za-z_]{1,32}")
 _LABEL = re.compile(r"[^\x00-\x1f\x7f]{1,40}")
+_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")  # keystore.NAME_RE
 
 
 def _end(value) -> str | None:
@@ -89,7 +91,9 @@ def _recipe(name, doc) -> dict | None:
         return None
     if not (isinstance(label, str) and _LABEL.fullmatch(label)):
         return None
-    works, ends = doc.get("works"), doc.get("ends")
+    works, ends, key = doc.get("works"), doc.get("ends"), doc.get("key")
+    if key is not None and not (isinstance(key, str) and _KEY.fullmatch(key)):
+        return None
     for f in (works, ends):
         if f is not None and not (isinstance(f, str) and _FIELD.fullmatch(f)):
             return None
@@ -102,6 +106,7 @@ def _recipe(name, doc) -> dict | None:
         "works": works,
         "ends": ends,
         "helper": None,
+        "key": key,
     }
 
 
@@ -134,6 +139,7 @@ def helper_recipes() -> list[dict]:
                     "works": spec["logged_in"],
                     "ends": spec.get("ends"),
                     "helper": name,
+                    "renew": bool(spec.get("renew") and spec.get("links")),
                 }
             )
     return out
@@ -216,9 +222,9 @@ def stops(root: Path, adapter: str | None) -> list[dict]:
 
 
 def overview(root: Path, now: datetime | None = None) -> list[dict]:
-    """One row per thing set here: {name, label, state, ends_at, helper, chosen, stops}. A helper tool
-    that is not installed is not set here and is left out; a workspace recipe whose command is missing
-    is unreachable."""
+    """One row per thing set here: {name, label, state, ends_at, helper, chosen, stops, renew, key}. A
+    helper tool that is not installed is not set here and is left out; a workspace recipe whose command is
+    missing is unreachable."""
     try:
         chosen = adapters.load(adapters.chosen(root), root)["adapter"]
     except Exception:  # noqa: BLE001  no agent chosen or found: nothing is "the helper here"
@@ -238,6 +244,8 @@ def overview(root: Path, now: datetime | None = None) -> list[dict]:
                 "helper": r["helper"],
                 "chosen": bool(r["helper"]) and r["helper"] == chosen,
                 "stops": stops(root, r["helper"]),
+                "renew": bool(r.get("renew")),  # orch can start the tool's own sign-in (ORCH-46)
+                "key": r.get("key"),  # the key a person replaces when this check fails (name only)
             }
         )
     return rows

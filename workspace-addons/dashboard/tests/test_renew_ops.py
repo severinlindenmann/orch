@@ -1,0 +1,95 @@
+"""Renew from the warning (ORCH-46): the dashboard's login ops. A pasted code and a new key go on stdin only."""
+
+import json
+
+import pytest
+
+from orch_dashboard import actions, server
+
+
+def test_renew_status_cancel_build_one_fixed_argv():
+    assert actions.build_argv("logins.renew", {"name": "claude"})[:3] == ["logins", "renew", "claude"]
+    assert actions.build_argv("logins.status", {"name": "claude"})[:4] == [
+        "logins",
+        "renew",
+        "claude",
+        "--status",
+    ]
+    assert actions.build_argv("logins.cancel", {"name": "claude"})[:4] == [
+        "logins",
+        "renew",
+        "claude",
+        "--cancel",
+    ]
+    for bad in ({"name": "../x"}, {"name": "--code"}, {"name": 5}, {}, {"name": "claude", "value": "x"}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("logins.renew", bad)
+
+
+class _R:
+    returncode, stdout, stderr = 0, json.dumps({"name": "claude", "state": "checking"}), ""
+
+
+@pytest.mark.parametrize(
+    ("op", "words"),
+    [
+        ("logins.code", ["logins", "renew", "claude", "--code", "-"]),
+        ("logins.replace", ["logins", "replace", "claude"]),
+    ],
+)
+def test_code_and_key_go_on_stdin_only(ws, monkeypatch, op, words):
+    from orch.pagesession import SELF
+
+    seen = {}
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: seen.update(argv=argv, kw=kw) or _R())
+    secret = "value-that-must-not-be-in-argv-123"
+    with pytest.raises(actions.NeedsPerson):  # watch-only: nothing runs
+        actions.run_op(ws, SELF, op, {"name": "claude", "value": secret})
+    assert seen == {}
+    code, _, out = actions.run_op(ws, SELF, op, {"name": "claude", "value": secret}, session=True)
+    assert code == 200 and out == {"name": "claude", "state": "checking"}
+    i = seen["argv"].index("logins")
+    assert seen["argv"][i : i + len(words)] == words
+    assert secret not in json.dumps(seen["argv"]) and seen["kw"]["input"] == secret
+
+
+@pytest.mark.parametrize(
+    "args", [{"name": "claude"}, {"name": "claude", "value": "  "}, {"name": "x y", "value": "abc"}]
+)
+def test_code_without_a_value_is_refused(ws, monkeypatch, args):
+    from orch.pagesession import SELF
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: pytest.fail("ran"))
+    with pytest.raises(actions.BadRequest):
+        actions.run_op(ws, SELF, "logins.code", args, session=True)
+
+
+def test_a_refusal_never_echoes_the_value(ws, monkeypatch):
+    from orch.pagesession import SELF
+
+    class R:
+        returncode, stdout, stderr = 2, json.dumps({"error": "The sign-in is no longer waiting."}), ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: R())
+    code, text, out = actions.run_op(
+        ws, SELF, "logins.code", {"name": "claude", "value": "abc-123"}, session=True
+    )
+    assert (code, out) == (422, None) and "abc-123" not in text and "no longer waiting" in text
+
+
+def test_the_answer_the_page_reads_holds_a_few_facts():
+    got = server._renew_answer(
+        {
+            "name": "claude",
+            "state": "link",
+            "link": "https://claude.com/x",
+            "other": "secret",
+            "went_on": ["A-1"],
+        }
+    )
+    assert got == {"state": "link", "link": "https://claude.com/x", "name": "claude", "went_on": ["A-1"]}
+    assert server._renew_answer({"state": "weird", "link": "javascript:alert(1)"}) == {
+        "state": "failed",
+        "went_on": [],
+    }
+    assert server._renew_answer(None) is None

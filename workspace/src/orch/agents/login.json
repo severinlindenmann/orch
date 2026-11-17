@@ -1,7 +1,7 @@
 {
   "adapters": {
     "claude": {
-      "login": { "status": ["auth", "status", "--json"], "logged_in": "loggedIn", "ends": "loginExpiresAt" }
+      "login": {"status": ["auth", "status", "--json"], "logged_in": "loggedIn", "ends": "loginExpiresAt", "renew": ["auth", "login"], "links": ["https://claude.com/", "https://claude.ai/", "https://platform.claude.com/", "https://console.anthropic.com/"]}
     }
   }
 }
