@@ -403,6 +403,7 @@ dialog.sheet{width:100%}
 .qmeta{font-size:var(--fs-1)}
 .qoptions{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center;margin-top:var(--s1)}
 .qoption{height:auto;min-height:var(--h);max-width:100%;white-space:normal;text-align:left;padding:var(--s2) var(--s3);justify-content:space-between}
+.qopt{display:inline-flex;align-items:center;gap:var(--s2);max-width:100%}
 .qoption>span:first-child{min-width:0}
 .qoption.suggested{background:var(--brand-soft);border-color:var(--brand);color:var(--text)}
 .qoption.suggested:hover{background:var(--surface-3)}
