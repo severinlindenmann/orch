@@ -5,7 +5,7 @@ from .test_server import req
 
 
 def test_sessions_route_asks_orch_run_history(server, fake_orch):
-    st, body, _ = req(server, "GET", f"/api/t/{TID}/sessions")
+    st, _, _ = req(server, "GET", f"/api/t/{TID}/sessions")
     assert st == 200
     assert ["run", "history", TID, "--json"] in calls(fake_orch)
 
