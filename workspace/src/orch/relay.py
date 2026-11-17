@@ -1448,8 +1448,55 @@ def send_taken_back(root: Path, tid: str, q: dict) -> str | None:
 
     if "relay" not in addons.active(root) or not isinstance(q.get("taken_back"), dict):
         return None
-    found = _taken_back_asked(root, tid, q["id"])
     reason = _one_line(q["taken_back"].get("reason"), TAKEN_BACK_REASON_MAX)
+    return _send_closed(root, tid, q["id"], reason)
+
+
+ANSWERED_ON_COMPUTER = "Answered on the computer"
+
+
+def sync_answered(root: Path) -> list[str]:
+    """A question that went to the phones and was answered here (dashboard, CLI, another helper) is still open
+    on the relay: only a phone's answer or a take-back closes it there, so the phone keeps showing it as
+    something to decide. Close it with the same "Question taken back" text, reason "Answered on the
+    computer", once per question (the message id is fixed in the asked record, so a retry sends the same
+    bytes). Only plain `q<n>` questions (the relay refuses the others); a question a phone answered, or that
+    was taken back already, is skipped. Best effort; returns the message ids sent."""
+    from orch import addons  # addons imports relay
+
+    if "relay" not in addons.active(root):
+        return []
+    sent: list[str] = []
+    cache: dict[str, dict | None] = {}
+    for rec in list(net.read_json(_asked_path(root), {}).values()):
+        if not (
+            isinstance(rec, dict)
+            and rec.get("to") == "phones"
+            and isinstance(rec.get("ticket"), str)
+            and re.fullmatch(r"q\d+", str(rec.get("question_id")))
+            and not rec.get("review")
+            and not rec.get("proposal")
+            and not isinstance(rec.get("taken_back_msg"), dict)
+        ):
+            continue
+        tid = rec["ticket"]
+        if tid not in cache:
+            try:
+                cache[tid] = tickets.load(root, tid)
+            except (Refused, OSError, ValueError, KeyError):
+                cache[tid] = None
+        t = cache[tid]
+        q = next((x for x in (t or {}).get("questions", []) if x.get("id") == rec["question_id"]), None)
+        if q is None or q.get("answer") is None or q.get("via") == "phone" or q.get("taken_back"):
+            continue
+        if (mid := _send_closed(root, tid, q["id"], ANSWERED_ON_COMPUTER)) is not None:
+            sent.append(mid)
+    return sent
+
+
+def _send_closed(root: Path, tid: str, qid: str, reason: str | None) -> str | None:
+    """The one "Question taken back" text for question `qid` of ticket `tid` (see send_taken_back)."""
+    found = _taken_back_asked(root, tid, qid)
     if found is None or reason is None:
         return None
     qmid = found[0]
@@ -2714,6 +2761,7 @@ def sync_phone_views(root: Path) -> None:
         phone_view.sync_light(root)
         phone_view.sync_reviews(root)
         phone_view.sync_cards(root)
+        sync_answered(root)
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
         send_working(root)
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
