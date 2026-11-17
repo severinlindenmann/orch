@@ -29,8 +29,14 @@ console.log(JSON.stringify({tiles: vm.runInContext('emptyTiles(' + JSON.stringif
 
 def run(connections):
     view = json.dumps({"tabs": {"connections": connections}})
-    data = json.loads(subprocess.run(["node", "-e", RUNNER, str(JS), view], capture_output=True, text=True, check=True).stdout)
-    assert not data.get("missing"), "insights.js needs metric(), servicesTile() and emptyTiles() before fillMetrics()"
+    data = json.loads(
+        subprocess.run(
+            ["node", "-e", RUNNER, str(JS), view], capture_output=True, text=True, check=True
+        ).stdout
+    )
+    assert not data.get("missing"), (
+        "insights.js needs metric(), servicesTile() and emptyTiles() before fillMetrics()"
+    )
     return data
 
 
@@ -54,4 +60,6 @@ def test_unmeasured_services_show_no_number():
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node missing")
 def test_measured_services_show_the_count():
-    assert run({"count": 3, "known": True})["services"].startswith("Connected services|3|Used by your helpers")
+    assert run({"count": 3, "known": True})["services"].startswith(
+        "Connected services|3|Used by your helpers"
+    )
