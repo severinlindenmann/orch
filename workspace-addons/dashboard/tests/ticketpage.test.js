@@ -1,3 +1,4 @@
+const kitState = require('./kit_state.js');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -5,7 +6,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
 const helpers = require('../src/orch_dashboard/web/helpers.js');
 function context(extra = {}) {
-  const ctx = {array:v => Array.isArray(v) ? v : [], h:(tag, attrs, ...children) => ({tag, attrs, children}), iconEl:name => name, window:{DashHelpers:helpers, orch:{toast(){}}}, snapshot:false, changeError:r => r.text, actRetry:(op, args) => ctx.act(op, args()), ...extra};
+  const ctx = {array:v => Array.isArray(v) ? v : [], h:(tag, attrs, ...children) => ({tag, attrs, children}), iconEl:name => name, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, snapshot:false, changeError:r => r.text, actRetry:(op, args) => ctx.act(op, args()), ...extra};
   vm.createContext(ctx);
   vm.runInContext(source.slice(source.indexOf('// These three icons'), source.indexOf('// Ticket page:')), ctx);
   vm.runInContext(source.slice(source.indexOf('// Ticket-only controls'), source.indexOf('function detail(t)')), ctx);
@@ -41,7 +42,7 @@ test('empty change notes send nothing; one call sends the note and the status', 
 });
 test('classic script loads before state and snapshot detail stays read-only inside its wrapper', () => {
   const h = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)});
-  const ctx = {window:{DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
+  const ctx = {window:{UI:{...kitState}, DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, text) => h(tag, {className:cls}, text), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:text => h('p', {}, text),
@@ -133,7 +134,7 @@ test('a failed change request shows a plain error; snapshot never submits notes'
 
 test('the review buttons show whenever the status is Review, an open question first', () => {
   const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
-  const ctx = {window:{DashHelpers:helpers, orch:{}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
+  const ctx = {window:{UI:{...kitState}, DashHelpers:helpers, orch:{}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, text) => h(tag, {className:cls}, text), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:text => h('p', {}, text),
@@ -160,7 +161,7 @@ test('the review buttons show whenever the status is Review, an open question fi
 });
 test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats add-on is on', () => {
   const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
-  const ctx = {window:{DashHelpers:helpers, orch:{}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
+  const ctx = {window:{UI:{...kitState}, DashHelpers:helpers, orch:{}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, text) => h(tag, {className:cls}, text), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:text => h('p', {}, text),
@@ -211,7 +212,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
   const t = {id:'t_parent', title:'Plan', status:'waiting', questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
   let scrolled = false, focused = false;
-  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
+  const ctx = {repeatsAddon:() => null, window:{UI:{...kitState}, DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '',
     el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids),
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
@@ -237,7 +238,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
 
 test('result preview tiles keep HTML static and bound text excerpts', async () => {
   const h = (tag, attrs = {}, ...children) => ({tag, attrs, children, append(...kids){this.children.push(...kids);}});
-  const ctx = {h, window:{DashHelpers:helpers}, snapshot:false, route:() => ({kind:'home'}), render(){}, URL, TextDecoder, fetch:async () => new Response('line\n'.repeat(1000),{headers:{'Content-Type':'text/plain'}})};
+  const ctx = {h, window:{UI:{...kitState}, DashHelpers:helpers}, snapshot:false, route:() => ({kind:'home'}), render(){}, URL, TextDecoder, fetch:async () => new Response('line\n'.repeat(1000),{headers:{'Content-Type':'text/plain'}})};
   vm.createContext(ctx);
   vm.runInContext(source.slice(source.indexOf('const PREVIEW_EXT'),source.indexOf('function loadArtifacts')),ctx);
   vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);
@@ -404,7 +405,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
   const t = {id:'t_parent', title:'Plan', status:'waiting', questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
   let scrolled = false, focused = false;
   const calls = [];
-  const ctx = {locks:new Set(), render(){}, refresh(){}, act:async (op,args) => { calls.push([op,args]); return {ok:true}; }, repeatsAddon:() => null, window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h,
+  const ctx = {locks:new Set(), render(){}, refresh(){}, act:async (op,args) => { calls.push([op,args]); return {ok:true}; }, repeatsAddon:() => null, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h,
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '',
     el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids),
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
@@ -522,7 +523,7 @@ test('a file is listed once per list, and Overview chips skip the file already i
     setAttribute(k, v){this.attrs[k] = v;}, addEventListener(){}, focus(){}, contains(){return false;}});
   const shot = {type:'file', ref:'.orch/tickets/t_dup/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
   const t = {id:'t_dup', title:'Dup', status:'review', checklist:[{id:'a', text:'One', done:true, evidence:[shot, {...shot}]}, {id:'b', text:'Two', done:true, evidence:[{...shot}]}]};
-  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h,
+  const ctx = {repeatsAddon:() => null, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h,
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '', route:() => ({kind:'ticket'}), render(){},
     el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids), button:(label, cls) => h('button',{className:cls},label),
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
@@ -545,7 +546,7 @@ test('a file that is both an artifact and a proof shows once in the Files tab an
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), append(...more){this.children.push(...more);}});
   const shot = {type:'file', ref:'.orch/tickets/t_both/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
   const t = {id:'t_both', title:'Both', status:'doing', checklist:[{id:'a', text:'One', done:true, evidence:[shot]}]};
-  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : []};
+  const ctx = {repeatsAddon:() => null, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : []};
   vm.createContext(ctx); vm.runInContext(source, ctx);
   ctx.snapshot = false;
   vm.runInContext("artifactData.set('t_both', {at:Date.now(), data:{files:[{name:'shot.pdf', size:10}]}});", ctx);

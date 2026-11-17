@@ -1307,27 +1307,29 @@ const openChanges = t => array(t.checklist).filter(c => !c.done && !c.wont_do &&
 const stripHelperPill = helper => { const p = window.UI.helperPill(helper.state, helper.word); p.dataset.key = 'status-helper-' + helper.state; return p; };
 function ticketStripModel(t, run, fresh) {
   const q = questions(t)[0], at = t.updated_at ? time(t.updated_at) : '';
+  // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
+  const s = window.UI.ticketState(t, run?.running ? window.DashHelpers.helperState(run, t) : null);
+  const m = sentence => ({pill:s.pill, word:s.word, helper:s.helper || undefined, sentence});
   if (t.status === 'done') {
     const ev = ticketDoneEvent(t), when = ev?.at || t.done_at || t.updated_at;
-    return {pill:'done', word:'Done', sentence:'Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + name(ev.by) : '') + '.'};
+    return m('Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + name(ev.by) : '') + '.');
   }
   if (q) {
     const ask = clean(q.text || '').replace(/\s+/g, ' ').trim();
     // who asked: the agent on the ticket by its own name (as Home says it), "Helper" only when none is known
     const asker = window.DashHelpers?.agentLabel ? window.DashHelpers.agentLabel(state?.settings, (run || state?.runs?.[t.id])?.claim) : 'Helper';
-    return {pill:'needs', word:'Needs you', sentence:asker + ' asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask)};
+    return m(asker + ' asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask));
   }
-  if (t.status === 'review') return {pill:'check', word:'Check', sentence:'Helper finished' + (at ? ' ' + at : '') + '.'};
-  if (t.bring_back?.state === 'waiting') return {pill:'needs', word:'Needs you', sentence:'Helper has changes waiting for you.'};
+  if (t.status === 'review') return m('Helper finished' + (at ? ' ' + at : '') + '.');
+  if (t.bring_back?.state === 'waiting') return m('Helper has changes waiting for you.');
   if (run?.running) {
     // the core's one helper state (ORCH-61): a helper that sits idle or is stuck never reads "Working" here
-    const helper = window.DashHelpers.helperState(run, t), PILL = {working:'working', starting:'working', you:'needs', waiting:'check', idle:'todo', stuck:'needs'};
-    if (helper && helper.state !== 'working') return {pill:PILL[helper.state] || 'todo', word:helper.word, helper, sentence:(helper.detail || helper.word) + '.'};
-    return {pill:'working', word:'Working', sentence:openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.'};
+    if (s.helper) return m((s.helper.detail || s.word) + '.');
+    return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
-  if (fresh) return {pill:'todo', word:'To do', sentence:'Not started. Your helper begins when you press Start.'};
-  if (ticketPaused(t, run)) return {pill:'todo', word:'To do', sentence:'Paused' + (at ? ' ' + at : '') + '.'};
-  return {pill:'todo', word:window.DashHelpers.statusWord(t.status) || 'To do', sentence:at ? 'Updated ' + at + '.' : ''};
+  if (fresh) return m('Not started. Your helper begins when you press Start.');
+  if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
+  return m(at ? 'Updated ' + at + '.' : '');
 }
 const taskTitle = task => clean(changeTask(task.text, task.origin)?.title || task.text);
 const taskWord = task => task.wont_do ? 'Skipped' : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
