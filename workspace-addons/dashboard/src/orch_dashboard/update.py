@@ -45,6 +45,21 @@ def update_info() -> dict:
         return {}
 
 
+def ticket_release(root: Path, tid: str) -> dict | None:
+    """A finished ticket's line 'In release 30 (installed here)' / 'Merged, not released yet' (orch works it out
+    from the merge commit and the installed release); None when there is nothing to say or it is unknown."""
+    import re
+
+    if not re.fullmatch(r"t_[a-z0-9]{6,16}", tid or ""):
+        return None
+    try:
+        from orch import released, tickets
+
+        return released.ticket_release(tickets.load(root, tid))
+    except Exception:  # noqa: BLE001 - a line on a page: never an error
+        return None
+
+
 def _record_update(root: Path, pid: int) -> None:
     """The detached update's pid, kept in the add-on's run folder (display and cleanup only)."""
     try:
