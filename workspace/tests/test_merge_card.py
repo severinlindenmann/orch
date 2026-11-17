@@ -22,6 +22,7 @@ class FakeGh:
         self.calls, self.envs, self.review, self.head = [], [], "", HEAD
         self.state, self.merge_rc, self.merge_err = state, merge_rc, merge_err
         self.login, self.user_rc = login, user_rc
+        self.files = None  # the changed files GitHub's compare lists for the card's commit (None: refused)
         self.rollup = []  # statusCheckRollup that `gh pr view --json statusCheckRollup` answers
         self.summary = (
             None  # what `gh pr view --json title,...` answers when the card is made (None: refused)
@@ -38,6 +39,12 @@ class FakeGh:
             if self.summary is None:
                 return subprocess.CompletedProcess(argv, 1, "", "not found")
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.summary), "")
+        if args[:2] == ["pr", "view"] and args[3:] == ["--json", "baseRefName"]:
+            if self.files is None:
+                return subprocess.CompletedProcess(argv, 1, "", "not found")
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"baseRefName": "develop"}), "")
+        if args[:2] == ["api", f"repos/acme/app/compare/develop...{self.head}"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.files), "")
         if args[:2] == ["pr", "view"] and args[3:] == ["--json", "statusCheckRollup"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps({"statusCheckRollup": self.rollup}), "")
         if args[:2] == ["pr", "view"]:
@@ -424,3 +431,111 @@ def test_a_doc_box_takes_status_rows_and_foot_only_in_shape():
     for bad in ([{"n": 3}], [{"title": "x", "n": -1}], [{"title": "x", "url": "https://x"}], "rows"):
         with pytest.raises(review.Refused):
             review.validate_card({**ok, "preview": {**ok["preview"], "rows": bad}})
+
+
+# ---- ORCH-305: a pull request that changes a CI workflow ----
+
+WF = ".github/workflows/addons.yml"
+
+
+def _wf_file(*added, name=WF, status="modified"):
+    patch = "@@ -1,2 +1,4 @@\n jobs:\n" + "".join(f"+{x}\n" for x in added)
+    return {"filename": name, "status": status, "additions": len(added), "deletions": 0, "patch": patch}
+
+
+def test_a_plain_workflow_change_says_it_was_checked():
+    wf = ghmerge.check_workflows(
+        [_wf_file("  pr-tests:", "    timeout-minutes: 10", "    steps:", "      - uses: actions/checkout@v4",
+                  "      - run: echo ${{ secrets.GITHUB_TOKEN }}"),
+         {"filename": "workspace/src/orch/x.py", "additions": 3, "deletions": 1, "patch": "+secrets.KEY"}]
+    )  # fmt: skip
+    assert wf == {"files": [{"name": WF, "add": 5, "del": 0}], "findings": [], "more": 0}
+    assert ghmerge.workflow_words(wf) == (
+        "Workflow check: no new secrets, permissions, outside actions or risky triggers in added lines."
+    )
+
+
+def test_no_workflow_file_is_no_workflow_check():
+    assert ghmerge.check_workflows([{"filename": ".github/CODEOWNERS", "patch": "+x"}]) is None
+    assert ghmerge.check_workflows("not a list") is None
+
+
+@pytest.mark.parametrize(
+    ("line", "words"),
+    [
+        ("      - run: curl -d ${{ secrets.DEPLOY_KEY }} x", "reads a secret (DEPLOY_KEY)"),
+        ("      env: ${{ toJSON(secrets) }}", "reads a secret (all secrets)"),
+        ("    permissions: write-all", "changes what a job may do on GitHub (permissions)"),
+        ("      contents: write", "changes what a job may do on GitHub (permissions)"),
+        ("  job: {permissions: {contents: read}}", "changes what a job may do on GitHub (permissions)"),
+        ("    steps: [{uses: someone/x@v1}]", "uses an action from outside GitHub: someone/x@v1"),
+        ('      - "uses": "someone/y@v2"', "uses an action from outside GitHub: someone/y@v2"),
+        ("    secrets: inherit", "passes all secrets on"),
+        ("      - uses: someone/action@v1", "uses an action from outside GitHub: someone/action@v1"),
+        (
+            "  pull_request_target:",
+            "runs on pull_request_target, which has more rights than a pull request run",
+        ),
+    ],
+)
+def test_each_risky_added_line_is_named(line, words):
+    assert ghmerge.check_workflows([_wf_file(line)])["findings"] == [words]
+
+
+def test_removed_lines_and_own_actions_are_not_findings():
+    f = _wf_file("      - uses: ./.github/actions/setup", "      - uses: github/codeql-action/init@v3")
+    f["patch"] += "-      - run: echo ${{ secrets.OLD }}\n-    permissions: write-all\n"
+    assert ghmerge.check_workflows([f])["findings"] == []
+
+
+def test_a_workflow_without_a_patch_says_open_it_and_a_removed_one_does_not():
+    big = {"filename": WF, "status": "modified", "additions": 900, "deletions": 0}
+    gone = {"filename": ".github/workflows/old.yml", "status": "removed", "additions": 0, "deletions": 40}
+    assert ghmerge.check_workflows([big, gone])["findings"] == [
+        "addons.yml is too big to check here: open it"
+    ]
+
+
+def test_the_merge_card_of_a_workflow_change_shows_the_check_first(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("      - uses: someone/action@v1")]
+    code, out, err = _ask(run, tid)
+    assert code == 0, err
+    card = _q(root, tid)["card"]
+    pv = card["preview"]
+    assert (
+        pv["paras"][0]
+        == "Workflow check, look at this: uses an action from outside GitHub: someone/action@v1."
+    )
+    assert pv["rows"][0] == {"title": f"{WF} (+1 −0)"}
+    assert "GitHub waits for you to approve it" in card["why"]
+    assert PR + "/files" in json.dumps(_q(root, tid))
+
+
+def test_the_click_on_a_workflow_card_approves_that_commit_then_merges(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("    timeout-minutes: 10")]
+    gh.review = "REVIEW_REQUIRED"  # the develop rule wants the code owner's review
+    _ask(run, tid)
+    code, _, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, err
+    posts = [c for c in gh.calls if c[:3] == ["api", "-X", "POST"]]
+    assert posts and f"commit_id={HEAD}" in posts[0] and gh.merges
+
+
+def test_a_card_without_a_workflow_file_is_as_before(tk, run, gh):
+    root, tid = tk
+    gh.files = [{"filename": "README.md", "additions": 1, "deletions": 0, "patch": "+x"}]
+    _ask(run, tid)
+    card = _q(root, tid)["card"]
+    assert "paras" not in card["preview"] and card["why"].startswith("Your click merges it")
+
+
+def test_a_changed_local_action_counts_and_is_named():
+    act = _wf_file("    - uses: someone/z@v1", name=".github/actions/setup/action.yml")
+    wf = ghmerge.check_workflows([act])
+    assert wf["files"][0]["name"] == ".github/actions/setup/action.yml"
+    assert wf["findings"] == [
+        "changes an action the workflows run: .github/actions/setup/action.yml",
+        "uses an action from outside GitHub: someone/z@v1",
+    ]
