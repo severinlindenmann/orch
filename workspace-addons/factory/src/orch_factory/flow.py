@@ -172,6 +172,8 @@ def derive(root, store, ticket, tickets=None):
         "shipped": False,
         "finished": False,
         "stage": None,
+        "stages": [],
+        "stop_of": {},
         "line": [],
         "tasks": {},
         "crew": {},
@@ -232,11 +234,16 @@ def derive(root, store, ticket, tickets=None):
     if changes and authority.human(changes[-1]["q"]) and changes[-1]["q"]["answer"] == "Edit":
         d["edit"] = changes[-1]  # stays until the manager proposes a new change
     shipped_row = any(r["type"] == "shipped" for r in rows)
-    line, current = [], None
-    for st in p["line"]:
+    # Stages run when the stages they wait for are done (ORCH-277): `after` in the plan, else the stage before;
+    # ship waits for every other stage. Several stages can be current at once.
+    names = [x["stage"] for x in p["line"]]
+    line, current, done, stop_of = [], [], set(), {}
+    for i, st in enumerate(p["line"]):
         name = st["stage"]
-        if current is not None:
-            line.append({"stage": name, "stop": st["stop"], "state": "todo"})
+        needs = names[:i] if name == "ship" else st.get("after", names[i - 1 : i])
+        item = {"stage": name, "stop": st["stop"], "state": "todo"}
+        if any(n not in done for n in needs):
+            line.append(item)
             continue
         stops = sorted(
             (e for e in ents if e["row"]["kind"] == "factory:stop" and e["data"]["stage"] == name),
@@ -246,18 +253,21 @@ def derive(root, store, ticket, tickets=None):
         answer = effective(last) if last else None
         mine = [t for t in tasks.values() if t["stage"] == name]
         done_tasks = all(crew.get(t["slug"], {}).get("status") == "done" for t in mine)
-        item = {"stage": name, "stop": st["stop"], "state": "todo"}
         if answer and answer[0] == ("Ship it" if name == "ship" else "Continue"):
             item.update(state="done", by=answer[1])
         elif not st["stop"] and done_tasks:
             item["state"] = "done"
         else:
-            current = name
-            d["last_stop"], d["last_answer"] = last, answer
+            current.append(name)
+            stop_of[name] = (last, answer)
             item["state"] = "waiting" if d["open"] and d["open"]["data"].get("stage") == name else "doing"
+        if item["state"] == "done":
+            done.add(name)
         line.append(item)
-    d["line"], d["stage"] = line, current
-    d["finished"] = current is None
+    d["line"], d["stages"], d["stop_of"] = line, current, stop_of
+    d["stage"] = current[0] if current else None
+    d["last_stop"], d["last_answer"] = stop_of.get(d["stage"], (None, None))
+    d["finished"] = not current
     last_ship = max(
         (e for e in ents if e["row"]["kind"] == "factory:stop" and e["data"]["stage"] == "ship"),
         key=lambda e: e["n"],
@@ -369,49 +379,91 @@ def _step(d):
     budget = {"used": d["used"], "cap": d["cap"], "warn": d["cap"] > 0 and d["used"] * 5 >= d["cap"] * 4}
     if d["shipped"]:
         return {**base, "step": "done"}
-    if d["open"]:
-        return {**base, "step": "wait", "waiting_for": d["open"]["row"]["kind"].split(":")[1]}
-    if d["edit"]:
+    open_ = d["open"]
+    if open_ is None and d["edit"]:
         return {**base, "step": "edit", "file": d["edit"]["row"]["file"]}
-    if d["finished"] and d["ship_ok"]:
+    if open_ is None and d["finished"] and d["ship_ok"]:
         ship = d["proposal"]["ship"]
         return {**base, "step": "ship", "does": ship["does"], "undo": ship["undo"]}
-    stage = d["stage"]
-    sent_back = d["last_answer"] is not None and d["last_answer"][0] == "Send back"
+    plans = [_stage_plan(d, stage) for stage in d["stages"]]
+    # a question on one stage never holds back a stage that does not wait for it (ORCH-277); a change does
+    free = [x for x in plans if open_ is None or (_open_stop_stage(d) not in (None, x["stage"]))]
+    fresh = next((x for x in free if x["unstarted"]), None)
+    if fresh is not None:
+        return _start_crew(base, d, fresh, budget)
+    if open_ is not None:
+        return {**base, "step": "wait", "waiting_for": open_["row"]["kind"].split(":")[1]}
+    for x in plans:
+        if x["sent_back"] and not x["todo"]:
+            return {**base, "step": "work", "stage": x["stage"], "comments": x["comments"]}
+    for x in plans:
+        if not x["todo"]:
+            return {
+                **base,
+                "step": "stop",
+                "stage": x["stage"],
+                "ship": x["stage"] == "ship",
+                "budget": budget,
+            }
+    return _start_crew(base, d, plans[0], budget)
+
+
+def _open_stop_stage(d):
+    """The stage of the open stop question; None when the open question is a change (it holds the whole run)."""
+    op = d["open"]
+    return op["data"].get("stage") if op and op["row"]["kind"] == "factory:stop" else None
+
+
+def _stage_plan(d, stage):
+    last, answer = d["stop_of"].get(stage, (None, None))
+    sent_back = answer is not None and answer[0] == "Send back"
     comments = None
     if sent_back:
-        asked = d["last_stop"]["q"].get("comment")
+        asked = last["q"].get("comment")
         comments = (
             [clean(asked, 400)]
             if isinstance(asked, str) and clean(asked, 400)
-            else [i["title"] for i in d["last_stop"]["data"]["items"]]
+            else [i["title"] for i in last["data"]["items"]]
         )
     todo = [
         t
         for t in d["tasks"].values()
         if t["stage"] == stage and d["crew"].get(t["slug"], {}).get("status") != "done"
     ]
-    if sent_back and not todo:
-        return {**base, "step": "work", "stage": stage, "comments": comments}
-    if todo:
-        return {
-            **base,
-            **({"comments": comments} if sent_back else {}),
-            "step": "start-crew",
-            "stage": stage,
-            "budget": budget,
-            "tasks": [
-                {
-                    "slug": t["slug"],
-                    "title": t["title"],
-                    "role": t["role"],
-                    "agent": t["agent"],
-                    "ticket": d["crew"].get(t["slug"], {}).get("id"),
-                }
-                for t in todo
-            ],
-        }
-    return {**base, "step": "stop", "stage": stage, "ship": stage == "ship", "budget": budget}
+    # a sent-back stage's reopened tasks count as not started again, so another stage's running crew never hides them
+    started = set() if sent_back else {r.get("why") for r in d["rows"] if r["type"] == "crew-started"}
+    unstarted = [
+        t
+        for t in todo
+        if t["slug"] not in started and d["crew"].get(t["slug"], {}).get("status") in (None, "open")
+    ]
+    return {
+        "stage": stage,
+        "sent_back": sent_back,
+        "comments": comments,
+        "todo": todo,
+        "unstarted": unstarted,
+    }
+
+
+def _start_crew(base, d, x, budget):
+    return {
+        **base,
+        **({"comments": x["comments"]} if x["sent_back"] else {}),
+        "step": "start-crew",
+        "stage": x["stage"],
+        "budget": budget,
+        "tasks": [
+            {
+                "slug": t["slug"],
+                "title": t["title"],
+                "role": t["role"],
+                "agent": t["agent"],
+                "ticket": d["crew"].get(t["slug"], {}).get("id"),
+            }
+            for t in x["todo"]
+        ],
+    }
 
 
 def next_step(root, order):
@@ -514,9 +566,9 @@ def crew_start(root, order, task):
         t = d["tasks"].get(task)
         if t is None:
             raise Refused("That task is not in the proposal you approved.", "not_allowed")
-        if t["stage"] != d["stage"]:
-            raise Refused("That task is not in the stage the run is at now.", "not_allowed")
-        if d["open"]:
+        if t["stage"] not in d["stages"]:
+            raise Refused("That task is not in a stage the run is at now.", "not_allowed")
+        if d["open"] and _open_stop_stage(d) in (None, t["stage"]):
             raise Refused("The run waits for your answer first.", "not_allowed")
         crew = d["crew"].get(task)
         if crew is None:
@@ -526,6 +578,7 @@ def crew_start(root, order, task):
             h = handover.of(d, task)
             if h is not None:
                 info = handover.start(root, store, d, t, crew, h)
+                store.journal_append({"type": "crew-started", "order": d["tid"], "why": task})
                 return {"order": d["tid"], "task": task, "ticket": crew["id"], "handover": info}
         _measure(root, d)  # the budget check uses measured time, never the (synced, settable) cache (#681)
         if d["cap"] and not d.get("measured"):
@@ -538,6 +591,8 @@ def crew_start(root, order, task):
                 "The time budget is used up. Ask the owner for more time (a change proposal).", "refused"
             )
         orchcli.call(root, "run", "start", crew["id"], "--agent", t["agent"], write=True)
+        # which tasks were started: a stage that does not wait for this one may start next (ORCH-277)
+        store.journal_append({"type": "crew-started", "order": d["tid"], "why": task})
         return {"order": d["tid"], "task": task, "ticket": crew["id"], "agent": t["agent"]}
 
 
@@ -604,8 +659,12 @@ def stop(root, order, data):
     with store.locked():
         ticket = commands.order_ticket(root, order)
         d = started_state(root, store, ticket)
-        if value["stage"] != d["stage"]:
-            raise Refused("That is not the stage the run is at now.", "not_allowed")
+        if value["stage"] not in d["stages"]:
+            raise Refused("That is not a stage the run is at now.", "not_allowed")
+        if d["open"] and _open_stop_stage(d) != value["stage"]:
+            raise Refused(
+                "Another question waits for your answer first. One question at a time.", "not_allowed"
+            )
         if not next(x for x in d["proposal"]["line"] if x["stage"] == value["stage"])["stop"]:
             raise Refused("The proposal you approved has no stop at this stage.", "not_allowed")
         if any(i.get("recommend") and i["tag"] != "routine" for i in value["items"]):

@@ -298,6 +298,7 @@
     if (answerable && /^[a-z][a-z0-9-]*:/.test(String(r.kind || ''))) return {label: 'Review', kind: 'review'};
     if (answerable) return {label: 'Answer', kind: 'answer'};
     if (r.kind === 'addon:not-running' && !r.ticket) return {label: 'Start', kind: 'start'};  // a background add-on that stopped
+    if (r.kind === 'overdue-wait' && r.ticket) return {label: 'Continue', kind: 'run'};  // ORCH-255: a passed wake time with no helper
     if (r.tone === 'bad' && r.ticket) return {label: 'Run again', kind: 'run'};
     return {label: 'Open', kind: 'open'};
   }
@@ -349,8 +350,9 @@
     for (const t of arr(tickets)) {
       const run = runs && runs[t.id], st = helperState(run, t);
       if (!st) continue;
-      const tasks = arr(t.checklist).filter(c => c && !c.wont_do), at = tasks.findIndex(c => c.state === 'doing');
-      const n = at >= 0 ? at : tasks.findIndex(c => !c.done);
+      // every task counts, a skipped one too, so "Step 3 of 4" matches the "3/4" of the Tickets list and the ticket
+      const tasks = arr(t.checklist).filter(Boolean), at = tasks.findIndex(c => !c.wont_do && c.state === 'doing');
+      const n = at >= 0 ? at : tasks.findIndex(c => !c.done && !c.wont_do);
       out.push({ticket: t, ...st, step: tasks.length && n >= 0 ? {n: n + 1, of: tasks.length} : null,
         minutes: Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
         idle: Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null,
@@ -785,7 +787,7 @@
   function stuckWords(t, nowMs = Date.now()) {
     const why = t && t.stuck;
     if (why === 'question') {
-      const open = (t.questions || []).filter(q => q && q.answer == null && !q.taken_back).map(q => Date.parse(q.sent_at || q.at)).filter(Number.isFinite);
+      const open = (t.questions || []).filter(q => q && q.answer == null && !q.taken_back).map(q => Date.parse(q.asked_at || q.sent_at || q.at)).filter(Number.isFinite);
       const days = open.length ? Math.floor((nowMs - Math.min(...open)) / 86400000) : 1;
       return 'Question waits ' + (days <= 1 ? '1 day' : days + ' days');
     }

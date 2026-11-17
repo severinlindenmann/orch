@@ -121,7 +121,7 @@ def _held_words(why):
     return TICKET_REF.sub("it", text)
 
 
-def _waiting(ticket, d, held=None, watcher=True):
+def _waiting(ticket, d, held=None, watcher=True, stuck=False):
     """Why no helper works on a started run right now (ORCH-277), or None while one works (the order or a crew
     ticket is Working) or when the order is no started run. {"kind", "task"?, "until"?, "why"?}; the page words it:
     you (a question or a result waits for the person), time (a ticket waits until a time), ticket (a crew ticket waits
@@ -153,6 +153,8 @@ def _waiting(ticket, d, held=None, watcher=True):
         return {"kind": "held", "why": _held_words(held.get("why")), "since": held.get("at")}
     if not watcher:
         return {"kind": "watcher"}
+    if stuck:  # Factory started the manager again several times and nothing moved
+        return {"kind": "stuck"}
     if _starting(d):
         return {"kind": "starting"}
     return {"kind": "idle"}
@@ -177,7 +179,7 @@ def _eta(d, proposal):
     return eta
 
 
-def _summary(ticket, d, root=None, held=None, watcher=True):
+def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
     """One order summary from a derived state `d`. `held`: the watcher's kept reason why core did not start the
     manager; `watcher`: whether the Factory watcher runs."""
     leads = _lead(d)
@@ -231,7 +233,7 @@ def _summary(ticket, d, root=None, held=None, watcher=True):
         "questions": _plain_questions(ticket),
         "results": _results(d) if started_run else [],
         "starting": _starting(d) if started_run else None,
-        "waiting": _waiting(ticket, d, held, watcher) if started_run else None,
+        "waiting": _waiting(ticket, d, held, watcher, stuck) if started_run else None,
     }
 
 
@@ -337,14 +339,14 @@ def _all(root):
     tickets = orchcli.tickets(root)
     journal = store.journal_read()
     summaries, ok = [], set()
-    held, on = watch.held(store), _watcher_on(root)
+    held, on, stuck = watch.held(store), _watcher_on(root), watch.stuck(store)
     for t in _order_tickets(tickets):
         try:
             d = _derive(root, store, t, tickets)
         except Refused as error:
             summaries.append(_broken(t, error))
             continue
-        summaries.append(_summary(t, d, root, held.get(t["id"]), on))
+        summaries.append(_summary(t, d, root, held.get(t["id"]), on, t["id"] in stuck))
         ok |= d["decided_ok"]
     return summaries, ok, store, tickets, journal
 
@@ -546,7 +548,14 @@ def order(root, order_id):
     leads = _lead(d)
     proposal = d.get("proposal") or (leads[-1]["data"] if leads else None)
     return {
-        **_summary(ticket, d, root, watch.held(store).get(order_id), _watcher_on(root)),
+        **_summary(
+            ticket,
+            d,
+            root,
+            watch.held(store).get(order_id),
+            _watcher_on(root),
+            order_id in watch.stuck(store),
+        ),
         "proposal": proposal,
         "drafts": _drafts(store, order_id),
         "crew": _crew(d, root, store),
