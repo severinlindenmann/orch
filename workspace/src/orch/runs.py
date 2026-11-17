@@ -1030,10 +1030,10 @@ def _plan_first_plan(ticket: dict) -> list[str]:
         f"done-when (`orch ticket new --parent {tid}`), in order. Write the goal and what is not included: "
         f'orch ticket plan {tid} --goal "<goal>" --not-included "<what is not part of it>". '
         f'Then ask exactly ONE question: orch ask {tid} "{PLAN_READY}" --option "Start work" '
-        '--option "Change sub-tickets" --recommend "Start work", and stop. Start the steps only after the '
-        'answer is "Start work". If the answer is "Change sub-tickets" (or asks for any change), ask one more '
-        f'question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, then ask '
-        f'"{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
+        '--option "Change sub-tickets" --recommend "Start work", and stop. Start the steps only after '
+        'the answer is "Start work". If the answer is "Change sub-tickets" (or asks for any change), '
+        f'ask one more question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, '
+        f'then ask "{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
     ]
 
 

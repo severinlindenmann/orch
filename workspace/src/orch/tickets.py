@@ -848,7 +848,8 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
         return "Renamed a task" + task(m.group(1))
     if m := re.fullmatch(r"Linked (c\d+) to Done when", t):
         return "Linked a task to Done when" + task(m.group(1))
-    if m := re.fullmatch(r"Removed step c\d+ '(.*)' \((?:was done|was open)(?:; evidence: .*)?\)", t, re.DOTALL):
+    removed = r"Removed step c\d+ '(.*)' \((?:was done|was open)(?:; evidence: .*)?\)"
+    if m := re.fullmatch(removed, t, re.DOTALL):
         return f"Removed a task: {m.group(1)}"
     if re.fullmatch(r"Title changed(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
         return "Changed the title"
@@ -1609,9 +1610,9 @@ def _when_words(at: datetime, now: datetime) -> str:
 
 
 def due_label(due: str | None, status: str = "open", now: datetime | None = None) -> str | None:
-    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 16 Nov, 18:30" (another day), "Late since
-    18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day wording).
-    Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
+    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 16 Nov, 18:30" (another day),
+    "Late since 18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day
+    wording). Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
     if not due or "T" not in str(due):
         return None
     try:
@@ -1747,7 +1748,8 @@ def edit(
             _set_field(ticket, k, v)
         if fields:
             text = "Edited " + ", ".join(sorted(fields))
-            if len(fields) == 1 and next(iter(fields)) in ("note", "done_when", "owner", "due"):  # ORCH-240: + owner, due
+            # ORCH-240: owner and due keep their old and new value too
+            if len(fields) == 1 and next(iter(fields)) in ("note", "done_when", "owner", "due"):
                 k = next(iter(fields))
                 text += f" (was: {_edit_snip(was[k])} | now: {_edit_snip(ticket.get(k))})"  # ORCH-185
             add_history(ticket, by, text)
@@ -1975,8 +1977,11 @@ def tidy(
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
         edited = any(  # someone renamed it after it was created: that title is theirs, tidy leaves it
-            re.fullmatch(r"Title changed(?: \(was: .* \| now: .*\))?",
-                         str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED), re.DOTALL)
+            re.fullmatch(
+                r"Title changed(?: \(was: .* \| now: .*\))?",
+                str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED),
+                re.DOTALL,
+            )
             for h in history.lines(root, ticket)
         )
         if title != old and not edited:
