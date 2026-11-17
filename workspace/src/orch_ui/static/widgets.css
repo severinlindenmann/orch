@@ -433,7 +433,7 @@ iframe.loading{opacity:0}
 /* A design review on cards (16 Nov, ORCH-65): the question text on the card, a marked suggestion, pictures that fill
    their pane on a dark ground with a zoom per side, a Today tile on a choice, groups in the list beside the deck. */
 .swipe-desk{--swipe-card-h:clamp(560px,calc(100vh - 300px),1000px)}
-.swipe-head{max-height:45%;overflow:auto}
+.swipe-head{min-height:0;overflow:auto}.swipe-head:has(+ .swipe-preview:not(.plain)){max-height:45%}/* a picture below keeps its room; text and plain answers give the question all the space left (ORCH-137) */
 .swipe-head .swipe-text{color:var(--text);white-space:pre-line}
 .swipe-sug{font-size:12px;line-height:16px;font-weight:500;color:var(--brand);border:1px solid var(--brand);border-radius:999px;padding:0 6px;white-space:nowrap}
 .swipe-act .act-sug{justify-self:center;margin-top:-2px}
