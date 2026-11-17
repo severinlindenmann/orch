@@ -565,7 +565,16 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.rfile.read(n)
             except (ValueError, OSError):
                 return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
-            up.update({"Origin": f"http://127.0.0.1:{port}", "Content-Type": "application/json"})
+            # The dashboard's own fence (or the add-on page's frame pass) already passed: it speaks for the request
+            # to the add-on as its own page would, with the add-on's origin and a same-origin fetch. An add-on that
+            # refuses a POST without Sec-Fetch-Site (Insights) would otherwise refuse every action from the dashboard.
+            up.update(
+                {
+                    "Origin": f"http://127.0.0.1:{port}",
+                    "Content-Type": "application/json",
+                    "Sec-Fetch-Site": "same-origin",
+                }
+            )
         for attempt in (0, 1):
             try:
                 conn = HTTPConnection("127.0.0.1", port, timeout=20)
