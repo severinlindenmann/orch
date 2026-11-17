@@ -1,4 +1,4 @@
-/* Services mockup (ORCH-268): the demo snapshot and the preview actions of services.html (layout C, picked by the owner 17 Nov). */
+/* Services mockup (ORCH-268): the demo snapshot and the preview actions of services.html (layout C, picked by the owner 17 Nov).
    Mockup only. Nothing here talks to a computer; every click changes this snapshot and shows the shared toast. */
 (()=>{'use strict';
 const ticket='../ticket/ticket.html';
