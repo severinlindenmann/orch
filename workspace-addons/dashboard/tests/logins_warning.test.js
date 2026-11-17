@@ -84,6 +84,7 @@ test('without the renew step the button checks again; a connection that cannot b
   assert.deepEqual(JSON.parse(JSON.stringify(acted)), [['logins.check', {}]]);
   assert.deepEqual(toasts[0], ['Claude Code login: Works', 'ok']);
   assert.equal(text(api.loginAction(item({state: 'unreachable'}), 'k')), 'Try again');
+  assert.equal(api.loginAction(item({state: 'unreachable'}), 'k').attrs.className, 'btn outline sm');  // never a second filled button
   assert.equal(api.loginAction(item(), 'k', true), null);  // a login that works has no button of its own
 });
 

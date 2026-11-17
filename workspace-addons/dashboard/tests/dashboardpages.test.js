@@ -696,7 +696,7 @@ test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All
   const page = logins => { const c = context([], {snapshot:false, state:{logins}, locks:new Set(), button:label => ({tag:'button', children:[label], dataset:{}})}); return {c, text:JSON.stringify(c.home())}; };
   const stopped = page({items:[stop]});
   assert.match(stopped.text, /The GitHub login stopped working/);
-  assert.match(stopped.text, /Things to look at/);
+  assert.match(stopped.text, /1 thing needs you/);
   assert.doesNotMatch(stopped.text, /All clear|Nothing needs you/);
   const runs = page({items:[soon]});
   assert.match(runs.text, /1 thing needs you/);

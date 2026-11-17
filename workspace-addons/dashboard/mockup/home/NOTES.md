@@ -61,8 +61,8 @@ Home: the question is body text; answering moves the card out, the next one in, 
   <time>." and "After that helpers stop on N tickets: <links>". `?login=stopped`: one that stopped working is the red
   banner at the top ("The <name> stopped working", or "cannot be reached" for a connection), "Helpers stopped on N
   tickets and start no new work: <links>" ("and start no new work" only for the main helper). `?login=several`: one
-  banner "N things stopped working", the names, `See what to fix` (Settings › Helper, the list). The banner does not
-  count. Nothing shows when all works or nothing was checked yet; a shared copy shows none of it.
+  banner "N things stopped working", the names, `See what to fix` (Settings › Helper, the list). Each thing that
+  stopped counts in the title ("N things need you", manager 17 Nov), not in the Needs you badge. Nothing shows when all works or nothing was checked yet; a shared copy shows none of it.
 - The `Renew` button is the renew step (ORCH-46). Until it is in the product, the same place shows `Check again`
   (word list #8; it runs every check once more and a toast says the new state), and `Try again` for a connection that
-  cannot be reached.
+  cannot be reached; both outlined (one filled button per view).

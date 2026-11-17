@@ -544,7 +544,7 @@ function loginAction(item, key, quiet = false) {
   const own = typeof renewButton === 'function' ? renewButton(item, {key, quiet}) : null;
   if (own || quiet) return own || null;
   const reach = item.state === 'unreachable';
-  const control = button(reach ? 'Try again' : 'Check again', (reach ? 'primary' : 'outline') + ' sm', () => checkLogins(item, key));
+  const control = button(reach ? 'Try again' : 'Check again', 'outline sm', () => checkLogins(item, key));  // one filled button per view
   control.dataset.key = key + '-check';
   return control;
 }
@@ -586,8 +586,9 @@ function home() {
   // The number counts open questions and results to check only (ORCH-63); the list below also holds failed starts,
   // changes to add and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
-  // a login that stopped working is never "Nothing needs you" / "All clear": the banner above says what to fix
-  const title = needCount ? needCount + (needCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
+  // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
+  const shownCount = needCount + logins.stopped.length;
+  const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds ? 'Things to look at' : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length);
   const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
