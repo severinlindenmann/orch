@@ -2896,6 +2896,7 @@ def ask(
             "answer": None,
             "answered_by": None,
             "via": None,
+            "asked_at": now(),  # the Reviewer's routine answers wait from here (reviewer.routine)
         }
         if kind is not None:
             q["kind"] = kind

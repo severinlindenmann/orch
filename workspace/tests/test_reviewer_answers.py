@@ -149,16 +149,28 @@ def test_a_changed_question_is_refused(proj, run, new_ticket, on):
         tickets.answer_for_owner(proj, tid, "q1", "0" * 64, "x")
 
 
-@pytest.mark.parametrize("text", ["Fix the d\u0435ploy now?", "Fix it now or open an iss\u200bue?"])
+@pytest.mark.parametrize(
+    "text", ["Fix the d\u0435ploy now?", "Fix it now or open an iss\u200bue?", "Fix it now or de\x08lete?"]
+)
 def test_look_alike_letters_and_hidden_marks_stay_for_the_owner(proj, run, new_ticket, on, text):
     tid = new_ticket("Small fix")
     _ask(run, tid, text)
     assert reviewer.answer_routine(proj, now=LATER)[0]["routine"] is False
 
 
-def test_a_copied_asked_line_does_not_make_a_question_older(proj, run, new_ticket, on):
+def test_the_wait_counts_from_the_question_not_from_history(proj, run, new_ticket, on):
     tid = new_ticket("Small fix")
+    tickets.log(proj, tid, "Asked q1, waiting", "agent:helper")  # a line written before asking counts not
     _ask(run, tid, "The test fails once in ten. Fix it now or open an issue?")
-    tickets.log(proj, tid, "Asked q1, waiting (copy)", "agent:helper")
+    assert _q(proj, tid)["asked_at"]
     rows = reviewer.answer_routine(proj)
     assert rows[0]["routine"] is False and "30 minutes" in rows[0]["why"]
+
+
+def test_a_question_from_an_older_version_stays_for_the_owner(proj, run, new_ticket, on):
+    tid = new_ticket("Small fix")
+    _ask(run, tid, "The test fails once in ten. Fix it now or open an issue?")
+    t = tickets.load(proj, tid)
+    t["questions"][0].pop("asked_at")
+    tickets.save(proj, t)
+    assert reviewer.answer_routine(proj, now=LATER)[0]["routine"] is False
