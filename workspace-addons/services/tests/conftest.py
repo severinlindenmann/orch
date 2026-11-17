@@ -1,5 +1,6 @@
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -78,7 +79,9 @@ class FakeDriver:
 
         e = self.entries.get(spec.sid)
         on = bool(e and e["running"])
-        return Status(running=on, pid=4242 if on else None, since="2026-11-17T10:00:00Z" if on else None)
+        # started just now: a fixed date made the "since today" check fail on every later day
+        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) if on else None
+        return Status(running=on, pid=4242 if on else None, since=since)
 
     def runs(self, spec):
         return self.run_counts.get(spec.sid)

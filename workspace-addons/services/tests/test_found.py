@@ -424,3 +424,41 @@ def test_a_ticket_key_resolves_even_when_the_core_cannot_be_asked(ws, monkeypatc
 
     monkeypatch.setattr(tickets, "resolve", broken)
     assert cli._ticket_key(ws, "dm1-12") == "DM1-12"
+
+
+def test_adopt_refuses_a_name_with_a_secret_and_found_masks_names_and_descriptions(cli, linux, tools, ws):
+    # review ORCH-378: adopt saved --name without the secret check add has; a unit description was shown as is
+    st = tools.read()
+    st["systemd"]["notes-sync.service"]["desc"] = f"Sync with key {TOKEN}"
+    tools.set(systemd=st["systemd"])
+    code, out = jrun(cli, "found")
+    assert code == 0 and TOKEN not in json.dumps(out)
+    assert out["found"][0]["what"] == "••••••"
+    code, out = jrun(cli, "adopt", "systemd:notes-sync.service", "--name", f"Notes {TOKEN}")
+    assert code == 2 and "secret" in out["error"] and TOKEN not in json.dumps(out)
+    assert not (ws / ".orch/addons/services/services").is_dir() or not list(
+        (ws / ".orch/addons/services/services").iterdir()
+    )
+
+
+def test_adopt_takes_the_page_id_of_a_found_job_with_capitals(cli, mac, tools, ws):
+    # review ORCH-378: the page gives a label with capitals a hashed id; Manage with orch must still find the job
+    from orch_services.found import page_id
+    from orch_services.view import build
+
+    mac["agents"].joinpath("ch.Example.Forwarder.plist").write_bytes(
+        plistlib.dumps({"Label": "ch.Example.Forwarder", "ProgramArguments": ["/usr/local/bin/fwd"]})
+    )
+    found = jrun(cli, "found")[1]["found"]
+    view = build(ws, ([], 0, None), found=found)
+    vid = page_id("launchd:ch.Example.Forwarder")
+    items = {i["id"]: i for i in view["blocks"][0]["groups"][-1]["items"]}
+    fwd = items[vid]
+    assert fwd["id"] == vid and vid.startswith("found-")
+    assert fwd["panel"]["buttons"][0]["action"]["args"] == {"verb": "adopt", "target": vid}
+    code, out = jrun(cli, "act", "adopt", "--", vid)
+    assert code == 0, out
+    rec = json.loads((ws / ".orch/addons/services/services" / f"{out['service']['id']}.json").read_text())
+    assert rec["adopted"]["entry"] == "ch.Example.Forwarder"
+    code, out = jrun(cli, "adopt", "found-000000000000")
+    assert code == 2 and "no found service" in out["error"]
