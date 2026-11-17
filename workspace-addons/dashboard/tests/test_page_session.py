@@ -432,6 +432,7 @@ ACT_ARGS = {
     "check.remove": {"ticket": TID, "check": "c1"},
     "check.move": {"ticket": TID, "check": "c1", "after": "c2"},
     "run.start": {"ticket": TID},
+    "session.new": {"kind": "empty"},
     "run.stop": {"ticket": TID},
     "run.send": {"ticket": TID, "text": "x"},
     "pull.merge": {"ticket": TID, "url": "https://github.com/acme/app/pull/12", "head": "a" * 40},
