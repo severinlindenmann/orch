@@ -570,7 +570,7 @@ test('home: headline and badge are one number (questions + results); changes to 
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 3);
   assert.match(text, /3 things need you/);
-  assert.match(text, /1 question · 2 results to check · 1 change to add/);
+  assert.match(text, /1 question · 2 results to check · also 1 change to add/);
 });
 test('toasts: successes leave after 5 s even under the pointer, sit bottom-right and do not centre over the page', () => {
   for (const dir of ['../../../workspace/src/orch_ui/static']) {
@@ -704,4 +704,34 @@ test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All
   assert.match(runs.text, /The Claude Code login ends on/);
   assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
   assert.match(page({items:[]}).text, /All clear/);
+});
+test('home: a ticket in Review that also asks a question counts once, and the title equals the rows the page counts (ORCH-184)', () => {
+  const items = [{id:'a', title:'T a', status:'review'}, {id:'b', title:'T b', status:'review'}, {id:'c', title:'T c', status:'waiting'}];
+  const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}, {id:'c1', ticket:'c', title:'Q?', answer:{question:'c1'}}];
+  const c = context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})});
+  const today = c.needsToday();
+  assert.equal(today.count, today.groups.length + today.review.length, 'one question per ticket plus the results shown as result rows');
+  assert.equal(today.count, 4);
+  const page = JSON.stringify(c.home());
+  assert.match(page, /4 things need you/); assert.match(page, /2 questions · 2 results to check/);
+});
+test('ORCH-184: one finish time and one wait time per ticket on every page', () => {
+  const t = {id:'a', status:'done', done_at:'2026-11-15T10:24:00Z', updated_at:'2026-11-17T09:00:00Z', history:[{at:'2026-11-13T08:00:00Z', text:'Status review -> done'}]};
+  assert.equal(helpers.doneAt(t), '2026-11-13T08:00:00Z', 'the history entry wins, like the ticket page');
+  assert.equal(helpers.doneAt({done_at:'x', updated_at:'y'}), 'x');
+  assert.equal(helpers.doneAt({updated_at:'y'}), 'y');
+  const open = {id:'q', updated_at:'2026-11-17T09:00:00Z'};
+  assert.equal(helpers.askedAt(open, [{ticket:'q', since:'2026-11-15T09:00:00Z'}, {ticket:'q', since:'2026-11-16T09:00:00Z'}, {ticket:'z', since:'2026-11-01T00:00:00Z'}]), '2026-11-15T09:00:00.000Z');
+  assert.equal(helpers.askedAt(open, []), open.updated_at);
+  const web = path.join(__dirname, '../src/orch_dashboard/web');
+  for (const f of ['pages/home.js', 'pages/tickets.js', 'pages/ticket.js']) assert.doesNotMatch(fs.readFileSync(path.join(web, f), 'utf8'), /t\.done_at \|\|/, f + ' takes the finish time from DashHelpers.doneAt');
+});
+test('ORCH-184: a line recorded under the computer login names the person, not the login', () => {
+  const st = {login:'lume', people:{me:'Severin', people:['Severin']}};
+  assert.equal(helpers.personName('human:lume', st), 'Severin');
+  assert.equal(helpers.personName('human:Maria', st), 'Maria', 'another person keeps their name');
+  assert.equal(helpers.personName('agent:lume', st), 'lume', 'an agent is never renamed');
+  assert.equal(helpers.personName('human:lume', {login:'lume'}), 'lume', 'nobody picked a name: nothing to show instead');
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+  assert.match(src, /checked by ' \+ ticketActor\(ev\.by\)/);
 });

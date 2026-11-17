@@ -50,6 +50,9 @@ UI_GLOBS = [
     "mobile/OrchMobile/Views/*.swift",
     "relay/web/*.html",
     "publish/web/*.html",
+    "publish/web/portal.js",
+    "publish/web/file.js",
+    "publish/web/frame.js",
 ]
 PY_GLOBS = ["workspace/src/**/*.py", "workspace-addons/*/src/**/*.py"]
 # "quoted string" or >tag text<. Comments and identifiers are not UI text.
