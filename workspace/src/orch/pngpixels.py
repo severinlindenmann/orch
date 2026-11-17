@@ -98,9 +98,9 @@ def _fixed() -> tuple:
 
 def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
     """Walk the raw deflate stream in `s` from byte `start` to its final block. (end byte, the bit ranges
-    [first, end) of the coded data of its Huffman blocks (the Huffman-coded code lengths and symbols; the
-    plain header fields before them are not part of it: they can hold any bytes), pixel bytes it inflates
-    to). Raises _Bad on any error, on a stored block that holds bytes and past the MAX_* caps."""
+    [first, end) of the coded symbols of its Huffman blocks (block headers and code tables are not part of
+    them: they can hold any bytes), pixel bytes it inflates to). Raises _Bad on any error, on a stored block
+    that holds bytes and past the MAX_* caps."""
     pos, b, n, out, L = start, 0, 0, 0, len(s)
     huff: list[tuple[int, int]] = []
     blocks = work = 0
@@ -143,7 +143,7 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
         else:
             if btype == 1:
                 (lt, lm), (dt, dm) = _fixed()
-                coded = pos * 8 - n  # the first bit of the block's coded data
+                coded = pos * 8 - n  # the first bit of the block's symbols
             else:
                 while n < 14:
                     if pos >= L:
@@ -168,7 +168,6 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
                     b >>= 3
                     n -= 3
                 ct, cm = table(cl, False)
-                coded = pos * 8 - n  # the code lengths, coded with that table, then the symbols
                 lens: list[int] = []
                 total = hlit + hdist
                 while len(lens) < total:
@@ -206,6 +205,7 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
                 lt, lm = table(lens[:hlit], True)
                 dist = lens[hlit:]
                 dt, dm = table(dist, True) if max(dist) else ([0, 0], 1)  # no distance code: any use fails
+                coded = pos * 8 - n  # the first bit of the block's symbols (the code tables stay visible)
             while True:  # the symbols of one block; at most 48 bits each
                 if n < 48:
                     k = (64 - n) >> 3

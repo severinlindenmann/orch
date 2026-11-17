@@ -345,8 +345,8 @@ def _canonical(lengths: list[int]) -> dict[int, tuple[int, int]]:
 
 
 def test_text_in_a_dynamic_code_table_is_not_exempt(tmp_path):
-    """The plain header fields of a dynamic block (the code length code lengths, 3 bits each) can carry any
-    bytes: here `pw=x`. Only the Huffman-coded data after them is exempt from the label rules."""
+    """The code tables of a dynamic block can carry any bytes: here `pw=x`. Only the coded symbols after the
+    tables are exempt from the label rules."""
     w = _Bits()
     w.put(0b010, 3)  # not final, fixed codes: literals 0 and 144 (the 1x1 picture), end of block
     w.fixed_literal(0)
