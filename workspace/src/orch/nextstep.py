@@ -272,6 +272,7 @@ HINTS = {
     "review link": "orch needs",
     "review tend": "orch review accepted  (what was accepted for you today)",
     "review tend-releases": "orch review list  (what still waits for the owner)",
+    "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
     "review accepted": "orch needs",
     "github expert": "orch ticket list  (a red run opened a top ticket)",
     "look *": "orch ticket list",
