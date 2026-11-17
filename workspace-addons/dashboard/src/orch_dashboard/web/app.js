@@ -774,6 +774,11 @@ main.addEventListener('click', async event => {
   if (menu && event.target.closest('button,a')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
+  // List and panel (split block): choosing an item and Open log stay on the page (no request).
+  const pick = event.target.closest('[data-split-pick]');
+  if (pick) { event.preventDefault(); OrchBlocks.splitPick(pick.closest('.blk-split'), pick.dataset.splitPick); return; }
+  const showLog = event.target.closest('[data-split-log]');
+  if (showLog) { OrchBlocks.splitLogShow(showLog.closest('.blk-split'), showLog.dataset.splitLog); return; }
   const row = event.target.closest('[data-addon-act]');
   if (row) { if (!snapshot) addonAct(row); return; }
   const allow = event.target.closest('[data-sync-allow]');

@@ -45,11 +45,12 @@
     "block": {
       "type": "object",
       "required": ["type"],
-      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio"] } },
+      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split"] } },
       "oneOf": [
         { "$ref": "#/$defs/stat" }, { "$ref": "#/$defs/list" }, { "$ref": "#/$defs/calendar" },
         { "$ref": "#/$defs/timeline" }, { "$ref": "#/$defs/chips" }, { "$ref": "#/$defs/table" },
-        { "$ref": "#/$defs/footnote" }, { "$ref": "#/$defs/settings" }, { "$ref": "#/$defs/radio" }
+        { "$ref": "#/$defs/footnote" }, { "$ref": "#/$defs/settings" }, { "$ref": "#/$defs/radio" },
+        { "$ref": "#/$defs/split" }
       ]
     },
     "stat": {
@@ -212,6 +213,90 @@
               "note": { "$ref": "#/$defs/text" },
               "tone": { "$ref": "#/$defs/tone" },
               "button": { "type": "object", "required": ["label", "action"], "additionalProperties": false, "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "$ref": "#/$defs/action" } } }
+            }
+          }
+        }
+      }
+    },
+    "split": {
+      "type": "object", "required": ["type", "groups"], "additionalProperties": false,
+      "description": "List and panel (added 17 Nov, ORCH-326): a slim list of things on the left (state mark, title, state word, one optional main button) and the chosen one in full on the right; on a phone the list first, then the panel with a way back. The chosen item has an address (`?<param>=<id>` after the page's hash). Every action of an item must name that item's own `id` as its target. Older dashboards skip this block.",
+      "properties": {
+        "type": { "const": "split" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60, "description": "Optional label of the list for screen readers, e.g. 'Services'." },
+        "param": { "type": "string", "pattern": "^[a-z]{1,12}$", "default": "item", "description": "The address word of the chosen item, e.g. 'svc'." },
+        "empty": { "$ref": "#/$defs/empty" },
+        "groups": {
+          "type": "array", "maxItems": 4,
+          "items": {
+            "type": "object", "required": ["title", "items"], "additionalProperties": false,
+            "properties": {
+              "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+              "meta": { "$ref": "#/$defs/meta" },
+              "items": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/splitItem" } }
+            }
+          }
+        }
+      }
+    },
+    "splitId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" },
+    "splitButton": {
+      "type": "object", "required": ["label"], "additionalProperties": false,
+      "description": "A button: `action` (sent as is; for `addon.act` the target must be the item's id) or `link` (a ticket, an https page or a dashboard page).",
+      "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "$ref": "#/$defs/action" }, "link": { "$ref": "#/$defs/link" }, "primary": { "type": "boolean" } }
+    },
+    "splitItem": {
+      "type": "object", "required": ["id", "title", "state", "panel"], "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/splitId" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 80 },
+        "state": { "$ref": "#/$defs/chip", "description": "The state word and its tone (good = running, bad = failing, neutral = stopped)." },
+        "action": { "$ref": "#/$defs/splitButton", "description": "Optional main button on the list row (Start or Stop)." },
+        "question": {
+          "type": "object", "required": ["title", "buttons"], "additionalProperties": false,
+          "description": "Optional question about this item, pinned above the list at every width (once per page).",
+          "properties": {
+            "title": { "$ref": "#/$defs/text", "maxLength": 80 },
+            "text": { "$ref": "#/$defs/text" },
+            "buttons": { "type": "array", "minItems": 1, "maxItems": 3, "items": { "$ref": "#/$defs/splitButton" } }
+          }
+        },
+        "panel": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "text": { "$ref": "#/$defs/text", "description": "One quiet line under the title: what it is." },
+            "buttons": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/splitButton" }, "description": "In order (Start or Stop, then Restart). Open log is added by the dashboard when there is a log." },
+            "facts": {
+              "type": "array", "maxItems": 12,
+              "items": {
+                "type": "object", "required": ["label"], "additionalProperties": false,
+                "properties": {
+                  "label": { "$ref": "#/$defs/text", "maxLength": 30 },
+                  "value": { "$ref": "#/$defs/text" },
+                  "tone": { "$ref": "#/$defs/tone", "description": "Draws a state dot before the value." },
+                  "link": { "$ref": "#/$defs/link", "description": "The value is a link (a ticket, an https page or a dashboard page)." },
+                  "switch": { "type": "object", "required": ["on", "label", "action"], "additionalProperties": false, "description": "An On/Off switch before the value; a click sends `action` (the view puts the verb for the NEW state in it).", "properties": { "on": { "type": "boolean" }, "label": { "$ref": "#/$defs/text", "maxLength": 60 }, "action": { "$ref": "#/$defs/action" } } }
+                }
+              }
+            },
+            "note": { "$ref": "#/$defs/text", "description": "One quiet line after the facts." },
+            "log": {
+              "type": "object", "required": ["lines"], "additionalProperties": false,
+              "properties": {
+                "title": { "$ref": "#/$defs/text", "maxLength": 40, "default": "Last log lines" },
+                "lines": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/text" } },
+                "empty": { "$ref": "#/$defs/text", "description": "Shown when there are no lines yet." }
+              }
+            },
+            "danger": {
+              "type": "object", "required": ["label", "action", "confirm"], "additionalProperties": false,
+              "description": "One action set apart at the bottom in the danger style (Remove). A click opens the shared dialog with `confirm`: what will happen, a Keep button and this button; no typed word.",
+              "properties": {
+                "label": { "$ref": "#/$defs/text", "maxLength": 30 },
+                "note": { "$ref": "#/$defs/text" },
+                "action": { "$ref": "#/$defs/action" },
+                "confirm": { "type": "object", "required": ["title", "lines"], "additionalProperties": false, "properties": { "title": { "$ref": "#/$defs/text", "maxLength": 80 }, "lines": { "type": "array", "minItems": 1, "maxItems": 5, "items": { "$ref": "#/$defs/text" } }, "keep": { "$ref": "#/$defs/text", "maxLength": 30, "default": "Keep it" } } }
+              }
             }
           }
         }

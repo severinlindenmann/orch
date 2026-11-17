@@ -1211,13 +1211,24 @@ async function addonAct(control) {
   const send = async () => {
     locks.add('addon-act'); control.disabled = true;
     const result = await act('addon.act', {addon:id, verb:control.dataset.verb, target:control.dataset.target});
-    locks.delete('addon-act'); control.disabled = false;
+    locks.delete('addon-act'); if (control.isConnected) control.disabled = false;
     if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+    else if (control.closest('.blk-split')) {   // list and panel: say what happened, in the add-on's own words
+      const said = result.state?.act_answer?.addon === id ? result.state.act_answer.answer?.next : null;
+      if (typeof said === 'string' && said) window.orch.toast(clean(said.split(/(?<=\.)\s/)[0]).slice(0, 160), 'ok');   // the first sentence: no path, no command
+    }
     await loadAddon(id);
   };
   if (!control.dataset.confirm) return send();
   const {d, actions} = dialog(control.dataset.confirm, 'dialog');
-  actions.append(button('Yes', 'primary', async () => { await window.orch.close(d); send(); }));
+  if (control.dataset.confirmLines) {
+    // What will happen, in plain lines; Keep it and the action's own word (danger look), never a typed word.
+    const list = el('ul');
+    control.dataset.confirmLines.split('\n').filter(Boolean).forEach(line => list.append(el('li', '', line)));
+    d.append(el('p', '', 'This is what happens:'), list);
+    actions.firstChild.textContent = control.dataset.keep || 'Keep it';
+    actions.append(button(control.dataset.label || 'Yes', 'danger', async () => { await window.orch.close(d); send(); }));
+  } else actions.append(button('Yes', 'primary', async () => { await window.orch.close(d); send(); }));
   d.append(actions);
   window.orch.open(d);
 }

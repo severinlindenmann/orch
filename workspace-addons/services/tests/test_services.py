@@ -172,7 +172,7 @@ def test_view_is_a_valid_page(cli, ws):
     view = json.loads(out)
     v = validator(CONTRACTS / "addon-view.schema.json")
     assert not [e.message for e in v.iter_errors(view)]
-    assert view["blocks"][0]["items"][0]["title"] == "Web preview"
+    assert view["blocks"][0]["groups"][0]["items"][0]["title"] == "Web preview"
 
 
 def test_launchd_plist_quotes_every_path(ws):
