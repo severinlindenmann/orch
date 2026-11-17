@@ -201,11 +201,19 @@ def find_artifact(repo: str, head: str) -> int:
         if not rid.isdigit():
             continue
         running = running or status != "completed"
-        jq = f'.artifacts[] | select(.name == "{ARTIFACT}" and (.expired | not)) | .id'
+        keep = f'.name == "{ARTIFACT}" and (.expired | not)'
+        jq = f".artifacts[] | select({keep}) | [.id, .size_in_bytes] | @tsv"
         a = _gh(["api", f"repos/{repo}/actions/runs/{rid}/artifacts", "--jq", jq])
-        ids = [int(x) for x in a.stdout.split() if x.isdigit()] if a.returncode == 0 else []
-        if ids:
-            return max(ids)
+        found = []
+        for row in a.stdout.splitlines() if a.returncode == 0 else []:
+            aid, _, size = row.partition("\t")
+            if aid.isdigit() and size.isdigit():
+                found.append((int(aid), int(size)))
+        if found:
+            aid, size = max(found)
+            if size > MAX_ZIP:  # asked before the download, so a huge upload is never fetched
+                raise Refused("The pictures from CI are too large. Run the checks again.")
+            return aid
     if running:
         raise Refused("CI is still taking the pictures of the newest commit. Ask again in a few minutes.")
     raise Refused(
@@ -230,6 +238,7 @@ def _gh_bytes(args: list[str], timeout: int = 120) -> bytes:
 
 
 MAX_ZIP = 40 * 1024 * 1024
+MAX_UNPACKED = 3 * MAX_SHEET  # every picture of one pull request together
 
 
 def _unpack(data: bytes, folder: Path) -> None:
@@ -239,14 +248,21 @@ def _unpack(data: bytes, folder: Path) -> None:
         infos = z.infolist()
     except (zipfile.BadZipFile, ValueError):
         raise Refused("The pictures from CI came broken. Run the checks again.") from None
-    for i in infos:
-        if i.is_dir():
-            continue
-        if not (i.filename == "manifest.json" or FILE_RE.fullmatch(i.filename)):
+    files = [i for i in infos if not i.is_dir()]
+    if len(files) > 1 + len(PAGES) * len(WIDTHS):
+        raise Refused("The pictures from CI hold too many files. Run the checks again.")
+    seen: set[str] = set()
+    total = 0
+    for i in files:
+        if not (i.filename == "manifest.json" or FILE_RE.fullmatch(i.filename)) or i.filename in seen:
             raise Refused("The pictures from CI hold an odd file. Run the checks again.")
-        if i.file_size > MAX_PNG:
+        seen.add(i.filename)
+        with z.open(i) as f:  # read at most one byte over the limit, whatever the archive claims
+            data = f.read(MAX_PNG + 1)
+        total += len(data)
+        if len(data) > MAX_PNG or total > MAX_UNPACKED:
             raise Refused(f"{i.filename} from CI is too large. Run the checks again.")
-        (folder / i.filename).write_bytes(z.read(i))
+        (folder / i.filename).write_bytes(data)
 
 
 def fetch(url: str, dest: Path) -> tuple[dict, list[dict]]:

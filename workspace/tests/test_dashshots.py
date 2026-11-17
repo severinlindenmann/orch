@@ -87,7 +87,9 @@ def test_the_sheet_holds_every_picture_inline(tmp_path):
     assert "prefers-color-scheme: dark" in page and "http" not in page.replace("http-equiv", "")
 
 
-def _fake_github(monkeypatch, folder: Path, head="a" * 40, runs="11\tcompleted\n", artifact="99", files=()):
+def _fake_github(
+    monkeypatch, folder: Path, head="a" * 40, runs="11\tcompleted\n", artifact="99\t1000", files=()
+):
     calls = []
 
     def gh(args, timeout=30):
@@ -247,4 +249,22 @@ def test_pictures_are_taken_while_the_run_goes_on_and_odd_files_refused(tmp_path
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("../evil.sh", "x")
     with pytest.raises(Refused, match="odd file"):
+        dashshots._unpack(buf.getvalue(), tmp_path)
+
+
+def test_too_large_or_too_many_files_are_refused(tmp_path, monkeypatch):
+    d = _ci_folder(tmp_path)
+    _fake_github(monkeypatch, d, artifact=f"99\t{dashshots.MAX_ZIP + 1}")
+    with pytest.raises(Refused, match="too large"):
+        dashshots.fetch(PR, tmp_path / "x")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for n in range(1 + len(dashshots.PAGES) * len(dashshots.WIDTHS) + 1):
+            z.writestr(f"page-p{n}-1280.png", PNG)
+    with pytest.raises(Refused, match="too many"):
+        dashshots._unpack(buf.getvalue(), tmp_path)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("page-home-1280.png", b"\0" * (dashshots.MAX_PNG + 10))  # small packed, big unpacked
+    with pytest.raises(Refused, match="too large"):
         dashshots._unpack(buf.getvalue(), tmp_path)
