@@ -664,11 +664,10 @@ test('Answer in the header opens the answer window like the ticket list; without
   assert.equal(opened[0][0], needs[2], 'the question of this ticket, never a stopped-helper row (that would restart it)');
   assert.equal(opened[0][1], trigger);
   const focused = [], log = [];
-  const card = {scrollIntoView:o => log.push('scroll ' + o.block), get offsetWidth() { log.push('reflow'); return 1; }, querySelector:() => ({focus:o => focused.push(o)}),
-    classList:{remove:x => log.push('remove ' + x), add:x => log.push('add ' + x)}};
+  const card = {scrollIntoView:o => log.push('scroll ' + o.block), querySelector:() => ({focus:o => focused.push(o)})};
   const lone = context({needsList:() => [], openNeed:() => assert.fail('no window without a need'), main:{querySelector:sel => sel === '.next-question' ? card : null}});
   assert.equal(lone.focusTicketAnswer('t_one', trigger), 'card');
-  assert.deepEqual(log, ['scroll center', 'remove needs-in', 'reflow', 'add needs-in'], 'the fade restarts on every press');
+  assert.deepEqual(log, ['scroll center']);
   assert.equal(focused.length, 1);
   assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
 });

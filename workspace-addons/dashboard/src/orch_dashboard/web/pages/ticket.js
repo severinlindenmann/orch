@@ -945,14 +945,13 @@ function phoneEntry(tid, entry) {
 // The header Answer button (ORCH-234): it only scrolled to the question card, which stands above every tab and so was
 // in view already, and focused it without a ring: nothing a person could see. It now opens the same answer window as
 // Answer in the ticket list (openNeed). Without a waiting question for this ticket it brings the card to the middle
-// and plays the soft "needs you" fade once.
+// and focuses its first answer (no fade: the page never animates needs-you, see test_views).
 function focusTicketAnswer(id, trigger) {
   const need = (typeof needsList === 'function' ? needsList() : []).find(n => n && n.ticket === id && window.DashHelpers.needAction(n).kind === 'answer');
   if (need) { openNeed(need, trigger); return 'window'; }
   const card = main.querySelector('.next-question');
   if (!card) return '';
   card.scrollIntoView({block:'center', behavior:'smooth'});
-  card.classList.remove('needs-in'); void card.offsetWidth; card.classList.add('needs-in');
   card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button')?.focus({preventScroll:true});
   return 'card';
 }
