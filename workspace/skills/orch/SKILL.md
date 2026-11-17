@@ -53,7 +53,7 @@ ask; its list replaces the one above.
 
 Started by hand (not by orch)? Tell orch which ticket you work on so nobody starts a second agent on it:
 `orch run claim <id> --session <your session id>`. Finishing a piece of work in a live session: `orch run done <id>`.
-In a live session, when you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready`, run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
+When you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready` (at your prompt in a live session, or after a tool step in a one-step run), run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
 Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, sends on a helper that stopped with open steps within a minute (the second time the ticket moves up to Opus), reminds any other helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
