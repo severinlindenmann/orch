@@ -4,7 +4,7 @@ const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false, ticketPerson = '';
 // Saved views live on the address: #tickets?view=needs-you|working|done-week.
-const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['working', 'Working'], ['done-week', 'Done this week']];
+const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['working', 'Working'], ['backlog', 'To do'], ['done-week', 'Done this week']];
 // Views reached only by a link (Home's "All finished today"), with no chip of their own.
 const LINK_VIEWS = [['done-today', 'Finished today']];
 function savedView() {
@@ -17,6 +17,7 @@ function inView(t, view, nowMs = Date.now()) {
   const status = window.DashHelpers.columnOf(shown(t).status);
   if (view === 'needs-you') return (status !== 'done' && (questions(t).length > 0 || status === 'review')) || changesPending(t);
   if (view === 'working') return status === 'active';
+  if (view === 'backlog') return status === 'open';
   if (view === 'done-today') { const at = new Date(t.done_at || t.completed_at || t.updated_at); return status === 'done' && at.toDateString() === new Date(nowMs).toDateString(); }
   if (view === 'done-week') { const at = Date.parse(t.done_at || t.updated_at); return status === 'done' && (!Number.isFinite(at) || nowMs - at <= 7 * 86400000); }
   return true;
@@ -104,7 +105,7 @@ function viewChips() {
     TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered, {href:id ? '#tickets?view=' + id : '#tickets', 'data-key':'view-chip-' + (id || 'all')})), own, save);
 }
 function ticketFilters() {
-  const input = h('input', {className:'input', type:'search', placeholder:'58 or words', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
+  const input = h('input', {className:'input', type:'search', placeholder:'Search by number or words', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); render(); });
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
   const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; render(); }) : null;
@@ -314,7 +315,7 @@ function ticketTable(visible) {
 // Phone (ORCH-73, owner 16 Nov): the same groups as short rows (master UI.shortGroup), never a squeezed table.
 // One row: number and title, one fact, one thing on the right (Answer where the person is needed, else steps n/m or an
 // Idle/Stuck chip). A group shows its first PHONE_ROWS rows, then "n more".
-const PHONE_ROWS = 5, phoneMore = new Set();
+const PHONE_ROWS = 8, phoneMore = new Set();
 const SHORT_ICON = {waiting:'needs', review:'check', active:'working', blocked:'todo', open:'todo', done:'done'};
 function shortFact(t, row) {
   const ago = iso => iso && window.DashHelpers.ago ? window.DashHelpers.ago(iso, Date.now()) : '';
