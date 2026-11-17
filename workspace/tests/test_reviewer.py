@@ -355,6 +355,7 @@ def test_work_in_other_words_goes_back_with_the_question_until_a_task_proves_it(
     tid = _real(proj, run, new_ticket, name)
     res = reviewer.run(proj)["actions"][0]
     assert res["verdict"] == "back" and "which task proves it?" in res["why"] and "looked for:" in res["why"]
+    assert "The Reviewer has a question:" in tickets.load(proj, tid)["checklist"][-1]["text"]
     assert (
         run("check", "done", tid, "c1", "--note", "again", "--proves", REAL[name][0], "--by", "human:tester")[
             0
