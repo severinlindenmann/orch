@@ -67,17 +67,26 @@
 
   const els = {};
 
-  const hhmm = at => { try { return new Date(at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: false}); } catch (e) { return ''; } };
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const clock = at => { try { return new Date(at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: false}); } catch (e) { return ''; } };
+  // A time of today is the clock only; any other day carries its day ("13 Nov 12:26"): a log over three days showed
+  // 12:26, 10:00, 12:00 and read as out of order (ORCH-232).
+  const hhmm = at => {
+    const d = new Date(at), now = new Date();
+    if (!at || isNaN(d.getTime())) return '';
+    if (d.toDateString() === now.toDateString()) return clock(at);
+    return d.getDate() + ' ' + MONTHS[d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '') + ' ' + clock(at);
+  };
   const evText = c => window.FocusHelpers.outcome(c);
   // When a proof was added, in the person's own time: "today 16:05", "yesterday 09:12", "5 Nov 09:12".
   function stamp(at) {
     const d = new Date(at), now = new Date();
     if (!at || isNaN(d.getTime())) return '';
     const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-    const diff = Math.round((day(now) - day(d)) / 86400000), t = hhmm(at);
+    const diff = Math.round((day(now) - day(d)) / 86400000), t = clock(at);
     if (diff === 0) return 'today ' + t;
     if (diff === 1) return 'yesterday ' + t;
-    return d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '') + ' ' + t;
+    return d.getDate() + ' ' + MONTHS[d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '') + ' ' + t;
   }
   const keyOf = o => JSON.stringify(o);
   // A file name with its kind icon; the name never breaks in the middle (the line around it may wrap).
