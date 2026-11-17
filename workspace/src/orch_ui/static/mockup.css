@@ -1049,7 +1049,8 @@ html[data-state=loading] :where(body.mk-board-board-html) .loadbar{animation:lb-
 :where(body.mk-board-board-html) .search input:focus,:where(body.mk-board-board-html).search input:focus{border-color:var(--border-strong)}
 :where(body.mk-board-board-html) .search kbd,:where(body.mk-board-board-html).search kbd{position:absolute;right:6px;min-width:20px;padding:0 4px;font-size:12px}
 :where(body.mk-board-board-html) #clear,:where(body.mk-board-board-html)#clear{min-height:32px}
-:where(body.mk-board-board-html) .board,:where(body.mk-board-board-html).board{display:grid;gap:12px;grid-template-columns:repeat(4,minmax(208px,1fr)) 56px;align-items:stretch}
+:where(body.mk-board-board-html) .board,:where(body.mk-board-board-html).board{display:grid;gap:12px;grid-template-columns:repeat(4,minmax(260px,340px)) 56px;overflow-x:auto;align-items:stretch}
+:where(body.mk-board-board-html) .tc-title,:where(body.mk-board-board-html).tc-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 :where(body.mk-board-board-html) .board.done-open,:where(body.mk-board-board-html).board.done-open{grid-template-columns:repeat(5,minmax(224px,1fr));overflow-x:auto;padding-bottom:8px}
 :where(body.mk-board-board-html) .col,:where(body.mk-board-board-html).col{--c:var(--text-faint);display:flex;flex-direction:column;min-height:calc(100dvh - 160px);background:var(--lane);border:1px solid #1f242b;border-top:2px solid var(--c);border-radius:10px}
 :where(body.mk-board-board-html) .col[data-col=working],:where(body.mk-board-board-html).col[data-col=working]{--c:var(--working)}
