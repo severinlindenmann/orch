@@ -10,6 +10,6 @@ function focusNextPage(r) {
   return fragment(heading(label, '', {actions:h('span', {className:'badge info', 'data-key':'focus-next-tag'}, 'Preview')}),
     h('section', {className:'card', 'data-key':'focus-next', 'data-path':r.path || ''},
       h('div', {className:'empty'},
-        h('p', {}, 'The new ' + label + ' is being built. Your helpers’ sessions will show here.'),
+        h('p', {}, 'The new ' + label + ' is being built; your helpers’ sessions will show here.'),
         h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(r.id), 'data-key':'focus-next-off'}, 'Back to today’s ' + label))));
 }
