@@ -1,0 +1,23 @@
+name: e2e-smoke
+# A short e2e set on every pull request that touches the CLI, an add-on, the e2e scenarios or the installer: 13
+# scenarios without relay/publish servers and without agents, so no cargo build. Under 5 minutes (the step has a hard
+# limit of 5). The full suite (e2e.yml) runs at night and before each release.
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Smoke set
+        timeout-minutes: 5
+        run: e2e/run.sh smoke --mode local

@@ -263,6 +263,11 @@ def _read_event(events: tuple[str, ...], root_hint: list, names: dict | None = N
         data = json.loads(box[0]) if box and box[0].strip() else None
     except (ValueError, RecursionError):
         data = None
+    if data is None and box and box[0].strip():  # cut off at 64 KB (a big tool result): find the event name
+        key = re.escape(names.get("event", "hook_event_name"))
+        m = re.search(rf'"{key}"\s*:\s*"([A-Za-z]{{1,40}})"', box[0])
+        if m:
+            event = m.group(1)
     if isinstance(data, dict):
         ev = data.get(names.get("event", "hook_event_name"))
         if isinstance(ev, str):
@@ -317,6 +322,33 @@ def start_watchdog() -> threading.Timer:
     return timer
 
 
+def input_notice(environ) -> str | None:
+    """#1268: a one-step run learns at its next tool step that a person's input waits for it. Only for the
+    run named by ORCH_RUN/ORCH_TICKET in the workspace ORCH_ROOT, only while that run holds the ticket in
+    oneshot mode (a live session gets the notice typed at its prompt), once per set of waiting items. The
+    line is the fixed notice (runs_live.notice_line): no person's words go into the agent's context."""
+    run, tid, base = environ.get("ORCH_RUN"), environ.get("ORCH_TICKET"), environ.get("ORCH_ROOT")
+    if not (run and tid and base) or not os.path.isabs(base):
+        return None
+    try:
+        from orch import runs, runs_live
+
+        if not runs_live._TID.fullmatch(tid):
+            return None
+        root = Path(base)
+        rec = runs.read(root, tid)
+        if not rec or rec.get("run") != run or (rec.get("mode") or "oneshot") != "oneshot":
+            return None
+        items = runs_live.oneshot_waiting(root, tid)
+        if not items:
+            return None
+        ids = ",".join(sorted(str(i.get("id")) for i in items))
+        sig = hashlib.sha256(f"input|{run}|{ids}".encode()).hexdigest()
+        return runs_live.notice_line(tid, False) if first_time(root, sig) else None
+    except Exception:  # noqa: BLE001 - a hook never gets in the agent's way
+        return None
+
+
 def hook_main(argv: list[str] | None = None, watchdog: threading.Timer | None = None) -> int:
     """`orch work-check --hook <tool>`: always exit 0; stdout is empty or the tool's one JSON object."""
     timer = start_watchdog()
@@ -331,8 +363,17 @@ def hook_main(argv: list[str] | None = None, watchdog: threading.Timer | None = 
         hooks = adapters.load(tool).get("reminder_hooks") if data else None
         if not hooks or not data.get("output"):
             return 0
+        steps = tuple(adapters.load(tool).get("step_hooks") or ())
         hint: list[str] = []
-        event = _read_event(tuple(hooks), hint, data.get("input"))
+        event = _read_event(tuple(hooks) + steps, hint, data.get("input"))
+        if event is not None and event in steps:
+            line = input_notice(
+                os.environ
+            )  # after a tool step: only the waiting-input notice, never work-check
+            if line:
+                sys.stdout.write(json.dumps(_fill(data["output"], event, line)) + "\n")
+                sys.stdout.flush()
+            return 0
         root = find_root(Path(hint[0] if hint else os.getcwd()))
         if event is None or own_ticket_open(root):
             return 0
