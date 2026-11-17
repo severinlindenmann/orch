@@ -221,7 +221,7 @@
  "pull-requests": {
   "acts": {},
   "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
-  "background": false,
+  "background": true,
   "description": "Merge queue: pull requests wait in line and are merged in groups after one run of the checks.",
   "gitignore": [
    ".orch/addons/pull-requests/"
@@ -235,11 +235,39 @@
   "runs_agents": false,
   "schema": "orch.addon/1",
   "skill": "skills/orch-pull-requests",
+  "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
-  "ticket_fields_section": null,
+  "ticket_fields": {
+   "schema": "ext.schema.json",
+   "section": "Pull requests",
+   "show_on_card": []
+  },
+  "ticket_fields_section": {
+   "fields": [
+    {
+     "hidden": false,
+     "key": "merge_when_green",
+     "options": [
+      {
+       "label": "Off",
+       "value": "off"
+      },
+      {
+       "label": "On",
+       "value": "on"
+      }
+     ],
+     "read_only": false,
+     "title": "Merge when green",
+     "type": "choice"
+    }
+   ],
+   "section": "Pull requests",
+   "show_on_card": []
+  },
   "ticket_links": [],
   "ticket_view": [],
-  "version": "0.1.0"
+  "version": "0.2.0"
  },
  "sync": {
   "acts": {},

@@ -21,9 +21,9 @@ def build() -> dict:
     for name in sorted(d.name for d in (ROOT / "workspace-addons").iterdir() if (d / "src").is_dir()):
         m = addons.folder_manifest(ROOT / "workspace-addons" / name)
         m = dict(m)
-        m.pop("dir")
+        where = m.pop("dir")  # the manifest's own folder: its schema files sit next to it
         # the ticket fields need the add-on's schema file, which a normal install does not have: keep the result
-        m["ticket_fields_section"] = fields.section({**m, "dir": ROOT / "workspace-addons" / name})
+        m["ticket_fields_section"] = fields.section({**m, "dir": where})
         out[name] = m
     return out
 

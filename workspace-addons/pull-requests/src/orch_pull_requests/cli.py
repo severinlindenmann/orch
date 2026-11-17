@@ -1,4 +1,4 @@
-"""orch pull-requests queue add|list|remove|run (contract: contracts/addons/pull-requests/README.md)."""
+"""orch pull-requests queue add|list|remove|run, tend, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
 
 from __future__ import annotations
 
@@ -141,6 +141,46 @@ def _wait(root: Path, url: str, max_wait: float, json_out: bool) -> int:
         time.sleep(POLL_SECS)
 
 
+def _tend(root: Path) -> dict:
+    from . import switch
+    from .github import GitHub
+
+    return switch.tend(root, GitHub(), log=lambda s: print(s, flush=True), start=start_runner)
+
+
+def _switch_cmd(args, root: Path) -> int:
+    """tend, start, stop, status, watch: the Merge when green switch and its background watcher."""
+    from . import service
+
+    def say(data: dict, text: str) -> None:
+        print(json.dumps(data) if getattr(args, "json", False) else text, flush=True)
+
+    if args.cmd == "watch":
+        return service.watch(root, lambda: _tend(root), log=lambda s: print(s, flush=True))
+    if args.cmd == "tend":
+        got = _tend(root)
+        n = len(got["added"])
+        say(
+            got,
+            f"Merge when green: {n} pull request(s) put in the merge queue, {len(got['removed'])} taken out.",
+        )
+        return 0
+    if args.cmd == "start":
+        pid = service.start(root)
+        say({"running": True, "pid": pid}, f"Merge when green watcher runs (pid {pid}).")
+        return 0
+    if args.cmd == "stop":
+        stopped = service.stop(root)
+        say({"stopped": stopped}, "Merge when green watcher stopped." if stopped else "It was not running.")
+        return 0
+    pid = service.running_pid(root)
+    say(
+        {"running": bool(pid), **({"pid": pid} if pid else {})},
+        f"Running (pid {pid})." if pid else "Not running.",
+    )
+    return 0 if pid else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="orch pull-requests")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -157,9 +197,21 @@ def main(argv: list[str] | None = None) -> int:
     rm.add_argument("url")
     r = q.add_parser("run", help="the runner (add starts it by itself)")
     r.add_argument("--root", help=argparse.SUPPRESS)
+    t = sub.add_parser("tend", help="Merge when green: one pass over the switched-on tickets")
+    t.add_argument("--json", action="store_true")
+    for name, text in (
+        ("start", "start the Merge when green watcher"),
+        ("stop", "stop it"),
+        ("status", "is it running?"),
+    ):
+        sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    w = sub.add_parser("watch", help=argparse.SUPPRESS)
+    w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     try:
         root = _root(getattr(args, "root", None))
+        if args.cmd != "queue":
+            return _switch_cmd(args, root)
         if args.sub == "run":
             return _run(root)
         if args.sub == "list":

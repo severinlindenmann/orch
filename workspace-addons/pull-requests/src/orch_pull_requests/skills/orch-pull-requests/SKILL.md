@@ -23,11 +23,19 @@ Run it bare, not through a pipe. Exit 0 = merged (alone or with its group); exit
 says why (checks failed, a draft, closed, conflicts with the base branch, no room in the GitHub write limit). The
 verdict also goes on the ticket. Fix what it says, push, and add it again. The pull request must be ready (not a draft).
 
-**2. Look at the line**
+**2. Or let the ticket's switch do it** (Merge when green)
+
+    orch ticket set <ticket> pull-requests.merge_when_green on
+
+The background watcher (`orch start`) then puts the ticket's open, ready pull requests in the queue by itself every
+minute; you do not wait. Mark the pull request ready (not a draft) when it is done. Use it when the ticket or the
+person says to merge on green; leave it off when a person merges with a Merge card. Turn it off again with `off`.
+
+**3. Look at the line**
 
     orch pull-requests queue list
 
-**3. Take a waiting pull request out**
+**4. Take a waiting pull request out**
 
     orch pull-requests queue remove <pull request url>
 
