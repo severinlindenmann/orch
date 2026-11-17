@@ -92,3 +92,13 @@ test('ORCH-185: a picture a person attached is an input (What you asked), not a 
   assert.deepEqual(vm.runInContext('JSON.stringify(inputFiles(t).map(f => f.name))', c), '["hero.png"]');
   assert.deepEqual(vm.runInContext('JSON.stringify(artifactFiles(t).map(f => f.name))', c), '["report.md"]');
 });
+test('ORCH-184: the Result card and the Files tab agree: a file a step proved is a result file too', () => {
+  const c = ctx(), t = {id:'t_one', status:'review', checklist:[{id:'c1', text:'Write the note', done:true, evidence:[{type:'file', ref:'.orch/tickets/t_one/evidence/one.md'}, {type:'file', ref:'.orch/tickets/t_one/evidence/two.md'}]}, {id:'c2', text:'Draw it', done:true, evidence:[{type:'file', ref:'.orch/tickets/t_one/evidence/three.png'}]}]};
+  vm.runInContext("artifactData.set('t_one', {at:Date.now(), data:{files:[]}})", c);
+  const files = nodes(h('div', {}, c.artifactsPanel(t))).filter(x => /(^| )file-tile( |$)/.test(x.attrs.className || '')).length;
+  c.t = t; assert.equal(vm.runInContext('ticketFileCount(t)', c), 3);
+  assert.equal(files, 3, 'the Files tab lists three');
+  const card = JSON.stringify(c.ticketReviewCard(t));
+  assert.doesNotMatch(card, /No result file/);
+  assert.match(card, /3 files/);
+});
