@@ -17,6 +17,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, result} = {}) {
     document:{querySelector:() => frame}, act:async (...a) => { calls.acts.push(a); return answer; },
     addEventListener(){}, window:{orch:{toast:t => calls.toasts.push(t)}}};
   ctx.orchFrameChan = () => 'ab'.repeat(16);  // the shown frame's per-frame code (settings.js, ORCH-186)
+  ctx.navigator = {userActivation:{isActive:true}};  // the person just clicked (ORCH-186 review M2)
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow, frame};
 }
@@ -77,4 +78,14 @@ test('a second click while saving files nothing twice', async () => {
   const req = ctx.embedIdeaRequest(msg(frameWindow));
   await Promise.all([ctx.fileEmbedIdea(req), ctx.fileEmbedIdea(req)]);
   assert.equal(calls.acts.length, 1);
+});
+
+
+// ORCH-186 review M2: nothing is done for a script alone, only right after the person's click.
+test('without a click of the person nothing is sent or started', async () => {
+  const {ctx, calls, frameWindow} = setup();
+  ctx.navigator.userActivation.isActive = false;
+  await ctx.fileEmbedIdea(ctx.embedIdeaRequest(msg(frameWindow)));
+  assert.equal(JSON.stringify(calls).includes('"orch.idea.failed"'), true);
+  assert.equal((calls.acts || []).length, 0);
 });
