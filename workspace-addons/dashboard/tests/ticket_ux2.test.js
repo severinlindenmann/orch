@@ -162,3 +162,15 @@ test('ORCH-62: an open question reads "Question: ..." under the title', () => {
   const c = listCtx();
   assert.match(text(c.ticketNext({id:'q', status:'waiting', questions:[{text:'Start the run?'}]})), /^Question: /);
 });
+test('ORCH-157: a Group choice lists the tickets that have parts, and picking one keeps only that group', () => {
+  const rows = [{id:'e', title:'Epic', status:'open'}, {id:'p1', title:'Part', parent:'e', status:'open'}, {id:'x', title:'Other', status:'open'}];
+  const c = listCtx({tickets:() => rows});
+  const sel = nodes(h('div', {}, c.ticketFilters())).find(n => n.attrs['data-key'] === 'ticket-group');
+  assert.ok(sel, 'a Group choice');
+  assert.deepEqual(c.filterTickets(rows, '', false, '', '', '', 'e').map(t => t.id), ['e', 'p1']);
+  assert.equal(c.filterTickets(rows, '', false).length, 3);
+});
+test('ORCH-157: the To do view keeps only backlog tickets', () => {
+  const c = listCtx();
+  assert.deepEqual(c.filterTickets([{id:'a', status:'open'}, {id:'b', status:'active'}], '', false, '', '', 'backlog').map(t => t.id), ['a']);
+});

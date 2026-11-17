@@ -109,11 +109,11 @@ test('phone list: groups as short rows, Answer where the person is needed, steps
   assert.equal(groups[2].rows[0].side, null, 'no steps: nothing on the right');
 });
 
-test('phone list: a long group shows 5 rows and "n more"; a folded group no rows', () => {
-  const list = Array.from({length:8}, (_, i) => ({id:'o' + i, key:'WS-' + i, title:'T' + i, status:'open'}));
+test('phone list: a long group shows 8 rows and "n more"; a folded group no rows', () => {
+  const list = Array.from({length:11}, (_, i) => ({id:'o' + i, key:'WS-' + i, title:'T' + i, status:'open'}));
   const {c, groups} = listCtx(list);
   c.phoneList(list);
-  assert.equal(groups[0].rows.length, 5);
+  assert.equal(groups[0].rows.length, 8);
   assert.equal(groups[0].more.label, '3 more');
   vm.runInContext("foldedGroups.add('open')", c);
   groups.length = 0;

@@ -16,7 +16,7 @@
   // "Move to" offers four places; Waiting is decided by the agent.
   const MOVE_CHOICES = STATUS_CHOICES.filter(([s]) => s !== 'waiting');
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
-    status: 'the status'};
+    status: 'the status', done_when: 'the Done when line'};
 
   /* Due dates (G1). `due` is "YYYY-MM-DD" (a day) or "YYYY-MM-DDTHH:MM" (local wall time, no zone). Only a due with a
      time gets words here: "Due 18:30" (today), "Due Mon 18:30" (within a week), "Due 14 Nov 2026, 18:30" (further),
@@ -94,6 +94,10 @@
     if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a step' + task(m[1]);
     if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
     if ((m = /^Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?$/.exec(text))) return 'Removed ' + addon(m[1]) + ' settings';
+    if (/^Created under t_\w+$/.test(text)) return 'Created as a sub-ticket';
+    if ((m = /^Recorded a check run for (c\d+)(?: \(exit (\d+)\))?$/.exec(text))) return 'Ran a check' + task(m[1]) + (m[2] == null ? '' : m[2] === '0' ? ' (passed)' : ' (failed)');
+    if ((m = /^Moved (c\d+) after c\d+$/.exec(text))) return 'Moved a task' + task(m[1]);
+    if ((m = /^Created under (.+)$/.exec(text))) return 'Created under ' + m[1];
     if (/^Created/.test(text)) return /under /.test(text) ? 'Created as a sub-ticket' : 'Ticket created';
     if ((m = /^Edited (.+)$/.exec(text))) {
       const parts = m[1].split(/,\s*/).map(f => FIELD_WORD[f.trim()] || f.trim());

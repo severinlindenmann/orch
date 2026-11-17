@@ -40,8 +40,10 @@
       [...(question.options || [])].sort((a, b) => Number(!!b.suggested) - Number(!!a.suggested)).forEach(option => {
         const node = button('', 'btn qoption' + (option.suggested ? ' suggested' : ''), () => choose(option.text, {immediate: question.oneTap === true && question.kind == null}));
         node.append(make('span', '', option.text));
-        if (option.suggested) node.append(make('span', 'suggested-label', 'Suggested'));
-        options.append(node);
+        const row = make('span', 'qopt');
+        row.append(node);
+        if (option.suggested) row.append(make('span', 'suggested-label', 'Suggested'));
+        options.append(row);
       });
       const editor = make('form', 'qeditor');
       editor.hidden = true;
@@ -102,7 +104,7 @@
       } else if (phase === 'sending') {
         status.textContent = "Sending '" + s.answer + "'...";
       } else if (phase === 'sent') {
-        status.textContent = ["Answered '" + s.answer + "'", s.who, s.via].filter(Boolean).join(' · ');
+        status.textContent = ["Answered '" + s.answer + "'", root.QuestionCardState.whoWord(s.who), root.QuestionCardState.viaWord(s.via)].filter(Boolean).join(' · ');
       } else if (phase === 'conflict') {
         status.textContent = 'Someone answered first: ' + root.QuestionCardState.otherLine(s.other);
       } else {

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 EXAMPLES = (
     "every monday 08:00 · daily 07:30 · every 15 minutes · every 2 hours · monthly 1 09:00 · "
-    "tomorrow 09:00 · today 17:30"
+    "tomorrow 09:00 · today 17:30 · in 2 hours · in 3 days"
 )
 DAYS = {"sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3, "thursday": 4, "friday": 5, "saturday": 6}
 MIN_MINUTES = 5  # the shortest steady interval (fb20)
@@ -81,6 +81,14 @@ def parse(text: str, tz: str, now: datetime | None = None) -> Plan:
         at = datetime(day.year, day.month, day.day, int(m[2]), int(m[3]), tzinfo=z)
         if at <= local:
             raise Plain(f"{m[0]} is already past. Try tomorrow {m[2]}:{m[3]}.")
+        return Plan(until=at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    m = re.fullmatch(r"in (\d{1,3}) (minutes?|hours?|days?)", t)
+    if m and int(m[1]) >= 1:  # a helper that must wait a while: one wake-up, not a repeat
+        n, unit = int(m[1]), m[2][0]
+        gap = (
+            timedelta(minutes=n) if unit == "m" else timedelta(hours=n) if unit == "h" else timedelta(days=n)
+        )
+        at = (now or datetime.now(UTC)) + gap
         return Plan(until=at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     raise Plain(
         f'I don\'t understand "{text}". Say it like: {EXAMPLES}. Monthly days go from 1 to 31 (in shorter months it runs on the last day).'
