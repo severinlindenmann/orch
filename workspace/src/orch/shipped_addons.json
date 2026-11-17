@@ -219,10 +219,25 @@
   "version": "0.1.0"
  },
  "pull-requests": {
-  "acts": {},
+  "acts": {
+   "refresh": {
+    "summary": "Look up the ticket's pull requests and their checks",
+    "who": "anyone",
+    "writes": [
+     "refs",
+     "ext.pull-requests"
+    ]
+   }
+  },
   "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
   "background": true,
-  "description": "Merge queue: pull requests wait in line and are merged in groups after one run of the checks.",
+  "dashboard": {
+   "icon": "check",
+   "label": "Pull requests",
+   "order": 25,
+   "subtitle": "Open pull requests of the repositories your tickets link, with their checks."
+  },
+  "description": "Open pull requests with their checks, live on each ticket; merge when green and the merge queue.",
   "gitignore": [
    ".orch/addons/pull-requests/"
   ],
@@ -240,7 +255,9 @@
   "ticket_fields": {
    "schema": "ext.schema.json",
    "section": "Pull requests",
-   "show_on_card": []
+   "show_on_card": [
+    "checks"
+   ]
   },
   "ticket_fields_section": {
    "fields": [
@@ -260,12 +277,108 @@
      "read_only": false,
      "title": "Merge when green",
      "type": "choice"
+    },
+    {
+     "hidden": false,
+     "key": "pr",
+     "read_only": true,
+     "title": "Pull request",
+     "type": "text"
+    },
+    {
+     "hidden": false,
+     "key": "checks",
+     "options": [
+      {
+       "label": "Passed",
+       "value": "passed"
+      },
+      {
+       "label": "Running",
+       "value": "running"
+      },
+      {
+       "label": "Failed",
+       "value": "failed"
+      },
+      {
+       "label": "No checks",
+       "value": "none"
+      }
+     ],
+     "read_only": true,
+     "title": "Checks",
+     "type": "choice"
+    },
+    {
+     "hidden": false,
+     "key": "merge",
+     "options": [
+      {
+       "label": "Ready to merge",
+       "value": "ready"
+      },
+      {
+       "label": "Blocked",
+       "value": "blocked"
+      },
+      {
+       "label": "Behind its base",
+       "value": "behind"
+      },
+      {
+       "label": "Has a conflict",
+       "value": "conflict"
+      },
+      {
+       "label": "Draft",
+       "value": "draft"
+      },
+      {
+       "label": "Not known yet",
+       "value": "unknown"
+      },
+      {
+       "label": "Merged",
+       "value": "merged"
+      },
+      {
+       "label": "Closed",
+       "value": "closed"
+      }
+     ],
+     "read_only": true,
+     "title": "Merge",
+     "type": "choice"
     }
    ],
    "section": "Pull requests",
-   "show_on_card": []
+   "show_on_card": [
+    "checks"
+   ]
   },
-  "ticket_links": [],
+  "ticket_links": [
+   {
+    "icon": "link",
+    "kind": "github-pr",
+    "label": "Pull request",
+    "match": [
+     "https://github.com/*/*/pull/*"
+    ],
+    "statuses": [
+     "open",
+     "draft",
+     "checks running",
+     "checks failed",
+     "conflict",
+     "behind",
+     "blocked",
+     "ready to merge",
+     "merged",
+     "closed"
+    ]
+   }
+  ],
   "ticket_view": [],
   "version": "0.2.0"
  },

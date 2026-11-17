@@ -1,6 +1,6 @@
 ---
 name: orch-pull-requests
-description: Merge a finished pull request through the merge queue, which merges several together after one run of the checks. Use when a ticket's pull request should be merged once its checks pass ("merge on green") and the pull-requests add-on is on. Not for opening pull requests or for pull requests a person merges with a Merge card.
+description: See each pull request's checks and merge state (on the Pull requests page and live on its ticket) and merge a finished pull request through the merge queue, which merges several together after one run of the checks. Use when a ticket links a pull request, should be merged once its checks pass ("merge on green") and the pull-requests add-on is on. Not for opening pull requests or for pull requests a person merges with a Merge card.
 ---
 # orch merge queue
 
@@ -38,6 +38,14 @@ person says to merge on green; leave it off when a person merges with a Merge ca
 **4. Take a waiting pull request out**
 
     orch pull-requests queue remove <pull request url>
+
+**5. See the checks** (no waiting, no GitHub call of your own)
+
+While the add-on runs (`orch start`), it reads the repositories your tickets link once a minute, read-only, and keeps each linked pull request's state on its ticket: the link shows `Checks running`, `Checks failed`, `Ready to merge`, `Merged` and so on, and the ticket's Details show its newest open pull request's checks and merge state. The dashboard's Pull requests page lists the open pull requests with their ticket, checks and merge state. Update one ticket now:
+
+    orch pull-requests act refresh -- <ticket>
+
+Link every pull request to its ticket with `orch ref add`; one no ticket links shows on the page but on no ticket.
 
 ## Rules
 - A pull request a person merges with a Merge card is never queued.

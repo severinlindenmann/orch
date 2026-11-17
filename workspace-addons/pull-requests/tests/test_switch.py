@@ -250,7 +250,11 @@ def test_stop_without_a_watcher_signals_nothing(ws, capsys):
 def test_manifest_declares_the_switch_and_the_service():
     m = tomllib.loads((resources.files("orch_pull_requests") / "orch-addon.toml").read_text(encoding="utf-8"))
     assert m["background"] is True and m["ticket_ext"] == "ext.schema.json"
-    assert m["ticket_fields"] == {"section": "Pull requests", "schema": "ext.schema.json"}
+    assert m["ticket_fields"] == {
+        "section": "Pull requests",
+        "schema": "ext.schema.json",
+        "show_on_card": ["checks"],  # the live checks (ORCH-165) show on board cards
+    }
     assert "recommended" not in m  # off until someone turns it on
     assert not m.get("ticket_ext_inert")  # it starts merges: synced changes wait for a person
 
@@ -260,7 +264,7 @@ def test_schema_copy_is_byte_identical_and_the_field_is_a_choice_off_by_default(
     assert ours == CONTRACT.read_bytes()
     from orch import fields
 
-    [f] = fields.field_list(json.loads(ours))
+    [f] = [x for x in fields.field_list(json.loads(ours)) if x["key"] == "merge_when_green"]
     assert f["key"] == "merge_when_green" and f["title"] == "Merge when green" and f["type"] == "choice"
     assert [o["label"] for o in f["options"]] == ["Off", "On"] and not f["read_only"]
     assert not switch.is_on({}) and not switch.is_on({"ext": {"pull-requests": {"merge_when_green": "off"}}})
@@ -274,7 +278,7 @@ def test_core_accepts_the_manifest_and_a_person_sets_the_switch_like_orch_ticket
     assert m["background"] is True
     sec = fields.section(m)
     assert sec["section"] == "Pull requests"
-    [f] = sec["fields"]
+    [f] = [x for x in sec["fields"] if x["key"] == "merge_when_green"]
     schema = json.loads(CONTRACT.read_text(encoding="utf-8"))
     prop = schema["properties"]["merge_when_green"]
     assert [fields.parse_value(f, v, prop) for v in ("On", "on", "off")] == ["on", "on", "off"]

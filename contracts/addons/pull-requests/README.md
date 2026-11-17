@@ -6,7 +6,8 @@ checks. No AI call. Off until `orch addon add pull-requests`. Needs `gh` signed 
 
 ## Manifest (`workspace-addons/pull-requests/src/orch_pull_requests/orch-addon.toml`)
 `name = "pull-requests"` (the core owns `orch github`), not recommended, `background = true` (the Merge when green
-watcher; the queue runner itself starts on `queue add` and ends when the queue is empty), no dashboard page yet,
+watcher and the pull request reader; the queue runner itself starts on `queue add` and ends when the queue is
+empty), `[dashboard]` "Pull requests" (`orch pull-requests view`), `[[ticket_links]]` `github-pr`, `[acts.refresh]`,
 `gitignore = [".orch/addons/pull-requests/"]`, `ticket_ext` and `[ticket_fields]` (section "Pull requests") =
 `ext.schema.json` (this folder; the package ships a byte-identical copy). Not `ticket_ext_inert`: the switch starts
 merges, so sync holds a changed block until a person allows it.
@@ -59,3 +60,23 @@ under the ticket's Details; set with `orch ticket set <ticket> pull-requests.mer
   when the add-on is no longer on here. `start` → `{"running": true, "pid"}`, `stop` → `{"stopped": bool}` (signals
   only the pid the lock names while that process lives with the recorded start time), `status` → `{"running",
   "pid"?}`, exit 1 when not running.
+
+## Pull requests page and live state on tickets (ORCH-165)
+- Every watcher round first reads the repositories the tickets link (a pull request, an issue or the repository on an
+  open ticket, plus every linked pull request not yet recorded merged or closed), one read-only `gh api graphql`
+  call per repository (open pull requests, newest 50, and the linked ones by number), at most 10 repositories.
+  Nothing is written to GitHub. Kept in `.orch/addons/pull-requests/prs.json` (`{"schema":
+  "orch.pull-requests-prs/1", "polled_at", "repos": {repo: {"polled_at", "error"?, "open": [n]}}, "prs": {url:
+  row}}`; the folder and file are never followed through a link).
+- A ticket changes only through the core: `orch pull-requests act refresh --by agent:pull-requests -- <ticket>`
+  (env `ORCH_PULL_REQUESTS_CACHED=1`: answer from prs.json), and only when what it shows differs. The answer sets
+  each pull request link's `status` (`open`, `draft`, `checks running`, `checks failed`, `conflict`, `behind`,
+  `blocked`, `ready to merge`, `merged`, `closed`), its `title` when the link has none, and `ext.pull-requests`
+  `pr` / `checks` (`passed` · `running` · `failed` · `none`) / `merge` (`ready` · `blocked` · `behind` · `conflict` ·
+  `draft` · `unknown` · `merged` · `closed`) of the ticket's newest open pull request (read only fields under
+  Details). A person's Refresh or a helper (no env) reads GitHub first. Checks follow the core waiter's words: only
+  SUCCESS passes, SKIPPED is fine, an unexpanded matrix job is left out, anything else finished is a failure.
+- `orch pull-requests view --json`: the page (orch.addon-view/1, read only, no GitHub call): three counts (Open,
+  Checks failed, Ready to merge), one table per repository (Pull request with branch and author, Ticket, Checks,
+  Merge; failed first, then ready to merge, then newest), the empty state, and a notice with Start reading when the
+  watcher does not run. `orch pull-requests poll [--json]`: one read now.
