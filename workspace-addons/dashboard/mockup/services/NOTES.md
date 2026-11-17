@@ -1,6 +1,6 @@
 # Services (ORCH-268, Preview add-on)
 
-Mockup only, nothing is built in the product yet. `services.html` is the page the owner picked on 17 Nov
+The product tab follows this page since ORCH-326 (see "Built" below). `services.html` is the page the owner picked on 17 Nov
 (layout C of three drafts: table, cards by state, list and panel). `services-data.js` holds the demo snapshot and
 the preview actions. Use the Preview pill for Loaded, Loading, Empty and Error.
 
@@ -53,3 +53,21 @@ the panel with "All services" to go back.
 - No "found, not managed yet" tag; the page uses a neutral pill with the words "Running, not managed".
 - The log lines use `.term` (made for the helper terminal); there is no plain "last lines" block.
 - On a phone the Preview pill covers the More tab of the bottom bar (same on the other mockup pages).
+
+## Built (ORCH-326, 17 Nov)
+
+The tab is the view block `split` (contracts/addon-view.schema.json) drawn by the dashboard's blocks.js; the add-on
+fills it with `orch services view --json`. Where the product differs from this page, and why:
+
+- Kit gaps filled in the master (widgets.css, gallery entry "List and panel"): `.split-view` (272 px list + panel,
+  phone: list first, a chosen item shows only its panel with "All services"), `.dot-off` for a stopped service,
+  `.log-lines` for plain last lines. The product uses these; this mockup still borrows the Automation scope, `.chat-grid`
+  and `.term` (unchanged, it looks the same).
+- Stopped shows a hollow dot (`.dot-off`) instead of the To-do status icon: the dashboard swaps every picture inside an
+  add-on view for its own icon, so a view block draws dots only.
+- The address is `#addon/services?svc=<id>` (the dashboard's hash route) instead of `?svc=<id>`.
+- A service's one-line "what it is" under the name shows only when the record has one; the add-on keeps none yet.
+  Made by without a ticket or add-on reads "Added by hand".
+- The Remove window is the dashboard's shared dialog: same words and buttons, plus its own Close.
+- Health check, Depends on it, the failing state and its question show when the add-on sends them (later work).
+- `services-data.js` closed its first comment too early, so this page stayed empty; fixed.

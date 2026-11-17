@@ -15,8 +15,9 @@
 @keyframes orch-spin{to{transform:rotate(360deg)}}
 .pill{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:none;padding:2px 10px 2px 6px;border:1px solid var(--border);border-radius:99px;font-size:13px;line-height:18px;background:var(--surface-2);color:var(--text)}
 .pill.needs{color:var(--warning)}.pill.working{color:var(--working)}.pill.done{color:var(--success)}
-.dot-ok,.dot-warn,.dot-work,.dot-err{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot-ok,.dot-warn,.dot-work,.dot-err,.dot-off{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
 .dot-ok{background:var(--success)}.dot-warn{background:var(--warning)}.dot-work{background:var(--working)}.dot-err{background:var(--danger)}
+.dot-off{box-sizing:border-box;border:1.5px solid var(--text-faint);background:none}
 
 /* Select trigger look for static mockups and non-native pickers (the real <select> is enhanced by select.js) */
 .select-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px;min-width:140px;padding:6px 10px 6px 12px;border:1px solid var(--input);border-radius:8px;background:var(--surface-2);color:var(--text);font:inherit}
@@ -941,3 +942,38 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .swipe-preview:has(.doc-rows){background:var(--surface-2)}
 .swipe-preview:has(>.doc) .swipe-expand{top:8px;bottom:auto}
 @media(max-width:720px){.doc-row{flex-wrap:wrap}.doc-row-title{flex-basis:100%}}
+
+/* List and panel (ORCH-326, the Services page; OrchBlocks split block): a slim list on the left (state dot, name, state
+   word, one button) and the chosen item in full on the right. Up to 720 px the list comes first; with an item chosen
+   (data-picked) only its panel shows, with a way back (.phone-only). State look: .pill (done, failed, plain) with a
+   dot (.dot-ok, .dot-err, .dot-off). .log-lines = plain last lines of a log. */
+.split-view{display:grid;grid-template-columns:272px minmax(0,1fr);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden}
+.split-view>*+*{border-left:1px solid var(--border)}
+.split-list{min-width:0}
+.split-list .card-h+.list-row{border-top:0}
+.split-list .list-row+.card-h{border-top:1px solid var(--border)}
+.split-list .list-row>a{display:grid;gap:2px;min-width:0;color:var(--text);text-decoration:none;font-weight:500;overflow-wrap:anywhere}
+.split-list .list-row>a:hover{text-decoration:underline}
+.split-list .list-row>a:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--r1)}
+.split-view .subline{display:block;font-size:var(--fs-meta);line-height:16px;font-weight:400;color:var(--text-faint)}
+.split-panel{min-width:0;padding:var(--s4)}
+.split-panel[hidden]{display:none}
+.split-panel:focus{outline:none}
+.split-panel:focus-visible{box-shadow:inset var(--focus-ring)}
+.split-facts{display:grid;gap:var(--s3);margin:0}
+.split-facts>div{display:grid;grid-template-columns:112px minmax(0,1fr);gap:var(--s3);align-items:center}
+.split-facts dt{color:var(--text-muted);font-size:var(--fs-meta)}
+.split-facts dd{margin:0;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;overflow-wrap:anywhere}
+.split-facts dd>label{gap:var(--s2)}
+.log-lines{background:var(--sidebar);border:1px solid var(--border);border-radius:var(--r2);font-family:var(--font-mono);font-size:12.5px;line-height:20px;color:var(--text-muted);overflow:hidden}
+.log-lines:focus{outline:none}.log-lines:focus-visible{box-shadow:var(--focus-ring)}
+.log-lines-h{padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);font-family:var(--font-ui);font-size:var(--fs-meta)}
+.log-lines ol{list-style:none;margin:0;padding:var(--s3);display:grid;gap:2px;overflow-x:auto}
+.log-lines li{white-space:pre-wrap;overflow-wrap:anywhere}
+.log-lines>p{padding:var(--s3);margin:0}
+@media(max-width:720px){
+  .split-view{grid-template-columns:minmax(0,1fr)}
+  .split-view>*+*{border-left:0}
+  .split-view[data-picked] .split-list,.split-view:not([data-picked]) .split-panel{display:none}
+  .split-facts>div{grid-template-columns:minmax(0,1fr);gap:var(--s1)}
+}
