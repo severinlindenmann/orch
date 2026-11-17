@@ -64,7 +64,11 @@ def test_unmeasured_services_show_no_number():
         assert "Not measured yet" in tile and "|0|" not in tile + "|"
     # services seen in use are a true count even when the full list is unknown: one number, never "Not measured yet"
     used = run({"count": 2, "known": False})["services"]
-    assert used.startswith("Connected services|2|") and "Not measured yet" not in used and "there may be more" in used
+    assert (
+        used.startswith("Connected services|2|")
+        and "Not measured yet" not in used
+        and "there may be more" in used
+    )
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node missing")
@@ -90,11 +94,23 @@ console.log(JSON.stringify({text: vm.runInContext('modelsEmptyText(' + JSON.stri
 @pytest.mark.skipif(not shutil.which("node"), reason="node missing")
 def test_runs_without_tokens_never_say_no_model_use():
     """ORCH-232: 5 runs recorded but no tokens must not read "No model use in the last 30 days"."""
+
     def text(runs):
-        out = subprocess.run(["node", "-e", MODELS, str(JS), json.dumps([{"empty": True, "text": "No model use in the last 30 days."}, runs])],
-                             capture_output=True, text=True, check=True).stdout
+        out = subprocess.run(
+            [
+                "node",
+                "-e",
+                MODELS,
+                str(JS),
+                json.dumps([{"empty": True, "text": "No model use in the last 30 days."}, runs]),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
         data = json.loads(out)
         assert not data.get("missing"), "insights.js needs modelsEmptyText() right before renderModels()"
         return data["text"]
+
     assert text(5) == "Token use isn’t recorded for these runs yet."
     assert text(0) == "No model use in the last 30 days."
