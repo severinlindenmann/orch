@@ -4,12 +4,16 @@ window appears on the person's screen."""
 
 from __future__ import annotations
 
+import base64
 import glob
+import json
 import os
 import re
+import select
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from orch.errors import Refused
@@ -25,6 +29,7 @@ SAFE_FLAGS = (
     "--hide-scrollbars",
 )
 DEFAULT_WIDTHS = (1280, 1920, 390)
+QUIET_SEC = 0.7  # no new network event for this long = the page has settled
 _CANDIDATES = (
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -78,16 +83,141 @@ def target_url(target: str) -> str:
     return p.resolve().as_uri()
 
 
-def command(browser: str, profile: str, url: str, out: Path, width: int, height: int, wait: int) -> list[str]:
+def command(browser: str, profile: str, width: int, height: int) -> list[str]:
+    """The browser start: keychain-safe, driven over a pipe (fd 3 in, fd 4 out), no page yet."""
     return [
         browser,
         *SAFE_FLAGS,
         f"--user-data-dir={profile}",
         f"--window-size={width},{height}",
-        f"--virtual-time-budget={wait * 1000}",
-        f"--screenshot={out}",
-        url,
+        "--remote-debugging-pipe",
+        "about:blank",
     ]
+
+
+class _Pipe:
+    """The DevTools protocol over --remote-debugging-pipe: JSON messages ended by a NUL byte."""
+
+    def __init__(self, write_fd: int, read_fd: int):
+        self.w, self.r = write_fd, read_fd
+        self.buf = b""
+        self.next_id = 0
+        self.events: list[dict] = []
+
+    def _read(self, deadline: float) -> dict:
+        while b"\0" not in self.buf:
+            left = deadline - time.monotonic()
+            if left <= 0 or not select.select([self.r], [], [], left)[0]:
+                raise TimeoutError
+            chunk = os.read(self.r, 1 << 20)
+            if not chunk:
+                raise EOFError
+            self.buf += chunk
+        msg, self.buf = self.buf.split(b"\0", 1)
+        return json.loads(msg)
+
+    def call(self, method: str, params: dict | None = None, session: str | None = None, timeout: float = 30):
+        self.next_id += 1
+        msg: dict = {"id": self.next_id, "method": method, "params": params or {}}
+        if session:
+            msg["sessionId"] = session
+        os.write(self.w, json.dumps(msg).encode() + b"\0")
+        deadline = time.monotonic() + timeout
+        while True:
+            m = self._read(deadline)
+            if m.get("id") == self.next_id:
+                if "error" in m:
+                    raise RuntimeError(f"{method}: {m['error'].get('message')}")
+                return m.get("result", {})
+            if "method" in m:
+                self.events.append(m)
+
+    def wait_event(self, method: str, session: str, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while True:
+            for i, m in enumerate(self.events):
+                if m.get("method") == method and m.get("sessionId") == session:
+                    del self.events[i]
+                    return True
+            try:
+                m = self._read(deadline)
+            except TimeoutError:
+                return False
+            if "method" in m:
+                self.events.append(m)
+
+    def settle(self, session: str, quiet: float, deadline: float) -> None:
+        """Return once no network event came for `quiet` seconds, or at the deadline."""
+        self.events = [m for m in self.events if m.get("sessionId") != session]
+        last = time.monotonic()
+        while True:
+            now = time.monotonic()
+            if now - last >= quiet or now >= deadline:
+                return
+            try:
+                m = self._read(min(deadline, last + quiet))
+            except TimeoutError:
+                continue
+            if m.get("sessionId") == session and str(m.get("method", "")).startswith("Network."):
+                last = time.monotonic()
+
+
+def capture(pipe: _Pipe, url: str, width: int, height: int, wait: int) -> bytes:
+    """One picture in a fresh tab. The viewport is set through the protocol, not the window: new
+    headless Chrome never makes a window narrower than 500, so a 390 window was laid out 500 wide
+    and cut at the right (ORCH-219)."""
+    target = pipe.call("Target.createTarget", {"url": "about:blank"})["targetId"]
+    s = pipe.call("Target.attachToTarget", {"targetId": target, "flatten": True})["sessionId"]
+    try:
+        pipe.call("Page.enable", session=s)
+        pipe.call(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False},
+            session=s,
+        )
+        pipe.call("Network.enable", session=s)
+        pipe.call("Page.navigate", {"url": url}, session=s)
+        # Wait for the load, then until the page has fetched nothing new for a moment (it renders
+        # after its own requests), never longer than --wait in all.
+        deadline = time.monotonic() + wait
+        pipe.wait_event("Page.loadEventFired", s, wait)
+        pipe.settle(s, QUIET_SEC, deadline)
+        shot = pipe.call("Page.captureScreenshot", {"format": "png"}, session=s, timeout=60)
+        return base64.b64decode(shot["data"])
+    finally:
+        try:
+            pipe.call("Target.closeTarget", {"targetId": target}, timeout=10)
+        except Exception:
+            pass
+
+
+def _height(width: int, height: int | None) -> int:
+    return height or (844 if width < 500 else 1080 if width >= 1900 else 800)
+
+
+def _launch(cmd: list[str]) -> tuple[subprocess.Popen, _Pipe]:
+    if os.name == "nt":
+        raise Refused("orch shot works on macOS and Linux only.")
+    to_browser_r, to_browser_w = os.pipe()
+    from_browser_r, from_browser_w = os.pipe()
+
+    def fds():  # in the child: the browser reads commands on fd 3 and answers on fd 4
+        # Copy both out of the way first: os.pipe() may itself have returned 3 or 4.
+        a, b = os.dup(to_browser_r), os.dup(from_browser_w)
+        os.dup2(a, 3)  # dup2 makes the new fd inherited by the browser
+        os.dup2(b, 4)
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        preexec_fn=fds,
+        close_fds=False,  # os.pipe() fds are not inherited; dup2 makes only 3 and 4 inherited
+    )
+    os.close(to_browser_r)
+    os.close(from_browser_w)
+    return proc, _Pipe(to_browser_w, from_browser_r)
 
 
 def shoot(
@@ -96,25 +226,42 @@ def shoot(
     url = target_url(target)
     browser = find_browser()
     out_dir.mkdir(parents=True, exist_ok=True)
-    # One profile for the whole run (a sign-in link in the address is spent once; the cookie it sets
-    # then carries the later widths); removed by its exact path at the end.
+    # One profile and one browser for the whole run (a sign-in link in the address is spent once; the
+    # cookie it sets then carries the later widths); the profile is removed by its exact path at the end.
     profile = tempfile.mkdtemp(prefix="orch-shot-")
     done: list[Path] = []
+    proc = None
+    pipe = None
     try:
+        proc, pipe = _launch(command(browser, profile, max(widths), _height(max(widths), height)))
         for w in widths:
             out = (out_dir / f"{name}-{w}.png").resolve()
-            h = height or (844 if w < 500 else 1080 if w >= 1900 else 800)
-            cmd = command(
-                browser, profile, url if not done else re.sub(r"#launch=.*$", "", url), out, w, h, wait
-            )
+            page = url if not done else re.sub(r"#launch=.*$", "", url)
             try:
-                subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=wait + 60)
-            except subprocess.TimeoutExpired:
-                pass
-            if not out.is_file() or out.stat().st_size == 0:
+                data = capture(pipe, page, w, _height(w, height), wait)
+            except (TimeoutError, EOFError, RuntimeError, KeyError, ValueError) as e:
+                raise Refused(f"No picture was made for {url} at {w} wide ({e}).") from None
+            if not data:
                 raise Refused(f"No picture was made for {url} at {w} wide.")
+            out.write_bytes(data)
             done.append(out)
     finally:
+        if pipe is not None:
+            try:
+                pipe.call("Browser.close", timeout=10)
+            except Exception:
+                pass
+            for fd in (pipe.w, pipe.r):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        if proc is not None:
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()  # only the browser this run started
+                proc.wait(timeout=5)
         shutil.rmtree(profile, ignore_errors=True)
     return done
 
@@ -124,8 +271,6 @@ def dispatch(args, root: Path) -> bool:
         return False
     files = shoot(args.target, parse_widths(args.width), Path(args.out), args.name, args.height, args.wait)
     if getattr(args, "json", False):
-        import json
-
         print(json.dumps({"files": [str(f) for f in files]}))
     else:
         print("\n".join(str(f) for f in files))
