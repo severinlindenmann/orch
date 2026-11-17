@@ -1,0 +1,20 @@
+{
+ "schema": "orch.addon-view/1",
+ "generated_at": "2026-11-17T16:45:00Z",
+ "blocks": [
+  {
+   "type": "split",
+   "title": "Services",
+   "param": "svc",
+   "groups": [],
+   "empty": {
+    "title": "No services yet",
+    "text": "When a ticket needs something to keep running on this computer, it shows up here.",
+    "button": {
+     "label": "Ask the helper",
+     "to": "app:chat"
+    }
+   }
+  }
+ ]
+}
