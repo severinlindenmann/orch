@@ -59,6 +59,8 @@ _REPORT_OWN = (
 )
 _REPORT_TITLE = re.compile(r"^Investigate orch report\b", re.I)
 UP_PREFIX = "Model moved up to Opus"
+# A role that makes routine tickets with long instructions of its own sets this field to "small".
+HINT = "model_hint"
 
 
 def _report(ticket: dict) -> bool:
@@ -80,6 +82,8 @@ def _text(ticket: dict) -> str:
 def pick(ticket: dict) -> tuple[str, str]:
     """(model, why in one plain line) from the ticket alone. Fable for drafts, else Opus unless the work is
     clearly small."""
+    if ticket.get(HINT) == "small":  # orch's own routine ticket (Reviewer second look, daily review)
+        return "sonnet", "orch's own routine check; it moves up when it turns hard"
     text = _text(ticket)
     drafts = _DRAFTS.search(text)
     if drafts:

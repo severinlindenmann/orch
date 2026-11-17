@@ -157,7 +157,9 @@ def build_settings(settings_json, counts, tickets, can_act: bool) -> dict:
     keep = _row(
         "insights.keep_days", "Keep full detail for", current_value(answer, "insights.keep_days"), can_act
     )
-    keep["note"] = f"up to {answer['max_mb']} MB, oldest detail first. Counts are kept."
+    keep["note"] = (
+        f"up to {LABELS.get(str(answer['max_mb']), str(answer['max_mb']) + ' MB')}, oldest detail first. Counts are kept."
+    )
     size = _row("insights.max_mb", "Largest size", current_value(answer, "insights.max_mb"), can_act)
     names = _row(
         "insights.share_names",

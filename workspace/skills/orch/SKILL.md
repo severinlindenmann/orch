@@ -133,6 +133,12 @@ choice of model always stays (ask them instead). Your own subagents follow the s
 searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
 Tokens per model and per ticket, and how many tickets moved up: `orch usage` (Insights shows the same).
 
+A ticket that asks for a mockup, a redesign or a concept starts on Fable and works the drafts way (its start
+text says how): at least three clearly different, clickable drafts with realistic data from the person's own
+words, each challenged by a subagent on Opus, then ONE `--choose` card with the drafts side by side to pick
+from. `up` never changes Fable. A person picks the model on the ticket page or with
+`orch ticket model <id> sonnet|opus|fable|auto`; a running helper switches when its turn ends.
+
 **Need an answer or blocked**
 
     orch ask <id> "<question>" --option A --option B --recommend A

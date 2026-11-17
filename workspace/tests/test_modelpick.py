@@ -95,6 +95,12 @@ def test_the_ticket_says_in_one_line_why(proj, run):
     assert modelpick.why(tickets.set_model(proj, t["id"], "sonnet", "human:severin")) is None
 
 
+def test_orchs_own_routine_ticket_starts_on_sonnet_despite_its_long_note():
+    long = "Look at each ticket and write one point per part. " * 30
+    assert modelpick.pick(_t("Reviewer second look", note=long))[0] == "opus"
+    assert modelpick.pick(_t("Reviewer second look", note=long, model_hint="small"))[0] == "sonnet"
+
+
 def test_pick_is_only_ever_a_known_model():
     for title in ("", "x", "Use Fable for this", "haiku please", "a" * 5000):
         assert modelpick.pick(_t(title))[0] in modelpick.MODELS
