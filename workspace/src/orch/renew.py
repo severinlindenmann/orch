@@ -10,9 +10,19 @@ again (health.check): the warning goes away by itself, and the tickets that wait
 A key: the person puts the new value in through the existing safe way (keystore.add, the same as
 `orch secret add`, value on stdin). It is never printed, logged or shown again. Then the same re-check.
 
-    <run dir>/renew/<name>/state.json  {schema, name, state, link?, started_at, beat_at, ends_at?, went_on?}
-    <run dir>/renew/<name>/code        0600, at most a second: the pasted code on its way to the tool
-    <run dir>/renew/<name>/stop        the person pressed Close: the worker ends the tool
+Security review of PR 1131 (17 Nov), two rules, each held in one place:
+  - person only (`person_only`): every entry of the person's side (start, status, code, cancel, replace_key)
+    refuses an agent actor and any process inside a helper run; the worker runs only with the one-time token
+    that a person's start gave it (`work`).
+  - nothing shown or deciding where a secret goes comes from a file a helper can write: the state lives in
+    the guarded orch home (`_dir`), the link is checked against the adapter's allowed starts each time it is
+    read (`status`), and the key name comes only from the guarded recipes (`replace_key`).
+
+    <key folder>/renew/<name>/state.json  {schema, name, state, link?, started_at, beat_at, ends_at?,
+                                           went_on?, token?}  token: the worker's start token (hash only)
+    <key folder>/renew/<name>/code        0600, at most a second: the pasted code on its way to the tool
+    <key folder>/renew/<name>/stop        the person pressed Close: the worker ends the tool
+    <key folder>/renew/<name>/start.lock  one start at a time
 
 States: starting | link (the link is ready; again=true when the tool did not take the last code and waits for
 it once more) | checking (a code went in) | done | failed | stopped.
@@ -22,9 +32,13 @@ Nothing else the tool prints is kept, shown or logged (R5.2).
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import hmac
 import os
 import re
+import secrets
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -45,6 +59,65 @@ _CODE = re.compile(r"[A-Za-z0-9#_.~+/=-]{4,512}")
 _NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 _BUF = 16384  # bytes of the tool's output looked at for the link; the rest is dropped unread
 BY = "orch"
+TOKEN_ENV = "ORCH_RENEW_TOKEN"  # the one-time token a person's start hands its worker
+GRANT_ENV = "ORCH_PERSON_GRANT"  # the one-time grant the dashboard's signed-in session hands one orch call
+GRANT_LIFE = 120  # seconds a grant stays good
+RUN_MARKS = ("ORCH_RUN", "ORCH_TICKET", "ORCH_JOB", "ORCH_AGENT")  # set inside a helper run
+PERSON_ONLY = (
+    "Only a person renews a login or replaces a key, with Renew or Replace on the dashboard warning. "
+    "In a terminal, sign in with the tool's own login command, then run orch logins."
+)
+_GRANTED: set[str] = set()  # workspaces this process was granted for (one grant serves one orch call)
+
+
+def person_only(root: Path, by: str | None = None) -> None:
+    """THE person check for renewing a login, pasting a code and replacing a key, on every path. The one proof
+    accepted: a one-time grant the dashboard's signed-in page session handed this call (kept as a hash in the
+    guarded orch home, see grant). Refused for an agent actor, an agent tool's environment, a process inside
+    a helper run, and every call without a grant, whatever its --by says. A terminal is no proof (a helper can
+    fake one), so there is no terminal way in: a person at a terminal signs in with the tool itself."""
+    if (by or "").startswith("agent:") or tickets.agent_tool() or any(os.environ.get(k) for k in RUN_MARKS):
+        raise Refused(PERSON_ONLY)
+    key = str(Path(root).resolve())
+    if key in _GRANTED or _take_grant(root):
+        _GRANTED.add(key)
+        return
+    raise Refused(PERSON_ONLY)
+
+
+def _grants(root: Path) -> Path:
+    from orch import home as orch_home
+
+    d = orch_home.key_dir(Path(root)) / "renew" / "grants"
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return d
+
+
+def grant(root: Path) -> str:
+    """A one-time grant for ONE orch call, for the dashboard after it checked the person's page session.
+    Only its hash is kept, in the guarded orch home; old ones are cleared."""
+    d = _grants(root)
+    now = time.time()
+    for f in d.iterdir():
+        with contextlib.suppress(OSError):
+            if now - f.stat().st_mtime > GRANT_LIFE:
+                f.unlink()
+    token = secrets.token_urlsafe(24)
+    os.close(os.open(d / _hash(token), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    return token
+
+
+def _take_grant(root: Path) -> bool:
+    token = os.environ.pop(GRANT_ENV, "")
+    if not token or len(token) > 100:
+        return False
+    try:
+        f = _grants(root) / _hash(token)
+        fresh = time.time() - f.stat().st_mtime <= GRANT_LIFE
+        f.unlink()  # used up, fresh or not
+    except (OSError, Refused):
+        return False
+    return fresh
 
 
 def _now() -> str:
@@ -52,15 +125,19 @@ def _now() -> str:
 
 
 def _dir(root: Path, name: str) -> Path:
+    """In the guarded orch home (never .orch/run, which a helper can write)."""
+    from orch import home as orch_home
+
     if not _NAME.fullmatch(name or ""):
         raise Refused("That is not the name of a login orch checks here.")
-    return runs.run_dir(Path(root)) / "renew" / name
+    return orch_home.key_dir(Path(root)) / "renew" / name
 
 
 def _write(root: Path, name: str, doc: dict) -> dict:
     d = _dir(root, name)
-    d.mkdir(parents=True, exist_ok=True)
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
     with contextlib.suppress(OSError):
+        os.chmod(d.parent, 0o700)
         os.chmod(d, 0o700)
     doc = {"schema": SCHEMA, "name": name, **doc}
     net.write_json(d / "state.json", doc)
@@ -112,53 +189,100 @@ def link_in(text: str, links: list[str]) -> str | None:
 # ------------------------------------------------------------------------------------- the person's side
 
 
-def status(root: Path, name: str) -> dict:
+def status(root: Path, name: str, by: str | None = None) -> dict:
     """The renew state for the page: {name, state, link?, ends_at?, went_on?}. A worker that stopped beating
-    before it finished reads as failed."""
+    before it finished reads as failed. The link is checked against the adapter's allowed starts again here,
+    where it leaves for the page: one that does not pass is never shown."""
+    person_only(root, by)
+    return _status(root, name)
+
+
+def _status(root: Path, name: str) -> dict:
     doc = _read(root, name)
     if not doc:
         return {"name": name, "state": "none"}
     if doc.get("state") not in FINAL and not _alive(doc) and _age(doc.get("started_at")) > BEAT:
         doc = {**doc, "state": "failed"}
-    return {k: doc[k] for k in ("name", "state", "link", "again", "ends_at", "went_on") if k in doc}
+    out = {k: doc[k] for k in ("name", "state", "again", "ends_at", "went_on") if k in doc}
+    s, link = spec(root, name), doc.get("link")
+    if s and isinstance(link, str) and link_in(link, s["links"]) == link:
+        out["link"] = link
+    return out
 
 
-def start(root: Path, name: str) -> dict:
+def start(root: Path, name: str, by: str | None = None) -> dict:
     """Start the tool's own sign-in in a background worker (one per login). A sign-in still running from an
     earlier Renew is ended first."""
+    person_only(root, by)
     s = spec(root, name)
     if not s:
         raise Refused("orch cannot start this sign-in. Sign in again with the tool itself, then check again.")
     if not shutil.which(s["binary"]):
         raise Refused(f"{s['label']} is not installed on this computer.")
+    with _start_lock(root, name):
+        d = _dir(root, name)
+        if _alive(_read(root, name)):  # Renew again: a fresh sign-in (an old code fits only the old one)
+            (d / "stop").touch()
+            end = time.time() + 5
+            while time.time() < end and _alive(_read(root, name)):
+                time.sleep(0.2)
+            if _alive(_read(root, name)):
+                raise Refused("The earlier sign-in is still ending. Press Renew again in a moment.")
+        for f in ("code", "stop"):
+            with contextlib.suppress(OSError):
+                (d / f).unlink()
+        token = secrets.token_urlsafe(24)
+        _write(
+            root, name, {"state": "starting", "started_at": _now(), "beat_at": _now(), "token": _hash(token)}
+        )
+        from orch import procs
+
+        subprocess.Popen(
+            procs.orch_python_argv("logins", "renew", name, "--worker"),
+            cwd=Path(os.path.realpath(tempfile.gettempdir())),
+            env={**os.environ, "ORCH_ROOT": str(root), TOKEN_ENV: token},
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **procs.background_popen_kwargs(),
+        )
+    return _status(root, name)
+
+
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+@contextlib.contextmanager
+def _start_lock(root: Path, name: str):
+    """One start at a time per login (two quick clicks start one worker). A lock older than a minute is from
+    a start that died and is taken over."""
     d = _dir(root, name)
-    if _alive(
-        _read(root, name)
-    ):  # Renew again: the person wants a fresh sign-in (an old code fits only the old one)
-        (d / "stop").touch()
-        end = time.time() + 5
-        while time.time() < end and _alive(_read(root, name)):
-            time.sleep(0.2)
-    for f in ("code", "stop"):
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = d / "start.lock"
+    end = time.time() + 10
+    while True:
+        try:
+            os.close(os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+            break
+        except FileExistsError:
+            with contextlib.suppress(OSError):
+                if time.time() - lock.stat().st_mtime > 60:
+                    lock.unlink()
+                    continue
+            if time.time() > end:
+                raise Refused("A sign-in is starting already. Wait a moment.") from None
+            time.sleep(0.1)
+    try:
+        yield
+    finally:
         with contextlib.suppress(OSError):
-            (d / f).unlink()
-    _write(root, name, {"state": "starting", "started_at": _now(), "beat_at": _now()})
-    from orch import procs
-
-    subprocess.Popen(
-        procs.orch_python_argv("logins", "renew", name, "--worker"),
-        cwd=Path(os.path.realpath(tempfile.gettempdir())),
-        env={**os.environ, "ORCH_ROOT": str(root)},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        **procs.background_popen_kwargs(),
-    )
-    return status(root, name)
+            lock.unlink()
 
 
-def code(root: Path, name: str, text: str) -> dict:
+def code(root: Path, name: str, text: str, by: str | None = None) -> dict:
     """Pass the code the sign-in page shows to the waiting tool. Kept nowhere: the worker removes the file
     before it writes the code to the tool's input."""
+    person_only(root, by)
     text = (text or "").strip()
     if not _CODE.fullmatch(text):
         raise Refused("That does not look like the code from the sign-in page. Copy it again and paste it.")
@@ -173,25 +297,27 @@ def code(root: Path, name: str, text: str) -> dict:
     finally:
         os.close(fd)
     os.replace(tmp, d / "code")
-    return status(root, name)
+    return _status(root, name)
 
 
-def cancel(root: Path, name: str) -> dict:
+def cancel(root: Path, name: str, by: str | None = None) -> dict:
     """The person closed the window: the worker ends the tool."""
+    person_only(root, by)
     doc = _read(root, name)
     if _alive(doc):
         (_dir(root, name) / "stop").touch()
-    return status(root, name)
+    return _status(root, name)
 
 
-def replace_key(root: Path, name: str, value: str) -> dict:
+def replace_key(root: Path, name: str, value: str, by: str | None = None) -> dict:
     """Put a new value in for the key a check names (the existing safe way: keystore.add, as
-    `orch secret add`), then check again. The value is never printed, logged or kept anywhere else."""
+    `orch secret add`), then check again. The value is never printed, logged or kept anywhere else. The key
+    name comes ONLY from the person's own recipes in the guarded orch home, never from a saved result."""
     from orch import keystore
 
-    row = next((r for r in (health.last(root) or {}).get("items") or [] if r.get("name") == name), None)
-    if not row:
-        row = next((r for r in health.workspace_recipes(root) if r["name"] == name), None)
+    person_only(root, by)
+    value = (value or "").strip()  # a pasted key often brings a space or a line end along
+    row = next((r for r in health.workspace_recipes(root) if r["name"] == name), None)
     key = (row or {}).get("key")
     if not key:
         raise Refused("This check names no key to replace.")
@@ -256,9 +382,25 @@ def go_on(root: Path, helper: str | None) -> list[str]:
 # -------------------------------------------------------------------------------------------- the worker
 
 
+def _worker_allowed(root: Path, name: str) -> bool:
+    """Only the worker a person's start launched: its one-time token matches the hash start kept in the
+    guarded state, and is used up here (a second worker, or one a helper starts by hand, is refused)."""
+    token = os.environ.pop(TOKEN_ENV, "")
+    doc = _read(root, name)
+    want = (doc or {}).get("token")
+    if not (token and isinstance(want, str) and doc.get("state") == "starting"):
+        return False
+    if not hmac.compare_digest(_hash(token), want):
+        return False
+    _write(root, name, {k: v for k, v in doc.items() if k not in ("schema", "name", "token")})  # used up
+    return True
+
+
 def work(root: Path, name: str) -> int:
     """`orch logins renew <name> --worker`: run the tool's sign-in, pass on the link and the code, end with a
-    re-check. Writes only the few facts above."""
+    re-check. Writes only the few facts above. Runs only with the one-time token of a person's start."""
+    if not _worker_allowed(root, name):
+        raise Refused(PERSON_ONLY)
     s = spec(root, name)
     binary = shutil.which(s["binary"]) if s else None
     started = _now()
@@ -273,6 +415,8 @@ def work(root: Path, name: str) -> int:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=Path(os.path.realpath(tempfile.gettempdir())),
+            # the worker leads its own process group (started detached): the tool joins it, so ending the
+            # worker's group ends the tool too, and a SIGTERM to the worker ends the tool first (below)
         )
     except OSError:
         _write(root, name, {"state": "failed", "started_at": started, "beat_at": _now()})
@@ -293,12 +437,19 @@ def work(root: Path, name: str) -> int:
                 if url:
                     found["link"] = url
 
+    def end_tool(*_):
+        with contextlib.suppress(Exception):
+            runs.kill_tree(proc.pid, grace=1.0)
+        raise SystemExit(1)
+
+    if os.name != "nt" and threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, end_tool)  # a killed worker leaves no sign-in running without a parent
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
     state, end, sent, again = "starting", time.time() + LIMIT, None, False
     while proc.poll() is None:
         if (d / "stop").exists() or time.time() > end:
-            proc.kill()
+            runs.kill_tree(proc.pid, grace=1.0)
             proc.wait()
             with contextlib.suppress(OSError):
                 (d / "stop").unlink()
