@@ -297,6 +297,13 @@ says "Can't preview this file." with Try again and Download, too big says so and
 (`item.shown`) or, for media, only the sentence. Text goes in with `textContent` only; a web page only in an
 `<iframe sandbox="">`.
 
+### Live bar (ORCH-337)
+`.lbar` is the one row under every dashboard page while the new Focus is in Preview (dashboard `pages/livebar.js`).
+Sessions that need you are orange chips, pinned ones are chips after them, everything else is a quiet count ("3
+working", "9 in line", "2 idle") that opens a list (`.lbar-pop`, search from 9 sessions). It never wraps: it folds
+(`data-fold` 0 to 4) into counts instead, and on a phone it shows symbols and numbers above the tab bar. Counts in
+words read right: "1 session", "2 sessions". The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
+
 ## Loading, errors and performance
 
 The brief asks for shell + skeleton within 100 ms while the numeric checklist says not to show indicators for sub-second work. Reconcile by expected latency (BP-05, BP-55–67):

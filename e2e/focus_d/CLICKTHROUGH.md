@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 3 ready (the script clicks them), 22 pending (not built yet).
+25 steps: 4 ready (the script clicks them), 21 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -147,7 +147,7 @@ Must be seen:
 ## 9. The bar under every page
 
 - Part: bar (draft D feature 7, 11)
-- State: pending, waits for: The bar under every page (crew task bar)
+- State: ready, clicked by the script
 - Pictures: `fd-09-bar-1280.png`, `fd-09-bar-1920.png`, `fd-09-bar-390.png`
 
 Do:

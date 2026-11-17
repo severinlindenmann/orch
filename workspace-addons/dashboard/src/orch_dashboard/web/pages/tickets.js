@@ -242,7 +242,7 @@ function dueCell(t) {
   if (!t.due) return h('span', {className:'meta'}, '–');
   const late = window.DashHelpers.columnOf(shown(t).status) !== 'done' && (t.stuck === 'overdue' || overdue(t));
   const today = !late && String(t.due).slice(0, 10) === new Date(now()).toLocaleDateString('sv');
-  return h('span', {className:late ? 'bad' : today ? 'warn' : ''}, dueText(t));
+  return h('span', {className:late ? 'bad' : today ? 'warn' : ''}, dueText(t).replace(/^Due /, ''));  // the column head says Due
 }
 function spendCell(t) { const words = window.DashHelpers.spendWords(t.spend); return h('span', {className:'meta', title:words ? undefined : 'Not recorded'}, words || '–'); }
 // One table row (a ticket or a part under its parent). `section` is the group it sits in.
