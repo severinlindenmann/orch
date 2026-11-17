@@ -17,6 +17,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, result} = {}) {
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:() => null,
     document:{querySelector:() => frame}, act:async (...a) => { calls.acts.push(a); return answer; },
     addEventListener(){}, window:{orch:{toast(){}}}};
+  ctx.navigator = {userActivation:{isActive:true}};  // the person just clicked (ORCH-186 review M2)
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow};
 }
@@ -70,4 +71,14 @@ test('a partly sent ask is reported with what went out, never as "nothing was se
   const {ctx, calls, frameWindow} = setup({result:{ok:true, status:200, state:{act_answer:{addon:'factory', answer:{state:'partial', said:'Only part of it went out: the card.'}}}}});
   await ctx.fileEmbedAsk(ctx.embedAskRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.posts), [[{type:'orch.ask.done', state:'partial', said:'Only part of it went out: the card.', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
+});
+
+
+// ORCH-186 review M2: nothing is done for a script alone, only right after the person's click.
+test('without a click of the person nothing is sent or started', async () => {
+  const {ctx, calls, frameWindow} = setup();
+  ctx.navigator.userActivation.isActive = false;
+  await ctx.fileEmbedAsk(ctx.embedAskRequest(msg(frameWindow)));
+  assert.equal(JSON.stringify(calls).includes('"orch.ask.failed"'), true);
+  assert.equal((calls.acts || []).length, 0);
 });
