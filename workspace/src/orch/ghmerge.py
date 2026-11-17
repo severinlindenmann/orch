@@ -186,7 +186,7 @@ def checks_state(rollup) -> tuple[str, str]:
         )
     if running:
         return "working", f"{running} of {len(runs)} checks still running"
-    return "done", f"All {len(runs)} checks passed"
+    return "done", f"All {len(runs)} checks passed" if len(runs) > 1 else "The check passed"
 
 
 def summary(url: str, head: str) -> dict | None:

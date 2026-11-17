@@ -293,7 +293,7 @@ def test_a_release_card_shows_what_goes_out_and_the_checks(tk, run, gh):
         "status": "COMPLETED",
         "conclusion": "SUCCESS",
         "workflowName": "ci",
-        "name": "lint",
+        "name": "build",
         "startedAt": "1",
     }
     gh.summary = {
