@@ -228,3 +228,36 @@ test('ORCH-156: a failed save puts the cards back and says why', async () => {
   assert.deepEqual(c.laneTickets('ready').map(t => t.id), ['a', 'b']);
   assert.deepEqual(toasts[0], ['Saving did not work.', 'error']);
 });
+
+// ---- ORCH-236 (bug hunt round 2 on the Tickets page and the ticket page)
+test('ORCH-236: the Needs you view lists exactly what the Needs you number counts', () => {
+  const items = [{id:'q', status:'waiting', questions:[{id:'q1', text:'Which?'}]}, {id:'r', status:'review'},
+    {id:'d', status:'done', bring_back:{state:'waiting'}}, {id:'a', status:'active', bring_back:{state:'waiting'}}, {id:'w', status:'active'}];
+  const c = listCtx({tickets:() => items});
+  const rows = [{id:'core:q', ticket:'q', answer:{question:'q1'}}];
+  const counted = helpers.needsYouCount(rows, items.filter(t => t.status === 'review'));
+  assert.equal(items.filter(t => c.inView(t, 'needs-you')).length, counted, 'header number = filter rows');
+});
+test('ORCH-236: a key typed without its dash finds the ticket ("dem36", "dem 36"); 36 is still exact', () => {
+  const c = listCtx();
+  const items = [{id:'a', key:'DEM-36', title:'Big'}, {id:'b', key:'DEM-136', title:'Other'}];
+  const hits = q => c.filterTickets(items, q, false).map(t => t.id).join();
+  assert.equal(hits('dem36'), 'a');
+  assert.equal(hits('DEM 36'), 'a');
+  assert.equal(hits('dem-36'), 'a');
+  assert.equal(hits('36'), 'a');
+});
+test('ORCH-236 (owner, 17 Nov): no saved views: only the built-in chips, no + Save view', () => {
+  const c = listCtx({URLSearchParams});
+  const keys = nodes(c.viewChips()).map(n => n.attrs?.['data-key']).filter(Boolean);
+  assert.deepEqual(keys, ['view-chips', 'view-chip-all', 'view-chip-needs-you', 'view-chip-working', 'view-chip-backlog', 'view-chip-done-week']);
+  assert.doesNotMatch(listSrc, /Save view|orch\.tickets\.saved/);
+});
+test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an empty Add says so', () => {
+  assert.match(ticketSrc, /act\('check\.edit', \{ticket:t\.id, check:task\.id, text, was:task\.text\}\)/);
+  assert.match(ticketSrc, /taskAct\('check\.move', \{ticket:t\.id, check:before\.id, after:task\.id\}\)/, 'up = the one above moves after this one');
+  assert.match(ticketSrc, /taskAct\('check\.move', \{ticket:t\.id, check:task\.id, after:after\.id\}\)/);
+  assert.match(ticketSrc, /taskAct\('check\.remove', \{ticket:t\.id, check:task\.id\}\)/);
+  assert.match(ticketSrc, /if \(!text\) \{ window\.orch\.toast\('Type the task first\.', 'error'\)/);
+  assert.match(ticketSrc, /\['activity', 'Activity', ticketHistoryEntries\(t, 'All'\)\.length\]/, 'the tab count is every entry, not the People/Helper choice');
+});

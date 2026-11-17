@@ -204,6 +204,16 @@ def test_an_open_page_follows_the_workspace_without_disturbing_you(srv):
     assert "asked.size > 0" in js and "t.value.trim()" in js  # a request waiting / a box with your text
 
 
+def test_the_idea_box_never_cuts_text_silently_and_an_empty_draft_says_so(srv):
+    """Bug hunt 17 Nov: a 15000-character paste was cut to 500 without a word; a 0-byte draft showed an empty box."""
+    js = get(srv, "/web/factory.js")[1].decode()
+    box = js[js.index("function ideaBox()") : js.index("let idea = null")]
+    assert "field.maxLength" not in box  # the browser would cut the paste without a word
+    assert "go.disabled = !field.value.trim() || over" in box and "fallback.hidden = !over" in box
+    assert "'Too long for an idea here: ' + n + ' of ' + IDEA_MAX" in box
+    assert "draft.text.trim() ? node('pre', draft.text, 'card f-draft') : card('This draft is empty'" in js
+
+
 def test_draft_route(ws, run, srv):
     order = run("idea", "Idea", "--file", "-", data=b"# Hello <b>x</b>")["order"]
     code, body, _ = get(srv, f"/api/order/{order}/draft/1")
