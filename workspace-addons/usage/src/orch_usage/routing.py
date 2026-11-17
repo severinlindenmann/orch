@@ -6,8 +6,11 @@
      any other role -> Helpers;
    - an automation ticket that runs a script: Scripts;
    - any other ticket: Helpers.
-2. The accounts that count for it: on, and `for` empty (every kind) or holding the kind, in their order. An account
-   with a `tool` (a helper tool's registry name, data in accounts.json) counts only when that tool is set up here.
+2. The accounts that count for it: on, and `for` empty (every kind) or holding the kind, in their order, and able to
+   run a helper: a subscription, or an account with a `tool` (a helper tool's registry name, data in accounts.json)
+   while that tool is set up here. An API key or credit without a tool (the Claude API credit, the OpenAI credit
+   before Codex helpers ship) cannot run a helper: credit skills and scripts ask Usage for it themselves (next step),
+   so it never holds a start back.
 3. The first one with room wins. A subscription has room by the same judgement as early switching (its limits and the
    pace); when it is not the one in use, Usage switches to it first (with switching on). An API key or helper tool
    has room while its credit reader says it is under its limits. A number Usage cannot read never blocks.
@@ -122,6 +125,8 @@ def decide(root: Path, req: dict, at: datetime | None = None, switch=switching._
     usable = []
     for a in allowed:
         tool = a.get("tool")
+        if a["type"] != "subscription" and tool is None:
+            continue  # a credit without a helper tool: used by skills and scripts, not by a helper start
         if tool is not None and (
             not isinstance(tool, str) or not _TOOL.fullmatch(tool) or tool not in agents
         ):

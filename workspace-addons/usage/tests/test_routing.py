@@ -242,6 +242,7 @@ def test_api_key_at_its_limit_is_skipped(cli, fake_switcher, ws, tmp_path):
             "label": "API key 1",
             "type": "api-key",
             "provider": "anthropic-api",
+            "tool": "tool-x",
             "source": {"reader": "spend-log", "path": str(log), "name": "main"},
             "on": True,
             "order": 0,
@@ -254,7 +255,7 @@ def test_api_key_at_its_limit_is_skipped(cli, fake_switcher, ws, tmp_path):
         }
     )
     p.write_text(json.dumps(data))
-    ans = routing.decide(ws, req(CREW("reviewer")), at=datetime.now(UTC))
+    ans = routing.decide(ws, req(CREW("reviewer"), agents=("main-tool", "tool-x")), at=datetime.now(UTC))
     assert ans["go"] is False and "API key 1 reached $100 (month)" in ans["why"] and ans["until"]
     assert "spend" not in json.dumps(ans) and str(log) not in json.dumps(ans)
 
@@ -298,3 +299,51 @@ def test_the_switcher_module_is_untouched_by_kinds(cli, fake_switcher, ws):
     jrun(cli, "for", "first", "reviews")
     ch = switching.choose(store.load(ws)["accounts"], [], {}, 10)
     assert ch.target is None
+
+
+def _credit(ws, *, tool=None, spent_log=None):
+    """The owner's 17 Nov rule: the Codex / OpenAI credit, $100, first for Reviews and Code (added by hand)."""
+    p = ws / ".orch/addons/usage/accounts.json"
+    data = json.loads(p.read_text())
+    src = {"reader": "spend-log", "path": str(spent_log), "name": "oa"} if spent_log else {"reader": "none"}
+    data["accounts"].append(
+        {
+            "id": "a_oacred",
+            "label": "Codex / OpenAI credit",
+            "type": "api-key",
+            "provider": "openai",
+            **({"tool": tool} if tool else {}),
+            "source": src,
+            "on": True,
+            "order": 0,
+            "rule": {
+                "limits": [{"value": 100, "unit": "$", "period": "month"}],
+                "for": ["reviews", "code"],
+                "ends": None,
+            },
+            "prev": None,
+        }
+    )
+    p.write_text(json.dumps(data))
+
+
+def test_owner_credit_without_a_helper_tool_never_holds_a_start(cli, fake_switcher, ws):
+    _owner_rules(cli)
+    _credit(ws)
+    assert store.load(ws)["accounts"][0]["label"] == "Codex / OpenAI credit"  # first in order
+    assert routing.decide(ws, req(CREW("reviewer"))) == {"go": True}  # Reviews helpers start as usual
+    assert routing.decide(ws, req(CREW("builder"))) == {"go": True}  # Code too, until Codex helpers ship
+    assert routing.decide(ws, req())["account"] == "first"  # Helpers keep the subscription
+
+
+def test_owner_credit_runs_code_once_its_tool_is_here_and_stops_at_100(cli, fake_switcher, ws, tmp_path):
+    _owner_rules(cli)
+    log = tmp_path / "oa.jsonl"
+    log.write_text(json.dumps({"t": store.now(), "account": "oa", "usd": 12}) + "\n")
+    _credit(ws, tool="tool-x", spent_log=log)
+    here = ("main-tool", "tool-x")
+    ans = routing.decide(ws, req(CREW("builder"), agents=here))
+    assert ans == {"go": True, "account": "Codex / OpenAI credit", "agent": "tool-x"}
+    log.write_text(json.dumps({"t": store.now(), "account": "oa", "usd": 100}) + "\n")
+    ans = routing.decide(ws, req(CREW("builder"), agents=here))
+    assert ans["go"] is False and "Codex / OpenAI credit reached $100 (month)" in ans["why"]
