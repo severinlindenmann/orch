@@ -11,6 +11,7 @@ import contextlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -66,6 +67,80 @@ def printable_launch_url(root: Path, server: str, base_url: str) -> str:
     if token is None:
         raise Refused("A sign-in link could not be made.")
     return f"{base_url.rstrip('/')}/#launch={token}"
+
+
+_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+_HOST_NAME = re.compile(rf"{_LABEL}(?:\.{_LABEL})*")  # a computer name or IPv4 address, no port, no path
+
+
+def remote_base(root: Path, server: str) -> str | None:
+    """The address other computers use for this page server when it listens for them (the dashboard's
+    [dashboard] listen, listen_port and listen_name settings), read from the settings file here and never
+    taken from the add-on. None when off, without a name, or not a valid name and port."""
+    if server != "dashboard":
+        return None
+    from orch import config
+
+    try:
+        table = config.read(root).get("dashboard")
+    except Refused:
+        return None
+    if not isinstance(table, dict) or not table.get("listen"):
+        return None
+    name, port = table.get("listen_name"), table.get("listen_port")
+    if not isinstance(name, str) or len(name) > 253 or not _HOST_NAME.fullmatch(name.lower()):
+        return None
+    if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+        return None
+    return f"http://{name.lower()}:{port}"
+
+
+# ---- The standing sign-in link (a bookmark): GET /go/<secret> on the dashboard answers with a fresh
+# one-time launch link, so a person who is usually on another computer signs in again without a terminal
+# here. The secret lives in the key folder (0600); only a person makes or renews it (`orch dashboard remote
+# link`), and renewing kills the old bookmark. Without the file, /go answers 404 like any unknown address.
+
+_GO_FILE = "go-dashboard.key"
+
+
+def standing_link_secret(root: Path, new: bool = False) -> str:
+    """The secret of the standing sign-in link, made on first use; `new` replaces it (the old link dies).
+    A person only (never under an agent tool, except a test install in a test folder)."""
+    from orch import tickets
+
+    if tickets.agent_tool() is not None and not is_test_workspace(root):
+        raise Refused("Only a person can make a sign-in bookmark. Run this in your own terminal.")
+    d = orch_home.key_dir(root)
+    f = d / _GO_FILE
+    if not new:
+        with contextlib.suppress(FileNotFoundError, Refused, OSError, ValueError):
+            cur = orch_home._read_guarded(f).decode("utf-8").strip()
+            if len(cur) >= 32:
+                return cur
+    secret = secrets.token_urlsafe(32)
+    orch_home._write_private(f, secret + "\n")
+    return secret
+
+
+def remove_standing_link(root: Path) -> bool:
+    try:
+        (orch_home.key_dir(root, create=False) / _GO_FILE).unlink()
+    except (FileNotFoundError, Refused, OSError):
+        return False
+    return True
+
+
+def standing_link_ok(root: Path, sent: str) -> bool:
+    """`sent` is the secret of the standing sign-in link (constant-time compare); no file = never."""
+    if not isinstance(sent, str) or not 32 <= len(sent) <= 100:
+        return False
+    try:
+        cur = (
+            orch_home._read_guarded(orch_home.key_dir(root, create=False) / _GO_FILE).decode("utf-8").strip()
+        )
+    except (FileNotFoundError, Refused, OSError, ValueError):
+        return False
+    return len(cur) >= 32 and hmac.compare_digest(cur.encode(), sent.encode())
 
 
 LAUNCH_LIFE = 30  # seconds: the token is single use and dies on the first page load

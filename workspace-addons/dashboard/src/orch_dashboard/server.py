@@ -236,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
             "dashboard.request",
             "debug",
             method=getattr(self, "command", ""),
-            path=self.path.split("?", 1)[0][:200],
+            path="/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200],
         )
 
     def log_message(self, *a):  # quiet
@@ -286,7 +286,7 @@ class Handler(BaseHTTPRequestHandler):
         after the sign-in it does not matter where the browser is."""
         raw = (self.headers.get("Host") or "").strip().lower()
         host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
-        if host in ("127.0.0.1", "localhost", "[::1]"):
+        if host in ("127.0.0.1", "localhost", "[::1]") and not self._remote():
             return True
         try:
             from orch_ui.origin import any_host_ok
@@ -302,7 +302,8 @@ class Handler(BaseHTTPRequestHandler):
         if px and PAGE_PATH.fullmatch(px.group(2) or ""):  # an unguessable key in the address
             return True
         if (
-            path.startswith("/view/")
+            not self._remote()  # browser headers anyone can forge prove nothing on the port for other computers
+            and path.startswith("/view/")
             and self.headers.get("Sec-Fetch-Site") in ("same-site", "cross-site")
             and self.headers.get("Sec-Fetch-Dest") in ticketfiles.PAGE_SUBRESOURCE_DEST
             and not path.lower().endswith((".html", ".htm"))
@@ -312,17 +313,27 @@ class Handler(BaseHTTPRequestHandler):
             not path.startswith(_PRIVATE_PREFIXES) and path.lower().endswith((*STATIC_EXT, ".html"))
         )
 
+    def _remote(self) -> bool:
+        """This request came in on the port for other computers (remote listening, opt-in). There a name of
+        this computer in Host proves nothing (any computer can send it), so nothing is trusted for it."""
+        return bool(getattr(getattr(self, "server", None), "remote", False))
+
+    def _page_port(self) -> int:
+        """The port the session belongs to (cookie name, kept session): the loopback port, also for a request
+        on the port for other computers, so one sign-in counts on both."""
+        return getattr(self.server, "page_port", None) or self.server.server_address[1]
+
     def _signed_in(self) -> bool:
         """This server's session cookie (no page secret needed): enough to READ under any host name."""
         if getattr(self, "session", None) is None:  # a server without a page session: nobody signs in
             return False
-        return self.session.cookie_ok(self.headers, self.server.server_address[1])
+        return self.session.cookie_ok(self.headers, self._page_port())
 
     def _can_act(self) -> bool:
         """The person's session (cookie + page secret), wherever the browser is."""
         if getattr(self, "session", None) is None:
             return False
-        return self.session.can_act(self.headers, self.server.server_address[1])
+        return self.session.can_act(self.headers, self._page_port())
 
     def _shipped(self, name: str) -> bool:
         """True only for an add-on `orch addon list` says is shipped with orch; anything else, or unknown, is not."""
@@ -426,6 +437,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self._trace()
         path, _, query = self.path.partition("?")
+        if path.startswith("/go/"):
+            return self._standing_link(path[len("/go/") :])
         if not self._host_ok(path):  # DNS rebinding guard
             return self._send(421, b"misdirected request", "text/plain")
         if path == "/" and selfupdate.answer(self):
@@ -688,12 +701,16 @@ class Handler(BaseHTTPRequestHandler):
             return "Actions are not available in this install."
         if self.headers.get("Origin") is None:
             return "This request was refused (no origin)."
+        if self._remote() and not (at_login or self._signed_in()):
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._refused_text(SIGNIN_MSG)
         if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
             return "This request came from another website and was refused."
         return check_request(
             "POST",
             self.headers,
-            self.server.server_address[1],
+            self._page_port(),
             api=True,
             signed_in=at_login or self._signed_in(),
         )
@@ -762,6 +779,28 @@ class Handler(BaseHTTPRequestHandler):
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
+    def _standing_link(self, sent: str):
+        """GET /go/<secret>: the person's standing sign-in link (a bookmark, see pagelaunch). Right secret: a
+        redirect to a fresh one-time launch link, which the page spends as with any sign-in link. Anything else
+        is 404, the same answer as an address that does not exist."""
+        try:
+            from orch import pagelaunch
+            from orch_ui.origin import any_host_ok
+        except ImportError:
+            return self._send(404, b"not found", "text/plain")
+        if (
+            self.session is None
+            or not any_host_ok((self.headers.get("Host") or "").strip())
+            or not pagelaunch.standing_link_ok(self.root, sent)
+        ):
+            return self._send(404, b"not found", "text/plain")
+        token = pagelaunch.write_launch_token(self.root, "dashboard")
+        if not token:
+            return self._send(503, b"Try again in a moment.", "text/plain")
+        self._send(
+            302, b"", "text/plain", {"Location": "/#launch=" + token, "Referrer-Policy": "no-referrer"}
+        )
+
     def _session_post(self):
         """POST /session: the page hands over the one-time sign-in token it got in the URL fragment; the server
         spends it and sets the session cookie (H1). Same fence as an action, from any computer."""
@@ -783,7 +822,7 @@ class Handler(BaseHTTPRequestHandler):
             200,
             json.dumps({"secret": self.session.secret}).encode(),
             "application/json",
-            {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)},
+            {"Set-Cookie": self.session.set_cookie(self._page_port(), cookie)},
         )
 
     def do_POST(self):
@@ -937,6 +976,9 @@ class Handler(BaseHTTPRequestHandler):
 
 class _Server(ThreadingHTTPServer):
     def server_close(self):
+        other = getattr(self, "remote_server", None)
+        if other is not None:
+            other.server_close()
         if hasattr(self, "revisions"):
             self.revisions.close()
         if hasattr(self, "state_cache"):
@@ -948,7 +990,23 @@ class _Server(ThreadingHTTPServer):
     )
 
 
-def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
+class _RemoteServer(ThreadingHTTPServer):
+    """The second socket of remote listening: same handler, session, state cache and change feed as the
+    loopback server (which owns and closes them). `remote` makes the handler trust no name of this computer."""
+
+    remote = True
+    request_queue_size = 128
+
+
+def make_server(
+    root: Path,
+    port: int = DEFAULT_PORT,
+    orch_bin: str | None = None,
+    remote: tuple[str, int] | None = None,
+) -> ThreadingHTTPServer:
+    """`remote`: (address, port) to listen on for other computers as well (the [dashboard] setting, see
+    remote.py). It shares this server's sign-in; a port that cannot be had leaves the dashboard local only
+    (`remote_error` says why) instead of not starting at all."""
     # No ORCH_BIN from the environment (H1): the real server passes SELF (`sys.executable -I -m orch`); only a
     # test harness passes a fake path. None = standalone, reads files only.
     handler = partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin), session=None)
@@ -964,8 +1022,19 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
         except BaseException:
             srv.server_close()
             raise
+    srv.page_port = srv.server_address[1]
     srv.revisions = Revisions(root)
     srv.state_cache = StateCache(root, orch_bin, srv.revisions)
+    srv.remote_server, srv.remote_error = None, None
+    if remote is not None:
+        try:
+            other = _RemoteServer(remote, handler)
+        except OSError as e:
+            srv.remote_error = f"could not listen on {remote[0]} port {remote[1]} ({e.strerror or e})"
+        else:
+            other.page_port = srv.page_port
+            other.revisions, other.state_cache = srv.revisions, srv.state_cache
+            srv.remote_server = other
     if orch_bin == actions.SELF:  # the real server: the automatic update looks once a minute (off by default)
         from . import update
 
