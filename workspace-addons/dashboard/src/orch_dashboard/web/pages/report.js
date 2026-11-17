@@ -6,7 +6,7 @@
 // Nothing leaves this computer unless the workspace is connected to a relay AND the person ticks "Send this report":
 // then the same report goes to that relay's admin. The hand-off to a helper puts one line into the helper chat's
 // message box; it never sends it by itself.
-const reportUi = {busy:false};
+const reportUi = {busy:false, draft:null};  // draft: what was typed when the dialog closed without a report (Escape), kept for the next open (ORCH-242)
 const REPORT_FILES = 10, REPORT_FILE_BYTES = 8 * 1024 * 1024, REPORT_FILES_BYTES = 25 * 1024 * 1024;
 // The connected relay's host name, or '' (no relay, not turned on, not connected: the dialog then never mentions it).
 function reportRelay() {
@@ -105,12 +105,19 @@ function reportOpen() {
   const added = reportFiles(d);
   const relay = reportRelay();
   const share = h('input', {type:'checkbox', 'data-key':'report-share'});
-  const field = (label, input) => h('label', {className:'field'}, h('span', {}, h('span', {}, label), ' ', h('span', {className:'meta'}, '(optional)')), input);
+  // Every limited field shows its limit and how much is used (ORCH-242: the box used to cut text without a word).
+  const counter = input => {
+    const note = h('span', {className:'meta', 'data-key':'report-count'});
+    const show = () => { note.textContent = input.value.length + ' / ' + input.maxLength; };
+    input.addEventListener('input', show); show();
+    return note;
+  };
+  const field = (label, input) => h('label', {className:'field'}, h('span', {}, h('span', {}, label), ' ', h('span', {className:'meta'}, '(optional)')), input, counter(input));
   const happenedField = field('What happened?', happened), expectedField = field('What did you expect?', expected);
-  const sent = relay ? 'Nothing is sent unless you tick the last box.' : 'Nothing is sent.';
+  const sent = relay ? 'It stays on this computer unless you tick the last box.' : 'It stays on this computer.';
   const intro = h('p', {className:'muted', 'data-key':'report-intro'});
   const pictureRow = h('label', {className:'check-label'}, picture, ' Add a picture of this page');
-  const pictureHint = h('p', {className:'meta'}, 'The picture can show ticket text.');
+  const pictureHint = h('p', {className:'meta'}, 'The picture can show ticket text. These two boxes only decide what goes into the saved report.');
   const contentRow = h('label', {className:'check-label'}, content, ' Include ticket text and helper conversation');
   let about = 'problem';
   const words = () => {  // the same dialog for both kinds; only the words and the defaults change
@@ -132,6 +139,15 @@ function reportOpen() {
       return h('label', {}, input, h('span', {}, label));
     }));
   words();
+  const draft = reportUi.draft;
+  if (draft) {  // the text from a closed dialog comes back
+    happened.value = draft.happened; expected.value = draft.expected; more.value = draft.more;
+    if (draft.about !== about) { about = draft.about; words(); for (const r of kind.querySelectorAll('input')) r.checked = r.value === about; }
+    for (const i of [happened, expected, more]) i.dispatchEvent(new Event('input'));
+  }
+  const keep = () => { reportUi.draft = {happened:happened.value, expected:expected.value, more:more.value, about}; };
+  for (const i of [happened, expected, more]) i.addEventListener('input', keep);
+  kind.addEventListener('change', keep);
   body.append(...[kind, intro,
     happenedField, expectedField, field('Anything else?', more), ...added.nodes,
     pictureRow, pictureHint, contentRow,
@@ -153,6 +169,7 @@ function reportOpen() {
       if (res.ok) result = await res.json(); else failure = window.DashHelpers.scrubText(await res.text()) || failure;
     } catch (_) { /* the plain failure text stands */ }
     reportUi.busy = false;
+    if (result) reportUi.draft = null;  // made: the next dialog starts empty
     if (!d.isConnected) return;
     if (!result) { window.orch.toast(failure, 'error'); await window.orch.close(d); return; }
     reportReady(d, actions, body, result);
