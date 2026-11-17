@@ -123,8 +123,15 @@ def test_real_launchd(real, ws):
 @pytest.mark.skipif(
     not (REAL and sys.platform.startswith("linux")), reason="real systemd test: Linux + ORCH_SERVICES_REAL=1"
 )
-def test_real_systemd(real, ws):
+def test_real_systemd(real, ws, monkeypatch):
+    import pwd
     from pathlib import Path
+
+    # The user service manager reads unit files from the account's real home, not from the faked HOME of the
+    # test guard. Only a throwaway machine (CI) may use the real home; elsewhere this test stays off.
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        pytest.skip("real systemd test runs only on a throwaway CI machine (GITHUB_ACTIONS=true)")
+    monkeypatch.setenv("HOME", pwd.getpwuid(os.getuid()).pw_dir)
 
     unit = f"orch-svc-{WID}-sleeper.service"
     path = Path.home() / ".config" / "systemd" / "user" / unit
