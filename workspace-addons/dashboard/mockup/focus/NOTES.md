@@ -191,6 +191,15 @@ focus-preview.html
 ../settings/addon-detail-focus.html
 - New row Preview: "Try the new Focus", off by default.
 
+## The layer, built (ORCH-338, 17 Nov)
+
+focus-v4d.html stays the source of truth for the layer; nothing in the draft changed. The dashboard now has it behind
+the Preview switch: one dock under every page (outside the page content, so it stays open when the page changes) with
+a panel at the bottom, on the right or full screen, minimise to the bar, close to the side. Place and size are kept per
+browser; the top edge of the bottom panel and the left edge of the right one resize it (drag or arrow keys). Esc goes
+one step back: an open menu, full screen, then the panel to the bar. One session for now; the pane says where the chat
+and terminal come. Master: `.live-*` in widgets.css (style guide: Live layer), icons dock-bottom, dock-right,
+dock-side, full-screen, full-exit.
 ## The bar is built (ORCH-337, 17 Nov)
 
 - The bar of draft D is in the dashboard behind the Preview switch (`pages/livebar.js`), with its look in the kit
