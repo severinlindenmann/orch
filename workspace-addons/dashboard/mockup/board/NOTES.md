@@ -93,3 +93,11 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 - `list.html`: up to 720 px the table gives way to grouped short rows (master `.short-group`): number and title, one fact, Answer where you are needed, else steps n/m or an Idle chip. The List/Board switch shows only on wide screens.
 - `list.html`, `../home/home.html`, `../review/review.html`, `../ticket/ticket-working.html`: the phone bottom bar (master `.tabbar`) Home, Tickets, Review with the one needs-you number, More opens the side menu.
+
+## Manager view (ORCH-189, owner approved 17 Nov)
+
+- `list.html`: Due column (red when past, amber today) and Time · cost column (helper time and money at list price);
+  quick views This week and Stuck; the Stuck pill also for an old question, no news for a day or past due.
+- `../insights/insights.html`: Helper time, Cost, Tickets finished, Stuck now and a By person table on top.
+- `../ticket/ticket-change.html`, `ticket-question.html`: Time · cost in Properties (the helper's first-run estimate
+  beside what it took so far).

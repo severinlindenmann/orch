@@ -11,7 +11,7 @@ test('TICKET_VIEWS has no holes, so find with a destructured entry never throws'
   assert.ok(line);
   const ctx = vm.createContext({});
   vm.runInContext(line + '\nthis.V = TICKET_VIEWS;', ctx);
-  assert.equal(ctx.V.length, 5);
+  assert.equal(ctx.V.length, 7);  // ORCH-189 added This week and Stuck
   assert.ok(Array.from({length: ctx.V.length}, (_, i) => i in ctx.V).every(Boolean), 'no hole');
   assert.doesNotThrow(() => ctx.V.find(([id]) => id === 'nope'));
 });

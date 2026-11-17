@@ -175,6 +175,7 @@ def test_price_rows_and_words():
     assert usage.price("gpt-x") is None
     assert usage.duration(0) == "–" and usage.duration(20) == "under 1 min"
     assert usage.duration(45 * 60) == "45 min" and usage.duration(125 * 60) == "2 h 5 min"
+    assert usage.duration(3600) == "1 h"
     assert usage.money(3.1) == "$3.10"
 
 

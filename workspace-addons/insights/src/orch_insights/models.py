@@ -46,7 +46,7 @@ def _seconds_words(seconds):
         return "–"
     if m < 1:
         return "under 1 min"
-    return f"{m // 60} h {m % 60} min" if m >= 60 else f"{m} min"
+    return (f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min"
 
 
 def _money(cost):

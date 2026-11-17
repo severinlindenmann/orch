@@ -1723,7 +1723,7 @@ def estimate_words(est: object) -> str:
     m, cost = est.get("minutes"), est.get("cost")
     parts = []
     if isinstance(m, int) and not isinstance(m, bool) and m > 0:
-        parts.append(f"{m // 60} h {m % 60} min" if m >= 60 else f"{m} min")
+        parts.append((f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min")
     if isinstance(cost, int | float) and not isinstance(cost, bool) and cost >= 0:
         parts.append(f"${cost:,.2f}")
     return "about " + " · ".join(parts) if parts else ""

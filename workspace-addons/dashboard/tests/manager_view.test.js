@@ -94,3 +94,8 @@ test('ticket page: Time · cost puts the first-run estimate beside what it took 
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(src, /costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null/);
 });
+
+test('whole hours read "1 h", not "1 h 0 min"', () => {
+  assert.equal(helpers.durationWords(3600), '1 h');
+  assert.equal(helpers.durationWords(3660), '1 h 1 min');
+});

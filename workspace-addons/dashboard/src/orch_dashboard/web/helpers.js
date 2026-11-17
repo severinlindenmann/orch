@@ -646,7 +646,7 @@
     const n = Number(seconds) || 0, m = Math.round(n / 60);
     if (n <= 0) return '';
     if (m < 1) return 'under 1 min';
-    return m >= 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : m + ' min';
+    return m >= 60 ? Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '') : m + ' min';
   }
   const moneyWords = cost => '$' + (Number(cost) || 0).toFixed(2);
   function spendWords(spend) {

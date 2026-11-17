@@ -359,7 +359,7 @@ function shortFact(t, row) {
   if (t.quiet_since) return window.DashHelpers.quietWords(t.quiet_since, now());
   const helper = helperChip(t);
   if (helper?.line) return helper.line;
-  if (t.due && shown(t).status !== 'done') return dueText(t);  // ORCH-189: the due day is the one fact when set
+  if (t.due && shown(t).status !== 'done') { const due = dueText(t); return /^(Due|Late)\b/.test(due) ? due : 'Due ' + due; }  // ORCH-189: the due day is the one fact when set
   if (row.parentMissing && typeof parentLine === 'function') { const step = parentLine(t)?.textContent; if (step) return step; }
   const at = shown(t).status === 'done' ? t.done_at || t.updated_at : t.updated_at;
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
