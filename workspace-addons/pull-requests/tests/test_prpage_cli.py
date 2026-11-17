@@ -52,7 +52,9 @@ def test_view_and_poll_without_links(prws, capsys, monkeypatch):
 def test_a_watcher_round_reads_then_tends(prws, monkeypatch):
     order = []
     monkeypatch.setattr(poll, "once", lambda root: order.append("read") or {"refreshed": [], "errors": {}})
-    monkeypatch.setattr(cli, "_tend", lambda root: order.append("tend"))
+    monkeypatch.setattr(
+        cli, "_watch_round", lambda root: order.append("tend")
+    )  # Merge when green, failed checks
     cli._round(prws)
 
     def boom(root):

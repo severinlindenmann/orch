@@ -425,8 +425,14 @@ def _ticket_changes(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "if_revision"))
+    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "parent", "release", "if_revision"))
     flags = []
+    if "parent" in a:  # ORCH-156: "Part of": put the ticket under an epic, or None to take it out
+        flags.append(f"--parent={_tid(a['parent']) if a['parent'] else ''}")
+    if "release" in a:  # ORCH-37: the Release switch on the ticket page (true marks it, false takes it off)
+        if not isinstance(a["release"], bool):
+            raise BadRequest("release is true or false.")
+        flags.append(f"--release={'yes' if a['release'] else 'no'}")
     for k in ("title", "owner", "due", "note", "done_when"):
         if k in a:
             v = _text(a[k], k, empty=k != "title")
@@ -439,6 +445,22 @@ def _ticket_edit(a):
     if rev is not None:
         flags.append(f"--if-revision={rev}")
     return ["ticket", "edit", _tid(a.get("ticket"))], flags, []
+
+
+LANE = re.compile(r"[a-z][a-z_]{0,23}")
+
+
+def _ticket_order(a):
+    """ORCH-156: the person put the tickets of one board lane in order (drag inside the lane): the whole lane,
+    first to last, so every card keeps its place."""
+    _only(a, ("lane", "tickets"))
+    lane = a.get("lane")
+    if not isinstance(lane, str) or not LANE.fullmatch(lane):
+        raise BadRequest("That is not a lane.")
+    ids = a.get("tickets")
+    if not isinstance(ids, list) or not ids or len(ids) > 500:
+        raise BadRequest("Name the tickets of the lane, first to last.")
+    return ["ticket", "order", lane], [], [_tid(t) for t in ids]
 
 
 MODELS = ("sonnet", "opus", "auto")
@@ -1038,6 +1060,7 @@ OPS = {
     "ticket.patch": _ticket_patch,
     "ticket.changes": _ticket_changes,
     "ticket.edit": _ticket_edit,
+    "ticket.order": _ticket_order,
     "ticket.model": _ticket_model,
     "log": _log,
     "chat.say": _chat_say,

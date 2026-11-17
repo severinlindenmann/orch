@@ -52,3 +52,9 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   requests page and the live pull request state on tickets. Its one background watcher reads the linked repositories
   (read-only) and then runs Merge when green, every minute. `orch github` (write limit, expert) stays in the core.
   Screen words "Pull requests", "Merge when green", "Merge queue" approved.
+- 2026-11-17 (ORCH-186): Add-on pages orch ships run sandboxed in the dashboard and act only with a frame pass for
+  their own add-on (15 minutes, bound to the sign-in, host name and port; a fixed list of actions per add-on). Their
+  program files (`/addon/<shipped>/kit|web/*.js|css|svg|png|woff…`) load without sign-in, also on the port for other
+  computers: a sandboxed page sends no cookie, and these files are open-source code with no workspace data. They show
+  which shipped add-ons run. Accepted by the manager for the prototype, not decided by the owner: open for the owner
+  to overrule.

@@ -315,6 +315,13 @@ test('mapCard: the files of a Check card become tiles with urls; unknown types a
   assert.equal(UI.review.mapCard(card('a'), fakeApi([[]]), NOW).files.length, 0);
 });
 
+test('mapCard: own answer buttons pass through (label and pick, at most 4)', () => {
+  const {UI} = load();
+  const it = UI.review.mapCard(card('a', {answers:[{label:'Not now', picked:'Not now'}, {label:'', picked:'x'}, {label:'Start', picked:7}, {label:'Start', picked:'Start'}]}), fakeApi([[]]), NOW);
+  assert.equal(JSON.stringify(it.answers), JSON.stringify([{label:'Not now', picked:'Not now'}, {label:'Start', picked:'Start'}]));
+  assert.equal(UI.review.mapCard(card('b'), fakeApi([[]]), NOW).answers.length, 0);
+});
+
 test('answerRecord: every card names its ticket and a title, never a bare "Answered" (ORCH-172)', () => {
   const {UI} = load();
   const untitled = {kind: 'choice', preview: {type: 'options', options: [{id: 'Yes', title: 'Yes'}, {id: 'No', title: 'No'}]}};
@@ -360,4 +367,15 @@ test('a words preview opens in full in the large view, not cut (ORCH-172)', () =
   rec.byClass('decision-shot')[0].fire('click');
   const d = document.body.children.at(-1);
   paras.forEach(p => assert.ok(d.textContent.includes(p)));
+});
+
+test('the large view of a words box uses the card\'s own words box when the kit has it (steps, rows, status) (ORCH-183)', () => {
+  const {UI, document} = load();
+  let got = null;
+  UI.docBox = (pv, tag) => { got = [pv, tag]; const n = document.createElement('div'); n.className = 'doc'; n.textContent = 'BOX'; return n; };
+  const pv = {type: 'doc', heading: 'What goes out · 2 changes', rows: [{title: 'One', n: 1}], steps: ['a']};
+  UI.reviewViewer([{label: 'Release', preview: pv}], 0, {title: 'Release 32'});
+  const d = document.body.children.at(-1);
+  assert.equal(got[0], pv); assert.equal(got[1], 'h3');
+  assert.match(d.textContent, /BOX/);
 });

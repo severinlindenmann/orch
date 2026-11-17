@@ -1,4 +1,4 @@
-"""orch pull-requests queue add|list|remove|run, tend, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
+"""orch pull-requests queue add|list|remove|run, tend, failed-checks, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
 
 from __future__ import annotations
 
@@ -164,7 +164,7 @@ def _tend(root: Path) -> dict:
 
 def _round(root: Path) -> None:
     """One round of the background watcher: read the linked pull requests (the Pull requests page and the live
-    state on tickets), then Merge when green. A failed read never stops Merge when green."""
+    state on tickets), then the Merge when green and failed-checks round. A failed read never stops that round."""
     from . import poll
 
     try:
@@ -173,7 +173,7 @@ def _round(root: Path) -> None:
             print(f"Pull requests: {json.dumps(got)}", flush=True)
     except Exception as e:  # noqa: BLE001 - one bad read never ends the round
         print(f"Pull requests: {e.__class__.__name__}: {str(e)[:200]}", flush=True)
-    _tend(root)
+    _watch_round(root)
 
 
 def _page_cmd(args, root: Path) -> int:
@@ -200,6 +200,58 @@ def _page_cmd(args, root: Path) -> int:
     if t is None:
         raise Refused(f"There is no ticket {args.target}.")
     print(json.dumps(poll.refresh_one(root, t, os.environ.get(poll.CACHED_ENV) == "1")))
+    return 0
+
+
+def _checks_tend(root: Path) -> dict:
+    from . import checks
+    from .github import GitHub
+
+    return checks.tend(root, GitHub(), log=lambda s: print(s, flush=True))
+
+
+def _watch_round(root: Path) -> None:
+    """One minute of the watcher: Merge when green, then (when turned on) the failed checks. A failure of one
+    part never skips the other."""
+    from . import checks
+
+    err = None
+    try:
+        _tend(root)
+    except Exception as e:  # noqa: BLE001 - raised again after the second part ran
+        err = e
+    if checks.is_on(root):
+        _checks_tend(root)
+    if err is not None:
+        raise err
+
+
+def _checks_cmd(args, root: Path) -> int:
+    """failed-checks on|off|status|tend: rerun a cancelled or timed-out job once, wake the helper on a failure."""
+    from . import checks
+
+    def say(data: dict, text: str) -> None:
+        print(json.dumps(data) if args.json else text, flush=True)
+
+    if args.state in ("on", "off"):
+        on = checks.set_on(root, args.state == "on")
+        say(
+            {"on": on},
+            "Failed checks: on. A cancelled or timed-out job is run again once; a real failure wakes the "
+            "ticket's helper. The Merge when green watcher does it every minute (orch pull-requests start)."
+            if on
+            else "Failed checks: off.",
+        )
+        return 0
+    if args.state == "tend":
+        got = _checks_tend(root)
+        if not got["on"]:
+            say(got, "Failed checks is off: nothing done. Turn it on: orch pull-requests failed-checks on")
+            return 0
+        say(got, f"Failed checks: {len(got['reran'])} job(s) run again, {len(got['woke'])} helper(s) woken.")
+        return 0
+    on = checks.is_on(root)
+    say({"on": on}, "Failed checks: on." if on else "Failed checks: off.")
     return 0
 
 
@@ -267,6 +319,11 @@ def main(argv: list[str] | None = None) -> int:
     ac.add_argument("--by", help="who asked (recorded on the ticket by orch)")
     ac.add_argument("--json", action="store_true")
     ac.add_argument("target", help="ticket id or key")
+    fc = sub.add_parser(
+        "failed-checks", help="rerun a cancelled or timed-out job once, wake the helper on a failure"
+    )
+    fc.add_argument("state", nargs="?", choices=("on", "off", "status", "tend"), default="status")
+    fc.add_argument("--json", action="store_true")
     w = sub.add_parser("watch", help=argparse.SUPPRESS)
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
@@ -274,6 +331,8 @@ def main(argv: list[str] | None = None) -> int:
         root = _root(getattr(args, "root", None))
         if args.cmd in ("poll", "view", "act"):
             return _page_cmd(args, root)
+        if args.cmd == "failed-checks":
+            return _checks_cmd(args, root)
         if args.cmd != "queue":
             return _switch_cmd(args, root)
         if args.sub == "run":

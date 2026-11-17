@@ -1539,7 +1539,9 @@ def _send_closed(root: Path, qmid: str, tid: str, reason: str | None, at: float 
     """The one "Question taken back" text for the question we sent as message `qmid` (see send_taken_back).
     `at` given (the sweep): a 403 (an older relay that closes only plain questions), 408, 429, a 5xx or no
     status frees the record again, to be tried after CLOSE_RETRY seconds; any other 4xx (answered first,
-    taken back already, not ours) is final, only logged."""
+    taken back already, not ours) is final, only logged. A freed send is kept (`taken_back_retry`) and the
+    next try sends the very same message (id, time, reason): when the unclear first post was stored after
+    all, the relay answers "duplicate" instead of a 409 for a new id."""
     if reason is None:
         return None
 
@@ -1548,12 +1550,21 @@ def _send_closed(root: Path, qmid: str, tid: str, reason: str | None, at: float 
         if not isinstance(rec, dict):
             return None
         if not isinstance(rec.get("taken_back_msg"), dict):
-            rec["taken_back_msg"] = {"id": new_id(), "created_at": tickets.now()}
+            old = rec.pop("taken_back_retry", None)
+            if not (
+                isinstance(old, dict)
+                and isinstance(old.get("id"), str)
+                and isinstance(old.get("created_at"), str)
+                and isinstance(old.get("reason"), str)
+            ):
+                old = {"id": new_id(), "created_at": tickets.now(), "reason": reason}
+            rec["taken_back_msg"] = old
             rec.pop("close_after", None)
         return rec["taken_back_msg"]
 
     if (fixed := _asked_edit(root, claim)) is None:
         return None
+    reason = fixed.get("reason") if isinstance(fixed.get("reason"), str) else reason
     try:
         sent = _message(
             root,
@@ -1576,7 +1587,7 @@ def _send_closed(root: Path, qmid: str, tid: str, reason: str | None, at: float 
             def free(asked):
                 rec = asked.get(qmid)
                 if isinstance(rec, dict) and rec.get("taken_back_msg") == fixed:
-                    rec.pop("taken_back_msg", None)
+                    rec["taken_back_retry"] = rec.pop("taken_back_msg")
                     rec["close_after"] = at + CLOSE_RETRY
 
             _asked_edit(root, free)

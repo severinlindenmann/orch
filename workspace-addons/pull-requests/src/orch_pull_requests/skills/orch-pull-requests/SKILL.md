@@ -42,13 +42,19 @@ person says to merge on green; leave it off when a person merges with a Merge ca
 
     orch pull-requests queue remove <pull request url>
 
-**5. See the checks** (no waiting, no GitHub call of your own)
+**6. See the checks** (no waiting, no GitHub call of your own)
 
 While the add-on runs (`orch start`), it reads the repositories your tickets link once a minute, read-only, and keeps each linked pull request's state on its ticket: the link shows `Checks running`, `Checks failed`, `Ready to merge`, `Merged` and so on, and the ticket's Details show its newest open pull request's checks and merge state. The dashboard's Pull requests page lists the open pull requests with their ticket, checks and merge state. Update one ticket now:
 
     orch pull-requests act refresh -- <ticket>
 
 Link every pull request to its ticket with `orch ref add`; one no ticket links shows on the page but on no ticket.
+
+**5. Failed checks** (off until a person turns it on: `orch pull-requests failed-checks on`)
+
+When it is on, a cancelled or timed-out job of your ticket's pull request is run again once by itself, and when a
+check fails for real you get a message with the failed job and the last lines of its log (once per commit). Fix the
+cause and push; do not rerun jobs by hand that orch already reran.
 
 ## Rules
 - A pull request a person merges with a Merge card is never queued; a Merge card made while it waits takes it out.
