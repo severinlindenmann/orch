@@ -210,6 +210,13 @@ function ticketNext(t) {
   }
   return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, clean(text)) : null, action) : null;
 }
+// The new Focus (Preview, draft D feature 3): every row gets the ticket's Focus button. When it says Answer it takes the
+// place of the row's own Answer, so a row never shows two.
+function ticketRowFocus(t, nextAction) {
+  const focus = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
+  if (!focus) return [nextAction];
+  return focus.dataset.verb === 'Answer' && nextAction?.textContent === 'Answer' ? [focus] : [nextAction, focus];
+}
 function ticketMenu(t, scope) {
   if (snapshot) return null;
   const menu = statusControl(t, scope), summary = menu.querySelector('summary');
@@ -265,7 +272,7 @@ function treeBranch(rows, index, section) {
     h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'numeric spend-cell'}, spendCell(t)),
     h('td', {className:'meta when', title:String(at || '')}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
-    h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, nextAction, ticketMenu(t, 'tree'))));
+    h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, ...ticketRowFocus(t, nextAction), ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
   node.classList.add('row-click');
   node.addEventListener('click', e => { if (!e.target.closest('a,button,select,input,[role="menu"]')) location.hash = href(t.id); });
@@ -586,6 +593,8 @@ function shortFact(t, row) {
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
 }
 function shortSide(t, row, status) {
+  const focus = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
+  if (focus) return focus;
   if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {
     event.stopPropagation();
     const need = needsList().find(x => x.ticket === t.id);
