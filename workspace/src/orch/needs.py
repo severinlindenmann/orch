@@ -137,6 +137,9 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
     from orch import health
 
     health.soon(root)  # tool logins: a stale result is checked again in the background (ORCH-44)
+    from orch import doctorpass
+
+    doctorpass.soon(root)  # the machine's health checks, when set up here and due (ORCH-104)
     for r in services.workspace_rows(root):
         if not r["running"] and not r.get("idle"):
             rows.append(
