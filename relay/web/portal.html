@@ -323,7 +323,7 @@ function subscriberCurl(link='<your link>',access='<your token>'){
 function subscriberDoc(){
  const base=location.origin+'/v1/sub/<TOKEN>',F='```',q=v=>"'"+v+"'";
  return ['# How to use an orch subscriber link','',
- 'A subscriber link lets a script, chat bot or agent read copies of workspace messages and, if allowed, answer questions.','',
+ 'A subscriber link lets a script, chat bot or another tool read copies of workspace messages and, if allowed, answer questions.','',
  '- Base address: `'+base+'`',
  '- `<TOKEN>` is the secret part of the link shown once when the subscriber was created. Keep it secret. It can also be sent as the header `Authorization: Bearer <TOKEN>`; then use `-` in place of the token in the path.','',
  '## Read missed messages','',F+'sh','curl -s '+q(base+'/events?after=<LAST_ID>'),F,'',
@@ -397,7 +397,7 @@ function subscribersPage(){
    el('div',{class:'sub-actions'},button('Activity',()=>subscriberActivity(s,activity),'ghost'),menu));
  });
  const curl=el('details',{class:'card sub-try'},el('summary',{},'Test a connection (for developers)'),subscriberCurl());
- const doc=el('div',{class:'row'},el('p',{class:'meta muted grow'},'A short guide another agent can read to use a subscriber link.'),button('Copy doc',()=>copy(subscriberDoc()),'outline'));
+ const doc=el('div',{class:'row'},el('p',{class:'meta muted grow'},'A short guide another tool can read to use a subscriber link.'),button('Copy doc',()=>copy(subscriberDoc()),'outline'));
  $('#top-add').hidden=!subList.length;
  show(el('header',{class:'page-heading'},el('h1',{tabindex:-1},'Subscribers'),el('p',{class:'muted'},'Let another app or tool get a copy of your workspace messages.')),panel('Your subscribers · '+subList.length,...(rows.length?rows:[empty('No subscribers yet','Add one to let a chat app, a script or another agent follow your workspaces.',button('Add subscriber',()=>subscriberDialog(),'primary'))])),doc,curl,activity);
 }
