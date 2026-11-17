@@ -33,7 +33,7 @@ const [base, shots, desc, launch] = process.argv.slice(2);
       await p.click('[data-key=pf-edit]');
       await p.fill('[data-key=pf-description]', desc);
       await p.click('[data-key=pf-save]');
-      await p.waitForFunction(() => /Waiting for relay approval/.test(document.querySelector('[data-testid=profile-relay-state]')?.textContent || ''), null, { timeout: 15000 });  // the state shows 'Live on relay' until the pending change comes back
+      await p.waitForFunction(() => /Waiting for relay/.test(document.querySelector('[data-testid=profile-relay-state]')?.textContent || ''), null, { timeout: 15000 });
       out.pending = await p.textContent('[data-testid=profile-relay-state]');
       // shared pages switch off
       const sharedBefore = await p.getAttribute('[data-testid=look-shared-pages]', 'aria-checked');
