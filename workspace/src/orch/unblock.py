@@ -235,18 +235,28 @@ def _drop_lock(root: Path) -> None:
 
 
 def _queued(root: Path) -> set[str]:
-    """Pull requests the merge queue add-on has waiting or running (its file, read only)."""
-    p = root / ".orch" / "addons" / "pull-requests" / "queue.json"
+    """Pull requests an add-on's merge queue has waiting or running, read only: any add-on folder with a
+    `queue.json` of {"entries": [{"url", "state"}]} (core names no add-on, R1.2)."""
+    out: set[str] = set()
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return set()
-    rows = data.get("entries") if isinstance(data, dict) else None
-    return {
-        str(r["url"]).lower()
-        for r in rows or []
-        if isinstance(r, dict) and isinstance(r.get("url"), str) and r.get("state") in ("waiting", "running")
-    }
+        files = sorted((root / ".orch" / "addons").glob("*/queue.json"))
+    except OSError:
+        return out
+    for p in files:
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        rows = data.get("entries") if isinstance(data, dict) else None
+        rows = rows if isinstance(rows, list) else []
+        out |= {
+            str(r["url"]).lower()
+            for r in rows
+            if isinstance(r, dict)
+            and isinstance(r.get("url"), str)
+            and r.get("state") in ("waiting", "running")
+        }
+    return out
 
 
 def linked(root: Path) -> list[dict]:

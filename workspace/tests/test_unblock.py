@@ -241,7 +241,7 @@ def test_merge_card_and_queue_are_left_alone(proj, role, new_ticket, run):
     )  # fmt: skip
     b = new_ticket("In the queue")
     run("ref", "add", b, PR2)
-    qdir = proj / ".orch" / "addons" / "pull-requests"
+    qdir = proj / ".orch" / "addons" / "some-queue"
     qdir.mkdir(parents=True)
     (qdir / "queue.json").write_text(json.dumps({"entries": [{"url": PR2, "state": "waiting"}]}))
     gh = FakeGH({PR: view(), PR2: view()})
