@@ -486,6 +486,20 @@ test('home (read-only copy, no run data): Working now and Finished are side card
   assert.doesNotMatch(JSON.stringify(right), /steps|segments|progressbar/);
   assert.match(text, /Nothing finished today\. Last: “Old sign”/);
 });
+test('home: Finished shows the 5 newest finished today and one link to all of them (report r-1116-2215-ws)', () => {
+  const day = new Date(); day.setHours(12, 0, 0, 0);
+  const at = m => new Date(day.getTime() - m * 60000).toISOString();
+  const done = Array.from({length:12}, (_, i) => ({id:'d' + i, title:'Done ' + i, status:'done', done_at:at(i * 5)}));
+  const items = [{id:'w', title:'Plan', status:'active'}, ...done.slice().reverse()];
+  const c = context(items, {parse:v => v ? new Date(v) : null, now:() => day, time:d => String(d), state:{runs:{}, settings:{}}});
+  const fin = nodes(c.home(), n => n.tag === 'section' && n.children?.[0] === 'Finished')[0];
+  const rows = nodes(fin, n => String(n.attrs?.['data-key'] || '').startsWith('ticket-')).map(n => n.attrs['data-key']);
+  assert.deepEqual(rows, ['ticket-d0', 'ticket-d1', 'ticket-d2', 'ticket-d3', 'ticket-d4'], 'newest first, five rows');
+  const link = nodes(fin, n => n.tag === 'a' && n.attrs?.href === '#tickets?view=done-today')[0];
+  assert.ok(link, 'link to the finished-today view'); assert.match(JSON.stringify(link), /All finished today \(12\)/);
+  const few = context(items.slice(0, 4), {parse:v => v ? new Date(v) : null, now:() => day, time:d => String(d), state:{runs:{}, settings:{}}});
+  assert.doesNotMatch(JSON.stringify(few.home()), /All finished today/, 'no link when all fit');
+});
 test('home needs: a failed answer on stacked questions says how many were answered', async () => {
   let n = 0;
   const {c, toasts} = sameNeeds(3, async () => ++n === 2 ? {ok:false, status:409, text:'Nope'} : {ok:true});
@@ -539,6 +553,7 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   assert.equal(ids('working'), 'w');
   assert.equal(ids('needs-you'), 'r,d');
   assert.equal(ids('done-week'), 'd');
+  assert.equal(ids('done-today'), 'd');
   assert.equal(ids('', 'ben'), 'r,o');
   assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
