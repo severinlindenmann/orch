@@ -84,9 +84,11 @@ A step that shows a part of Done when in other words than its title: add `--prov
 
 Only the person marks a step "Won't do"; you cannot. Ask instead, with the step on the question:
 
-    orch ask <id> "Mark step c2 as won't do?" --option yes --option no --check c2
+    orch ask <id> "Mark step c2 as won't do?" --option yes --option "No, run it in CI" --check c2
 
-Wait for the answer. A yes marks the step won't do by itself; never tick or reopen it yourself.
+Say in the no option where the step would run; a bare yes and no is refused. Never offer a protected machine (a
+production machine the owner listed, `orch config get workspace.protected_machines`) for a test: offer CI or a
+throwaway server. Wait for the answer. A yes marks the step won't do by itself; never tick or reopen it yourself.
 
 **Files you make**
 
