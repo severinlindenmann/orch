@@ -8,7 +8,7 @@
   "properties": {
     "v": { "const": 1 },
     "id": { "type": "string", "pattern": "^(m_[a-z0-9]{16}|test_[a-z0-9]{10})$" },
-    "type": { "enum": ["update", "text", "question", "answered", "test"] },
+    "type": { "enum": ["update", "text", "question", "answered", "closed", "test"] },
     "at": { "type": "string", "format": "date-time" },
     "workspace": {
       "type": "object",
@@ -82,7 +82,13 @@
       ]
     },
     "answer": { "type": "string" },
-    "answered_by": { "type": "string" }
+    "answered_by": { "type": "string" },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "closed: why the workspace closed the question, one plain line (relay-api.md 'Question taken back'), e.g. 'Answered in orch'. Never the answer itself."
+    }
   },
   "allOf": [
     {
@@ -100,6 +106,10 @@
     {
       "if": { "properties": { "type": { "const": "answered" } } },
       "then": { "required": ["workspace", "ticket", "key", "question_id", "answer", "answered_by"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "closed" } } },
+      "then": { "required": ["workspace", "ticket", "key", "question_id", "reason"] }
     },
     {
       "if": { "properties": { "type": { "const": "test" } } },

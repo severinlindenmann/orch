@@ -242,6 +242,18 @@ def prepare(counts):
     return {"counts": counts, "inventory": inventory, "entries": entries, "rows": rows}
 
 
+def lost_view(counts):
+    """ORCH-189: helper actions that were not recorded in the window; the page says the counts are too low."""
+    lost = counts.get("lost") if isinstance(counts, dict) else None
+    n = lost.get("lines") if isinstance(lost, dict) else 0
+    if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+        return None
+    return {
+        "lines": n,
+        "text": f"{n:,} helper actions in the last 30 days were not recorded, so the counts on this page are too low.",
+    }
+
+
 def build_overview(counts) -> dict:
     """Fail closed: unavailable and partial answers contain no apparent zero totals or rows."""
     ready = prepare(counts)
@@ -250,6 +262,9 @@ def build_overview(counts) -> dict:
     counts, entries, rows = ready["counts"], ready["entries"], ready["rows"]
     # Rows live in the lists (/api/list/<tab>); the overview keeps the tab counts and the cards.
     tabs = {tab: {"count": sum(key[0] == kind for key in rows)} for kind, tab in TABS.items()}
+    # The connected services are measured only when the counts carry their list. Without it the count holds only
+    # the services a helper happened to use, and the page says "Not measured yet" instead of a false 0 (ORCH-72).
+    tabs["connections"]["known"] = bool(counts["inventory"]["connections"])
     cards = _cards(entries, rows)
     sharing = counts["sharing"]["counts"] == "on"
     return {
@@ -263,4 +278,5 @@ def build_overview(counts) -> dict:
         "empty_needs": "All good this month." if not cards else None,
         "tabs": tabs,
         "first_day": counts["runs"] == 0 and not any(item["uses"] for item in counts["items"]),
+        "lost": lost_view(counts),
     }

@@ -88,7 +88,7 @@ _PV_KEYS = {
     "doc": {"type", "heading", "paras", "steps"},
     "table": {"type", "cols", "rows"},
     "compare": {"type", "note", "before", "after"},
-    "options": {"type", "options"},
+    "options": {"type", "options", "before"},
 }
 _OPT_KEYS = {"id", "title", "text", "preview"}
 
@@ -106,6 +106,52 @@ def _drop_empty(d: dict, keys: tuple) -> None:
             del d[k]
 
 
+# A doc box may carry a little structure (ORCH-183, a merge card): a status line with a tone, rows with a
+# short key and a number, and a small footer. The phone gets them as plain paras and steps (wire_card), so
+# its schema stays unchanged.
+DOC_EXTRA = {"status", "rows", "foot"}
+STATUS_TONES = ("done", "working", "failed")
+
+
+def _doc_extra(pv: dict, where: str) -> None:
+    st = pv.get("status")
+    if st is not None:
+        if not isinstance(st, dict) or set(st) != {"tone", "text"} or st["tone"] not in STATUS_TONES:
+            raise Refused(f"{where}.status is {{tone: {'|'.join(STATUS_TONES)}, text}}.")
+        _text(st["text"], "status", 200, required=True)
+    rows = pv.get("rows", [])
+    if not isinstance(rows, list) or len(rows) > 50:
+        raise Refused(f"{where}.rows is a list of at most 50 rows.")
+    for r in rows:
+        if not isinstance(r, dict) or not set(r) <= {"title", "key", "n"} or "title" not in r:
+            raise Refused(f"{where}.rows: each row is {{title, key?, n?}}.")
+        _text(r["title"], "rows.title", 300, required=True)
+        if "key" in r:
+            _text(r["key"], "rows.key", 20, required=True)
+        if "n" in r and (not isinstance(r["n"], int) or isinstance(r["n"], bool) or not 0 < r["n"] < 10**9):
+            raise Refused(f"{where}.rows: n is a positive number.")
+    if "foot" in pv:
+        _text(pv["foot"], "foot", 200, required=True)
+
+
+def _plain_doc(p: dict) -> dict:
+    """A doc box with status, rows or foot as the phone schema knows it: those become paras and steps."""
+    if not DOC_EXTRA & set(p):
+        return p
+    q = {k: v for k, v in p.items() if k not in DOC_EXTRA}
+    paras = ([p["status"]["text"]] if isinstance(p.get("status"), dict) else []) + list(p.get("paras") or [])
+    rows = [
+        r["title"] + (f" (#{r['n']}" + (f", {r['key']}" if r.get("key") else "") + ")" if r.get("n") else "")
+        for r in p.get("rows") or []
+    ]
+    paras += [p["foot"]] if p.get("foot") else []
+    if paras:
+        q["paras"] = paras[:50]
+    if rows or p.get("steps"):
+        q["steps"] = (rows + list(p.get("steps") or []))[:50]
+    return q
+
+
 def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) -> dict:
     """Check one preview; every file reference found is appended to refs as (dict, key)."""
     if depth > 2 or not isinstance(pv, dict):
@@ -113,8 +159,8 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
     t = pv.get("type")
     if t not in PREVIEW_TYPES:
         raise Refused(f"{where}: preview type must be one of {', '.join(PREVIEW_TYPES)}.")
-    _only(pv, _PV_KEYS[t], where)
-    _drop_empty(pv, ("alt", "heading", "note"))
+    _only(pv, _PV_KEYS[t] | (DOC_EXTRA if t == "doc" else set()), where)
+    _drop_empty(pv, ("alt", "heading", "note", "foot"))
     if t in ("page", "img"):
         _file_name(pv.get("src"), f"{where}.src")
         refs.append((pv, "src"))
@@ -122,6 +168,7 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
             _text(pv.get("alt"), "alt", 200)
     elif t == "doc":
         _text(pv.get("heading"), "heading", 200)
+        _doc_extra(pv, where)
         for key in ("paras", "steps"):
             items = pv.get(key, [])
             if not isinstance(items, list) or len(items) > 50:
@@ -175,7 +222,14 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
             _text(o.get("text"), "option text", 500)
             if o.get("preview") is not None:
                 _walk_preview(o["preview"], f"{where}.options[{i}].preview", refs, depth + 1)
+        if pv.get("before") is not None:  # how it is today, shown beside the options (not one to pick)
+            _walk_preview(pv["before"], f"{where}.before", refs, depth + 1)
     return pv
+
+
+def is_plain_url(url) -> bool:
+    """A plain http(s) address (the same rule as a card's open)."""
+    return isinstance(url, str) and len(url) <= 500 and bool(_OPEN.fullmatch(url))
 
 
 def validate_card(card) -> dict:
@@ -351,7 +405,10 @@ def card_files_of(card: dict) -> list[str]:
     """The stored file references of a card (reviewed/<sha12>/<name>), each once, in the order they appear."""
     refs: list[tuple[dict, str]] = []
     if isinstance(card.get("preview"), dict):
-        _walk_preview(json.loads(json.dumps(card["preview"])), "preview", refs)
+        pv = json.loads(json.dumps(card["preview"]))
+        if pv.get("type") == "options":
+            pv.pop("before", None)  # not on the phone's card (wire_card)
+        _walk_preview(pv, "preview", refs)
     out: list[str] = []
     for d, k in refs:
         if d[k] not in out:
@@ -393,10 +450,12 @@ def wire_card(card: dict, refs: dict) -> dict:
         return {"file": None, "why": r if r in _WHY else "held_back"}
 
     def pv(p):
+        if p.get("type") == "doc":
+            p = _plain_doc(p)
         o = {}
         for k, v in p.items():
-            if v is None or v == "":
-                continue
+            if v is None or v == "" or (k == "before" and p.get("type") == "options"):
+                continue  # the phone shows a choice's options only (its card has no Today picture yet)
             if k == "src":
                 o[k] = src(v)
             elif k in ("before", "after"):
@@ -683,6 +742,9 @@ def _decision(q: dict, card: dict, verdict: str, picked, note) -> dict:
         "replaced_by": None,
     }
     d["summary"] = summary(d, card)
+    if action == "send_back" and card.get("kind") == "choice":
+        # own words on a question (as on Home's "Write your own"): the words are the answer
+        d["summary"] = _clip("; ".join(changes), 400)
     return d
 
 
@@ -743,6 +805,51 @@ def _check_open(ticket: dict) -> str | None:
     return None
 
 
+_CHECK_FILE_TYPES = {
+    ".png": "img", ".jpg": "img", ".jpeg": "img", ".webp": "img", ".gif": "img",
+    ".html": "page", ".htm": "page", ".pdf": "file",
+}  # fmt: skip
+_CHECK_FILE_NAME = re.compile(r"[^/\\\x00-\x1f\x7f]{1,200}(/[^/\\\x00-\x1f\x7f]{1,200}){0,3}")
+MAX_CHECK_FILES = 6
+
+
+def _check_files(ticket: dict, root: Path | None) -> list[dict]:
+    """The result's own files a person wants to see on the card (ORCH-183): pictures, web pages and PDFs
+    from the steps' evidence (with the helper's title), then from the artifacts folder (with `root`). Each is
+    {name, type: img|page|file, ref: evidence/<name> | artifacts/<name>, stamp}; the stamp (size, time) puts
+    a changed file into check_digest. Files are named, never read here; the page asks for them like the Files
+    tab."""
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(folder: str, name: str, label: str, stamp: str) -> None:
+        kind = _CHECK_FILE_TYPES.get(os.path.splitext(name)[1].lower())
+        ref = f"{folder}/{name}"
+        if not kind or ref in seen or len(out) >= MAX_CHECK_FILES or not _CHECK_FILE_NAME.fullmatch(name):
+            return
+        if any(p in ("", ".", "..") or p.startswith(".") for p in name.split("/")) or _NAME_BAD.search(label):
+            return
+        seen.add(ref)
+        out.append({"name": _clip(label, 80), "type": kind, "ref": ref, "stamp": _clip(stamp, 60)})
+
+    head = f".orch/tickets/{ticket['id']}/evidence/"
+    for c in ticket.get("checklist") or []:
+        for ev in (c.get("evidence") if isinstance(c, dict) else None) or []:
+            ref = ev.get("ref") if isinstance(ev, dict) else None
+            if ev.get("type") == "file" and isinstance(ref, str) and ref.startswith(head):
+                name = ref[len(head) :]
+                title = ev.get("title") if isinstance(ev.get("title"), str) and ev["title"].strip() else name
+                add("evidence", name, title.strip(), str(ev.get("text") or ""))
+    if root is not None:
+        try:
+            rows = tickets.artifacts_list(root, ticket["id"])
+        except (Refused, OSError, ValueError):
+            rows = []
+        for a in rows:
+            add("artifacts", a["name"], a["name"].rsplit("/", 1)[-1], f"{a['size']} {a['mtime']}")
+    return out
+
+
 def _parent_line(ticket: dict, root: Path | None) -> str:
     """'Part of: ORCH-49 Factory follow-ups' for a sub-ticket (needs `root`); "" without a parent."""
     pid = ticket.get("parent")
@@ -774,6 +881,11 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     paras += [x for x in (_parent_line(ticket, root),) if x]
     uncovered = tickets.proof_state(ticket)["uncovered"]
     paras += [_clip(f"No task covers: “{p}”", 600) for p in uncovered[:10]]
+    if uncovered:  # what the person can do about it (ORCH-183)
+        paras.append(
+            "What to do: send it back and say which part is missing,"
+            " or approve it if that part does not matter."
+        )
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
@@ -786,6 +898,9 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     url = _check_open(ticket)
     if url:
         card["open"] = url
+    files = _check_files(ticket, root)
+    if files:
+        card["files"] = files
     if steps or paras:
         card["preview"] = {"type": "doc", "heading": "What was done"}
         if paras:
@@ -824,7 +939,10 @@ def decide(
     d = _decision(q, card, verdict, picked, note)
     if digest is not None and tickets.question_digest(q) != digest:  # before a merge, not only at the write
         raise Refused(f"{key} changed after it was shown. Look at the question again, then answer.")
-    _merge_first(root, tid, q, d, by, via)
+    try:
+        _merge_first(root, tid, q, d, by, via)
+    except _merge_failed() as e:  # GitHub said no: the helper gets the reason and fixes it
+        d = _send_back_after_failed_merge(card, str(e))
     _, out = tickets.answer(
         root, tid, key, _plain_answer(q, d), by, via, expected_question_digest=digest, decision=d
     )
@@ -841,6 +959,23 @@ def merge_url(q: dict) -> str | None:
     if card.get("kind") != "link" or card.get("open") != url or card.get("ok_label") != "Merge":
         return None
     return url
+
+
+def _merge_failed():
+    from orch.ghmerge import MergeFailed
+
+    return MergeFailed
+
+
+def _send_back_after_failed_merge(card: dict, reason: str) -> dict:
+    """The Merge click was refused by GitHub: answer the card as sent back to the helper, with the reason as
+    the change to make (the helper then takes develop in, asks for a review or whatever the rule needs)."""
+    from orch.ghmerge import OPEN_IT
+
+    reason = _clip(reason.replace(OPEN_IT, "").strip(), 400)
+    out = _bare("send_back", None, [f"Merge failed on GitHub, please fix it: {reason}"], _note_bv(None))
+    out["summary"] = summary(out, card)
+    return out
 
 
 def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> None:
@@ -865,6 +1000,93 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
 
     with contextlib.suppress(Refused, OSError):  # merged; the answer itself is written next
         tickets.note_history(root, tid, by, line, via)
+
+
+def tend_releases(
+    root: Path, dry_run: bool = False, checks_of=None, merge_with=None, release_check=None
+) -> dict:
+    """One pass of the release keeper (`orch review tend-releases`): every unanswered release Merge card
+    (`orch ask ... --merge --release`) whose pull request is open, not a draft, still on the card's commit and
+    green on every check is merged with the gh login of this computer (the owner's: ghmerge drops helper
+    tokens) and recorded as answered by the release keeper. Only while the owner turned it on in Settings
+    (`workflow.release_merge`) and automation is not paused. Returns {"off", "paused", "actions": [{ticket,
+    key, question, url, verdict, why, done}]}; verdict is merge, wait or stale. dry_run only says it.
+    Only a real release merges: from a release/... branch into the default branch, changing nothing that is
+    not on develop already (ghmerge.release_problem), so a card a helper marks --release on other work never
+    merges by itself. Refused inside a helper (an agent tool in the environment), like the Merge click.
+    No AI call: a repeating automation script runs it."""
+    from orch import brake, config, ghmerge
+
+    checks_of = checks_of or ghmerge.checks
+    merge_with = merge_with or ghmerge.merge
+    release_check = release_check or ghmerge.release_problem
+    if tickets.agent_tool():
+        raise Refused("Releases merge from the automation on this computer, not inside a helper.")
+    if not config.release_merge_on(root):
+        return {"off": True, "paused": False, "actions": []}
+    if brake.paused(root) is not None:
+        return {"off": False, "paused": True, "actions": []}
+    actions = []
+    for t in tickets.list_all(root):
+        if t.get("status") in ("done", "dropped"):
+            continue
+        for q in t.get("questions") or []:
+            url = merge_url(q)
+            act = q.get("action") if isinstance(q.get("action"), dict) else {}
+            if url is None or act.get("release") is not True or q.get("answer") is not None:
+                continue
+            if tickets.taken_back_text(q):
+                continue
+            head = act.get("head")
+            row = {"ticket": t["id"], "key": t.get("key") or t["id"], "question": q["id"], "url": url,
+                   "done": False}  # fmt: skip
+            got = checks_of(url)
+            if got is None:
+                row.update(verdict="wait", why="GitHub could not be read")
+            elif got["state"] != "OPEN" or got["head"] != head:
+                row.update(verdict="stale", why="the pull request changed or closed; a new card is needed")
+            elif not got["green"]:
+                row.update(verdict="wait", why="not every check is green yet")
+            elif (why := release_check(url, head)) is not None:
+                row.update(verdict="wait", why=f"not a release that merges by itself: {why}")
+            else:
+                row.update(verdict="merge", why="every check is green")
+            if row["verdict"] != "merge" or dry_run:
+                actions.append(row)
+                continue
+            try:
+                done = merge_with(url, head)
+                d = _bare("approve", "Merge", [], _note(None))
+                d["summary"] = "Merged by itself: every check was green."
+                line = (f"merged already on GitHub ({done['login']}): {url}" if done.get("already")
+                        else f"merged on GitHub as {done['login']}: {url}")  # fmt: skip
+                tickets.merged_for_owner(root, t["id"], q["id"], url, head, line, d)
+                row["done"] = True
+            except Refused as e:  # GitHub said no, or the card changed: the owner's click still works
+                row.update(verdict="wait", why=str(e))
+            actions.append(row)
+    return {"off": False, "paused": False, "actions": actions}
+
+
+def tend_releases_text(result: dict, dry_run: bool = False) -> str:
+    if result.get("off"):
+        return (
+            "Releases merge only on your click here. "
+            "Turn it on: Settings, or orch config set workflow.release_merge on"
+        )
+    if result.get("paused"):
+        return "Automation is paused: no release merges by itself now."
+    rows = result.get("actions") or []
+    if not rows:
+        return "No release waits for a merge."
+    out = []
+    for r in rows:
+        if r["verdict"] == "merge":
+            word = "would merge" if dry_run else ("merged" if r["done"] else "not merged")
+        else:
+            word = "waits" if r["verdict"] == "wait" else "needs a new card"
+        out.append(f"{r['key']} {r['question']}: {word} ({r['why']}) {r['url']}")
+    return "\n".join(out)
 
 
 def _decide_check(
@@ -995,6 +1217,9 @@ def stack(root: Path) -> list[dict]:
                         "since": needs._asked_at(root, t, q["id"]),
                         "options": list(q.get("options") or []),
                         "recommended": q.get("recommended"),
+                        "text": q.get("text") or "",
+                        **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
+                        **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
                     }
                 )
         if t.get("status") == "review":

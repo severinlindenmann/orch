@@ -8,17 +8,18 @@
       "prompt_via": "arg",
       "model_args": ["--model", "{model}"],
       "oneshot": {
-        "fresh": ["claude", "-p", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
-        "resume": ["claude", "-p", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
+        "fresh": ["claude", "-p", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch ticket model:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
+        "resume": ["claude", "-p", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch ticket model:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
         "stream_args": ["--output-format", "stream-json", "--verbose"],
         "events": "claude-stream-json/1",
         "allow_args": ["--allowedTools", "{allow}"],
         "settings_args": ["--settings", "{reminder_json}"]
       },
       "live": {
-        "fresh": ["claude", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--settings", "{orch_hooks_file}"],
-        "resume": ["claude", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--settings", "{orch_hooks_file}"],
+        "fresh": ["claude", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch ticket model:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--settings", "{orch_hooks_file}"],
+        "resume": ["claude", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch ticket model:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--settings", "{orch_hooks_file}"],
         "send": "notice-line+Enter",
+        "model_line": "/model {model}",
         "prompt_box": true,
         "dialog": "Do you want to (proceed|make this edit|create)|^\\s*❯\\s*\\d\\.|trust (this folder|the files)",
         "interrupt_keys": ["Escape"],
@@ -43,9 +44,14 @@
       "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
       "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
       "record_hooks": { "PreToolUse": "orch record hook", "PostToolUse": "orch record hook", "PostToolUseFailure": "orch record hook" },
-      "login": { "status": ["auth", "status", "--json"], "logged_in": "loggedIn", "ends": "loginExpiresAt" },
+      "login": {
+        "status": ["auth", "status", "--json"], "logged_in": "loggedIn", "ends": "loginExpiresAt",
+        "renew": ["auth", "login"],
+        "links": ["https://claude.com/", "https://claude.ai/", "https://platform.claude.com/", "https://console.anthropic.com/"]
+      },
       "reminder": { "settings_file": ".claude/settings.local.json", "settings_dir_env": "CLAUDE_CONFIG_DIR", "skip": [".claude", ".agents", "CLAUDE.local.md"], "input": { "event": "hook_event_name", "cwd": "cwd", "default_event": "UserPromptSubmit" }, "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } } },
-      "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] } },
+      "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] }, "chat_files": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "glob": "projects/*/{session}.jsonl", "lines": "chat" } },
+      "connection_check": { "list": ["mcp", "list"], "sign_in": "Open Claude Code, type /mcp and sign in to {name} again." },
       "mcp_settings": [
         { "file": "{home}/.claude.json", "format": "json", "path": ["mcpServers"] },
         { "file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"] },
@@ -59,8 +65,8 @@
       "detect": { "binary": "codex", "env_prefix": "CODEX_" },
       "prompt_via": "arg",
       "oneshot": {
-        "fresh": ["codex", "exec", "--json", "--", "{prompt}"],
-        "resume": ["codex", "exec", "resume", "--json", "{session}", "--", "{prompt}"]
+        "fresh": ["codex", "exec", "--skip-git-repo-check", "--json", "--", "{prompt}"],
+        "resume": ["codex", "exec", "resume", "--skip-git-repo-check", "--json", "{session}", "--", "{prompt}"]
       },
       "live": null,
       "permissions": {
@@ -70,7 +76,8 @@
       },
       "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
-      "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id" },
+      "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id", "chat_files": { "dir_env": "CODEX_HOME", "home": ".codex", "glob": "sessions/*/*/*/rollout-*-{session}.jsonl", "lines": "items" } },
+      "login": { "status": ["login", "status"], "how": "Open a terminal on this computer and run: codex login" },
       "mcp_settings": [
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],

@@ -37,11 +37,11 @@ test('a slow or broken Live now answer never keeps the tickets hidden', async ()
   assert.equal(await settled(broken.ready(1000), 200), true, 'a failed answer counts as done');
 });
 
-test('the lists are drawn only after the Live now wait, and the in-app jump to a ticket does not wait', () => {
+test('the lists are drawn only after the Helpers list wait, and Focus never jumps to a ticket (ORCH-61)', () => {
   const js = web('ticket.js');
-  const wait = js.indexOf('S.views.livenow.ready(LIVE_WAIT_MS)'), jump = js.indexOf('location.replace(P + \'/t/\' + next.ticket.id'), groups = js.indexOf("['waiting', 'Needs you', 'Answer']");
-  assert.ok(wait > 0 && jump > 0 && groups > 0);
-  assert.ok(jump < wait && wait < groups);
+  const wait = js.indexOf('S.views.livenow.ready(LIVE_WAIT_MS)'), groups = js.indexOf("['waiting', 'Needs you', 'Answer']");
+  assert.ok(wait > 0 && groups > 0 && wait < groups);
+  assert.doesNotMatch(js, /location\.replace\(P \+ '\/t\/'/);
 });
 
 test('live cards no longer change the page width', () => {

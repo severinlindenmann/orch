@@ -77,6 +77,7 @@ def test_example_denominators_inventory_and_privacy(answer):
         "connections": 3,
         "keys": 2,
     }
+    assert view["tabs"]["connections"]["known"] is True
     row = build_list(answer, "skills")["rows"][0]
     assert row["name"] == "Invoice export"
     assert row["numbers"] == "5 of 23 runs"
@@ -437,3 +438,23 @@ def test_bundled_counts_contract_matches_repository():
     assert json.loads(PACKAGE.joinpath("answer.schema.json").read_text()) == expand(
         schema, "counts.schema.json"
     )
+
+
+def test_connections_without_their_list_are_not_measured(answer):
+    """No list of connected services in the counts: the page must say "Not measured yet", never a false 0 (ORCH-72)."""
+    answer["inventory"] = {**answer["inventory"], "connections": []}
+    assert build_overview(answer)["tabs"]["connections"]["known"] is False
+
+
+def test_lost_helper_actions_are_said(answer, nothing):
+    """ORCH-189: a record that lost hook lines is not "nothing was used"; the page says the counts are too low."""
+    assert build_overview(answer)["lost"] is None
+    for counts in (answer, nothing):
+        view = build_overview(
+            {**counts, "lost": {"lines": 2136, "reasons": {"hider_off": 2136}, "errors": {}}}
+        )
+        assert view["lost"] == {
+            "lines": 2136,
+            "text": "2,136 helper actions in the last 30 days were not recorded, so the counts on this page are too low.",
+        }
+    assert build_overview({**answer, "lost": {"lines": 0, "reasons": {}, "errors": {}}})["lost"] is None

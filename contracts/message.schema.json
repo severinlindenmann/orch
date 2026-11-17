@@ -38,6 +38,7 @@
         { "if": { "required": ["body"], "properties": { "body": { "required": ["review_result"], "properties": { "review_result": { "required": ["result"], "properties": { "result": { "const": "decided" } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Already decided" } } } } } }
       ] } },
     { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["taken_back"] } } }, "then": { "required": ["reply_to", "ticket"], "properties": { "type": { "const": "text" }, "to": { "const": "phones" }, "body": { "additionalProperties": false, "required": ["text"], "properties": { "text": { "type": "string", "not": { "pattern": "\\n" }, "pattern": "^Taken back: [^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]{1,200}$" }, "taken_back": {} } } } } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["tool_alert"] } } }, "then": { "properties": { "type": { "const": "text" }, "to": { "const": "phones" }, "body": { "additionalProperties": false, "required": ["text"], "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]*\\S[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]*$" }, "tool_alert": {} } } }, "not": { "anyOf": [{ "required": ["ticket"] }, { "required": ["key"] }, { "required": ["reply_to"] }] } } },
     { "if": { "properties": { "type": { "const": "control" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/control" } } } },
     { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/file" } } } },
     { "if": { "properties": { "type": { "const": "question" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/question" } }, "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["proposal"] } } }, "then": { "not": { "required": ["ticket"] } }, "else": { "required": ["ticket"] } } },
@@ -162,6 +163,7 @@
         "proposal_result": { "$ref": "#/$defs/proposal_result" },
         "review_result": { "$ref": "#/$defs/review_result" },
         "taken_back": { "$ref": "#/$defs/taken_back" },
+        "tool_alert": { "$ref": "#/$defs/tool_alert" },
         "update": {
           "type": "object", "required": ["kind"], "additionalProperties": false,
           "properties": {
@@ -198,6 +200,19 @@
       "type": "object", "additionalProperties": false, "required": ["reason"],
       "properties": {
         "reason": { "type": "string", "minLength": 1, "maxLength": 200, "not": { "pattern": "\\n" }, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]*\\S[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]*$", "description": "One plain line: why the question no longer matters. No control characters, not blank." }
+      }
+    },
+    "tool_alert": {
+      "description": "Not chat. The workspace warns the phones that a tool login, connection or key a helper needs runs out soon or stopped working (tool-alert.md): one text to `phones`, no ticket, no reply_to, no update, body only {text, tool_alert}. The relay pushes it like any workspace text. Never a bubble, never unread; the phone keeps one row per name until state works. Never a secret, account or ticket title.",
+      "type": "object", "additionalProperties": false, "required": ["name", "label", "kind", "state", "ends_at", "stops", "no_new_work"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "The stable name of the check (health item name)." },
+        "label": { "type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]*\\S[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]*$", "description": "The tool name as dashboard Home shows it, one plain line." },
+        "kind": { "enum": ["login", "connection", "key"] },
+        "state": { "enum": ["soon", "renew", "unreachable", "works"], "description": "works = works again (the phone removes the row)." },
+        "ends_at": { "oneOf": [{ "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }, { "type": "null" }] },
+        "stops": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "$ref": "#/$defs/display_key" }, "description": "Display keys of the tickets whose helpers it stops." },
+        "no_new_work": { "type": "boolean", "description": "true = the helper chosen here stopped working: helpers start no new work." }
       }
     },
     "card_text": { "type": "string", "minLength": 1, "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]*$" }, { "pattern": "\\S" }], "description": "review.py _text: not blank, no control characters but newline and tab, no DEL, no bidi embedding/override/isolate characters (U+202A-U+202E, U+2066-U+2069; stricter than review.py today, which must align). Lengths are set where it is used (code points, as Python len)." },

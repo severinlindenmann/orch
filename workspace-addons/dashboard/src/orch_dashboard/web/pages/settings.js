@@ -2,6 +2,23 @@
 // Settings, add-on pages and add-on actions.
 let settingsTab = 'general', settingsAddon = null;
 const settingsBusy = new Set();
+// ORCH-227: a choice shows at once, with "Saving…", while it is saved; a click while one saves is sent after it (the
+// last click wins). settingsPending holds the picked value per key, settingsQueued the next send.
+const settingsPending = new Map(), settingsQueued = new Map();
+async function settingsChoose(key, value, send) {
+  settingsPending.set(key, value);
+  if (settingsBusy.has(key)) { settingsQueued.set(key, send); render(); return null; }
+  let result = await send();
+  while (settingsQueued.has(key)) {
+    const next = settingsQueued.get(key);
+    settingsQueued.delete(key);
+    result = await next();
+  }
+  settingsPending.delete(key);
+  render();
+  return result;
+}
+const settingsSaving = key => settingsPending.has(key) ? settingsText('span', {className:'meta', role:'status', 'data-key':'settings-saving-' + key}, 'Saving…') : null;
 // A long path keeps its start and its end: "/Users/me/…/team/pilatus". The full path is in the row's title.
 const middleShort = (value, max = 48) => {
   const text = String(value ?? '');
@@ -10,7 +27,7 @@ const middleShort = (value, max = 48) => {
   return text.slice(0, head) + '…' + text.slice(-tail);
 };
 // The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
-const rowLabel = a => capitalise(a?.name || 'add-on');
+const rowLabel = a => capitalise(a?.label || a?.dashboard?.label || a?.name || 'add-on');
 // "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
 const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, a.active ? 'Turning off…' : 'Turning on…') : null;
 // A change of the add-ons restarts this page's server: nothing asks it (or an add-on's page) until it is back.
@@ -44,28 +61,50 @@ function addonFacts(addon) {
 const FULL_WARNING = 'Never asks: a helper can change or delete anything in this folder and run any command without asking.';
 const PERMISSION_CHOICES = [['ask', 'Asks first', 'Before it changes anything. Example: it asks before editing a file.'], ['auto', 'Asks for risky things', 'It works on its own and asks only when something is risky. Example: it asks before deleting.'], ['full', 'Never asks', 'It changes things without asking. Example: it deletes a file straight away. Only use this if you trust it.']];
 function permissionsCard(settings) {
-  const current = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
+  const saved = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
+  const current = settingsPending.has('permissions') ? settingsPending.get('permissions') : saved;
   const rows = PERMISSION_CHOICES.map(([value, label, hint]) => {
-    const radio = h('input', {type:'radio', name:'settings-permissions', value, 'data-key':'settings-permissions-' + value, 'data-settings-permissions':value, disabled:snapshot || settingsBusy.has('permissions')});
+    const radio = h('input', {type:'radio', name:'settings-permissions', value, 'data-key':'settings-permissions-' + value, 'data-settings-permissions':value, disabled:snapshot});
     radio.checked = value === current;
     return h('label', {className:'card-row agent-opt' + (value === current ? ' sel' : ''), 'data-key':'settings-permissions-row-' + value}, radio,
       h('div', {className:'grow'}, settingsText('h3', {}, label), settingsText('p', {className:'meta'}, hint)));
   });
-  return h('div', {className:'stack', 'data-key':'settings-permissions'}, h('h2', {className:'set-sub'}, 'What a helper may do'),
+  return h('div', {className:'stack', 'data-key':'settings-permissions'}, h('h2', {className:'set-sub'}, 'What a helper may do', ' ', settingsSaving('permissions')),
     h('div', {className:'card'}, h('div', {className:'permission-choices', role:'radiogroup', 'aria-label':'What a helper may do'}, rows),
       current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
+}
+// What helpers need (ORCH-45, drawn and chosen on ORCH-43): every tool login, connection and key a helper needs here,
+// with whether it works, when it runs out and how many tickets it stops. The buttons are Home's (loginAction): Renew
+// from the renew step when it is there, else Check again / Try again. Never checked yet or nothing set: no card.
+function helperNeedsCard() {
+  const D = window.DashHelpers, items = D.needItems(snapshot ? null : state.logins);
+  if (!items.length) return null;
+  const at = state.logins.checked_at, when = typeof age === 'function' ? age(at) : '';
+  const rows = items.map(item => {
+    const key = 'settings-need-' + item.name, st = D.needState(item), stops = D.needStopsWord(item.state === 'works' ? 0 : item.stops.length);
+    const action = typeof loginAction === 'function' ? loginAction(item, key, item.state === 'works') : null;
+    return h('div', {className:'setting-row', 'data-key':key, 'data-state':item.state},
+      h('div', {className:'row-label'}, settingsText('span', {}, D.needListName(item)), settingsText('p', {className:'meta'}, D.needKindWord(item))),
+      h('div', {className:'row-value'}, h('span', {className:'badge ' + st.tone}, st.word), stops ? settingsText('p', {className:'meta'}, stops) : null,
+        (typeof loginHowText === 'function' ? loginHowText(item) : '') ? settingsText('p', {className:'meta', 'data-key':key + '-how'}, (typeof loginHowText === 'function' ? loginHowText(item) : '')) : null),
+      h('div', {className:'row-action'}, action));
+  });
+  return h('section', {className:'card', id:'needs', 'data-key':'settings-needs'},
+    h('header', {className:'card-h row between'}, h('h3', {}, 'What helpers need'), when ? settingsText('span', {className:'meta', 'data-key':'settings-needs-when'}, 'Checked ' + when) : null),
+    rows);
 }
 // Share with team: off by default; on writes one short entry into the team's AGENTS.md (the orch files stay local).
 // Helpers at once (ORCH-16): no limit by default; a number makes the next helper wait in line until one is
 // finished. Saved on change, like the copies cap (a select, no typed words).
 const LIVE_MAX_CHOICES = [2, 3, 4, 5, 6, 7, 8, 9, 10];
 function helpersAtOnceCard(settings) {
-  const n = LIVE_MAX_CHOICES.includes(settings.live_max) ? settings.live_max : null;
-  const pick = h('select', {className:'input copies-max', 'aria-label':'Helpers at once', 'data-key':'settings-live-max', disabled:snapshot || settingsBusy.has('live')},
+  const want = settingsPending.has('live') ? settingsPending.get('live') : settings.live_max;
+  const n = LIVE_MAX_CHOICES.includes(want) ? want : null;
+  const pick = h('select', {className:'input copies-max', 'aria-label':'Helpers at once', 'data-key':'settings-live-max', disabled:snapshot},
     h('option', {value:'none'}, 'No limit'), LIVE_MAX_CHOICES.map(v => h('option', {value:String(v)}, String(v))));
   pick.value = n ? String(n) : 'none';
   return h('div', {className:'stack', 'data-key':'settings-live'}, h('div', {className:'card'}, h('div', {className:'card-row'},
-    h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers at once'),
+    h('div', {className:'grow'}, h('h3', {}, 'Helpers at once', ' ', settingsSaving('live')),
       settingsText('p', {}, n ? 'When ' + n + ' helpers are working, the next one waits in line and starts when one is finished.' : 'Any number of helpers can work at the same time.'),
       settingsText('p', {className:'meta'}, 'Pick a number if your computer gets slow with many helpers.')),
     pick)));
@@ -133,6 +172,29 @@ function workflowCard(settings) {
         settingsText('p', {className:'meta'}, 'Example: the helper fixes a typo and closes the ticket; you find it under Done.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
+}
+// Accept small finished work for me (ORCH-77): one switch that saves at once; the Reviewer's work shows on Review.
+function reviewerCard(settings) {
+  return h('div', {className:'stack', 'data-key':'settings-reviewer'},
+    h('div', {className:'card'}, h('div', {className:'card-row'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Accept small finished work for me'),
+        settingsText('p', {className:'meta'}, 'Merged bug fixes with green checks and no change to looks, words or rules are marked Done for you. You see them on Review and can send any back.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')}))));
+}
+async function reviewerSwitch() {
+  await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');
+}
+// Merge releases without my click (ORCH-79): off = the owner clicks Merge on the release card; on = a release
+// with every check green merges by itself (orch review tend-releases). Only a person can turn it on.
+function releaseMergeCard(settings) {
+  return h('div', {className:'stack', 'data-key':'settings-release-merge'},
+    h('div', {className:'card'}, h('div', {className:'card-row'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Merge releases without my click'),
+        settingsText('p', {className:'meta'}, 'A release whose checks are all green goes in by itself with your GitHub login. You get the short highlights afterwards. Off: you click Merge on the card.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Merge releases without my click', 'aria-checked':!!settings.release_merge_on, 'data-key':'settings-switch-release-merge', 'data-action':'release-merge-set', disabled:snapshot || settingsBusy.has('release_merge')}))));
+}
+async function releaseMergeSwitch() {
+  await settingsSend('release_merge.set', {on:state.settings?.release_merge_on !== true}, 'release_merge');
 }
 // Separate copies (draft 1f, owner pass 11 Nov): one plain row with a switch; when, how many, what is on this
 // computer, how a copy is prepared and what it needs sit behind Details.
@@ -239,6 +301,7 @@ function syncReviewText(s) {
 // One click on the sync add-on's own verb; its answer comes back as state.act_answer.
 async function syncAct(verb, target, extra = {}) {
   const result = await act('addon.act', {addon:SYNC, verb, target, ...extra});
+  if (verb !== 'status' && verb !== 'check' && typeof addonViews === 'object') delete addonViews[SYNC];  // the Sync page's saved view is old now: it asks again, so Settings and the page agree (ORCH-184)
   const answer = result.ok && result.state?.act_answer?.addon === SYNC ? result.state.act_answer.answer : null;
   return {...result, answer};
 }
@@ -479,7 +542,7 @@ function everydayCard(settings, phoneAddon) {
   const row = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow set-ctl'}, value), snapshot ? null : action);
   return h('div', {className:'stack', 'data-key':'settings-everyday'}, h('h2', {className:'set-sub'}, 'Everyday settings'), h('div', {className:'card'},
     row('Helper', chosen ? chosen.label : 'No helper chosen yet', go('agent', 'Manage', 'settings-everyday-helper'), 'settings-everyday-helper-row'),
-    phoneAddon ? row('Phone questions', state.mobile_mode ? (state.mobile_mode.on ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
+    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
 }
 // Phone & workspaces (draft settings-phone): 1. the relay connection, 2. phones (paired on the relay admin page) + delivery,
 // then the workspaces this one may talk to. Everything comes from the relay add-on's saved connection (no network).
@@ -547,7 +610,7 @@ function addonDetailPage(addon) {
     heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Installed add-ons')}),
     h('div', {className:'card'}, settingsRows),
     where,
-    snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Remove from this computer')),
+    snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Uninstall')),
     h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
       settingsText('p', {className:'meta'}, connected && d.address ? 'Connection address: ' + d.address : addon.description || 'No connection address.'))));
 }
@@ -604,12 +667,10 @@ function settingsPage() {
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
-      snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
-        h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'/styleguide', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings)), diagCard(settings)]),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), reviewerCard(settings), releaseMergeCard(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
-      permissionsCard(settings), helpersAtOnceCard(settings)]),
+      helperNeedsCard(), permissionsCard(settings), helpersAtOnceCard(settings)]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
     panel('addons', addonsPanel),
     panel('about', aboutPanel())))
@@ -630,12 +691,12 @@ function updLoad(force = false) {
     if (route().kind === 'settings') render();
   });
 }
-async function updStart() {
+async function updStart(to) {
   const was = updUi.info?.installed;
   updUi.from = was?.release || was?.label || null; updUi.phase = 'running'; updUi.reason = ''; render();
   try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
   let res = null;
-  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:{}})}); } catch (e) { /* the server may already be restarting */ }
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' ? {to} : {}})}); } catch (e) { /* the server may already be restarting */ }
   if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }
@@ -651,6 +712,19 @@ if (typeof window !== 'undefined' && window.addEventListener) window.addEventLis
   if (d.state === 'finished') updLoad(true);
 });
 function updButton(text, key, fn) { const b = button(text, 'primary', fn); b.dataset.key = key; return b; }
+// Where this orch came from (issue 957): "Release" or "Development build" on the Installed line, and one click to switch.
+// The switch is the same detached `orch update` as the Update button, with --to (the official source at that branch).
+function buildLine(info, phase) {
+  const dev = info?.build === 'development';
+  if (info?.build !== 'release' && !dev) return null;
+  const idle = phase === 'idle' || phase === 'failed';
+  return [
+    h('span', {className:dev ? 'badge needs' : 'badge', 'data-key':'update-build'}, dev ? 'Development build' : 'Release'),
+    // What the build is sits under its name; what the button does sits beside the button (manager, 17 Nov).
+    dev ? settingsText('p', {className:'meta', 'data-key':'update-build-note'}, 'The newest changes, not yet tested as a release.') : null,
+    idle && !snapshot ? h('div', {className:'row'}, (() => { const b = button(dev ? 'Switch to release' : 'Switch to development build', 'outline sm', () => updStart(dev ? 'release' : 'development')); b.dataset.key = 'update-switch'; return b; })(),
+      settingsText('span', {className:'meta', 'data-key':'update-switch-note'}, (dev ? 'Installs the newest release' : 'Installs the newest changes, not yet tested as a release,') + ' and restarts. Your helpers keep their work.')) : null];
+}
 function updNum(v) { return typeof v === 'number' ? 'orch ' + v : String(v || ''); }
 function aboutPanel() {
   if (settingsTab === 'about') updLoad();  // the check runs when the tab is open, not on every Settings page
@@ -678,7 +752,7 @@ function aboutPanel() {
     const ready = info.update_available === true && newest;
     body = [
       // A build from a branch (no release number, a commit) is a normal case, not an error: say what it is, skip the check.
-      !newest && have?.sha && !have.release && info.ref ? settingsText('p', {className:'meta', 'data-key':'update-branch'}, 'This is a build from the \u201c' + clean(info.ref) + '\u201d branch, so there is no release to compare it with. Update checks are skipped.')
+      !newest && have?.sha && !have.release && info.ref ? settingsText('p', {className:'meta', 'data-key':'update-branch'}, 'This is a development build, so there is no release to compare it with. Update checks are skipped.')
         : !newest ? settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.')
         : ready ? h('div', {className:'upd-ready'}, settingsText('strong', {}, updNum(newest.release) || newest.label), settingsText('span', {className:'meta'}, ' is ready to install'))
         : settingsText('p', {className:'meta', 'data-key':'update-current'}, 'You have the newest version.'),
@@ -687,9 +761,12 @@ function aboutPanel() {
         info.source ? settingsText('span', {className:'meta'}, 'From ' + info.source) : null) : null];
   }
   return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
-    line('Installed', settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…'))),
+    line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…')), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
-    autoUpdateCard(info));
+    autoUpdateCard(info),
+    // About sits with the version (ORCH-89: it was under General)
+    snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about-orch'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
+      h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'/styleguide', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))));
 }
 // Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
 function autoUpdateCard(info) {
@@ -698,7 +775,7 @@ function autoUpdateCard(info) {
   return h('div', {className:'card', 'data-key':'settings-auto-update'}, h('div', {className:'card-row'},
     h('div', {className:'grow'}, settingsText('h3', {}, 'Update automatically when a new release is out'),
       settingsText('p', {}, 'orch installs it by itself at a quiet moment, never while a helper is working, and shows on Home what changed.'),
-      auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a development build: it follows the \u201c' + clean(auto.ref) + '\u201d branch, so it updates to every new version there, not only to releases.') : null),
+      auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a development build: it gets every new change as soon as it is ready, not only releases.') : null),
     h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':auto.on, 'aria-label':'Update automatically when a new release is out', 'data-key':'settings-switch-auto-update', 'data-action':'auto-update-set', disabled:snapshot || settingsBusy.has('auto-update')})));
 }
 async function autoUpdateSwitch() {
@@ -877,24 +954,88 @@ function pageStopped(r) {
     h('div', {className:'row'}, h('p', {className:'grow'}, label + ' isn’t running.'),
       h('button', {type:'button', className:'btn primary sm', 'data-action':'start', 'data-key':'page-start'}, 'Start'))));
 }
+// Every add-on page runs sandboxed: its own origin is opaque, so a script in it can never read this page's
+// secret or reach into this page (ORCH-186). One orch ships acts with a pass for that add-on only, handed over in
+// the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
+const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
+const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+function framePass(name) {
+  if (framePasses.has(name)) return framePasses.get(name);
+  if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
+  framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
+    .then(r => r.ok ? r.json() : null)
+    .then(j => {
+      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew()});
+      else framePassFailed.set(name, Date.now());
+    })
+    .catch(() => framePassFailed.set(name, Date.now()))
+    .finally(() => { framePassAsks.delete(name); if (framePasses.has(name)) render(); }));
+  return null;
+}
+// A per-frame code the page's messages must carry: a document that is navigated into the frame (not the add-on's
+// own page, which got it in its address) cannot drive the dashboard (ORCH-186 review M1).
+function frameChanNew() { const b = new Uint8Array(16); crypto.getRandomValues(b); return Array.from(b, x => x.toString(16).padStart(2, '0')).join(''); }
+globalThis.orchFrameChan = () => { const r = route(); return r.kind === 'page' ? framePasses.get(r.id)?.chan || null : null; };
+// Passes go only to the add-on's own page (its start page and its own places such as t/<id>), never to one of
+// its files, pictures, answers or ticket pages (api/, page/, kit/, web/, or any name with a dot): those can carry
+// content an agent made (ORCH-186 review H1).
+const frameEntry = path => /^[A-Za-z0-9_\/-]{0,300}$/.test(path) && !/^(api|page|kit|web)(\/|$)/i.test(path) && !path.includes('//');
+// The shown page moved inside itself (frame-at, ORCH-241): while the address is the one it moved to, the frame keeps
+// the address it was opened with, so drawing the page again never reloads it. {id, hash, pass, src}
+// Only while that same frame is still on screen: a new frame (back from another page) opens at the address's place.
+let frameKeep = null;
+const frameShown = () => document.querySelector('iframe.embed[data-key="embed"]');
 function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
-  const src = '/addon/' + r.id + '/' + r.path;
-  const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
+  const shipped = !!addons().find(a => a.name === r.id)?.shipped, base = '/addon/' + r.id + '/' + r.path;
+  const entry = shipped && frameEntry(r.path), p = entry ? framePass(r.id) : null;
+  if (entry && !p) { const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; return wait; }
+  const kept = entry && frameKeep && frameKeep.id === r.id && frameKeep.hash === r.hash && frameKeep.pass === p.pass && frameShown()?.getAttribute('src') === frameKeep.src ? frameKeep.src : null;
+  if (!kept) frameKeep = null;
+  const src = kept || (entry ? base + '#orch-frame=' + p.pass + '&orch-file=' + p.file + '&orch-chan=' + p.chan + (r.inner ? '&' + r.inner : '') : base + (r.inner ? '#' + r.inner : ''));
+  const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', sandbox:shipped ? SHIPPED_SANDBOX : 'allow-scripts'});  // allow alone: both log a warning (ORCH-186)
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
   if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }
-  // an add-on that orch did not ship gets an opaque origin: it cannot use the dashboard's session
-  if (!addons().find(a => a.name === r.id)?.shipped) frame.setAttribute('sandbox', 'allow-scripts');
-  else window.DiagTrail?.watchFrame(window, frame);  // a same-origin add-on page joins the action trail
   return fragment(skeleton, frame);
 }
+// The shown shipped add-on page asks to open another of its places (a link, or a fresh pass after a reload or an
+// expired one): the dashboard opens it, so the new page gets a pass. A link to the dashboard's own page moves it.
+// A move inside the page itself (frame-at) only changes the address: the frame is not loaded again.
+globalThis.addEventListener?.('message', e => {
+  const d = e.data, r = route();
+  if (snapshot || e.origin !== 'null' || !d || !['frame-go', 'frame-top', 'frame-at'].includes(d.orch) || r.kind !== 'page') return;
+  const frame = document.querySelector('iframe.embed[data-key="embed"]');
+  if (!frame || e.source !== frame.contentWindow || !addons().find(a => a.name === r.id)?.shipped) return;
+  const hash = typeof d.hash === 'string' && /^[A-Za-z0-9_\/-]{0,200}$/.test(d.hash) ? d.hash : null;
+  if (hash === null) return;
+  if (d.orch === 'frame-top') { if (hash && d.chan && d.chan === globalThis.orchFrameChan()) location.hash = '#' + hash; return; }
+  const prefix = '/addon/' + r.id + '/', rel = typeof d.path === 'string' && d.path.startsWith(prefix) ? d.path.slice(prefix.length) : null;
+  if (rel === null || rel.startsWith('/') || !frameEntry(rel)) return;  // only the add-on's own page gets opened with a pass
+  if (d.orch === 'frame-at') {  // only the page that had the code, and only a place on the page that is shown
+    if (!d.chan || d.chan !== globalThis.orchFrameChan() || rel !== r.path) return;
+    const at = '#addon/' + r.id + (rel ? '/' + rel : '') + (hash ? '#' + hash : '');
+    if (location.hash === at) return;
+    const src = frame.getAttribute('src') || '';
+    try { followAddress(at); } catch (_) { return; }  // the browser may refuse many address changes in a row
+    frameKeep = {id:r.id, hash:at, pass:/#orch-frame=([A-Za-z0-9_-]+)&/.exec(src)?.[1] || null, src};  // the pass the frame really has
+    return;
+  }
+  if (d.fresh && d.chan && d.chan === globalThis.orchFrameChan()) {  // new passes only for the page that had the code
+    if (Date.now() - (frameFresh.get(r.id) || 0) < 5000) return;
+    frameFresh.set(r.id, Date.now()); framePasses.delete(r.id);
+  }
+  const next = '#addon/' + r.id + (rel ? '/' + rel : '') + (hash ? '#' + hash : '');
+  if (location.hash !== next) location.hash = next;
+  else render();
+});
 const framesLoaded = new Set();
 // A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
 const shellAddons = new Set();
 globalThis.addEventListener?.('message', event => {
-  const name = event.origin === location.origin && event.data?.orch === 'embed-shell' && /^\/addon\/([a-z][a-z0-9-]{1,31})\//.exec(String(event.data.path || ''))?.[1];
+  const ours = event.origin === location.origin || (event.origin === 'null' && !!event.data?.chan && event.data.chan === globalThis.orchFrameChan() && [...document.querySelectorAll('iframe.embed')].some(f => f.contentWindow === event.source));
+  const name = ours && event.data?.orch === 'embed-shell' && /^\/addon\/([a-z][a-z0-9-]{1,31})\//.exec(String(event.data.path || ''))?.[1];
   if (!name || shellAddons.has(name)) return;
   shellAddons.add(name);
   document.querySelectorAll('iframe.embed').forEach(f => { if ((f.getAttribute('src') || '').startsWith('/addon/' + name + '/')) f.classList.add('embed-shell'); });
@@ -938,12 +1079,14 @@ function shownAddon() {
   const r = route();
   return r.kind === 'addon' && !(r.id === SYNC && syncNative()) ? r.id : null;
 }
-// Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> without a navigation.
+// The address names a tab like its label: Helper is #settings/helper, Contacts is #settings/contacts.
+const SETTINGS_TAB_ADDRESS = {agent:'helper', phone:'contacts'};
+// Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> (one history entry, so Back returns to the tab before).
 function settingsGo(tab) {
   settingsTab = tab;
   settingsAddon = null;
   settingsReview = null;
-  history.replaceState(null, '', '#settings/' + tab);
+  if (location.hash !== '#settings/' + (SETTINGS_TAB_ADDRESS[tab] || tab)) history.pushState(null, '', '#settings/' + (SETTINGS_TAB_ADDRESS[tab] || tab));
   render();
 }
 function addonBody(a, res) {
@@ -966,7 +1109,13 @@ function addonNotice(view) {
   if (snapshot || (op !== 'addon.start' && op !== 'addon.refresh')) return h('p', {className:tone}, clean(view.notice));
   return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':op === 'addon.start' ? 'start' : 'retry-addon'}, clean(b.label)));
 }
-let pendingRepeat = null;  // {title}: the repeat being saved, shown as a row
+let pendingRepeat = null;  // {tid, title, plan, removing}: the repeat being saved or removed, shown as a row
+// The cells of that row: "DEM-9 · Weekly report · Saving…" first, the new plan in the second cell (one line when one cell).
+function pendingCells(n, p) {
+  const head = p.title + (p.removing ? ' · Removing…' : ' · Saving…');
+  if (n < 2) return [head + (p.plan && !p.removing ? ' · ' + p.plan : '')];
+  return Array.from({length:n}, (_, i) => i === 0 ? head : i === 1 && !p.removing ? p.plan || '' : '');
+}
 function paintAddon(id) {
   const host = document.getElementById('addon-body'), a = addons().find(a => a.name === id);
   if (!host || host.dataset.name !== id || !a) return;
@@ -984,13 +1133,15 @@ function paintAddon(id) {
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);
   }
-  // A repeat that is being saved shows as its own row ("Saving…") until the list has it.
+  // A repeat that is being saved or removed shows at once, with its number and plan, until the list has the change:
+  // in place of the ticket's own row when it has one, else as a new row on top.
   if (pendingRepeat && blocks) {
     const body = blocks.querySelector('table tbody'), first = body?.querySelector('tr');
+    const own = body ? [...body.querySelectorAll('[data-addon-edit]')].find(n => n.dataset.addonEdit === pendingRepeat.tid)?.closest('tr') : null;
     if (body && first) {
-      const cells = [...first.children].map((_, i) => h('td', {}, i === 0 ? pendingRepeat.title + ' · Saving…' : ''));
-      body.prepend(h('tr', {'data-key':'repeat-saving', role:'status'}, cells));
-    } else blocks.prepend(h('p', {className:'status-line', role:'status'}, pendingRepeat.title + ' · Saving…'));
+      const row = h('tr', {'data-key':'repeat-saving', role:'status'}, pendingCells((own || first).children.length, pendingRepeat).map(text => h('td', {}, text)));
+      if (own) own.replaceWith(row); else body.prepend(row);
+    } else blocks.prepend(h('p', {className:'status-line', role:'status'}, pendingCells(1, pendingRepeat)[0]));
   }
   reconcile(host, template);
   const slot = document.getElementById('addon-header');
@@ -1070,13 +1221,17 @@ async function addonAct(control) {
   d.append(actions);
   window.orch.open(d);
 }
-// "Allow on this computer" on a repeat whose script is not allowed here yet: the add-on answers what the person reads
+// "Allow this script" on a repeat whose script is not allowed here yet: the add-on answers what the person reads
 // (the command in full, never behind Details) and a target that ends in the entry's key; the click sends that key back,
 // so only what was shown is allowed (as Settings > Allow this command).
 async function addonReview(id, control) {
   if (snapshot) return;
   const args = {addon:id, verb:control.dataset.verb, target:control.dataset.target};
+  // reading what the add-on would allow takes a few seconds: say so on the button, so the click is seen at once
+  const label = control.textContent;
+  locks.add('addon-act'); control.disabled = true; control.setAttribute('aria-busy', 'true'); control.textContent = 'Checking\u2026';
   const asked = await act('addon.act', {...args, review:true});
+  locks.delete('addon-act'); control.disabled = false; control.removeAttribute('aria-busy'); control.textContent = label;
   const got = asked.ok && asked.state?.act_answer?.addon === id ? asked.state.act_answer.answer : null;
   const key = typeof got?.target === 'string' ? (/:([0-9a-f]{64})$/.exec(got.target) || [])[1] : null;
   if (!got?.review || typeof got.review.title !== 'string' || !key) {
@@ -1088,7 +1243,7 @@ async function addonReview(id, control) {
     locks.add('addon-act');
     const result = await act('addon.act', {...args, value:key});
     locks.delete('addon-act');
-    window.orch.toast(result.ok ? 'Allowed on this computer.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? 'Script allowed.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
     await loadAddon(id);
   });
 }
@@ -1176,16 +1331,28 @@ function cronWords(cron) {
   if (f.length === 5 && f[0] === '0' && /^\*\/\d+$/.test(f[1]) && f.slice(2).every(x => x === '*')) return 'every ' + f[1].slice(2) + ' hours';
   return 'a custom plan';
 }
+// A saved repeat in plain words ("Repeats every Monday at 08:00"); a plan set by the helper in its own words.
+function savedRepeatWords(cron) {
+  const c = cronToChoice(cron), plan = c ? repeatPlan(c) : null;
+  if (plan?.phrase) return plan.summary;
+  const w = cronWords(cron);
+  return w === 'a custom plan' ? 'Repeats on a custom plan' : 'Repeats ' + w;
+}
+// A ticket as the repeat list names it: its number first ("DEM-9 · Weekly sales report").
+function repeatTicketName(t) { return (t.key ? t.key + ' · ' : '') + (t.title || t.id); }
 const REPEAT_UNITS = [['minutes', 'minutes'], ['hours', 'hours'], ['days', 'days']];
 const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];
 // The ticket is chosen in the window, or fixed when it is opened from a ticket's menu (`only`).
 function repeatsDialog(only = null, addonName = null) {
   if (snapshot) return;
-  const saved = only ? tickets().find(t => t.id === only)?.ext?.[addonName || repeatsAddon()] : null;
+  const key = addonName || repeatsAddon();
+  const repeatOf = id => { const x = tickets().find(t => t.id === id)?.ext?.[key]; return x?.recurring === true && x.cron ? x : null; };
+  const saved = only ? tickets().find(t => t.id === only)?.ext?.[key] : null;
   const had = saved?.recurring === true ? cronToChoice(saved.cron) : null;
   const {d, actions} = dialog(had ? 'Edit repeat' : 'New repeat', 'dialog repeat-dialog');
   const ticket = h('select', {className:'input', name:'ticket', id:'repeat-ticket'});
-  tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
+  tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(repeatTicketName(t) + (!only && repeatOf(t.id) ? ' · already repeats' : ''), t.id)));
+  const nameOf = id => repeatTicketName(tickets().find(t => t.id === id) || {id});
   const choice = had || {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00', unit:'minutes'};
   const outside = !had && saved?.recurring === true && saved.cron ? cronWords(saved.cron) : null;  // set by the helper: shown, never overwritten silently
   if (outside) Object.assign(choice, {freq:'custom', unit:'minutes', every:5});
@@ -1196,21 +1363,19 @@ function repeatsDialog(only = null, addonName = null) {
     const plan = repeatPlan(choice);
     if (save.disabled || !ticket.value || !plan.phrase) return;
     save.disabled = true;
-    // Close at once: saving takes a few seconds, so the list shows the repeat as "Saving…" until it is stored.
-    const target = ticket.value, addon = addonName || route().id, title = ticket.selectedOptions[0]?.textContent || 'Repeat';
-    await window.orch.close(d);
-    pendingRepeat = {title};
-    if (route().kind === 'addon') paintAddon(route().id);
-    // Saving always ends: the answer, or after 30 s a plain "taking too long" (the schedule may still have been saved)
-    let timer;
-    const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list, then try again.'}), 30000); });
-    let result;
-    try { result = await Promise.race([act('addon.act', {addon, verb:'repeat', target, value:plan.phrase}), late]); }
-    catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
-    finally { clearTimeout(timer); pendingRepeat = null; }
-    window.orch.toast(result.ok ? 'Repeat saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    if (route().kind === 'addon') await loadAddon(route().id);
+    const target = ticket.value;
+    await repeatSend(d, {addon:addonName || route().id, verb:'repeat', target, value:plan.phrase}, {tid:target, title:nameOf(target), plan:plan.summary}, 'Repeat saved.');
   });
+  // A new repeat for a ticket that already repeats replaces that plan: the window says so and Save says Replace
+  // (bug hunt 17 Nov: the old repeat was gone without a word).
+  const replaces = h('p', {className:'banner attn', role:'status', 'data-key':'repeat-replaces', hidden:true});
+  const refreshReplace = () => {
+    const old = only ? null : repeatOf(ticket.value);
+    replaces.hidden = !old;
+    replaces.textContent = old ? 'This ticket already repeats ' + savedRepeatWords(old.cron).replace(/^Repeats /, '') + '. Saving replaces that plan.' : '';
+    save.textContent = old ? 'Replace repeat' : 'Save repeat';
+  };
+  ticket.onchange = refreshReplace;
   const refreshSummary = () => {
     const plan = repeatPlan(choice);
     summary.textContent = plan.summary; hint.textContent = plan.hint;
@@ -1259,7 +1424,7 @@ function repeatsDialog(only = null, addonName = null) {
       input.onchange = () => { choice.freq = value; if (value === 'custom') { choice.unit = choice.unit || 'minutes'; if (choice.unit === 'minutes' && !(Number(choice.every) >= 5)) choice.every = 5; } draw(); };
       return h('label', {}, input, h('span', {}, label));
     }));
-  const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket),
+  const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket), replaces,
     h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary,
       outside ? h('p', {className:'meta', 'data-key':'repeat-set-by-helper'}, 'Set by your helper: ' + outside + '. Change it with the options above.') : null));
   if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
@@ -1272,18 +1437,39 @@ function repeatsDialog(only = null, addonName = null) {
   });
   draw();
   // An existing schedule: Save changes, or remove it (its tickets stay); a new one may also copy the ticket.
-  const remove = button('Delete repeat', 'outline danger', async () => {
+  // Delete asks first, in the window itself, and sits apart from Save (bug hunt 17 Nov: it acted at once, next to Save).
+  const sure = h('div', {className:'banner attn', role:'alert', 'data-key':'repeat-delete-confirm', hidden:true});
+  const remove = button('Delete repeat', 'outline danger', () => {
     if (remove.disabled) return;
-    remove.disabled = true;
-    const label = remove.textContent; remove.textContent = 'Removing…';
-    const result = await act('addon.act', {addon:addonName || route().id, verb:'delete', target:only});
-    window.orch.toast(result.ok ? 'Repeat removed. Its tickets stay.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    remove.disabled = false; remove.textContent = label;
-    if (result.ok) await window.orch.close(d);
-    if (route().kind === 'addon') await loadAddon(route().id);
+    remove.hidden = true; sure.hidden = false; yes.focus();
   });
-  if (had) actions.append(remove, save); else actions.append(copy, save);
-  d.append(fields, actions); window.orch.open(d);
+  const keep = button('Keep it', 'ghost', () => { sure.hidden = true; remove.hidden = false; remove.focus(); });
+  const yes = button('Delete repeat', 'danger', async () => {
+    if (yes.disabled) return;
+    yes.disabled = true; keep.disabled = true;
+    await repeatSend(d, {addon:addonName || route().id, verb:'delete', target:only}, {tid:only, title:nameOf(only), removing:true}, 'Repeat removed. Its tickets stay.');
+  });
+  sure.append(h('p', {className:'grow'}, 'Delete this repeat? It stops repeating. The ticket and its history stay.'), keep, yes);
+  if (had) { actions.prepend(remove, h('span', {className:'grow', 'aria-hidden':'true'})); actions.append(save); d.append(fields, sure, actions); }
+  else { actions.append(copy, save); d.append(fields, actions); }
+  refreshReplace();
+  window.orch.open(d);
+}
+// Save or Delete in the repeat window: it closes at once and the list shows the change ("Saving…" / "Removing…",
+// with the ticket's number) until it is stored. It always ends: the answer, or after 30 s a plain "taking too long"
+// (the change may still have been made).
+async function repeatSend(d, args, pending, okText) {
+  await window.orch.close(d);
+  pendingRepeat = pending;
+  if (route().kind === 'addon') paintAddon(route().id);
+  let timer;
+  const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list, then try again.'}), 30000); });
+  let result;
+  try { result = await Promise.race([act('addon.act', args), late]); }
+  catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
+  finally { clearTimeout(timer); pendingRepeat = null; }
+  window.orch.toast(result.ok ? okText : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  if (route().kind === 'addon') await loadAddon(route().id);
 }
 // `addon.prompt` (a row's Edit in an add-on view): one text line in a small window, prefilled; Save sends the add-on's
 // own verb with the new text. 1 to 200 characters; the add-on's refusal is shown here in one sentence.

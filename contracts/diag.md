@@ -76,6 +76,14 @@ the key values the hider guards).
 `diag.enabled`, default **on**, per workspace on this computer: `orch config get|set diag.enabled on|off` and the settings answer
 of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until retention removes them.
 
+`diag.report_tickets`, default **off**, per workspace: `orch config set diag.report_tickets on|off`. On, the automation
+loop runs `orch diag tickets` every `[automation] reports_every` seconds (default 120; no AI): it takes new problems shared
+to the relay (at most every 14 minutes, when connected and allowed to pick up), opens one ticket per new report folder
+(`Investigate orch report <ref>`; a feature wish `Feature wish: ...` gets no helper), and marks a relay problem done when
+its ticket reaches Review or Done. A relay copy of a report shared from here opens no second ticket. Seen reports:
+`.orch/diag/report-tickets.json`; turning it on marks the reports already here as seen. The loop starts at most two
+helpers per pass on the new tickets.
+
 ## Event names (`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
 
 | `ev` | `kv` |
@@ -92,14 +100,14 @@ of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until
 | `diag.disabled` | `actor` (written just before the log is switched off) |
 | `diag.dropped` | `count`, `n_<reason>` |
 | `diag.report_failed` | (error event; `err` has the class) the dashboard could not make a report |
-| `diag.report_made` | `ref`, `scope` (`ticket`, `add-on` or `workspace`), `content`, `page` (a page snapshot was added); written when the dashboard makes a report |
+| `diag.report_made` | `ref`, `scope` (`ticket`, `add-on` or `workspace`), `content`, `page` (a page snapshot was added), `about` (`problem` or `feature`); written when the dashboard makes a report |
 | `diag.report_shared` | `ref` (the person or a helper sent this report to the connected relay; relay-api.md, Problems) |
 | `diag.reports_deleted` | `count` (Settings > Delete all) |
 | `diag.notes_deleted` | `files` (Settings > Delete notes; the first line of the new log) |
 | `ui.error` | `kind` (`error` or `rejection`), `what` (the error class or name, cut), `file`, `line`, `col` (script file name, no query) |
 | `ui.console_error` | `what` (first argument's type, never its text), `n` (arguments) |
 | `ui.fetch` | `route` (path without query, ids folded to `:id`), `method`, `status`, `ms`, `outcome` (`ok`, `error`, `cancelled`, `failed`) |
-| `ui.action` | `id` (the button's `data-action`), `route` |
+| `ui.action` | `id` (the button's `data-action`; an add-on button: `addon-<verb>`, a schedule that came by sync: `sync-allow`), `route` |
 | `ui.route` | `from`, `to` (the page hash with ids folded to `:id`) |
 | `ui.state` | `client_rev`, `server_rev` (revision hashes, 12 chars), `cache_age_ms` (`X-State-Age-Ms` of the last state read) |
 | `ui.env` | `w`, `h`, `zoom`, `browser`, `assets` (the dashboard version the page loaded), `touch`; once per page load |
@@ -130,8 +138,11 @@ relay is a separate, explicit step of the relay client (relay-api.md, Problems),
   `next` is the token for the following page. A record that could not be read fully says so in `unavailable`.
 - Checks (`orch/diag_checks/<name>.py`, `{name, verdict: problem|ok|cannot_check, fact, evidence[]}`):
   `run_gone_ticket_working`, `dead_lock_holder` (pid AND process start time), `no_heartbeat` ("progress unknown", never
-  "hung"), `waiting_for_permission`, `ticket_op_refused` (3 times), `hook_lines_missing`, `relay_unreachable`,
-  `clock_skew`, `disk_low`, `diag_dropped`.
+  "hung"; a working run quiet over 30 min, a live session at its prompt or on a dialog is left out),
+  `waiting_for_permission`, `ticket_op_refused` (3 times in the last hour with the same guard; write conflicts are not
+  counted), `hook_lines_missing`, `relay_unreachable`, `clock_skew`, `disk_low`, `diag_dropped` (a problem only for
+  drops in the last hour; older ones of the day are named in the fact). A problem goes away by itself once its cause
+  stops.
 - `report [--ticket T] [--addon A] [--since 2h] [--note ...] [--expected ...] [--content|--no-content]` writes
   `reports/r-<MMDD-HHMM>-<scope>/`: `SUMMARY.md` (< 20 KB, read first: note, window, checks, top errors, last 50 lines,
   gaps), `manifest.json` (`orch.diag-report/1`), `checks.json`, `timeline.jsonl` (sources merged by time, each source in
@@ -144,6 +155,15 @@ relay is a separate, explicit step of the relay client (relay-api.md, Problems),
   person picked into `attachments/` (each at most 8 MB, 25 MB together; a cleaned file name, no folders, no leading dot,
   a second file of the same name gets `-2`). They are the person's own files and are stored as they are (a picture cannot
   pass the hider); the manifest lists them in `attachments: [{name, size}]`. Nothing in them is ever run or followed.
+  `--about problem|feature` (default `problem`; the dashboard sends `about`) says what the report is: a problem, or a
+  feature wish. The manifest keeps it as `about` (an incident, or a report from before, is a `problem`), `SUMMARY.md`
+  starts with "Feature wish" and the person's words under "What the person wants" / "Why it would help", and a shared
+  one carries it to the relay (`about`, contracts/relay-api.md "Problems").
+- `orch report problem "<what happened>" [--expected T]` and `orch report feature "<what you want>" [--why T]` (both
+  `[--more T] [--file F]... [--ticket ID] [--content|--no-content] [--no-send]`) are the one-line form for a helper:
+  the same report (`--content` on for a problem, off for a feature wish), then, when the relay is turned on and this
+  workspace is connected, `orch relay problem share` of it (unless `--no-send`). A failed send keeps the report and says
+  why (`share_error`); it never fails the command.
 - Incidents (`reports/i-...`): the same layout, structure only, 15-minute window, frozen BEFORE a recovery runs (in front of
   `settle_orphan` and the start-failure path), on a crash of a command, on a check turning `problem`, and when the same
   delivery failure happens 3 times. One per fingerprint per 15 minutes, at most 20 and 50 MB. Reports and incidents count

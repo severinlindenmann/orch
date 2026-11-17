@@ -1,0 +1,296 @@
+{
+  "note": "Same as late-second-workflow-fails, but the late check passes. Must wait one poll, then be green.",
+  "repo": "severinlindenmann/orch",
+  "isDraft": false,
+  "required": [
+    "gate"
+  ],
+  "polls": [
+    {
+      "checks": [
+        {
+          "name": "gate",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "workspace / windows-standard-user",
+          "state": "SKIPPED",
+          "bucket": "skipping",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / tool-name-scan",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / lessons",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / sync",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / focus",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / py311",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / insights",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "publish / test",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "contracts / validate",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / page-smoke",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / factory",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "cli-smoke / smoke (windows-latest)",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / automation",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "cli-smoke / smoke (macos-15)",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "workspace / test (ubuntu-latest)",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / dashboard",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "brand",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "relay / test",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "mobile / test",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "changes",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        }
+      ],
+      "runs": [
+        {
+          "name": "ci",
+          "status": "completed"
+        },
+        {
+          "name": "rules",
+          "status": "queued"
+        }
+      ]
+    },
+    {
+      "checks": [
+        {
+          "name": "gate",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "workspace / windows-standard-user",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / tool-name-scan",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / lessons",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / sync",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / focus",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / py311",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / insights",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "publish / test",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "contracts / validate",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / page-smoke",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / factory",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "cli-smoke / smoke (windows-latest)",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / automation",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "cli-smoke / smoke (macos-15)",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "workspace / test (ubuntu-latest)",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "addons / dashboard",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "brand",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "relay / test",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "mobile / test",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        },
+        {
+          "name": "banned-words",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "rules"
+        },
+        {
+          "name": "changes",
+          "state": "SUCCESS",
+          "bucket": "pass",
+          "workflow": "ci"
+        }
+      ],
+      "runs": [
+        {
+          "name": "ci",
+          "status": "completed"
+        },
+        {
+          "name": "rules",
+          "status": "completed"
+        }
+      ]
+    }
+  ]
+}

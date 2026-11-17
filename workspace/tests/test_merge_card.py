@@ -22,6 +22,10 @@ class FakeGh:
         self.calls, self.envs, self.review, self.head = [], [], "", HEAD
         self.state, self.merge_rc, self.merge_err = state, merge_rc, merge_err
         self.login, self.user_rc = login, user_rc
+        self.rollup = []  # statusCheckRollup that `gh pr view --json statusCheckRollup` answers
+        self.summary = (
+            None  # what `gh pr view --json title,...` answers when the card is made (None: refused)
+        )
 
     def __call__(self, argv, env=None, **kw):
         args = argv[1:]
@@ -30,6 +34,12 @@ class FakeGh:
         self.envs.append({k: env[k] for k in ghmerge.TOKEN_VARS if k in env})
         if args[:2] == ["api", "user"]:
             return subprocess.CompletedProcess(argv, self.user_rc, self.login + "\n", "")
+        if args[:2] == ["pr", "view"] and "title,baseRefName,headRefOid,commits,statusCheckRollup" in args:
+            if self.summary is None:
+                return subprocess.CompletedProcess(argv, 1, "", "not found")
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.summary), "")
+        if args[:2] == ["pr", "view"] and args[3:] == ["--json", "statusCheckRollup"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"statusCheckRollup": self.rollup}), "")
         if args[:2] == ["pr", "view"]:
             return subprocess.CompletedProcess(argv, 0, f"{self.state}\t{self.review}\t{self.head}\n", "")
         if args[:3] == ["api", "-X", "POST"]:
@@ -134,18 +144,44 @@ def test_not_now_merges_nothing(tk, run, gh):
     assert _q(root, tid)["decision"]["action"] == "dont"
 
 
-def test_refused_merge_saves_no_answer_and_can_be_clicked_again(tk, run, gh):
+def test_refused_merge_is_sent_back_to_the_helper_with_the_reason(tk, run, gh):
     root, tid = tk
     assert _ask(run, tid)[0] == 0
-    gh.merge_rc, gh.merge_err = 1, "X Pull request acme/app#12 is not mergeable: checks are failing.\n"
+    gh.merge_rc, gh.merge_err = (
+        1,
+        "X Pull request acme/app#12 is not mergeable: the base branch policy prohibits the merge.\n",
+    )
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    q = _q(root, tid)
+    assert q["answer"] is not None and q["decision"]["action"] == "send_back"
+    change = q["decision"]["changes"][0]
+    assert "Merge failed on GitHub, please fix it:" in change and "base branch policy prohibits" in change
+    assert "Open the pull request and merge it there." not in change
+    assert len(gh.merges) == 1
+
+
+def test_only_a_person_merge_refusal_still_refuses(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", "agent:claude")
+    assert code == 2 and _q(root, tid)["answer"] is None
+
+
+def test_running_checks_hold_the_merge_and_save_no_answer(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.rollup = [
+        {"name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "workflowName": "ci"},
+        {"name": "tests", "status": "IN_PROGRESS", "conclusion": "", "workflowName": "ci"},
+    ]
     code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
     assert code == 2
-    assert "GitHub did not merge it: Pull request acme/app#12 is not mergeable" in out + err
-    assert "Open the pull request and merge it there." in out + err
-    assert _q(root, tid)["answer"] is None
-    gh.merge_rc = 0
+    assert "1 of 2 checks still running" in out + err and "nothing was merged" in out + err
+    assert gh.merges == [] and _q(root, tid)["answer"] is None
+    gh.rollup[1].update(status="COMPLETED", conclusion="SUCCESS")
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
-    assert len(gh.merges) == 2 and _q(root, tid)["answer"] is not None
+    assert len(gh.merges) == 1
 
 
 def test_already_merged_is_not_merged_twice(tk, run, gh):
@@ -226,9 +262,9 @@ def test_a_required_review_is_the_persons_own_before_the_merge(tk, run, gh):
     gh.review = "REVIEW_REQUIRED"
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
     acts = [c[:2] for c in gh.calls]
-    assert acts == [["api", "user"], ["pr", "view"], ["api", "-X"], ["pr", "merge"]]
-    assert gh.calls[2][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
-    assert f"commit_id={HEAD}" in gh.calls[2] and "event=APPROVE" in gh.calls[2]
+    assert acts == [["api", "user"], ["pr", "view"], ["pr", "view"], ["api", "-X"], ["pr", "merge"]]
+    assert gh.calls[3][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
+    assert f"commit_id={HEAD}" in gh.calls[3] and "event=APPROVE" in gh.calls[3]
     assert all(e == {} for e in gh.envs)
 
 
@@ -267,22 +303,124 @@ def test_card_shows_and_pins_the_newest_commit(tk, run, gh):
     assert _ask(run, tid)[0] == 0
     q = _q(root, tid)
     assert q["action"] == {"merge": PR, "head": HEAD}
-    assert q["card"]["preview"]["paras"] == [PR, f"Commit {HEAD[:7]}"]
+    assert q["card"]["preview"] == {
+        "type": "doc",
+        "heading": "Pull request",
+        "foot": f"Exact version: {HEAD[:7]}",
+    }
+    assert PR not in json.dumps(q["card"]["preview"]), "the address is the Open link, not the content"
+    assert q["card"]["open"] == PR
 
 
-def test_a_push_after_the_card_is_never_merged(tk, run, gh):
+def test_a_release_card_shows_what_goes_out_and_the_checks(tk, run, gh):
+    """ORCH-183, owner 17 Nov: a Merge card shows what the person decides on, not the address."""
     root, tid = tk
+    code, out, _ = run("ticket", "new", "Review on desktop", "--json", "--by", "agent:x")
+    other = json.loads(out)["id"]
+    assert run("ref", "add", other, "https://github.com/acme/app/pull/7", "--by", "agent:x")[0] == 0
+    ok = {
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "workflowName": "ci",
+        "name": "build",
+        "startedAt": "1",
+    }
+    gh.summary = {
+        "title": "Release 32",
+        "baseRefName": "main",
+        "headRefOid": HEAD,
+        "commits": [
+            {"messageHeadline": "Merge pull request #7 from acme/feat/x", "messageBody": "Bigger pictures"},
+            {"messageHeadline": "Fix a typo", "messageBody": ""},
+            {
+                "messageHeadline": "Merge pull request #9 from acme/fix/y",
+                "messageBody": "Send back asks for words\n\nmore",
+            },
+        ],
+        "statusCheckRollup": [ok, {**ok, "name": "lint"}],
+    }
     assert _ask(run, tid)[0] == 0
-    gh.head, gh.review = "b" * 40, "REVIEW_REQUIRED"
-    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
-    assert code == 2 and "changed after the card was made" in out + err
-    assert gh.merges == [] and ["api", "-X"] not in [c[:2] for c in gh.calls]
-    assert _q(root, tid)["answer"] is None
+    pv = _q(root, tid)["card"]["preview"]
+    key = tickets.load(root, other)["key"]
+    assert pv["heading"] == "What goes out · 2 changes"
+    assert pv["rows"] == [
+        {"title": "Bigger pictures", "n": 7, "key": key},
+        {"title": "Send back asks for words", "n": 9},
+        {"title": "and 1 other commit"},
+    ], "GitHub's own titles, the linked ticket beside it, and the commits that are no pull request"
+    assert pv["status"]["tone"] == "done" and pv["status"]["text"].startswith(
+        "All 2 checks passed · checked "
+    )
+    assert "paras" not in pv, "all green: no warning lines"
+    assert pv["foot"] == f"Exact version: {HEAD[:7]}"
+    wire = review.wire_card(_q(root, tid)["card"], {})
+    review.check_wire_card(wire, 0)  # still a valid phone card: the rows and status become plain lines
+    assert wire["preview"]["steps"][0] == f"Bigger pictures (#7, {key})"
+    assert wire["preview"]["paras"][0].startswith("All 2 checks passed")
 
 
-def test_card_only_for_an_open_pull_request(tk, run, gh):
+def test_a_failed_check_turns_the_status_red_and_says_why(tk, run, gh):
     root, tid = tk
-    gh.state = "MERGED"
-    code, out, err = _ask_only(run, tid)
-    assert code == 2 and "not open on GitHub" in out + err
-    assert tickets.load(root, tid)["questions"] == []
+    bad = {
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "workflowName": "ci",
+        "name": "lint",
+        "startedAt": "1",
+    }
+    gh.summary = {
+        "title": "Release 33",
+        "baseRefName": "main",
+        "headRefOid": HEAD,
+        "statusCheckRollup": [bad],
+        "commits": [{"messageHeadline": "Merge pull request #9 from acme/fix/y", "messageBody": "Y"}],
+    }
+    assert _ask(run, tid)[0] == 0
+    pv = _q(root, tid)["card"]["preview"]
+    assert pv["status"]["tone"] == "failed" and pv["status"]["text"].startswith("1 check failed: lint")
+    assert pv["paras"][0] == "Merging now would put work live that failed a check."
+    assert "may have changed" in pv["paras"][1]
+
+
+def test_a_summary_of_another_commit_or_a_file_never_replaces_it(tk, run, gh, tmp_path):
+    root, tid = tk
+    gh.summary = {
+        "title": "Release 33",
+        "baseRefName": "main",
+        "headRefOid": "c" * 40,
+        "commits": [],
+        "statusCheckRollup": [],
+    }
+    assert _ask(run, tid)[0] == 0
+    assert "rows" not in _q(root, tid)["card"]["preview"], "read for another commit: only the pinned one"
+
+
+def test_checks_in_plain_words():
+    run_ = {"status": "COMPLETED", "conclusion": "SUCCESS", "workflowName": "ci", "startedAt": "1"}
+    assert ghmerge.checks_state([]) == ("working", "No checks have run yet")
+    assert ghmerge.checks_state([{**run_, "name": "a"}, {**run_, "name": "b"}]) == (
+        "done",
+        "All 2 checks passed",
+    )
+    two = [{**run_, "name": "a"}, {"status": "IN_PROGRESS", "name": "b"}]
+    assert ghmerge.checks_state(two) == ("working", "1 of 2 checks still running")
+    assert ghmerge.checks_state([{**run_, "name": "a", "conclusion": "FAILURE"}]) == (
+        "failed",
+        "1 check failed: a",
+    )
+
+
+def test_a_doc_box_takes_status_rows_and_foot_only_in_shape():
+    pv = {
+        "type": "doc",
+        "status": {"tone": "done", "text": "Fine"},
+        "rows": [{"title": "One", "n": 3, "key": "ORCH-1"}],
+    }
+    ok = {"kind": "draft", "title": "T", "then": "x", "preview": {**pv, "foot": "v"}}
+    review.validate_card(json.loads(json.dumps(ok)))
+    for bad in ({"tone": "pink", "text": "x"}, {"tone": "done"}, "Fine"):
+        with pytest.raises(review.Refused):
+            review.validate_card({**ok, "preview": {**ok["preview"], "status": bad}})
+    for bad in ([{"n": 3}], [{"title": "x", "n": -1}], [{"title": "x", "url": "https://x"}], "rows"):
+        with pytest.raises(review.Refused):
+            review.validate_card({**ok, "preview": {**ok["preview"], "rows": bad}})

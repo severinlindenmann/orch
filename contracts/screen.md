@@ -2,7 +2,7 @@
 
 A live run already sits in its own tmux session on orch's own tmux server (`tmux -L orch-<hash>`, session = ticket id,
 run.schema.json `tmux`). Focus shows it on the ticket page (Session tab, one click away from Steps, owner decision 1A): watch it
-read-only, or take it over to type, only from the dashboard on this computer (2A). No phone version. Windows (no tmux) and
+read-only, or take it over to type, only from the signed-in dashboard, from any computer (2A; R4.1a). No phone version. Windows (no tmux) and
 runs without a live mode have no Session tab.
 
 Schema: `screen.schema.json` (stream lines; `$defs/takeover`, `$defs/type_input`), `run.schema.json` `takeover`. Examples:

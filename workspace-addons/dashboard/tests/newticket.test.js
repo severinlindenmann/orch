@@ -55,7 +55,8 @@ test('file validation, first nonempty title, and base64 stripping', () => {
   assert.equal(c.ticketFileError({name:'x.md',size:20*1024*1024}, []), '');
   assert.equal(c.ticketFileError({name:'x.md',size:1}, Array(12).fill({size:1})), '');  // no file-count limit
   assert.equal(c.ticketFileError({name:'x.md',size:25*1024*1024}, [{size:80*1024*1024}]), 'Files are over 100 MB');
-  assert.equal(c.ticketTextTitle('\n  hello\r\nworld', 3), 'hel');
+  assert.equal(c.ticketTextTitle('\n  hello\r\nworld', 3), 'he…');
+  assert.equal(c.ticketTextTitle('let me add like a "Release" Tag to the properties of a ticket and then for e.g. on the ticket page group them', 80), 'let me add like a "Release" Tag to the properties of a ticket…');  // ORCH-62
   assert.equal(c.ticketTextTitle('  \n ', 80), '');
   assert.equal(c.ticketBase64('data:image/png;base64,YQ=='), 'YQ==');
 });
@@ -310,7 +311,7 @@ test('ORCH-8: the new ticket opens by the id in the reply, even when orch change
   s.input.value = 'add a option that when a user does first orch init it adds a default task, this default task'; await s.input.fire('input');
   await s.form.fire('submit');
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(s.calls[0].args.title, 'add a option that when a user does first orch init it adds a default task, this');
+  assert.equal(s.calls[0].args.title, 'add a option that when a user does first orch init it adds a default task, this…');  // ORCH-62: a cut ends with …
   assert.equal(s.c.location.hash, '#ticket/t_new123');
   assert.ok(!walk(s.d).some(n => /could not be found/.test(n.textContent)));
 });
@@ -321,7 +322,7 @@ test('ORCH-8: an older reply without the id still finds the ticket by its title 
   s.input.value = 'x'.repeat(79) + ' and more words after the cut'; await s.input.fire('input');
   await s.form.fire('submit');
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(s.calls[0].args.title, 'x'.repeat(79));
+  assert.equal(s.calls[0].args.title, 'x'.repeat(79) + '…');  // ORCH-62: a cut ends with …
   assert.equal(s.c.location.hash, '#ticket/t_old1');
 });
 
@@ -330,12 +331,12 @@ const stepBoxes = s => walk(s.d).filter(n => n.className.split(' ').includes('ne
 const addStepButton = s => walk(s.d).find(n => n.className.includes('new-ticket-add-step'));
 test('ORCH-14: Make it an epic adds numbered ticket boxes; Remove takes one out and renumbers', async () => {
   const s = setup();
-  const help = walk(s.d).find(n => /This ticket becomes an epic/.test(n.textContent));
+  const help = walk(s.d).find(n => /This ticket is split into parts/.test(n.textContent));
   assert.equal(stepBoxes(s).length, 0); assert.equal(help.hidden, true);
-  assert.equal(addStepButton(s).textContent, '＋ Make it an epic with several tickets');
+  assert.equal(addStepButton(s).textContent, '＋ Split into parts');
   await addStepButton(s).click(); await addStepButton(s).click(); await addStepButton(s).click();
   assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'strong').textContent), ['Ticket 1', 'Ticket 2', 'Ticket 3']);
-  assert.equal(help.hidden, false); assert.equal(addStepButton(s).textContent, '＋ Add another ticket');
+  assert.equal(help.hidden, false); assert.equal(addStepButton(s).textContent, '＋ Add another part');
   await walk(stepBoxes(s)[0]).find(n => n['aria-label'] === 'Remove ticket 1').click();
   assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'textarea')['aria-label']), ['Ticket 1: what needs doing?', 'Ticket 2: what needs doing?']);
 });
@@ -350,6 +351,7 @@ test('ORCH-14: Start makes the epic, then one ticket inside it per box with its 
   const twoText = walk(two).find(n => n.tag === 'textarea'); twoText.value = 'Larger buttons';
   assert.equal((await twoText.fire('paste', {clipboardData:{files:[{name:'Screenshot 09-13.png', size:1}], getData:() => ''}})).prevented, true);
   assert.equal(walk(empty).find(n => n.tag === 'textarea').value, '');
+  await walk(empty).find(n => n.textContent === 'Remove').click();  // ORCH-156: an empty box is refused, not skipped
   await s.form.fire('submit');
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'ticket.new', 'ticket.new', 'run.start']);
@@ -370,6 +372,7 @@ test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 4.9 MB i
   const big = setup();
   big.input.value = 'Main'; await big.input.fire('input');
   await addStepButton(big).click(); await addStepButton(big).click();
+  walk(stepBoxes(big)[0]).find(n => n.tag === 'textarea').value = 'small';
   walk(stepBoxes(big)[1]).find(n => n.tag === 'textarea').value = 'y'.repeat(5000000);
   await big.form.fire('submit');
   assert.equal(big.calls.length, 0);
@@ -399,11 +402,100 @@ test('ORCH-14: a ticket that fails keeps the window open; pressing again sends o
   assert.equal(s.calls[3].args.parent, 't_1');
   assert.equal(s.d.open, false);
 });
-test('ORCH-14: empty ticket boxes make no epic; a plain ticket is sent as before', async () => {
+test('ORCH-156: an empty ticket box is refused with a plain message; nothing is made until it is filled or removed', async () => {
   const s = setup();
   s.input.value = 'Just one'; await s.input.fire('input');
   await addStepButton(s).click();
   await s.form.fire('submit');
+  assert.deepEqual(s.calls, []);
+  const error = walk(s.d).find(n => n.className === 'bad' && n.role === 'alert');
+  assert.equal(error.textContent, 'Ticket 1 is empty. Write what needs doing in it, or remove it.');
+  assert.equal(s.d.open, true);
+  await walk(s.d).find(n => n.textContent === 'Remove').click();  // removed: a plain ticket, as before
+  await s.form.fire('submit');
   assert.equal(s.calls[0].args.epic, undefined);
   assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'run.start']);
+});
+test('ORCH-156: the second of two boxes empty names Ticket 2; a filled one alone still makes the epic', async () => {
+  const s = setup();
+  s.input.value = 'Epic'; await s.input.fire('input');
+  await addStepButton(s).click(); await addStepButton(s).click();
+  const boxes = walk(s.d).filter(n => n.name === 'step');
+  boxes[0].value = 'First';
+  await s.form.fire('submit');
+  assert.deepEqual(s.calls, []);
+  assert.match(walk(s.d).find(n => n.className === 'bad').textContent, /^Ticket 2 is empty/);
+  boxes[1].value = 'Second';
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].args.epic, true);
+  assert.deepEqual(s.calls.filter(c => c.op === 'ticket.new').length, 3);
+});
+test('ORCH-156: parentChoices keeps the current parent even when it is closed', () => {
+  const helpers = require('../src/orch_dashboard/web/helpers.js');
+  const all = [{id:'t_a', status:'done'}, {id:'t_b', status:'done'}, {id:'t_me', parent:'t_a', status:'open'}];
+  assert.deepEqual(helpers.parentChoices(all, all[2]).map(x => x.id), ['t_a']);
+});
+
+test('ORCH-185: a first line over 200 characters keeps every word; a one-sentence wish stays in the note', () => {
+  const c = setup().c;
+  const long = 'Please make the report page faster because the people in sales wait too long for it to open every morning ' + 'and again '.repeat(20) + 'THE-END';
+  const a = c.ticketFromText(long, long, '', []);
+  assert.ok(a.title.length <= 80 && a.title.endsWith('…') && a.title_auto === true);
+  assert.equal(a.note, long);  // nothing dropped
+  const wish = c.ticketFromText('Add a dark mode to the settings page for night work', 'Add a dark mode to the settings page for night work', '', []);
+  assert.equal(wish.note, 'Add a dark mode to the settings page for night work');
+  assert.equal(c.ticketFromText('Fix login', 'Fix login', '', []).note, undefined);  // a short label is only the title
+});
+test('ORCH-185: Cancel, Esc or Back keep the typed text; the next New ticket brings it back; a sent ticket clears it', async () => {
+  const s = setup(), {c} = s;
+  s.input.value = 'Draft that must not be lost'; await s.input.fire('input');
+  await c.window.orch.close(s.d);  // Cancel, Esc, backdrop and Back all end here
+  c.ticketForm();
+  const d2 = c.document.body.children.at(-1), input2 = walk(d2).find(n => n.name === 'text');
+  assert.equal(input2.value, 'Draft that must not be lost');
+  assert.ok(walk(d2).some(n => n.className.includes('new-ticket-draft')));
+  walk(d2).find(n => n.textContent === 'Discard').click();
+  assert.equal(input2.value, '');
+  await c.window.orch.close(d2);  // empty: nothing kept
+  c.ticketForm();
+  assert.equal(walk(c.document.body.children.at(-1)).find(n => n.name === 'text').value, '');
+});
+test('ORCH-185: an added picture shows a thumbnail in its chip; a text file does not', () => {
+  const c = setup().c;
+  const img = walk(c.ticketFileChip({name:'hero.png', type:'image', size:99, url:'blob:x'}, () => {}));
+  assert.ok(img.some(n => n.tag === 'img' && n.className === 'thumbnail' && n.src === 'blob:x'));
+  assert.ok(!walk(c.ticketFileChip({name:'a.txt', type:'text', size:1, text:'x'}, () => {})).some(n => n.tag === 'img'));
+});
+async function epicSetup(reply) {
+  const s = setupWith(null, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
+  s.c.act = async (op, args) => { s.calls.push({op, args}); if (op === 'ticket.new') { s.c.tickets().push({id:'t_epic', title:args.title}); return {ok:true, state:{created:{id:'t_epic'}, ...reply(args)}}; } return {ok:true}; };
+  s.input.value = 'Dashboard fixes'; await s.input.fire('input');
+  await addStepButton(s).click(); await addStepButton(s).click();
+  const [one, two] = stepBoxes(s);
+  walk(one).find(n => n.tag === 'textarea').value = 'Fix the header';
+  walk(two).find(n => n.tag === 'textarea').value = 'Larger buttons';
+  return s;
+}
+test('ORCH-185: an epic and its tickets go in ONE request, none of them naming a parent', async () => {
+  const s = await epicSetup(args => ({steps:{made:args.steps.map((_, index) => ({index})), failed:[]}}));
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'run.start']);
+  assert.equal(s.calls[0].args.epic, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0].args.steps.map(x => [x.title, 'parent' in x]))), [['Fix the header', false], ['Larger buttons', false]]);
+  assert.ok(s.toasts.some(x => x[0] === 'Epic created'));
+});
+test('ORCH-185: when one ticket of the epic is not made, the window says which and pressing again sends only that one', async () => {
+  const s = await epicSetup(args => ({steps:{made:[{index:0}], failed:[{index:1, message:'Too long'}]}}));
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stepBoxes(s).length, 1, 'the ticket that was made left the list');
+  const err = walk(s.d).find(n => n.className === 'bad');
+  assert.match(err.textContent, /not every ticket in it\. Ticket 2: Too long/);
+  s.calls.length = 0;
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(s.calls.map(c => c.op).slice(0, 1), ['ticket.new']);
+  assert.equal(s.calls[0].args.parent, 't_epic');
+  assert.equal(s.calls[0].args.title, 'Larger buttons');
 });

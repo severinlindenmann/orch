@@ -55,7 +55,7 @@ TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
 }  # fmt: skip
-KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
+KIT_FILES = ("frame.js", "tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js", "widgets.css", "widgets.js")  # fmt: skip
 WEB_FILES = (
     "index.html",
@@ -498,9 +498,12 @@ class Tracker:
         return {
             "ticket": {
                 "id": ticket.get("id"), "key": ticket.get("key"), "title": ticket.get("title"),
+                "manager": ticket.get("manager") is True,  # ORCH-147: the always-on Manager, not a piece of work
                 "status": ticket.get("status"), "closed_at": ticket.get("closed_at"),
                 "started": bool(ticket.get("started") or (ticket.get("ticket_view") or {}).get("started") or claim.get("run")),
                 "revision": ticket.get("revision", 0), "checklist": checks,
+                # ORCH-71: the ticket page's state rule reads changes waiting for the person
+                "bring_back": ticket.get("bring_back") if isinstance(ticket.get("bring_back"), dict) else None,
                 "questions": [{**q, "digest": livecards.question_digest(q)} if isinstance(q, dict) else q for q in questions],
                 "history": (ticket.get("history") or [])[-80:],
             },
@@ -508,6 +511,10 @@ class Tracker:
                 "running": running, "mode": claim.get("mode"), "agent": agent, "label": label, "run": claim.get("run"),
                 "pending": status.get("pending", 0),
                 "waiting_input": _waiting_input(status),
+                # ORCH-61: the core's one helper state (the dashboard shows the same), and its times
+                "helper": status.get("helper") if isinstance(status.get("helper"), dict) else None,
+                "age_seconds": status.get("age_seconds") if isinstance(status.get("age_seconds"), int) else None,
+                "idle_seconds": status.get("idle_seconds") if isinstance(status.get("idle_seconds"), int) else None,
             },
             "state": state,
             "generic": generic,
@@ -546,6 +553,22 @@ class Tracker:
         if not agent:
             return True
         return adapterdata.events_kind(self.root, agent, mode or "oneshot") is None
+
+    def manager(self) -> dict | None:
+        """The always-on Manager (ORCH-147): {ticket, running} from `orch manager status`; None when this orch
+        has no Manager yet (an older core), so the start page shows no Manager row."""
+        try:
+            code, out, _ = actions.orch(self.root, self.orch_bin, ["manager", "status", "--json"], timeout=15)
+            d = json.loads(out) if code == 0 else None
+        except (actions.Unavailable, ValueError, RecursionError):
+            d = None
+        if not isinstance(d, dict):
+            return None
+        tid = d.get("ticket")
+        return {
+            "ticket": tid if isinstance(tid, str) and TID_RE.fullmatch(tid) else None,
+            "running": d.get("running") is True,
+        }
 
     def tickets_list(self) -> list[dict]:
         try:
@@ -644,7 +667,7 @@ class Handler(BaseHTTPRequestHandler):
                 and pagelaunch.write_resume_cookie(self.root, s.server, s.cookie, s.secret)
             ):
                 srv.resume_written = exp
-        except Exception:  # noqa: BLE001, S110 - without it the tab shows "orch restarted. Reload" as before
+        except Exception:  # noqa: BLE001, S110 - without it the restarted server uses its kept session
             pass
 
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None):
@@ -663,15 +686,19 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code, data):
         self._send(code, json.dumps(data).encode(), "application/json")
 
-    def _fence(self, method: str, api: bool) -> str | None:
-        """Host + Origin check of orch_ui.origin. A POST without Origin is refused too: the page always sends one."""
+    def _fence(self, method: str, api: bool, at_login: bool = False) -> str | None:
+        """Host + Origin check of orch_ui.origin. A POST without Origin is refused too: the page always sends one.
+        Any host name passes once signed in (session cookie), or for the sign-in itself: where the browser is
+        does not matter."""
         try:
             from orch_ui.origin import check_request
         except ImportError:
             return "Focus is not available in this install."
         if method == "POST" and self.headers.get("Origin") is None:
             return "This request was refused (no origin)."
-        return check_request(method, self.headers, self.server.server_address[1], api=api)
+        port = self.server.server_address[1]
+        signed_in = at_login or bool(self.session is not None and self.session.cookie_ok(self.headers, port))
+        return check_request(method, self.headers, port, api=api, signed_in=signed_in)
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
@@ -693,7 +720,12 @@ class Handler(BaseHTTPRequestHandler):
             self._keep_session_for_restart()
         if path == "/api/tickets":
             return self._json(
-                200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()}
+                200,
+                {
+                    "workspace": self.tracker.workspace(),
+                    "tickets": self.tracker.tickets_list(),
+                    "manager": self.tracker.manager(),
+                },
             )
         if path == "/api/live":
             cards = livecards.cards(self.tracker)
@@ -722,6 +754,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.tracker.status_cache.clear()
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
+        m = re.fullmatch(r"/api/t/(t_[a-z0-9]{6,16})/sessions", path)
+        if m:  # earlier chat sessions of the ticket, or one session's history (?session=<id>): read-only
+            sid = parse_qs(self.path.partition("?")[2]).get("session", [None])[0]
+            args = ["run", "history", m.group(1), "--json"] + (["--session", sid] if sid else [])
+            try:
+                code, out, err = actions.orch(self.root, self.orch_bin, args, timeout=15)
+            except actions.Unavailable as e:
+                return self._json(503, {"error": str(e)})
+            if code != 0:
+                return self._json(404, {"error": (err or out or "No earlier chat sessions.").strip()[:300]})
+            return self._send(200, out.encode() if isinstance(out, str) else out, "application/json")
         if path == "/api/file":  # one proof file of a ticket, read by orch.safefile only (proofs.py)
             q = parse_qs(self.path.partition("?")[2], keep_blank_values=True)
             one = lambda k: (q.get(k) or [""])[0]
@@ -812,11 +855,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.orch_bin == actions.SELF and not (
             self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
         ):
-            return self._send(
-                403,
-                b"Open Focus from this computer (orch focus open) to do this.",
-                "text/plain; charset=utf-8",
-            )
+            return self._send(403, actions.SIGNIN.encode(), "text/plain; charset=utf-8")
         try:
             (areas.accept if op == "area.accept" else areas.remove)(self.root, args["area"])
         except areas.BadArea as e:
@@ -830,19 +869,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _session_post(self):
         """POST /session: the page hands over the one-time launch token from its URL fragment; the server spends
-        it and sets the session cookie (H1). Loopback Host, no proxy headers, same fence as an action."""
-        why = self._fence("POST", True)
+        it and sets the session cookie (H1). Same fence as an action, from any computer."""
+        why = self._fence("POST", True, at_login=True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
             return self._send(403, b"This request came from another website and was refused.", "text/plain")
-        from orch.pagesession import forwarded, host_ok
-
-        if (
-            self.session is None
-            or forwarded(self.headers)
-            or not host_ok(self.headers, self.server.server_address[1])
-        ):
+        if self.session is None:
             return self._send(403, b"forbidden", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
@@ -852,7 +885,7 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "Focus"), "text/plain; charset=utf-8")
-        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its sessionStorage
+        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its localStorage
         self._send(
             200,
             json.dumps({"secret": self.session.secret}).encode(),
@@ -1003,7 +1036,7 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
         from orch.pagesession import PageSession
 
         try:
-            handler.keywords["session"] = PageSession(root, "focus")
+            handler.keywords["session"] = PageSession(root, "focus", srv.server_address[1])
         except BaseException:
             srv.server_close()
             raise

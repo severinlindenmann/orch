@@ -38,8 +38,28 @@ test('one card and none: plain words', () => {
 test('fileUrl serves only reviewed/<sha12>/<name> through /api/file', () => {
   const f = ctx({}).reviewApi().fileUrl;
   assert.equal(f(CARD, 'reviewed/0123456789ab/after.png'), '/api/file?t=t_abcdef&k=reviewed&n=0123456789ab%2Fafter.png');
-  for (const bad of ['reviewed/0123456789ab/../x.png', 'reviewed/0123456789ab/a/b.png', 'artifacts/x.png', 'reviewed/XYZ/x.png', '', null, 'https://evil/x.png']) assert.equal(f(CARD, bad), '', String(bad));
+  for (const bad of ['reviewed/0123456789ab/../x.png', 'reviewed/0123456789ab/a/b.png', 'reviewed/XYZ/x.png', '', null, 'https://evil/x.png', 'artifacts/../x.png', 'evidence/a/../../x.png', 'evidence/.orch/x.png', 'secrets/x.png', 'evidence/a\\b.png']) assert.equal(f(CARD, bad), '', String(bad));
   assert.equal(f({}, 'reviewed/0123456789ab/after.png'), '');
+});
+test('a Check result opens its own files: pictures and PDFs through /api/file, a page only in its /view frame (ORCH-183)', () => {
+  const f = ctx({}).reviewApi().fileUrl;
+  assert.equal(f(CARD, 'evidence/shop photo.png'), '/api/file?t=t_abcdef&k=evidence&n=shop%20photo.png');
+  assert.equal(f(CARD, 'artifacts/out/poster.pdf'), '/api/file?t=t_abcdef&k=artifacts&n=out%2Fposter.pdf');
+  assert.equal(f(CARD, 'evidence/result.html'), '/view/t_abcdef/evidence/result.html');
+  assert.equal(f(CARD, 'artifacts/site/index.HTM'), '/view/t_abcdef/artifacts/site/index.HTM');
+});
+test('a Factory proposal on Review reads like Home: its title as the question, goal and time in short lines (ORCH-183)', async () => {
+  const text = "Start 'Loyalty card for regular customers'? ~1 h 30 min · you're needed for ~10 min. Goal: Regular customers collect stamps. Done means: The card design is ready. Stops: ship. Cap: 2 h active. Crew: manager claude.";
+  const plain = {...CARD, id:'core:q:t_abcdef:q4', key:'q4', text, options:['Start', 'Edit', 'Not now'], card:{kind:'choice', title:text, preview:{type:'options', options:[{id:'Start', title:'Start'}]}}};
+  const [fac, other] = await ctx({review:{cards:[plain, CARD]}}).reviewApi().stack();
+  assert.equal(fac.card.title, "Start 'Loyalty card for regular customers'?");
+  assert.equal(fac.text, 'Regular customers collect stamps.\n' + helpers.factoryStart(text).meta, 'the goal, then the same time line as Home');
+  assert.doesNotMatch(fac.text, /Crew|Stops/);
+  assert.equal(JSON.stringify(fac.answers), JSON.stringify([{label:'Not now', picked:'Not now'}, {label:'Change it', picked:'Edit'}, {label:'Start', picked:'Start'}]), "Home's buttons, Start last (owner choice B)");
+  assert.equal(fac.card.preview, undefined, 'no second list of the same answers on the card');
+  assert.equal(plain.card.preview.type, 'options', 'the state itself is not changed');
+  assert.equal(fac.digest, plain.digest, 'the answer still names what was asked');
+  assert.equal(other, CARD, 'any other card as it is');
 });
 test('an answer is one review.answer click: question card, check card, picked and note', async () => {
   const c = ctx({});
@@ -53,7 +73,7 @@ test('an answer is one review.answer click: question card, check card, picked an
 });
 test('refusals become the codes the page understands', async () => {
   const reply = r => ctx({}, {act:async () => r}).reviewApi().answer({id:CARD.id, digest:ID, verdict:'ok'});
-  assert.equal((await reply({ok:false, status:403, text:'Open the dashboard from this computer.'})).error.code, 'needs_person');
+  assert.equal((await reply({ok:false, status:403, text:'Sign in to do this: open the dashboard with a sign-in link from orch.'})).error.code, 'needs_person');
   assert.deepEqual({...(await reply({ok:false, status:422, text:JSON.stringify({ok:false, error:{code:'changed', message:'It changed.'}})})).error}, {code:'changed', message:'It changed.'});
   assert.equal((await reply({ok:false, status:400, text:'That is not a card.'})).error.code, 'refused');
   assert.equal((await reply({ok:false, status:0, text:'Could not reach orch.'})).error.code, 'error');
@@ -64,6 +84,9 @@ test('the All cards list: the card on screen in bold, answered ones quiet with t
   const item = (id, title) => ({id, title, icon:'page', kind:'draft', okLabel:'Build it', preview:{type:'page'}});
   const deck = {items:[item('a', 'First'), item('b', 'Second'), item('c', 'Third')], index:1, answers:{a:{verdict:'ok', item:item('a', 'First'), note:null}, c:{verdict:'no', item:item('c', 'Third')}}, jump(i) { deck.index = i; }};
   c.document = {createElement: t => h(t)}; c.reviewDrawSide(queue, deck);
+  assert.equal(rows.length, 1, 'one set: one section without a heading');
+  assert.ok(!nodes(rows[0]).some(n => /review-group-head/.test(n.attrs?.className || '')));
+  rows.splice(0, 1, ...rows[0].children);
   assert.equal(rows.length, 3);
   assert.match(rows[0].attrs.className, /is-done/); assert.match(text(rows[0]), /Build it/);
   assert.match(rows[1].attrs.className, /is-now/); assert.match(text(rows[1]), /Now/);
@@ -122,7 +145,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
 });
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
   const src = read('app.js');
-  assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, location\.origin\)/);
+  assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, '\*'\)/);  // to the sandboxed frame only
   assert.match(src, /menuToggle\.textContent = [^\n]+\n\s*postNeedsCount\(needCount\);/);
   assert.match(src, /e\.data\?\.orch !== 'needs-count'/);
   assert.match(src, /\.shipped\) return null;/, 'only an add-on orch ships gets the number');
@@ -138,4 +161,53 @@ test('Review answers on a ticket: only those with a card answer, newest first', 
   const list = vm.runInContext('ticketReviewAnswers', c)(t);
   assert.deepEqual(list.map(e => e.id), ['core:q:t_abcdef:q3', 'core:q:t_abcdef:q1'], 'an answer without a decision is not one');
   assert.equal(vm.runInContext('ticketReviewAnswers', c)({id:'t_abcdef', questions:[{id:'q4', answer:'x'}]}).length, 0);
+});
+
+test('the All cards list: one section per set (group, else ticket) with its own count (ORCH-65)', () => {
+  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
+  const secs = []; const queue = {replaceChildren(...r) { secs.push(...r); }};
+  const item = (id, extra) => ({id, title:'Card ' + id, icon:'page', kind:'draft', preview:{type:'page'}, ticketTitle:'Home look', ...extra});
+  const deck = {items:[item('a', {group:'Phone'}), item('b', {group:'Phone'}), item('c')], index:1, answers:{a:{verdict:'ok', item:item('a'), note:null}}, jump() {}};
+  c.reviewDrawSide(queue, deck);
+  assert.equal(secs.length, 2);
+  assert.match(text(secs[0]), /^Phone1 of 2 waiting/); assert.match(text(secs[1]), /^Home look1 of 1 waiting/);
+});
+
+test('Review opens at the card the ticket page asked for (#review?card=...)', () => {
+  const calls = [];
+  const c = ctx({}, {location:{hash:'#review?card=' + encodeURIComponent('core:q:t_abcdef:q2')}, window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() {}, tick() {}}; }}}});
+  const host = h('div'), main = {querySelectorAll: sel => sel === '[data-review-host]' ? [host] : [], querySelector: () => h('div')};
+  c.mountReview(main);
+  assert.equal(calls[0].startId, 'core:q:t_abcdef:q2');
+});
+
+test('"Accepted for you": hidden when empty, a link and the why line per row, one tap sends back with a note (ORCH-77)', async () => {
+  const row = (ticket, extra = {}) => ({ticket, key:'ORCH-' + ticket.slice(-2), title:'Fix ' + ticket, why:'pull request #12 merged, 17 checks green.', sent_back:false, ...extra});
+  const c = ctx({review:{cards:[], accepted:[]}}, {iconEl:n => n});
+  assert.equal(c.reviewAcceptedCard(), null, 'nothing accepted: no section');
+  c.state.review.accepted = [row('t_aaaa11'), row('t_bbbb22', {sent_back:true})];
+  const card = c.reviewAcceptedCard();
+  assert.match(text(card), /^Accepted for you/);
+  const links = nodes(card).filter(n => n.tag === 'a');
+  assert.deepEqual(links.map(a => a.attrs.href), ['#ticket/t_aaaa11', '#ticket/t_bbbb22']);
+  assert.match(text(card), /pull request #12 merged, 17 checks green\./);
+  const buttons = nodes(card).filter(n => n.tag === 'button');
+  assert.equal(buttons.length, 1, 'only the row that is not sent back has the button');
+  assert.equal(text(buttons[0]), 'Send back');
+  assert.match(text(card), /Sent back/);
+  // the page keeps the card beside the "All cards" aside, not inside it (the aside hides on a phone)
+  const page = nodes(c.reviewPage());
+  const side = page.find(n => n.attrs?.['data-review-side'] !== undefined), rail = page.find(n => n.attrs?.['data-key'] === 'review-rail');
+  assert.ok(rail && !nodes(side).some(n => n.attrs?.['data-key'] === 'review-accepted') && nodes(rail).some(n => n.attrs?.['data-key'] === 'review-accepted'));
+  // the send: ticket.changes with the note, then the row reads "Sent back"
+  assert.equal(await c.reviewSendBack(row('t_aaaa11'), '   '), false, 'an empty note sends nothing');
+  assert.equal(c.acts.length, 0);
+  assert.equal(await c.reviewSendBack(row('t_aaaa11'), ' Keep the old name '), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts[0])), ['ticket.changes', {ticket:'t_aaaa11', text:'Keep the old name'}]);
+  assert.equal(nodes(c.reviewAcceptedCard()).filter(n => n.tag === 'button').length, 0);
+});
+test('the All cards list names an own answer by its button word', () => {
+  const c = ctx({});
+  const it = {answers:[{label:'Change it', picked:'Edit'}]};
+  assert.equal(c.reviewWord({verdict:'ok', item:it, note:{picked:'Edit'}}), 'Change it');
 });

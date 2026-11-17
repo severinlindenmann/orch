@@ -16,11 +16,18 @@ import re
 import shutil
 import subprocess
 
+from orch import ghlimit
 from orch.errors import Refused
 
 PR_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}")
 # gh reads these before its own sign-in; a helper's environment may set them for a helper account
 TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+
+
+class MergeFailed(Refused):
+    """GitHub (or the pull request itself) refused the merge: the review card sends it back to the helper."""
+
+
 OPEN_IT = "Open the pull request and merge it there."
 JQ_VIEW = '[.state, (.reviewDecision // ""), .headRefOid] | @tsv'
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -153,6 +160,118 @@ def checks(url: str) -> dict | None:
     return {"state": data["state"], "head": head, "green": green}
 
 
+MERGE_COMMIT = re.compile(r"Merge pull request #([0-9]{1,9}) from ")
+MAX_ITEMS = 40
+
+
+def checks_state(rollup) -> tuple[str, str]:
+    """(tone, plain words) of a pull request's checks (ORCH-183): ("done", "All 18 checks passed"),
+    ("working", "3 of 18 checks still running"), ("failed", "1 check failed: lint"). The newest run of each
+    check counts, as in passed()."""
+    if not isinstance(rollup, list) or not rollup:
+        return "working", "No checks have run yet"
+    runs = [c for c in _newest(rollup) if isinstance(c, dict)]
+    failed, running = [], 0
+    for c in runs:
+        if "state" in c and "status" not in c:
+            word = c.get("state")
+            if word == "PENDING":
+                running += 1
+                continue
+        elif c.get("status") != "COMPLETED":
+            running += 1
+            continue
+        else:
+            word = c.get("conclusion")
+        if word not in PASSED:
+            failed.append(str(c.get("name") or c.get("context") or "a check")[:60])
+    if failed:
+        n = len(failed)
+        return "failed", f"{n} check{'' if n == 1 else 's'} failed: " + ", ".join(failed[:3]) + (
+            " …" if n > 3 else ""
+        )
+    if running:
+        return "working", f"{running} of {len(runs)} checks still running"
+    return "done", f"All {len(runs)} checks passed" if len(runs) > 1 else "The check passed"
+
+
+def summary(url: str, head: str) -> dict | None:
+    """What a merge card shows (ORCH-183, owner 17 Nov: "the address is a link, not the content"), read
+    once when the card is made, with whatever login this process has: {"title", "base", "checks" (plain
+    words), "items": [{"pr": n, "title"}], "other": commits that are no pull request merge}. Items come from
+    merge commit headlines, which a commit author writes: GitHub's own titles, never a ticket alone, and the
+    count of other commits is always shown. None when GitHub cannot be read or the newest commit is no longer
+    `head` (the commit the click merges): the card then shows only that commit."""
+    gh = shutil.which("gh")
+    if gh is None or not is_pr_url(url):
+        return None
+    try:
+        v = _gh_plain(
+            gh, ["pr", "view", url, "--json", "title,baseRefName,headRefOid,commits,statusCheckRollup"], 20
+        )
+        data = json.loads(v.stdout) if v.returncode == 0 else None
+    except (Refused, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("headRefOid") != head:
+        return None
+    items, seen, other = [], set(), 0
+    for c in data.get("commits") or []:
+        if not isinstance(c, dict):
+            continue
+        m = MERGE_COMMIT.match(str(c.get("messageHeadline") or ""))
+        if not m or m[1] in seen:
+            other += 1
+            continue
+        seen.add(m[1])
+        title = next((x.strip() for x in str(c.get("messageBody") or "").splitlines() if x.strip()), "")
+        items.append({"pr": int(m[1]), "title": title[:200]})
+    return {
+        "title": str(data.get("title") or "")[:200],
+        "base": str(data.get("baseRefName") or "")[:100],
+        "checks": checks_state(data.get("statusCheckRollup")),
+        "items": items[:MAX_ITEMS],
+        "more": max(0, len(items) - MAX_ITEMS),
+        "other": other,
+    }
+
+
+RELEASE_PREFIX = "release/"
+RELEASE_FROM = "develop"  # a release only carries what is on this branch already (reviewed there)
+
+
+def release_problem(url: str, head: str) -> str | None:
+    """Why a pull request is not a release that may merge without a click (None = it is one): it must
+    come from a release/... branch into the repository's default branch, and change nothing that is not on
+    develop already (GitHub's compare develop...<commit> lists no file). Read-only, with any login."""
+    repo, _ = _parts(url)
+    gh = shutil.which("gh")
+    if gh is None or not SHA.fullmatch(str(head or "")):
+        return "GitHub could not be read"
+    try:
+        v = _gh_plain(gh, ["pr", "view", url, "--json", "baseRefName,headRefName,isCrossRepository"], 15)
+        pr = json.loads(v.stdout) if v.returncode == 0 else None
+        d = _gh_plain(gh, ["api", f"repos/{repo}", "--jq", ".default_branch"], 15)
+        # the branch's own commit (a tag of that name cannot stand in), then compare commit to commit
+        b = _gh_plain(gh, ["api", f"repos/{repo}/branches/{RELEASE_FROM}", "--jq", ".commit.sha"], 15)
+        base = b.stdout.strip() if b.returncode == 0 else ""
+        if not SHA.fullmatch(base):
+            return "GitHub could not be read"
+        c = _gh_plain(gh, ["api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".files | length"], 20)
+    except (Refused, ValueError):
+        return "GitHub could not be read"
+    if not isinstance(pr, dict) or v.returncode != 0 or d.returncode != 0:
+        return "GitHub could not be read"
+    if pr.get("isCrossRepository") is not False:
+        return "it comes from another repository"
+    if not str(pr.get("headRefName") or "").startswith(RELEASE_PREFIX):
+        return f"it does not come from a {RELEASE_PREFIX}... branch"
+    if pr.get("baseRefName") != d.stdout.strip():
+        return "it does not go into the default branch"
+    if c.returncode != 0 or c.stdout.strip() != "0":
+        return f"it changes files that are not on {RELEASE_FROM}"
+    return None
+
+
 def head_of(url: str) -> str:
     """The newest commit of an open pull request, read when the card is made: the click merges exactly it."""
     _parts(url)
@@ -163,6 +282,21 @@ def head_of(url: str) -> str:
     if state != "OPEN":
         raise Refused("That pull request is not open on GitHub, so there is nothing to merge.")
     return head
+
+
+def _unfinished_checks(gh: str, url: str) -> str | None:
+    """Plain words when the pull request's checks have not all passed yet ("3 of 18 checks still running",
+    "1 check failed: lint"), read now at GitHub; None when they passed, there are none (a repository without
+    checks), or GitHub could not be read (GitHub's own rules then decide)."""
+    try:
+        v = _gh(gh, ["pr", "view", url, "--json", "statusCheckRollup"], 15)
+        rollup = (json.loads(v.stdout) if v.returncode == 0 else {}).get("statusCheckRollup")
+    except (ValueError, AttributeError, Refused):
+        return None
+    if not isinstance(rollup, list) or not rollup:
+        return None
+    tone, words = checks_state(rollup)
+    return None if tone == "done" else words
 
 
 def merge(url: str, head: str, add_review: bool = True) -> dict:
@@ -186,7 +320,13 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
     if state != "OPEN":
         raise Refused("The pull request is closed on GitHub, so it cannot be merged. Open it to see why.")
     if now != head:
-        raise Refused(CHANGED)
+        raise MergeFailed(CHANGED)
+    unfinished = _unfinished_checks(gh, url)
+    if unfinished:  # say it plainly instead of GitHub's "base branch policy prohibits the merge"
+        raise Refused(
+            f"Its checks have not all passed yet ({unfinished}), so nothing was merged. "
+            "The card stays: click Merge again when they are green."
+        )
     if (
         add_review and review == "REVIEW_REQUIRED"
     ):  # the branch rules want a review: the click is the person's, on THIS commit
@@ -198,5 +338,6 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
         )  # fmt: skip
     done = _gh(gh, ["pr", "merge", url, "--merge", "--match-head-commit", head], 25)
     if done.returncode != 0:
-        raise Refused(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
+        raise MergeFailed(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
+    ghlimit.count("merge", url)  # the person's own click never waits, but it uses up the hour too
     return {"login": login, "already": False}

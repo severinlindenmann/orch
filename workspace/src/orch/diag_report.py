@@ -36,7 +36,10 @@ ATTACH_FILE_BYTES = 8 * 1024 * 1024
 ATTACH_BYTES = 25 * 1024 * 1024
 INCIDENT_MAX = 20
 INCIDENT_BYTES = 50 * 1024 * 1024
+REPORT_BYTES = 100 * 1024 * 1024  # own room: reports never count against the debug log
+TICKETS_STATE = "report-tickets.json"  # written by report_tickets.py: which reports became a ticket
 REPORTS = "reports"
+ABOUT = ("problem", "feature")  # what a report is about: something went wrong, or a feature wish
 _SCOPE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
@@ -231,13 +234,21 @@ def summary(
     content: bool,
     more=None,
     attachments=(),
+    about="problem",
 ) -> str:
+    wish = about == "feature"
+
     def build(n_timeline: int, n_errors: int) -> str:
-        out = [f"# Diagnostic report {ref}", ""]
+        out = [f"# {'Feature wish' if wish else 'Diagnostic report'} {ref}", ""]
+        if wish:
+            out += [
+                "This is a feature wish, not a problem: sort it first, do not start building it blindly.",
+                "",
+            ]
         if note:
-            out += ["## What the person said", note[:600], ""]
+            out += ["## What the person wants" if wish else "## What the person said", note[:600], ""]
         if expected:
-            out += ["## What they expected", expected[:600], ""]
+            out += ["## Why it would help" if wish else "## What they expected", expected[:600], ""]
         if more:
             out += ["## More details from the person", more[:MORE_MAX], ""]
         if attachments:
@@ -321,6 +332,7 @@ def make(
     page=None,
     more=None,
     files=None,
+    about="problem",
 ) -> dict:
     """Make a report (`kind` r) or an incident (`kind` i, structure only, a short window). Returns {ref,
     path, ...}."""
@@ -328,6 +340,8 @@ def make(
     hide = hide or diag._hider(root)
     if hide is None:
         raise Refused("Secrets cannot be hidden here, so no report was made.")
+    if about not in ABOUT:
+        raise Refused("A report is about a problem or a feature.")
     scope = {"ticket": ticket, "run": run, "addon": addon}
     added = check_attachments(files) if kind == "r" else []
     more = (str(more).strip()[:MORE_MAX] or None) if more and kind == "r" else None
@@ -358,8 +372,11 @@ def make(
             raise Refused(f"{part} is a link. No report was made.")
     rdir.mkdir(parents=True, exist_ok=True, mode=0o700)
     folder = None
+    used = _ticketed(root)  # a name that already has a ticket is never given out again
     for n in range(1, 50):
         ref = base if n == 1 else f"{base}-{n}"
+        if ref in used:
+            continue
         try:
             (rdir / ref).mkdir(mode=0o700)
             folder = rdir / ref
@@ -387,6 +404,7 @@ def make(
                 bool(content),
                 more,
                 [n for n, _ in added],
+                about if kind == "r" else "problem",
             ),
         )
         for name, data in added:
@@ -427,6 +445,7 @@ def make(
                 "schema": SCHEMA,
                 "ref": ref,
                 "kind": "report" if kind == "r" else "incident",
+                "about": about if kind == "r" else "problem",
                 "created_at": _iso(now),
                 "scope": scope,
                 "window": {"from": _iso(lo), "to": _iso(hi), "why": why},
@@ -450,6 +469,7 @@ def make(
     prune(root)
     return {
         "ref": ref,
+        "about": about if kind == "r" else "problem",
         "path": str(folder),
         "problems": [c["name"] for c in checks if c["verdict"] == "problem"],
         "checks": checks,
@@ -483,11 +503,27 @@ def delete_all(root: Path) -> int:
     return gone
 
 
+def is_kept(path: str | Path) -> bool:
+    """True when the report folder is still on disk and complete (manifest.json written)."""
+    p = Path(path)
+    return p.is_dir() and not p.is_symlink() and (p / "manifest.json").is_file()
+
+
+def _ticketed(root: Path) -> set[str]:
+    """Report names the ticket pass has seen: a ticket was made, or it was here when the setting went on."""
+    try:
+        d = json.loads((root / ".orch" / "diag" / TICKETS_STATE).read_text())
+        seen = d.get("seen") if isinstance(d, dict) else None
+        return set(seen) if isinstance(seen, dict) else set()
+    except (OSError, ValueError):
+        return set()
+
+
 def prune(root: Path) -> list[str]:
-    """Reports and incidents count against the 200 MB of the debug log. Over the budget the oldest
-    report goes first
-    (then the oldest incident); more than 20 incidents or 50 MB of them, the oldest incident goes. Each
-    removal is a
+    """Reports and incidents do NOT count against the debug log's 200 MB: the log gives way on its own
+    (diag.prune). More than 20 incidents or 50 MB of them, the oldest incident goes. Reports have their own
+    room (REPORT_BYTES); over it, the oldest report that already became a ticket goes. A report without a
+    ticket is never removed here (only `orch diag delete reports` does that). Each removal is a
     `diag.report_pruned` event."""
     rdir = reports_dir(root)
     if rdir.is_symlink() or not rdir.is_dir():
@@ -511,11 +547,12 @@ def prune(root: Path) -> list[str]:
     while inc and (len(inc) > INCIDENT_MAX or sum(i[3] for i in inc) > INCIDENT_BYTES):
         drop(inc[0], "incident budget")
         inc.pop(0)
-    logs = 0
-    d = root / ".orch" / "diag"
-    for p in d.glob("*.jsonl"):
-        with contextlib.suppress(OSError):
-            logs += p.lstat().st_size
-    while items and logs + sum(i[3] for i in items) > diag.MAX_TOTAL_BYTES:
-        drop(items[0], "total budget")
+    rep = [i for i in items if i[1].startswith("r-")]
+    done = _ticketed(root)
+    for it in list(rep):
+        if sum(i[3] for i in rep) <= REPORT_BYTES:
+            break
+        if it[1] in done:
+            drop(it, "report budget, already a ticket")
+            rep.remove(it)
     return gone

@@ -71,10 +71,74 @@ New ticket: 560 px, the box starts at 3 rows and grows, Start opens the new tick
 
 - A Working ticket with no news for 6 hours shows "No news since 09:20" (day first when not today) on its card and in the list, on its ticket page ("Your helper is working. No news since 09:20."), and as a quiet row on Home that is not counted as needing you. Open the ticket with `?quiet=1` to see it.
 ## Fix wave 15 Nov (b4)
-Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy local link" with the hint "Works only on this computer". Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
+Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy link for this computer" with the hint "Works only on this computer". Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
 
 ## ORCH-14 (16 Nov): several tickets at once (epic)
 
 ### new.html
 
-- Under the files: "＋ Make it an epic with several tickets". Each click adds a "Ticket N" box with its own text, files and Remove; the button then reads "＋ Add another ticket" and a line says the ticket becomes an epic. On Start the epic is made first, then one ticket inside it per box; one helper run goes through them in order. The epic page lists them under "Tickets in this epic"; the board card says "Epic · N of M done"; a ticket inside says "Part of the epic …".
+- Under the files: "＋ Split into parts". Each click adds a "Ticket N" box with its own text, files and Remove; the button then reads "＋ Add another part" and a line says the ticket becomes an epic. On Start the epic is made first, then one ticket inside it per box; one helper run goes through them in order. The epic page lists them under "Tickets in this epic"; the board card says "Epic · N of M done"; a ticket inside says "Part of the epic …".
+
+## ORCH-156 (17 Nov): existing tickets under an epic, no empty epic box, order inside a lane
+
+### new.html
+- An empty "Ticket N" box stops the save with "Ticket N is empty. Write what needs doing in it, or remove it." (it used to drop out silently, and an epic with only empty boxes became a plain ticket). Nothing is made until it is filled or removed.
+
+### Ticket page (Properties, Add a ticket)
+- Properties has "Part of" (it replaces the "Sub-ticket of" line): a select with "Not part of another ticket" or any open ticket, epics first (marked "(epic)"), never the ticket itself or one inside it. The header line "Part of the epic …" follows it.
+- An epic's "+ Add a ticket" window keeps the title box and adds "Or pick a ticket that already exists"; picking one hides the title box, Add moves that ticket in.
+
+### board.html
+- Inside a lane the person drags a card above another to put them in order (a drop on empty space puts it last); the order is kept per lane. Cards that came into the lane since stay on top. The card's ⋯ menu adds "Move up" and "Move down" under the lanes (by keyboard, no dragging), only where the card can move.
+
+## Revised after the owner's answer (16 Nov, ORCH-62)
+
+### list.html
+
+- Every ticket sits in the group of its own status; a ticket that only waits for another one has its own group "Waiting for another ticket" with "Waits for ORCH-12" under the title.
+- Steps read "3/4" with a bar, on one line. No Status and no Owner column (the group says the status); a chip only for an Idle or Stuck helper, with "Nothing running for 18 min".
+
+## ORCH-69 (owner picked A, 16 Nov)
+- Board and list cards carry no Start helper or Resume button: starting a helper costs budget, so it is never the easiest click. A To do card shows its title, its line and its meta only; a paused card keeps its "Paused" line. A helper starts from the ticket page (Start helper / Resume) or from Home. New ticket keeps Start and Save.
+
+## Phone (17 Nov, ORCH-73)
+
+- `list.html`: up to 720 px the table gives way to grouped short rows (master `.short-group`): number and title, one fact, Answer where you are needed, else steps n/m or an Idle chip. The List/Board switch shows only on wide screens.
+- `list.html`, `../home/home.html`, `../review/review.html`, `../ticket/ticket-working.html`: the phone bottom bar (master `.tabbar`) Home, Tickets, Review with the one needs-you number, More opens the side menu.
+
+## ORCH-185: no lost input or silent cuts (17 Nov)
+
+- New ticket: text typed and then closed with Cancel, Esc or Back is kept and comes back the next time with "Your unsent text from before is back. Discard".
+- New ticket: an added picture shows a small thumbnail in its file row (kit `.thumbnail`).
+- Date picker (kit): today is marked with a ring and `aria-current="date"`; it opens as a small 340 px popup, not the 480 px dialog width.
+- `new.html` and `new.js` show the draft line with Discard and the picture thumbnail.
+- Board: a sub-ticket that has its own card in the same column is no longer listed again inside its parent's card; sub-tickets in other columns still are.
+
+## Releases (ORCH-37, owner picked "a release is a parent ticket", 17 Nov)
+
+- `list.html`: a release is its own group above the status groups ("Release 26 · 1 of 4 done", Open release), with its epic, the epic's tickets and its other tickets as one tree; each row carries its status chip. Finished releases start folded.
+- `../ticket/ticket-working.html`: Properties has a Release switch under Part of; Part of offers releases first, marked "(release)".
+## Triage button (ORCH-151, 17 Nov)
+
+- `board.html`, `list.html`: a Triage button beside the page title. It opens a small menu that says what happens and lists the lanes with their counts as tick boxes (Backlog to Check ticked, Done, Won't do and Superseded not); Start triage opens a dated Triage ticket and starts one
+  helper that goes through every open ticket (brings it up to date, groups related ones, closes what is no longer
+  needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
+  says so in a notice.
+- Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).
+
+
+## Manager view (ORCH-189, owner approved 17 Nov)
+
+- `list.html`: Due column (red when past, amber today) and Time · cost column (helper time and money at list price);
+  quick views This week and Stuck; the Stuck pill also for an old question, no news for a day or past due.
+- `../insights/insights.html`: Helper time, Cost, Tickets finished, Stuck now and a By person table on top.
+- `../ticket/ticket-change.html`, `ticket-question.html`: Time · cost in Properties (the helper's first-run estimate
+  beside what it took so far).
+## ORCH-240 (17 Nov, owner's words)
+
+- The filter "Group" is now "Part of", with "Any ticket" for no choice; the list column "Steps" is "Tasks".
+- The to-do lines of a ticket are "tasks" everywhere ("+ Add task", "2 of 5 tasks", "Added a task"); the
+  sub-tickets of a plain ticket are headed "Sub-tickets".
+- The board fits at 1440: lanes shrink to 210 px, empty lanes to 76 px, empty Won't do and Superseded lanes
+  are hidden until they hold a card. A sub-ticket with its own card is not listed again in its parent's card.
+- On the phone the List/Board switch shows too; the Board is lanes side by side that you swipe.

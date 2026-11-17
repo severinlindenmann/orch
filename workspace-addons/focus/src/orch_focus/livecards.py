@@ -16,6 +16,19 @@ WORKERS = 6  # views read at the same time
 MAX_STEPS = 3
 MAX_OPTIONS = 4
 ACTIVE = ("active", "waiting")  # ticket statuses a running agent can have
+FINISHED = (
+    "review",
+    "done",
+)  # a helper whose ticket is finished can still have its session open (it shows, with Stop)
+WORDS = {
+    "working": "Working",
+    "starting": "Starting",
+    "you": "Waits for you",
+    "waiting": "On hold",
+    "idle": "Idle",
+    "stuck": "Stuck",
+}
+ORDER = list(WORDS)  # working first, stuck last: the order of the Helpers list on Home
 
 
 def _one_line(text, limit: int = 200) -> str:
@@ -84,13 +97,43 @@ def _task_line(board: dict, checklist: list[dict]) -> str:
     return ""
 
 
+def helper(v: dict) -> dict:
+    """The core's one helper state (orch run status "helper"); the same fallback words as the dashboard for an older core."""
+    run, t = v["run"], v["ticket"]
+    h = run.get("helper")
+    if isinstance(h, dict) and h.get("state") in WORDS:
+        return {"state": h["state"], "word": WORDS[h["state"]], "detail": _one_line(h.get("detail"))}
+    key = {"needs": "you", "waiting": "idle"}.get(v.get("state"), "working")
+    detail = (
+        "Your answer"
+        if key == "you"
+        and any(q.get("answer") is None for q in t.get("questions") or [] if isinstance(q, dict))
+        else ""
+    )
+    return {"state": key, "word": WORDS[key], "detail": detail}
+
+
+def _step(checklist: list[dict]) -> dict | None:
+    """{n, of}: the task being done, else the first open one (the same count as the dashboard's Helpers list)."""
+    tasks = [c for c in checklist if not c.get("wont_do")]
+    at = next((i for i, c in enumerate(tasks) if c.get("state") == "doing"), None)
+    if at is None:
+        at = next((i for i, c in enumerate(tasks) if not c.get("done")), None)
+    return {"n": at + 1, "of": len(tasks)} if tasks and at is not None else None
+
+
 def card(v: dict) -> dict:
     t, run, board = v["ticket"], v["run"], v["board"]
     checklist = [c for c in t.get("checklist") or [] if isinstance(c, dict)]
     steps = _steps(v.get("events") or [])
     question = _question(t)
-    now = _one_line(board.get("step")) or (steps[0]["text"] if steps else "") or "Getting started"
+    state = helper(v)
+    now = _one_line(board.get("step")) or (steps[0]["text"] if steps else "") or state["detail"]
+    age, idle = run.get("age_seconds"), run.get("idle_seconds")
     return {
+        **state, "step": _step(checklist), "finished": t.get("status") in FINISHED,
+        "age_minutes": age // 60 if isinstance(age, int) else None,
+        "idle_minutes": idle // 60 if isinstance(idle, int) else None,
         "ticket": t["id"], "key": t.get("key"), "title": _one_line(t.get("title")),
         "agent": _one_line(run.get("label") or "Agent", 60),
         "minutes": int(run.get("worked") or 0) // 60,
@@ -125,11 +168,18 @@ def same_file(cards: list[dict]) -> list[dict]:
 
 
 def cards(tracker) -> list[dict]:
-    """Cards for every ticket whose agent runs now, those that wait for you first.
+    """Cards for every ticket whose agent runs now, in the Helpers list order (working first, stuck last).
 
     The views are read side by side (each asks `orch` about its ticket): one after the other took a few seconds
     with four helpers at work, and the start page waits for this answer before it shows its lists."""
-    ids = [row["id"] for row in tracker.tickets_list() if row["status"] in ACTIVE]
+    root = getattr(tracker, "root", None)  # a finished ticket counts only while its session file is there
+    claims = root / ".orch" / "run" / "tickets" if root is not None else None
+    ids = [
+        row["id"]
+        for row in tracker.tickets_list()
+        if row["status"] in ACTIVE
+        or (claims is not None and row["status"] in FINISHED and (claims / f"{row['id']}.json").exists())
+    ]
     if len(ids) > 1:
         with ThreadPoolExecutor(max_workers=min(WORKERS, len(ids))) as pool:
             views = list(pool.map(tracker.view, ids))
@@ -137,4 +187,4 @@ def cards(tracker) -> list[dict]:
         views = [tracker.view(t) for t in ids]
     out = [card(v) for v in views if v and v["run"]["running"]][:MAX_CARDS]
     areas.label(tracker.root, out)
-    return sorted(out, key=lambda c: c["question"] is None)
+    return sorted(out, key=lambda c: ORDER.index(c["state"]))

@@ -13,7 +13,9 @@
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
     S.views.ticket.renderPhoneLine(v);
-    els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
+    const head = window.FocusHelpers.headerLine(v);
+    els.key.textContent = head.key;  /* the ticket number people use (ORCH-12), never the internal id */
+    els.key.hidden = !head.key;
     document.getElementById('fx-loading')?.remove();  /* the skeleton goes when the first view is there */
     root.dataset.state = v.state;
     if (prev && !root.hasAttribute('data-live')) root.setAttribute('data-live', '');  /* motion only after a live change */
@@ -21,6 +23,7 @@
     /* the helper waits for an answer on its screen: one yellow line there, and here it is your turn */
     const screenAsks = S.state.screenWaiting === true && v.run.running === true;
     const stateText = screenAsks ? 'Needs you' : window.FocusHelpers.sessionState(v).pill || statusWord(t);
+    renderHeadLine(head);
     const shownText = window.FocusHelpers.holdText(v) || stateText;  /* why orch waits, in the core's words; gone when it clears */
     if (els.stateText.textContent !== shownText) els.stateText.textContent = shownText;
     els.live.toggleAttribute('data-hold', shownText !== stateText);
@@ -38,22 +41,18 @@
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
     els.stopL.textContent = running ? 'Pause work' : 'Continue';
     els.stop.setAttribute('aria-label', running ? 'Pause work' : 'Continue');
-    els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
+    els.compose.hidden = S.state.tab >= 2 || (v.state === 'done' && !running);  /* a done ticket is a read-only board unless a helper runs on it; a ticket in Check takes messages (ORCH-247) */
     S.views.compose.renderWaiting(v);
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
     els.stop.hidden = (asking && !running) || (!running && !hasStarted);
-    els.fresh.disabled = running || asking || !hasStarted;
+    els.fresh.disabled = t.manager ? asking : running || asking || !hasStarted;  /* the Manager starts fresh any time (ORCH-147) */
     els.review.hidden = !window.FocusHelpers.reviewBarShown(v);
     els.complete.hidden = v.state !== 'done';
     els.attachBtn.disabled = !(running && v.live);
     els.interruptBtn.disabled = !running;
     els.sub.textContent = '';
-    /* whose turn it is, and where the work is */
-    const turn = v.state === 'done' ? 'Finished' : asking || screenAsks || t.status === 'review' ? 'Your turn' : running ? 'Helper’s turn' : '';
-    const base = els.stateText.textContent.split(' · ')[0];
-    if (turn && !base.startsWith('Finished') && turn !== 'Finished') els.stateText.textContent = base + ' · ' + turn;
     const now = t.checklist.find(c => !c.done && !c.wont_do);
     els.taskLine.textContent = v.total && now ? 'Task ' + (v.done + 1) + ' of ' + v.total + ' · ' + now.text : '';
     if (!S.state.changesRequested) els.msg.placeholder = screenAsks ? 'Answer the helper…' : 'Write a message…';
@@ -76,6 +75,16 @@
     if (root.classList.contains('fx-terminal') && ((S.state.firstRender && (['review', 'done'].includes(t.status) || location.hash === '#results')) || (t.status === 'done' && prev?.ticket.status !== 'done'))) els.tabs[1].click();
     S.state.firstRender = false;
     S.notify(v);
+  }
+
+  /* Inside the dashboard the header says what the ticket page says (ORCH-71): ORCH-n · the state pill · Step 3 of 4 · 52 min */
+  function renderHeadLine(head) {
+    if (!els.headLine || !window.UI || !window.UI.ticketPill) return;
+    const state = head.state;
+    const meta = window.UI.helperMeta ? window.UI.helperMeta(head.row) : '';
+    const sep = () => document.createTextNode(' · ');
+    els.headLine.replaceChildren(...[head.key ? h('span', {class: 'key', text: head.key}) : null, state ? window.UI.ticketPill(state) : null,
+      meta ? document.createTextNode(meta) : null].filter(Boolean).flatMap((n, i) => i ? [sep(), n] : [n]));
   }
 
   /* Compact is the default; Terminal mode adds the task rail and the tabs. The choice is remembered. */
@@ -130,7 +139,7 @@
       if (!tab || tab.hidden) return;
       S.state.tab = onScreen ? 0 : i;
       els.review.hidden = !S.state.view || !window.FocusHelpers.reviewBarShown(S.state.view);
-      els.compose.hidden = S.state.view?.state === 'done' || S.state.tab >= 2 || (S.state.view?.ticket.status === 'review' && !S.state.changesRequested);
+      els.compose.hidden = S.state.tab >= 2 || (S.state.view?.state === 'done' && !S.state.view?.run.running);
       [...els.tabs, ...(els.screenTab ? [els.screenTab] : [])].forEach(b => { const on = b === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; });
       if (screen) screen.place(onScreen);
       try { localStorage.setItem('focus-tab', onScreen ? 'screen' : ''); } catch (e) { /* not kept */ }
@@ -259,10 +268,12 @@
   /* A push (server-sent events) tells the page at once when a ticket or run file changed; the poll above is the
      slow fallback while the stream is up and the normal pace while it is down. Under the dashboard the stream is
      the dashboard's own (same origin, no proxy); opened directly it is Focus's own. */
-  if (typeof EventSource !== 'undefined') {
+  /* In the dashboard's sandboxed frame the stream is read with the frame pass (kit/frame.js, ORCH-186). */
+  const Stream = window.OrchFrame && window.OrchFrame.on ? window.OrchFrame.EventSource : window.EventSource;
+  if (typeof Stream !== 'undefined') {
     let stream, pending;
     const connect = () => {
-      stream = new EventSource('/api/events');
+      stream = new Stream('/api/events');
       stream.onopen = () => { live = true; };
       stream.onerror = () => { live = false; };
       stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(() => { fresh = true; poll(); }, Math.max(30, 500 - (Date.now() - lastFetch))); });

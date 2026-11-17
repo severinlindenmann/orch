@@ -7,13 +7,16 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 
 from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict")
 CARD_KINDS = ("draft", "link", "plan", "choose")
+SUGGEST_VERDICTS = ("ok", "no")
+LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
 KEY_RE = re.compile(r"review|q[0-9]+")
 
 
@@ -53,6 +56,32 @@ def add_parsers(sub, common) -> None:
     x.add_argument("question", nargs="?", help="the question (default: the latest card)")
     x.add_argument("--timeout", type=int, default=600, metavar="SECONDS")
     s.add_parser("link", parents=[common], help="the address of the review page")
+    x = s.add_parser(
+        "tend", parents=[common], help="the Reviewer's pass: accept small finished work for the owner"
+    )
+    x.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    x = s.add_parser(
+        "tend-releases",
+        parents=[common],
+        help="merge green release cards for the owner when Settings allow it (workflow.release_merge)",
+    )
+    x.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    x = s.add_parser(
+        "verdict",
+        parents=[common],
+        help="the Reviewer's second look decides one ticket (accept, back, leave)",
+    )
+    x.add_argument("ticket")
+    x.add_argument("word", choices=("accept", "back", "leave"), help="accept, back or leave")
+    x.add_argument("why", help="one line why")
+    x.add_argument(
+        "--point", action="append", default=[], metavar="TEXT", help="one point and what you saw (repeat)"
+    )
+    x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
+    x.add_argument(
+        "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
+    )
+    x.add_argument("--phone", action="store_true", help="also send the list to your phones (relay)")
 
 
 def _ticket(root: Path, args) -> dict:
@@ -119,6 +148,36 @@ def _option(root: Path, spec: str) -> dict:
     return out
 
 
+def _describe(specs: list[str], ids: list[str]) -> dict[str, str]:
+    """--describe "A=text": a description under one option."""
+    out: dict[str, str] = {}
+    for spec in specs:
+        ident, eq, text = spec.partition("=")
+        ident, text = ident.strip(), " ".join(text.split())
+        if not eq or ident not in ids or not text:
+            raise Refused(f'--describe is "ID=Text" with one of the option ids, got "{spec[:40]}".')
+        if len(text) > 500:
+            raise Refused("An option description is at most 500 characters.")
+        out[ident] = text
+    return out
+
+
+def links_of(specs: list[str]) -> list[dict] | None:
+    """--ref "Label=https://...": links shown beside the card (a mockup, a reference). At most 5."""
+    if not specs:
+        return None
+    if len(specs) > LINKS_MAX:
+        raise Refused(f"A card takes at most {LINKS_MAX} --ref links.")
+    out = []
+    for spec in specs:
+        label, eq, url = spec.partition("=")
+        label, url = " ".join(label.split()), url.strip()
+        if not eq or not label or len(label) > 60 or not review.is_plain_url(url):
+            raise Refused(f'--ref is "Label=https://address" (label up to 60 characters), got "{spec[:40]}".')
+        out.append({"label": label, "url": url})
+    return out
+
+
 def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     kind, title = next((k, getattr(args, k)) for k in CARD_KINDS if getattr(args, k, None) is not None)
     kind = "choice" if kind == "choose" else kind
@@ -131,10 +190,20 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
         opts = [_option(root, o) for o in args.option]
         if len(opts) < 2:
             raise Refused('A choice needs at least two --option "ID=Title[:file]".')
+        if args.after or args.file:
+            raise Refused("A choice shows its options; add how it is today with --before FILE.")
+        about = _describe(getattr(args, "describe", None) or [], [o["id"] for o in opts])
+        for o in opts:
+            if o["id"] in about:
+                o["text"] = about[o["id"]]
         card["preview"] = {"type": "options", "options": opts}
+        if args.before:  # how it is today, beside the options (the person compares, then picks one)
+            card["preview"]["before"] = _file_preview(root, args.before, "before")
         options = [o["id"] for o in opts]
     elif args.option:
         raise Refused("A card takes --option only with --choose.")
+    elif getattr(args, "describe", None):
+        raise Refused("--describe goes with the options of --choose.")
     elif bool(args.before) != bool(args.after):
         raise Refused("--before and --after go together.")
     elif args.before and args.file:
@@ -158,16 +227,86 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
                 "e.g. --open https://github.com/owner/repo/pull/12."
             )
         head = args.merge_head = ghmerge.head_of(args.open)  # the click merges exactly this commit
-        card["preview"] = {
-            "type": "doc",
-            "heading": "Pull request",
-            "paras": [args.open, f"Commit {head[:7]}"],
-        }
+        # what the person decides on, read for the pinned commit; never a helper's own file in its place
+        card["preview"] = merge_preview(root, args.open, head, ghmerge.summary(args.open, head))
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
-        card.setdefault("why", "Your click merges it on GitHub with your own GitHub login.")
-    if args.suggest is not None and args.suggest not in options:
+        card.setdefault(
+            "why",
+            "Your click merges it on GitHub with your own GitHub login."
+            + (
+                " When you allowed it in Settings, it merges by itself once every check is green."
+                if getattr(args, "release", False)
+                else ""
+            ),
+        )
+    if args.suggest is not None and kind == "choice" and args.suggest not in options:
         raise Refused("--suggest must be one of the --option ids.")
+    if args.suggest is not None and kind != "choice" and args.suggest not in SUGGEST_VERDICTS:
+        raise Refused("On this card --suggest is ok (approve) or no (don't do).")
     return card, options, args.suggest, title
+
+
+def _pr_tickets(root: Path, repo_url: str) -> dict[int, list[str]]:
+    """{pull request number: [ticket keys]} for this repository's pull requests the tickets link (shown after
+    GitHub's own title, never in its place)."""
+    out: dict[int, list[str]] = {}
+    for t in tickets.list_all(root):
+        name = t.get("key") if isinstance(t.get("key"), str) else ""
+        for r in t.get("refs") or []:
+            url = r.get("url") if isinstance(r, dict) else None
+            if isinstance(url, str) and url.startswith(repo_url + "/pull/") and name:
+                tail = url[len(repo_url) + 6 :]
+                if tail.isdigit():
+                    keys = out.setdefault(int(tail), [])
+                    if name not in keys:
+                        keys.append(name)
+    return out
+
+
+def merge_preview(root: Path, url: str, head: str, info: dict | None) -> dict:
+    """A merge card's box (ORCH-183, owner 17 Nov, after a design challenge): the checks as a status line,
+    "What goes out · N changes" with one row per pull request (GitHub's title first, its ticket key and
+    number beside it), the commits that are no pull request merge, and the exact version as a small footer.
+    The address itself is the card's Open link, not its content. Without GitHub's answer only the version."""
+    foot = f"Exact version: {head[:7]}"
+    if not info:
+        return {"type": "doc", "heading": "Pull request", "foot": foot}
+    when = datetime.now().strftime("%H:%M")
+    tone, words = info["checks"]
+    names = _pr_tickets(root, url.rsplit("/pull/", 1)[0])
+    rows = []
+    for i in info["items"]:
+        row = {"title": i["title"] or "Pull request", "n": i["pr"]}
+        keys = names.get(i["pr"], [])
+        if keys:
+            row["key"] = " ".join(keys[:2])[:20]
+        rows.append(row)
+    if info.get("more"):
+        rows.append({"title": f"and {info['more']} more"})
+    if rows and info.get("other"):
+        n = info["other"]
+        rows.append({"title": f"and {n} other commit{'' if n == 1 else 's'}"})
+    paras = []
+    if tone == "working":
+        paras.append("Safer to wait: choose Later and this card stays.")
+    elif tone == "failed":
+        paras.append("Merging now would put work live that failed a check.")
+    if tone != "done":
+        paras.append(f"Checked at {when}; it may have changed. Open shows the latest.")
+    n = len(info["items"]) + info.get("more", 0)
+    pv: dict = {
+        "type": "doc",
+        "heading": (
+            f"What goes out · {n} change{'' if n == 1 else 's'}" if n else info.get("title") or "Pull request"
+        )[:200],
+        "status": {"tone": tone, "text": f"{words} · checked {when}"},
+        "foot": foot,
+    }
+    if paras:
+        pv["paras"] = paras
+    if rows:
+        pv["rows"] = rows
+    return pv
 
 
 def has_card_flags(args) -> bool:
@@ -179,10 +318,14 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
     if not args.then:
         raise Refused("A card needs --then: what happens after the answer.")
     card, options, suggest, _title = _guard(build_card, root, args)
+    links = _guard(links_of, getattr(args, "ref", None) or [])
     card, shown = _guard(review.prepare_card, root, tid, card)
     action = None
     if getattr(args, "merge", False):
-        action = json.dumps({"merge": args.open, "head": args.merge_head})
+        act = {"merge": args.open, "head": args.merge_head}
+        if getattr(args, "release", False):
+            act["release"] = True  # review.tend_releases may merge it for the owner (workflow.release_merge)
+        action = json.dumps(act)
     return _guard(
         tickets.ask,
         root,
@@ -194,6 +337,8 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         action=action,
         card=card,
         shown=shown,
+        group=getattr(args, "group", None),
+        links=links,
     )
 
 
@@ -213,6 +358,8 @@ def _answered(root: Path) -> list[dict]:
                     "id": f"core:q:{t['id']}:{q['id']}",
                     "ticket": t["id"],
                     "ticket_key": t.get("key"),
+                    "ticket_title": t.get("title") or "",
+                    "text": q.get("text") or "",
                     "key": q["id"],
                     "by": q.get("answered_by"),
                     "via": q.get("via"),
@@ -334,6 +481,50 @@ def _link(args, root: Path) -> None:
     _out(args, data, "No review page runs. Start it in your terminal: orch review")
 
 
+def _tend(args, root: Path) -> None:
+    from orch import reviewer
+
+    res = reviewer.run(root, dry_run=args.dry_run)
+    _out(args, res, reviewer.text(res, args.dry_run))
+
+
+def _tend_releases(args, root: Path) -> None:
+    res = review.tend_releases(root, dry_run=args.dry_run)
+    _out(args, res, review.tend_releases_text(res, args.dry_run))
+
+
+def _accepted(args, root: Path) -> None:
+    from orch import relay, reviewer
+
+    rows = reviewer.accepted(root, reviewer.since_time(args.since))
+    word = args.since if args.since in ("today", "yesterday") else "since " + args.since
+    text = reviewer.accepted_text(rows, word)
+    data: dict = {"since": args.since, "accepted": rows}
+    if args.phone:
+        data["sent"] = False
+        if rows:  # nothing accepted: no message
+            try:
+                relay.send_text(root, "phones", text, general=True)
+                data["sent"] = True
+            except Refused as e:
+                data["not_sent"] = str(e)
+        text += "\n" + (
+            "Sent to your phones."
+            if data["sent"]
+            else "Not sent to your phones"
+            + (f": {data['not_sent']}" if "not_sent" in data else " (nothing to send).")
+        )
+    _out(args, data, text)
+
+
+def _verdict(args, root: Path) -> None:
+    from orch import lookreview
+
+    tid = _ticket(root, args)["id"]
+    res = _guard(lookreview.verdict, root, tid, args.word, args.why, args.point)
+    _out(args, res, f"{res['key']}: {lookreview.VERDICT_TEXT[res['verdict']]}: {res['why']}")
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "review":
         return False
@@ -342,5 +533,14 @@ def dispatch(args, root: Path) -> bool:
         if rc:
             raise SystemExit(rc)
         return True
-    {"list": _list, "answer": _answer, "wait": _wait, "link": _link}[args.sub](args, root)
+    {
+        "list": _list,
+        "answer": _answer,
+        "wait": _wait,
+        "link": _link,
+        "tend": _tend,
+        "tend-releases": _tend_releases,
+        "accepted": _accepted,
+        "verdict": _verdict,
+    }[args.sub](args, root)
     return True

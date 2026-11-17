@@ -20,8 +20,8 @@ def check(snap):
             continue
         if (t.get("age_s") or 0) < runs.ORPHAN_GRACE_SECONDS:
             continue  # a start writes its claim within seconds; give it the grace the product gives it
-        why = "no run record" if not rec else f"run {rec['run']}: process gone"
-        bad.append(f"{tid}: Working for {int(t.get('age_s') or 0)} s, {why}")
+        why = "no run record" if not rec else f"run {rec['run']} - process gone"
+        bad.append(f"{tid} - Working for {int(t.get('age_s') or 0)} s, {why}")
     if bad:
         return verdict(NAME, "problem", "ticket is Working but nothing runs it", bad)
     return verdict(NAME, "ok", "every Working ticket has a live run")

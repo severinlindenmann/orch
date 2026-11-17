@@ -166,7 +166,7 @@
   /* "← All live" before the title: shown only while some ticket is live; checked at build and every 15 s. */
   function backLink() {
     const count = h('span', {class: 'fx-back-n', text: ''});
-    const link = h('a', {class: 'fx-back', href: INAPP ? '/#home' : '/', target: INAPP ? '_top' : '_self', hidden: true}, h('span', {text: '← All live'}), count);
+    const link = h('a', {class: 'fx-back', href: INAPP ? '/#home' : '/', target: INAPP ? '_top' : '_self', hidden: true}, h('span', {text: '← All helpers'}), count);
     let loading = false, lastLive = '', lastAreas = '';
     /* The same fetch also feeds the same-file banner and the Files tab (S.state.live) and the area chip (S.state.areas). */
     async function load() {
@@ -182,7 +182,7 @@
         const data = await r.json(), json = JSON.stringify(data);
         const n = (data.cards || []).length;
         count.textContent = String(n);
-        link.setAttribute('aria-label', 'All live work (' + n + ')');
+        link.setAttribute('aria-label', 'All helpers (' + n + ')');
         link.hidden = !n;
         if (json !== lastLive) {
           lastLive = json; S.state.live = data;

@@ -189,20 +189,59 @@ def test_share_needs_a_relay(proj, run):
     assert code == 2
 
 
-def test_pick_up_fetches_into_the_reports_folder(proj, run, srv, tmp_path):
+def test_a_workspace_that_shares_and_picks_up_keeps_one_report(proj, run, srv):
+    """ORCH-86: the problem this workspace shared comes back in its own list. It is marked as its own, and
+    picking it up gives the report it already has: no second copy, so no second ticket."""
     made = make(proj, files=[("shot.png", b"\x89PNG")])
     ref = made["ref"]
     assert run("relay", "problem", "share", ref)[0] == 0
     pid = srv.problems[0]["id"]
     code, out, _ = run("relay", "problem", "list")
-    assert code == 0 and pid in out and "stuck since 10:00" in out
+    assert code == 0 and pid in out and "stuck since 10:00" in out and "(shared from here)" in out
+    item = json.loads(run("relay", "problem", "list", "--json")[1])[0]
+    assert item["mine"] is True and item["report"] == ref
+    code, out, err = run("relay", "problem", "get", pid, "--json")
+    assert code == 0, err
+    got = json.loads(out)
+    assert got["ref"] == ref and got["mine"] is True and got["new"] is False
+    assert sorted(p.name for p in diag_report.reports_dir(proj).iterdir()) == [ref]
+    assert not (Path(got["path"]) / "from.json").exists()
+    assert srv.problems[0]["status"] == "taken"  # taken by the workspace that already works on it
+    code, out, _ = run("relay", "problem", "get", pid)
+    assert code == 0 and "shared from here" in out and "another computer" not in out
+    assert run("relay", "problem", "done", pid)[0] == 0 and srv.problems[0]["status"] == "done"
+
+
+def test_own_problem_without_its_report_here_is_fetched_but_marked_mine(proj, run, srv):
+    """The report folder was deleted here (or shared from another computer of this workspace): it is
+    fetched, and still marked as this workspace's own."""
+    made = make(proj)
+    assert run("relay", "problem", "share", made["ref"])[0] == 0
+    pid = srv.problems[0]["id"]
+    (Path(made["path"]) / "shared.json").unlink()
+    item = json.loads(run("relay", "problem", "list", "--json")[1])[0]
+    assert item["mine"] is True and "report" not in item
+    got = json.loads(run("relay", "problem", "get", pid, "--json")[1])
+    assert got["mine"] is True and got["new"] is True and got["ref"] == made["ref"] + "-2"
+
+
+def test_pick_up_fetches_into_the_reports_folder(proj, run, srv, tmp_path):
+    data = make(proj, files=[("shot.png", b"\x89PNG")])
+    ref = data["ref"]
+    assert run("relay", "problem", "share", ref)[0] == 0
+    pid = srv.problems[0]["id"]
+    srv.problems[0]["from"] = "ws_other00001"  # shared by another workspace
+    (Path(data["path"]) / "shared.json").unlink()
+    code, out, _ = run("relay", "problem", "list")
+    assert code == 0 and pid in out and "stuck since 10:00" in out and "shared from here" not in out
     code, out, err = run("relay", "problem", "get", pid, "--json")
     assert code == 0, err
     got = json.loads(out)
     f = Path(got["path"])
     assert (
         f.parent == diag_report.reports_dir(proj) and f.name == f"{ref}-2"
-    )  # the own report keeps its folder
+    )  # a report of the same name here keeps its folder
+    assert got["mine"] is False and "another computer" in run("relay", "problem", "get", pid)[1]
     assert (f / "attachments" / "shot.png").read_bytes() == b"\x89PNG"
     assert json.loads((f / "from.json").read_text())["id"] == pid
     assert srv.problems[0]["status"] == "taken"
@@ -324,3 +363,115 @@ def test_a_refused_send_does_not_block_the_next_report(proj, run, srv):
     (Path(md["path"]) / "SUMMARY.md").write_text("# x\npassword: admin:hunter:1234\n")
     (Path(md["path"]) / "shared.json").unlink()
     assert run("relay", "problem", "share", md["ref"])[0] == 2
+
+
+@pytest.mark.parametrize("name", ["shared.json", "from.json"])
+def test_a_fetched_report_cannot_claim_to_be_shared_from_here(proj, run, srv, name):
+    """A sender's archive with its own shared.json (naming another problem) would hide that problem as
+    "shared from here": such an archive is refused, and a fetched folder never counts as shared from here."""
+    ref = "r-1116-1200-ws"
+    members = []
+    for n, data in (("SUMMARY.md", b"# x"), (name, json.dumps({"id": "pb_" + "b" * 16}).encode())):
+        info = tarfile.TarInfo(f"{ref}/{n}")
+        info.size = len(data)
+        members.append((info, data))
+    data = bad_tar(members)
+    srv.blobs["b_" + "0" * 16] = data
+    srv.problems.append(
+        {"id": PID, "ref": ref, "from": "ws_other00001", "status": "new", "taken_by": None}
+        | {"blob_id": "b_" + "0" * 16, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    )
+    code, _, err = run("relay", "problem", "get", PID)
+    assert code == 2 and "Nothing was kept" in err
+    folder = diag_report.reports_dir(proj) / ref
+    assert not folder.exists()
+    folder.mkdir(parents=True)  # as an older orch would have kept it
+    (folder / "from.json").write_text(json.dumps({"id": PID}))
+    (folder / "shared.json").write_text(json.dumps({"id": "pb_" + "b" * 16}))
+    assert relay_problems.shared_here(proj) == {}
+
+
+# ------------------------------------------------------- a kind: a problem or a feature wish (ORCH-81)
+
+
+def test_a_report_says_whether_it_is_a_problem_or_a_feature_wish(proj):
+    wish = diag_report.make(
+        proj, note="a dark look", expected="easier at night", about="feature", content=False
+    )
+    f = Path(wish["path"])
+    man = json.loads((f / "manifest.json").read_text())
+    assert (wish["about"], man["about"], man["kind"]) == ("feature", "feature", "report")
+    text = (f / "SUMMARY.md").read_text()
+    assert text.startswith("# Feature wish ") and "sort it first" in text
+    assert "## What the person wants\na dark look" in text and "## Why it would help\neasier at night" in text
+    assert json.loads((Path(make(proj)["path"]) / "manifest.json").read_text())["about"] == "problem"
+    # an incident is always a problem; a made-up kind is refused before anything is written
+    assert diag_report.make(proj, kind="i", window_s=900, about="feature")["about"] == "problem"
+    with pytest.raises(Refused, match="problem or a feature"):
+        diag_report.make(proj, about="bug")
+
+
+def test_report_command_without_a_relay_keeps_both_kinds_here(proj, run):
+    (proj / "shot.png").write_bytes(b"\x89PNG")
+    code, out, err = run(
+        "report", "problem", "the board froze", "--expected", "it updates", "--file", "shot.png"
+    )
+    assert code == 0, err
+    assert out.startswith("Problem report r-") and "Sent" not in out and "Not sent" not in out
+    code, out, err = run("report", "feature", "a dark look", "--why", "easier at night", "--json")
+    assert code == 0, err
+    res = json.loads(out)
+    assert res["about"] == "feature" and "shared" not in res and "share_error" not in res
+    man = json.loads((Path(res["path"]) / "manifest.json").read_text())
+    assert man["about"] == "feature" and man["note"] == "a dark look" and man["content"] is False
+    assert run("report", "feature", "  ")[0] == 2  # no words: refused, nothing written
+    with pytest.raises(SystemExit):  # only problem or feature
+        run("report", "bug", "x")
+
+
+def test_report_command_takes_the_ticket_key(proj, run):
+    tid = stuck(proj, title="Send the newsletter")
+    key = tickets.load(proj, tid)["key"]
+    code, out, err = run("report", "problem", "stuck", "--ticket", key, "--json")
+    assert code == 0, err
+    assert json.loads((Path(json.loads(out)["path"]) / "manifest.json").read_text())["scope"]["ticket"] == tid
+
+
+def test_report_command_sends_to_the_connected_relay_with_its_kind(proj, run, srv, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {"relay": {}})
+    code, out, err = run("report", "feature", "a dark look", "--json")
+    assert code == 0, err
+    res = json.loads(out)
+    assert res["shared"]["id"] == srv.problems[0]["id"]
+    assert srv.problems[0]["about"] == "feature" and srv.problems[0]["note"] == "a dark look"
+    code, out, err = run("report", "problem", "the board froze")
+    assert code == 0, err
+    assert "Sent to the admin of" in out and "about" not in srv.problems[1]  # a problem sends no field
+    code, out, err = run("report", "problem", "kept here", "--no-send")
+    assert code == 0 and len(srv.problems) == 2
+    # the list says which shared report is a wish
+    srv.problems[0]["about"] = "feature"
+    code, out, err = run("relay", "problem", "list")
+    assert code == 0 and "feature wish: a dark look" in out
+
+
+def test_report_command_keeps_the_report_when_the_send_fails(proj, run, srv, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {"relay": {}})
+    key = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    (proj / "notes.txt").write_text(f"token {key}\n")
+    code, out, err = run("report", "problem", "it broke", "--file", "notes.txt")
+    assert code == 0, err
+    assert "Not sent:" in out and "orch relay problem share r-" in out and key not in out
+    assert not srv.problems and len(list(diag_report.reports_dir(proj).glob("r-*"))) == 1
+
+
+def test_report_command_sends_nothing_while_the_relay_is_turned_off(proj, run, srv, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {})
+    code, out, err = run("report", "problem", "the board froze")
+    assert code == 0 and "Sent" not in out and not srv.problems

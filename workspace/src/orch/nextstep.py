@@ -87,6 +87,12 @@ def _new(data, args) -> str:
     return f'add one task per step: orch check add {n} "<step>"'
 
 
+def _triage(data, args) -> str:
+    if (data or {}).get("ticket"):
+        return f"watch it: orch run status {data['ticket']}"
+    return "orch triage --start  (a helper goes through the list and tidies the tickets)"
+
+
 def _check_add(data, args) -> str:
     c = (data or {}).get("id", "<task>")
     return f'do the step, then record its evidence: orch check done {_tid(args)} {c} --note "<evidence>"'
@@ -145,13 +151,40 @@ def _doctor(data, args) -> str:
 
 
 def _logins(data, args) -> str:
-    if any(r.get("state") == "renew" for r in (data or {}).get("items") or []):
+    rows = [r for r in (data or {}).get("items") or [] if r.get("state") == "renew"]
+    if any(r.get("renew") or r.get("key") for r in rows):
+        return "the person presses Renew or Replace on the dashboard warning (person only)"
+    if rows:
         return "renew it with the tool's own login, then run orch logins again"
     return "orch ticket list"
 
 
+def _logins_replace(data, args) -> str:
+    return "orch ticket list" if (data or {}).get("state") in ("works", "soon") else "orch logins"
+
+
+def _logins_renew(data, args) -> str:
+    """The dashboard reads these calls; their hint stays plain (a person renews in the Renew window)."""
+    st = (data or {}).get("state")
+    if st == "done":
+        return "orch ticket list"
+    if st in ("starting", "link", "checking"):
+        return "the person goes on in the Renew window on the dashboard"
+    return "orch logins"
+
+
 def _status_cmd(data, args) -> str:
     return "orch stop  (when you are done)" if data else "orch ticket list"
+
+
+def _ref_wait(data, args) -> str:
+    """Says the verdict again: the last line is all a caller that reads through a pipe sees (PR 978)."""
+    if data and all(o.get("ok") for o in data):
+        merged = all(o.get("status") == "merged" for o in data)
+        return "GREEN" + (
+            " and merged: finish the ticket" if merged else ": merge, or run it again with --merge"
+        )
+    return "NOT green or not merged (see the line above): fix it, push, then run orch ref wait again"
 
 
 HINTS = {
@@ -159,15 +192,22 @@ HINTS = {
     "update": _update,
     "start": "keep working; the dashboard link is above. orch ticket list",
     "stop": "orch ticket list",
+    "shot": "look at the pictures, then attach them: orch check done <id> <step> --file <picture>",
     "status": _status_cmd,
     "addon add": "orch addon list",
     "addon remove": "orch addon list",
     "addon uninstall": "orch addon list",
     "addon list": "turn one on with: orch addon add <name>",
+    "manager start": "talk to it in Focus, or join it: orch manager status",
+    "manager stop": "start it again any time: orch manager start",
+    "manager status": "orch manager start",
     "diag inspect": "orch diag query",
     "diag query": "orch diag report",
     "diag report": "share the report with whoever is helping you, then keep working: orch ticket list",
     "diag delete": "orch ticket list",
+    "diag tickets": "orch ticket list",
+    "report problem": "carry on with your ticket: orch ticket list",
+    "report feature": "carry on with your ticket: orch ticket list",
     "ticket new": _new,
     "ticket tree": _on_ticket,
     "ticket list": _list,
@@ -175,6 +215,7 @@ HINTS = {
     "ticket status": _status,
     "ticket edit": _on_ticket,
     "ticket set": _on_ticket,
+    "ticket order": "keep working: orch ticket list",
     "ticket summary": _on_ticket,
     "ticket outcome": _on_ticket,
     "ticket artifacts": _on_ticket,
@@ -186,7 +227,17 @@ HINTS = {
     "ticket changes": _on_ticket,
     "ticket patch": _on_ticket,
     "doctor": _doctor,
+    "doctor pass": "orch ticket list",  # the problems it found are tickets now
+    "doctor soon": "orch ticket list",
+    "doctor setup": "orch doctor pass --dry-run",
+    "doctor clean": "orch doctor",
+    "doctor remove-temp": "orch ticket list",
+    "doctor stop-pids": "orch ticket list",
     "logins": _logins,
+    "logins renew": _logins_renew,
+    "logins replace": _logins_replace,
+    "logins add": "orch logins",
+    "logins remove": "orch logins",
     "pause": "turn it back on with: orch resume",
     "resume": "orch needs",
     "wait": "keep working on other tickets: orch ticket list",
@@ -209,13 +260,22 @@ HINTS = {
     "ref rm": _on_ticket,
     "ref set": _on_ticket,
     "ref merge": _on_ticket,
+    "ref wait": _ref_wait,
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": "keep working on what does not wait: orch ticket list",
+    "usage": "keep working: orch ticket list",
+    "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
     "review answer": "orch needs",
     "review wait": _on_ticket,
     "review link": "orch needs",
+    "review tend": "orch review accepted  (what was accepted for you today)",
+    "review tend-releases": "orch review list  (what still waits for the owner)",
+    "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
+    "review accepted": "orch needs",
+    "github expert": "orch ticket list  (a red run opened a top ticket)",
+    "github release": "orch ticket list  (a red run opened a top ticket)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",

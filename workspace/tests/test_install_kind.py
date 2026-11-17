@@ -11,6 +11,7 @@ import pytest
 
 from orch import addons, pagelaunch
 from orch import home as home_mod
+from orch import tickets as tickets_mod
 from orch.errors import Refused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -154,30 +155,43 @@ def test_launch_url_on_a_test_install(tws):
     )  # the ONE format: token, expiry
     assert (
         tok == token
-        and 0 < int(exp) - __import__("time").time() <= pagelaunch.LAUNCH_LIFE
+        and 0 < int(exp) - __import__("time").time() <= pagelaunch.PRINTED_LIFE
         and pagelaunch.LAUNCH_LIFE == 30
+        and pagelaunch.PRINTED_LIFE == 600
     )
     assert oct((home_mod.key_dir(tws) / "launch-focus.token").stat().st_mode & 0o777) == "0o600"
 
 
-def test_launch_url_refused_on_dev_normal_and_outside_the_test_folder(tws, tmp_path, monkeypatch):
+def test_launch_url_refused_under_an_agent_outside_the_test_folder(tws, tmp_path, monkeypatch):
+    """Owner rule (16 Nov): a person signs in from any computer, so a person may print a sign-in link on any
+    install (a headless server). An agent never may: it must not sign in as the person."""
+    monkeypatch.setenv("ORCH_AGENT", "claude")
     for kind in ("dev", "normal"):
         monkeypatch.setattr(home_mod, "install_kind", lambda k=kind: k)
-        with pytest.raises(Refused, match="only on a test install"):
+        with pytest.raises(Refused, match="Only a person"):
             pagelaunch.printable_launch_url(tws, "focus", "http://127.0.0.1:1")
     monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     other = tmp_path / "acct" / "real-ws"
     other.mkdir()
-    with pytest.raises(Refused, match="only on a test install"):
+    with pytest.raises(Refused, match="Only a person"):
         pagelaunch.printable_launch_url(other, "focus", "http://127.0.0.1:1")
     with pytest.raises(Refused):
         pagelaunch.write_launch_token(tws, "evil")
 
 
-def test_start_refuses_print_launch_url_outside_test(proj, monkeypatch, run):
+def test_a_person_prints_a_sign_in_link_on_any_install(tws, tmp_path, monkeypatch):
+    monkeypatch.delenv("ORCH_AGENT", raising=False)
+    monkeypatch.setattr(tickets_mod, "agent_tool", lambda: None)
+    monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda root: False)  # not the test-folder exception
+    url = pagelaunch.printable_launch_url(tws, "dashboard", "http://127.0.0.1:8420")
+    assert url.startswith("http://127.0.0.1:8420/#launch=")
+
+
+def test_start_refuses_print_launch_url_under_an_agent(proj, monkeypatch, run):
     monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
+    monkeypatch.setenv("ORCH_AGENT", "claude")
     code, out, err = run("start", "--no-open", "--print-launch-url")
-    assert code == 2 and "only on a test install" in (out + err)
+    assert code == 2 and "Only a person" in (out + err)
 
 
 # ---------------------------------------------------------------- folder add-ons, tool env guard, json

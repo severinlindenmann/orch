@@ -498,14 +498,14 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
     move = move[: move.index("function list()")]
     assert (
         # `extra` (Accept's shown review tip, B13g) goes first: it never overrides ticket, status or revision
-        "actRetry('ticket.patch', () => ({...extra, ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision})"
+        "actRetry('ticket.patch', () => ({...extra, ticket:id, data:{status, ...more}, if_revision:(ticketOf(id) || t).revision || revision})"
         in move
     )
     assert "extra = {...extra, review_tip:'none'}" in move  # a Done from a view that showed no tip says so
-    assert "if (!t || t.status === status" in move  # dropping on the same column does nothing
+    assert "if (!t || same ||" in move  # dropping on the same column does nothing
     card = js[js.index("function boardCard") : js.index("function board()")]
     assert (
-        "statusItems(t, 'card', STATUS_CHOICES)" in card and "aria-label" in card
+        "statusItems(t, 'card', BOARD_MOVES)" in card and "aria-label" in card
     )  # the menu is the keyboard way to move
     assert "slice(0, cap)" in js and "boardMore" in js  # Done shows 3 until asked
     assert (
@@ -558,7 +558,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "'Let the helper do everything?'",
         "' is now the default helper.'",
         "ticketButton('Start helper'",
-        "'Ask the helper to check again'",
+        "'Ask your helper to check again'",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
         "plainWhy(question, 'The helper')",
@@ -592,13 +592,17 @@ def test_no_waiting_for_your_answer_wording_left():
 
 
 def test_no_bare_waiting_status_label_left():
-    """5A/10A: the status word for a waiting ticket is "Needs you" everywhere (ids like 'waiting' stay)."""
+    """5A/10A: the status word for a waiting ticket is "Needs you" everywhere (ids like 'waiting' stay).
+    ORCH-152: "Waiting" is the word only for a ticket that waits without a question (the board's Waiting lane)."""
     import re
 
+    lane_words = ("['blocked', 'Waiting']", "lane === 'blocked' ? 'Waiting'")
     for f in list(WEBDIR.glob("*.js")) + list(
         (WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")
     ):
         text = f.read_text()
+        for word in lane_words:
+            text = text.replace(word, "")
         assert not re.search(r"""['"]Waiting['"]""", text), f.name  # a bare "Waiting" label
         assert not re.search(r"""\bstatus\s*=\s*['"]waiting['"]""", text), f.name  # "Agent · waiting"
         assert not re.search(r"""\bwaiting:\s*['"]waiting['"]""", text, re.IGNORECASE), f.name
@@ -619,13 +623,18 @@ def test_v1_home_and_ticket_controls():
     assert "function connectionNotice(connectionEl, hadState)" in home
     assert "connectionNotice(connection, !!state)" in js
     assert "main.replaceChildren(skeletonFor(hashKind(location.hash)))" in js
-    assert "[t.title, t.key, t.owner, t.note]" in tickets and "startsWith('agent:')" in tickets
+    # ORCH-58: a number (58, ORCH-58) matches the key exactly; words search title, key, owner and note
+    assert (
+        "keyMatch(t, needle)" in tickets
+        and "t.key, t.owner, t.note]" in tickets
+        and "startsWith('agent:')" in tickets
+    )
     assert "'data-key':'ticket-search'" in tickets and "aria-pressed" in tickets
     # The shell's unused old delegation and shared CSS are outside this lane's edit scope.
     for old in ("Jump to", "status-jumps", "board-jump", "boardCol"):
         assert old not in tickets
     css = (WEBDIR / "pages" / "tickets.css").read_text()
-    assert ".board .kanban-col{display:block" in css
+    assert ".board .kanban-col{flex:0 0 82%" in css  # ORCH-240: phone lanes side by side, swiped
     # Reduced motion for Home comes from the kit (motion.css switches every animation and transition off).
     assert 'href="kit/motion.css"' in (WEBDIR / "index.html").read_text()
 

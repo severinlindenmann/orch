@@ -89,7 +89,7 @@
     b.type = 'button';
     b.addEventListener('click', () => {
       b.disabled = true;
-      window.parent.postMessage({type: 'orch.question', ticket: order.id, question}, location.origin);
+      window.parent.postMessage({type: 'orch.question', ticket: order.id, question, chan: (window.OrchFrame || {}).chan}, location.origin);
       setTimeout(() => { b.disabled = false; }, 1500);
     });
     return b;
@@ -223,9 +223,11 @@
   // there). The idea box asks the dashboard to file the idea as YOUR click (orch.idea): the dashboard checks this frame and
   // runs the person's action with your page session; it answers orch.idea.done {id, order} or orch.idea.failed {id, error}.
   function toChat(message) {
-    window.parent.postMessage({type: 'orch.say', text: message}, location.origin);
+    window.parent.postMessage({type: 'orch.say', text: message, chan: (window.OrchFrame || {}).chan}, location.origin);
   }
   const IDEA_MAX = 500, NOTE_MAX = 1000;
+  // the length the server counts: spaces and line breaks run together into one space
+  const ideaLength = value => String(value).split(/\s+/).filter(Boolean).join(' ').length;
   // A request to the dashboard waits for its answer by a random id: orch.idea.* and orch.send.* (see below).
   const asked = new Map();  // request id -> callback
   window.addEventListener('message', e => {
@@ -247,7 +249,7 @@
       const timer = setTimeout(() => finish({error: ''}), wait);  // an older dashboard never answers
       function finish(result) { clearTimeout(timer); asked.delete(id); resolve(result); }
       asked.set(id, finish);
-      window.parent.postMessage({...message, id}, location.origin);
+      window.parent.postMessage({...message, id, chan: (window.OrchFrame || {}).chan}, location.origin);  // the code: the dashboard's per-frame check
     });
   }
   // Ask another workspace at a stop (816 A): one click; the dashboard runs the add-on's ask act as the person.
@@ -292,12 +294,20 @@
   function ideaBox() {
     const el = card('Start with an idea', meta('Describe something you want built. Factory plans it and builds it step by step.'));
     const field = node('textarea', null, 'text-input'); field.rows = 3; field.setAttribute('aria-label', 'Your idea');
-    field.placeholder = 'For example: a page that shows our opening hours'; field.style.width = '100%'; field.maxLength = IDEA_MAX;
+    // No maxLength: the browser would cut a long paste without a word (bug hunt 17 Nov: 15000 pasted, 14500 dropped).
+    // A counter shows near and over the limit; over it, Start is off and Chat is offered for the long text.
+    field.placeholder = 'For example: a page that shows our opening hours'; field.style.width = '100%';
     const go = node('button', 'Start with this idea', 'btn primary'); go.type = 'button'; go.disabled = true;
     const status = node('p', null, 'meta f-idea-status'); status.setAttribute('role', 'status'); status.hidden = true;
     const fallback = node('button', 'Send it to your helper in Chat instead', 'btn outline sm'); fallback.type = 'button'; fallback.hidden = true;
     const say = value => { status.textContent = value; status.hidden = !value; };
-    field.addEventListener('input', () => { go.disabled = !field.value.trim(); fallback.hidden = true; say(''); });
+    const count = node('p', null, 'meta f-idea-count'); count.setAttribute('aria-live', 'polite'); count.hidden = true;
+    field.addEventListener('input', () => {
+      const n = ideaLength(field.value), over = n > IDEA_MAX;
+      go.disabled = !field.value.trim() || over; fallback.hidden = !over; say('');
+      count.hidden = n < IDEA_MAX * 0.8;
+      count.textContent = over ? 'Too long for an idea here: ' + n + ' of ' + IDEA_MAX + ' characters. Shorten it, or send it to your helper in Chat.' : n + ' of ' + IDEA_MAX + ' characters';
+    });
     fallback.addEventListener('click', () => { if (field.value.trim()) toChat('Factory: ' + field.value.trim()); });
     go.addEventListener('click', async () => {
       const idea = field.value.trim();
@@ -311,7 +321,7 @@
       say((result.error ? result.error + ' ' : "That didn't work. ") + 'Your idea is still here.');
       fallback.hidden = false;
     });
-    el.append(field, group('row', go, fallback), status); el.classList.add('f-idea'); return el;
+    el.append(field, count, group('row', go, fallback), status); el.classList.add('f-idea'); return el;
   }
   // One idea box for the whole page: it is on screen before the order list has been read, and what you type in it
   // stays when the list arrives.
@@ -334,7 +344,33 @@
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
     view.append(heading('Factory', needing.length
       ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
-      : 'Nothing in Factory waits for you right now. Your ideas and planned runs are below.'));
+      : 'Nothing in Factory waits for you right now.'));
+    // What waits for you comes first, in one block; a kind with nothing in it gets no section of its own (owner
+    // 16 Nov, ORCH-72): the missing kinds are named once in a quiet line at the end, not as a wall of empty sections.
+    const kinds = [
+      ['drafts', orders.filter(draftWaiting), o => {
+        const c = card(o.title, meta('Read the draft, then plan the run or ask for changes.'),
+          tail(orderLink(o, 'Read draft', '/draft')), draftActions(o, render));
+        c.classList.add('f-attention'); return c;
+      }],
+      ['proposals', orders.filter(o => o.phase === 'proposed'), o => {
+        const need = yourTime(o.owner_min);
+        const c = card(o.title, ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
+        c.classList.add('f-attention'); return c;
+      }],
+      ['stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
+        const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false), rawDetails(o.open),
+          tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
+        c.classList.add('f-attention'); return c;
+      }],
+      ['results', orders.filter(o => results(o).length), o => resultsCard(o, true)],
+    ];
+    const waiting = kinds.flatMap(([, rows, paint]) => rows.map(paint));
+    if (waiting.length) {
+      const block = node('section', null, 'f-section f-waits');
+      const mark = badge('Waits for you'); mark.classList.add('attn');
+      block.setAttribute('aria-label', 'Waits for you'); block.append(mark, ...waiting); view.append(block);
+    }
     view.append(theIdea(), askRow(auto));
     if (auto?.on) {
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
@@ -344,38 +380,30 @@
         tail(link('What it decided', '#/autopilot')));
       autoCard.classList.add('f-autopilot'); view.append(autoCard);
     } else if (auto) view.append(tail(link('What it decided', '#/autopilot')));
-    if (!orders.length) return;
     const primary = group('stack'), secondary = group('stack');
-    const section = (parent, title, rows, render, empty) => {
-      const el = node('section', null, 'f-section'); el.append(node('h2', title));
-      el.append(...(rows.length ? rows.map(render) : [meta(empty)])); parent.append(el);
+    const section = (parent, title, rows, paint) => {
+      if (!rows.length) return;
+      const el = node('section', null, 'f-section'); el.append(node('h2', title), ...rows.map(paint)); parent.append(el);
     };
-    section(primary, 'Drafts waiting for you', orders.filter(draftWaiting), o => {
-      const c = card(o.title, meta('Read the draft, then plan the run or ask for changes.'),
-        tail(orderLink(o, 'Read draft', '/draft')), draftActions(o, render));
-      c.classList.add('f-attention'); return c;
-    }, 'No drafts waiting for you.');
-    section(primary, 'Proposals waiting for Start', orders.filter(o => o.phase === 'proposed'), o => {
-      const need = yourTime(o.owner_min);
-      const c = card(o.title, ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
-      c.classList.add('f-attention'); return c;
-    }, 'No proposals waiting for Start.');
-    section(primary, 'Factory stops waiting for you', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
-      const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false), rawDetails(o.open),
-        tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
-      c.classList.add('f-attention'); return c;
-    }, 'No stops waiting for you.');
-    section(primary, 'Results to check', orders.filter(o => results(o).length), o => resultsCard(o, true), 'No results waiting for you.');
-    section(primary, 'Running', orders.filter(o => o.phase === 'started'), o => o.kind === 'autopilot'
+    const running = orders.filter(o => o.phase === 'started');
+    section(primary, 'Running', running, o => o.kind === 'autopilot'
       ? card(o.title, meta('Autopilot order'), p('Routine stops answered by your agent · Ship still asks you'), tail(link('What it decided', '#/autopilot')))
-      : card(o.title, stages(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('ETA ' + when(o.eta))] : []), tail(orderLink(o))), 'No running orders.');
+      : card(o.title, stages(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('ETA ' + when(o.eta))] : []), tail(orderLink(o))));
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
-    section(secondary, 'Shipped', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))), 'No shipped work recorded.');
-    secondary.append(meta('Shipped orders are listed from the workspace record; shipment dates are not available yet.'));
+    const shipped = orders.filter(o => o.phase === 'shipped');
+    section(secondary, 'Shipped', shipped, o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))));
+    if (shipped.length) secondary.append(meta('Shipped orders are listed from the workspace record; shipment dates are not available yet.'));
     section(secondary, 'Saved ideas', orders.filter(o => (o.phase === 'draft' && !draftWaiting(o)) || ['edit','parked','cancelled','broken'].includes(o.phase)),
-      o => card(o.title, ...(o.phase === 'draft' ? [draftNote(o)] : [badge(capital(o.phase))]), tail(orderLink(o))), 'No saved ideas.');
-    view.append(group('f-grid', primary, secondary));
+      o => card(o.title, ...(o.phase === 'draft' ? [draftNote(o)] : [badge(capital(o.phase))]), tail(orderLink(o))));
+    const filled = [primary, secondary].filter(col => col.childNodes.length);
+    if (filled.length === 2) view.append(group('f-grid', primary, secondary));
+    else if (filled.length) view.append(filled[0]);
+    const none = [...kinds.filter(([, rows]) => !rows.length).map(([name]) => name), ...(running.length ? [] : ['running orders'])];
+    if (none.length) view.append(meta((waiting.length || filled.length ? 'Nothing else in Factory right now: no ' : 'Nothing in Factory right now: no ')
+      + listWords(none) + '. They show here when they come.'));
   }
+  // ["drafts", "stops", "results"] -> "drafts, stops or results"
+  const listWords = words => words.length < 2 ? words.join('') : words.slice(0, -1).join(', ') + ' or ' + words[words.length - 1];
   function line(items) {
     const el = node('ol', null, 'f-line');
     for (const item of array(items)) {
@@ -520,7 +548,9 @@
   function preview(order, label, value) {
     const figure = node('figure'); figure.append(node('figcaption', label));
     if (validId(order.id) && imageName(value)) {
-      const img = node('img'); img.alt = label + ' review image'; img.src = prefix + '/api/order/' + order.id + '/file/' + value.split('/').map(encodeURIComponent).join('/');
+      const src = prefix + '/api/order/' + order.id + '/file/' + value.split('/').map(encodeURIComponent).join('/');
+      // in the dashboard's sandboxed frame a picture address carries the frame pass (kit/frame.js, ORCH-186)
+      const img = node('img'); img.alt = label + ' review image'; img.src = window.OrchFrame ? window.OrchFrame.url(src) : src;
       img.addEventListener('error', () => img.replaceWith(meta(label + ' image unavailable.')), {once:true}); figure.append(img);
     } else figure.append(meta(value ? 'Picture unavailable.' : 'No picture for this one yet.'));
     return figure;
@@ -710,7 +740,9 @@
           const draft = await read('/api/order/' + match[1] + '/draft/' + version, signal);
           if (serial !== request) return;
           showNotices(homeData, order, draft);
-          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), node('pre', draft.text, 'card f-draft'), ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
+          // an empty draft says so in words, never an empty box (bug hunt 17 Nov)
+          const body = typeof draft.text === 'string' && draft.text.trim() ? node('pre', draft.text, 'card f-draft') : card('This draft is empty', meta('Nothing has been written in this version yet.'));
+          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;

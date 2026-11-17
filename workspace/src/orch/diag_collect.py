@@ -83,7 +83,7 @@ def tickets_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
         try:
             t = tickets._load_raw(root, tid)  # the file as it is: no verdict view, no ledger write
         except Exception as e:  # noqa: BLE001
-            gaps.append(f"{tid}: {type(e).__name__}")
+            gaps.append(f"{tid} - {type(e).__name__}")
             continue
         hist = [
             {"at": h.get("at"), "via": h.get("via")}  # when and how; never who or what was said
@@ -136,7 +136,7 @@ def runs_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
         try:
             rec = runs.read(root, tid)
         except Exception as e:  # noqa: BLE001
-            gaps.append(f"{tid}: run record {type(e).__name__}")
+            gaps.append(f"{tid} - run record {type(e).__name__}")
             continue
         if not rec:
             continue
@@ -331,15 +331,20 @@ def disk_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
 def diag_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
     """What the debug log itself lost: this process's counters and the `diag.dropped` events of the last
     day."""
-    dropped = 0
+    dropped = recent = 0
     last = None
+    hour_ago = _iso(now - 3600)
     for e in recent_events(root, now - 86400):
         if e.get("ev") == "diag.dropped":
-            dropped += int((e.get("kv") or {}).get("count") or 0)
-            last = e.get("at")
+            n = int((e.get("kv") or {}).get("count") or 0)
+            dropped += n
+            if str(e.get("at") or "")[:19] >= hour_ago[:19]:
+                recent += n
+            last = max(last or "", e.get("at") or "") or None
     return {
         "dropped_in_this_process": diag.dropped_count(),
         "dropped_events_24h": dropped,
+        "dropped_last_hour": recent,
         "last_dropped_at": last,
         "enabled": diag.enabled(root),
     }, []

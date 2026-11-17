@@ -17,6 +17,8 @@ class N {
   setAttribute(k, v) { this.attrs[k] = v; }
   addEventListener(t, f) { (this.listeners[t] ||= []).push(f); }
   focus() {}
+  showModal() { this.open = true; }
+  fire(t, e = {}) { (this.listeners[t] || []).forEach(f => f({preventDefault() {}, ...e})); }
   all(pred, out = []) { if (pred(this)) out.push(this); this.children.forEach(c => c.all(pred, out)); return out; }
   byClass(c) { return this.all(n => n.className.split(' ').includes(c)); }
 }
@@ -28,10 +30,10 @@ function load() {
     state: o => { const n = new N('div'); n.className = 'state ' + o.kind; n.append(Object.assign(new N('strong'), {own: o.title || ''}), Object.assign(new N('p'), {own: o.text || ''})); n.opts = o; return n; },
     swipeDeck: (host, items, o) => { const d = {host, items, o, answers: {}, pins: {}, later: new Set(o.later || []), index: o.start || 0, busy: false}; decks.push(d); host.replaceChildren(); return d; },
   };
-  const document = {createElement: t => new N(t), visibilityState: 'visible'};
+  const document = {createElement: t => new N(t), visibilityState: 'visible', body: new N('body')};
   const window = {UI};
-  vm.runInNewContext(read('review.js'), {window, document, setInterval, clearInterval, console});
-  return {UI, toasts, decks};
+  vm.runInNewContext(read('review.js'), {window, document, setInterval, clearInterval, setTimeout, clearTimeout, console});
+  return {UI, toasts, decks, document};
 }
 
 const NOW = new Date(2026, 10, 15, 12, 0);
@@ -49,7 +51,7 @@ const fakeApi = (stacks, answer) => {
 const flush = () => new Promise(r => setTimeout(r, 5));
 const mount = async (api, o = {}) => {
   const env = load(), host = new N('main');
-  const page = env.UI.reviewPage(host, api, {poll: 0, now: NOW, ...o});
+  const page = env.UI.reviewPage(host, api, {poll: 0, now: NOW, hold: 0, ...o});
   await flush();
   return {...env, host, page};
 };
@@ -78,6 +80,20 @@ test('mapCard keeps option previews and picks a kind label', () => {
   const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
   assert.equal(it.kindLabel, 'Choose'); assert.equal(it.preview.options[0].preview.src, '/f/T-1/reviewed/aa/a.html');
   assert.equal(it.preview.options[1].suggested, true);
+});
+
+test('mapCard carries the question text, the set, the suggestion and a choice\'s Today picture (ORCH-65)', () => {
+  const {UI} = load();
+  const c = card('o'); Object.assign(c, {text: 'Now: three counts. Proposal: one.', group: 'Home look', recommended: 'B'});
+  c.card = {kind: 'choice', title: 'Which?', preview: {type: 'options', before: {type: 'img', src: 'reviewed/aa/t.png'}, options: [{id: 'A', title: 'One'}, {id: 'B', title: 'Two'}]}};
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.equal(it.text, 'Now: three counts. Proposal: one.'); assert.equal(it.group, 'Home look');
+  assert.equal(it.preview.options[1].suggested, true); assert.equal(it.preview.options[0].suggested, false);
+  assert.equal(it.preview.before.src, '/f/T-1/reviewed/aa/t.png'); assert.equal(it.suggest, undefined);
+  const l = card('l'); l.links = [{label: 'Mockup', url: 'http://127.0.0.1:8780/a.html'}, {label: 'Bad', url: 'javascript:x'}]; l.card = {kind: 'draft', title: 'B'};
+  assert.equal(JSON.stringify(UI.review.mapCard(l, fakeApi([[]]), NOW).links), JSON.stringify([{label: 'Mockup', url: 'http://127.0.0.1:8780/a.html'}]));
+  const d = card('d'); d.recommended = 'ok'; d.card = {kind: 'draft', title: 'Block'};
+  assert.equal(UI.review.mapCard(d, fakeApi([[]]), NOW).suggest, 'ok');
 });
 
 test('the deck is text only by default: voice is off', async () => {
@@ -173,6 +189,15 @@ test('answerRecord: title, verdict words, by · via · time, taken option, pins 
   assert.ok(rec.byClass('decision-verdict')[0].className.includes('ok'));
 });
 
+test('answerRecord: a plain question (options without pictures) shows no empty tiles and no doubled names (ORCH-110)', () => {
+  const {UI} = load();
+  const plain = {kind: 'choice', title: 'Which name for the export?', preview: {type: 'options', options: [{id: 'Export', title: 'Export'}, {id: 'Download', title: 'Download'}]}};
+  const rec = UI.answerRecord(entry({action: 'use', picked: 'Export'}, {card: plain, shown: null}), {now: NOW});
+  assert.equal(rec.byClass('opt-thumb').length, 0); assert.equal(rec.byClass('decision-shown').length, 0);
+  assert.match(rec.textContent, /Use Export/); assert.doesNotMatch(rec.textContent, /Export · Export/);
+  assert.equal(UI.cardShown({card: plain, ticket: 'T-1'}), null, 'the ticket page shows no empty picture tiles either');
+});
+
 test('answerRecord: words per action, text via textContent, relation lines', () => {
   const {UI} = load();
   const w = (a, k) => UI.review.verdictWord({card: k || {kind: 'draft', ok_label: 'Build it'}, decision: a});
@@ -226,4 +251,131 @@ test('onChange: called with the deck when it is built and after every move or an
   assert.deepEqual(seen, [2]);
   decks[0].o.onChange();
   assert.deepEqual(seen, [2, 2]);
+});
+
+// ORCH-183 A2: Undo in the deck took the card back on screen while the answer was already saved. An answer now waits
+// (o.hold) before it is sent; Undo in that time means nothing is saved; leaving the page saves what waits.
+test('an answer waits before it is saved: Undo in that time sends nothing', async () => {
+  const sent = [];
+  const {decks, page} = await mount(fakeApi([[card('a'), card('b')]], async b => { sent.push(b); return {ok: true}; }), {hold: 40});
+  const d = decks[0];
+  d.o.onDecide(d.items[0], 'ok', null);
+  await flush();
+  assert.equal(sent.length, 0, 'not saved yet');
+  assert.equal(d.o.canUndo(d.items[0]), true, 'the deck may offer Undo');
+  d.o.onUndo(d.items[0]);
+  await new Promise(r => setTimeout(r, 60));
+  assert.equal(sent.length, 0, 'Undo took it back for real');
+  assert.equal(d.o.canUndo(d.items[0]), false);
+  assert.equal(page.held, 0);
+});
+
+test('a held answer is saved when its time is up, and Undo is no longer offered', async () => {
+  const sent = [];
+  const {decks} = await mount(fakeApi([[card('a')]], async b => { sent.push(b); return {ok: true}; }), {hold: 20});
+  const d = decks[0];
+  let synced = 0; d.syncUndo = () => { synced++; };
+  d.o.onDecide(d.items[0], 'no', null);
+  await new Promise(r => setTimeout(r, 40));
+  assert.equal(sent.length, 1); assert.equal(sent[0].verdict, 'no');
+  assert.equal(d.o.canUndo(d.items[0]), false, 'saved: no Undo');
+  assert.equal(synced, 1, 'the deck is told to turn its Undo button off');
+});
+
+test('leaving the page saves every answer that still waits', async () => {
+  const sent = [];
+  const {decks, page} = await mount(fakeApi([[card('a'), card('b')]], async b => { sent.push(b); return {ok: true}; }), {hold: 60000});
+  decks[0].o.onDecide(decks[0].items[0], 'ok', null);
+  decks[0].o.onDecide(decks[0].items[1], 'talk', {changes: {text: 'Shorter', pins: []}});
+  page.destroy();
+  await flush();
+  assert.deepEqual(sent.map(b => b.id).sort(), ['a', 'b']);
+});
+
+test('a held answer keeps its card out of a refreshed stack; after Undo the card may come back', async () => {
+  const api = fakeApi([[card('a'), card('b')], [card('a'), card('b')], [card('a'), card('b'), card('c')]]);
+  const {decks, page} = await mount(api, {hold: 60000});
+  decks[0].answers.a = {verdict: 'ok', item: decks[0].items[0]}; decks[0].o.onDecide(decks[0].items[0], 'ok', null);  // as the deck does
+  await page.tick(); await flush();
+  assert.equal(decks.length, 1, 'same open cards: no rebuild');
+  delete decks[0].answers.a; decks[0].o.onUndo(decks[0].items[0]);
+  await page.tick(); await flush();
+  assert.equal(decks.length, 2, 'a new card arrived');
+  assert.deepEqual(decks[1].items.map(i => i.id), ['a', 'b', 'c'], 'the card taken back is waiting again');
+});
+
+// ORCH-183 A3: a Check result shows its own files (a picture, a page) as tiles.
+test('mapCard: the files of a Check card become tiles with urls; unknown types are plain files; no url, no tile', () => {
+  const {UI} = load();
+  const c = {id: 'core:review:t_x', ticket: 'T-1', key: 'review', digest: 'd', card: {kind: 'check', title: 'Done', then: 'x',
+    files: [{name: 'Cover photo', type: 'img', ref: 'evidence/shop.png'}, {name: 'Result', type: 'page', ref: 'evidence/result.html'},
+      {name: 'Catalogue', type: 'zip', ref: 'evidence/c.pdf'}, {name: '', type: 'img', ref: 'evidence/x.png'}, {name: 'Bad', ref: 7}]}};
+  const it = UI.review.mapCard(c, {fileUrl: (k, ref) => ref === 'evidence/c.pdf' ? '' : '/f/' + ref}, NOW);
+  assert.deepEqual(JSON.parse(JSON.stringify(it.files)), [{label: 'Cover photo', type: 'img', src: '/f/evidence/shop.png'}, {label: 'Result', type: 'page', src: '/f/evidence/result.html'}]);
+  assert.equal(UI.review.mapCard(card('a'), fakeApi([[]]), NOW).files.length, 0);
+});
+
+test('mapCard: own answer buttons pass through (label and pick, at most 4)', () => {
+  const {UI} = load();
+  const it = UI.review.mapCard(card('a', {answers:[{label:'Not now', picked:'Not now'}, {label:'', picked:'x'}, {label:'Start', picked:7}, {label:'Start', picked:'Start'}]}), fakeApi([[]]), NOW);
+  assert.equal(JSON.stringify(it.answers), JSON.stringify([{label:'Not now', picked:'Not now'}, {label:'Start', picked:'Start'}]));
+  assert.equal(UI.review.mapCard(card('b'), fakeApi([[]]), NOW).answers.length, 0);
+});
+
+test('answerRecord: every card names its ticket and a title, never a bare "Answered" (ORCH-172)', () => {
+  const {UI} = load();
+  const untitled = {kind: 'choice', preview: {type: 'options', options: [{id: 'Yes', title: 'Yes'}, {id: 'No', title: 'No'}]}};
+  const long = 'Which helper should the always-on session in Focus be? A: the Chat helper itself, shown in Focus with its screen and a terminal command, or B: a separate manager.';
+  const rec = UI.answerRecord(entry({action: 'use', picked: 'No'}, {card: untitled, ticket_key: 'ORCH-147', ticket_title: 'Focus: always-on manager', text: long, shown: null}), {now: NOW, ticketHref: id => '#ticket/' + id});
+  const h3 = rec.all(n => n.tag === 'h3')[0].textContent;
+  assert.notEqual(h3, 'Answered'); assert.match(h3, /^Which helper should the always-on session/); assert.ok(h3.length <= 121 && h3.endsWith('…'));
+  const link = rec.all(n => n.tag === 'a' && n.href === '#ticket/T-1')[0];
+  assert.ok(link, 'the ticket key and title link to the ticket'); assert.equal(link.textContent, 'ORCH-147 · Focus: always-on manager');
+  assert.equal(UI.answerRecord(entry({action: 'approve'}, {card: {}, ticket_title: 'Fix the date', shown: null}), {now: NOW}).all(n => n.tag === 'h3')[0].textContent, 'Fix the date');
+  const own = UI.answerRecord(entry({action: 'approve'}, {ticket_key: 'ORCH-147', ticket_title: 'Focus'}), {now: NOW, showTicket: false});
+  assert.doesNotMatch(own.textContent, /ORCH-147/, 'the ticket page does not repeat its own key');
+});
+
+test('answerRecord: a card with nothing to show gets no empty "Reviewed" tile (ORCH-172)', () => {
+  const {UI} = load();
+  const rec = UI.answerRecord(entry({action: 'approve'}, {card: {kind: 'draft', preview: {type: 'doc'}}, shown: null}), {now: NOW});
+  assert.equal(rec.byClass('decision-shown').length, 0); assert.doesNotMatch(rec.textContent, /Reviewed/);
+  const words = UI.answerRecord(entry({action: 'approve'}, {card: {kind: 'check', title: 'Done', preview: {type: 'doc', heading: 'What was done', paras: ['Fixed it.']}}, shown: null}), {now: NOW});
+  assert.equal(words.byClass('decision-shot').length, 1, 'a words preview keeps its tile');
+});
+
+test('a click on a tile opens it large with the card\'s other tiles a step away (ORCH-172)', () => {
+  const {UI, document} = load();
+  const rec = UI.answerRecord(entry({action: 'approve'}, {card: {kind: 'draft', title: 'Tickets board', preview: {type: 'compare', before: {type: 'img', src: 'reviewed/aa/before.png'}, after: {type: 'img', src: 'reviewed/aa/after.png'}}}}), {fileUrl: (e, r) => '/f/' + r, now: NOW});
+  const tiles = rec.byClass('decision-shot');
+  assert.equal(tiles.length, 2); assert.equal(tiles[1].attrs['aria-label'], 'Open After large');
+  assert.equal(tiles[0].children[0].children[0].alt, 'Before', 'every picture has a name');
+  tiles[1].fire('click');
+  const d = document.body.children.at(-1);
+  assert.equal(d.tag, 'dialog'); assert.ok(d.open); assert.ok(d.className.includes('review-viewer'));
+  assert.match(d.textContent, /After/); assert.match(d.textContent, /2 of 2/);
+  assert.equal(d.byClass('review-viewer-body')[0].children[0].src, '/f/reviewed/aa/after.png');
+  d.fire('keydown', {key: 'ArrowLeft'});
+  assert.match(d.textContent, /1 of 2/); assert.equal(d.byClass('review-viewer-body')[0].children[0].src, '/f/reviewed/aa/before.png');
+});
+
+test('a words preview opens in full in the large view, not cut (ORCH-172)', () => {
+  const {UI, document} = load();
+  const paras = ['In short: helpers waiting for checks no longer take a place.', 'Merged on green with tests.', 'Third paragraph the tile does not show.'];
+  const rec = UI.answerRecord(entry({action: 'approve'}, {card: {kind: 'check', title: 'Helpers waiting', preview: {type: 'doc', heading: 'What was done', paras}}, shown: null}), {now: NOW});
+  assert.doesNotMatch(rec.textContent, /Third paragraph/);
+  rec.byClass('decision-shot')[0].fire('click');
+  const d = document.body.children.at(-1);
+  paras.forEach(p => assert.ok(d.textContent.includes(p)));
+});
+
+test('the large view of a words box uses the card\'s own words box when the kit has it (steps, rows, status) (ORCH-183)', () => {
+  const {UI, document} = load();
+  let got = null;
+  UI.docBox = (pv, tag) => { got = [pv, tag]; const n = document.createElement('div'); n.className = 'doc'; n.textContent = 'BOX'; return n; };
+  const pv = {type: 'doc', heading: 'What goes out · 2 changes', rows: [{title: 'One', n: 1}], steps: ['a']};
+  UI.reviewViewer([{label: 'Release', preview: pv}], 0, {title: 'Release 32'});
+  const d = document.body.children.at(-1);
+  assert.equal(got[0], pv); assert.equal(got[1], 'h3');
+  assert.match(d.textContent, /BOX/);
 });

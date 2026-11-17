@@ -20,7 +20,9 @@ from orch import (
     runs,
     runs_live,
     runwatch,
+    session_history,
     sharedfolder,
+    tend,
     term,
     tickets,
 )
@@ -32,6 +34,7 @@ SUBCOMMANDS = (
     "release",
     "status",
     "session",
+    "history",
     "argv",
     "start",
     "send",
@@ -43,6 +46,7 @@ SUBCOMMANDS = (
     "input",
     "list",
     "screen",
+    "tend",
     *cli_screen.SUBCOMMANDS,
 )
 
@@ -56,6 +60,9 @@ def add_parsers(sub, common) -> None:
         x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
         if name == "list":
             continue  # every run; no ticket
+        if name == "tend":  # every live run; no ticket
+            x.add_argument("--dry-run", action="store_true", help="only say what it would do")
+            continue
         x.add_argument(
             "ticket", nargs="?" if name in ("event", "done", "input") else "+" if name == "status" else None
         )
@@ -75,6 +82,11 @@ def add_parsers(sub, common) -> None:
             x.add_argument("--kind", required=True, choices=runs_live.KINDS)
             x.add_argument("--run", help="the run (the tool's hook passes it)")
             x.add_argument("--session-id", help="the tool's session id")
+        if name == "history":
+            x.add_argument("--session", help="show this earlier session (default: list the earlier sessions)")
+            x.add_argument(
+                "--continue", dest="resume", action="store_true", help="the next run continues --session"
+            )
         if name in ("claim", "session", "argv", "start"):
             x.add_argument("--agent", help="which agent (default: the one chosen for this folder)")
         if name == "claim":
@@ -92,6 +104,12 @@ def add_parsers(sub, common) -> None:
         if name == "start":
             x.add_argument("--take-over", action="store_true", help="take over a claim nobody has written to")
             x.add_argument("--text", help="what to queue when the ticket is busy")
+            x.add_argument(
+                "--priority",
+                choices=runs_live.PRIORITIES,
+                default="normal",
+                help="when every slot is taken: where it waits in line (default normal)",
+            )
         if name == "screen":
             x.add_argument(
                 "--lines",
@@ -209,7 +227,7 @@ def _waiting_input(root: Path, tid: str) -> list[dict]:
 def _status(args, root: Path) -> None:
     ids = args.ticket if isinstance(args.ticket, list) else [args.ticket]
     if len(ids) == 1:  # the one-ticket answer is unchanged
-        data, text = _status_of(root, ids[0])
+        data, text = status_of(root, ids[0])
         _out(args, data, text)
         return
     # Several tickets in one process (the dashboard asks for all runs at once): the same answer per ticket,
@@ -218,14 +236,14 @@ def _status(args, root: Path) -> None:
     lines = []
     for tid in dict.fromkeys(ids):
         try:
-            out[tid], text = _status_of(root, tid)
+            out[tid], text = status_of(root, tid)
         except Refused as e:
             out[tid], text = {"ticket": tid, "error": str(e)}, str(e)
         lines.append(text)
-    _out(args, {"runs": out}, "\n".join(lines))
+    _out(args, {"runs": out}, "\n".join(lines))  # orch.reads.run_status: the same answer, in-process
 
 
-def _status_of(root: Path, tid: str) -> tuple[dict, str]:
+def status_of(root: Path, tid: str) -> tuple[dict, str]:
     tickets.load(root, tid)
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
     runs.check_start_timeout(root, tid)  # a start that never got an agent says why
@@ -377,6 +395,38 @@ def _unsend(args, root: Path, tid: str, by: str) -> None:
     )
 
 
+def _history(args, root: Path, tid: str) -> None:
+    t = tickets.load(root, tid)
+    if not args.session:
+        rows = session_history.sessions(t, root=root)
+        lines = [
+            f"{r['last_used'] or '?'}  {r['agent']}  {r['id']}  "
+            f"{r['title'] or ('(empty)' if r['readable'] else '(history not on this computer)')}"
+            for r in rows
+        ]
+        _out(args, {"sessions": rows}, "\n".join(lines) or "No earlier chat sessions on this ticket.")
+        return
+    rec = next((r for r in session_history.sessions(t, root=root) if r["id"] == args.session), None)
+    if rec is None:
+        raise Refused("That session does not belong to this ticket. List them: orch run history <ticket>")
+    if args.resume:
+        if not str(args.by or tickets.current_actor()).startswith("human:"):
+            raise Refused("Only a person can pick the conversation a helper continues.")
+        run = runs.read(root, tid)
+        if run and isinstance(run.get("pid"), int) and runs.state(run) == "alive":
+            raise Refused("A helper is working on this ticket. Stop it first, then continue the other chat.")
+        if not rec["readable"]:
+            raise Refused("That conversation is not on this computer, so it cannot be continued.")
+        tickets.record_session(root, tid, rec["agent"], args.session, runs.host())
+        _out(args, {"continued": args.session}, "The next run continues that conversation.")
+        return
+    h = session_history.read(rec["agent"], args.session, root=root)
+    if not h["found"]:
+        raise Refused("The history of that session is not on this computer.")
+    text = "\n\n".join(f"{'You' if x['role'] == 'user' else 'Helper'}: {x['text']}" for x in h["turns"])
+    _out(args, {"agent": rec["agent"], "session": args.session, **h}, text or "That session has no messages.")
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "run":
         return False
@@ -393,6 +443,15 @@ def dispatch(args, root: Path) -> bool:
     if sub == "list":  # read-only: no cleanup, no writes
         rows = runwatch.list_runs(root)
         _out(args, {"runs": rows}, runwatch.list_text(rows))
+        return True
+    if sub == "tend":  # the helper watcher's pass (ORCH-78): end, remind, start fresh, start the line
+        # the watcher first, so a session at the idle limit gets its history line (or its fresh start)
+        # before the plain cleanup closes it silently (ORCH-149)
+        res = tend.run(root, dry_run=args.dry_run)
+        if not args.dry_run:
+            with contextlib.suppress(Exception):
+                runs_live.cleanup(root)
+        _out(args, res, tend.text(res, args.dry_run))
         return True
     if sub == "screen":  # read-only: nothing is typed into the session
         if not args.ticket:
@@ -472,6 +531,8 @@ def dispatch(args, root: Path) -> bool:
         name = args.agent or adapters.chosen(root)
         sid = tickets.sessions_for(root, tid, tickets.load(root, tid), name, runs.host())
         _out(args, {"agent": name, "session": sid}, sid or "")
+    elif sub == "history":  # read-only: the tool's own saved conversation, never changed
+        _history(args, root, tid)
     elif sub == "argv":
         prompt = Path(args.prompt_file).read_text(encoding="utf-8") if args.prompt_file else None
         if args.mode != "oneshot":
@@ -492,6 +553,7 @@ def dispatch(args, root: Path) -> bool:
             mode=args.mode,
             text=args.text,
             agent=args.agent,
+            priority=args.priority,
         )
         for note in r["notes"]:
             print(note, file=sys.stderr)

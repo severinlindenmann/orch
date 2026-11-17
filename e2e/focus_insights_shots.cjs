@@ -80,7 +80,7 @@ const insTab = tab => async p => { await settle(p, 800); await p.click(`#tab-${t
 // Since the Focus redesign the ticket tabs and the task/helper rail only show in Terminal mode; the plain view is the feed.
 const terminal = async p => { await settle(p); await p.click('button[data-act=mode]'); await p.waitForSelector('.fx-tab', { timeout: 20000 }); };
 const SCREENS = [
-  { name: 'start', url: '/', wait: '.fx-ln-card', setup: p => settle(p) }, // strip + Live now + same-file line
+  { name: 'start', url: '/', wait: '.fx-livenow .helper-row', setup: p => settle(p) }, // strip + Helpers list (ORCH-61) + same-file line
   { name: 'start-areas', url: '/', wait: '.fx-areas button', async setup(p) {
     await settle(p);
     await p.click('.fx-areas button');
@@ -95,7 +95,7 @@ const SCREENS = [
     await p.locator('.fx-history').scrollIntoViewIfNeeded();
   } },
   { name: 'ticket-used', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-used'); } },
-  { name: 'ticket-results', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await settle(p); await p.evaluate(() => { document.querySelector('button[data-act=mode]').click(); }); await p.waitForSelector('#fx-t-proof', { state: 'attached' }); await p.evaluate(() => document.getElementById('fx-t-proof').click()); await p.waitForSelector('.fx-results .fx-ptile'); } }, // Results tab: the Command tile
+  { name: 'ticket-results', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await settle(p); await p.evaluate(() => { document.querySelector('button[data-act=mode]').click(); }); await p.waitForSelector('#fx-t-proof', { state: 'attached' }); await p.evaluate(() => document.getElementById('fx-t-proof').click()); await p.waitForSelector('.fx-results .card-row'); } }, // Results tab: plain result lines (ORCH-71)
   { name: 'ticket-files', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-files'); } },
   // the helper tree shows from 1500 px wide only (narrower it is folded away), so the smoke loads this screen at 1600
   { name: 'ticket-helpers', smokeWidth: 1600, url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) {
@@ -120,7 +120,7 @@ const SCREENS = [
   } },
   // ORCH-67: Settings' 'Open the style guide' opens /styleguide/ in a new tab with every section, clean (the real button
   // on the real dashboard server, files only). The style guide tab is checked here; the smoke test checks Settings.
-  { name: 'dashboard-style-guide', url: '/#settings', ...DASH, wait: '[data-key="settings-style-guide"]', async setup(p, base) {
+  { name: 'dashboard-style-guide', url: '/#settings/about', ...DASH, wait: '[data-key="settings-style-guide"]', async setup(p, base) {
     const [tab] = await Promise.all([p.waitForEvent('popup', { timeout: 15000 }), p.click('[data-key="settings-style-guide"]')]);
     const problems = [];
     tab.on('pageerror', e => problems.push(`uncaught: ${e.message}`));

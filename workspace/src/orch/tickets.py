@@ -34,8 +34,17 @@ STATUS_WORDS = {
     "waiting": "Waiting",
     "review": "Review",
     "done": "Done",
-    "dropped": "Dropped",
+    "dropped": "Won't do",
 }
+
+
+def status_word(t: dict) -> str:
+    """The word for a ticket's status; a dropped ticket another ticket replaces says Superseded."""
+    if t.get("status") == "dropped" and t.get("superseded_by"):
+        return "Superseded"
+    return STATUS_WORDS.get(t.get("status"), str(t.get("status")))
+
+
 OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 TAIL_MAX = 2048
@@ -47,7 +56,17 @@ RUNS_PER_CHECK = 45  # notes are not capped: only people write them, orch writes
 SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
-PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
+PATCH_FIELDS = (
+    "title",
+    "status",
+    "waiting_on",
+    "superseded_by",
+    "owner",
+    "due",
+    "note",
+    "done_when",
+    "summary",
+)
 VIA_RE = re.compile(r"^[a-z][a-z0-9-]{1,15}$")
 KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
 DOING_STALE_SECONDS = 2 * 3600
@@ -480,6 +499,21 @@ def _agent_actor(by: str) -> bool:
     return by.startswith("agent:") or (by.startswith("human:") and bool(agent_tool()))
 
 
+def _addon_keeps_its_ticket(root: Path, ticket: dict, by: str) -> bool:
+    """An add-on's work can go on after its ticket is Done (a repeat survives Done, #194): an ACTIVE add-on,
+    writing as agent:<its name>, still keeps up a done ticket that carries its own ext block (its record, a
+    history line, opening it again for the next run). Never from inside an agent run (a run sets ORCH_AGENT),
+    never on a dropped ticket, never on a ticket the add-on has no data on."""
+    name = by.removeprefix("agent:")
+    if by == name or ticket.get("status") != "done" or agent_tool():
+        return False
+    if not isinstance((ticket.get("ext") or {}).get(name), dict):
+        return False
+    from orch import addons  # addons is a leaf here; imported late like the other helpers
+
+    return name in addons.active(root)
+
+
 def _refuse_closed_agent(root: Path, tid: str, by: str) -> None:
     """The closed-ticket guard for a write that happens outside apply_op (a file copy): same rule, checked
     under the caller's ticket lock BEFORE anything is written."""
@@ -545,7 +579,7 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         ticket = _load_raw(root, tid)
         eff_status = ticket.get("status")
         info.update(status=eff_status, revision=revision(ticket))
-        if eff_status in CLOSED and _agent_actor(by):
+        if eff_status in CLOSED and _agent_actor(by) and not _addon_keeps_its_ticket(root, ticket, by):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
@@ -624,7 +658,8 @@ def save(root: Path, ticket: dict) -> None:
 
 def list_all(root: Path, include_general: bool = False) -> list[dict]:
     """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
-    `general: true`) is left out unless include_general: it is not a ticket anyone lists, counts or closes."""
+    `general: true`) and the hidden Manager ticket (flag `manager: true`) are left out unless include_general:
+    they are not tickets anyone lists, counts or closes."""
     d = tickets_dir(root)
     out = []
     if d.is_dir():
@@ -639,7 +674,7 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
                 continue
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten
-            if include_general or t.get("general") is not True:
+            if include_general or (t.get("general") is not True and t.get("manager") is not True):
                 out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
@@ -659,6 +694,57 @@ def general_id(root: Path) -> str | None:
         if isinstance(t, dict) and t.get("general") is True:
             return t["id"]
     return None
+
+
+def is_manager(root: Path, tid: str) -> bool:
+    """True for the hidden Manager ticket: the workspace's always-on helper session (ORCH-147)."""
+    try:
+        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("manager") is True
+    except (OSError, ValueError, Refused, AttributeError):
+        return False
+
+
+def manager_id(root: Path) -> str | None:
+    """The id of this workspace's hidden Manager ticket, or None before the Manager was first started."""
+    for t in list_all(root, include_general=True):
+        if isinstance(t, dict) and t.get("manager") is True and t.get("general") is not True:
+            return t["id"]
+    return None
+
+
+MANAGER_NOTE = (
+    "The Manager: an always-on helper the person talks to in Focus or joins in a terminal. It looks after "
+    "the workspace's tickets and helpers with the full rights of a normal helper. Nothing ends its session "
+    "by itself."
+)
+
+
+def ensure_manager(root: Path, by: str) -> str:
+    """The Manager ticket (flag manager: true, no display key so no number is used up), made once. Kept out of
+    git like the Chat ticket: it is this computer's own session."""
+    from orch import harness
+
+    if tid := manager_id(root):
+        return tid
+    t = now()
+    ticket = {
+        "schema": "orch.ticket/1",
+        "id": new_id(root),
+        "title": "Manager",
+        "manager": True,
+        "status": "open",
+        "note": MANAGER_NOTE,
+        "created_at": t,
+        "updated_at": t,
+        "checklist": [],
+        "refs": [],
+        "questions": [],
+        "history": [],
+    }
+    add_history(ticket, by, "Created", "cli", at=t)
+    save(root, ticket)
+    harness.protect_local(root)
+    return ticket["id"]
 
 
 def ensure_general(root: Path, by: str) -> str:
@@ -693,7 +779,7 @@ _FIELD_WORDS = {
     "owner": "owner",
     "due": "due date",
     "note": "note",
-    "done_when": "done criteria",
+    "done_when": "Done when line",
     "summary": "summary",
     "status": "status",
     "waiting_on": "wait",
@@ -706,6 +792,13 @@ def _fields_text(raw: str) -> str | None:
         return None  # free text someone logged by hand: shown as written
     words = [_FIELD_WORDS[k] for k in keys]
     return "the " + (", ".join(words[:-1]) + " and " + words[-1] if len(words) > 1 else words[0])
+
+
+def _parent_words(parent: dict) -> str:
+    """The parent in a "Created under ..." line: its key and title (never its internal id)."""
+    title = " ".join(str(parent.get("title") or "").split())
+    title = title[:77] + "..." if len(title) > 80 else title
+    return f"{parent.get('key') or parent['id']}" + (f" {title}" if title else "")
 
 
 def history_line(text: str, checklist: list[dict] | None = None) -> str:
@@ -721,13 +814,20 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     def addon(key: str) -> str:
         return key.replace("-", " ").capitalize()
 
+    if re.fullmatch(r"Created under t_\w+", t):
+        return "Created as a sub-ticket"  # an older line: it holds only the internal id
+    if m := re.fullmatch(r"Recorded a check run for (c\d+)(?: \(exit (\d+)\))?", t):
+        result = "" if m.group(2) is None else " (passed)" if m.group(2) == "0" else " (failed)"
+        return "Ran a check" + task(m.group(1)) + result
+    if m := re.fullmatch(r"Moved (c\d+) after c\d+", t):
+        return "Moved a task" + task(m.group(1))
     if re.fullmatch(r"Asked q\d+, waiting", t):
         return "Asked a question"
     if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
         return f"Answered a question: {m.group(1)}"
     if m := re.fullmatch(r"Status (\w+) -> (\w+)", t):
         return f"Moved to {STATUS_WORDS.get(m.group(2), m.group(2))}"
-    if m := re.fullmatch(r"Edited ([a-z_, ]+)", t):
+    if m := re.fullmatch(r"Edited ([a-z_, ]+)(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
         if (f := _fields_text(m.group(1))) is not None:
             return "Changed " + f
     if m := re.fullmatch(r"Patched ([a-z_, ]+?)(?: \(status \w+ -> (\w+)\))?", t):
@@ -736,11 +836,23 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
                 "Changed " + f + (f" (now {STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
             )
     if m := re.fullmatch(r"Added check (c\d+)", t):
-        return "Added a step" + task(m.group(1))
+        return "Added a task" + task(m.group(1))
     if m := re.fullmatch(r"Check (c\d+) done", t):
         return "Finished a task" + task(m.group(1))
     if m := re.fullmatch(r"Marked (c\d+) as won't do", t):
         return "Marked as won't do" + task(m.group(1))
+    # ORCH-240: never a raw task id ("Reopened c1") in the Activity
+    if m := re.fullmatch(r"Reopened (c\d+)(?: \(old evidence: .*\))?", t, re.DOTALL):
+        return "Opened a task again" + task(m.group(1))
+    if m := re.fullmatch(r"Renamed (c\d+)(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
+        return "Renamed a task" + task(m.group(1))
+    if m := re.fullmatch(r"Linked (c\d+) to Done when", t):
+        return "Linked a task to Done when" + task(m.group(1))
+    removed = r"Removed step c\d+ '(.*)' \((?:was done|was open)(?:; evidence: .*)?\)"
+    if m := re.fullmatch(removed, t, re.DOTALL):
+        return f"Removed a task: {m.group(1)}"
+    if re.fullmatch(r"Title changed(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
+        return "Changed the title"
     if m := re.fullmatch(r"Set ext\.([a-z][a-z0-9-]*)", t):
         return f"Updated {addon(m.group(1))} settings"
     if m := re.fullmatch(r"Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?", t):
@@ -813,6 +925,7 @@ def create(
     title_auto: bool = False,
     plan_first: bool = False,
     epic: bool = False,
+    release: bool = False,
 ) -> dict:
     """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
@@ -822,8 +935,10 @@ def create(
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
+    parent_ticket = None
     if parent is not None:
-        load(root, parent)  # the parent must exist (cycles are impossible: it is set only here)
+        # the parent must exist (a new ticket has no children, so no loop; set_parent checks loops later)
+        parent_ticket = load(root, parent)
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
@@ -841,7 +956,8 @@ def create(
         "questions": [],
         "history": [],
     }
-    add_history(ticket, by, "Created" + (f" under {parent}" if parent else ""), at=t)
+    under = f" under {_parent_words(parent_ticket)}" if parent_ticket else ""
+    add_history(ticket, by, "Created" + under, at=t)
     if parent is not None:
         ticket["parent"] = parent
     if title_auto:
@@ -850,6 +966,10 @@ def create(
         ticket["plan_first"] = True
     if epic:  # several tickets made at once: its sub-tickets are the work, one run goes through them in order
         ticket["epic"] = True
+    if (
+        release
+    ):  # ORCH-37: a release holds the epics and tickets that ship together (set_release changes it later)
+        ticket["release"] = True
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -908,6 +1028,15 @@ def _covered(part: str, cover: str) -> bool:
     return len(short) >= 3 and f" {short} " in f" {long_} "
 
 
+def _loosely_named(part: str, texts: list[str]) -> bool:
+    """A task text names a Done when part by meaning, not link: at least 70% of the part's words (3+ letters,
+    at least 3 of them) are in that one task's text. Lets a reworded Done when keep its finished tasks."""
+    words = {w for w in _norm_words(part).split() if len(w) >= 3}
+    if len(words) < 3:
+        return False
+    return any(len(words & set(_norm_words(t).split())) * 10 >= len(words) * 7 for t in texts)
+
+
 def done_when_parts(done_when: str) -> list[str]:
     """done_when split into its parts: one per line, ';' or sentence end. Plain and cheap on purpose."""
     parts = []
@@ -926,7 +1055,8 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
     (a stored flag is never trusted). The current signature is computed at most once per call, only when a
     recorded signature exists; `cache` reuses it for a few seconds (polled pages).
     uncovered: the parts of done_when that no task `covers` (a part is covered when a task's covers text
-    and the part contain one another, ignoring case and punctuation); one hint when done_when cannot be
+    and the part contain one another, ignoring case and punctuation, or when one task's own text holds
+    70% of the part's words); one hint when done_when cannot be
     split and nothing is linked. level: ok | note | warn | fail, so views never parse `line`."""
     from orch import filesig
 
@@ -956,11 +1086,18 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
             per[c["id"]] = "note" if evs else "missing"
     done_when = ticket.get("done_when")
     covers = [_norm_words(c["covers"]) for c in items if isinstance(c.get("covers"), str)]
+    # a finished task with evidence that the helper linked to a part proves it, in any words
+    for c in items:
+        if c.get("done") and c.get("evidence") and isinstance(c.get("proves"), list):
+            covers += [_norm_words(q) for q in c["proves"] if isinstance(q, str)]
     covers = [c for c in covers if c]
     uncovered: list[str] = []
     if isinstance(done_when, str) and done_when.strip():
         parts = done_when_parts(done_when)
-        uncovered = [p for p in parts if not any(_covered(p, c) for c in covers)]
+        texts = [c["text"] for c in items if isinstance(c.get("text"), str) and not c.get("wont_do")]
+        uncovered = [
+            p for p in parts if not any(_covered(p, c) for c in covers) and not _loosely_named(p, texts)
+        ]
         if not parts and not covers:
             uncovered = ["Done when isn't linked to tasks"]
     n = {k: list(per.values()).count(k) for k in ("passed", "failed", "changed", "note")}
@@ -1019,6 +1156,23 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
 
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
+MANAGER_REFUSAL = "The Manager is not a ticket: it is never finished, dropped or reopened."
+
+
+def hidden_kind(ticket: dict) -> str | None:
+    """'general' (Chat) or 'manager' for the two hidden tickets that hold a conversation, never a piece of
+    work: no status moves, never Working. None for every other ticket."""
+    if ticket.get("general") is True:
+        return "general"
+    if ticket.get("manager") is True:
+        return "manager"
+    return None
+
+
+def _hidden_refusal(ticket: dict) -> str:
+    return MANAGER_REFUSAL if hidden_kind(ticket) == "manager" else GENERAL_REFUSAL
+
+
 GENERAL_REFUSED = (
     "open",
     "review",
@@ -1029,10 +1183,8 @@ GENERAL_REFUSED = (
 
 
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
-    if (
-        ticket.get("general") is True and status in GENERAL_REFUSED
-    ):  # the ONE status guard (agent, person, wrapper)
-        raise Refused(GENERAL_REFUSAL)
+    if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
+        raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
@@ -1069,8 +1221,8 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
         raise Refused("Only a person can accept.")
 
     def op(ticket):
-        if ticket.get("general") is True:
-            raise Refused(GENERAL_REFUSAL)
+        if hidden_kind(ticket):
+            raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not waiting for your review.")
         ticket["status"] = "done"
@@ -1078,6 +1230,126 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
         add_history(ticket, by, "Status review -> done", via)
 
     return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away (worktrees.on_closed)
+
+
+REVIEWER = "agent:reviewer"  # the Reviewer role (reviewer.py): acts for the owner, never as a person
+REVIEWER_VIA = "reviewer"
+ACCEPTED_LINE = "Accepted for you by the Reviewer: "
+SENT_BACK_LINE = "Sent back by the Reviewer: "
+
+
+def accepted_by_reviewer(root: Path, ticket: dict) -> bool:
+    """Done, and the line that made it Done is the Reviewer's (the owner may still send it back)."""
+    if ticket.get("status") != "done":
+        return False
+    for h in reversed(history.lines(root, ticket)):
+        if isinstance(h, dict) and re.fullmatch(r"Status \w+ -> done", str(h.get("text", ""))):
+            return h.get("by") == REVIEWER
+    return False
+
+
+def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
+    """The Reviewer accepts a ticket in Review for the owner (Review -> Done), only while the owner turned it
+    on (`workflow.reviewer`), every task is done with evidence and no question waits. The history says who did
+    it and why: a role acting for the owner, not a second approver (R4.1). The owner can send it back."""
+    if not config.reviewer_on(root):
+        raise Refused("The Reviewer is off here. Turn it on: orch config set workflow.reviewer on")
+    why = _one_line(reasons)
+
+    def op(ticket):
+        if hidden_kind(ticket):
+            raise Refused(_hidden_refusal(ticket))
+        if ticket["status"] != "review":
+            raise Refused("This ticket is not in Review.")
+        _check_can_finish(ticket)
+        if _open_questions(ticket):
+            raise Refused("A question on this ticket still waits for an answer.")
+        ticket["status"] = "done"
+        ticket["waiting_on"] = None
+        add_history(ticket, REVIEWER, "Status review -> done", REVIEWER_VIA)
+        add_history(ticket, REVIEWER, ACCEPTED_LINE + why, REVIEWER_VIA)
+
+    return apply_op(root, tid, op, by=REVIEWER)[0]
+
+
+ANSWERED_LINE = "Answered for you by the Reviewer: "
+
+
+def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> dict:
+    """The Reviewer answers a small, routine question for the owner with the helper's recommended option,
+    only while the owner turned it on (`workflow.reviewer_answers`) and only for a plain question (no card, no
+    merge, not an add-on's) that is still exactly the one the Reviewer looked at (`digest`). The history says
+    who did it and why: a role acting for the owner (R4.1); the owner corrects it with a message on the
+    ticket."""
+    if not config.reviewer_answers_on(root):
+        raise Refused("The Reviewer does not answer questions here. Turn it on: orch config set "
+                      "workflow.reviewer_answers on")  # fmt: skip
+    line = _one_line(why)
+
+    def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused(GENERAL_REFUSAL)
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        if question_digest(q) != digest:
+            raise Refused(f"{qid} changed after the Reviewer looked at it.")
+        if q.get("card") is not None or q.get("action") is not None or q.get("kind") not in (None, "plain"):
+            raise Refused(f"{qid} waits for the owner.")
+        rec = q.get("recommended")
+        if not rec or rec not in q["options"]:
+            raise Refused(f"{qid} has no recommended answer.")
+        q["answer"], q["answered_by"], q["via"] = rec, REVIEWER, REVIEWER_VIA
+        q["answered_at"] = now()
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, REVIEWER, f"Answered {qid}: {rec}", REVIEWER_VIA)
+        add_history(ticket, REVIEWER, ANSWERED_LINE + f"{qid} = {rec} ({line})", REVIEWER_VIA)
+        history.created("answers", q)
+        return q
+
+    return apply_op(root, tid, op, by=REVIEWER)[0]
+
+
+RELEASE_KEEPER = "agent:release-keeper"  # merges a green release for the owner (review.tend_releases)
+RELEASE_VIA = "release-keeper"
+RELEASE_MERGED_LINE = "Merged for you (Settings: merge releases without my click): "
+
+
+def merged_for_owner(root: Path, tid: str, qid: str, url: str, head: str, line: str, decision: dict) -> dict:
+    """A release Merge card that review.tend_releases merged on GitHub for the owner: record it as answered
+    (Merge) by the release keeper, only while the owner turned it on (`workflow.release_merge`) and only for a
+    card made with `orch ask ... --merge --release` on exactly this pull request and commit. The history says
+    who did it and why; the owner's own Merge click stays the default (R4.1: a role acting for the owner)."""
+    if not config.release_merge_on(root):
+        raise Refused("Releases merge only on your click here. Turn it on in Settings.")
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        act = q.get("action")
+        if not (isinstance(act, dict) and act.get("release") is True and act.get("merge") == url
+                and act.get("head") == head):  # fmt: skip
+            raise Refused(f"{qid} is not this release's Merge card.")
+        q["answer"], q["answered_by"], q["via"] = "Merge", RELEASE_KEEPER, RELEASE_VIA
+        q["answered_at"] = q["at"] = now()
+        q["decision"] = dict(decision)
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, RELEASE_KEEPER, RELEASE_MERGED_LINE + _one_line(line), RELEASE_VIA)
+        history.created("answers", q)
+        return q
+
+    return apply_op(root, tid, op, by=RELEASE_KEEPER)[0]
+
+
+def _one_line(text: str, limit: int = 300) -> str:
+    return " ".join(str(text or "").split())[:limit]
 
 
 def ask_for_changes(
@@ -1092,8 +1364,11 @@ def ask_for_changes(
 ) -> dict:
     """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
     Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
-    automation host starts exactly one run for it (a person's pending input is what starts runs; #287)."""
-    if not by.startswith("human:") or agent_tool():
+    automation host starts exactly one run for it (a person's pending input is what starts runs; #287).
+    A ticket the Reviewer accepted for the person (Done) can be sent back the same way.
+    The Reviewer itself (by REVIEWER) sends a Review ticket back once when work is missing (reviewer.py)."""
+    role = by == REVIEWER
+    if not role and (not by.startswith("human:") or agent_tool()):
         raise Refused("Only a person can ask for changes.")
     note = (text or "").strip()
     if not note:
@@ -1101,27 +1376,35 @@ def ask_for_changes(
     if len(note) > 2000:
         raise Refused("A note for changes is at most 2000 characters.")
 
+    def may_send_back(ticket) -> bool:
+        return ticket["status"] == "review" or (not role and accepted_by_reviewer(root, ticket))
+
     def op(ticket):
-        if ticket["status"] != "review":
+        if not may_send_back(ticket):
             raise Refused("This ticket is not waiting for your review.")
-        ticket["checklist"].append(
-            {
-                "id": _next_id(ticket["checklist"], "c"),
-                "text": note,
-                "origin": "change_request",  # structured: the dashboard shows "You asked: <note>"
-                "done": False,
-                "evidence": [],
-            }
-        )
+        item = {"id": _next_id(ticket["checklist"], "c"), "text": note, "done": False, "evidence": []}
+        if not role:
+            item["origin"] = "change_request"  # structured: the dashboard shows "You asked: <note>"
+        ticket["checklist"].append(item)
         ticket["status"] = "ready"  # any wait the ticket has is not this review's: left as it is
-        add_history(ticket, by, "Asked for changes: " + note[:200], via)
+        line = SENT_BACK_LINE if role else "Asked for changes: "
+        add_history(ticket, by, line + note[:200], REVIEWER_VIA if role else via)
 
     from orch import runs  # runs imports tickets
 
-    if load(root, tid)["status"] != "review":
+    if not may_send_back(load(root, tid)):
         raise Refused("This ticket is not waiting for your review.")
     # Queue the note first, then commit the ticket: a failure of either leaves nothing half done.
-    item = runs.pending_add(root, tid, by, "message", note, via or _env_via(), pid, phone=phone)
+    item = runs.pending_add(
+        root,
+        tid,
+        by,
+        "event" if role else "message",
+        note,
+        REVIEWER_VIA if role else via or _env_via(),
+        pid,
+        phone=phone,
+    )
     try:
         return apply_op(root, tid, op, by=SYSTEM)[0]
     except BaseException:
@@ -1131,7 +1414,7 @@ def ask_for_changes(
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
-        if ticket.get("general") is True:
+        if hidden_kind(ticket):
             return NO_WRITE
         was_started = ticket.get("started") is True
         ticket["started"] = True
@@ -1160,7 +1443,7 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
     Returns True when the ticket was moved."""
 
     def op(ticket):
-        if ticket.get("general") is True:
+        if hidden_kind(ticket):
             return NO_WRITE
         if ticket["status"] != "active" or (still_running is not None and still_running()):
             return NO_WRITE
@@ -1224,19 +1507,51 @@ def recheck_hint(root: Path, tid: str, status: str, by: str) -> str | None:
     if status != "review" or not (agent_tool() or by.startswith("agent:")):
         return None
     t = load(root, tid)
-    if t.get("status") == "review" or t.get("general") is True:
+    if t.get("status") == "review" or hidden_kind(t):
         return None
     if not {"changed", "failed"} & set(proof_state(t, root)["per_item"].values()):
         return None
     return RECHECK_HINT
 
 
-def set_status(root: Path, tid: str, status: str, by: str) -> dict:
+def superseded_value(root: Path, tid: str, other) -> str | None:
+    """The ticket that replaces `tid` (Superseded: Won't do because another ticket does the work). Its id,
+    from an id or a key; None clears. Refused for the ticket itself or a ticket that does not exist."""
+    if other is None or other == "":
+        return None
+    if not isinstance(other, str):
+        raise Refused("superseded_by is a ticket id or key, or null.")
+    oid = resolve(root, other.strip())
+    if not isinstance(oid, str) or not _ID_RE.fullmatch(oid) or not ticket_path(root, oid).is_file():
+        raise Refused(f"Ticket {other} doesn't exist. Run `orch ticket list` to see your tickets.")
+    if oid == tid:
+        raise Refused("A ticket cannot replace itself.")
+    return oid
+
+
+def _keep_superseded(ticket: dict, status: str, other: str | None, given: bool) -> None:
+    """superseded_by lives only on a dropped ticket: any other status clears it."""
+    if status != "dropped":
+        ticket.pop("superseded_by", None)
+    elif given:
+        if other:
+            ticket["superseded_by"] = other
+        else:
+            ticket.pop("superseded_by", None)
+
+
+def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | None = None) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
+    if superseded_by is not None and status != "dropped":
+        raise Refused("--superseded-by goes with the status dropped (Won't do).")
+    other = superseded_value(root, tid, superseded_by) if superseded_by is not None else None
 
     def op(ticket):
         target, actor = _finish_status(root, ticket, status, by)
+        _keep_superseded(ticket, target, other, superseded_by is not None)
+        if other and target == "dropped":
+            add_history(ticket, actor, f"Superseded by {other}")
         if target in ("open", "ready") and not actor.startswith("agent:"):
             ticket.pop("started", None)
         if target != "waiting":
@@ -1257,7 +1572,7 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by", "model")
+PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "release", "description", "description_by", "model")
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1295,9 +1610,9 @@ def _when_words(at: datetime, now: datetime) -> str:
 
 
 def due_label(due: str | None, status: str = "open", now: datetime | None = None) -> str | None:
-    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 18:30" (another day), "Late since
-    18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day wording).
-    Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
+    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 16 Nov, 18:30" (another day),
+    "Late since 18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day
+    wording). Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
     if not due or "T" not in str(due):
         return None
     try:
@@ -1306,7 +1621,10 @@ def due_label(due: str | None, status: str = "open", now: datetime | None = None
         return None
     now = now or datetime.now()
     late = at < now and status not in ("done", "dropped")
-    return f"{'Late since' if late else 'Due'} {_when_words(at, now)}"
+    words = _when_words(at, now)
+    if 0 < abs((at.date() - now.date()).days) < 7:  # ORCH-240: which Monday? the day of the month too
+        words = f"{at.strftime('%a')} {at.day} {at.strftime('%b')}, {at.strftime('%H:%M')}"
+    return f"{'Late since' if late else 'Due'} {words}"
 
 
 QUIET_HOURS = 6  # a working ticket with no history line for this long is "quiet" (fixed, no setting: R4.4)
@@ -1340,6 +1658,65 @@ def quiet_since(ticket: dict, now: datetime | None = None) -> str | None:
     return newest[0].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+STUCK_HOURS = (
+    24  # a question unanswered or a Working ticket without news this long counts as stuck (fixed: R4.4)
+)
+
+
+def overdue(ticket: dict, now: datetime | None = None) -> bool:
+    """Past its due date (local time like the due itself): a date-only due from the next day on, a due with a
+    time from that minute on; never for a finished or dropped ticket."""
+    due = ticket.get("due")
+    if not isinstance(due, str) or not due or ticket.get("status") in ("done", "dropped"):
+        return False
+    now = now or datetime.now()
+    try:
+        if "T" in due:
+            return datetime.strptime(due, "%Y-%m-%dT%H:%M") < now.replace(tzinfo=None)
+        return datetime.strptime(due, "%Y-%m-%d").date() < now.date()
+    except ValueError:
+        return False
+
+
+def _utc(text: object) -> datetime | None:
+    if not isinstance(text, str):
+        return None
+    try:
+        at = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=UTC)
+
+
+def stuck_why(ticket: dict, now: datetime | None = None) -> str | None:
+    """ORCH-189, the one Stuck rule beside a stuck helper (which only the run knows): "question" when a
+    question has waited more than STUCK_HOURS, "quiet" when a Working ticket had no news that long, "overdue"
+    past its due date; None otherwise and for finished, dropped or in-Review tickets. Read-only, nothing is
+    stored."""
+    status = ticket.get("status")
+    if status in ("done", "dropped", "review"):
+        return None
+    if now is None:
+        utc_now, local = datetime.now(UTC), None
+    elif now.tzinfo is None:  # a plain time is taken as UTC here and as local time for the due date
+        utc_now, local = now.replace(tzinfo=UTC), now
+    else:
+        utc_now, local = now.astimezone(UTC), now.astimezone().replace(tzinfo=None)
+    limit = timedelta(hours=STUCK_HOURS)
+    for q in ticket.get("questions") or []:
+        if not isinstance(q, dict) or q.get("answer") is not None or q.get("taken_back"):
+            continue
+        sent = _utc(q.get("sent_at") or q.get("at"))
+        if sent is not None and utc_now - sent > limit:
+            return "question"
+    since = quiet_since(ticket, utc_now)
+    if since and utc_now - (_utc(since) or utc_now) > limit:
+        return "quiet"
+    if overdue(ticket, local):
+        return "overdue"
+    return None
+
+
 def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
     """The words "No news since 09:20" (local time; "Mon 09:20" on another day). None when not quiet.
     Same words as the dashboard helper `quietWords`."""
@@ -1364,9 +1741,16 @@ def clean_field(key: str, value):
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
     if key == "note" and len(v) > 2000:
-        raise Refused("A note is at most 2000 characters.")
+        raise Refused(
+            f"A note is at most 2000 characters; this one has {len(v)}. Nothing was changed. "
+            "Shorten it, or keep the full text as a file on the ticket: "
+            "orch ticket attach <ticket> --name note.md < note.md"
+        )
     if key == "done_when" and len(v) > 2000:
-        raise Refused("The done criteria are at most 2000 characters.")
+        raise Refused(
+            f"The done criteria are at most 2000 characters; these have {len(v)}. Nothing was changed. "
+            "Shorten them to one plain line and keep the details in the note."
+        )
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
@@ -1380,6 +1764,14 @@ def _set_field(ticket: dict, key: str, value) -> None:
         ticket.pop(key, None)
     else:
         ticket[key] = v
+
+
+def _edit_snip(value, limit: int = 200) -> str:
+    """The old or new text of an edited field in one short line for the Activity (ORCH-185)."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return "(empty)"
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def edit(
@@ -1401,16 +1793,120 @@ def edit(
 
     def op(ticket):
         if title is not None:
-            if title != ticket.get("title"):
+            before = ticket.get("title")
+            if title != before:
                 ticket.pop("title_auto", None)  # a person's (or anyone's) own title is final
             ticket["title"] = title
-            add_history(ticket, by, "Title changed")
+            # ORCH-240: the Activity shows what the title was and is now
+            line = "Title changed"
+            if title != before:
+                line += f" (was: {_edit_snip(before)} | now: {_edit_snip(title)})"
+            add_history(ticket, by, line)
+        was = {k: ticket.get(k) for k in fields}
         for k, v in fields.items():
             _set_field(ticket, k, v)
         if fields:
-            add_history(ticket, by, "Edited " + ", ".join(sorted(fields)))
+            text = "Edited " + ", ".join(sorted(fields))
+            # ORCH-240: owner and due keep their old and new value too
+            if len(fields) == 1 and next(iter(fields)) in ("note", "done_when", "owner", "due"):
+                k = next(iter(fields))
+                text += f" (was: {_edit_snip(was[k])} | now: {_edit_snip(ticket.get(k))})"  # ORCH-185
+            add_history(ticket, by, text)
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+def set_release(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-37: mark a ticket as a release (the epics and tickets that ship together sit under it, put there
+    with set_parent) or take the mark off. Its sub-tickets stay where they are either way."""
+    me = load(root, tid)
+    if bool(me.get("release")) == on:
+        return me  # nothing changes: no write, no history line
+
+    def op(ticket):
+        if on:
+            ticket["release"] = True
+        else:
+            ticket.pop("release", None)
+        add_history(ticket, by, "Marked as a release" if on else "No longer a release")
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+PARENT_DEPTH = 50  # a parent chain longer than this is broken data: never followed further
+
+
+def set_parent(root: Path, tid: str, parent: str | None, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-156: put a ticket that already exists under another one (an epic, a release) or take it out
+    (`parent` None or empty). Refused: itself, a ticket that does not exist, or one of its own sub-tickets
+    (a loop). One history line on the ticket and one on each parent it joins or leaves."""
+    me = load(root, tid)
+    new = None
+    if isinstance(parent, str) and parent.strip():
+        if parent.strip() in (me["id"], me.get("key")):
+            raise Refused("A ticket cannot be part of itself.")
+        new = load(root, parent.strip())
+        by_id = {t["id"]: t for t in list_all(root)}
+        seen, cur = set(), new
+        while cur is not None and cur["id"] not in seen and len(seen) < PARENT_DEPTH:
+            if cur["id"] == me["id"]:
+                raise Refused(
+                    f"{_parent_words(new)} is inside this ticket already, so it cannot hold this ticket."
+                )
+            seen.add(cur["id"])
+            cur = by_id.get(str(cur.get("parent") or ""))
+    old_id = me.get("parent")
+    if (new["id"] if new else None) == (old_id or None):
+        return me  # nothing changes: no write, no history line
+    try:
+        old = load(root, old_id) if old_id else None
+    except (Refused, OSError, ValueError):
+        old = None  # a parent that is gone: taking the ticket out still works
+
+    def op(ticket):
+        if new is None:
+            ticket.pop("parent", None)
+            add_history(ticket, by, "Taken out of " + (_parent_words(old) if old else str(old_id)))
+        else:
+            ticket["parent"] = new["id"]
+            add_history(ticket, by, "Put under " + _parent_words(new))
+
+    t = apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    me_words = _parent_words(t)
+    for other, words in ((old, f"{me_words} moved out"), (new, f"{me_words} added")):
+        if other is None:
+            continue
+        try:  # the parent's line is a courtesy: the ticket itself is already saved
+            apply_op(root, other["id"], lambda p, w=words: add_history(p, by, w), by=by)
+        except (Refused, OSError, ValueError):
+            pass
+    return t
+
+
+LANE_RE = re.compile(r"^[a-z][a-z_]{0,23}$")
+MAX_ORDER = 500
+
+
+def set_lane_order(root: Path, lane: str, ids: list[str], by: str) -> list[dict]:
+    """ORCH-156: the order of the tickets inside one board lane (To do, Backlog ...), first to last. Each
+    listed ticket keeps {lane, n}; the board uses it only while the ticket is still in that lane, so a ticket
+    that moves on needs no clean-up. Only tickets whose place changed are written (no history line: the order
+    is how the board shows them, not news about the work). Returns the tickets that changed."""
+    if not isinstance(lane, str) or not LANE_RE.match(lane):
+        raise Refused("A lane is a short name such as todo or backlog.")
+    if not ids:
+        raise Refused("Name the tickets of the lane, first to last.")
+    if len(ids) > MAX_ORDER:
+        raise Refused(f"At most {MAX_ORDER} tickets can be put in order at once.")
+    if len(set(ids)) != len(ids):
+        raise Refused("A ticket is named twice; name each ticket once.")
+    now_at = [load(root, tid).get("lane_order") for tid in ids]  # every ticket exists before any write
+    changed = []
+    for n, (tid, was) in enumerate(zip(ids, now_at, strict=True), start=1):
+        want = {"lane": lane, "n": n}
+        if was != want:
+            changed.append(apply_op(root, tid, lambda t, w=want: t.__setitem__("lane_order", w), by=by)[0])
+    return changed
 
 
 LONG_NOTE = (
@@ -1419,10 +1915,40 @@ LONG_NOTE = (
 PLACEHOLDER_TITLE = 80  # characters of a person's text kept as the title until the agent writes one
 
 
+_TITLE_ABBR = re.compile(
+    r"(?:^|\s)(?:e\.\s?g\.|i\.\s?e\.|etc\.|z\.\s?B\.|d\.\s?h\.|u\.\s?a\.|bzw\.|vs\.|ca\.|approx\.)$", re.I
+)
+
+
+_TITLE_TAIL = re.compile(  # a cut never ends on a small word
+    r"\s(?:and|or|but|then|for|to|of|the|a|an|with|in|on|at|by|like|und|oder|dann|für|mit|der|die|das|zu)$",
+    re.I,
+)
+
+
+def cut_title(line: str, limit: int = PLACEHOLDER_TITLE) -> str:
+    """ORCH-62: a line longer than `limit` is cut at a whole word, never right after an abbreviation such as
+    "e.g." (it read like the end of a sentence), and ends with "…" so it reads as cut. The dashboard's New
+    ticket dialog cuts the same way (ticketTextTitle)."""
+    if len(line) <= limit:
+        return line
+    cut = line[: limit - 1]
+    space = cut.rfind(" ")
+    if line[limit - 1] != " " and space > limit / 2:
+        cut = cut[:space]
+    prev = None
+    while prev != cut:
+        prev = cut
+        cut = re.sub(r"[\s,;:.\-–—(]+$", "", _TITLE_ABBR.sub("", cut))
+        if len(cut) > limit / 2:
+            cut = _TITLE_TAIL.sub("", cut)
+    return (cut or line[: limit - 1].strip()) + "…"
+
+
 def placeholder_title(text: str) -> str:
     """The first words of what a person wrote, on one line: the title until the agent writes the real one."""
     first = next((x for x in clean_untrusted(str(text), 4000).splitlines() if x.strip()), "")
-    return " ".join(first.split())[:PLACEHOLDER_TITLE].strip() or "New ticket"
+    return cut_title(" ".join(first.split())).strip() or "New ticket"
 
 
 def needs_agent_title(text: str) -> bool:
@@ -1488,14 +2014,55 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
+def estimate_words(est: object) -> str:
+    """ "about 45 min · $2.00" for a stored estimate; "" for none."""
+    if not isinstance(est, dict):
+        return ""
+    m, cost = est.get("minutes"), est.get("cost")
+    parts = []
+    if isinstance(m, int) and not isinstance(m, bool) and m > 0:
+        parts.append((f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")) if m >= 60 else f"{m} min")
+    if isinstance(cost, int | float) and not isinstance(cost, bool) and cost >= 0:
+        parts.append(f"${cost:,.2f}")
+    return "about " + " · ".join(parts) if parts else ""
+
+
+def _estimate(minutes: object, cost: object) -> dict | None:
+    """ORCH-189: the helper's own estimate from its first run (helper minutes, dollars at list price)."""
+    if minutes is None and cost is None:
+        return None
+    if minutes is not None and (
+        not isinstance(minutes, int) or isinstance(minutes, bool) or not 0 < minutes <= 100_000
+    ):
+        raise Refused("An estimate needs whole minutes between 1 and 100000.")
+    if cost is not None and (
+        not isinstance(cost, int | float) or isinstance(cost, bool) or not 0 <= cost <= 100_000
+    ):
+        raise Refused("An estimated cost needs dollars between 0 and 100000.")
+    out: dict = {}
+    if minutes is not None:
+        out["minutes"] = minutes
+    if cost is not None:
+        out["cost"] = round(float(cost), 2)
+    return out
+
+
 def tidy(
-    root: Path, tid: str, title: str, by: str, fields: dict | None = None, description: str | None = None
+    root: Path,
+    tid: str,
+    title: str,
+    by: str,
+    fields: dict | None = None,
+    description: str | None = None,
+    estimate: dict | None = None,
 ) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
     filled only where still empty, and the agent's description (what and why, its own field, never the
-    person's note) when there is none yet. Once."""
+    person's note) when there is none yet, and the helper's time and cost estimate (ORCH-189: made in the same
+    first run, shown on the ticket) when there is none yet. Once."""
     title = title.strip()
+    est = _estimate((estimate or {}).get("minutes"), (estimate or {}).get("cost"))
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
     description = (description or "").strip() or None
@@ -1510,7 +2077,11 @@ def tidy(
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
         edited = any(  # someone renamed it after it was created: that title is theirs, tidy leaves it
-            str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED) == "Title changed"
+            re.fullmatch(
+                r"Title changed(?: \(was: .* \| now: .*\))?",
+                str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED),
+                re.DOTALL,
+            )
             for h in history.lines(root, ticket)
         )
         if title != old and not edited:
@@ -1527,19 +2098,24 @@ def tidy(
             ticket["description"] = description
             ticket["description_by"] = by[:100]
             add_history(ticket, by, f"Description written by {by[:100]}")
-        if (title == old or edited) and not filled and not wrote:
+        estimated = bool(est and not ticket.get("estimate"))
+        if estimated:
+            ticket["estimate"] = {**est, "by": by[:100], "at": now()}
+            add_history(ticket, by, "Estimate: " + estimate_words(est))
+        if (title == old or edited) and not filled and not wrote and not estimated:
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]
 
 
 def set_model(root: Path, tid: str, name: str, by: str) -> dict:
-    """A person's model for this ticket's helper (sonnet or opus), or auto: orch picks again next start."""
+    """A person's model for this ticket's helper (haiku, sonnet, opus or fable), or auto: orch picks again
+    next start. Haiku and Fable come only from here: orch never picks them (owner 17 Nov, ORCH-257)."""
     from orch import modelpick
 
     name = (name or "").strip().lower()
     if name not in (*modelpick.MODELS, "auto"):
-        raise Refused("Pick sonnet, opus or auto.")
+        raise Refused("Pick haiku, sonnet, opus, fable or auto.")
     if not _is_person(by):
         raise Refused(
             f'Only a person picks the model. Ask instead: orch ask {tid} "Run this ticket on Opus?" '
@@ -1564,24 +2140,71 @@ def pick_model(root: Path, tid: str, by: str) -> str:
 
     out: dict = {}
 
-    def op(ticket):
+    def keep(ticket) -> str | None:
+        """The model that stays as it is: a person's choice, or Opus once a helper ran on it (never down by
+        itself: a ticket picked or moved up to Opus does not drop to Sonnet in the middle of its work)."""
         cur = modelpick.chosen(ticket)
-        if cur and modelpick.by_person(ticket):
-            out["name"] = cur["name"]
+        if not cur:
+            return None
+        if modelpick.by_person(ticket) or cur["name"] == modelpick.pick(ticket)[0]:
+            return cur["name"]
+        if cur["name"] == "opus" and (cur.get("up") or ticket.get("sessions")):
+            return "opus"
+        return None
+
+    def op(ticket):
+        kept = keep(ticket)
+        if kept:
+            out["name"] = kept
             return
         name, why = modelpick.pick(ticket)
         out["name"] = name
-        if cur and cur["name"] == name:
-            return
         ticket["model"] = {"name": name, "by": modelpick.BY_ORCH, "why": why[:200]}
         add_history(ticket, by, f"Model picked: {modelpick.LABELS[name]} ({why[:200]})")
 
-    t = load(root, tid)
-    cur = modelpick.chosen(t)
-    if cur and (modelpick.by_person(t) or cur["name"] == modelpick.pick(t)[0]):
-        return cur["name"]  # nothing to write
+    kept = keep(load(root, tid))
+    if kept:
+        return kept  # nothing to write
     apply_op(root, tid, op, by=by)
     return out["name"]
+
+
+def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
+    """Move a ticket orch put on Sonnet up to Opus (the helper when its plan shows design, security or
+    several parts; orch after two failed checks on one step). One history line says why. A person's choice
+    is never changed. Returns (ticket, moved): moved False when it already runs on Opus or Fable."""
+    from orch import modelpick
+
+    why = " ".join(clean_untrusted(why or "", 200).split())
+    if len(why) < 3:
+        raise Refused('Say why in a few words, e.g. --why "the plan needs a new design".')
+    out = {"moved": False}
+
+    def op(ticket):
+        cur = modelpick.chosen(ticket)
+        if cur and modelpick.by_person(ticket):
+            if cur["name"] in modelpick.STRONG:
+                return
+            raise Refused(
+                f"A person chose {modelpick.LABELS[cur['name']]} for this ticket. Ask instead: "
+                f'orch ask {tid} "Move this ticket up to Opus? {why[:80]}" --option yes --option no'
+            )
+        if cur and cur["name"] in modelpick.STRONG:
+            return
+        ticket["model"] = {
+            "name": "opus",
+            "by": modelpick.BY_ORCH,
+            "why": why,
+            "up": {"from": (cur or {}).get("name") or "sonnet", "at": now(), "by": by[:100]},
+        }
+        add_history(ticket, by, f"{modelpick.UP_PREFIX}: {why}")
+        out["moved"] = True
+
+    t = load(root, tid)
+    if (modelpick.chosen(t) or {}).get("name") in modelpick.STRONG:
+        return t, False  # already on Opus or Fable: nothing to write
+    t = apply_op(root, tid, op, by=by)[0]
+    return t, out["moved"]
 
 
 def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
@@ -1830,7 +2453,11 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
         secretscan.refuse_if_secret_in(root, body, "evidence", verb="saved")
 
 
-def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> tuple[dict, dict]:
+def check_done(
+    root: Path, tid: str, cid: str, evidence: list[str], by: str, proves: list[str] | None = None
+) -> tuple[dict, dict]:
+    """`proves`: quoted parts of Done when this finished task shows; the evidence decides, not the wording."""
+    proved = [q for q in (_clean_covers(p) for p in proves or []) if q]
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
         raise Refused(
@@ -1850,6 +2477,8 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
             ev.setdefault("at", now())
         add_evidence(item, evs)
         item["done"] = True
+        if proved:
+            item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
         add_history(t, by, f"Check {cid} done")
         return item
@@ -1958,7 +2587,34 @@ def check_record(
         )
         return item
 
-    return apply_op(root, tid, op, by=by)
+    t, item = apply_op(root, tid, op, by=by)
+    if exit_code and _failed_twice(item):
+        _up_after_failures(root, tid, item)
+    return t, item
+
+
+def _failed_twice(item: dict) -> bool:
+    """The step's last two recorded check runs both failed (a non-zero exit)."""
+    runs_ = [e for e in item.get("evidence") or [] if e.get("type") == "command" and "exit" in e]
+    return len(runs_) >= 2 and all(e.get("exit") not in (0, None) for e in runs_[-2:])
+
+
+def _up_after_failures(root: Path, tid: str, item: dict) -> None:
+    """Two failed checks on one step: a ticket orch put on Sonnet moves up to Opus by itself. Never fails
+    the record (a person's choice stays; a live session switches at its next turn end)."""
+    from orch import modelpick, runs_live
+
+    t = load(root, tid)
+    cur = modelpick.chosen(t)
+    if not cur or cur["name"] not in modelpick.SMALL or modelpick.by_person(t):
+        return
+    step = " ".join(str(item.get("text") or "").split())[:80]
+    why = f'two checks failed on the step "{step}"' if step else "two checks failed on one step"
+    with contextlib.suppress(Refused):
+        t, moved = move_up(root, tid, why, "orch")
+        if moved:
+            with contextlib.suppress(Exception):
+                runs_live.switch_model(root, tid, "opus", "orch")
 
 
 def check_exists(root: Path, tid: str, cid: str) -> None:
@@ -1985,8 +2641,10 @@ def check_edit(
         item = _item(t, cid)
         _person_only(by, item, tid, cid)
         if text is not None:
+            before = item.get("text")
             item["text"] = text.strip()
-            add_history(t, by, f"Renamed {cid}")
+            # ORCH-240: the Activity shows the old and the new task text
+            add_history(t, by, f"Renamed {cid} (was: {_edit_snip(before)} | now: {_edit_snip(item['text'])})")
         if covers is not None:
             item["covers"] = covers
             if text is None:
@@ -2475,10 +3133,19 @@ def ask(
     check: str | None = None,
     card: dict | None = None,
     shown: dict | None = None,
+    group: str | None = None,
+    links: list[dict] | None = None,
 ) -> tuple[dict, dict]:
-    """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here)."""
+    """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
+    group: a short name for cards that belong together (one set on Review); only with a card."""
     if not text.strip():
         raise Refused("A question needs text.")
+    if group is not None:
+        group = " ".join(group.split())
+        if card is None or not group or len(group) > GROUP_MAX or any(ord(ch) < 32 for ch in group):
+            raise Refused(f"A group is a short name (at most {GROUP_MAX} characters) on a card.")
+    if links is not None and card is None:
+        raise Refused("Links go with a card.")
     if recommended is not None and options and recommended not in options:
         raise Refused("The recommended answer must be one of the options.")
     if kind is not None and not KIND_RE.fullmatch(kind):
@@ -2526,6 +3193,7 @@ def ask(
             "answer": None,
             "answered_by": None,
             "via": None,
+            "asked_at": now(),  # the Reviewer's routine answers wait from here (reviewer.routine)
         }
         if kind is not None:
             q["kind"] = kind
@@ -2536,6 +3204,10 @@ def ask(
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
+            if group:
+                q["group"] = group
+            if links:  # part of what the person is shown: in the digest (question_digest)
+                q["links"] = [dict(x) for x in links]
         ticket["questions"].append(q)
         ticket["status"] = "waiting"
         ticket["waiting_on"] = {"kind": "question", "ref": q["id"]}
@@ -2545,6 +3217,7 @@ def ask(
     return apply_op(root, tid, op, by=by)
 
 
+GROUP_MAX = 80
 QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
 
 
@@ -2554,7 +3227,11 @@ def question_digest(q) -> str:
     if not isinstance(q, dict):
         return QUESTION_UNENCODABLE
     shown = {k: q.get(k) for k in ("id", "text", "options", "kind", "action", "recommended")}
-    for k in ("card", "shown"):  # RULE A: only when present, so a question without a card keeps its digest
+    for k in (
+        "card",
+        "shown",
+        "links",
+    ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]
     try:
@@ -2576,7 +3253,7 @@ def _release_wait(root: Path, tid: str, ticket: dict, qid: str) -> None:
         else:
             ticket["waiting_on"] = None
             if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
-                chat = ticket.get("general") is True  # the Chat ticket is never Working
+                chat = hidden_kind(ticket) is not None  # the Chat and Manager tickets are never Working
                 ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
 
 
@@ -2820,8 +3497,13 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         if not isinstance(w, dict) or set(w) - {"kind", "until", "ref"}:
             raise Refused("waiting_on is {kind, until} or {kind, ref}, or null.")
         w = waiting_value(str(w.get("kind")), w.get("ref"), w.get("until"))
+    if obj.get("superseded_by") and obj.get("status", "dropped") != "dropped":
+        raise Refused("superseded_by goes with the status dropped (Won't do).")
+    other = superseded_value(root, tid, obj.get("superseded_by")) if "superseded_by" in obj else None
 
     def op(ticket):
+        if other and "status" not in obj and ticket["status"] != "dropped":
+            raise Refused("superseded_by goes with the status dropped (Won't do).")
         if "title" in obj:
             if obj["title"].strip() != ticket.get("title"):
                 ticket.pop("title_auto", None)
@@ -2841,6 +3523,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             ticket["waiting_on"] = w
         if status != "waiting":
             ticket["waiting_on"] = None
+        _keep_superseded(ticket, status, other, "superseded_by" in obj)
         old, ticket["status"] = ticket["status"], status
         note = f" (status {old} -> {status})" if old != status else ""
         add_history(ticket, actor, "Patched " + ", ".join(sorted(obj)) + note)
@@ -2970,6 +3653,13 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
         sessions = t.setdefault("sessions", [])
         for s in sessions:
             if s.get("agent") == agent and s.get("host") == host:
+                if s.get("id") != sid and valid_session_id(s.get("id")):
+                    # keep the replaced conversation so a person can read or continue it later
+                    old = [e for e in s.get("earlier") or [] if isinstance(e, dict) and e.get("id") != sid]
+                    old.insert(0, {"id": s["id"], "last_used": s.get("last_used")})
+                    s["earlier"] = old[:20]
+                elif s.get("earlier"):
+                    s["earlier"] = [e for e in s["earlier"] if e.get("id") != sid]
                 s["id"], s["last_used"] = sid, now()
                 break
         else:

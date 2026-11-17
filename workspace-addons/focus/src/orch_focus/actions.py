@@ -54,6 +54,7 @@ except ImportError:  # no orch: nothing runs
 # (under the dashboard, no session of its own) keeps its started-run bookkeeping in Focus, so these three stay
 # open until that has a session path. Every other op acts as the person and needs the page session (watch-only
 # without one).
+# manager.start is NOT free: the Manager has a normal helper's full rights and Start fresh ends its conversation
 FREE_OPS = frozenset({"check.add", "check.move", "run.start", "run.stop", "mobile.set"})
 
 
@@ -124,6 +125,20 @@ def _answer(a):
 def _run_start(a):
     _only(a, ("ticket", "fresh"))
     return ["run", "start", _t(a)], (["--fresh"] if _flag(a.get("fresh")) else []), []
+
+
+def _session_continue(a):
+    _only(a, ("ticket", "session"))
+    sid = a.get("session")
+    if not isinstance(sid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", sid):
+        raise BadRequest("That is not a session id.")
+    return ["run", "history", _t(a)], ["--session", sid, "--continue"], []
+
+
+def _manager_start(a):
+    """The workspace's always-on Manager (ORCH-147): made the first time, started live; fresh = an empty talk."""
+    _only(a, ("fresh",))
+    return ["manager", "start"], (["--fresh"] if _flag(a.get("fresh")) else []), []
 
 
 def _run_stop(a):
@@ -278,7 +293,9 @@ OPS = {
     "ticket.done": _ticket_done,
     "answer": _answer,
     "run.start": _run_start,
+    "manager.start": _manager_start,
     "run.stop": _run_stop,
+    "session.continue": _session_continue,
     "run.send": _run_send,
     "run.take_back": _run_take_back,
     "check.add": _check_add,
@@ -290,6 +307,7 @@ OPS = {
 }
 BY = {
     "run.start": "focus",
+    "manager.start": "focus",
     "mobile.set": "focus",
 }  # who a start is recorded as (the page is the starter); other ops: the person
 
@@ -375,11 +393,15 @@ def _attach_all(root: Path, orch_bin: str | None, tid: str, files: list[tuple[st
     return {"saved": saved, "failed": failed}
 
 
+# the ONLY check is the sign-in (owner rule, 16 Nov); equal to orch.pagesession.SIGNIN_MSG.
+SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
+
+
 def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
     if orch_bin == SELF and needs_session(op) and not session:
-        raise NeedsPerson("Open Focus from this computer (orch focus open) to do this.")
+        raise NeedsPerson(SIGNIN)
     files = attachments(op, args)  # checked before anything is written
     code, stdout, stderr = orch(root, orch_bin, argv)
     if code == 124:

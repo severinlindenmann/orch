@@ -51,6 +51,7 @@ struct WorkspaceView: View {
             Group {
                 ModelMessage()
                 MobileModeBanner(workspaceId: workspaceId)
+                ToolAlertBanner(workspaceId: workspaceId)
             }.listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
             // Same card margins as the topic sections below (P14).
             if parts?.general ?? true {

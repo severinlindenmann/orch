@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 
 import pytest
@@ -623,10 +624,10 @@ def test_start_text_shows_what_matters(ws, run):
     order, _ = started(ws, run, data=json.dumps(p).encode())
     text = core(ws, "ticket", "show", order)["questions"][0]["text"]
     for part in (
-        "Stops: build, ship",
-        "Crew: manager claude, builder codex, reviewer claude",
-        "Cap: 2 h 30 min active",
-        "Ship: Merges the reviewed page into develop. (undo: A revert task.)",
+        "I will pause at: build, ship",
+        "Who works on it: manager claude, builder codex, reviewer claude",
+        "Time limit: 2 h 30 min active",
+        "What goes live: Merges the reviewed page into develop. (undo: A revert task.)",
         "Handover: photos → ws_design0001",
         "Unsure: Bookings go to Anna's calendar",
     ):
@@ -1040,3 +1041,17 @@ def test_stop_item_preview_address(ws, run):
         assert refused["code"] == "invalid", bad
     ok = {**base, "preview": "http://127.0.0.1:5173/"}
     assert run("stop", order, "--file", "-", data=stop_file("build", ok))["question"]
+
+
+def test_start_text_keeps_the_shape_the_home_card_reads():
+    """Dashboard Home shows a Factory start question as title, goal, time and cap (ORCH-60) by reading this text
+    (DashHelpers.factoryStart in dashboard/web/helpers.js uses these same patterns): keep both in step."""
+    from orch_factory import render
+
+    p = json.loads((CONTRACTS / "examples/factory-proposal/valid-run.json").read_text())
+    text = render.start_text(p, 1)
+    m = re.match(r"^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: ", text, re.DOTALL)
+    assert m, text[:200]
+    assert m.group(1) == render.clean(p["title"])
+    assert m.group(3) == render.clean(p["goal"]).rstrip(". ")
+    assert re.search(r"\. Time limit: (.+?) active\. ", text)

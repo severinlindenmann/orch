@@ -78,9 +78,12 @@ enum QuestionClosing {
     /// "waiting" (active, review, done, ...), so the question was answered or closed elsewhere (on the computer).
     static func closedByTicket(questions: [Question], updates: [TicketUpdate], answers: [String: String], pending: Set<String> = []) -> [String] {
         questions.compactMap { q in
-            guard !q.isReview, !q.isMakeTicket, answers[q.id] == nil, !pending.contains(q.id), let t = q.message.ticket else { return nil }
+            guard !q.isMakeTicket, answers[q.id] == nil, !pending.contains(q.id), let t = q.message.ticket else { return nil }
             let newer = updates.filter { $0.workspace == q.message.from && $0.ticket == t && $0.at > q.message.createdAt && $0.ticketView?.status != nil }
-            guard let last = newer.max(by: { $0.at < $1.at }), let st = Ticket.Status(ticketStatus: last.ticketView?.status), st != .needsYou else { return nil }
+            guard let last = newer.max(by: { $0.at < $1.at }), let st = Ticket.Status(ticketStatus: last.ticketView?.status) else { return nil }
+            // A review question stays open only while the ticket is in Review (accepted or changed on the computer closes it).
+            if q.isReview { return st == .review ? nil : q.id }
+            guard st != .needsYou else { return nil }
             return q.id
         }
     }

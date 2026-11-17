@@ -1,4 +1,5 @@
-"""`orch diag inspect | query | report`: what happened inside orch, read-only (contracts/diag.md).
+"""`orch diag inspect | query | report | tickets`: what happened inside orch, read-only (contracts/diag.md).
+`tickets` (report_tickets.py) is the one that writes tickets: new problem reports become tickets.
 
 `inspect` and `query` never write anything and never repair anything: they do not call `orch run status`'s
 orphan repair, they read files. `report` writes one folder under `.orch/diag/reports/` and nothing else.
@@ -41,6 +42,12 @@ def add_parsers(sub, common) -> None:
     r.add_argument("--note")
     r.add_argument("--expected")
     r.add_argument("--more", help="further details, up to 4000 characters")
+    r.add_argument(
+        "--about",
+        choices=["problem", "feature"],
+        default="problem",
+        help="a problem (default) or a feature wish",
+    )
     r.add_argument("--file", action="append", default=[], help="add a picture or file (up to 10 times)")
     r.add_argument(
         "--content",
@@ -50,8 +57,26 @@ def add_parsers(sub, common) -> None:
         help="include ticket text and helper excerpts (default)",
     )
     r.add_argument("--no-content", dest="content", action="store_false")
+    t = d.add_parser("tickets", parents=[common], help="turn new problem reports into tickets, once (no AI)")
+    t.add_argument("--dry-run", action="store_true", help="say what would happen, change nothing")
     x = d.add_parser("delete", parents=[common], help="delete saved reports or the saved debug notes")
     x.add_argument("what", choices=["reports", "notes"])
+
+
+def read_files(paths) -> list[tuple[str, bytes]]:
+    """The pictures and files a person or helper names (`--file`), each checked before it is read."""
+    files = []
+    for raw in list(paths or [])[: diag_report.ATTACH_MAX + 1]:
+        f = Path(raw).expanduser()
+        if not f.is_file():
+            raise Refused(f"{raw} is not a file. Check the path and try again.")
+        if f.stat().st_size > diag_report.ATTACH_FILE_BYTES:  # before reading it
+            raise Refused(
+                f"{f.name} is bigger than {diag_report.ATTACH_FILE_BYTES // 1024 // 1024} MB. "
+                "Leave it out or make it smaller."
+            )
+        files.append((f.name, f.read_bytes()))
+    return files
 
 
 def _check_id(value, what: str, rx) -> None:
@@ -111,23 +136,18 @@ def dispatch(args, root: Path) -> bool:
                 print(f"more: --page {res['next']}")
             for g in res["unavailable"]:
                 print(f"not available: {g}")
+    elif args.sub == "tickets":
+        from orch import report_tickets
+
+        res = report_tickets.run_pass(root, dry_run=args.dry_run)
+        print(report_tickets.dumps(res) if args.json else report_tickets.text(res))
     elif args.sub == "delete":
         gone = diag_report.delete_all(root) if args.what == "reports" else diag.delete_notes(root)
         label = "report" if args.what == "reports" else "file of notes"
         text = f"Deleted {gone} {label}{'' if gone == 1 else 's'}."
         print(json.dumps({"deleted": gone, "what": args.what}) if args.json else text)
     else:
-        files = []
-        for raw in args.file[: diag_report.ATTACH_MAX + 1]:
-            f = Path(raw).expanduser()
-            if not f.is_file():
-                raise Refused(f"{raw} is not a file. Check the path and try again.")
-            if f.stat().st_size > diag_report.ATTACH_FILE_BYTES:  # before reading it
-                raise Refused(
-                    f"{f.name} is bigger than {diag_report.ATTACH_FILE_BYTES // 1024 // 1024} MB. "
-                    "Leave it out or make it smaller."
-                )
-            files.append((f.name, f.read_bytes()))
+        files = read_files(args.file)
         made = diag_report.make(
             root,
             ticket=args.ticket,
@@ -139,16 +159,21 @@ def dispatch(args, root: Path) -> bool:
             content=args.content,
             more=args.more,
             files=files,
+            about=args.about,
         )
+        if not diag_report.is_kept(made["path"]):
+            raise Refused(
+                f"Report {made['ref']} is NOT kept: it is no longer on this computer. Report again."
+            )
         if args.json:
             print(
                 json.dumps(
-                    {"ref": made["ref"], "path": made["path"], "problems": made["problems"]},
+                    {"ref": made["ref"], "path": made["path"], "problems": made["problems"], "kept": True},
                     ensure_ascii=False,
                 )
             )
         else:
-            print(f"Report {made['ref']}\n{made['path']}")
+            print(f"Report {made['ref']} is kept here.\n{made['path']}")
             if made["problems"]:
                 print("Problems found: " + ", ".join(made["problems"]))
     return True

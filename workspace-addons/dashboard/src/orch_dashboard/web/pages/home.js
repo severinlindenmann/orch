@@ -11,20 +11,21 @@ function changeError(result) {
   // the page was older than the ticket (a new round started, the work changed): nothing was approved
   return /changed while you worked|Read it again/i.test(text) ? 'This ticket changed since you opened it. Look at it again, then accept.' : text;
 }
-// Home rows sit under a heading that already says their status, so a row shows no status chip, and no ticket key
-// (that is under the ticket's Technical details). `tail` is what a row adds instead, e.g. when it finished.
+// Home rows sit under a heading that already says their status, so a row shows no status chip; the ticket number
+// (ORCH-58) goes before the title. `tail` is what a row adds instead, e.g. when it finished.
 function ticketTitle(t, tail = null) {
-  return h('div', {className:'row ticket-title'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, clean(t.title)), titleTag(t)), tail);
+  return h('div', {className:'row ticket-title'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t)), tail);
 }
 function parentLine(t) {
   const parent = ticketOf(t.parent || tickets().find(p => array(p.children).includes(t.id))?.id);
-  return parent ? h('p', {className:'meta'}, parent.epic ? 'Part of the epic ' : 'Step of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
+  return parent ? h('p', {className:'meta'}, parent.epic ? 'Part of the epic ' : 'Sub-ticket of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
 }
-const finishedAt = t => parse(t.done_at || t.completed_at || t.updated_at);
+const finishedAt = t => parse(window.DashHelpers.doneAt(t));
 
 function ticketRow(t) {
   const at = finishedAt(t);
-  return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t, at ? h('span', {className:'meta'}, 'Finished ' + time(at)) : null));
+  // The time sits under the title (not beside it), so a title fits on one line in the narrow side card.
+  return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t), at ? h('p', {className:'meta'}, 'Finished ' + time(at)) : null);
 }
 // Answered on Home but not sent yet (the Undo window): the question is hidden and not counted.
 const pendingAnswers = new Map();
@@ -36,8 +37,9 @@ function needRow(row, newest, questionCount = 1, same = []) {
   if (needActs(row).length) return needActionsRow(row, key);
   if (!row.ticket && array(row.answer?.options).length) return needNoticeRow(row, key);
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row);
-  const options = array(row.answer?.options);
+  const options = array(row.answer?.options), factory = factoryStartOf(row);
   let actions = null, other = null;
+  if (factory && (snapshot || !options.length)) return factoryStartRow(row, key, t, factory, []);
   if (!snapshot && options.length) {
     // The card leaves at once (master row-out), the badge counts down, the toast offers Undo; the answer is sent
     // when the Undo window ends. Reloading inside the window sends nothing and the question is back.
@@ -71,6 +73,11 @@ function needRow(row, newest, questionCount = 1, same = []) {
         undone = true; clearTimeout(timer); rows.forEach(r => pendingAnswers.delete(r.id)); render();
       });
     };
+    if (factory) return factoryStartRow(row, key, t, factory, window.DashHelpers.factoryStartOptions(options).map(o => {
+      const control = h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-option-' + o.answer}, o.label);
+      control.onclick = event => answer(o.answer, event);
+      return control;
+    }));
     actions = h('div', {className:'answer-options'}, options.map(option => {
       const suggested = option === row.answer.recommended;
       const control = h('button', {type:'button', className:'answer-option' + (suggested ? ' suggested' : ''), 'data-key':key + '-option-' + option},
@@ -89,11 +96,32 @@ function needRow(row, newest, questionCount = 1, same = []) {
   return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
     h('h2', {className:'question-title'}, clean(source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper'))),
     h('p', {className:'meta question-context'}, asked + ' asked' + (when ? ' ' + when : ''),
-      t ? [(clean(t.title).toLowerCase() === String(window.DashHelpers.plainWhy(question, 'The helper')).trim().toLowerCase() ? ' · ' : ' on ‘' + clean(t.title) + '’ · '), h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
+      t ? [(clean(t.title).toLowerCase() === String(window.DashHelpers.plainWhy(question, 'The helper')).trim().toLowerCase() ? ' · ' : ' on ' + (window.DashHelpers.ticketKey(t) ? window.DashHelpers.ticketKey(t) + ' ' : '') + '‘' + clean(t.title) + '’ · '), h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
     actions && options.length ? h('p', {className:'meta choose-line'}, 'Needs you · Choose an answer') : null,
     same.length ? h('p', {className:'meta', 'data-key':key + '-same'}, 'Asked on ' + (same.length + 1) + ' tickets – answer once') : null,
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null,
     actions, other, t ? parentLine(t) : null);
+}
+// A Factory start question (ORCH-60, as drawn and accepted on 16 Nov): the whole proposal is hundreds of words, so
+// Home shows its title, goal and time and links to the proposal on the Factory page; the buttons are equal, Start last.
+function factoryStartOf(row) {
+  const q = array(ticketOf(row.ticket)?.questions).find(x => x.id === row.answer?.question);
+  return q && q.kind === 'factory:start' ? window.DashHelpers.factoryStart(q.text) : null;
+}
+function factoryProposalHref(t) {
+  const page = typeof addons === 'function' && addons().some(a => a.name === 'factory' && a.page);
+  return page && /^t_[a-z0-9]{6,16}$/.test(t.id) ? '#addon/factory/#/order/' + t.id + '/proposal' : href(t.id);
+}
+function factoryStartRow(row, key, t, p, buttons) {
+  const when = typeof age === 'function' ? age(row.since) : '';
+  return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-factory-start':''},
+    h('p', {className:'meta'}, 'Factory proposal', typeof t.key === 'string' ? [' · ', h('span', {className:'key'}, t.key)] : null),
+    h('h2', {className:'question-title'}, 'Start “' + clean(p.title) + '”?'),
+    h('p', {className:'muted'}, clean(p.goal)),
+    h('p', {className:'meta'}, p.meta),
+    h('p', {className:'meta question-context'}, whoAsked(t) + ' asked' + (when ? ' ' + when : '') + ' · ',
+      h('a', {href:factoryProposalHref(t), 'data-key':key + '-proposal'}, 'Read the whole proposal')),
+    buttons.length ? h('div', {className:'actions'}, buttons) : null);
 }
 // A row that offers choices but belongs to no ticket cannot be answered as a ticket question (the answer needs a
 // ticket). It shows as a plain notice and can always be put off for the day.
@@ -208,7 +236,7 @@ function helperRow(row, key) {
   const link = row.kind === 'helper:unmerged' && /^https:\/\/github\.com\//.test(String(pull.url || '')) ? h('a', {href:pull.url, target:'_blank', rel:'noopener noreferrer'}, 'Pull request') : null;
   return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-need-row':row.id},
     h('div', {className:'grow'}, h('p', {}, clean(row.text)),
-      h('p', {className:'meta'}, t ? h('a', {href:href(t.id)}, clean(t.title)) : clean(row.title), link ? [' · ', link] : null)),
+      h('p', {className:'meta'}, t ? h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)) : clean(row.title), link ? [' · ', link] : null)),
     h('div', {className:'acts'}, controls));
 }
 function startFailedRow(t, sf) {
@@ -226,12 +254,34 @@ function workingRow(t) {
   const who = window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state.settings, claim) : capitalise(name(claim?.label || claim?.agent || t.owner));
   return h('a', {className:'card-row working-row', href:href(t.id), 'data-key':'ticket-' + t.id},
     h('span', {className:'avatar', 'aria-hidden':'true'}, String(who || 'H').slice(0, 1).toUpperCase()),
-    h('span', {className:'grow'}, h('strong', {}, clean(t.title)), task ? h('span', {className:'meta'}, clean(task.text || task.title)) : null));
+    h('span', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title)), task ? h('span', {className:'meta'}, clean(task.text || task.title)) : null));
+}
+// Helpers (ORCH-61, owner pick A on ORCH-64): one row per running helper with ORCH-n, step, minutes and the core's
+// state word (Working, Waits for you, Waiting, Idle, Stuck); Nudge on an idle or stuck row, Stop on one whose ticket
+// is finished. The same kit widget (UI.helperList) draws the live list of the other add-on page.
+function helpersCard(rows) {
+  const key = 'helpers';
+  const action = (r, label, run, done) => ({label, key:key + '-' + r.ticket.id + '-' + label.toLowerCase(), run:async () => {
+    const lock = key + '-' + r.ticket.id;
+    if (changeUnavailable() || locks.has(lock)) return;
+    locks.add(lock);
+    try {
+      const result = await run();
+      window.orch.toast(result.ok ? done : changeError(result), result.ok ? 'ok' : 'error');
+    } finally { locks.delete(lock); render(); }
+  }});
+  return window.UI.helperList(rows.map(r => ({
+    key:typeof r.ticket.key === 'string' ? r.ticket.key : '', title:clean(r.ticket.title), href:href(r.ticket.id),
+    state:r.state, word:r.word, meta:window.UI.helperMeta(r), dataKey:key + '-' + r.ticket.id,
+    actions:snapshot || !['idle', 'stuck'].includes(r.state) ? [] : r.finished
+      ? [action(r, 'Stop', () => act('run.stop', {ticket:r.ticket.id}), 'Helper stopped')]
+      : [action(r, 'Nudge', () => nudgeHelper(r.ticket.id, NUDGE), 'Message sent')],
+  })), {dataKey:'helpers'});
 }
 // G2: a Working ticket with no news for 6 h is one quiet line ("No news since 09:20: title"), never a need.
 function quietRow(t) {
   return h('a', {className:'card-row working-row quiet-row', href:href(t.id), 'data-key':'quiet-' + t.id},
-    h('span', {className:'grow'}, h('span', {className:'meta'}, window.DashHelpers.quietWords(t.quiet_since, now()) + ': '), h('strong', {}, clean(t.title))));
+    h('span', {className:'grow'}, h('span', {className:'meta'}, window.DashHelpers.quietWords(t.quiet_since, now()) + ': '), h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title))));
 }
 // Results with the same name are one row ("9 versions"): the row opens the newest; "Mark older as done" closes the rest
 // (each move shows its Undo). Signing off a single result happens in the result view, not here.
@@ -255,11 +305,42 @@ function shortQuestion(text) {
   const first = String(text || '').split(/(?<=[?.])\s/)[0].trim();
   return first.length > 110 ? first.slice(0, 107) + '…' : first;
 }
+// The card on a question (orch ask --draft/--choose/...), else null.
+function needCardQuestion(row) {
+  const q = array(ticketOf(row.ticket)?.questions).find(x => x.id === row.answer?.question);
+  return q && q.card && typeof q.card === 'object' ? q : null;
+}
+// Cards that wait on one ticket (a design review is often a set of them): one row with the set's name, how many,
+// the first pictures, and one button that opens Review at the first card.
+function cardSetRow(row) {
+  const t = ticketOf(row.ticket), open = array(t?.questions).filter(q => q.answer == null && !q.taken_back && q.card && typeof q.card === 'object');
+  const names = [...new Set(open.map(q => q.group).filter(Boolean))], n = open.length || 1, key = 'need-set-' + (t?.id || row.id);
+  // One card: the row says what it asks (its title, else its question); several: the set's name. Always with the ticket key.
+  const one = open.length === 1 ? open[0] : null, ask = one ? clean(one.card?.title || shortQuestion(one.text)) : '';
+  const title = ask || (names.length === 1 ? names[0] : clean(t?.title || 'Cards to look at'));
+  const api = typeof reviewApi === 'function' ? reviewApi() : null, o = {fileUrl:api ? api.fileUrl : () => ''};
+  const pics = window.UI?.cardShown ? open.slice(0, 3).map(q => {
+    const g = window.UI.cardShown({card:q.card, ticket:t.id}, o), tiles = g ? [...g.children] : [];
+    const pick = tiles.find(x => x.dataset.on === 'after') || tiles.find(x => x.dataset.on !== 'before') || tiles[0];  // the proposal, not how it is
+    if (!pick) return null;
+    const cap = pick.querySelector('b');
+    if (cap) cap.textContent = clean(q.card.title || '');
+    return pick;
+  }).filter(Boolean) : [];
+  const meta = [n === 1 ? '1 card to look at' : n + ' cards to look at', (names[0] && names[0] !== title ? names[0] : '') || (t && clean(t.title) !== title ? clean(t.title) : ''), typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
+  const go = snapshot ? null : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + row.ticket + ':' + (open[0]?.id || row.answer?.question)), 'data-key':key + '-go'}, n === 1 ? 'Look at it' : 'Look at all ' + n);
+  return h('div', {className:'card-row', 'data-key':key, 'data-need-row':row.id},
+    h('div', {className:'grow stack'}, h('div', {}, h('h3', {}, window.DashHelpers.keyTag(t, h), title), h('p', {className:'meta'}, meta)), pics.length ? h('div', {className:'decision-shown'}, pics) : null), go);
+}
 // A further question, startable failure or add-on row: the same one button the full card would open.
 function needListRow(row, count, same) {
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row), key = 'need-' + row.id;
   const source = !t && row.source ? addonName(row.source) : '', when = typeof age === 'function' ? age(row.since) : '';
-  const meta = [t ? clean(t.title) : source, count > 1 ? count + ' questions' : '', same.length ? 'Asked on ' + (same.length + 1) + ' tickets' : '', when].filter(Boolean).join(' · ');
+  const meta = [t ? [window.DashHelpers.ticketKey(t), clean(t.title)].filter(Boolean).join(' ') : source, count > 1 ? count + ' questions' : '', same.length ? 'Asked on ' + (same.length + 1) + ' tickets' : '', when].filter(Boolean).join(' · ');
+  // a Factory start question below the first one opens the proposal, never the whole text with Start in a dialog
+  const factory = t && factoryStartOf(row);
+  if (factory) return listRow(key, 'Start “' + clean(factory.title) + '”?', [factory.meta, when].filter(Boolean).join(' · '),
+    h('a', {className:'btn outline sm', href:factoryProposalHref(t), 'data-key':key + '-proposal'}, 'Read proposal'), {'data-need-row':row.id});
   const action = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id, 'data-key':key + '-answer'}, choice.label);
   const question = shortQuestion(needQuestion(row)), title = source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper');
   return listRow(key, clean(title), meta, action, {'data-need-row':row.id});
@@ -267,7 +348,7 @@ function needListRow(row, count, same) {
 // A result to check: same-name results are one row ("3 versions"); the row opens the newest.
 function resultRow(group) {
   const t = group[group.length - 1];
-  return listRow('check-' + t.id, 'Check the result', clean(t.title) + (group.length > 1 ? ' · ' + group.length + ' versions' : ''),
+  return listRow('check-' + t.id, [window.DashHelpers.keyTag(t, h), clean(t.title)], 'Check the result' + (group.length > 1 ? ' · ' + group.length + ' versions' : ''),
     h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'result-' + t.id}, 'Check result'));
 }
 // Changes a helper made in its own copy, waiting to be added to the person's files (the signed copies.approve path).
@@ -277,7 +358,7 @@ function changeRow(t) {
     action = h('button', {type:'button', className:'btn outline sm', 'data-key':'add-files-' + t.id}, 'Apply changes');
     action.onclick = () => ticketBringBackDialog(t);
   }
-  return listRow('change-' + t.id, 'Apply the changes?', clean(t.title), action);
+  return listRow('change-' + t.id, [window.DashHelpers.keyTag(t, h), clean(t.title)], 'Apply the changes?', action);
 }
 function attentionCard(key, badge, cls, body, meta = '', action = null) {
   return h('section', {className:'card home-card', 'data-key':key, id:key}, h('header', {className:'card-h'}, h('span', {className:'badge ' + cls}, badge), h('span', {className:'grow'}), meta ? h('span', {className:'meta'}, meta) : null, action), body);
@@ -328,10 +409,13 @@ function clearOldButton() {
   return b;
 }
 function attentionSummary(groups, failed, results, changes) {
+  // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
+  // (failed starts, notes without a question, changes to add) follows "also", so title, subtitle and rows agree (ORCH-184)
   const questionsAsked = groups.filter(g => g.row.answer?.question).length, other = groups.length - questionsAsked + failed.length;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
-  return [part(questionsAsked, 'question', 'questions'), part(other, 'thing to look at', 'things to look at'),
-    part(results, 'result to check', 'results to check'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
+  const counted = [part(questionsAsked, 'question', 'questions'), part(results, 'result to check', 'results to check')].filter(Boolean).join(' · ');
+  const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
+  return counted && extra ? counted + ' · also ' + extra : counted || extra;
 }
 function homeSection(key, title, body, count = '', more = null) {
   return h('section', {className:'home-section', 'data-key':key, id:key === 'needs-you' ? key : null},
@@ -370,10 +454,13 @@ function needsToday() {
   const needs = live.filter(r => !window.DashHelpers.isNotice(r) && !window.DashHelpers.isBringBack(r));
   const failed = tickets().map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
   const groups = homeNeeds(needs), all = tickets();
-  const review = all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id));
+  const review = all.filter(t => t.status === 'review');  // each result to check is one row and one count, like the Review page cards
   const changes = all.filter(t => t.bring_back?.state === 'waiting');
-  const asked = groups.length + failed.length, results = all.filter(t => t.status === 'review');
-  return {needs, notices, failed, groups, review, changes, asked, count:window.DashHelpers.needsYouCount(needs, results)};
+  const asked = groups.length + failed.length, results = review;
+  // what helpers need: a login that runs out soon is a row of Home's list and counts in Home's title only (as drawn: the
+  // menu badges count questions and results, which the Review page holds); the stopped ones are the banner
+  const logins = loginWarnings();
+  return {needs, notices, failed, groups, review, changes, asked, logins, count:window.DashHelpers.needsYouCount(needs, results)};
 }
 // The one needs-you number: the Review menu entry, Menu, top bar, Home, Review and Tickets headers all read it.
 function needsYouTotal() { return state ? needsToday().count : 0; }
@@ -403,8 +490,7 @@ function autoUpdateNote() {
 }
 // "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first.
 function doneAt(t) {
-  if (typeof t.done_at === 'string' && t.done_at) return t.done_at;
-  return (typeof ticketDoneEvent === 'function' ? ticketDoneEvent(t)?.at : '') || t.updated_at || t.created_at || '';
+  return window.DashHelpers.doneAt(t) || t.created_at || '';
 }
 function changedWords(t) {
   const o = typeof outcomeOf === 'function' ? outcomeOf(t) : {}, first = String(o.changed || o.why || '').split('\n')[0].trim();
@@ -421,51 +507,124 @@ function whatChangedCard(list) {
   return h('section', {className:'card home-card what-changed', 'data-key':'what-changed'},
     h('div', {className:'card-h row between'}, h('h2', {}, 'What changed'), h('a', {className:'btn ghost sm', href:'#tickets?view=done-week'}, 'Done tickets →')),
     list.map(({t, words}) => h('a', {className:'home-note', href:href(t.id), 'data-key':'changed-' + t.id},
-      h('div', {className:'grow'}, h('strong', {}, clean(t.title)), h('p', {className:'muted preserve-lines'}, clean(words.head) + (words.detail ? ' ' + clean(words.detail) : ''))),
+      h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title)), h('p', {className:'muted preserve-lines'}, clean(words.head) + (words.detail ? ' ' + clean(words.detail) : ''))),
       h('span', {className:'meta'}, [typeof ticketDoneEvent === 'function' && typeof ticketActor === 'function' ? ticketActor(ticketDoneEvent(t)?.by) : '', time(doneAt(t))].filter(Boolean).join(' · ')))));
+}
+// "Finished" on Home: the 5 newest finished today, then one link to all of them in the Tickets list (report r-1116-2215-ws:
+// 60 rows made Home 8000 px tall).
+const FINISHED_SHOWN = 5;
+function finishedBody(finished, all) {
+  if (!finished.length) return emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
+  const newest = finished.slice().sort((a, b) => (finishedAt(b) || 0) - (finishedAt(a) || 0));
+  const more = newest.length > FINISHED_SHOWN ? h('div', {className:'card-row', 'data-key':'finished-all'},
+    h('a', {className:'btn ghost sm', href:'#tickets?view=done-today'}, 'All finished today (' + newest.length + ') →')) : null;
+  return [...newest.slice(0, FINISHED_SHOWN).map(ticketRow), more];
 }
 // The day the last finished ticket was closed, for the empty "Finished" card ("Last: “…”, Fri.").
 function lastFinished(all) {
   const t = all.filter(x => x.status === 'done' && finishedAt(x)).sort((a, b) => finishedAt(b) - finishedAt(a))[0];
   return t ? 'Last: “' + clean(t.title) + '”, ' + finishedAt(t).toLocaleDateString('en-GB', {weekday:'short'}) + '.' : '';
 }
+// What helpers need (ORCH-45, drawn and chosen on ORCH-43): a login, connection or key that runs out within three days
+// is a row in Needs you; one that stopped working or cannot be reached is the red banner at the top, naming the tickets
+// it stops. The Renew button comes from the renew step (a page function renewButton) when it is there; until then
+// Check again runs every check once more (orch logins), and Try again for one that cannot be reached.
+const loginWarnings = () => window.DashHelpers.needWarnings(snapshot ? null : state?.logins);
+function loginTicketLinks(list) {
+  return list.flatMap((t, i) => [i ? ' · ' : null, h('a', {href:href(t.id), 'data-key':'login-ticket-' + t.id}, (typeof t.key === 'string' && t.key ? t.key + ' ' : '') + clean(t.title || ''))]);
+}
+async function checkLogins(item, key) {
+  if (changeUnavailable() || locks.has(key)) return;
+  locks.add(key);
+  try {
+    const result = await act('logins.check', {});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); return; }
+    const after = window.DashHelpers.needItems(state?.logins).find(i => i.name === item.name);
+    window.orch.toast(clean(window.DashHelpers.needName(item)) + ': ' + (after ? window.DashHelpers.needState(after).word.replace(/^✓ /, '') : 'checked'), after?.state === 'works' ? 'ok' : 'error');
+  } finally { locks.delete(key); render(); }
+}
+function loginAction(item, key, quiet = false) {
+  if (snapshot) return null;
+  const own = typeof renewButton === 'function' ? renewButton(item, {key, quiet}) : null;
+  if (own || quiet) return own || null;
+  const reach = item.state === 'unreachable';
+  const control = button(reach ? 'Try again' : 'Check again', 'outline sm', () => checkLogins(item, key));  // one filled button per view
+  control.dataset.key = key + '-check';
+  return control;
+}
+// A tool orch cannot renew itself says the one step the person takes (ORCH-48).
+// (page scope: Settings uses it too). Nothing when a Renew or Replace button is there, or it works.
+function loginHowText(item) {
+  return item && item.state !== 'works' && !item.renew && !item.key && typeof item.how === 'string' ? item.how : '';
+}
+function loginHow(item) {
+  const how = loginHowText(item);
+  return how ? h('p', {className:'meta', 'data-key':'login-how-' + item.name}, how) : null;
+}
+function loginSoonRow(item) {
+  const key = 'login-soon-' + item.name, n = item.stops.length;
+  return h('div', {className:'card-row', 'data-key':key, 'data-login':'soon'},
+    h('div', {className:'grow'}, h('p', {}, h('strong', {}, 'The ' + clean(window.DashHelpers.needName(item)) + ' ends on ' + window.DashHelpers.needEnds(item) + '.')),
+      n ? h('p', {className:'meta'}, 'After that helpers stop on ' + n + (n === 1 ? ' ticket: ' : ' tickets: '), loginTicketLinks(item.stops)) : null,
+      loginHow(item)),
+    loginAction(item, key));
+}
+function loginBanner(stopped) {
+  if (!stopped.length) return null;
+  const list = window.DashHelpers.needTickets(stopped), n = list.length, noNew = stopped.some(i => i.chosen && i.state === 'renew');
+  const lead = n ? 'Helpers stopped on ' + n + (n === 1 ? ' ticket' : ' tickets') + (noNew ? ' and start no new work' : '') : noNew ? 'Helpers start no new work' : '';
+  if (stopped.length === 1) {
+    const item = stopped[0], name = clean(window.DashHelpers.needName(item));
+    return h('div', {className:'banner error', role:'alert', 'data-key':'login-stopped', 'data-login':'stopped'},
+      h('div', {className:'grow'}, h('strong', {}, 'The ' + name + (item.state === 'unreachable' ? ' cannot be reached' : ' stopped working')),
+        lead ? h('p', {}, lead + (n ? ': ' : '.'), n ? loginTicketLinks(list) : null) : null, loginHow(item)),
+      loginAction(item, 'login-stopped-' + item.name));
+  }
+  const names = stopped.map(i => clean(window.DashHelpers.needName(i))).join(' · ');
+  return h('div', {className:'banner error', role:'alert', 'data-key':'login-stopped', 'data-login':'several'},
+    h('div', {className:'grow'}, h('strong', {}, stopped.length + ' things stopped working'), h('p', {}, (lead ? lead + '. ' : '') + names + '.')),
+    snapshot ? null : h('a', {className:'btn primary sm', href:'#settings/agent', 'data-key':'login-see'}, 'See what to fix'));
+}
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further
 // question, result to check and change to add (one button each); the notes that need no answer are one quiet line.
 function home() {
-  const {needs, notices, failed, groups:groupedNeeds, review, changes, count:needCount} = needsToday(), all = tickets();
+  const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, count:counted} = needsToday(), all = tickets();
+  const needCount = counted + logins.soon.length;
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
+  const helpers = window.DashHelpers.helperRows(all, state.runs);
   const quiet = working.filter(t => t.quiet_since);
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const banner = [backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
+  const banner = [loginBanner(logins.stopped), backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
   // The number counts open questions and results to check only (ORCH-63); the list below also holds failed starts,
   // changes to add and add-on rows, so it shows whenever it has anything, with or without a number.
-  const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length > 0;
-  const title = needCount ? needCount + (needCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds ? 'Things to look at' : 'Nothing needs you';
+  const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
+  // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
+  const shownCount = needCount + logins.stopped.length;
+  const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds ? 'Things to look at' : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length);
   const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
   const notes = notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : [];
-  if (!anyNeeds && !working.length) {
-    return fragment(head, banner, h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
+  if (!anyNeeds && !working.length && !helpers.length) {
+    return fragment(head, banner, logins.stopped.length ? null : h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
       h('p', {}, 'Questions and results to check will appear here.'), typeof newButton === 'function' ? newButton() : null),
       notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
-      card('finished-today', 'Finished', '', finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.')), changedCard);
+      card('finished-today', 'Finished', '', finishedBody(finished, all)), changedCard);
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
-    .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length);
-  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
-  const list = [first ? needRow(first.row, newest, first.count, first.same) : null, ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
+    .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
+  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
+  const list = [first ? needRow(first.row, newest, first.count, first.same) : null, ...logins.soon.map(loginSoonRow), ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
     ...results.map(resultRow), ...changes.map(changeRow), ...notes];
-  const finishedBody = finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
       anyNeeds ? attentionCard('needs-you', needCount ? 'Needs you · ' + needCount : 'Needs you', 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', [clearOldButton(), reviewAllButton()]) : null),
     h('aside', {className:'stack', 'data-key':'right'},
-      working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
+      helpers.length && window.UI?.helperList ? helpersCard(helpers) : snapshot && working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
       quiet.length ? card('quiet-now', 'No news', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
-      card('finished-today', 'Finished', '', finishedBody))),
+      card('finished-today', 'Finished', '', finishedBody(finished, all)))),
     changedCard);
 }
 function connectionNotice(connectionEl, hadState) {

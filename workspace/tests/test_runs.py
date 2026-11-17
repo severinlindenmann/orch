@@ -190,7 +190,9 @@ def test_argv_resumes_only_this_agent_on_this_host(proj, new_ticket, run):
     assert tickets.sessions_for(proj, tid, t, "claude", runs.host()) == "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     _choose(proj, "codex")
     j = json.loads(run("run", "argv", tid, "--json")[1])
-    assert j["argv"][:5] == ["codex", "exec", "resume", "--json", "01a1ac76-7c05-70d2-824d-4854e0c9c3f8"]
+    assert j["argv"][:6] == [
+        "codex", "exec", "resume", "--skip-git-repo-check", "--json", "01a1ac76-7c05-70d2-824d-4854e0c9c3f8",
+    ]  # fmt: skip
 
 
 def test_argv_on_another_host_starts_fresh(proj, new_ticket, run, monkeypatch):
@@ -246,7 +248,7 @@ def test_plan_first_prompt_plans_asks_one_question_and_stops(proj):
     t = tickets.create(proj, "Online payments", "human:me", plan_first=True)
     prompt = runs.fresh_prompt(t, [], proj)
     assert "Plan big work" in prompt and f"orch ticket new --parent {t['id']}" in prompt
-    assert f'orch ask {t["id"]} "Plan ready" --option "Start work" --option "Change a step"' in prompt
+    assert f'orch ask {t["id"]} "Plan ready" --option "Start work" --option "Change sub-tickets"' in prompt
     assert '--recommend "Start work"' in prompt and "Do NOT change any project file" in prompt
     assert "Plan big work" in runs.resume_prompt(t, [], None, "claude", proj)
 
@@ -262,9 +264,9 @@ def test_plan_first_rule_holds_until_start_work_is_answered(proj):
     for qs in ([], [ready]):
         t["questions"] = qs
         assert "Do NOT change any project file" in runs.fresh_prompt(t, [], proj)
-    # 3. "Change a step": re-plan, still no start
+    # 3. "Change sub-tickets": re-plan, still no start
     t["questions"] = [
-        {**ready, "answer": "Change a step"},
+        {**ready, "answer": "Change sub-tickets"},
         {"id": "q2", "text": "Which step, and what should change?", "answer": "Step 2 is too big"},
     ]
     for prompt in (runs.fresh_prompt(t, [], proj), runs.resume_prompt(t, [], None, "claude", proj)):
@@ -527,7 +529,7 @@ def test_shared_folder_several_others_are_counted(proj, new_ticket):
     a, _ = _two_runs(proj, new_ticket)
     runs.claim(proj, new_ticket("Third"), "agent:z", "claude", pid=os.getpid())
     assert sharedfolder.line(sharedfolder.others_in_folder(proj, a)) == (
-        "2 other agents are also changing this folder."
+        "2 other helpers are also changing this folder."
     )
 
 
@@ -658,3 +660,11 @@ def test_epic_prompt_lists_its_open_tickets_in_order(proj):
 def test_epic_prompt_with_every_ticket_finished_says_finish_the_epic(proj):
     epic = tickets.create(proj, "Dashboard fixes", "human:me", epic=True)
     assert "none is left open" in runs.fresh_prompt(epic, [], proj)
+
+
+def test_a_program_that_cannot_start_returns_its_reason(tmp_path):
+    log = tmp_path / "run.log"
+    rc, out = runs._run_turn(["/no/such/agent-orch153"], tmp_path, None, log, {"PATH": "/usr/bin"})
+    assert rc == 127
+    assert "could not start the agent" in out
+    assert runs.failure_text(rc, out).startswith("orch could not start the agent")

@@ -73,7 +73,7 @@ def finish_hint(ticket: dict) -> str | None:
     key = ticket.get("key") or ticket["id"]
     return (
         f"the pull request is still open ({pulls[0]}). If the ticket says to merge it once its checks pass, "
-        f"wait for them and merge it, then: orch ref set {key} {pulls[0]} --status merged"
+        f"wait for them and merge it: orch ref wait {key} --merge"
     )
 
 

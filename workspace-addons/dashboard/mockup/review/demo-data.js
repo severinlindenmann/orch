@@ -3,6 +3,25 @@
    shows why it waits on you (need). Order: most urgent first. */
 window.SWIPE_KIT='../../../../workspace/src/orch_ui/static/';
 window.SWIPE_ITEMS=[
+ /* A design review as one set of cards (16 Nov, ORCH-65): the question text on the card, full-page pictures that fit the
+    pane on a dark ground with a zoom per side, a marked suggestion, a choice with how it is today. */
+ {id:'g1',kind:'draft',kindLabel:'Draft',icon:'page',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:02',title:'Home: one list of what needs you',
+  text:'Now: Home shows questions, results to check and a factory start in three places, and the count on top does not match the list. Proposal: one list, most urgent first, each row with its picture and one button. The count on top is the length of this list.',
+  why:'Found in the dashboard look review.',okLabel:'Build it',suggest:'ok',
+  links:[{label:'Mockup',url:'../proposals/fb23-home-what-changed.html'},{label:'Issue 1290',url:'https://github.com/'}],
+  then:'The helper builds it. You check it again before anyone sees it.',
+  preview:{type:'compare',before:{type:'img',src:'assets/home-today.jpg',alt:'Home today'},after:{type:'img',src:'assets/home-proposal.jpg',alt:'Home as proposed'}}},
+ {id:'g2',kind:'choice',kindLabel:'Choose',icon:'cards',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:03',title:'Home: where the review sets go',
+  text:'Several cards that belong together should show as one row on Home with their pictures. Which place?',
+  then:'The helper builds the one you pick.',
+  preview:{type:'options',before:{type:'img',src:'assets/home-today.jpg',alt:'Home today'},options:[
+   {id:'A',title:'Top of Home',suggested:true,preview:{type:'img',src:'assets/home-proposal.jpg',alt:'Sets on top'},text:'One row per set, above everything else.'},
+   {id:'B',title:'Inside Needs you',preview:{type:'page',src:'../home/home.html'},text:'The set is one row in the list.'}]}},
+ {id:'g3',kind:'plan',kindLabel:'Plan',icon:'note',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:04',title:'Drop the old “Review all” button',
+  text:'With sets on Home, the separate “Review all” button repeats the same thing. Proposal: remove it; the menu keeps Review.',
+  okLabel:'Remove it',suggest:'no',
+  then:'The button goes; Review stays in the menu.',
+  preview:{type:'doc',heading:'What changes',paras:['Home: the “Review all” button is removed.','Menu: Review stays, with its count.']}},
  {id:'d1',kind:'draft',kindLabel:'Draft',icon:'page',ticket:'DT-41',ticketId:'DT-41',ticketTitle:'Home update',task:'d1',about:'Draw the “What changed today” block',when:'today 09:12',need:'Blocks the Home update',title:'Home: “What changed today” block',
   why:'The helper drew a new block for the top of Home.',okLabel:'Build it',
   then:'The helper builds it. You check it again before anyone sees it.',
@@ -25,6 +44,14 @@ window.SWIPE_ITEMS=[
    {id:'A',title:'Plain',preview:{type:'doc',heading:'November news from the café',paras:['Short and safe.']}},
    {id:'B',title:'Question',suggested:true,preview:{type:'doc',heading:'Sunday coffee? You asked, we listened',paras:['Picks up the survey result.']}},
    {id:'C',title:'Offer',preview:{type:'doc',heading:'Free oat milk all November ☕',paras:['Promises an offer. Picking C asks you about the offer itself first.']}}]}},
+ /* a Factory start: Home's short form and Home's buttons, none filled (ORCH-183, owner choice B) */
+ {id:'f1',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-49',ticketId:'DT-49',ticketTitle:'Loyalty card',when:'today 10:00',title:"Start 'Loyalty card for regular customers'?",
+  text:'Regular customers collect stamps and get a free coffee after ten visits.\nRuns about 1 h 30 min · needs you for about 10 min · up to 2 h of helper time',preview:{type:'doc'},
+  answers:[{label:'Not now',picked:'Not now'},{label:'Change it',picked:'Edit'},{label:'Start',picked:'Start'}]},
+ /* a plain question with no pictures (orch ask --option ...): plain rows, whole titles (ORCH-110) */
+ {id:'o3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-48',ticketId:'DT-48',ticketTitle:'Export button',task:'o3',when:'today 10:40',title:'Which name for the export button?',
+  then:'The helper uses the name you pick.',
+  preview:{type:'options',options:[{id:'Export',title:'Export',suggested:true},{id:'Download',title:'Download',text:'Says what happens on a phone.'}]}},
  {id:'d4',kind:'question',kindLabel:'Plan',icon:'note',ticket:'DT-44',ticketId:'DT-44',ticketTitle:'Invoice reminders',when:'today 10:02',need:'7 invoices are overdue',title:'Send invoice reminders every Monday',
   why:'The helper wants to start a schedule.',okLabel:'Start reminders',signs:true,
   then:'Every Monday 08:00 to customers with invoices older than 30 days (7 today). First one Mon 17 Nov. Nothing is sent before.',
@@ -42,7 +69,8 @@ window.SWIPE_ITEMS=[
  {id:'d7',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-47',ticketId:'DT-47',ticketTitle:'Opening hours page',when:'today 09:15',need:'Done when is not fully covered',title:'New opening hours on the website',
   why:'The helper says this is ready for your check.',okLabel:'Looks good',open:'https://example.com/pull/12',
   then:'The ticket is done.',
-  preview:{type:'doc',heading:'What was done',paras:['In short: Sunday 9–13 is on the website and the Google entry.','No task covers: “the poster at the door shows it”'],
+  files:[{label:'Opening hours page',type:'page',src:window.SWIPE_KIT+'samples/sample-page.html'},{label:'Door poster',type:'img',src:window.SWIPE_KIT+'demo-image.svg'}],/* the result's own files (ORCH-183) */
+  preview:{type:'doc',heading:'What was done',paras:['In short: Sunday 9–13 is on the website and the Google entry.','No task covers: “the poster at the door shows it”','What to do: send it back and say which part is missing, or approve it if that part does not matter.'],
    steps:['Done: Change the hours on the website — Page now says Sunday 9:00 – 13:00 · Ran: page check (all links fine) · PR #12','Done: Update the Google entry — Saved; Google shows the new hours']}},
  {id:'d8',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-48',ticketId:'DT-48',ticketTitle:'Supplier call',when:'today 09:20',title:'Call the supplier about oat milk',
   why:'The helper says this is ready for your check.',okLabel:'Looks good',

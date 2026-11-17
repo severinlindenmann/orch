@@ -14,8 +14,8 @@
     const thumb = h('span', {class: 'thumb', text: kind});
     if (r && typeof r.preview === 'string' && r.preview.startsWith('/api/file?')) {
       const src = P + r.preview;
-      if (r.kind === 'image') {
-        const img = h('img', {alt: '', loading: 'lazy'}); img.src = src; thumb.replaceChildren(img);
+      if (r.kind === 'image') {  // in the dashboard's sandboxed frame a picture address carries the frame pass
+        const img = h('img', {alt: '', loading: 'lazy'}); img.src = window.OrchFrame ? window.OrchFrame.url(src) : src; thumb.replaceChildren(img);
       } else {
         fetch(src).then(x => x.ok && (x.headers.get('Content-Type') || '').startsWith('text/plain') ? x.text() : null)
           .then(txt => { if (txt) thumb.replaceChildren(h('pre', {text: txt.slice(0, 600).split('\n').slice(0, 8).join('\n')})); }).catch(() => {});
@@ -35,13 +35,9 @@
       h('main', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta fx-sub', text: 'Loading your tickets…'}), skeleton()));
     /* the lists wait for the first Live now answer (at most a few seconds), so nothing moves after they show */
     const tickets = fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); });
-    tickets.then(payload => {
-      /* inside the dashboard Focus opens straight on the next ticket that needs the person; Home keeps the whole list.
-         "?all=1" (from the links beside the ticket) shows this start page: Live now, areas and jobs. */
-      const next = INAPP ? window.FocusHelpers.nextNeeding(payload.tickets) : null;
-      if (next && !/[?&]all=1/.test(location.search)) { location.replace(P + '/t/' + next.ticket.id + next.hash); return null; }
-      return S.views.livenow.ready(LIVE_WAIT_MS).then(() => payload);
-    }).then(payload => {
+    /* Focus opens on this start page, the Helpers list first (ORCH-61); the next ticket that needs the person is one
+       button below it, never a jump. */
+    tickets.then(payload => S.views.livenow.ready(LIVE_WAIT_MS).then(() => payload)).then(payload => {
       if (!payload) return;
       const list = payload.tickets;
       const next = INAPP ? window.FocusHelpers.nextNeeding(list) : null;
@@ -61,12 +57,12 @@
           next ? h('small', {text: next}) : null, finished ? h('small', {text: 'Finished ' + finished}) : null,
           h('span', {class: 'btn outline sm', text: action}));  /* a real 32 px button from the master, not a chip */
       };
+      if (payload.manager) box.insertBefore(managerRow(payload.manager), box.querySelector('.fx-livenow, .fx-pick-group, .fx-procs'));
       if (next) box.append(h('div', {class: 'row'}, h('a', {class: 'btn outline sm', href: P + '/t/' + next.ticket.id + next.hash, text: 'Open the next ticket that needs you'}),
         h('a', {class: 'btn ghost sm', href: '/#home', target: '_top', text: 'See everything on Home'})));
       for (const [status, label, action] of groups) {
         if (INAPP && (status === 'waiting' || status === 'review')) continue;  /* Home lists these; not twice */
-        const needsYou = window.FocusHelpers.needsYou;
-        const rows = list.filter(t => status === 'waiting' ? needsYou(t) : t.status === status);
+        const rows = window.FocusHelpers.groupRows(list, status);
         if (!rows.length) continue;
         const {shown, more} = window.FocusHelpers.limitGroup(rows);
         const cards = status === 'review';  /* results are cards, every other group stays a row */
@@ -105,6 +101,23 @@
     });
   }
 
+  /* ORCH-147: the always-on Manager, one row above the helpers. Open goes to its page (screen, typing, message box);
+     the first time, or while it is off, one click starts it and then opens that page. */
+  function managerRow(m) {
+    const button = h('button', {class: 'btn outline sm', type: 'button', text: m.ticket && m.running ? 'Open' : 'Start'});
+    const line = m.ticket && m.running ? 'Always on. Talk to it here or join it from a terminal.' : 'An always-on helper that looks after your tickets and helpers.';
+    button.addEventListener('click', async () => {
+      if (m.ticket && m.running) { location.href = P + '/t/' + m.ticket; return; }
+      button.disabled = true;
+      const r = await act('manager.start', {});
+      const tid = r.ok && r.result && r.result.ticket;
+      if (tid) location.href = P + '/t/' + tid;
+      else { button.disabled = false; toast(r.message || 'The Manager could not start. Try again.', 'error'); }
+    });
+    return h('section', {class: 'fx-pick-group fx-group-manager', 'aria-label': 'Manager'},
+      h('div', {class: 'card'}, h('div', {class: 'card-row'}, h('div', {class: 'grow'}, h('p', {class: 'title', text: 'Manager'}), h('p', {class: 'meta', text: line})), button)));  /* master card-row */
+  }
+
   const LIVE_WAIT_MS = 4000;
   /* the page's shape before the tickets arrive, so nothing jumps */
   function skeleton() {
@@ -133,7 +146,7 @@
       if (S.state.dashNeeds === d.count) return;
       S.state.dashNeeds = d.count; pickAttention();
     });
-    try { window.parent.postMessage({orch: 'needs-count'}, location.origin); } catch (e) { /* not framed */ }
+    try { window.parent.postMessage({orch: 'needs-count', chan: (window.OrchFrame || {}).chan}, location.origin); } catch (e) { /* not framed */ }
   }
 
   /* "2 agents are working. One question needs you." The agent count comes from the live cards, the rest from the tickets. */
@@ -239,17 +252,18 @@
   const DOT = {waiting: 'dot-warn', review: 'dot-warn', active: 'dot-work', done: 'dot-ok'};
   function buildShell(top, stepbar, rail, stage) {
     root.classList.add('fx-shell', 'fx-terminal');
-    try { parent.postMessage({orch: 'embed-shell', path: location.pathname}, location.origin); } catch (e) { /* not framed */ }
+    try { parent.postMessage({orch: 'embed-shell', path: location.pathname, chan: (window.OrchFrame || {}).chan}, location.origin); } catch (e) { /* not framed */ }
     els.ticketList = h('div', {class: 'fx-tickets', role: 'list', 'aria-label': 'Tickets in focus'});
     const left = h('aside', {class: 'focus-list fx-left', 'aria-label': 'Tickets in focus'},
       h('div', {class: 'card-h'}, h('h3', {text: 'Tickets in focus'})), els.ticketList,
       h('div', {class: 'row'}, h('a', {class: 'btn ghost sm', href: '/#home', target: '_top', text: 'See everything on Home'}),
-        h('a', {class: 'btn ghost sm', href: P + '/?all=1', text: 'Live now and areas'})), rail);
-    const head = h('div', {class: 'fx-chead'}, h('div', {class: 'grow'}, h('span', {class: 'eyebrow'}, els.key), h('h1', {}, els.title)),
-      els.liveWrap, els.stop, els.more);
+        h('a', {class: 'btn ghost sm', href: P + '/', text: 'All helpers'})), rail);
+    /* the ticket page's header line (ORCH-71): ORCH-n · state pill · Step 3 of 4 · 52 min, then the title */
+    els.headLine = h('p', {class: 'meta', 'data-key': 'focus-head-line'});
+    const head = h('div', {class: 'fx-chead'}, h('div', {class: 'grow'}, els.headLine, h('h1', {}, els.title)), els.stop, els.more);
     stage.prepend(head);
     els.resultEmpty = h('p', {class: 'meta fx-result-empty', text: 'Results appear here as the helper finishes steps.'});
-    els.resultHead = h('span', {class: 'eyebrow', text: 'Result so far'});
+    els.resultHead = h('h2', {text: 'Result so far'});
     root.replaceChildren(h('div', {class: 'focus3 fx-body'}, left, stage, els.human));
     refreshTickets();
     S.subscribe(() => { refreshTickets(); els.resultEmpty.hidden = !els.sent.hidden; });
@@ -262,7 +276,7 @@
       const r = await fetch(P + '/api/tickets'); if (!r.ok) return;
       const list = window.FocusHelpers.listOrder((await r.json()).tickets.filter(t => t.status !== 'done' || t.id === TID));
       els.ticketList.replaceChildren(...list.map(t => h('a', {class: 'list-row' + (t.id === TID ? ' cur' : ''), role: 'listitem', href: P + '/t/' + t.id, 'aria-current': t.id === TID ? 'page' : null},
-        h('span', {class: window.FocusHelpers.needsYou(t) ? 'dot-warn' : DOT[t.status] || 'dot-work', 'aria-hidden': 'true'}), h('strong', {class: 'grow', text: t.title}))));
+        h('span', {class: window.FocusHelpers.needsYou(t) ? 'dot-warn' : DOT[t.status] || 'dot-work', 'aria-hidden': 'true'}), typeof t.key === 'string' && t.key && !/^t_/.test(t.key) ? h('span', {class: 'key', text: t.key}) : null, h('strong', {class: 'grow', text: t.title}))));
     } catch (e) { /* the list keeps what it had */ }
   }
 
@@ -332,32 +346,36 @@
     S.views.ticket.showTab(1, !!list.length || ['review', 'done'].includes(v.ticket.status));
     if (key === els.paneProof.dataset.k) return;
     els.paneProof.dataset.k = key;
-    const files = list.filter(x => x.ev.type !== 'note');
-    const primary = files[files.length - 1] || list[list.length - 1];
     const content = h('div', {class: 'fx-results'}, h('h2', {text: v.state === 'done' ? 'Work completed' : list.length ? 'Ready for your look' : 'No results yet'}),
       list.length ? null : h('p', {class: 'meta', text: 'Results will appear here when a task is done.'}));  // the title is in the header: shown once
     const completed = window.FocusHelpers.completedAt(v.ticket);
     if (v.state === 'done' && completed) content.append(h('p', {class: 'meta', text: 'Completed ' + stamp(completed).replace(/ (\d\d:)/, ' at $1')}));
-    if (primary) content.append(proof.tile(primary, from => proof.open(list, list.indexOf(primary), from)));
-    for (const c of done) content.append(h('p', {class: 'fx-result-note', text: '✓ ' + c.text + ' — ' + evText(c)}));
-    if (files.length) content.append(h('div', {class: 'fx-result-files'}, files.map(({c, ev}) => h('p', {class: 'meta', text: c.text + ' · ' + String(ev.ref || '').split('/').pop() + (ev.summary ? ' · ' + ev.summary : '')}))));
+    content.append(...resultRows(list));  // the same plain lines as "Result so far" (ORCH-71)
     els.paneProof.replaceChildren(content);
     renderSent(v, list);
   }
 
-  /* "Sent back to you": what the helper handed over, as small cards you can open in place (no PDFs or live pages mounted) */
+  /* One plain line per result: what, what came out, Open (the preview panel, in place). */
+  function resultRows(list) {
+    return list.map((item, i) => {
+      const line = window.FocusHelpers.resultLine(item);
+      const open = h('button', {class: 'btn ghost sm', type: 'button', 'aria-haspopup': 'dialog', 'aria-label': 'Open ' + line.what, text: 'Open', onclick: () => proof.open(list, i, open)});
+      return h('div', {class: 'card-row', 'data-key': 'result-' + i},
+        h('div', {class: 'grow'}, h('strong', {text: line.what}), line.outcome ? h('p', {class: 'meta', text: line.outcome}) : null), open);
+    });
+  }
+  /* "Result so far" / "Sent back to you": one plain line per result (ORCH-71): what it is, what came out, and Open.
+     Open shows the result in place (the preview panel); no kinds, commands or file names on the line. */
   function renderSent(v, list) {
-    const key = keyOf([v.ticket.status, list.map(x => [x.c.id, x.ev.ref, x.ev.type, x.ev.summary])]);
+    const key = keyOf([v.ticket.status, list.map(x => [x.c.id, x.ev.ref, x.ev.type, x.ev.summary, x.ev.title])]);
     if (key === els.sent.dataset.k) return;
     els.sent.dataset.k = key;
     els.sent.hidden = !list.length;
     if (!list.length) { els.sent.replaceChildren(); return; }
-    const files = list.filter(x => x.ev.type !== 'note');
-    const cards = [...files.map(x => proof.tile(x, from => proof.open(list, list.indexOf(x), from))),
-      ...list.filter(x => x.ev.type === 'note').map(({c, ev}) => h('article', {class: 'fx-sent-note card'}, h('p', {class: 'eyebrow', text: 'Result'}), h('strong', {text: c.text}), h('p', {class: 'meta', text: String(ev.text || ev.ref || '')})))];
+    const rows = resultRows(list);
     const review = v.ticket.status === 'review';
-    els.sent.replaceChildren(h('div', {class: 'row'}, h('h2', {class: 'grow', text: 'Sent back to you'}), h('span', {class: 'meta', text: list.length + (list.length === 1 ? ' item' : ' items')})),
-      h('div', {class: 'fx-sent-grid'}, cards), ...(review ? [h('p', {class: 'meta', text: 'Checking a result records your feedback. It does not publish anything.'})] : []));
+    els.sent.replaceChildren(...(INAPP ? [] : [h('div', {class: 'row'}, h('h2', {class: 'grow', text: 'Sent back to you'}), h('span', {class: 'meta', text: list.length + (list.length === 1 ? ' item' : ' items')}))]),
+      ...rows, ...(review ? [h('p', {class: 'meta', text: 'Checking a result records your feedback. It does not publish anything.'})] : []));
   }
 
   /* Where a question also waits: one quiet line under the answers, "Sent to your phone 12:31. Answer here or there,

@@ -27,10 +27,10 @@ test('board parts span columns, accept keys, and ignore children summaries and a
     const c = context(items);
     if (!useHelpers) c.window = {DashHelpers:{...helpers, childrenOf:undefined, parentOf:undefined}};
     const card = c.boardCard(items[0]);
-    assert.match(JSON.stringify(card), /Steps · 0 of 3 done/);
+    assert.match(JSON.stringify(card), /Sub-tickets · 0 of 3 done/);
     assert.equal(nodes(card, n => n.attrs?.className === 'board-part').length, 3);
-    assert.match(JSON.stringify(c.boardCard(items[1])), /Step of Parent/);
-    assert.doesNotMatch(JSON.stringify(c.boardCard(items[3], true)), /Step of Parent/);
+    assert.match(JSON.stringify(c.boardCard(items[1])), /Sub-ticket of Parent/);
+    assert.doesNotMatch(JSON.stringify(c.boardCard(items[3], true)), /Sub-ticket of Parent/);
     const rows = helpers.treeRows(c.ticketParents(items.filter(t => t.status === 'waiting')));
     assert.equal(rows[1].depth, 1);
     const board = c.board();
@@ -47,8 +47,10 @@ test('list groups have owner order and every ticket belongs to exactly one group
   const items = ['done','review','ready','open','active','waiting'].map(status => ({id:status,status}));
   items.push({id:'question',status:'active',questions:[{text:'Choose?'}]});
   const groups = context(items).ticketGroups(items);
-  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','To do','Check','Done']);
-  assert.deepEqual(Array.from(groups, g => Array.from(g.tickets, t => t.id)), [['waiting','question'],['active'],['ready','open'],['review'],['done']]);
+  // ORCH-62: a waiting ticket without an open question is in its own group, not Needs you
+  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','Waiting','To do','Backlog','Check','Done']);
+  // ORCH-152: To do (ready) and Backlog (open, where new tickets land) are two groups
+  assert.deepEqual(Array.from(groups, g => Array.from(g.tickets, t => t.id)), [['question'],['active'],['waiting'],['ready'],['open'],['review'],['done']]);
 });
 test('home renders one need card per ticket with question count and yellow chip', () => {
   const t = {id:'p',title:'Pick a plan',status:'active',questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
@@ -98,9 +100,9 @@ test('ORCH-14: an epic says Epic on its board card; a ticket inside it says Part
   const c = context(items);
   assert.match(JSON.stringify(c.boardCard(items[0])), /Epic · 1 of 2 done/);
   assert.match(JSON.stringify(c.boardCard(items[2])), /Part of the epic Dashboard fixes/);
-  assert.doesNotMatch(JSON.stringify(c.boardCard(items[2])), /Step of/);
+  assert.doesNotMatch(JSON.stringify(c.boardCard(items[2])), /Sub-ticket of/);
 });
-test('parts on the real /api/state shape: list nests parts under the parent whatever their status', () => {
+test('parts on the real /api/state shape: each part sits in its OWN status group (ORCH-62), standing alone with its parent named', () => {
   const real = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/state-pilatus-parts.json'), 'utf8'));
   const items = real.tickets, [parent] = items.filter(t => t.key === 'PIL-2');
   assert.deepEqual(parent.children, ['t_1wis33', 't_fhm1w4']);
@@ -108,12 +110,13 @@ test('parts on the real /api/state shape: list nests parts under the parent what
   assert.equal(helpers.parentOf(items, items.find(t => t.key === 'PIL-10')).key, 'PIL-2');
   const c = context(items, {state:real});
   const groups = c.ticketGroups(c.ticketParents(items));
-  const waiting = groups.find(g => g.status === 'waiting'), open = groups.find(g => g.status === 'open');
-  assert.equal([...waiting.tickets.map(t => t.key)].sort().join(), 'PIL-10,PIL-11,PIL-2');
-  assert.ok(!open.tickets.some(t => t.key === 'PIL-10'));
-  const rows = helpers.treeRows(waiting.tickets);
-  assert.equal(rows.find(r => r.ticket.key === 'PIL-2').children, 2);
-  assert.equal(rows.filter(r => /PIL-1[01]/.test(r.ticket.key)).map(r => r.depth).join(), '1,1');
+  const blocked = groups.find(g => g.status === 'blocked'), open = groups.find(g => g.status === 'open');
+  assert.ok(blocked.tickets.some(t => t.key === 'PIL-2') && !blocked.tickets.some(t => /PIL-1[01]/.test(t.key)));
+  assert.ok(['PIL-10', 'PIL-11'].every(k => open.tickets.some(t => t.key === k)), 'To do parts sit in To do');
+  const rows = helpers.treeRows(open.tickets).filter(r => /PIL-1[01]/.test(r.ticket.key));
+  assert.equal(rows.map(r => r.depth).join(), '0,0');
+  assert.ok(rows.every(r => r.parentMissing), 'each names its parent on a Sub-ticket of line');
+  for (const g of groups) assert.equal(g.tickets.filter(t => c.ticketGroupOf(t) !== g.status).length, 0, 'a group holds only its own status');
 });
 
 test('Copy/Repeat capability is read from the real state.addons shape (active add-ons only, no active field)', () => {
@@ -160,7 +163,7 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const LIVE_MAX_CHOICES'), end = src.indexOf('function shareCard');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
-  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsPending:new Map(), settingsSaving:() => null, settingsText:(tag, a, t) => h(tag, a, t)});
   vm.runInContext(src.slice(start, end), c);
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
   const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join(' ');
@@ -174,6 +177,48 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   assert.match(text(four), /When 4 helpers are working, the next one waits in line/);
   assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:99}), n => n.tag === 'select')[0].value, 'none');
   assert.ok(src.includes("permissionsCard(settings), helpersAtOnceCard(settings)]"), 'sits on the Helper tab');
+});
+
+test('ORCH-227: a Settings choice shows at once with Saving…, a second click while it saves is sent after it', async () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  let renders = 0;
+  const c = vm.createContext({h, snapshot:false, render:() => { renders++; }});
+  vm.runInContext(src.slice(src.indexOf('const settingsBusy'), src.indexOf('const addonOpen')), c);
+  vm.runInContext(src.slice(src.indexOf('const FULL_WARNING'), src.indexOf('// What helpers need')), c);
+  vm.runInContext(src.slice(src.indexOf('const LIVE_MAX_CHOICES'), src.indexOf('function shareCard')), c);
+  const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+  const checked = card => all(card, n => n.tag === 'input' && n.checked)[0]?.attrs.value;
+  const saving = (card, key) => all(card, n => n.attrs?.['data-key'] === 'settings-saving-' + key).length;
+  const choose = vm.runInContext('settingsChoose', c), busy = vm.runInContext('settingsBusy', c);
+  // the server answers slowly: the clicked choice is drawn at once, with Saving…, never the old one
+  const sent = [];
+  let finish;
+  const send = mode => () => { busy.add('permissions'); sent.push(mode); return new Promise(done => { finish = () => { busy.delete('permissions'); done({ok:true}); }; }); };
+  const first = choose('permissions', 'ask', send('ask'));
+  const card = vm.runInContext('permissionsCard', c)({permissions:'auto'});
+  assert.equal(checked(card), 'ask', 'the click shows at once');
+  assert.equal(saving(card, 'permissions'), 1, 'with Saving…');
+  assert.equal(all(card, n => n.tag === 'input' && n.attrs.disabled).length, 0, 'a second click is possible');
+  // a second click while the first saves is kept and sent after it; the last click wins
+  assert.equal(await choose('permissions', 'full', send('full')), null);
+  assert.equal(checked(vm.runInContext('permissionsCard', c)({permissions:'auto'})), 'full');
+  finish();
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(sent, ['ask', 'full']);
+  finish();
+  await first;
+  const after = vm.runInContext('permissionsCard', c)({permissions:'full'});
+  assert.equal(checked(after), 'full'); assert.equal(saving(after, 'permissions'), 0, 'no Saving… once saved');
+  // a failed save falls back to what the server says
+  const failed = choose('live', 4, () => Promise.resolve({ok:false}));
+  await failed;
+  assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:null}), n => n.tag === 'select')[0].value, 'none');
+  // Helpers at once shows the picked number at once too
+  choose('live', 6, () => new Promise(() => {}));
+  const live = vm.runInContext('helpersAtOnceCard', c)({live_max:null});
+  assert.equal(all(live, n => n.tag === 'select')[0].value, '6'); assert.equal(saving(live, 'live'), 1);
+  assert.ok(renders > 0);
 });
 
 test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote shown plainly (no Details)', () => {
@@ -376,12 +421,15 @@ test('settings: the folder is shown plainly with Copy path and the quiet full pa
   }
 });
 
-// Dash 02/21/43/44: no ticket keys or status chips on Home rows, no empty Working now, See all tickets right after.
-test('home rows: no key or chip, no empty Working now, See all tickets (N), finish time instead of Done', () => {
+// Dash 02/21/43/44: no status chips on Home rows, no empty Working now, See all tickets right after.
+// ORCH-58 (owner, 16 Nov): the ticket number goes before every title; a result row is titled with the ticket.
+test('home rows: number before the title, no chip, no empty Working now, See all tickets (N), finish time instead of Done', () => {
   const today = new Date(); today.setHours(9, 5);
   const items = [{id:'a', key:'PIL-54', title:'Pay invoice', status:'review'}, {id:'d', key:'PIL-55', title:'Book room', status:'done', done_at:today.toISOString()}];
   const home = context(items, {parse:v => v ? new Date(v) : null, time:d => d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')}).home(), text = JSON.stringify(home);
-  assert.doesNotMatch(text, /PIL-5/); assert.doesNotMatch(text, /"(review|done)"\]/);
+  assert.match(text, /\{"tag":"h3","attrs":\{\},"children":\[\{"tag":"span","attrs":\{"className":"key"\},"children":\["PIL-54"\]\}," ","Pay invoice"\]\},\{"tag":"p","attrs":\{"className":"meta"\},"children":\["Check the result"\]\}/, 'result row: number + ticket name, Check the result as the small line');
+  assert.match(text, /"children":\["PIL-55"\]\}," ","Book room"/, 'finished row shows the number');
+  assert.doesNotMatch(text, /"(review|done)"\]/);
   assert.doesNotMatch(text, /Working now|No tickets are being worked on/);
   assert.match(text, /Finished 9:05/);
   const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0];
@@ -472,7 +520,7 @@ test('home: notices fold into one quiet line, are not counted, and Show lists th
   assert.equal(c.needsToday().count, 1);
   assert.match(text, /1 thing needs you/); assert.match(text, /3 sync notes, nothing to do/); assert.doesNotMatch(text, /Restored it/);
 });
-test('home: Working now and Finished are side cards; an empty Finished says what was last', () => {
+test('home (read-only copy, no run data): Working now and Finished are side cards; an empty Finished says what was last', () => {
   const t = new Date(); t.setDate(t.getDate() - 1);
   const items = [{id:'w', title:'Plan', status:'active', checklist:[{id:'c1', text:'Send a test mail'}]}, {id:'d', title:'Old sign', status:'done', done_at:t.toISOString()}];
   const home = context(items, {parse:v => v ? new Date(v) : null, state:{runs:{}, settings:{}}}).home(), text = JSON.stringify(home);
@@ -480,6 +528,23 @@ test('home: Working now and Finished are side cards; an empty Finished says what
   assert.match(JSON.stringify(right), /Working now/); assert.match(JSON.stringify(right), /Send a test mail/);
   assert.doesNotMatch(JSON.stringify(right), /steps|segments|progressbar/);
   assert.match(text, /Nothing finished today\. Last: “Old sign”/);
+});
+test('home: Finished shows the 5 newest finished today and one link to all of them (report r-1116-2215-ws)', () => {
+  const day = new Date(); day.setHours(12, 0, 0, 0);
+  const at = m => new Date(day.getTime() - m * 60000).toISOString();
+  const done = Array.from({length:12}, (_, i) => ({id:'d' + i, title:'Done ' + i, status:'done', done_at:at(i * 5)}));
+  const items = [{id:'w', title:'Plan', status:'active'}, ...done.slice().reverse()];
+  const c = context(items, {parse:v => v ? new Date(v) : null, now:() => day, time:d => String(d), state:{runs:{}, settings:{}}});
+  const fin = nodes(c.home(), n => n.tag === 'section' && n.children?.[0] === 'Finished')[0];
+  const rows = nodes(fin, n => String(n.attrs?.['data-key'] || '').startsWith('ticket-')).map(n => n.attrs['data-key']);
+  assert.deepEqual(rows, ['ticket-d0', 'ticket-d1', 'ticket-d2', 'ticket-d3', 'ticket-d4'], 'newest first, five rows');
+  const row = nodes(fin, n => n.attrs?.['data-key'] === 'ticket-d0')[0];
+  assert.equal(row.children[1].attrs.className, 'meta', 'the time is a line under the title, not inside the title row');
+  assert.doesNotMatch(JSON.stringify(row.children[0]), /Finished/);
+  const link = nodes(fin, n => n.tag === 'a' && n.attrs?.href === '#tickets?view=done-today')[0];
+  assert.ok(link, 'link to the finished-today view'); assert.match(JSON.stringify(link), /All finished today \(12\)/);
+  const few = context(items.slice(0, 4), {parse:v => v ? new Date(v) : null, now:() => day, time:d => String(d), state:{runs:{}, settings:{}}});
+  assert.doesNotMatch(JSON.stringify(few.home()), /All finished today/, 'no link when all fit');
 });
 test('home needs: a failed answer on stacked questions says how many were answered', async () => {
   let n = 0;
@@ -522,8 +587,35 @@ test('shell: quiet footer, one phone control while on, Ask the helper', () => {
   const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
   assert.match(web('style.css'), /\.side-foot:has\(#workspace-mode:empty\)\{display:none\}/);
   assert.doesNotMatch(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/, 'the sidebar switch stays while on; the chip is in the top bar');
-  assert.match(web('index.html'), />Ask the helper<\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
+  assert.match(web('index.html'), /aria-label="Ask the helper"[^>]*>.*<span class="btn-word-wide">Ask the helper<\/span><\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
   assert.doesNotMatch(web('app.js'), /tk\?\.key/); // no ticket key in the breadcrumb
+});
+// Report r-1117-1256-ws-2: phone width (390, 320) and 150% zoom. The rules are checked here; e2e/dash_page_health.cjs
+// measures the real pages at those sizes.
+test('phone and zoom layout: nothing pushes the page sideways or hides a menu item', () => {
+  const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
+  const kit = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/components.css'), 'utf8');
+  const source = web('app.js');
+  const style = web('style.css'), phone = style.slice(style.indexOf('@media(max-width:720px){\n  .shell{display:flex'));
+  const phoneBlock = phone.slice(0, phone.indexOf('\n}'));
+  // the ticket's action row may shrink and wrap on a narrow screen (it was flex:none, 490 px wide on a 390 px phone)
+  assert.match(web('pages/ticket.css'), /@media\(max-width:760px\)\{[^\n]*\.ticket-strip \.ticket-strip-actions\{flex:0 1 auto;min-width:0\}/);
+  // the phone top bar wraps instead of overlapping; the phone chip stays in the menu; both helpers' buttons show as icons
+  assert.match(phoneBlock, /\.topbar\{flex-wrap:wrap;/);
+  assert.match(phoneBlock, /\.topbar>#mm-chip\{display:none\}/);
+  assert.doesNotMatch(style, /#open-agent\{display:none\}/);
+  assert.match(web('index.html'), /id="report-problem"[^>]*aria-label="Report a problem"/);
+  assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Ask the helper"/);
+  // the open phone menu is the whole screen, with room for the bottom bar after its last row; any page change closes it
+  assert.match(phoneBlock, /\.shell:has\(>\.sidebar\[data-open=true\]\)>div>\.page\{display:none\}/);
+  assert.match(phoneBlock, /\.shell>\.sidebar\[data-open=true\]\{padding-bottom:calc\(var\(--touch\)/);
+  assert.match(source, /addEventListener\('hashchange', async \(\) => \{\n  if \(document\.querySelector\('\.sidebar'\)\?\.dataset\.open === 'true'\) setMenu\(false\);/);
+  assert.match(source, /closest\?\.\('#tabbar a'\)\) setMenu\(false\)/);
+  // the one-row top bar (900 px and more) lets the waiting line give way, so New ticket stays on screen at 150% zoom
+  assert.match(style, /\.topbar>\.topbar-wait\{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis\}/);
+  // the icon rail scrolls its list only when it does not fit above the foot
+  assert.match(kit, /\.sidebar:has\(\.nav-label\) \.sidebar-scroll\.cramped\{overflow-x:hidden;overflow-y:auto\}/);
+  assert.match(source, /classList\.toggle\('cramped', sideScroll\.scrollHeight > sideScroll\.clientHeight \+ 1\)/);
 });
 test('ticket saved views filter by status and the board shows Changes to add', () => {
   const items = [{id:'w',title:'W',status:'active',owner:'anna'}, {id:'r',title:'R',status:'review',owner:'ben'},
@@ -532,8 +624,9 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   const c = context(items);
   const ids = (view, person = '') => c.filterTickets(items, '', false, '', person, view).map(t => t.id).join();
   assert.equal(ids('working'), 'w');
-  assert.equal(ids('needs-you'), 'r,d');
+  assert.equal(ids('needs-you'), 'r', 'ORCH-236: a Done ticket with changes to add is not counted in Needs you, so it is not in the view either');
   assert.equal(ids('done-week'), 'd');
+  assert.equal(ids('done-today'), 'd');
   assert.equal(ids('', 'ben'), 'r,o');
   assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
@@ -546,7 +639,7 @@ test('home: headline and badge are one number (questions + results); changes to 
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 3);
   assert.match(text, /3 things need you/);
-  assert.match(text, /1 question · 2 results to check · 1 change to add/);
+  assert.match(text, /1 question · 2 results to check · also 1 change to add/);
 });
 test('toasts: successes leave after 5 s even under the pointer, sit bottom-right and do not centre over the page', () => {
   for (const dir of ['../../../workspace/src/orch_ui/static']) {
@@ -572,9 +665,12 @@ test('Watch live and Stop exist only while a helper is at work (not on a ticket 
   assert.equal(helpers.helperAlive({status:'active'}, {running:false}), false);
   assert.equal(helpers.helperAlive({status:'active'}, null), false);
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
-  // one Stop / Watch live pair, in the helper line; the header keeps only status, title, sentence and the menu
-  assert.equal((ticket.match(/ticketButton\('Stop'/g) || []).length, 1);
-  assert.match(ticket, /function agentBar[\s\S]*className:'btn primary sm'[\s\S]*Watch live[\s\S]*ticketButton\('Stop', 'outline sm'/);
+  // ORCH-70: a running helper has its Watch live in the header and Stop in the ⋯ menu; the helper bar (with its own
+  // pair) shows only when the header does not hold them (a question open, a background run)
+  assert.equal((ticket.match(/ticketButton\((idle \? 'Stop idle helper' : )?'Stop'/g) || []).length, 2);
+  assert.match(ticket, /function ticketHelperMenuItems[\s\S]*ticketButton\(idle \? 'Stop idle helper' : 'Stop', 'menu-item'/);
+  assert.match(ticket, /function ticketWorkingStrip[\s\S]*'data-key':'watch-live'\}, 'Watch live'/);
+  assert.match(ticket, /working && !helperLive \? agentBar\(t\)/);
   assert.doesNotMatch(ticket, /Watch live ↗/);
   assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
 });
@@ -587,7 +683,7 @@ test('the Automation page heading is the add-on menu name, not a second name', (
 test('ticket page: brief heading, Repeats in Properties, plain values with a pencil, no Edit text (UX round 5)', () => {
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(ticket, /h\('h2', \{\}, 'What you asked'\)/);
-  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\)\), addonPropertyRows\(t\)/);
+  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\)\), costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
   assert.match(ticket, /'Set a due date'/);
   assert.match(ticket, /iconEl\('pencil'\)/);
   assert.doesNotMatch(ticket, /'Helper: '/);
@@ -602,4 +698,153 @@ test('home: a long add-on question is one short title in its row', () => {
   const items = [{id:'a', title:'Launch a loyalty card', status:'waiting', questions:[{id:'q1', text:long}]}, {id:'b', title:'T b', status:'waiting', questions:[{id:'q1', text:'Plain?'}]}];
   const row = nodes(context(items, {needsList:() => needs, snapshot:false, button:label => ({tag:'button', children:[label]})}).home(), n => n.attrs?.['data-key'] === 'need-f1')[0];
   assert.ok(row); assert.match(JSON.stringify(row), /Start 'Loyalty card'\?/); assert.doesNotMatch(JSON.stringify(row), /Regular customers/);
+});
+
+test('Settings: "Accept small finished work for me" is one switch that saves at once through reviewer.set (ORCH-77)', async () => {
+  const calls = [];
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null},
+    act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
+  c.window.orch = {toast() {}};
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  c.state.settings = {reviewer_on:false};
+  const text = n => typeof n === 'string' ? n : n.textContent != null ? String(n.textContent) : (n.children || []).map(text).join(' ');
+  const card = c.reviewerCard(c.state.settings), sw = nodes(card, n => n.attrs?.role === 'switch')[0];
+  assert.equal(sw.attrs['aria-label'], 'Accept small finished work for me'); assert.equal(sw.attrs['aria-checked'], false);
+  assert.equal(sw.attrs['data-action'], 'reviewer-set');
+  assert.match(text(card), /Merged bug fixes with green checks and no change to looks, words or rules are marked Done for you\. You see them on Review and can send any back\./);
+  await c.reviewerSwitch();
+  assert.deepEqual(calls, [JSON.stringify(['reviewer.set', {on:true}])]);
+  c.state.settings.reviewer_on = true;
+  assert.equal(nodes(c.reviewerCard(c.state.settings), n => n.attrs?.role === 'switch')[0].attrs['aria-checked'], true);
+  await c.reviewerSwitch();
+  assert.equal(calls[1], JSON.stringify(['reviewer.set', {on:false}]));
+});
+
+// ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.
+test('Settings: "Merge releases without my click" is one switch that saves at once through release_merge.set (ORCH-79)', async () => {
+  const calls = [];
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null},
+    act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
+  c.window.orch = {toast() {}};
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  c.state.settings = {release_merge_on:false};
+  const text = n => typeof n === 'string' ? n : n.textContent != null ? String(n.textContent) : (n.children || []).map(text).join(' ');
+  const card = c.releaseMergeCard(c.state.settings), sw = nodes(card, n => n.attrs?.role === 'switch')[0];
+  assert.equal(sw.attrs['aria-label'], 'Merge releases without my click'); assert.equal(sw.attrs['aria-checked'], false);
+  assert.equal(sw.attrs['data-action'], 'release-merge-set');
+  assert.match(text(card), /A release whose checks are all green goes in by itself with your GitHub login\. You get the short highlights afterwards\. Off: you click Merge on the card\./);
+  await c.releaseMergeSwitch();
+  assert.deepEqual(calls, [JSON.stringify(['release_merge.set', {on:true}])]);
+  c.state.settings.release_merge_on = true;
+  assert.equal(nodes(c.releaseMergeCard(c.state.settings), n => n.attrs?.role === 'switch')[0].attrs['aria-checked'], true);
+  await c.releaseMergeSwitch();
+  assert.equal(calls[1], JSON.stringify(['release_merge.set', {on:false}]));
+});
+
+// ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.
+
+test('tickets list: number before the title, and a search hit is visible without opening its group', () => {
+  const items = [{id:'o', key:'ORCH-63', title:'Open one', status:'open'}];
+  for (let i = 0; i < 7; i++) items.push({id:'d' + i, key:'ORCH-' + (30 + i), title:'Done ' + i, status:'done'});
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null), addEventListener(){}, dataset:{}, classList:{add(){}}});
+  const c = context(items, {h, iconEl:() => null, parentLine:() => null});
+  const titles = table => nodes(table, n => n.tag === 'a' && /^#ticket\//.test(n.attrs?.href || '')).map(a => a.children.map(x => typeof x === 'string' ? x : x.children.join('')).join(''));
+  let table = c.ticketTable(c.filteredTickets());
+  assert.deepEqual(titles(table), ['ORCH-63 Open one'], 'the Done group starts folded (more than 5)');
+  assert.equal(nodes(table, n => n.attrs?.className === 'key')[0].children[0], 'ORCH-63');
+  assert.deepEqual(titles(c.boardCard(items[0])), ['ORCH-63 Open one'], 'board card shows the number');
+  vm.runInContext("ticketSearch = '31'", c);
+  table = c.ticketTable(c.filteredTickets());
+  assert.deepEqual(titles(table), ['ORCH-31 Done 1'], 'the hit inside the folded Done group shows at once');
+  assert.match(JSON.stringify(table), /1 ticket matches “31”/);
+  vm.runInContext("ticketSearch = ''", c);
+  assert.deepEqual(titles(c.ticketTable(c.filteredTickets())), ['ORCH-63 Open one'], 'clearing the search folds Done again');
+});
+test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All clear"; one that runs out soon counts on Home only', () => {
+  const stop = {name:'gh', label:'GitHub', kind:'login', state:'renew', chosen:false, stops:[]};
+  const soon = {name:'claude', label:'Claude Code', kind:'login', state:'soon', ends_at:'2026-11-19T08:00:00Z', chosen:true, stops:[]};
+  const page = logins => { const c = context([], {snapshot:false, state:{logins}, locks:new Set(), button:label => ({tag:'button', children:[label], dataset:{}})}); return {c, text:JSON.stringify(c.home())}; };
+  const stopped = page({items:[stop]});
+  assert.match(stopped.text, /The GitHub login stopped working/);
+  assert.match(stopped.text, /1 thing needs you/);
+  assert.doesNotMatch(stopped.text, /All clear|Nothing needs you/);
+  const runs = page({items:[soon]});
+  assert.match(runs.text, /1 thing needs you/);
+  assert.match(runs.text, /The Claude Code login ends on/);
+  assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
+  assert.match(page({items:[]}).text, /All clear/);
+});
+
+test('ORCH-158: the edit button has a name, and a long note opens whole', () => {
+  const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+  assert.match(ticket, /setAttribute\('aria-label', 'Change ' \+ FIELD_LABEL\[field\]\)/);
+  assert.match(ticket, /Shift\+Enter new line'\s*:\s*'Click to change'/);
+  assert.match(ticket, /input\.rows = 3; else/);
+  assert.match(ticket, /button\('Show all', 'ghost xs'/);
+  assert.match(ticket, /open \? 'Show less' : 'Show all'/);
+});
+
+test('ORCH-185/240: a sub-ticket with its own card anywhere on the board is not also listed inside its parent card', () => {
+  const items = [{id:'p', key:'PIL-2', title:'Parent', status:'open'}, {id:'a', key:'PIL-10', title:'First', parent:'p', status:'open'},
+    {id:'c', key:'PIL-12', title:'Third', parent:'p', status:'waiting'}];
+  const c = context(items);
+  const board = c.board();
+  const openColumn = nodes(board, n => n.attrs?.['data-status'] === 'open')[0];
+  assert.equal(nodes(openColumn, n => n.tag === 'article').length, 2, 'parent and First once each, as cards');
+  assert.equal(nodes(openColumn, n => n.attrs?.className === 'board-part').length, 0, 'Third has its own card in Needs you: not listed twice');
+  assert.match(JSON.stringify(openColumn), /0 of 2 done/, 'the parent card still says how far its sub-tickets are');
+  assert.ok(nodes(board, n => n.tag === 'article' && n.attrs?.['data-ticket'] === 'c').length === 1, 'Third is its own card, once');
+});
+test('ORCH-240: a sub-ticket hidden by a cut-short lane is still listed inside its parent card', () => {
+  const done = [1, 2, 3, 4].map(n => ({id:'d' + n, key:'PIL-' + (20 + n), title:'Done ' + n, status:'done'}));
+  const items = [{id:'p', key:'PIL-2', title:'Parent', status:'open'}, ...done, {id:'k', key:'PIL-30', title:'Kid', parent:'p', status:'done'}];  // Kid is 5th in Done
+  const board = context(items).board();
+  const openColumn = nodes(board, n => n.attrs?.['data-status'] === 'open')[0];
+  const kidCard = nodes(board, n => n.tag === 'article' && n.attrs?.['data-ticket'] === 'k').length;
+  const listed = nodes(openColumn, n => n.attrs?.className === 'board-part');
+  assert.equal(kidCard, 0, 'Kid is cut off in the Done lane (3 shown, then Show more)');
+  assert.equal(listed.length, 1, 'so the parent card still lists it');
+});
+test('ORCH-240: empty Won\'t do and Superseded lanes take no room on the board', () => {
+  const board = context([{id:'a', key:'PIL-1', title:'A', status:'open'}]).board();
+  const lanes = nodes(board, n => n.attrs?.['data-status']).map(n => n.attrs['data-status']);
+  assert.ok(!lanes.includes('dropped') && !lanes.includes('superseded'));
+  assert.ok(lanes.includes('done') && lanes.includes('ready'), 'the other empty lanes stay as drop targets');
+});
+test('home: a ticket in Review that also asks a question counts once, and the title equals the rows the page counts (ORCH-184)', () => {
+  const items = [{id:'a', title:'T a', status:'review'}, {id:'b', title:'T b', status:'review'}, {id:'c', title:'T c', status:'waiting'}];
+  const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}, {id:'c1', ticket:'c', title:'Q?', answer:{question:'c1'}}];
+  const c = context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})});
+  const today = c.needsToday();
+  assert.equal(today.count, today.groups.length + today.review.length, 'one question per ticket plus the results shown as result rows');
+  assert.equal(today.count, 4);
+  const page = JSON.stringify(c.home());
+  assert.match(page, /4 things need you/); assert.match(page, /2 questions · 2 results to check/);
+});
+test('ORCH-184: one finish time and one wait time per ticket on every page', () => {
+  const t = {id:'a', status:'done', done_at:'2026-11-15T10:24:00Z', updated_at:'2026-11-17T09:00:00Z', history:[{at:'2026-11-13T08:00:00Z', text:'Status review -> done'}]};
+  assert.equal(helpers.doneAt(t), '2026-11-13T08:00:00Z', 'the history entry wins, like the ticket page');
+  assert.equal(helpers.doneAt({done_at:'x', updated_at:'y'}), 'x');
+  assert.equal(helpers.doneAt({updated_at:'y'}), 'y');
+  const open = {id:'q', updated_at:'2026-11-17T09:00:00Z'};
+  assert.equal(helpers.askedAt(open, [{ticket:'q', since:'2026-11-15T09:00:00Z'}, {ticket:'q', since:'2026-11-16T09:00:00Z'}, {ticket:'z', since:'2026-11-01T00:00:00Z'}]), '2026-11-15T09:00:00.000Z');
+  assert.equal(helpers.askedAt(open, []), open.updated_at);
+  const web = path.join(__dirname, '../src/orch_dashboard/web');
+  for (const f of ['pages/home.js', 'pages/tickets.js', 'pages/ticket.js']) assert.doesNotMatch(fs.readFileSync(path.join(web, f), 'utf8'), /t\.done_at \|\|/, f + ' takes the finish time from DashHelpers.doneAt');
+});
+test('ORCH-184: a line recorded under the computer login names the person, not the login', () => {
+  const st = {login:'lume', people:{me:'Severin', people:['Severin']}};
+  assert.equal(helpers.personName('human:lume', st), 'Severin');
+  assert.equal(helpers.personName('human:Maria', st), 'Maria', 'another person keeps their name');
+  assert.equal(helpers.personName('agent:lume', st), 'lume', 'an agent is never renamed');
+  assert.equal(helpers.personName('human:lume', {login:'lume'}), 'lume', 'nobody picked a name: nothing to show instead');
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+  assert.match(src, /checked by ' \+ ticketActor\(ev\.by\)/);
+});
+
+test('ORCH-158: the shared ticket word for a new ticket is Backlog, not To do', () => {
+  const { ticketState } = require('./kit_state.js');
+  assert.equal(ticketState({status:'open'}).word, 'Backlog');
+  assert.equal(ticketState({status:'ready'}).word, 'To do');
+  assert.equal(ticketState({status:'dropped'}).word, "Won't do");
 });

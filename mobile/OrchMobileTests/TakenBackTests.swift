@@ -90,6 +90,30 @@ final class TakenBackTests: XCTestCase {
         XCTAssertEqual(TakenBackRules.open([q], messages: [try takenBackText(m)]).count, 1)
     }
 
+    /// "Settled in orch": the workspace closes a question answered in orch, or a review round that ended there, with the same
+    /// taken-back text. Both leave every list, the Review stack included.
+    func testSettledInOrchClosesPlainQuestionsAndReviewRounds() throws {
+        let plain = try question("m_tq00000000000001")
+        let json: [String: Any] = ["workspace_name": "Pilatus Workspace", "message": [
+            "schema": "orch.msg/1", "id": "m_rv00000000000001", "from": "ws_pilatus001", "to": "phones", "type": "question",
+            "created_at": "2026-11-15T09:00:00Z", "ticket": "t_7k3f9q",
+            "body": ["question_id": "review-1", "title": "Ticket", "text": "Is this done?", "options": ["accept", "changes"], "review": true]]]
+        let round = try JSONCoding.decoder.decode(Question.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertTrue(round.isReview)
+        XCTAssertEqual(ReviewStackRules.stack(questions: [plain, round], answers: [:]).count, 2)
+        func closing(_ reply: String, _ reason: String) throws -> PhoneMessage {
+            try takenBackText(["schema": "orch.msg/1", "id": "m_tb" + reply.suffix(14), "from": "ws_pilatus001", "to": "phones", "type": "text",
+                               "reply_to": reply, "ticket": "t_7k3f9q", "created_at": "2026-11-15T10:00:00Z",
+                               "body": ["text": "Taken back: \(reason)", "taken_back": ["reason": reason]]])
+        }
+        let msgs = [try closing("m_tq00000000000001", "Answered in orch"), try closing("m_rv00000000000001", "Review finished in orch")]
+        XCTAssertTrue(msgs.allSatisfy { $0.message.body.isTakenBack && $0.message.body.isSilentResult }, "no chat line, no push")
+        XCTAssertEqual(TakenBackRules.closedIds(questions: [plain, round], messages: msgs), [plain.id, round.id])
+        let open = TakenBackRules.open([plain, round], messages: msgs)
+        XCTAssertTrue(open.isEmpty)
+        XCTAssertTrue(ReviewStackRules.stack(questions: open, answers: [:]).isEmpty, "the Review stack is empty")
+    }
+
     /// The relay's `409 taken_back` on a queued answer: the card goes and the relay's own line is kept.
     @MainActor func testRefusedAnswerEventCarriesTheRelayLine() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tb-" + UUID().uuidString)

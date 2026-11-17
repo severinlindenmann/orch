@@ -2185,6 +2185,44 @@ def test_view_folds_automatic_updates_behind_one_row(proj, run, rel):
     assert not any(d["value"].rstrip().endswith("Tasks:") for d in items[1]["detail"])
 
 
+def test_view_names_the_ticket_and_folds_repeated_phone_questions(proj, run, rel):
+    """ORCH-62: "Helper → your phone · Is this done?" twenty times without the ticket: each row names its
+    ticket ("ORCH-1 Write the report: Is this done?")
+    and the same question again is ONE row with "N times"."""
+    from orch import relay_view
+
+    connect(run, rel)
+    tid = json.loads(run("ticket", "new", "Write the report", "--json")[1])["id"]
+    key = json.loads(run("ticket", "show", tid, "--json")[1])["key"]
+    for i in range(3):
+        relay_view.record_sent(
+            proj,
+            {
+                "id": f"m_rev000000000{i}",
+                "to": "phones",
+                "type": "question",
+                "ticket": tid,
+                "created_at": f"2026-11-04T10:0{i}:00Z",
+                "body": {"question_id": f"review-{i}", "title": "Write the report", "text": "Is this done?"},
+            },
+        )
+    relay_view.record_sent(  # an old line without the ticket stays as it was
+        proj,
+        {
+            "id": "m_rev0000000old",
+            "to": "phones",
+            "type": "question",
+            "created_at": "2026-11-03T10:00:00Z",
+            "body": {"question_id": "review-0", "text": "Is this done?"},
+        },
+    )
+    items = json.loads(run("relay", "view", "--json")[1])["blocks"][0]["items"]
+    assert len(items) == 2, items
+    assert f"{key} Write the report: Is this done?" in items[0]["subtitle"]
+    assert items[0]["subtitle"].endswith("3 times")
+    assert "times" not in items[1]["subtitle"] and "Is this done?" in items[1]["subtitle"]
+
+
 def _dry_state(proj):
     """What a preview must leave untouched: outbox files, relay_view records, the tickets."""
     snap = {}
@@ -2417,3 +2455,34 @@ def test_question_times_sent_at_and_answered_at(proj, monkeypatch):
     tickets.answer(proj, tid, "q1", "yes", "human:tester", "phone")
     q = tickets.load(proj, tid)["questions"][0]
     assert q["answered_at"].endswith("Z") and q["answered_at"] >= first and q["via"] == "phone"
+
+
+def test_view_long_rows_end_at_a_word_and_answered_questions_say_answered(proj, run, rel):
+    """ORCH-138: no row is cut mid-word without an ellipsis, and a question the ticket has answered shows
+    "Answered" instead of "Question"."""
+    from orch import net, relay, relay_view, tickets
+
+    connect(run, rel)
+    tid = json.loads(run("ticket", "new", "Write the report", "--json")[1])["id"]
+    t = tickets.load(proj, tid)
+    t["questions"] = [{"id": "q1", "text": "Is this done?", "answer": "yes"}]
+    tickets.save(proj, t)
+    net.write_json(relay._asked_path(proj), {"m_ans000000001": {"ticket": tid, "question_id": "q1"}}, True)
+    words = "Replace a key opens the hidden key field at once and shows what to do next. " * 3
+    for mid, qtext in (("m_ans000000001", "Is this done?"), ("m_ans000000002", words)):
+        relay_view.record_sent(
+            proj,
+            {
+                "id": mid,
+                "to": "phones",
+                "type": "question",
+                "ticket": tid,
+                "created_at": "2026-11-04T10:00:00Z" if mid.endswith("1") else "2026-11-04T10:05:00Z",
+                "body": {"question_id": "q1" if mid.endswith("1") else "q2", "title": "T", "text": qtext},
+            },
+        )
+    items = json.loads(run("relay", "view", "--json")[1])["blocks"][0]["items"]
+    by_text = {("Is this done?" in i["subtitle"]): i for i in items}
+    assert by_text[True]["chips"] == [{"label": "Answered"}]
+    assert by_text[False]["chips"] == [{"label": "Question"}]  # asked, no answer yet
+    assert by_text[False]["subtitle"].endswith("…") and not by_text[False]["subtitle"].endswith("a…")

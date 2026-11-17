@@ -1,6 +1,8 @@
 import json
 import os
 import time
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import add_ticket
@@ -52,15 +54,20 @@ def test_repeat_sets_ext_and_off(ws, capsys):
         == 0
     )
     t = json.loads((ws / ".orch/tickets/t_rep00002.json").read_text())
-    assert t["ext"]["automation"] == {
+    a = t["ext"]["automation"]
+    nxt = datetime.fromisoformat(a.pop("next_run"))  # the next planned run: read by core's health checks
+    assert a == {
         "recurring": True,
         "cron": "0 8 * * 1",
         "tz": "Europe/Zurich",
         "agent": "codex",
     }
+    local = nxt.astimezone(ZoneInfo("Europe/Zurich"))
+    assert (local.weekday(), local.hour, local.minute) == (0, 8, 0) and nxt > datetime.now(UTC)
     assert main(["--dir", str(ws), "repeat", "t_rep00002", "--off"]) == 0
     t = json.loads((ws / ".orch/tickets/t_rep00002.json").read_text())
     assert t["ext"]["automation"]["recurring"] is False and t["ext"]["automation"]["cron"] == "0 8 * * 1"
+    assert "next_run" not in t["ext"]["automation"]  # a repeat turned off is never late
 
 
 def test_repeat_refuses_plainly(ws, capsys):

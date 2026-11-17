@@ -35,7 +35,7 @@ def test_settings_navigation_and_cards():
     detail = src[src.index("function addonDetailPage(addon)") :][:3500]
     assert "h('summary'" not in detail and "'Details'" not in detail
     assert "Pair a phone" not in src and "phonePairDialog" not in src
-    assert "history.replaceState(null, '', '#settings/' + tab)" in src
+    assert "history.pushState(null, '', '#settings/' + (SETTINGS_TAB_ADDRESS[tab] || tab))" in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
     # folder: plain name + Copy path + quiet full path, no Details toggle
     folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:900]
@@ -68,10 +68,7 @@ def test_repeat_window_offers_plain_choices_and_open_tickets():
         in src
     )
     assert "tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status))" in src
-    assert (
-        "addon = addonName || route().id" in src
-        and "{addon, verb:'repeat', target, value:plan.phrase}" in src
-    )
+    assert "{addon:addonName || route().id, verb:'repeat', target, value:plan.phrase}" in src
     assert "verb:'copy', target:ticket.value" in src
     assert "if (route().kind === 'addon') await loadAddon(route().id)" in src
 

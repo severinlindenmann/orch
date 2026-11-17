@@ -106,6 +106,7 @@ actor MockRelay: RelayAPI {
             all.append(GroupMock.question(at: Self.now()))
         }
         if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }
+        if let state = UserDefaults.standard.string(forKey: "mockToolAlert") { received.append(Self.toolAlert(state)) }
         if UserDefaults.standard.bool(forKey: "mockChatDays") { let d = Self.chatDays(); sentMessages += d.sent; received += d.received }
         let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
@@ -140,6 +141,19 @@ actor MockRelay: RelayAPI {
                                           body: TextBody(text: "Yes, I can answer your phone. The report is ready.")),
                      workspaceName: "Pilatus Workspace"),
     ]
+
+    /// A tool warning (contracts/tool-alert.md) on the Pilatus workspace: `-mockToolAlert soon|renew|works` (screenshots, UI tests).
+    static func toolAlert(_ state: String) -> PhoneMessage {
+        let text = state == "renew"
+            ? "The Claude Code login stopped working. Helpers stopped on 3 tickets and start no new work: DM1-12, DM1-14, DM1-15. Renew it on your computer."
+            : state == "works" ? "The Claude Code login works again."
+            : "The Claude Code login ends on Monday 23 November at 22:24. After that helpers stop on 3 tickets: DM1-12, DM1-14, DM1-15. Renew it on your computer."
+        let alert = ToolAlert(name: "claude", label: "Claude Code login", kind: "login", state: state, endsAt: "2026-11-23T21:24:00Z",
+                              stops: state == "works" ? [] : ["DM1-12", "DM1-14", "DM1-15"], noNewWork: state == "renew")
+        return PhoneMessage(message: TextMessage(id: "m_mocktoolalert01", from: pilatus, to: "phones", type: "text", createdAt: now(), ticket: nil,
+                                                 body: TextBody(text: text, toolAlert: alert)),
+                            workspaceName: "Pilatus Workspace")
+    }
 
     /// A long answer the workspace marked `speak`: shows the memo bubble (screenshots, UI tests): `-mockMemo YES`.
     /// Dated now: Chat shows only today (older days live in History).

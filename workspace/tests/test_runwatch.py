@@ -188,3 +188,174 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
     data = json.loads(out)
     assert data["lines"] == ["two", "three"] and data["signal"] == "working"
     assert all(a[0] == "capture-pane" for a in calls)  # nothing is typed into the session
+
+
+@pytest.mark.parametrize(
+    "sig, waits, idle, want",
+    [
+        ("none", [], None, None),
+        ("ended", [], None, None),
+        ("working", [], None, ("working", "Working", "")),
+        ("working", [{"kind": "command", "label": "pytest", "what": "pytest (running 1 min)"}], None,
+         ("working", "Working", "Running pytest")),
+        ("starting", [], None, ("starting", "Starting", "")),
+        ("waiting", [{"kind": "person", "what": "an answer from the person", "ref": "q1"}], 60,
+         ("you", "Waits for you", "Your answer")),
+        ("waiting", [{"kind": "person", "what": "the person's OK on the screen"}], None,
+         ("you", "Waits for you", "Your OK on the screen")),
+        ("waiting", [{"kind": "person", "what": "x", "ref": "q1"}, {"kind": "person", "what": "y"}], None,
+         ("you", "Waits for you", "Your answer and your OK on the screen")),
+        ("waiting", [{"kind": "command", "label": "pr-green.sh", "seconds": 360, "what": "x"}], 60,
+         ("waiting", "On hold", "Waiting for pr-green.sh · 6 min")),
+        ("waiting", [{"kind": "command", "label": "the pull request checks", "seconds": 1080, "what": "x"}],
+         60,
+         ("waiting", "On hold", "Waiting for the pull request checks · 18 min")),
+        ("idle", [], 300, ("idle", "Idle", "Nothing running for 5 min")),
+        ("idle", [], runwatch.STUCK_MINUTES * 60, ("stuck", "Stuck", "Nothing running for 20 min")),
+        ("stale", [], None, ("stuck", "Stuck", "No update for a while")),
+    ],
+)  # fmt: skip
+def test_helper_state_is_one_word_per_signal(sig, waits, idle, want):
+    got = runwatch.helper_state(sig, waits, idle)
+    assert (got if got is None else (got["state"], got["word"], got["detail"])) == want
+
+
+def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run, monkeypatch, child):
+    tid = new_ticket()
+    run("ask", tid, "Which colour?", "--option", "red", "--option", "blue", "--by", "agent:helper")
+    _live(proj, tid, "idle", child)
+    monkeypatch.setattr(runwatch, "_table", lambda: [])
+    data = json.loads(run("run", "status", tid, "--json")[1])
+    assert data["helper"] == {"state": "you", "word": "Waits for you", "detail": "Your answer"}
+    last = data["last_activity"]
+    assert last["at"].endswith("Z") and last["seconds"] >= 0 and last["text"]
+    rows = json.loads(run("run", "list", "--json")[1])["runs"]
+    assert rows[0]["helper"]["word"] == "Waits for you"  # orch run list says the same
+    data = json.loads(run("run", "status", new_ticket("B"), "--json")[1])
+    assert data["helper"] is None and data["last_activity"] is None
+
+
+def test_label_names_the_pull_request_wait_in_plain_words():
+    assert runwatch.label("orch ref wait ORCH-46 --merge") == "the pull request checks"
+    assert runwatch.label("/opt/bin/orch github wait merge --for a/b#1") == "the GitHub merge limit"
+    assert runwatch.label("orch ticket show x") == "orch"
+
+
+ORCH = "/u/.local/share/uv/tools/orch-workspace/bin/python /u/.local/bin/orch"
+SHELL = "/bin/zsh -c source /h/.claude/shell-snapshots/s.sh && eval 'x'"
+
+
+@pytest.mark.parametrize(
+    "cmd,want",
+    [
+        (f"{ORCH} ref wait t_abc --merge", True),
+        (f"{ORCH} github wait merge --for owner/repo#12", True),
+        ("python -m orch --json ref wait ORCH-1", True),
+        (f"{ORCH} ref add t_abc https://x", False),
+        (f"{ORCH} run start t_abc", False),
+        ("uv run python -m pytest -q", False),
+        ("bash /x/pr-green.sh 12 owner/repo", False),  # a hand-made script may do anything: it counts
+    ],
+)
+def test_is_check_wait_knows_only_orchs_own_check_waits(cmd, want):
+    assert runwatch.is_check_wait(cmd) is want
+
+
+def _waiter_table(agent, *inner):
+    """An agent with one tool shell per inner command (pids from agent*10)."""
+    rows = [
+        (agent, 1, 900, "claude --resume abc"),
+        (agent * 10 + 99, agent, 800, "npm exec @playwright/mcp@latest"),
+    ]
+    for i, cmd in enumerate(inner):
+        sh = agent * 10 + i
+        rows += [(sh, agent, 300, SHELL), (agent * 100 + i, sh, 299, cmd)]
+    return rows
+
+
+def test_only_waits_for_checks_needs_every_command_to_be_a_check_wait():
+    wait = f"{ORCH} ref wait t_abc --merge"
+    assert runwatch.only_waits_for_checks(7, _waiter_table(7, wait)) is True
+    assert runwatch.only_waits_for_checks(7, _waiter_table(7, wait, "uv run pytest")) is False
+    assert runwatch.only_waits_for_checks(7, _waiter_table(7)) is False  # nothing running: plain idle
+    assert runwatch.only_waits_for_checks(7, TABLE) is False
+
+
+def test_helpers_that_only_wait_for_checks_leave_their_slot_free(proj, new_ticket, monkeypatch):
+    """ORCH-148: 7 of 9 slots were held by helpers idle at their prompt while `orch ref wait` ran for them,
+    with tickets in line and the machine nearly idle. Such a helper no longer counts toward the limit; a
+    working one, an idle one with nothing running and one running real work still do,
+    under the hard ceiling."""
+    from orch import config, runs_live
+
+    wait = f"{ORCH} ref wait t_abc --merge"
+    table = (
+        _waiter_table(11, wait)  # idle, only waits for checks: free
+        + _waiter_table(12, f"{ORCH} github wait merge --for o/r#1")  # idle, waits for the write limit: free
+        + _waiter_table(13, wait)  # working while a wait runs: counts
+        + _waiter_table(14, wait, "uv run pytest")  # idle with tests running too: counts
+        + _waiter_table(15)  # idle, nothing running: counts
+    )
+    monkeypatch.setattr(runwatch, "_table", lambda: table)
+    procs_ = [subprocess.Popen(["sleep", "120"]) for _ in range(5)]
+    try:
+        states = {11: "idle", 12: "idle", 13: "working", 14: "idle", 15: "idle"}
+        ids = {}
+        for agent, state in states.items():
+            tid = new_ticket(f"T{agent}")
+            ids[agent] = tid
+            rec = _live(proj, tid, state, procs_[agent - 11].pid, agent_pid=agent)
+            rec["run"] = f"r_test{agent:04d}"
+            runs._write(proj, rec)
+        counted = {r["ticket"] for r in runs_live.live_alive(proj)}
+        assert counted == {ids[13], ids[14], ids[15]}
+        config.set_live_max(proj, "4")
+        assert runs_live._full(proj) is None  # 3 of 4 slots used: the next ticket starts instead of waiting
+        config.set_live_max(proj, "3")
+        assert runs_live._full(proj) == 3
+        config.set_live_max(proj, "2")
+        assert runs_live._full(proj) == 2
+        monkeypatch.setattr(runs_live, "HARD_EXTRA", 0)  # the ceiling still holds waiters: 5 open >= 4 + 0
+        config.set_live_max(proj, "4")
+        assert runs_live._full(proj) == 4
+    finally:
+        for p in procs_:
+            p.kill()
+            p.wait()
+
+
+def test_the_idle_close_never_kills_a_wait_for_checks(proj, new_ticket, monkeypatch):
+    """ORCH-221: six helpers idle at their prompt while `orch ref wait --merge` ran for them in the
+    background (CI took 30-50 min plus re-runs) were closed after the idle hour; the close killed the wait,
+    so their green pull requests stayed unmerged and nobody was told. A session running a wait on checks
+    stays open; one with nothing running, or only real work, still closes after the limit."""
+    from orch import runs_live
+
+    wait = f"{ORCH} ref wait t_abc --merge"
+    table = (
+        _waiter_table(21, wait)  # idle, only waits for checks: stays
+        + _waiter_table(22, wait, "uv run pytest")  # a wait and tests: stays (the wait would die too)
+        + _waiter_table(23, f"{ORCH} github wait merge --for o/r#1")  # write-limit wait before a merge: stays
+        + _waiter_table(24)  # idle, nothing running: closes
+        + _waiter_table(25, "uv run pytest")  # no wait on checks: closes as before
+    )
+    monkeypatch.setattr(runwatch, "_table", lambda: table)
+    monkeypatch.setattr(runs_live, "_close", lambda root, rec, interrupt: None)
+    monkeypatch.setattr(runs_live, "start_waiting", lambda root: None)
+    monkeypatch.setenv("ORCH_RUN_IDLE_SECONDS", "3600")
+    assert runwatch.runs_check_wait(22, table) is True
+    assert runwatch.runs_check_wait(25, table) is False
+    procs_ = [subprocess.Popen(["sleep", "120"]) for _ in range(5)]
+    try:
+        ids = {}
+        for agent in range(21, 26):
+            tid = new_ticket(f"T{agent}")
+            ids[agent] = tid
+            rec = _live(proj, tid, "idle", procs_[agent - 21].pid, since=_since(2 * 3600), agent_pid=agent)
+            rec["run"] = f"r_test{agent:04d}"
+            runs._write(proj, rec)
+        assert sorted(runs_live.cleanup(proj)) == sorted([ids[24], ids[25]])
+    finally:
+        for p in procs_:
+            p.kill()
+            p.wait()

@@ -16,7 +16,7 @@ def test_long_or_multiline_text_gets_a_placeholder_title_and_the_flag(proj):
     assert t["title"] == "Evaluate the AI inventory prompts" and t["title_auto"] is True
     assert tickets.load(proj, t["id"])["title_auto"] is True
     assert tickets.create_from_input(proj, "one\ntwo", "human:t")["title_auto"] is True
-    assert tickets.create_from_input(proj, "x" * 200, "human:t")["title"] == "x" * 80
+    assert tickets.create_from_input(proj, "x" * 200, "human:t")["title"] == "x" * 79 + "…"
     short = tickets.create_from_input(proj, "Fix the login page", "human:t")
     assert short["title"] == "Fix the login page" and "title_auto" not in short
     assert tickets.create_from_input(proj, "  \n ", "human:t")["title"] == "New ticket"
@@ -205,3 +205,62 @@ def test_long_note_on_an_add_on_ticket_gets_no_plan_line(proj):
     t["ext"] = {"factory": {"role": "order"}}
     prompt = runs.fresh_prompt(t, [], proj)
     assert "write a plan, split it into tasks" not in prompt and "word word word" in prompt
+
+
+def test_a_long_first_line_is_cut_at_a_whole_word_never_after_e_g(proj):
+    """ORCH-62: 'let me add like a "Release" Tag ... and then for e.g.' was the title: a cut at 80 characters
+    that ended on an abbreviation and read like a sentence.
+    Now: a whole word, no trailing small word, and "…"."""
+    text = (
+        'let me add like a "Release" Tag to the properties of a ticket and then for e.g. on the ticket page '
+        "group them also by release tags"
+    )
+    title = tickets.create_from_input(proj, text, "human:t")["title"]
+    assert title == 'let me add like a "Release" Tag to the properties of a ticket…'
+    assert len(tickets.cut_title("word " * 40)) <= tickets.PLACEHOLDER_TITLE
+    assert tickets.cut_title("Use short names, i.e. " + "y" * 90, 30).endswith("names…")
+    assert tickets.cut_title("Fix the login page") == "Fix the login page"
+
+
+def test_tidy_stores_the_helpers_estimate_once(proj):
+    """ORCH-189: the first run estimates helper time and cost while it tidies; shown on the ticket."""
+    t = tickets.create(proj, "fix login", "human:t")
+    assert "--estimate-minutes" in runs.fresh_prompt(t, [], proj)
+    t = tickets.tidy(
+        proj, t["id"], "Fix the login page", "agent:claude", estimate={"minutes": 95, "cost": 3.456}
+    )
+    assert {k: t["estimate"][k] for k in ("minutes", "cost", "by")} == {
+        "minutes": 95,
+        "cost": 3.46,
+        "by": "agent:claude",
+    }
+    assert any(h["text"] == "Estimate: about 1 h 35 min · $3.46" for h in t["history"])
+    assert tickets.estimate_words({"minutes": 40}) == "about 40 min"
+    assert tickets.estimate_words({"cost": 0}) == "about $0.00"
+    assert tickets.estimate_words(None) == "" and tickets.estimate_words({"minutes": "x"}) == ""
+    for bad in ({"minutes": 0}, {"minutes": 2.5}, {"cost": -1}, {"cost": True}):
+        other = tickets.create(proj, "other", "human:t")
+        with pytest.raises(Refused):
+            tickets.tidy(proj, other["id"], "Other", "agent:claude", estimate=bad)
+    plain = tickets.create(proj, "no estimate", "human:t")
+    assert "estimate" not in tickets.tidy(proj, plain["id"], "No estimate", "agent:claude")
+
+
+def test_tidy_cli_takes_the_estimate(proj, capsys):
+    from orch import cli
+
+    t = tickets.create(proj, "fix login", "human:t")
+    cli.main(
+        [
+            "ticket",
+            "tidy",
+            t["id"],
+            "Fix login",
+            "--estimate-minutes",
+            "30",
+            "--estimate-cost",
+            "1.5",
+            "--json",
+        ]
+    )
+    assert tickets.load(proj, t["id"])["estimate"]["minutes"] == 30

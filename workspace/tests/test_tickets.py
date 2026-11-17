@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -95,6 +96,34 @@ def test_status_flow_and_history(proj, run, new_ticket, validate):
     assert t["status"] == "done" and len(t["history"]) == 3
     with pytest.raises(SystemExit):
         run("ticket", "status", tid, "nonsense")
+
+
+def test_superseded_by_lives_only_on_a_dropped_ticket(proj, run, new_ticket, validate):
+    old, new = new_ticket(), new_ticket()
+    key = read(proj, new).get("key") or new
+    assert run("ticket", "status", old, "open", "--superseded-by", new)[0] == 2  # only with dropped
+    assert run("ticket", "status", old, "dropped", "--superseded-by", old)[0] == 2  # not itself
+    assert run("ticket", "status", old, "dropped", "--superseded-by", "t_nothere1")[0] == 2
+    code, out, _ = run("ticket", "status", old, "dropped", "--superseded-by", key)
+    assert code == 0 and "Superseded" in out
+    t = read(proj, old)
+    validate(t)
+    assert t["status"] == "dropped" and t["superseded_by"] == new
+    assert "Superseded by" in json.dumps(t["history"])
+    assert "Replaced by:" in run("ticket", "show", old)[1]
+    rev = t["revision"]
+    assert run("ticket", "patch", old, "--if-revision", str(rev), '{"status": "open"}')[0] == 0
+    assert "superseded_by" not in read(proj, old)  # any other status clears it
+    rev += 1
+    patch = json.dumps({"status": "dropped", "superseded_by": new})
+    assert run("ticket", "patch", old, "--if-revision", str(rev), patch)[0] == 0
+    assert read(proj, old)["superseded_by"] == new
+    assert run("ticket", "patch", new, "--if-revision", "1", json.dumps({"superseded_by": old}))[0] == 2
+    rev += 1
+    assert run("ticket", "patch", old, "--if-revision", str(rev), '{"superseded_by": null}')[0] == 0
+    t = read(proj, old)
+    assert t["status"] == "dropped" and "superseded_by" not in t
+    assert tickets.status_word(t) == "Won't do"
 
 
 def test_log_actor(proj, run, new_ticket, monkeypatch):
@@ -333,7 +362,7 @@ def test_new_with_bad_ext_makes_no_ticket(proj, run, bad):
         ("Patched owner, status (status open -> active)", "Changed the owner and status (now Working)"),
         ("Status open -> done", "Moved to Done"),
         ("Status done -> open", "Moved to Backlog"),
-        ("Added check c1", "Added a step"),
+        ("Added check c1", "Added a task"),
         ("Check c1 done", "Finished a task"),
         ("Set ext.focus", "Updated Focus settings"),
         ("Set ext.my-addon", "Updated My addon settings"),
@@ -348,7 +377,7 @@ def test_history_line_is_plain_words(stored, shown):
 
 def test_history_line_names_the_task():
     checks = [{"id": "c1", "text": "Write the test"}]
-    assert tickets.history_line("Added check c1", checks) == "Added a step: Write the test"
+    assert tickets.history_line("Added check c1", checks) == "Added a task: Write the test"
     assert tickets.history_line("Check c1 done", checks) == "Finished a task: Write the test"
     assert tickets.history_line("Check c9 done", checks) == "Finished a task"
 
@@ -357,7 +386,7 @@ def test_cli_shows_task_text_in_history_but_stores_machine_text(proj, run, new_t
     tid = new_ticket()
     run("check", "add", tid, "Write the test")
     out = run("ticket", "show", tid)[1]
-    assert "Added a step: Write the test" in out
+    assert "Added a task: Write the test" in out
     assert read(proj, tid)["history"][-1]["text"] == "Added check c1"
 
 
@@ -587,6 +616,44 @@ def test_an_agent_cannot_reopen_a_closed_ticket_a_person_can(proj, new_ticket, m
     assert tickets.check_add(proj, tid, "more work", "agent:claude")[1]["id"] == "c1"  # open again: allowed
 
 
+def test_an_active_addon_keeps_up_a_done_ticket_with_its_own_data(proj, new_ticket, monkeypatch):
+    """A repeat survives Done (#194): the add-on that owns a ticket's ext block (agent:<add-on>) still records
+    its last run, writes its history line and opens the ticket again for the next run. A helper, the add-on
+    from inside a helper run, an add-on that is off, a dropped ticket or a ticket without its data: no."""
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {"rep": {}})
+    msg = "This ticket is closed, so the agent can't change it."
+    rep = new_ticket()
+    tickets.ext_set(proj, rep, "rep", '{"every": "15 min"}', "human:t")
+    tickets.set_status(proj, rep, "done", "human:t")
+    tickets.ext_set(proj, rep, "rep", '{"last_run": "2026-11-16T19:30:00Z"}', "agent:rep")
+    tickets.log(proj, rep, "Opened again for the next run of this repeat.", "agent:rep")
+    assert tickets.load(proj, rep)["ext"]["rep"] == {"every": "15 min", "last_run": "2026-11-16T19:30:00Z"}
+    for actor in ("agent:claude", "agent:other"):  # a helper or another add-on still cannot touch it
+        with pytest.raises(Refused, match=msg):
+            tickets.ext_set(proj, rep, "rep", '{"last_run": "x"}', actor)
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # a helper run cannot pass for the add-on
+    with pytest.raises(Refused, match=msg):
+        tickets.set_status(proj, rep, "open", "agent:rep")
+    monkeypatch.delenv("ORCH_AGENT")
+    monkeypatch.setattr(addons, "active", lambda root: {})  # the add-on is off here
+    with pytest.raises(Refused, match=msg):
+        tickets.set_status(proj, rep, "open", "agent:rep")
+    monkeypatch.setattr(addons, "active", lambda root: {"rep": {}})
+    assert tickets.set_status(proj, rep, "open", "agent:rep")["status"] == "open"
+
+    plain = new_ticket()  # none of its data: closed stays closed for the add-on too
+    tickets.set_status(proj, plain, "done", "human:t")
+    with pytest.raises(Refused, match=msg):
+        tickets.set_status(proj, plain, "open", "agent:rep")
+    off = new_ticket()  # a dropped ticket is not planned any more
+    tickets.ext_set(proj, off, "rep", '{"every": "15 min"}', "human:t")
+    tickets.set_status(proj, off, "dropped", "human:t")
+    with pytest.raises(Refused, match=msg):
+        tickets.set_status(proj, off, "open", "agent:rep")
+
+
 def test_closed_without_a_live_run_or_from_inside_its_own_run_stops_nothing(
     proj, new_ticket, stopped, monkeypatch, outside_pid
 ):
@@ -744,3 +811,50 @@ def test_every_apply_op_call_names_its_actor():
             if name == "apply_op" and not any(k.arg == "by" for k in n.keywords):
                 missing.append(f"{f.relative_to(repo)}:{n.lineno}")
     assert not missing, f"apply_op without by=: {missing}"
+
+
+def test_proof_state_reworded_done_when_matches_task_text_loosely():
+    done_when = "With 20 queued tickets and no limit set, helpers start in steps. Usage belongs elsewhere."
+    c = _c("c1")
+    c["text"] = "Add a test: 20 queued tickets, no limit set, helpers start in steps"
+    ps = tickets.proof_state(_t([c], done_when=done_when))
+    assert ps["uncovered"] == ["Usage belongs elsewhere."]
+
+
+def test_orch185_note_edit_history_carries_old_and_new_text(proj, new_ticket):
+    """ORCH-185: Activity can show the old and new note; the label still says "Changed the note"."""
+    tid = new_ticket("Edit me")
+    tickets.edit(proj, tid, None, "human:t", {"note": "first words"})
+    tickets.edit(proj, tid, None, "human:t", {"note": "second words " * 30})
+    lines = [h["text"] for h in read(proj, tid)["history"] if h["text"].startswith("Edited note")]
+    assert lines[0] == "Edited note (was: (empty) | now: first words)"
+    assert lines[1].startswith("Edited note (was: first words | now: second words")
+    assert lines[1].endswith("…)") and len(lines[1]) < 500
+    assert tickets.history_line(lines[0]) == "Changed the note"
+    assert tickets.history_line("Edited note") == "Changed the note"
+
+
+def test_history_line_never_shows_a_task_id():
+    """ORCH-240: Reopened / Renamed / Linked / Removed lines name the task, never 'c1'."""
+    checks = [{"id": "c1", "text": "Write the test"}]
+    for stored in (
+        "Reopened c1",
+        "Reopened c1 (old evidence: note)",
+        "Renamed c1 (was: a | now: b)",
+        "Linked c1 to Done when",
+        "Removed step c2 'Old one' (was done; evidence: note)",
+    ):
+        shown = tickets.history_line(stored, checks)
+        assert not re.search(r"\bc\d+\b", shown), shown
+    assert tickets.history_line("Removed step c2 'Old one' (was open)", checks).endswith("Old one")
+    assert tickets.history_line("Title changed (was: a | now: b)") == "Changed the title"
+
+
+def test_rename_title_owner_and_task_keep_old_and_new_text(proj, run, new_ticket):
+    """ORCH-240: the Activity can show what changed (was / now)."""
+    tid = new_ticket()
+    run("ticket", "edit", tid, "--owner", "Anna")
+    assert read(proj, tid)["history"][-1]["text"] == "Edited owner (was: (empty) | now: Anna)"
+    run("check", "add", tid, "Write the test")
+    run("check", "edit", tid, "c1", "Write two tests")
+    assert read(proj, tid)["history"][-1]["text"] == "Renamed c1 (was: Write the test | now: Write two tests)"

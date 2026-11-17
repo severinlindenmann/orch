@@ -12,6 +12,7 @@ const TABS = [
 ];
 const kinds = {skill: 'skills', connection: 'connections', key: 'keys'};
 const MARKS = {working: '✓ ', look: '▲ ', new: '◇ ', idle: '', unknown: ''};
+const CANT_TELL = "Can't tell yet";
 const BADGE = {success: 'done', warning: 'attn', info: 'working', '': ''};
 let overview = null, lists = {}, active = 'skills', loading = false;
 
@@ -57,29 +58,33 @@ function showMessage(text) {
   overview = null;
 }
 
-// First day, nothing recorded yet: the same three tiles as the overview, at 0, each saying when it fills.
+// The stat tiles. A number is shown only when it is measured; an unmeasured one says "Not measured yet" (ORCH-72).
+function metric(label, value, small) {
+  const card = node('article', undefined, 'card metric');
+  card.append(node('p', label, 'meta'), value === null ? node('p', 'Not measured yet') : node('strong', value), node('small', small));
+  return card;
+}
+
+function servicesTile(view, small) {
+  const {count, known} = view.tabs.connections;
+  if (known) return metric('Connected services', String(count), small || (count ? 'Used by your helpers' : 'None connected'));
+  // The full list is unknown: the services seen in use are still a true count (one number, ORCH-232); never a false 0.
+  if (count) return metric('Connected services', String(count), 'Used by your helpers · there may be more');
+  return metric('Connected services', null, 'orch can’t see this list yet');
+}
+
+// First day, nothing recorded yet: the same tiles as the overview, each saying when it fills.
 function emptyTiles(view) {
   const note = 'Fills after the first helper run';
-  const cards = [['Times helpers worked', '0'], ['Connected services', String(view.tabs.connections.count)]];
-  return cards.map(([label, value]) => {
-    const card = node('article', undefined, 'card metric');
-    card.append(node('p', label, 'meta'), node('strong', value), node('small', note));
-    return card;
-  });
+  // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139).
+  return [metric('Times helpers worked', null, 'No helper runs are recorded here yet'), servicesTile(view, note)];
 }
 
 function fillMetrics() {
   const first = overview.since && (Date.now() - Date.parse(overview.since)) < 31 * 86400000;
-  const cards = [
-    ['Times helpers worked', String(overview.runs), first ? 'First month of data' : 'In the last 30 days'],
-    ['Connected services', String(overview.tabs.connections.count),
-      overview.tabs.connections.count ? 'Used by your helpers' : 'None connected'],
-  ];
-  byId('metrics').replaceChildren(...cards.map(([label, value, small]) => {
-    const card = node('article', undefined, 'card metric');
-    card.append(node('p', label, 'meta'), node('strong', value), node('small', small));
-    return card;
-  }));
+  byId('metrics').replaceChildren(
+    metric('Times helpers worked', String(overview.runs), first ? 'First month of data' : 'In the last 30 days'),
+    servicesTile(overview));
 }
 
 function fillTrend() {
@@ -109,6 +114,88 @@ function fillBars() {
     bar.append(head, meter);
     bars.append(bar);
   });
+}
+
+const short = (n, d, unit) => `${(n / d).toFixed(1).replace(/\.0$/, "")}${unit}`;
+const fmt = n => n >= 1e6 ? short(n, 1e6, "M") : n >= 1e3 ? short(n, 1e3, "k") : String(n);
+
+// Runs and tokens come from two records: runs without recorded tokens are not "no model use" (ORCH-232).
+function modelsEmptyText(view, runs) {
+  return runs > 0 ? 'Token use isn’t recorded for these runs yet.' : view.text;
+}
+
+function renderModels(view) {
+  const host = byId('models');
+  if (!view || view.error) { host.hidden = true; return; }
+  host.hidden = false;
+  const bars = byId('models-bars'), rows = byId('models-rows');
+  bars.replaceChildren();
+  rows.replaceChildren();
+  rows.hidden = view.empty;
+  if (view.empty) { byId('models-text').textContent = modelsEmptyText(view, overview && overview.runs); return; }
+  byId('models-text').textContent = view.moved_text + '.';
+  const most = Math.max(...view.models.map(m => m.tokens));
+  view.models.forEach((m, index) => {
+    const bar = node('div', undefined, index ? 'bar-row secondary' : 'bar-row');
+    const head = node('div', undefined, 'row between');
+    head.append(node('span', m.label), node('strong', `${fmt(m.tokens)} tokens`));
+    const meter = node('div', undefined, 'progress');
+    meter.setAttribute('aria-label', `${m.label}: ${m.tokens} tokens`);
+    const fill = node('span');
+    fill.style.setProperty('--value', `${Math.round(100 * m.tokens / most)}%`);
+    meter.append(fill);
+    bar.append(head, meter);
+    bars.append(bar);
+  });
+  for (const t of view.tickets) {
+    // one line per ticket: the title is cut with an ellipsis, the tokens stay right-aligned on the same row
+    const item = node('div', undefined, 'list-row');
+    item.setAttribute('role', 'listitem');
+    const name = node('div', undefined, 'grow');
+    name.append(node('strong', t.key), node('div', t.title, 'meta truncate'));
+    const tokens = node('div', undefined, 'numeric');  // one short line per model, right-aligned
+    const parts = t.parts.length ? t.parts : [{ label: '', tokens: t.tokens }];
+    tokens.append(...parts.map(p => node('div', `${p.label} ${fmt(p.tokens)}`.trim(), 'meta truncate')));
+    item.append(name, tokens);
+    rows.append(item);
+  }
+}
+
+// ORCH-189 manager view: four numbers and one row per person, from the helpers' conversations (not the record,
+// so it shows on a first day too). Cost is at list price.
+function statTile(label, value, small) {
+  const tile = node('article', undefined, 'stat-tile');
+  tile.append(node('span', label, 'stat-label'), node('span', value, 'stat-value'), node('span', small, 'stat-delta'));
+  return tile;
+}
+function renderTeam(team) {
+  const host = byId('team');
+  if (!team) { host.hidden = true; return; }
+  host.hidden = false;
+  byId('team-stats').replaceChildren(
+    statTile('Helper time', team.time, 'Last 30 days'),
+    statTile('Cost', team.cost, 'at list price'),
+    statTile('Tickets finished', String(team.finished), team.each || 'Last 30 days'),
+    statTile('Stuck now', String(team.stuck), team.stuck ? 'See Stuck on the Tickets page' : 'Nothing is stuck'));
+  const rows = byId('people-rows');
+  rows.replaceChildren(...team.people.map(p => {
+    const tr = node('tr');
+    tr.append(node('td', p.name), node('td', String(p.finished), 'numeric'), node('td', String(p.open), 'numeric'),
+      node('td', p.time, 'numeric'), node('td', p.cost, 'numeric'));
+    return tr;
+  }));
+  byId('people').hidden = !team.people.length;
+}
+function renderLost(view) {
+  const note = byId('lost-note');
+  note.hidden = !(view && view.lost);
+  note.textContent = view && view.lost ? view.lost.text : '';
+}
+async function loadModels() {
+  let view = null;
+  try { view = await read('/api/models'); } catch { view = null; }
+  renderTeam(view && !view.error ? view.team : null);
+  renderModels(view);
 }
 
 function stateBadge(row) {
@@ -188,15 +275,17 @@ function renderTabs() {
 }
 
 function renderServices() {
-  const count = overview.tabs.connections.count;
-  byId('services-title').textContent = `Connected services · ${count}`;
+  const {count, known} = overview.tabs.connections;
+  byId('services-title').textContent = known || count ? `Connected services · ${count}` : 'Connected services';
   const box = byId('services');
   const answer = lists.connections;
-  if (!count) { box.textContent = 'No connected services are recorded.'; return; }
+  if (!count) { box.textContent = known ? 'No connected services are recorded.' : 'Not measured yet.'; return; }
   if (!answer) { box.textContent = `${plural(count, 'connected service')} recorded.`; return; }
   box.replaceChildren(...answer.rows.map(row => {
     const line = node('p');
-    line.append(node('strong', row.name), document.createTextNode(` · ${row.state.text} · ${row.allowed}`));
+    // Only what is known: "Can't tell yet" twice on one line says nothing (ORCH-232).
+    const known = [row.state && row.state.text, row.allowed].filter(text => text && text !== CANT_TELL);
+    line.append(node('strong', row.name), document.createTextNode(known.map(text => ` · ${text}`).join('')));
     return line;
   }));
 }
@@ -267,7 +356,9 @@ async function refresh() {
     const answer = await read('/api/overview');
     if (answer.error) { showMessage(answer.error); return; }
     overview = answer;
+    renderLost(overview);
     if (overview.first_day) {
+      loadModels();
       showView('empty');
       const grid = node('div', undefined, 'metric-grid');
       grid.append(...emptyTiles(overview));
@@ -277,6 +368,7 @@ async function refresh() {
     if (!await loadList('skills')) return;
     showView('overview');
     renderAll();
+    loadModels();
     for (const tab of ['connections', 'keys']) {
       if (overview.tabs[tab].count && await loadList(tab)) { renderServices(); if (tab === active) renderTable(); }
     }

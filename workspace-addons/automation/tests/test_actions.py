@@ -92,6 +92,21 @@ def test_list_shows_a_paused_repeat_as_off(ws, capsys):
     assert "off" in capsys.readouterr().out
 
 
+def test_list_keeps_a_repeat_whose_ticket_was_accepted(ws):
+    """The list and the scheduler agree: an accepted (done) ticket that repeats still runs, so it is listed;
+    a plain done ticket and a dropped repeat are not (report r-1116-2116-ws)."""
+    rec = {"automation": {"recurring": True, "cron": "*/15 * * * *"}}
+    add_ticket(ws, "t_rec00001", status="done", ext=rec)
+    add_ticket(ws, "t_rec00002", status="dropped", ext=rec)
+    add_ticket(ws, "t_done0001", status="done")
+    from orch_automation.cli import describe
+    from orch_automation.loop import scheduled
+    from orch_automation.orchcli import tickets
+
+    assert [r["ticket"] for r in describe(ws)] == ["t_rec00001"]
+    assert [t["id"] for t in tickets(ws) if scheduled(t)] == ["t_rec00001"]
+
+
 def test_list_says_the_repeat_in_plain_words_with_local_time_and_zone(ws, capsys, set_tz):
     set_tz("Europe/Zurich")
     add_ticket(
