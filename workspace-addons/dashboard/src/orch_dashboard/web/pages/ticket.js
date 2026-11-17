@@ -1175,14 +1175,15 @@ function ticketTalk(host, tid) {
   async function poll() {
     const t = ticketOf(tid), run = state.runs?.[tid];
     if (!t || busy || document.hidden) return;
-    if (!window.DashHelpers.helperAlive(t, run)) { show(false, idle(t)); return; }
+    // Any run on the ticket (also one that is starting or could not start) may have a screen worth seeing; no run, no ask.
+    if (!run?.claim && !window.DashHelpers.helperAlive(t, run)) { show(false, idle(t)); return; }
     if (run?.claim?.mode === 'oneshot') { show(false, 'The helper works in the background; its screen is not shown here.'); return; }
     busy = true;
     try {
       const res = await fetch('/api/term?ticket=' + encodeURIComponent(tid), {cache:'no-store'});
       const snap = res.ok ? await res.json() : null;
       if (snap?.state === 'live') show(true, talkScreenText(snap.screen));
-      else show(false, 'The helper is working; its screen is not available yet.');
+      else show(false, window.DashHelpers.helperAlive(t, run) ? 'The helper is working; its screen is not available yet.' : idle(t));
     } catch (_) { /* the next poll tries again */ }
     finally { busy = false; }
   }
