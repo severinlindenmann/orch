@@ -370,12 +370,30 @@ function phoneList(visible) {
 function list() {
   const visible = filteredTickets();
   const needN = typeof needsYouTotal === 'function' ? needsYouTotal() : 0;
-  const top = [heading('Tickets', 'Every ticket, from To do to Done.', {actions:needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null}), viewToggle()];
+  const pill = needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null;
+  const top = [heading('Tickets', 'Every ticket, from To do to Done.', {actions:fragment(pill, triageButton())}), viewToggle()];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {className:'wide-only', 'data-key':'board-wide'}, board()), window.UI?.shortGroup ? phoneList(visible) : null);
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
     h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
     h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));
+}
+// ORCH-151: one helper goes through every open ticket (orch triage --start); it opens the new Triage ticket.
+const TRIAGE_OPEN = ['open', 'ready', 'active', 'waiting', 'review'];
+function triageButton() {
+  if (snapshot || !tickets().some(t => TRIAGE_OPEN.includes(t.status))) return null;
+  return h('button', {type:'button', className:'btn outline sm', 'data-key':'triage', title:'A helper goes through every open ticket: brings it up to date, groups related ones and closes what is no longer needed.', onclick:startTriage}, iconEl('spark'), 'Triage');
+}
+async function startTriage(e) {
+  if (typeof changeUnavailable === 'function' && changeUnavailable()) return;
+  const btn = e?.currentTarget; if (btn) btn.disabled = true;
+  const known = new Set(tickets().map(t => t.id));
+  const result = await act('triage.start', {});
+  if (btn) btn.disabled = false;
+  if (!result.ok) return window.orch.toast(changeError(result), 'error');
+  window.orch.toast('Triage started: a helper is going through the open tickets', 'ok');
+  const made = tickets().find(t => !known.has(t.id) && String(t.title || '').startsWith('Triage '));
+  if (made) location.hash = href(made.id);
 }
 function ticketNotFound() {
   return fragment(h('section', {className:'not-found', 'data-key':'not-found'}, iconEl('search'), heading("We couldn't find that ticket", 'It may have been dropped or the link is old.'), h('div', {className:'row ticket-not-found'},

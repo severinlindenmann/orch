@@ -610,6 +610,12 @@ def _copies_clean(a):
     return ["copy", "clean", "--json"], [], []
 
 
+def _triage_start(a):
+    """Tickets > Triage: `orch triage --start` opens one Triage ticket with the list and starts a helper on it."""
+    _only(a, ())
+    return ["triage", "--start", "--json"], [], []
+
+
 def _copies_remove_orphaned(a):
     """Remove the copies of a project that is gone or moved (a person's click; changes are saved first when git
     can reach the project, else the copies stay). `ws8` is the 8-character folder name `copies_disk` lists."""
@@ -1055,6 +1061,7 @@ OPS = {
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
+    "triage.start": _triage_start,
     "copies.remove_orphaned": _copies_remove_orphaned,
     "copies.retry": _copies_retry,
     "copies.approve": _copies_approve,

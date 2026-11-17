@@ -1410,6 +1410,15 @@ def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
         build_argv("copies.clean", {"path": "/"})
 
 
+def test_triage_start_is_one_fixed_argv_and_takes_no_arguments():
+    from orch_dashboard.actions import BadRequest, build_argv, needs_session
+
+    assert build_argv("triage.start", {})[:3] == ["triage", "--start", "--json"]
+    assert needs_session("triage.start")  # a person's click only
+    with pytest.raises(BadRequest):
+        build_argv("triage.start", {"ticket": "t_abcdef"})
+
+
 def test_copies_remove_orphaned_takes_one_folder_name_only():
     from orch_dashboard.actions import BadRequest, build_argv
 

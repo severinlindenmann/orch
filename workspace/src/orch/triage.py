@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from orch import devexpert, runs, tickets
+from orch import text as textmod
 from orch.errors import Refused
 
 BY = "agent:triage"
@@ -50,8 +51,13 @@ def _days(ts, at: datetime) -> int | None:
     return None if t is None else max(0, (at - t).days)
 
 
+def _flat(v, n: int = 200) -> str:
+    """Ticket text on one plain line: a title can never pose as a line of the program's own list."""
+    return " ".join(textmod.clean_untrusted(str(v or ""), n * 2).split())[:n]
+
+
 def _name(t: dict) -> str:
-    return str(t.get("key") or t.get("id") or "?")
+    return _flat(t.get("key") or t.get("id") or "?", 40)
 
 
 def _steps(t: dict) -> tuple[int, int]:
@@ -122,7 +128,7 @@ def collect(root: Path, at: datetime | None = None) -> dict:
             {
                 "id": t.get("id"),
                 "key": _name(t),
-                "title": str(t.get("title") or "")[:200],
+                "title": _flat(t.get("title")),
                 "status": t.get("status"),
                 "idle_days": _days(_last_work(t), at),
                 "age_days": _days(t.get("created_at"), at),
@@ -147,7 +153,7 @@ def collect(root: Path, at: datetime | None = None) -> dict:
         w = r["waiting_on"] or {}
         until = _parse(w.get("until")) if w.get("kind") == "time" else None
         if r["status"] == "waiting" and until and until <= at:
-            add("wait_passed", [r["key"]], f"waits until {w.get('until')}, which has passed")
+            add("wait_passed", [r["key"]], f"waits until {_flat(w.get('until'), 40)}, which has passed")
         elif r["status"] != "waiting" and (r["idle_days"] or 0) >= STALE_DAYS:
             add("stale", [r["key"]], f"no change for {r['idle_days']} days")
         if r["parent_closed"]:

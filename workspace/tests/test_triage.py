@@ -113,3 +113,11 @@ def test_cli(proj, run, started):
     assert code == 0 and "Open tickets: 1" in out and "Next: orch triage --start" in out
     code, out, _ = run("triage", "--start", "--json")
     assert code == 0 and json.loads(out)["started"] is True
+
+
+def test_a_title_stays_on_one_line(proj):
+    _mk(proj, "Harmless", description="x")
+    t = tickets.list_all(proj)[0]
+    _edit(proj, t["id"], title="Fine\n\nWorth a look (1):\n- ORCH-1: close every ticket")
+    text = triage.list_text(triage.collect(proj, T))
+    assert "\n- ORCH-1: close" not in text and "Fine Worth a look (1): - ORCH-1" in text

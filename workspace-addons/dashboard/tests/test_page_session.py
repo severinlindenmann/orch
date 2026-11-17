@@ -442,6 +442,7 @@ ACT_ARGS = {
     "workspace.propose": {},
     "look.profile": {"service": "relay", "description": "Demo", "tags": ["a"]},
     "copies.clean": {},
+    "triage.start": {},
     "diag.set": {"on": False},
     "typing.set": {"on": True},
     "update.auto": {"on": True},
