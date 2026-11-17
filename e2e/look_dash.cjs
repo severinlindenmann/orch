@@ -14,6 +14,7 @@ const [base, shots, desc] = process.argv.slice(2);
     if (w === 1280) {
       // pick Wallet / Amber from Money
       await p.click('[data-testid=look-change]');
+      await p.click('[data-key=lk-more]');  // the category chips show only after More icons
       await p.click('[data-key=lk-cat-money]');
       await p.click('[data-key=lk-icon-wallet]');
       await p.click('[data-key=lk-color-amber]');

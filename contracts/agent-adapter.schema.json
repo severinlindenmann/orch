@@ -192,6 +192,11 @@
           "additionalProperties": { "type": "string", "pattern": "^orch work-check --hook [a-z][a-z0-9-]{0,31}$" },
           "description": "Optional. Tool hook event -> `orch work-check --hook <tool>`: one plain line at the start of a turn when files changed and no ticket is active. Added to the per-run hooks file (live) and passed inline by oneshot.settings_args. The command always exits 0."
         },
+        "step_hooks": {
+          "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
+          "additionalProperties": { "type": "string", "pattern": "^orch work-check --hook [a-z][a-z0-9-]{0,31}$" },
+          "description": "Optional. Tool hook event after a tool call -> `orch work-check --hook <tool>`: in a one-step (oneshot) run it says once, in the fixed notice line, that a person's input waits (read it with orch run input). Only in the run's own settings blob (like record_hooks), never in the workspace's settings file. The command always exits 0."
+        },
         "record_hooks": {
           "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
           "additionalProperties": { "type": "string", "pattern": "^orch record hook$" },

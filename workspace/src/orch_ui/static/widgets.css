@@ -384,9 +384,9 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .decision-verdict.ok{background:var(--brand-soft);color:var(--brand)}.decision-verdict.no{background:var(--danger-soft);color:var(--danger)}.decision-verdict.talk{background:var(--warning-soft);color:var(--warning)}
 .decision-by{font-size:13px;line-height:18px;color:var(--text-muted)}
 /* Tiles about twice the old 172x108 (owner 17 Nov: 50-100 percent bigger, no zoom step); a click or Enter opens one large (.review-viewer) */
-.decision-shown{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(288px,100%),344px));gap:var(--s3)}
+.decision-shown{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:var(--s3);width:100%}/* full width: before/after and A/B side by side, each at least 320px (ORCH-294) */
 .decision-shot{position:relative;display:grid;gap:4px;font-size:12px;line-height:16px;color:var(--text-muted);background:none;border:0;padding:0;text-align:left;font-family:inherit;cursor:zoom-in}
-.decision-shot .opt-thumb{height:216px;flex:none}
+.decision-shot .opt-thumb{height:clamp(216px,24vw,360px);flex:none}
 .decision-shot:hover .opt-thumb{border-color:var(--border-strong)}
 .decision-shot:focus-visible{outline:none}.decision-shot:focus-visible .opt-thumb{box-shadow:var(--focus-ring)}
 .decision-open{position:absolute;top:var(--s2);right:var(--s2);display:grid;place-items:center;width:24px;height:24px;border-radius:6px;background:var(--surface);border:1px solid var(--border);color:var(--text-muted)}
@@ -395,6 +395,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .decision-shot.taken .opt-thumb{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
 .decision-shot.dim .opt-thumb{opacity:.45}
 .decision-shot b{color:var(--text)}
+.more-text{display:grid;gap:var(--s1);justify-items:start}.more-text>p{margin:0;overflow-wrap:anywhere}.more-text.clamped>p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .decision-words{display:grid;gap:var(--s2);padding:var(--s3);border-left:2px solid var(--warning);background:var(--surface-2);border-radius:0 var(--radius) var(--radius) 0}
 .decision-words p{margin:0;font-size:14px;line-height:20px}
 .decision-foot{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;font-size:13px;line-height:18px;color:var(--text-muted)}
@@ -942,6 +943,91 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .swipe-preview:has(>.doc) .swipe-expand{top:8px;bottom:auto}
 @media(max-width:720px){.doc-row{flex-wrap:wrap}.doc-row-title{flex-basis:100%}}
 
+/* Live layer (ORCH-338, Focus draft D): one dock under every page, outside the page content so it stays open when the
+   page changes. The page (pages/live-layer.js) sets data-mode on .live-dock and the size in --live-h / --live-w, and
+   body[data-live-layer] plus --live-pad / --live-padr keep the page usable behind it. Modes: bar (only the bar), bottom
+   and right (a panel above the bar or at the right edge), full (the whole window, bar on top), side (a slim edge tab).
+   Panes (1 to 3, ORCH-339) sit side by side in .live-panel, stacked in the right panel; with more than one, the selected
+   pane ([data-on]) has a brand line on top and the others a quiet header whose title selects them. Opening, moving and
+   a new pane ([data-new]) animate; reduced motion is still through the global rule in motion.css. */
+.live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:min(42vw,760px)}
+.live-dock[data-mode=side]{left:auto;right:0;top:50%;bottom:auto;transform:translateY(-50%)}
+.live-dock[data-mode=right]{right:var(--live-w)}
+.live-dock[data-mode=full]{inset:0;z-index:70;flex-direction:column-reverse;background:var(--bg)}
+.live-bar{position:relative;display:flex;gap:var(--s2);align-items:center;min-width:0;min-height:var(--s8);padding:var(--s1) var(--s3);border-top:1px solid var(--border-strong);background:var(--sidebar)}
+.live-dock[data-mode=full] .live-bar{border-top:0;border-bottom:1px solid var(--border)}
+.live-dock[data-mode=side] .live-bar,.live-dock[data-mode=side] .lbar{display:none}
+.live-end{position:relative;display:flex;flex:none;gap:var(--s2);align-items:center}
+.live-home{display:inline-flex;gap:var(--s2);align-items:center;flex:none;min-height:32px;padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text);font:inherit;font-weight:600;text-decoration:none;white-space:nowrap;cursor:pointer}
+.live-home:hover{background:var(--surface-2)}
+.live-bar-sessions{display:flex;flex:1 1 0;gap:var(--s2);align-items:center;min-width:0;overflow:hidden}
+.live-bar .btn{flex:none;white-space:nowrap}
+.live-bar .ic,.live-pane .ic,.live-edge .ic{width:18px;height:18px}
+.live-pop{position:absolute;right:0;bottom:calc(100% + var(--s2));z-index:6;display:grid;gap:var(--s1);width:min(280px,calc(100vw - var(--s5)));padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
+.live-dock[data-mode=full] .live-pop{top:calc(100% + var(--s2));bottom:auto}
+.live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta)}
+.live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.live-opt:hover{background:var(--surface-2)}
+.live-opt[aria-pressed=true]{border-color:var(--brand)}
+.live-panel{position:relative;display:flex;min-width:0;min-height:0;border-top:1px solid var(--border-strong);background:var(--surface)}
+.live-panel[data-mode=bottom]{height:var(--live-h);animation:live-up var(--dur-slow) var(--ease-enter)}
+.live-panel[data-mode=right]{position:fixed;top:var(--topbar-height);right:0;bottom:0;width:var(--live-w);border-top:0;border-left:1px solid var(--border-strong);animation:live-in var(--dur-slow) var(--ease-enter)}
+.live-panel[data-mode=full]{flex:1;border-top:0;animation:orch-dialog var(--dur-settle) var(--ease-enter)}
+.live-pane{display:flex;flex:1 1 0;flex-direction:column;min-width:0;min-height:0}
+.live-pane+.live-pane{border-left:1px solid var(--border-strong)}
+.live-panel[data-mode=right]{flex-direction:column}
+.live-panel[data-mode=right] .live-pane+.live-pane{border-left:0;border-top:1px solid var(--border-strong)}
+.live-panel:not([data-n="1"]) .live-pane[data-on]>.live-ph{box-shadow:inset 0 2px 0 var(--brand)}
+.live-panel:not([data-n="1"]) .live-pane:not([data-on])>.live-ph{background:var(--sidebar)}
+.live-pane[data-new]{animation:live-in var(--dur-base) var(--ease-enter)}
+.live-panel[data-mode=right] .live-pane[data-new]{animation-name:live-up}
+.live-ph{display:flex;gap:var(--s2);align-items:center;min-width:0;min-height:var(--s8);padding:var(--s1) var(--s2) var(--s1) var(--s4);border-bottom:1px solid var(--border)}
+.live-ph .key{flex:none;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.live-pt{flex:1 1 0;min-width:0;overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+button.live-pt{min-height:32px;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;font-weight:600;text-align:left;cursor:pointer}
+button.live-pt:hover{color:var(--brand)}
+.live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
+.live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
+.live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
+.live-grip{position:absolute;z-index:2;background:none;border:0;padding:0;touch-action:none}
+.live-grip::after{content:"";position:absolute;border-radius:2px;background:var(--border-strong);transition:background-color var(--dur-fast) var(--ease-move)}
+.live-grip:hover::after,.live-grip:focus-visible::after,.live-grip[data-drag]::after{background:var(--brand)}
+.live-panel[data-mode=bottom] .live-grip{top:calc(-1 * var(--s2));left:0;right:0;height:var(--s4);cursor:ns-resize}
+.live-panel[data-mode=bottom] .live-grip::after{top:calc(var(--s2) - 2px);left:50%;width:var(--s7);height:4px;transform:translateX(-50%)}
+.live-panel[data-mode=right] .live-grip{top:0;bottom:0;left:calc(-1 * var(--s2));width:var(--s4);cursor:ew-resize}
+.live-panel[data-mode=right] .live-grip::after{left:calc(var(--s2) - 2px);top:50%;width:4px;height:var(--s7);transform:translateY(-50%)}
+.live-panel[data-mode=full] .live-grip{display:none}
+.live-edge{display:flex;flex-direction:column;gap:var(--s2);align-items:center;min-width:var(--s6);min-height:var(--touch);padding:var(--s3) var(--s1);border:1px solid var(--border-strong);border-right:0;border-radius:var(--r1) 0 0 var(--r1);background:var(--surface);color:var(--text);font:inherit;font-weight:600;box-shadow:var(--lift-shadow);cursor:pointer;animation:live-in var(--dur-slow) var(--ease-enter)}
+.live-edge:hover{background:var(--surface-2)}
+.live-dock[data-still] .live-panel,.live-dock[data-still] .live-edge{animation:none}
+.live-edge>span{writing-mode:vertical-rl}
+body[data-live-layer] .shell-body{padding-bottom:var(--live-pad,0)}
+body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
+html:has(>body[data-live-layer=full]){overflow:hidden}
+/* the style guide shows the dock inline */
+.live-dock.live-sample{position:relative;inset:auto;left:auto;right:auto;bottom:auto;top:auto;z-index:auto;transform:none;border:1px solid var(--border);border-radius:var(--r2);overflow:hidden}
+.live-dock.live-sample .live-panel[data-mode=bottom]{height:180px}
+.live-dock.live-sample[data-mode=side]{align-items:flex-end;border:0}
+@keyframes live-up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+@keyframes live-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+@media(max-width:720px){
+  .live-dock{left:0}
+  .live-dock:not([data-mode=full]):not([data-mode=side]){bottom:var(--live-bottom,0)}
+  .live-dock[data-mode=side]{top:auto;bottom:calc(var(--live-bottom,0px) + var(--s4));transform:none}
+  .live-panel[data-mode=bottom]{height:min(var(--live-h),60vh)}
+  .live-bar{padding-inline:var(--s2)}
+  .live-word{display:none}
+}
+/* Glance formats of a doc box (ORCH-329): headline, progress, chips, flow, chart, diff, details */
+.doc-headline{margin:0 0 10px;font-size:20px;line-height:28px;font-weight:600;color:var(--text)}
+.swipe-preview .doc .doc-headline{color:var(--text)}
+.doc-progress{display:grid;gap:4px;margin:0 0 12px}.doc-progress .progress{height:8px}
+.doc-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.doc-flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}
+.doc-box{padding:6px 10px;border-radius:8px;background:var(--info-soft);color:var(--info);font-size:13px;line-height:18px}.doc-arrow{color:var(--text-faint)}
+.doc-chart{display:grid;gap:8px;margin:0 0 12px}.doc-bar{display:grid;grid-template-columns:minmax(64px,120px) 1fr auto;gap:10px;align-items:center;font-size:13px}.doc-bar .progress{height:10px}
+.doc-diff{display:grid;gap:2px;margin:0 0 12px;font-family:var(--font-mono,ui-monospace,monospace);font-size:13px}.doc-line{padding:2px 8px;border-radius:4px}.doc-line.add{background:var(--add-bg)}.doc-line.del{background:var(--del-bg)}
+.doc-details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}.doc-details summary{cursor:pointer;color:var(--text-muted);font-size:13px}.doc-details p{margin:8px 0 0}
 /* ---- Live bar (draft D, ORCH-337): one calm row under every page. Groups with a small label: needs-you chips
    (orange), pinned chips, then quiet counts that open a list with search. It never wraps: data-fold says how far it
    folded (0 every chip, 1 pinned as a count, 2 the counts as one More, 3 symbols and counts, 4 needs you and More).

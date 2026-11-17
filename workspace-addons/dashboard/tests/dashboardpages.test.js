@@ -578,8 +578,8 @@ test('titleTag: the hidden tags show muted only when two visible tickets share a
   assert.equal(c.titleTag(a, [a, b]).children[0], ' [R] [0722]');
   assert.equal(c.titleTag(b, [a, b]).children[0], ' [R] [0811]');
 });
-// Dash 51/28/31: footer line only when the connection is lost; the phone switch hides while on; Ask the helper.
-test('shell: quiet footer, one phone control while on, Ask the helper', () => {
+// Dash 51/28/31: footer line only when the connection is lost; the phone switch hides while on; Chat.
+test('shell: quiet footer, one phone control while on, Chat', () => {
   const on = {settings:{addons:[{name:'relay', active:true, detail:{connected:true}}]}};
   assert.equal(helpers.footerState(on, false), '');
   assert.equal(helpers.footerState({settings:{addons:[{name:'relay', active:true, detail:{connected:false}}]}}, false), 'Not connected');
@@ -587,7 +587,7 @@ test('shell: quiet footer, one phone control while on, Ask the helper', () => {
   const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
   assert.match(web('style.css'), /\.side-foot:has\(#workspace-mode:empty\)\{display:none\}/);
   assert.doesNotMatch(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/, 'the sidebar switch stays while on; the chip is in the top bar');
-  assert.match(web('index.html'), /aria-label="Ask the helper"[^>]*>.*<span class="btn-word-wide">Ask the helper<\/span><\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
+  assert.match(web('index.html'), /aria-label="Chat"[^>]*>.*<span class="btn-word-wide">Chat<\/span><\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
   assert.doesNotMatch(web('app.js'), /tk\?\.key/); // no ticket key in the breadcrumb
 });
 // Report r-1117-1256-ws-2: phone width (390, 320) and 150% zoom. The rules are checked here; e2e/dash_page_health.cjs
@@ -605,7 +605,7 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   assert.match(phoneBlock, /\.topbar>#mm-chip\{display:none\}/);
   assert.doesNotMatch(style, /#open-agent\{display:none\}/);
   assert.match(web('index.html'), /id="report-problem"[^>]*aria-label="Report a problem"/);
-  assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Ask the helper"/);
+  assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Chat"/);
   // the open phone menu is the whole screen, with room for the bottom bar after its last row; any page change closes it
   assert.match(phoneBlock, /\.shell:has\(>\.sidebar\[data-open=true\]\)>div>\.page\{display:none\}/);
   assert.match(phoneBlock, /\.shell>\.sidebar\[data-open=true\]\{padding-bottom:calc\(var\(--touch\)/);

@@ -4,6 +4,8 @@ The host gives every app HOST, PORT, BASE_PATH (/{{slug}}), DATA_DIR (kept acros
 without the /{{slug}} prefix; use relative links in pages (style.css, items), not BASE_PATH: private apps are served under a secret address.
 """
 
+from __future__ import annotations  # `dict | None` hints on Python 3.9 too (a host may run the app with an old python3)
+
 import html
 import os
 import socketserver

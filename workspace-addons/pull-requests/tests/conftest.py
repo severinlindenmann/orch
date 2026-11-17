@@ -23,3 +23,6 @@ def ws(tmp_path, monkeypatch):
     for k in ("ORCH_RUN", "ORCH_AGENT"):
         monkeypatch.delenv(k, raising=False)
     return root
+
+
+from prpage_util import prws  # noqa: F401  (the Pull requests page tests' workspace)
