@@ -1,16 +1,19 @@
 """One pass of the helper watcher (`orch run tend`, ORCH-78): what a person watching the helpers did by hand.
 
-- A live session at its prompt whose ticket is finished (Review, Done, Dropped) or only waits (on a person's
-  answer, a time or another ticket) is ended. Its conversation stays on the ticket, so the answer, the time or
+- Sessions stay open as long as possible, so the tool's prompt cache stays warm (ORCH-149). A live
+  session at its prompt on a ticket that is Done or Dropped is ended after END_FINISHED_MINUTES. One on a
+  ticket in Review or that only waits (on a person's answer, a time or another ticket) is ended early only
+  when the sessions are full (runs_live._crowded); otherwise it stays open until the idle limit
+  (workspace.live_idle_minutes, an hour). Its conversation stays on the ticket, so the answer, the time or
   a person's Continue resumes it, and the slot is free for the next ticket meanwhile. A ticket waiting on
   another ticket is started again here once that one is finished (nothing else promises that wake-up).
   Waiting on something outside (a release, a CI run) is no reason to end: such a helper gets the reminder.
 - A live session idle at its prompt with nothing running for IDLE_MINUTES, on a ticket still being worked on,
   gets one message with what changed since it went quiet (ticket history, its pull request's last look, the
   open steps).
-- When it is still idle RESTART_MINUTES after that message and nothing happened on the ticket, its session is
-  ended and the helper is started fresh from the ticket (at most once per RESTART_EVERY per ticket; after that
-  the idle row in `orch needs` is for a person).
+- When it is still idle near the idle limit (BEFORE_LIMIT ahead of it; the cache is gone by then) and nothing
+  happened on the ticket since that message, its session is ended and the helper is started fresh from the
+  ticket (at most once per RESTART_EVERY per ticket; after that the idle row in `orch needs` is for a person).
 - Tickets waiting in line for a free slot start in priority order (runs_live.start_waiting).
 
 Every action is a line in the ticket's history. Nothing happens while automation is paused (`orch pause`). No
@@ -30,9 +33,11 @@ from orch import brake, history, runs, runs_live, runwatch, stuck, tickets
 BY = "agent:helper-watcher"
 VIA = "watcher"
 IDLE_MINUTES = 20  # idle with nothing running, ticket still Working: one message
-RESTART_MINUTES = 10  # still idle this long after the message, nothing changed: start fresh
-END_WAITING_MINUTES = 5  # quiet this long while the ticket only waits: the session ends
-END_FINISHED_MINUTES = 10  # quiet this long on a finished ticket (runs_live.FINISHED_IDLE_SECONDS)
+RESTART_MINUTES = 10  # at least this long after the message (and idle the full limit), nothing changed: fresh
+END_WAITING_MINUTES = 5  # quiet this long while the ticket only waits and the sessions are full: it ends
+END_FINISHED_MINUTES = 10  # quiet this long on a Done/Dropped ticket, or in Review when full
+BEFORE_LIMIT = 5 * 60  # a stuck helper starts fresh this long before any `orch run` call closes it silently
+GONE = ("done", "dropped")  # nothing is left: no reason to keep the session warm
 RESTART_EVERY = 6 * 3600  # at most one fresh start per ticket in this time
 FINISHED = runs_live.FINISHED
 WAIT_KINDS = ("person", "time", "ticket")  # something wakes these; "external" gets the reminder instead
@@ -122,9 +127,9 @@ def nudge_text(root: Path, t: dict, idle_secs: int | None, since: str | None) ->
         f"running, and {k} is still being worked on.\n"
         + _what_changed(root, t, since)
         + f"\nCarry on with the next open task. If you wait on something, say so (orch wait or orch ask); if "
-        f"you are finished, run orch ticket status {k} done. If nothing happens in {RESTART_MINUTES} "
-        "minutes, "
-        "this session is ended and a fresh one starts from the ticket."
+        f"you are finished, run orch ticket status {k} done. If nothing happens until it has been idle "
+        f"for {runwatch.span(int(runs_live.idle_seconds(root)))}, this session is ended and a fresh one "
+        "starts from the ticket."
     )
 
 
@@ -144,6 +149,8 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
     now = time.time() if now is None else now
     state = _read_state(root)
     table = runwatch._table()
+    limit = runs_live.idle_seconds(root)  # the idle limit: the cache is gone after it
+    crowded = runs_live._crowded(root)
     out = []
     for rec in runs_live.records(root):
         if rec.get("mode") != "live" or runs.state(rec) != "alive" or rec.get("closing"):
@@ -167,12 +174,13 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
             continue
         row = {"ticket": tid, "key": _key(t), "run": rec["run"], "idle_seconds": quiet, "rec": rec, "t": t}
         if t.get("status") in FINISHED:
-            if quiet >= END_FINISHED_MINUTES * 60:
+            early = t.get("status") in GONE or crowded  # Review keeps its warm session unless full
+            if quiet >= (END_FINISHED_MINUTES * 60 if early else limit):
                 out.append({**row, "action": "end", "why": "finished"})
             continue
         kinds = [w["kind"] for w in waits if w.get("kind") in WAIT_KINDS]
         if kinds:
-            if quiet >= END_WAITING_MINUTES * 60:
+            if quiet >= (END_WAITING_MINUTES * 60 if crowded else limit):
                 what = ", ".join(w["what"] for w in waits if w.get("kind") in WAIT_KINDS)
                 out.append({**row, "action": "end", "why": "waiting", "waits": what})
             continue
@@ -190,7 +198,7 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
         if moved:
             out.append({**row, "action": "forget"})  # it did something after the reminder: a new chance
             continue
-        if now - nudged < RESTART_MINUTES * 60 or quiet < RESTART_MINUTES * 60:
+        if now - nudged < RESTART_MINUTES * 60 or quiet < max(limit - BEFORE_LIMIT, RESTART_MINUTES * 60):
             continue
         last = _ts(seen.get("restarted_at"))
         if last is not None and now - last < RESTART_EVERY:

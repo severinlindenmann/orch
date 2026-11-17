@@ -161,15 +161,19 @@ def dispatch(args, root: Path) -> bool:
             files=files,
             about=args.about,
         )
+        if not diag_report.is_kept(made["path"]):
+            raise Refused(
+                f"Report {made['ref']} is NOT kept: it is no longer on this computer. Report again."
+            )
         if args.json:
             print(
                 json.dumps(
-                    {"ref": made["ref"], "path": made["path"], "problems": made["problems"]},
+                    {"ref": made["ref"], "path": made["path"], "problems": made["problems"], "kept": True},
                     ensure_ascii=False,
                 )
             )
         else:
-            print(f"Report {made['ref']}\n{made['path']}")
+            print(f"Report {made['ref']} is kept here.\n{made['path']}")
             if made["problems"]:
                 print("Problems found: " + ", ".join(made["problems"]))
     return True

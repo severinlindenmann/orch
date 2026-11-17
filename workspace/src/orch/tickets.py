@@ -727,7 +727,7 @@ _FIELD_WORDS = {
     "owner": "owner",
     "due": "due date",
     "note": "note",
-    "done_when": "done criteria",
+    "done_when": "Done when line",
     "summary": "summary",
     "status": "status",
     "waiting_on": "wait",
@@ -740,6 +740,13 @@ def _fields_text(raw: str) -> str | None:
         return None  # free text someone logged by hand: shown as written
     words = [_FIELD_WORDS[k] for k in keys]
     return "the " + (", ".join(words[:-1]) + " and " + words[-1] if len(words) > 1 else words[0])
+
+
+def _parent_words(parent: dict) -> str:
+    """The parent in a "Created under ..." line: its key and title (never its internal id)."""
+    title = " ".join(str(parent.get("title") or "").split())
+    title = title[:77] + "..." if len(title) > 80 else title
+    return f"{parent.get('key') or parent['id']}" + (f" {title}" if title else "")
 
 
 def history_line(text: str, checklist: list[dict] | None = None) -> str:
@@ -755,6 +762,13 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     def addon(key: str) -> str:
         return key.replace("-", " ").capitalize()
 
+    if re.fullmatch(r"Created under t_\w+", t):
+        return "Created as a sub-ticket"  # an older line: it holds only the internal id
+    if m := re.fullmatch(r"Recorded a check run for (c\d+)(?: \(exit (\d+)\))?", t):
+        result = "" if m.group(2) is None else " (passed)" if m.group(2) == "0" else " (failed)"
+        return "Ran a check" + task(m.group(1)) + result
+    if m := re.fullmatch(r"Moved (c\d+) after c\d+", t):
+        return "Moved a task" + task(m.group(1))
     if re.fullmatch(r"Asked q\d+, waiting", t):
         return "Asked a question"
     if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
@@ -856,8 +870,10 @@ def create(
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
+    parent_ticket = None
     if parent is not None:
-        load(root, parent)  # the parent must exist (cycles are impossible: it is set only here)
+        # the parent must exist (cycles are impossible: it is set only here)
+        parent_ticket = load(root, parent)
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
@@ -875,7 +891,8 @@ def create(
         "questions": [],
         "history": [],
     }
-    add_history(ticket, by, "Created" + (f" under {parent}" if parent else ""), at=t)
+    under = f" under {_parent_words(parent_ticket)}" if parent_ticket else ""
+    add_history(ticket, by, "Created" + under, at=t)
     if parent is not None:
         ticket["parent"] = parent
     if title_auto:

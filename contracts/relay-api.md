@@ -372,6 +372,7 @@ Work updates (`body.update` on a text, message.schema.json): the relay pushes a 
 `failure` or `stopped` as above (push body = `update.title` + ": " + the first line of the text, max 120 chars); `ack`, `working`
 and `note` are stored and listed (`/v1/phone/messages`, `/v1/phone/updates`) but **never pushed**. A text without `update` is
 pushed as before, except a text with `body.proposal_result`, `body.review_result` or `body.taken_back`, which is never pushed. The filter runs in the relay, not in the sender.
+**Tool warning** (`body.tool_alert`, tool-alert.md, vectors/tool-alert-v1.json): a workspace text to `phones` that warns a tool login, connection or key runs out soon or stopped working. The relay keeps and pushes it like any text without `update`; nothing in the relay changes. Phones show it as a row on the workspace, never as a bubble.
 **Text push budget** (per sending workspace and phone, kept in the relay's memory): at most 1 text push per 10 s and 30 per hour
 window (the window starts with the first push after the last one ended) for each (workspace, phone) pair; a text over the budget is still stored and listed, only its push is skipped.
 Questions are not limited by it. The budget applies after the update-kind filter (quiet kinds never use it up).

@@ -7,7 +7,7 @@ publish and relay are built into orch (no separate package) but are also off unt
 | Add-on | What it does |
 |---|---|
 | automation | Starts your agent at a time, on a repeat, or when the phone or another workspace sends work |
-| focus | A live page for one ticket: watch the agent work, answer, send a message |
+| focus | A live page for one ticket: watch the helper work, answer, send a message |
 | dashboard | One page with every ticket and what needs you |
 | publish (built in) | Share a file or a small app by private link ([publish.md](publish.md)) |
 | relay (built in) | Messages and tasks between workspaces and phones ([relay.md](relay.md)) |

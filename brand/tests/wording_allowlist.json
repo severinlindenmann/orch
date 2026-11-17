@@ -1,21 +1,197 @@
 {
  "relay/web/portal.html": {
-  "Signature": 1
+  "Signature": 1,
+  "agent": 2,
+  "agents": 2
  },
  "workspace-addons/automation/src/orch_automation/cli.py": {
-  "Scheduler": 3
+  "Scheduler": 3,
+  "agent": 7,
+  "agents": 2
+ },
+ "workspace-addons/automation/src/orch_automation/loop.py": {
+  "agent": 6
+ },
+ "workspace-addons/automation/src/orch_automation/orchcli.py": {
+  "agent": 2
+ },
+ "workspace-addons/automation/src/orch_automation/scripts.py": {
+  "agent": 1
  },
  "workspace-addons/dashboard/src/orch_dashboard/actions.py": {
   "Sign": 2,
+  "agent": 5,
+  "agents": 1,
   "signed": 1
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/app.js": {
+  "agent": 1
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/look-icons.js": {
+  "agent": 1
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/home.js": {
+  "agent": 1
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/newticket.js": {
+  "agent": 1
+ },
+ "workspace-addons/factory/src/orch_factory/ask.py": {
+  "Agents": 1
+ },
+ "workspace-addons/factory/src/orch_factory/commands.py": {
+  "Agents": 1,
+  "agent": 3
+ },
+ "workspace-addons/factory/src/orch_factory/flow.py": {
+  "agent": 2
+ },
+ "workspace-addons/factory/src/orch_factory/web/factory.js": {
+  "agent": 18
+ },
+ "workspace-addons/focus/src/orch_focus/adapters/claude.py": {
+  "Agent": 1
+ },
+ "workspace-addons/focus/src/orch_focus/chat.py": {
+  "agent": 1
+ },
+ "workspace-addons/focus/src/orch_focus/cli.py": {
+  "agents": 1
+ },
+ "workspace-addons/focus/src/orch_focus/livecards.py": {
+  "Agent": 1
+ },
+ "workspace-addons/focus/src/orch_focus/server.py": {
+  "Agent": 1,
+  "agent": 1
+ },
+ "workspace-addons/focus/src/orch_focus/view.py": {
+  "agent": 1
+ },
+ "workspace-addons/focus/src/orch_focus/web/areas.js": {
+  "Agents": 1,
+  "agent": 1
+ },
+ "workspace-addons/focus/src/orch_focus/web/live.js": {
+  "agent": 1
+ },
+ "workspace-addons/focus/src/orch_focus/web/ticket.js": {
+  "agent": 1
+ },
+ "workspace-addons/focus/src/orch_focus/web/used.js": {
+  "agent": 1
+ },
+ "workspace-addons/insights/src/orch_insights/lists.py": {
+  "agent": 1
+ },
+ "workspace-addons/insights/src/orch_insights/overview.py": {
+  "agent": 1
+ },
+ "workspace-addons/insights/src/orch_insights/settings.py": {
+  "agents": 1
+ },
+ "workspace-addons/lessons/src/orch_lessons/store.py": {
+  "agent": 1
  },
  "workspace-addons/sync/src/orch_sync/step.py": {
   "Artifact": 1
  },
+ "workspace-addons/sync/src/orch_sync/visibility.py": {
+  "Agent": 1
+ },
+ "workspace/src/orch/adapters.py": {
+  "agent": 6,
+  "agents": 5
+ },
+ "workspace/src/orch/addons.py": {
+  "agents": 1
+ },
+ "workspace/src/orch/chat.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/cli.py": {
+  "agent": 7
+ },
+ "workspace/src/orch/cli_config.py": {
+  "Agents": 1,
+  "agent": 7
+ },
+ "workspace/src/orch/cli_diag.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/cli_leave.py": {
+  "agent": 2
+ },
+ "workspace/src/orch/cli_look.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/cli_review.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/cli_run.py": {
+  "agent": 5
+ },
+ "workspace/src/orch/collect_claude.py": {
+  "Agent": 1
+ },
+ "workspace/src/orch/config.py": {
+  "agent": 4
+ },
+ "workspace/src/orch/doctorpass.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/init.py": {
+  "Agent": 4,
+  "agent": 6
+ },
  "workspace/src/orch/jobs.py": {
   "Job": 1
  },
+ "workspace/src/orch/net.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/nextstep.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/profile_propose.py": {
+  "agent": 1,
+  "agents": 2
+ },
+ "workspace/src/orch/publish.py": {
+  "agent": 1
+ },
  "workspace/src/orch/record.py": {
+  "agent": 10,
+  "agents": 1,
   "proof": 2
+ },
+ "workspace/src/orch/record_hook.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/runs.py": {
+  "agent": 14
+ },
+ "workspace/src/orch/runs_live.py": {
+  "agent": 12
+ },
+ "workspace/src/orch/runwatch.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/secretrun.py": {
+  "agent": 3,
+  "agents": 1
+ },
+ "workspace/src/orch/sharedfolder.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/skillrender.py": {
+  "agent": 1
+ },
+ "workspace/src/orch/tickets.py": {
+  "agent": 7,
+  "agents": 1
+ },
+ "workspace/src/orch/worktrees.py": {
+  "agent": 18
  }
 }

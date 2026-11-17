@@ -21,7 +21,7 @@ ALLOWLIST = Path(__file__).with_name("wording_allowlist.json")
 NEVER = [
     "Request", "Requests", "Job", "Issue", "Todo", "Subtask", "Inbox", "Over to you", "Approval",
     "Sign-off", "Recommended", "Proof", "Artifact", "Scheduler", "Cron", "Schedule", "Bot", "NetBird",
-    "Peer", "Node", "Sign", "Signed", "Signature", "signed", "signature",
+    "Peer", "Node", "Sign", "Signed", "Signature", "signed", "signature", "Agent", "Agents",
 ]  # fmt: skip
 # "Issue" alone is banned; an outside item keeps its tool's own word ("GitHub issue", "Jira Issue"): see wording.md
 TOOLS = ("GitHub", "GitLab", "Jira", "Linear", "Trello")
@@ -36,7 +36,7 @@ WORD = re.compile(
 )
 # lowercase never-words that are only ever the screen word in a sentence; a key-like neighbour (proof-chip,
 # task_proof, proof.js) is code, not text
-LOWER = re.compile(r"(?<![A-Za-z_.-])(proofs?)(?![A-Za-z_-]|\.\w)")
+LOWER = re.compile(r"(?<![A-Za-z_.-])(proofs?|agents?)(?![A-Za-z_:-]|\.\w)")
 # a string with no space made of lowercase key characters is a data key, flag, class or pattern, not text
 KEYLIKE = re.compile(r"[a-z0-9_.:/|\\-]*")
 
@@ -66,6 +66,26 @@ def ui_files():
             if p.is_file() and rel not in SKIP_FILES and rel not in seen:
                 seen.add(rel)
                 yield rel, p
+
+
+MANIFEST_GLOBS = ["workspace-addons/*/src/**/orch-addon.toml", "workspace/src/orch/shipped_addons.json"]
+MANIFEST_TEXT = re.compile(r'(?m)^\s*"?(?:description|label|title|subtitle)"?\s*[=:]\s*"((?:[^"\\\n]|\\.)*)"')
+
+
+def manifest_files():
+    for g in MANIFEST_GLOBS:
+        for p in sorted(ROOT.glob(g)):
+            if p.is_file():
+                yield p.relative_to(ROOT).as_posix(), p
+
+
+def manifest_words() -> list[str]:
+    """Never-words in the shown text of every add-on manifest (description, label, title, subtitle)."""
+    out = []
+    for rel, p in manifest_files():
+        for m in MANIFEST_TEXT.finditer(p.read_text(errors="ignore")):
+            out += [f"{rel}: '{w}' in \"{m.group(1)[:60]}\"" for w in never_words(m.group(1))]
+    return out
 
 
 def py_files():
@@ -172,3 +192,17 @@ def test_lowercase_proof_only_as_a_word():
 def test_confirm_words_replace_the_old_ones():
     assert WORD.findall('"Sign" "Signed. Saved." "Needs your signature" "You have signed this"') == ["Sign", "Signed", "signature", "signed"]
     assert WORD.findall('"Sign in" "Signed out" "signed in as Mia" "Sign-in" "Confirm" "Needs your OK" "design" "assigned"') == []
+
+
+def test_agent_is_a_never_word_the_screen_word_is_helper():
+    assert never_words("Starts agent runs") == ["agent"] and never_words("Your Agent proposes") == ["Agent"]
+    assert never_words("Starts helper runs") == [] and never_words("agent:claude") == []
+
+
+def test_addon_texts_are_word_checked():
+    files = [rel for rel, _ in manifest_files()]
+    assert any(f.endswith("orch-addon.toml") for f in files) and "workspace/src/orch/shipped_addons.json" in files
+    assert not manifest_words(), "words from docs/wording.md 'never use' in add-on texts:\n" + "\n".join(manifest_words())
+    for rel, p in manifest_files():  # also "remote" (the Sync page says another computer or your own storage)
+        for m in MANIFEST_TEXT.finditer(p.read_text(errors="ignore")):
+            assert not re.search(r"\bremote\b", m.group(1), re.I), f"{rel}: 'remote' in add-on text"
