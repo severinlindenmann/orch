@@ -43,7 +43,8 @@ if tool == "launchctl":
     elif verb == "bootstrap":
         d = plistlib.loads(Path(target).read_bytes())
         j = jobs.setdefault(d["Label"], {{}})
-        j.update(loaded=True, running=True, pid=j.get("pid", 5000) + 1)
+        run = bool(d.get("RunAtLoad") or d.get("KeepAlive"))  # like launchd: loading alone starts nothing
+        j.update(loaded=True, running=run, pid=j.get("pid", 5000) + 1)
     elif verb == "bootout":
         jobs.get(label, {{}}).update(loaded=False, running=False)
     elif verb == "kickstart":
@@ -462,3 +463,34 @@ def test_adopt_takes_the_page_id_of_a_found_job_with_capitals(cli, mac, tools, w
     assert rec["adopted"]["entry"] == "ch.Example.Forwarder"
     code, out = jrun(cli, "adopt", "found-000000000000")
     assert code == 2 and "no found service" in out["error"]
+
+
+def test_start_on_a_taken_over_job_without_run_at_load_really_runs_it(cli, mac, tools, ws):
+    # ORCH-371 bug 3: bootstrap only loads such a job; start answered "did not stay running"
+    assert jrun(cli, "adopt", "launchd:com.example.backup")[0] == 0
+    target = f"gui/{os.getuid()}/com.example.backup"
+    tools.clear()
+    code, out = jrun(cli, "start", "backup")
+    assert code == 0 and out["service"]["state"] == "running", out
+    assert ["launchctl", "kickstart", target] in tools.calls()
+
+
+def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
+    # ORCH-371 bug 2: orch starts its pages as `Python -P -m orch_dashboard ...` (macOS framework Python)
+    py = "/opt/homebrew/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+    tools.set(
+        ps=[
+            {
+                "pid": 960,
+                "ppid": 1,
+                "tty": "??",
+                "argv": [py, "-P", "-m", "orch_dashboard", "--dir", str(ws)],
+            },
+            {"pid": 961, "ppid": 1, "tty": "??", "argv": [py, "-P", "-m", "orch_automation", "run"]},
+            {"pid": 962, "ppid": 1, "tty": "??", "argv": [py, "-P", "watcher.py"]},
+        ],
+        lsof={"960": str(ws), "961": str(ws), "962": str(ws)},
+    )
+    found = {i["id"]: i for i in jrun(cli, "found")[1]["found"]}
+    assert "process:960" not in found and "process:961" not in found
+    assert found["process:962"]["name"] == "watcher.py"  # an interpreter shows the script, also as Python
