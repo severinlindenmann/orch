@@ -68,7 +68,8 @@ def test_code_and_key_go_on_stdin_only(ws, monkeypatch, op, words):
     assert secret not in json.dumps(seen["argv"]) and seen["kw"]["input"] == secret
     from orch import renew
 
-    assert seen["kw"]["env"].get(renew.GRANT_ENV)  # a one-time person grant goes with the call
+    assert seen["kw"]["env"].get(renew.GRANT_ENV + "_FD")  # a one-time person grant goes with the call ...
+    assert renew.GRANT_ENV not in seen["kw"]["env"] and seen["kw"]["pass_fds"]  # ... in a pipe, not the env
 
 
 @pytest.mark.parametrize(
@@ -148,6 +149,9 @@ def test_the_status_poll_carries_a_grant_and_only_with_a_session(ws, monkeypatch
         actions.run_op(ws, SELF, "logins.status", {"name": "claude"})
     assert seen == {}
     actions.run_op(ws, SELF, "logins.status", {"name": "claude"}, session=True)
-    assert seen["env"].get(renew.GRANT_ENV)
+    assert seen["env"].get(renew.GRANT_ENV + "_FD") and renew.GRANT_ENV not in seen["env"]
+    n = len(list(renew._grants(ws).iterdir()))
+    actions.run_op(ws, SELF, "logins.status", {"name": "claude"}, session=True)
+    assert len(list(renew._grants(ws).iterdir())) == n  # a poll leaves no grant file behind
     actions.run_op(ws, SELF, "logins.check", {}, session=True)
-    assert renew.GRANT_ENV not in seen["env"]  # a plain check needs no grant
+    assert renew.GRANT_ENV + "_FD" not in seen["env"]  # a plain check needs no grant
