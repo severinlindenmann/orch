@@ -477,3 +477,12 @@ def test_skill_tells_the_manager_to_file_the_testers_pictures_with_the_stop():
 
     text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
     assert ".orch/addons/factory/stops/<order>/s<round>/" in text and '"after": "s1/make-poll.png"' in text
+
+
+def test_skill_tells_the_manager_to_wait_for_real_instead_of_ending_its_turn():
+    import orch_factory
+
+    text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
+    # ORCH-333: after start-crew the manager records what it waits for, so orch can wake it
+    assert "orch wait <order> --on ticket:<crew ticket>" in text
+    assert "Never\n  just end your turn" in text
