@@ -11,8 +11,8 @@ Both are read from the end of the saved conversation (no AI call, no process lis
   <task-notification> naming the same tool use arrives (any status). One older than MAX_AGE counts as gone
   (a notice lost when the session was resumed must not keep a session open for ever);
 - a person typed when a user entry is plain text that orch did not type itself. Inside a session orch only
-  types its notice lines (runs_live.NOTICE); the task text of a start or resume arrives right after the start
-  (START_GRACE); tool results, task notices and tool wrappers start with "<".
+  types its notice lines (runs_live.NOTICE); the task text of a start or resume is the first line right after
+  the start (START_GRACE); tool results, task notices and tool wrappers start with "<".
 
 Unknown formats give nothing found, never an error: a tool without these entries is treated as before.
 """
@@ -27,10 +27,14 @@ from pathlib import Path
 
 from orch import adapters, runs
 
-TAIL_BYTES = 4 * 1024 * 1024  # the end of the saved conversation that is read
+TAIL_BYTES = (
+    16 * 1024 * 1024
+)  # the end of the saved conversation that is read (a launch before it is not seen)
 MAX_AGE = 4 * 3600  # a background helper with no finish notice after this long counts as gone
 TALK_MINUTES = 30  # a person typed to the helper this recently: it is in a conversation
-START_GRACE = 120  # a "user" line this soon after the session started is orch's own task text
+START_GRACE = 120  # the first "user" line this soon after the session started is orch's own task text
+CLOCK_SKEW = 5  # the tool's clock and orch's start time may differ by this much
+TYPED_KEEP = 20  # the last typed lines kept
 
 _LAUNCHED = "Async agent launched"
 _NOTICE = "<task-notification>"
@@ -87,10 +91,10 @@ def _results(content: object) -> list[tuple[str, str]]:
 
 
 def scan(lines: list[str]) -> dict:
-    """{"agents": {tool_use_id: {"what", "since"}}, "typed_at": float | None} from saved lines."""
+    """{"agents": {tool_use_id: {"what", "since"}}, "typed": [times], "typed_at": float | None} from lines."""
     names: dict[str, str] = {}
     agents: dict[str, dict] = {}
-    typed_at = None
+    typed: list[float] = []
     for line in lines:
         if '"tool_use' not in line and _NOTICE not in line and '"user"' not in line:
             continue  # most lines are answers and tool output: skip without parsing
@@ -114,21 +118,24 @@ def scan(lines: list[str]) -> dict:
             if text.startswith(_LAUNCHED):
                 agents[tid] = {"what": names.get(tid, "a helper"), "since": _ts(d.get("timestamp"))}
         text = _text(content)
-        if text is None or d.get("isMeta") or d.get("isCompactSummary"):
+        if text is None:
             continue
-        if text.lstrip().startswith(_NOTICE):
+        if text.lstrip().startswith(_NOTICE):  # a finish notice counts however it is flagged
             for tid in _TOOL_USE_ID.findall(text):
                 agents.pop(tid.strip(), None)
             continue
+        if d.get("isMeta") or d.get("isCompactSummary"):
+            continue
         s = text.strip()
-        if s and not s.startswith("<") and not s.startswith(_ORCH_TYPED):
-            typed_at = _ts(d.get("timestamp")) or typed_at
-    return {"agents": agents, "typed_at": typed_at}
+        at = _ts(d.get("timestamp"))
+        if s and at is not None and not s.startswith("<") and not s.startswith(_ORCH_TYPED):
+            typed = [*typed[-(TYPED_KEEP - 1) :], at]
+    return {"agents": agents, "typed": typed, "typed_at": typed[-1] if typed else None}
 
 
 def read(path: Path | None) -> dict:
     """scan() of the end of a saved conversation (cached by size and time); empty when it cannot be read."""
-    empty = {"agents": {}, "typed_at": None}
+    empty = {"agents": {}, "typed": [], "typed_at": None}
     if path is None:
         return empty
     try:
@@ -177,11 +184,11 @@ def subagents(root: Path, rec: dict | None, now: float | None = None) -> list[di
 
 def talking(root: Path, rec: dict | None, now: float | None = None) -> bool:
     """A person typed to this helper in its own window within TALK_MINUTES. The task text orch hands the tool
-    when it starts or resumes the session (its words vary) arrives within START_GRACE of the start and is not
-    counted."""
+    when it starts or resumes the session (its words vary) is the first such line, within START_GRACE of the
+    start: only that one line is not counted."""
     now = time.time() if now is None else now
-    at = read(_path(root, rec))["typed_at"]
-    if at is None or now - at >= TALK_MINUTES * 60:
-        return False
     started = _ts((rec or {}).get("started_at")) or 0.0
-    return at > started + START_GRACE
+    typed = [t for t in read(_path(root, rec))["typed"] if t >= started - CLOCK_SKEW]
+    if typed and typed[0] - started <= START_GRACE:
+        typed = typed[1:]  # orch's own start text
+    return any(now - t < TALK_MINUTES * 60 for t in typed)

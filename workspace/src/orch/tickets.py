@@ -3368,6 +3368,11 @@ def answered_in_conversation(root: Path, tid: str, qid: str, words: str, by: str
     if len(words) > MAX_TAKE_BACK_REASON:
         raise Refused(f"Keep it to one short line (at most {MAX_TAKE_BACK_REASON} characters).")
 
+    if str(by).startswith("human:"):
+        raise Refused(
+            "Only the helper writes down an answer from the conversation; a person answers on the card."
+        )
+
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
@@ -3375,7 +3380,7 @@ def answered_in_conversation(root: Path, tid: str, qid: str, words: str, by: str
         refuse_if_taken_back(q)
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
-        if q.get("action"):
+        if q.get("action") or q.get("kind") not in (None, "plain"):
             raise Refused(f"{qid} does something when it is answered: the person answers it on the card.")
         at = now()
         q["in_conversation"] = {"at": at, "by": by}

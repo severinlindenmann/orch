@@ -96,9 +96,26 @@ def test_a_line_the_person_typed_is_seen_with_its_time():
     assert found["typed_at"] is not None and abs(time.time() - 120 - found["typed_at"]) < 5
 
 
+def test_a_finish_notice_flagged_as_meta_still_ends_the_helper():
+    entries = [*_launch(), {**_finished(), "isMeta": True}]
+    assert bgwork.scan(_lines(entries))["agents"] == {}
+
+
+def test_only_the_first_line_after_the_start_is_orchs_task_text(tmp_path, monkeypatch):
+    p = tmp_path / "s.jsonl"
+    monkeypatch.setattr(bgwork, "_path", lambda root, rec: p)
+    rec = {"ticket": "t_x", "started_at": _iso(100)[:19] + "Z"}
+    p.write_text("\n".join(_lines([_typed("Work on the ticket ...", ago=98)])) + "\n")
+    assert not bgwork.talking(tmp_path, rec)
+    p.write_text(
+        "\n".join(_lines([_typed("Work on the ticket ...", ago=98), _typed("Wait, one thing", ago=40)]))
+    )
+    assert bgwork.talking(tmp_path, rec)
+
+
 def test_broken_lines_and_unknown_formats_find_nothing():
     found = bgwork.scan(["not json", "{}", json.dumps({"type": "user", "message": {"content": 5}})])
-    assert found == {"agents": {}, "typed_at": None}
+    assert found == {"agents": {}, "typed": [], "typed_at": None}
 
 
 def test_reading_a_saved_conversation_and_its_limits(tmp_path, monkeypatch):

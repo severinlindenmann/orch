@@ -888,4 +888,8 @@ def test_an_answer_given_in_the_conversation_closes_the_card(proj, run, new_tick
     code, _, err = run("ask", tid, "yes", "--in-conversation", "q2")
     assert code == 2 and "on the card" in err and read(proj, tid)["questions"][1]["answer"] is None
     assert run("ask", tid, "x", "--in-conversation", "q9")[0] == 2
+    # it is never written down as the person: that is their own click on the card
+    run("ask", tid, "Which size?", "--option", "S", "--option", "M")
+    code, _, err = run("ask", tid, "M", "--in-conversation", "q3", "--by", "human:owner")
+    assert code == 2 and read(proj, tid)["questions"][2]["answer"] is None
     assert run("ask", tid, "x", "--in-conversation", "q1", "--option", "a")[0] == 2
