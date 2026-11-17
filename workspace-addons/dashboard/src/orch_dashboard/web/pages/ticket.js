@@ -1696,7 +1696,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     else if (ticketPaused(t, run)) { startShown = true; actions.push(ticketButton('Resume', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'})); }
     // ORCH-255: Continue is on the page in every state while no helper runs; Start helper / Resume already do that job
     if (!run?.running && !startShown) actions.push(ticketButton('Continue', actions.length ? 'outline sm' : 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-continue'}));
-    // the new Focus (Preview, draft D feature 3): one Focus button that opens this ticket's session in the layer
+    // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
     const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
     if (focusBtn) actions.push(focusBtn);
     if (menu) actions.push(menu);

@@ -210,12 +210,12 @@ function ticketNext(t) {
   }
   return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, clean(text)) : null, action) : null;
 }
-// The new Focus (Preview, draft D feature 3): every row gets the ticket's Focus button. When it says Answer it takes the
+// The new live page (Preview, draft D feature 3): every row gets the ticket's session button. When it says Answer it takes the
 // place of the row's own Answer, so a row never shows two.
 function ticketRowFocus(t, nextAction) {
-  const focus = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
-  if (!focus) return [nextAction];
-  return focus.dataset.verb === 'Answer' && nextAction?.textContent === 'Answer' ? [focus] : [nextAction, focus];
+  const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
+  if (!live) return [nextAction];
+  return live.dataset.verb === 'Answer' && nextAction?.textContent === 'Answer' ? [live] : [nextAction, live];
 }
 function ticketMenu(t, scope) {
   if (snapshot) return null;
@@ -593,8 +593,8 @@ function shortFact(t, row) {
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
 }
 function shortSide(t, row, status) {
-  const focus = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
-  if (focus) return focus;
+  const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
+  if (live) return live;
   if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {
     event.stopPropagation();
     const need = needsList().find(x => x.ticket === t.id);
