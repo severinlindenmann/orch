@@ -22,6 +22,12 @@ def test_nothing_stuck():
     assert tickets.stuck_why(ticket(status="active"), NOW) is None
 
 
+def test_question_asked_at_counts():
+    """A question made by orch ask has asked_at only (sent_at is set when it reaches a phone)."""
+    q = {"id": "q1", "text": "?", "asked_at": iso(NOW - timedelta(hours=48))}
+    assert tickets.stuck_why(ticket(status="waiting", questions=[q]), NOW) == "question"
+
+
 def test_question_waiting_over_a_day():
     q = {"id": "q1", "text": "?", "sent_at": iso(NOW - timedelta(hours=25))}
     assert tickets.stuck_why(ticket(status="waiting", questions=[q]), NOW) == "question"

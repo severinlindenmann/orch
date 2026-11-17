@@ -787,7 +787,7 @@
   function stuckWords(t, nowMs = Date.now()) {
     const why = t && t.stuck;
     if (why === 'question') {
-      const open = (t.questions || []).filter(q => q && q.answer == null && !q.taken_back).map(q => Date.parse(q.sent_at || q.at)).filter(Number.isFinite);
+      const open = (t.questions || []).filter(q => q && q.answer == null && !q.taken_back).map(q => Date.parse(q.asked_at || q.sent_at || q.at)).filter(Number.isFinite);
       const days = open.length ? Math.floor((nowMs - Math.min(...open)) / 86400000) : 1;
       return 'Question waits ' + (days <= 1 ? '1 day' : days + ' days');
     }

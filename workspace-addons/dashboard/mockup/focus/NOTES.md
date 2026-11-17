@@ -190,3 +190,11 @@ focus-preview.html
 
 ../settings/addon-detail-focus.html
 - New row Preview: "Try the new Focus", off by default.
+
+## The bar is built (ORCH-337, 17 Nov)
+
+- The bar of draft D is in the dashboard behind the Preview switch (`pages/livebar.js`), with its look in the kit
+  (`.lbar` in `widgets.css`, gallery section "Live bar"). Same groups, words and fold steps as `chipsHTML` here.
+- Two changes from this draft: an open list scrolls inside its box (here it runs past it), and when even symbols and
+  numbers do not fit, needs you stays and the rest becomes one More count (fold 4), so nothing is cut at 320 wide.
+- New, Open and Where Focus sits come with the layer; the bar keeps an empty `.lbar-end` slot for them.

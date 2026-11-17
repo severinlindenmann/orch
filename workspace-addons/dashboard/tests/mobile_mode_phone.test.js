@@ -109,3 +109,13 @@ test('ORCH-184: a mode whose end time has passed is shown as ended, not "Phone u
   assert.equal(helpers.mobileOn({on:true, ends_at:soon(60000)}), true);
   assert.equal(helpers.mobileOn({on:true}), true);
 });
+test('ORCH-286: an end time on another day says the day, in the chip, the menu and the sidebar label', () => {
+  const c = load();
+  c.state({...base, phones:1, on:true, ends_at:soon(26 * 3600 * 1000), awake:'ok'});
+  assert.match(text(c.chip.children[0]), /^Phone until tomorrow \d\d:\d\d$/);
+  assert.match(c.label.textContent, /^Phone · until tomorrow \d\d:\d\d$/);
+  assert.match(text(c.chip.children[1]), /Questions go to your phone until tomorrow \d\d:\d\d/);
+  const c2 = load();
+  c2.state({...base, phones:1, on:true, ends_at:soon(4 * 24 * 3600 * 1000), awake:'ok'});
+  assert.match(text(c2.chip.children[0]), /^Phone until (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d\d:\d\d$/);
+});
