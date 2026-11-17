@@ -8,7 +8,9 @@ const style = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/st
 // persona tests F1-F3: look fixes that only CSS can show; the pictures are on the ticket.
 test('F1: on a wide screen the top bar stays on one row and the page name gives way first', () => {
   assert.match(kit, /@media\(min-width:900px\)\{\.topbar\{flex-wrap:nowrap\}\.topbar>\*\{flex-shrink:0\}\.topbar>\.breadcrumb\{flex-shrink:1;min-width:0\}\}/);
-  assert.match(style, /\.breadcrumb>#updated\{flex-shrink:20\}/);
+  // the page name is a line of whole words; "· Updated …" wraps out of sight instead of being cut mid-word
+  assert.match(style, /\.breadcrumb>#crumb\{display:block;height:16px;overflow:hidden;white-space:normal/);
+  assert.match(style, /\.breadcrumb>#updated\{flex:none;white-space:nowrap/);
 });
 test('F2: an empty row in a page adds no 24 px gap above the title', () => {
   assert.match(kit, /\.page>\.stack:empty\{display:none\}/);
