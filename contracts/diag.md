@@ -138,8 +138,11 @@ relay is a separate, explicit step of the relay client (relay-api.md, Problems),
   `next` is the token for the following page. A record that could not be read fully says so in `unavailable`.
 - Checks (`orch/diag_checks/<name>.py`, `{name, verdict: problem|ok|cannot_check, fact, evidence[]}`):
   `run_gone_ticket_working`, `dead_lock_holder` (pid AND process start time), `no_heartbeat` ("progress unknown", never
-  "hung"), `waiting_for_permission`, `ticket_op_refused` (3 times), `hook_lines_missing`, `relay_unreachable`,
-  `clock_skew`, `disk_low`, `diag_dropped`.
+  "hung"; a working run quiet over 30 min, a live session at its prompt or on a dialog is left out),
+  `waiting_for_permission`, `ticket_op_refused` (3 times in the last hour with the same guard; write conflicts are not
+  counted), `hook_lines_missing`, `relay_unreachable`, `clock_skew`, `disk_low`, `diag_dropped` (a problem only for
+  drops in the last hour; older ones of the day are named in the fact). A problem goes away by itself once its cause
+  stops.
 - `report [--ticket T] [--addon A] [--since 2h] [--note ...] [--expected ...] [--content|--no-content]` writes
   `reports/r-<MMDD-HHMM>-<scope>/`: `SUMMARY.md` (< 20 KB, read first: note, window, checks, top errors, last 50 lines,
   gaps), `manifest.json` (`orch.diag-report/1`), `checks.json`, `timeline.jsonl` (sources merged by time, each source in

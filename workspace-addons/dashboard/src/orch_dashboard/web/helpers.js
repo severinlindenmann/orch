@@ -63,12 +63,17 @@
 
   /* A task finished by the agent is written twice (orch's own "Check c1 done" and the agent's own note): both read
      "Finished a task: ...". Within two minutes the longer of two equal-or-prefix lines stays, once. Original order kept. */
+  /* ORCH-185: the old and new text of a note edit, when the line carries them ("Edited note (was: ... | now: ...)"). */
+  function historyChange(entry) {
+    const m = /^Edited (note|done_when) \(was: ([\s\S]*) \| now: ([\s\S]*)\)$/.exec(String((entry && entry.text) || '').trim());
+    return m ? {field: m[1], was: m[2], now: m[3]} : null;
+  }
   function dedupeHistory(entries, checklist) {
     const list = Array.isArray(entries) ? entries : [], drop = new Set(), last = [];
     const order = list.map((e, i) => [e, i]).sort((a, b) => (Date.parse(a[0] && a[0].at) || 0) - (Date.parse(b[0] && b[0].at) || 0) || a[1] - b[1]);
     for (const [e] of order) {
       const line = historyLine(e, checklist), at = Date.parse(e && e.at) || 0;
-      const dup = last.find(p => Math.abs(at - p.at) <= 120000 && (p.line === line || line.startsWith(p.line + ':') || p.line.startsWith(line + ':')));
+      const dup = last.find(p => !(historyChange(e) && historyChange(p.e)) && Math.abs(at - p.at) <= 120000 && (p.line === line || line.startsWith(p.line + ':') || p.line.startsWith(line + ':')));
       if (!dup) { last.push({e, line, at}); continue; }
       if (line.length > dup.line.length) { drop.add(dup.e); Object.assign(dup, {e, line, at}); } else drop.add(e);
     }
@@ -99,7 +104,7 @@
     if ((m = /^Moved (c\d+) after c\d+$/.exec(text))) return 'Moved a task' + task(m[1]);
     if ((m = /^Created under (.+)$/.exec(text))) return 'Created under ' + m[1];
     if (/^Created/.test(text)) return /under /.test(text) ? 'Created as a sub-ticket' : 'Ticket created';
-    if ((m = /^Edited (.+)$/.exec(text))) {
+    if ((m = /^Edited ([a-z_, ]+?)(?: \(was: [\s\S]* \| now: [\s\S]*\))?$/.exec(text)) || (m = /^Edited (.+)$/.exec(text))) {
       const parts = m[1].split(/,\s*/).map(f => FIELD_WORD[f.trim()] || f.trim());
       return 'Changed ' + (parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]);
     }
@@ -132,6 +137,14 @@
   }
 
   /* Who a history line is about: "You" for the current person, the display name otherwise. */
+  /* A person's name for a "by": a line recorded under the computer's login ("human:lume") is the person who picked
+     their name in "You: ..." (people.me), never the login (ORCH-184). Agents and other people keep their own name. */
+  function personName(by, st) {
+    const b = String(by || '').replace(/^(?:agent|human):/, ''), s = st || {};
+    const me = s.people && s.people.me;
+    return /^human:/.test(String(by || '')) && me && s.login && b === s.login ? me : b;
+  }
+
   function historyWho(by, me) {
     const b = String(by || '');
     if (me && b === me) return 'You';
@@ -401,12 +414,12 @@
 
   /* A Factory start question (kind factory:start) in a few lines for Home (ORCH-60). The question's text is the frozen
      proposal Factory wrote ("Start '<title>'? ~10 h · target $5 · you're needed for ~15 min. Goal: … . Done means: …
-     Cap: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
+     Time limit: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
      text is not in that shape (the card then shows the question as it always did). */
   function factoryStart(text) {
     const m = /^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: /s.exec(String(text || ''));
     if (!m) return null;
-    const head = m[2].split(' · '), cap = /\. Cap: (.+?) active\. /.exec(String(text))?.[1];
+    const head = m[2].split(' · '), cap = /\. Time limit: (.+?) active\. /.exec(String(text))?.[1];
     const usd = head.map(x => /^target \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
     const owner = head.map(x => /^you're needed for ~(.+)$/.exec(x)?.[1]).find(Boolean);
     const meta = ['Runs about ' + head[0], owner ? 'needs you for about ' + owner : '', usd ? 'about $' + usd : '', cap ? 'up to ' + cap + ' of helper time' : ''];
@@ -432,6 +445,27 @@
     const q = arr(ticket && ticket.questions).find(x => x && x.answer == null && x.text);
     const text = q ? String(q.text).replace(/\s+/g, ' ').trim() : '';
     return text.length > 90 ? text.slice(0, 89) + '…' : text;
+  }
+
+  /* When a ticket was finished: the history entry that marked it done, else done_at, else the last change. Every page
+     (Home, Tickets, the board, the ticket) takes the day and time from here, so one ticket never has two dates (ORCH-184). */
+  function doneAt(ticket) {
+    const t = ticket || {}, event = arr(t.history).slice().reverse().find(e => e && (e.kind === 'done' || /(?:->|to) done\b|^Done\b/i.test(e.text || '')));
+    return (event && event.at) || t.done_at || t.completed_at || t.updated_at || '';
+  }
+
+  /* When a ticket's question was asked: the time Home shows for it (the oldest open row of that ticket), else the last
+     change. Home, Tickets and the ticket page say the same wait (ORCH-184). */
+  function askedAt(ticket, rows) {
+    const id = ticket && ticket.id, times = arr(rows).filter(r => r && r.ticket === id && Number.isFinite(Date.parse(r.since))).map(r => Date.parse(r.since));
+    return times.length ? new Date(Math.min(...times)).toISOString() : (ticket && ticket.updated_at) || '';
+  }
+
+  /* Is phone mode on right now? A mode whose end time has passed is over, whatever the last state said (ORCH-184). */
+  function mobileOn(mm, nowMs) {
+    if (!mm || !mm.on) return false;
+    const end = mm.ends_at ? Date.parse(mm.ends_at) : NaN;
+    return !(Number.isFinite(end) && end <= (Number(nowMs) || Date.now()));
   }
 
   /* One state per ticket: a ticket the agent cannot go on with (live state attention) is Waiting, never Working. */
@@ -641,5 +675,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  return {historyChange, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });

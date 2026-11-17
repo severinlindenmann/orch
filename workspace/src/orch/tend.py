@@ -11,6 +11,10 @@
 - A live session idle at its prompt with nothing running for IDLE_MINUTES, on a ticket still being worked on,
   gets one message with what changed since it went quiet (ticket history, its pull request's last look, the
   open steps).
+- A helper that stopped right after its start (its first turn ended within EARLY_TURN_SECONDS, ORCH-190: it
+  asked "shall I go ahead?" in its own window, where nobody reads it, and the tool showed a greyed-out "go
+  ahead" in the box) gets that message after EARLY_IDLE_MINUTES instead, and is started fresh when it still
+  has not moved EARLY_RESTART_MINUTES after it: no person needed, no wait for the idle limit.
 - When it is still idle near the idle limit (BEFORE_LIMIT ahead of it; the cache is gone by then) and nothing
   happened on the ticket since that message, its session is ended and the helper is started fresh from the
   ticket (at most once per RESTART_EVERY per ticket; after that the idle row in `orch needs` is for a person).
@@ -33,6 +37,9 @@ from orch import brake, history, runs, runs_live, runwatch, stuck, tickets
 BY = "agent:helper-watcher"
 VIA = "watcher"
 IDLE_MINUTES = 20  # idle with nothing running, ticket still Working: one message
+EARLY_TURN_SECONDS = 5 * 60  # the first turn ended this soon after the start: it stopped instead of working
+EARLY_IDLE_MINUTES = 3  # such a helper gets the message this soon
+EARLY_RESTART_MINUTES = 5  # ... and is started fresh when nothing changed this long after it
 RESTART_MINUTES = 10  # at least this long after the message (and idle the full limit), nothing changed: fresh
 END_WAITING_MINUTES = 5  # quiet this long while the ticket only waits and the sessions are full: it ends
 END_FINISHED_MINUTES = 10  # quiet this long on a Done/Dropped ticket, or in Review when full
@@ -120,16 +127,24 @@ def _what_changed(root: Path, t: dict, since: str | None) -> str:
     return "\n".join(out)
 
 
-def nudge_text(root: Path, t: dict, idle_secs: int | None, since: str | None) -> str:
+EARLY_WORDS = (
+    "You stopped right after the start. Nobody reads this window: do not wait here for a go-ahead. "
+    "Ask a person only with orch ask, otherwise carry on.\n"
+)
+
+
+def nudge_text(root: Path, t: dict, idle_secs: int | None, since: str | None, early: bool = False) -> str:
     k = _key(t)
     return (
         f"The helper watcher: you have been idle at your prompt for {runwatch.span(idle_secs)} with nothing "
         f"running, and {k} is still being worked on.\n"
+        + (EARLY_WORDS if early else "")
         + _what_changed(root, t, since)
         + f"\nCarry on with the next open task. If you wait on something, say so (orch wait or orch ask); if "
         f"you are finished, run orch ticket status {k} done. If nothing happens until it has been idle "
-        f"for {runwatch.span(int(runs_live.idle_seconds(root)))}, this session is ended and a fresh one "
-        "starts from the ticket."
+        f"for {runwatch.span(EARLY_RESTART_MINUTES * 60 if early else int(runs_live.idle_seconds(root)))}"
+        + (" more" if early else "")
+        + ", this session is ended and a fresh one starts from the ticket."
     )
 
 
@@ -138,6 +153,12 @@ def restart_text(t: dict) -> str:
         f"The helper watcher started you fresh: the earlier session sat idle at its prompt and did not move "
         f"after a reminder. Read the ticket (orch ticket show {_key(t)}) and go on from the first open task."
     )
+
+
+def _early(rec: dict, since: str | None) -> bool:
+    """The run went idle within EARLY_TURN_SECONDS of its start: its first turn ended before any real work."""
+    start, idle = _ts(rec.get("started_at")), _ts(since)
+    return start is not None and idle is not None and 0 <= idle - start <= EARLY_TURN_SECONDS
 
 
 def _waits(info: dict) -> list[dict]:
@@ -187,8 +208,9 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
         seen = state.get(tid) or {}
         nudged = _ts(seen.get("nudged_at")) if seen.get("run") == rec["run"] else None
         if nudged is None:
-            if quiet >= IDLE_MINUTES * 60:
-                out.append({**row, "action": "nudge", "since": info.get("idle_since")})
+            early = _early(rec, info.get("idle_since"))
+            if quiet >= (EARLY_IDLE_MINUTES if early else IDLE_MINUTES) * 60:
+                out.append({**row, "action": "nudge", "since": info.get("idle_since"), "early": early})
             continue
         helper = f"agent:{rec.get('agent')}"
         moved = any(
@@ -198,7 +220,10 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
         if moved:
             out.append({**row, "action": "forget"})  # it did something after the reminder: a new chance
             continue
-        if now - nudged < RESTART_MINUTES * 60 or quiet < max(limit - BEFORE_LIMIT, RESTART_MINUTES * 60):
+        if seen.get("early"):  # it stopped right after the start: no wait for the idle limit
+            if now - nudged < EARLY_RESTART_MINUTES * 60 or quiet < EARLY_RESTART_MINUTES * 60:
+                continue
+        elif now - nudged < RESTART_MINUTES * 60 or quiet < max(limit - BEFORE_LIMIT, RESTART_MINUTES * 60):
             continue
         last = _ts(seen.get("restarted_at"))
         if last is not None and now - last < RESTART_EVERY:
@@ -291,9 +316,13 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
                 )
             state.pop(tid, None)
         elif action == "nudge":
-            runs_live.send(root, tid, BY, nudge_text(root, row["t"], row["idle_seconds"], row.get("since")))
-            state[tid] = {"run": row["run"], "nudged_at": _iso(now)}
-            line = f"Reminded the helper: idle for {quiet} with nothing running."
+            early = bool(row.get("early"))
+            text = nudge_text(root, row["t"], row["idle_seconds"], row.get("since"), early)
+            runs_live.send(root, tid, BY, text)
+            state[tid] = {"run": row["run"], "nudged_at": _iso(now), **({"early": True} if early else {})}
+            line = f"Reminded the helper: idle for {quiet} with nothing running" + (
+                ", right after its start." if early else "."
+            )
         elif action == "forget":
             state.pop(tid, None)
         elif action == "wake":

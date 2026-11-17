@@ -53,7 +53,7 @@ test('a Factory proposal on Review reads like Home: its title as the question, g
   const plain = {...CARD, id:'core:q:t_abcdef:q4', key:'q4', text, options:['Start', 'Edit', 'Not now'], card:{kind:'choice', title:text, preview:{type:'options', options:[{id:'Start', title:'Start'}]}}};
   const [fac, other] = await ctx({review:{cards:[plain, CARD]}}).reviewApi().stack();
   assert.equal(fac.card.title, "Start 'Loyalty card for regular customers'?");
-  assert.match(fac.text, /^Regular customers collect stamps\.\nRuns about 1 h 30 min · needs you for about 10 min · up to 2 h of helper time$/);
+  assert.equal(fac.text, 'Regular customers collect stamps.\n' + helpers.factoryStart(text).meta, 'the goal, then the same time line as Home');
   assert.doesNotMatch(fac.text, /Crew|Stops/);
   assert.equal(JSON.stringify(fac.answers), JSON.stringify([{label:'Not now', picked:'Not now'}, {label:'Change it', picked:'Edit'}, {label:'Start', picked:'Start'}]), "Home's buttons, Start last (owner choice B)");
   assert.equal(fac.card.preview, undefined, 'no second list of the same answers on the card');
