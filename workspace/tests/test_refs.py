@@ -247,6 +247,14 @@ def test_ref_add_refuses_non_web_and_is_one_entry_per_address(proj, run, tid):  
     assert len(t["refs"]) == 1 and t["refs"][0]["title"] == "Now with a title"
 
 
+@pytest.mark.parametrize("value", ["javascript:alert(1)", "mailto:anna@example.com", "data:text/html,x"])
+def test_other_address_kinds_get_the_web_message_not_the_file_one(proj, run, tid, value):  # noqa: F811
+    """ORCH-236: a 'javascript:' reference was refused with "Choose a project file outside .orch and .git"."""
+    code, out, err = run("ref", "add", tid, value)
+    assert code == 2 and "A web reference starts with https:// or http://." in out + err
+    assert ".orch" not in out + err and not tickets.load(proj, tid)["refs"]
+
+
 def test_active_add_on_sets_the_kind(proj, run, hello, tid):  # noqa: F811
     install(run, hello)
     code, out, _ = run("ref", "add", tid, "https://github.com/acme/billing/pull/418")
