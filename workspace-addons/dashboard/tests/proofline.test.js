@@ -17,7 +17,7 @@ test('shows the core line, hint and details; nothing without proof data', () => 
   const t = {id:'t_1', checklist:[{id:'c1', text:'Tests pass'}], proof:{line:'1 part of "Done when" has no task', level:'warn', uncovered:['and it works on the phone'], per_item:{c1:'passed'}}};
   const out = text(line(t));
   assert.match(out, /1 part of "Done when" has no task/);
-  assert.match(out, /No task covers this/);
+  assert.match(out, /Nothing in the to-do list covers this yet/);
   assert.match(out, /Check passed/);
 });
 test('a failed check is a bad mark, no checks is neutral', () => {
@@ -49,7 +49,7 @@ test('changed since the check: the line and a button that sends one fixed text',
   assert.match(text(out), /Changes haven't been checked yet/);
   const find = n => n && (n.tag === 'button' ? n : (n.children || []).map(find).find(Boolean));
   const btn = find(out);
-  assert.equal(btn.label, 'Ask the helper to check again');
+  assert.equal(btn.label, 'Ask your helper to check again');
   btn.fn();
   assert.deepEqual(sent, [['t_1', 'Please run the checks again and record them with orch check record.']]); // fixed text, not the stored command
   assert.equal(find(c.ticketProofLine({...t, status:'active'})), undefined);

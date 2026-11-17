@@ -331,12 +331,12 @@ const stepBoxes = s => walk(s.d).filter(n => n.className.split(' ').includes('ne
 const addStepButton = s => walk(s.d).find(n => n.className.includes('new-ticket-add-step'));
 test('ORCH-14: Make it an epic adds numbered ticket boxes; Remove takes one out and renumbers', async () => {
   const s = setup();
-  const help = walk(s.d).find(n => /This ticket becomes an epic/.test(n.textContent));
+  const help = walk(s.d).find(n => /This ticket is split into parts/.test(n.textContent));
   assert.equal(stepBoxes(s).length, 0); assert.equal(help.hidden, true);
-  assert.equal(addStepButton(s).textContent, '＋ Make it an epic with several tickets');
+  assert.equal(addStepButton(s).textContent, '＋ Split into parts');
   await addStepButton(s).click(); await addStepButton(s).click(); await addStepButton(s).click();
   assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'strong').textContent), ['Ticket 1', 'Ticket 2', 'Ticket 3']);
-  assert.equal(help.hidden, false); assert.equal(addStepButton(s).textContent, '＋ Add another ticket');
+  assert.equal(help.hidden, false); assert.equal(addStepButton(s).textContent, '＋ Add another part');
   await walk(stepBoxes(s)[0]).find(n => n['aria-label'] === 'Remove ticket 1').click();
   assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'textarea')['aria-label']), ['Ticket 1: what needs doing?', 'Ticket 2: what needs doing?']);
 });

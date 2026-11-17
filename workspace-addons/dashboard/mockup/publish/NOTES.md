@@ -64,4 +64,4 @@ Round 2 — working shared components.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
 
-- Share a file (e2e 15 Nov): the window stays open after Create link, shows the link with a Copy button and says "Copied" (the link is copied once automatically). A ticket file's viewer has "Share by link…" next to "Copy local link", only when sharing is on; it opens this same window for that file.
+- Share a file (e2e 15 Nov): the window stays open after Create link, shows the link with a Copy button and says "Copied" (the link is copied once automatically). A ticket file's viewer has "Share by link…" next to "Copy link for this computer", only when sharing is on; it opens this same window for that file.

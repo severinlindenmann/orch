@@ -44,7 +44,7 @@ test('only web pages and PDFs get a thumbnail; the box has a stable key so a red
 });
 
 test('b4: the viewer copy button says it is local and says where it works', () => {
-  assert.match(source, /btn\('Copy local link'/);
+  assert.match(source, /btn\('Copy link for this computer'/);
   assert.doesNotMatch(source, /btn\('Copy link'/);
-  assert.match(source, /Works only on this computer/);
+  assert.doesNotMatch(source, /Works only on this computer/);
 });
