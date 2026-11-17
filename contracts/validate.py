@@ -1750,6 +1750,26 @@ def kind_review_card():
                 fails.append(f"review-question verdict_cases {c['name']}: result not valid: {e}")
 
 
+def kind_tool_alert():
+    """Tool warning on the phone (tool-alert.md, vectors/tool-alert-v1.json): every valid / invalid message, and every
+    body the workspace sends, against message.schema.json."""
+    vm = _w("message")
+    vec = _vec("tool-alert-v1.json")
+    for c in vec["valid"]:
+        _expect(f"tool-alert valid {c['name']}", _msgs(vm, c["message"]), [])
+    for c in vec["invalid"]:
+        _expect(f"tool-alert invalid {c['name']} is refused", bool(_msgs(vm, c["message"])), True)
+    for c in vec["workspace"]:
+        for n, body in enumerate(c["send"]):
+            m = {"schema": "orch.msg/1", "id": f"m_alertws{n:09d}", "from": vec["workspace_id"], "to": "phones",
+                 "type": "text", "created_at": vec["now"], "body": body}
+            _expect(f"tool-alert workspace {c['name']} send {n}", _msgs(vm, m), [])
+    for c in vec["phone"]:
+        for item in c["messages"]:
+            if "tool_alert" in item["message"]["body"] and c["name"] != "malformed-ignored":
+                _expect(f"tool-alert phone {c['name']} {item['message']['id']}", _msgs(vm, item["message"]), [])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "review-card": kind_review_card,
@@ -1765,6 +1785,7 @@ KINDS = {
     "human": kind_human,
     "proposal": kind_proposal,
     "diag": kind_diag,
+    "tool-alert": kind_tool_alert,
 }
 
 

@@ -237,7 +237,7 @@ def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run
 
 def test_label_names_the_pull_request_wait_in_plain_words():
     assert runwatch.label("orch ref wait ORCH-46 --merge") == "the pull request checks"
-    assert runwatch.label("/opt/bin/orch github wait merge --for a/b#1") == "the pull request checks"
+    assert runwatch.label("/opt/bin/orch github wait merge --for a/b#1") == "the GitHub merge limit"
     assert runwatch.label("orch ticket show x") == "orch"
 
 

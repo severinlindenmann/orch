@@ -44,3 +44,13 @@ test('Terminal mode has three columns at 1920 and two at 1280, composer sticky i
   assert.match(css, /grid-template-areas:"rail human" "stage human"/);
   assert.match(css, /\.fx\.fx-terminal \.fx-human>\.fx-compose[^{]*\{position:sticky;bottom:0/);
 });
+
+test('work log lines orch writes are plain words, with task names and no internal ids', () => {
+  const {live: L} = live();
+  const cl = [{id: 'c3', text: 'Build it'}];
+  assert.equal(L.plainLine('Recorded a check run for c3 (exit 0)', cl), 'Ran a check: Build it (passed)');
+  assert.equal(L.plainLine('Moved c3 after c4', cl), 'Moved a task: Build it');
+  assert.equal(L.plainLine('Created under t_q7pi62', cl), 'Created as a sub-ticket');
+  assert.equal(L.plainLine('Created under ORCH-46 Quarter close', cl), 'Created under ORCH-46 Quarter close');
+  assert.equal(L.plainLine('Edited done_when, note', cl), 'Changed the Done when line, the note');
+});
