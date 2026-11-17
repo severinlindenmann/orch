@@ -291,8 +291,11 @@ async function layer(page, dash, width) {
   // full screen; Esc goes back one step at a time: full screen, the panel, the bar
   await page.click('[data-key="live-full"]');
   await page.waitForSelector(panel('full'), { timeout: 5000 });
+  // the page behind full screen takes no keyboard (ORCH-340)
+  if (!(await page.evaluate(() => document.getElementById('content').inert))) throw new Error('the page behind full screen still takes Tab');
   await press('Escape');
   await page.waitForSelector(panel(docked), { timeout: 5000 });
+  if (await page.evaluate(() => document.getElementById('content').inert)) throw new Error('the page stayed inert after full screen');
   await press('Escape');
   await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
   if (await page.$('[data-key="live-panel"]')) throw new Error('Esc left the panel open');
@@ -435,7 +438,7 @@ const STEPS = [
     do: ['Open a session from the bar.', 'Change to Tickets, Review and Home.', 'Use Place: bottom, right, full screen; press Esc twice.',
       'Open it again, minimise it to the bar, then put it to the side and open it from the edge.', 'Make it larger, then reload the page.'],
     see: ['Each place works and the page stays usable behind it; on a phone there is no right.', 'The layer stays open while the page changes.',
-      'Esc goes back one step: full screen, then the panel, then the bar.',
+      'Esc goes back one step: full screen, then the panel, then the bar.', 'In full screen Tab stays in the layer.',
       'Minimise leaves only the bar; to the side leaves a slim edge.', 'After the reload the layer opens where it was last, at the same size.'],
     async run({ page, dash, width }) {
       await layer(page, dash, width);
