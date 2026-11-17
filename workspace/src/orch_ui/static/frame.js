@@ -7,21 +7,29 @@
 (function () {
   var framed = false;
   try { framed = window.top !== window; } catch (e) { framed = true; }
-  var off = {on: false, url: function (u) { return u; }, EventSource: window.EventSource};
+  var off = {on: false, chan: null, url: function (u) { return u; }, EventSource: window.EventSource};
   if (!framed || self.origin !== 'null') { window.OrchFrame = off; return; }
 
   var HEADER = 'X-Orch-Frame', PARAM = 'orch-frame';
   var here = location.protocol + '//' + location.host;  // the dashboard's origin (the frame's own is opaque)
-  var m = /^#orch-frame=([A-Za-z0-9_-]{20,64})(?:&(.*))?$/.exec(location.hash || '');
-  var pass = m ? m[1] : '';
+  // #orch-frame=<pass>&orch-file=<file pass>&orch-chan=<message code>[&<the page's own hash>]
+  var m = /^#orch-frame=([A-Za-z0-9_-]{20,64})&orch-file=([A-Za-z0-9_-]{20,64})&orch-chan=([0-9a-f]{32})(?:&(.*))?$/.exec(location.hash || '');
+  var kept = null;
+  try { kept = history.state && history.state.orchFrame; } catch (e) { kept = null; }  // this same page, reloaded
+  var pass = m ? m[1] : (kept && kept.pass) || '', file = m ? m[2] : (kept && kept.file) || '', chan = m ? m[3] : (kept && kept.chan) || null;
   if (m) {
-    try { history.replaceState(null, '', location.pathname + location.search + (m[2] ? '#' + m[2] : '')); }
-    catch (e) { location.replace('#' + (m[2] || '')); }
+    var state = {orchFrame: {pass: pass, file: file, chan: chan}};
+    try { history.replaceState(state, '', location.pathname + location.search + (m[4] ? '#' + m[4] : '')); }
+    catch (e) { location.replace('#' + (m[4] || '')); }
   }
+  var own = location.pathname.split('/').slice(0, 3).join('/') + '/';  // /addon/<name>/: this add-on's places
   function same(u) {
     try { var x = new URL(u, location.href); return x.protocol + '//' + x.host === here; } catch (e) { return false; }
   }
-  function tell(msg) { try { window.parent.postMessage(msg, here); } catch (e) { /* not in the dashboard */ } }
+  function tell(msg) {
+    if (chan) msg.chan = chan;
+    try { window.parent.postMessage(msg, here); } catch (e) { /* not in the dashboard */ }
+  }
   // No pass (a reload inside the frame, an expired pass, a restarted dashboard): ask the dashboard to show this
   // place again with a fresh one. At most once every 5 seconds.
   var asked = 0;
@@ -48,12 +56,13 @@
     });
   };
 
-  // A picture, file or download address of this server: the pass rides along as a query value (an <img> or a
-  // link cannot send a header). The dashboard takes it off before the add-on sees the request.
+  // A picture, file or download address of this add-on: the read-only file pass rides along as a query value (an
+  // <img> or a link cannot send a header). It never acts; the dashboard takes it off before the add-on sees it.
   function withPass(u) {
-    if (!pass || typeof u !== 'string' || !same(u)) return u;
+    if (!file || typeof u !== 'string' || !same(u)) return u;
     var x = new URL(u, location.href);
-    x.searchParams.set(PARAM, pass);
+    if (x.pathname.indexOf(own) !== 0) return u;
+    x.searchParams.set(PARAM, file);
     return u.charAt(0) === '/' && u.charAt(1) !== '/' ? x.pathname + x.search + x.hash : x.href;
   }
 
@@ -107,11 +116,20 @@
       if (u.pathname === '/' && !u.search) { e.preventDefault(); tell({orch: 'frame-top', hash: u.hash.slice(1)}); }
       return;
     }
-    if ((target && target !== '_self') || u.search) return;
-    if (u.pathname === location.pathname && u.hash) return;  // a place on this page: the browser scrolls
+    if (target && target !== '_self') {  // a new tab: only this add-on's own files, never another page here
+      if (u.pathname.indexOf(own) !== 0) e.preventDefault();
+      return;
+    }
+    if (u.pathname === location.pathname && !u.search && u.hash) return;  // a place on this page: the browser scrolls
     e.preventDefault();
-    tell({orch: 'frame-go', path: u.pathname, hash: u.hash.slice(1)});
+    if (u.pathname.indexOf(own) === 0 && !u.search) tell({orch: 'frame-go', path: u.pathname, hash: u.hash.slice(1)});
   });
+  // A form never takes the frame to another page of this server (nothing here is sent by a form).
+  // (The page's own submit handlers still run: only the browser's navigation is stopped.)
+  document.addEventListener('submit', function (e) {
+    var action = e.target && typeof e.target.action === 'string' ? e.target.action : location.href;
+    if (same(action || location.href)) e.preventDefault();
+  }, true);
 
-  window.OrchFrame = {on: true, url: withPass, EventSource: FrameEvents};
+  window.OrchFrame = {on: true, chan: chan, url: withPass, EventSource: FrameEvents};
 })();

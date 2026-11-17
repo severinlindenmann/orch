@@ -309,7 +309,8 @@ function postNeedsCount(n) {
   try { win?.postMessage({type:'orch.needs.count', count:n}, '*'); } catch (_) { /* the page was left */ }  // the frame's origin is opaque (sandboxed)
 }
 globalThis.addEventListener?.('message', e => {
-  if ((e.origin !== location.origin && e.origin !== 'null') || e.data?.orch !== 'needs-count' || !state) return;
+  const chan = e.origin === 'null' && !!e.data?.chan && e.data.chan === globalThis.orchFrameChan?.();  // sandboxed frame: its code
+  if ((e.origin !== location.origin && !chan) || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
 function render(arrived = new Set()) {

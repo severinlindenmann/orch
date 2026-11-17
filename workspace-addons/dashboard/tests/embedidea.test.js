@@ -16,6 +16,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, result} = {}) {
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:() => null,
     document:{querySelector:() => frame}, act:async (...a) => { calls.acts.push(a); return answer; },
     addEventListener(){}, window:{orch:{toast:t => calls.toasts.push(t)}}};
+  ctx.orchFrameChan = () => 'ab'.repeat(16);  // the shown frame's per-frame code (settings.js, ORCH-186)
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow, frame};
 }
@@ -27,8 +28,12 @@ test('only the shown shipped add-on frame of this origin may ask; anything else 
   assert.equal(ctx.embedIdeaRequest(msg(frameWindow)).text, 'A page with our opening hours');
   assert.equal(ctx.embedIdeaRequest(msg(frameWindow)).addon, 'factory');
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), origin:'https://evil.example'}), null);
-  assert.notEqual(ctx.embedIdeaRequest({...msg(frameWindow), origin:'null'}), null);  // ORCH-186: the shown shipped frame is sandboxed
-  assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), origin:'null', source:{}}), null);  // ...but only that frame
+  // ORCH-186: the shown shipped frame is sandboxed (origin "null"): it must carry its per-frame code
+  assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), origin:'null'}), null);
+  const coded = {...msg(frameWindow), origin:'null'}; coded.data = {...coded.data, chan:'ab'.repeat(16)};
+  assert.notEqual(ctx.embedIdeaRequest(coded), null);
+  assert.equal(ctx.embedIdeaRequest({...coded, data:{...coded.data, chan:'cd'.repeat(16)}}), null);
+  assert.equal(ctx.embedIdeaRequest({...coded, source:{}}), null);  // ...and come from that frame
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), source:{}}), null);
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), source:null}), null);
   for (const bad of [{type:'orch.say'}, {type:'orch.idea.done'}, {id:'x'}, {id:5}, {id:'ABCDEFGH'}, {text:5}, {text:'   '}, {text:'---'}]) assert.equal(ctx.embedIdeaRequest(msg(frameWindow, bad)), null);

@@ -17,6 +17,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, status = 'ready
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:id => tickets.find(t => t.id === id),
     document:{querySelector:() => frame}, act:async (op, args) => { calls.acts.push([op, args]); return results[op] || {ok:true, status:200, state:op === 'run.send' ? {send_result:{id:'i_1', delivered:0, state:'none'}} : {}}; },
     addEventListener(){}, window:{orch:{toast(){}}}};
+  ctx.orchFrameChan = () => 'ab'.repeat(16);  // the shown frame's per-frame code (settings.js, ORCH-186)
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow};
 }
@@ -27,8 +28,12 @@ test('only the shown shipped add-on frame of this origin, for a ticket of its ow
   const {ctx, frameWindow} = setup();
   assert.equal(ctx.embedSendRequest(msg(frameWindow)).ticket, 't_order01');
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), origin:'https://evil.example'}), null);
-  assert.notEqual(ctx.embedSendRequest({...msg(frameWindow), origin:'null'}), null);  // ORCH-186: the shown shipped frame is sandboxed
-  assert.equal(ctx.embedSendRequest({...msg(frameWindow), origin:'null', source:{}}), null);  // ...but only that frame
+  // ORCH-186: the shown shipped frame is sandboxed (origin "null"): it must carry its per-frame code
+  assert.equal(ctx.embedSendRequest({...msg(frameWindow), origin:'null'}), null);
+  const coded = {...msg(frameWindow), origin:'null'}; coded.data = {...coded.data, chan:'ab'.repeat(16)};
+  assert.notEqual(ctx.embedSendRequest(coded), null);
+  assert.equal(ctx.embedSendRequest({...coded, data:{...coded.data, chan:'cd'.repeat(16)}}), null);
+  assert.equal(ctx.embedSendRequest({...coded, source:{}}), null);  // ...and come from that frame
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), source:{}}), null);
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), source:null}), null);
   for (const bad of [{type:'orch.idea'}, {type:'orch.send.done'}, {id:'x'}, {ticket:'t_other01'}, {ticket:'t_zzzzzz'}, {ticket:'../x'}, {text:5}, {text:'  \n '}]) assert.equal(ctx.embedSendRequest(msg(frameWindow, bad)), null);

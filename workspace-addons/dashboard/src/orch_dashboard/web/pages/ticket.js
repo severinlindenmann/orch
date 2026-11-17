@@ -1837,7 +1837,8 @@ const EMBED_TICKET = /^t_[a-z0-9]{6,16}$/, EMBED_QUESTION = /^q[A-Za-z0-9_-]{0,3
 // The frame of the shown page of an add-on shipped with orch, when this message came from it (same origin); else null.
 function shippedFrame(e) {
   // the shipped add-on page is sandboxed (origin "null"); the frame check below is what counts
-  if ((e.origin !== location.origin && e.origin !== 'null') || snapshot) return null;  // a shared read-only copy acts on nothing
+  const chan = e.origin === 'null' && !!e.data?.chan && e.data.chan === globalThis.orchFrameChan?.();  // its per-frame code
+  if ((e.origin !== location.origin && !chan) || snapshot) return null;  // a shared read-only copy acts on nothing
   const r = route();
   if (r.kind !== 'page' || !addons().find(a => a.name === r.id)?.shipped) return null;
   const frame = document.querySelector('iframe.embed[data-key="embed"]');

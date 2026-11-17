@@ -15,7 +15,7 @@ from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, unquote, unquote_plus
 
 from . import actions, copychanges, diagapi, framepass, reffiles, selfupdate, ticketfiles
 from .data import (
@@ -126,6 +126,7 @@ SHIPPED_SANDBOX = (
 )
 FRAME_DEST = ("script", "style", "font", "image")  # what a sandboxed add-on page loads of its own code
 FRAME_CODE_DIRS = ("/kit/", "/web/")  # where a page orch ships keeps its program files
+FILE_CSP = "sandbox; default-src 'none'; img-src 'self' data: blob:; style-src 'self'; media-src 'self'; frame-ancestors 'self'"
 PROXY_BODY = 16384
 
 
@@ -370,22 +371,43 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return self.session.can_act(self.headers, self._page_port())
 
+    def _pass_tag(self) -> str:
+        return framepass.pass_tag(
+            getattr(self, "session", None), self.headers.get("Host") or "", self._remote()
+        )
+
     def _frame_begin(self, path: str, query: str = "") -> None:
         """Per request (a connection can carry several): the frame pass this request carries, checked for its
-        path. `_frame` = (add-on, may act) or None. A pass that is sent but not valid (expired, another add-on,
-        another sign-in) answers 401 readable by the frame, so the page asks the dashboard for a new one."""
+        path. `_frame` = (add-on, may act) or None. The pass comes only as X-Orch-Frame; the read-only file pass
+        only as the `orch-frame` query value of a GET under its add-on. One that is sent but not valid (expired,
+        another add-on or call, another sign-in or address) answers 401 readable by the frame, so the page asks
+        the dashboard for new ones."""
         self._frame, self._frame_cors, self._frame_bad = None, False, False
-        value = self.headers.get(framepass.FRAME_HEADER)
-        if value is None and getattr(self, "command", "") == "GET" and query:
-            value = (parse_qs(query).get(framepass.FRAME_PARAM) or [None])[0]
-        if value is None:
+        header = self.headers.get(framepass.FRAME_HEADER)
+        file = None
+        if header is None and query and framepass.FRAME_PARAM in unquote_plus(query):
+            file = (parse_qs(query).get(framepass.FRAME_PARAM) or [None])[0]
+            if getattr(self, "command", "") != "GET" or file is None:
+                self._frame_bad = True
+                return
+        if header is None and file is None:
             return
         passes = getattr(getattr(self, "server", None), "frame_passes", None)
         hit = None
         if passes is not None and self.headers.get("Origin") in (None, "null"):
-            hit = passes.check(value, framepass.session_tag(getattr(self, "session", None)))
+            hit = passes.check(
+                header if header is not None else file,
+                self._pass_tag(),
+                "header" if header is not None else "file",
+            )
         px = PROXY.fullmatch(path)
-        if hit and ((px and px.group(1) == hit[0]) or (not px and path in framepass.FRAME_ROOT_PATHS)):
+        if hit and px and px.group(1) == hit[0]:
+            ok = True
+        elif hit and not px and header is not None:
+            ok = path in framepass.FRAME_ROOT.get(hit[0], ())
+        else:
+            ok = False
+        if ok:
             self._frame, self._frame_cors = hit, True
         else:
             self._frame_bad = True
@@ -448,8 +470,8 @@ class Handler(BaseHTTPRequestHandler):
         passes = getattr(self.server, "frame_passes", None)
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
-        value = passes.mint(name, act, framepass.session_tag(session))
-        self._send(200, json.dumps({"pass": value, "act": act}).encode(), "application/json")
+        header, file = passes.mint(name, act, self._pass_tag())
+        self._send(200, json.dumps({"pass": header, "file": file, "act": act}).encode(), "application/json")
 
     def do_OPTIONS(self):
         """The preflight of a sandboxed add-on page's call (origin "null", the X-Orch-Frame header). It carries
@@ -473,7 +495,7 @@ class Handler(BaseHTTPRequestHandler):
             or "x-orch-frame" not in asked
             or not asked <= {"x-orch-frame", "content-type", "x-orch-op"}
             or not any_host_ok((self.headers.get("Host") or "").strip())
-            or not ((px and self._shipped(px.group(1))) or (not px and path in framepass.FRAME_ROOT_PATHS))
+            or not ((px and self._shipped(px.group(1))) or (not px and path in framepass.ALL_ROOT_PATHS))
         ):
             return self._refuse()
         self.send_response(204)
@@ -520,8 +542,10 @@ class Handler(BaseHTTPRequestHandler):
         port = self._upstream_port(name)
         if port is None or ".." in rest or "//" in rest:
             return self._send(404, b"not found", "text/plain")
-        if framepass.FRAME_PARAM in query:  # the frame pass is the dashboard's: the add-on never sees it
-            query = "&".join(q for q in query.split("&") if q.split("=", 1)[0] != framepass.FRAME_PARAM)
+        if query:  # the file pass is the dashboard's: the add-on never sees it, however its name is written
+            query = "&".join(
+                q for q in query.split("&") if unquote_plus(q.split("=", 1)[0]) != framepass.FRAME_PARAM
+            )
         up = {"Host": f"127.0.0.1:{port}", "X-Forwarded-Prefix": f"/addon/{name}"}
         if self._can_act():  # the person signed in here: vouch for them to the add-on's own page server
             from orch.pagesession import VOUCH_HEADER, vouch_key
@@ -574,6 +598,10 @@ class Handler(BaseHTTPRequestHandler):
         # /api/act or hand-off confirm (the fence refuses an origin of "null"; SameSite withholds the cookie). One
         # orch ships: sandboxed as well, it acts only with the frame pass for that add-on (ORCH-186).
         csp = PROXY_CSP + ("; " + SHIPPED_SANDBOX if self._shipped(name) else "; sandbox allow-scripts")
+        if self._shipped(name) and rest.startswith(("/api/", "/page/")):
+            # a file, picture or answer of a shipped add-on is never a page that runs: whatever its content (an
+            # agent's SVG or HTML), no script runs in it, so nothing in it can use a pass (ORCH-186 review H1)
+            csp = FILE_CSP
         extra["Referrer-Policy"] = "no-referrer"  # a picture or file address may carry the frame pass
         if method == "GET" and r.status == 200 and rest.lower().endswith(STATIC_EXT):
             extra = {**extra, "Cache-Control": "private, max-age=60"}

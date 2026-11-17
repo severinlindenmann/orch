@@ -943,18 +943,29 @@ function framePass(name) {
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
   framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
-    .then(j => { if (j && typeof j.pass === 'string') framePasses.set(name, j.pass); else framePassFailed.set(name, Date.now()); })
+    .then(j => {
+      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew()});
+      else framePassFailed.set(name, Date.now());
+    })
     .catch(() => framePassFailed.set(name, Date.now()))
     .finally(() => { framePassAsks.delete(name); if (framePasses.has(name)) render(); }));
   return null;
 }
+// A per-frame code the page's messages must carry: a document that is navigated into the frame (not the add-on's
+// own page, which got it in its address) cannot drive the dashboard (ORCH-186 review M1).
+function frameChanNew() { const b = new Uint8Array(16); crypto.getRandomValues(b); return Array.from(b, x => x.toString(16).padStart(2, '0')).join(''); }
+globalThis.orchFrameChan = () => { const r = route(); return r.kind === 'page' ? framePasses.get(r.id)?.chan || null : null; };
+// Passes go only to the add-on's own page (its start page and its own places such as t/<id>), never to one of
+// its files, pictures, answers or ticket pages (api/, page/, kit/, web/, or any name with a dot): those can carry
+// content an agent made (ORCH-186 review H1).
+const frameEntry = path => /^[A-Za-z0-9_\/-]{0,300}$/.test(path) && !/^(api|page|kit|web)(\/|$)/.test(path) && !path.includes('//');
 function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
   const shipped = !!addons().find(a => a.name === r.id)?.shipped, base = '/addon/' + r.id + '/' + r.path;
-  const pass = shipped ? framePass(r.id) : null;
-  if (shipped && !pass) { const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; return wait; }
-  const src = shipped ? base + '#orch-frame=' + pass + (r.inner ? '&' + r.inner : '') : base + (r.inner ? '#' + r.inner : '');
+  const entry = shipped && frameEntry(r.path), p = entry ? framePass(r.id) : null;
+  if (entry && !p) { const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; return wait; }
+  const src = entry ? base + '#orch-frame=' + p.pass + '&orch-file=' + p.file + '&orch-chan=' + p.chan + (r.inner ? '&' + r.inner : '') : base + (r.inner ? '#' + r.inner : '');
   const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', sandbox:shipped ? SHIPPED_SANDBOX : 'allow-scripts'});  // allow alone: both log a warning (ORCH-186)
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
@@ -970,9 +981,9 @@ globalThis.addEventListener?.('message', e => {
   if (!frame || e.source !== frame.contentWindow || !addons().find(a => a.name === r.id)?.shipped) return;
   const hash = typeof d.hash === 'string' && /^[A-Za-z0-9_\/-]{0,200}$/.test(d.hash) ? d.hash : null;
   if (hash === null) return;
-  if (d.orch === 'frame-top') { if (hash) location.hash = '#' + hash; return; }
+  if (d.orch === 'frame-top') { if (hash && d.chan && d.chan === globalThis.orchFrameChan()) location.hash = '#' + hash; return; }
   const prefix = '/addon/' + r.id + '/', rel = typeof d.path === 'string' && d.path.startsWith(prefix) ? d.path.slice(prefix.length) : null;
-  if (rel === null || !/^[A-Za-z0-9_.\/-]{0,300}$/.test(rel) || rel.startsWith('/') || rel.includes('..') || rel.includes('//')) return;
+  if (rel === null || rel.startsWith('/') || !frameEntry(rel)) return;  // only the add-on's own page gets opened with a pass
   if (d.fresh) {
     if (Date.now() - (frameFresh.get(r.id) || 0) < 5000) return;
     frameFresh.set(r.id, Date.now()); framePasses.delete(r.id);
@@ -985,7 +996,7 @@ const framesLoaded = new Set();
 // A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
 const shellAddons = new Set();
 globalThis.addEventListener?.('message', event => {
-  const ours = event.origin === location.origin || (event.origin === 'null' && [...document.querySelectorAll('iframe.embed')].some(f => f.contentWindow === event.source));
+  const ours = event.origin === location.origin || (event.origin === 'null' && !!event.data?.chan && event.data.chan === globalThis.orchFrameChan() && [...document.querySelectorAll('iframe.embed')].some(f => f.contentWindow === event.source));
   const name = ours && event.data?.orch === 'embed-shell' && /^\/addon\/([a-z][a-z0-9-]{1,31})\//.exec(String(event.data.path || ''))?.[1];
   if (!name || shellAddons.has(name)) return;
   shellAddons.add(name);

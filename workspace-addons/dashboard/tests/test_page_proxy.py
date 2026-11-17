@@ -530,7 +530,8 @@ def test_the_dashboard_page_gets_a_pass_for_a_shipped_page_only(stack, monkeypat
     base, _ = stack
     _with_person(monkeypatch)
     code, body, _ = _mint(base, headers={"X-Orch-Page": "secret"})
-    assert code == 200 and json.loads(body)["act"] is True and len(json.loads(body)["pass"]) >= 40
+    got = json.loads(body)
+    assert code == 200 and got["act"] is True and len(got["pass"]) >= 40 and len(got["file"]) >= 40
     code, body, _ = _mint(base)  # no sign-in on this computer: a read-only pass (it could read anyway)
     assert code == 200 and json.loads(body)["act"] is False
     assert _mint(base, headers=REMOTE)[0] == 403  # another computer without sign-in: none
@@ -548,19 +549,26 @@ def test_a_pass_works_for_its_own_addon_from_any_computer_and_is_readable_by_the
 
     base, _ = stack
     _with_person(monkeypatch)
-    p = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["pass"]
-    for extra in ({}, REMOTE):
+    remote_mint = {
+        **REMOTE,
+        "Origin": "http://orch.team.example:8791",
+        "Cookie": "orch_page_x=1",
+        "X-Orch-Page": "secret",
+    }
+    for extra, mint in (({}, {"X-Orch-Page": "secret"}), (REMOTE, remote_mint)):
+        p = json.loads(_mint(base, headers=mint)[1])["pass"]
         code, _, h = call(base + "/addon/focus/api/x", headers={**FRAME, **extra, "X-Orch-Frame": p})
         assert code == 200 and h["Access-Control-Allow-Origin"] == "null"
         assert SEEN[-1][2].get(pagesession.VOUCH_HEADER)  # the dashboard vouches for the person
         assert "X-Orch-Frame" not in SEEN[-1][2]  # the add-on never sees the pass
-    j = {**FRAME, "Content-Type": "application/json", "X-Orch-Frame": p}
+    j = {**FRAME, **REMOTE, "Content-Type": "application/json", "X-Orch-Frame": p}  # p: minted under REMOTE
     code, _, _ = call(base + "/addon/focus/api/act", "POST", j, b"{}")
     assert code == 200 and SEEN[-1][2].get(pagesession.VOUCH_HEADER)
-    # a picture or file address carries it as a query value; the add-on gets the address without it
+    # a picture or file address carries the read-only file pass as a query value; the add-on gets the address without it
+    p = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["file"]
     code, _, _ = call(
         base + f"/addon/focus/api/file?t=t_abcdef&orch-frame={p}&m=view",
-        headers={**REMOTE, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"},
+        headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"},
     )
     assert code == 200 and SEEN[-1][1] == "/api/file?t=t_abcdef&m=view"
 
@@ -663,18 +671,87 @@ def test_the_preflight_of_a_frame_call_is_answered_only_for_frame_calls(stack):
 
 
 def test_frame_passes_end_expire_and_stay_few():
-    from orch_dashboard.framepass import FramePasses
+    from orch_dashboard.framepass import FramePasses, pass_tag
 
-    passes = FramePasses(life=60, limit=3)
-    a = passes.mint("focus", True, "tag")
-    assert passes.check(a, "tag") == ("focus", True)
-    assert (
-        passes.check(a, "other") is None
-        and passes.check(None, "tag") is None
-        and passes.check("short", "tag") is None
-    )
-    for _ in range(3):
+    passes = FramePasses(life=60, limit=4)
+    a, fa = passes.mint("focus", True, "tag")
+    assert passes.check(a, "tag", "header") == ("focus", True)
+    assert passes.check(fa, "tag", "file") == ("focus", False)  # the file pass never acts
+    assert passes.check(a, "tag", "file") is None and passes.check(fa, "tag", "header") is None
+    assert passes.check(a, "other", "header") is None and passes.check(None, "tag", "header") is None
+    assert passes.check("short", "tag", "header") is None
+    for _ in range(2):
         passes.mint("focus", False, "tag")
-    assert passes.check(a, "tag") is None  # the oldest went first
+    assert passes.check(a, "tag", "header") is None  # the oldest went first
     short = FramePasses(life=-1)
-    assert short.check(short.mint("focus", True, "tag"), "tag") is None  # expired
+    assert short.check(short.mint("focus", True, "tag")[0], "tag", "header") is None  # expired
+
+    class S:
+        secret, revoked = "s", False
+
+    assert pass_tag(S, "h:1", False) != pass_tag(S, "h:1", True) != pass_tag(S, "other:1", True)
+    S.revoked = True
+    assert pass_tag(S, "h:1", False) != pass_tag(S, "h:1", False)  # a revoked session never matches
+
+
+def test_the_file_pass_only_reads_its_own_addon_and_the_pass_never_rides_in_an_address(stack, monkeypatch):
+    """ORCH-186 review H2: the value that may appear in an address (logs, history) can never act."""
+    from orch import pagesession
+
+    base, _ = stack
+    _with_person(monkeypatch)
+    got = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])
+    img = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"}
+    assert call(base + f"/addon/focus/api/x?orch-frame={got['file']}", headers=img)[0] == 200
+    assert pagesession.VOUCH_HEADER not in SEEN[-1][2]  # read-only: no word for the person
+    n = len(SEEN)
+    assert (
+        call(base + f"/addon/focus/api/x?orch-frame={got['pass']}", headers=img)[0] == 401
+    )  # the pass: header only
+    assert (
+        call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": got["file"]})[0] == 401
+    )  # file: query only
+    assert (
+        call(base + f"/api/events?orch-frame={got['file']}", headers=img)[0] == 401
+    )  # never a dashboard call
+    j = {**FRAME, "Content-Type": "application/json"}
+    assert call(base + f"/addon/focus/api/act?orch-frame={got['file']}", "POST", j, b"{}")[0] in (
+        401,
+        403,
+    )  # never a POST
+    assert len(SEEN) == n
+
+
+def test_a_pass_belongs_to_the_address_it_was_minted_on(stack, monkeypatch):
+    base, _ = stack
+    _with_person(monkeypatch)
+    p = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["pass"]
+    assert call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": p})[0] == 200
+    assert call(base + "/addon/focus/api/x", headers={**FRAME, **REMOTE, "X-Orch-Frame": p})[0] == 401
+
+
+def test_a_shipped_addons_files_and_answers_never_run_script(stack):
+    """ORCH-186 review H1: an agent's SVG or HTML under a shipped add-on's /api/ runs no script, so it can never
+    use a pass; the add-on's own page keeps its scripts (sandboxed)."""
+    base, _ = stack
+    _c, _b, h = call(base + "/addon/focus/api/order/x/file/evil.svg")
+    csp = h["Content-Security-Policy"]
+    assert csp.startswith("sandbox;") and "allow-scripts" not in csp and "default-src 'none'" in csp
+    _c, _b, h = call(base + "/addon/focus/t/t_abcdef")
+    assert "allow-scripts" in h["Content-Security-Policy"]
+
+
+def test_the_file_pass_is_taken_off_however_its_name_is_written(stack, monkeypatch):
+    base, _ = stack
+    _with_person(monkeypatch)
+    f = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["file"]
+    img = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"}
+    assert call(base + f"/addon/focus/api/x?a=1&orch%2Dframe={f}&b=2", headers=img)[0] == 200
+    assert SEEN[-1][1] == "/api/x?a=1&b=2"
+
+
+def test_only_focus_makes_dashboard_calls_from_its_frame():
+    from orch_dashboard import framepass
+
+    assert set(framepass.FRAME_ROOT) == {"focus"}  # Insights and Factory get no dashboard call at all
+    assert "/api/frame-pass" not in framepass.ALL_ROOT_PATHS and "/session" not in framepass.ALL_ROOT_PATHS

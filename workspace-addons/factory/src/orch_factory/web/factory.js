@@ -89,7 +89,7 @@
     b.type = 'button';
     b.addEventListener('click', () => {
       b.disabled = true;
-      window.parent.postMessage({type: 'orch.question', ticket: order.id, question}, location.origin);
+      window.parent.postMessage({type: 'orch.question', ticket: order.id, question, chan: (window.OrchFrame || {}).chan}, location.origin);
       setTimeout(() => { b.disabled = false; }, 1500);
     });
     return b;
@@ -223,7 +223,7 @@
   // there). The idea box asks the dashboard to file the idea as YOUR click (orch.idea): the dashboard checks this frame and
   // runs the person's action with your page session; it answers orch.idea.done {id, order} or orch.idea.failed {id, error}.
   function toChat(message) {
-    window.parent.postMessage({type: 'orch.say', text: message}, location.origin);
+    window.parent.postMessage({type: 'orch.say', text: message, chan: (window.OrchFrame || {}).chan}, location.origin);
   }
   const IDEA_MAX = 500, NOTE_MAX = 1000;
   // A request to the dashboard waits for its answer by a random id: orch.idea.* and orch.send.* (see below).
@@ -247,7 +247,7 @@
       const timer = setTimeout(() => finish({error: ''}), wait);  // an older dashboard never answers
       function finish(result) { clearTimeout(timer); asked.delete(id); resolve(result); }
       asked.set(id, finish);
-      window.parent.postMessage({...message, id}, location.origin);
+      window.parent.postMessage({...message, id, chan: (window.OrchFrame || {}).chan}, location.origin);  // the code: the dashboard's per-frame check
     });
   }
   // Ask another workspace at a stop (816 A): one click; the dashboard runs the add-on's ask act as the person.

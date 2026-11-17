@@ -1,14 +1,18 @@
 """Frame passes (ORCH-186): the add-on pages orch ships run in a sandboxed frame (an opaque origin), so a script in
 one can never read the dashboard's page secret or reach into the dashboard page. The dashboard page (signed in)
-asks for a pass for one add-on and hands it to that frame in the frame address's fragment (never sent in a request).
-The frame sends it as X-Orch-Frame (or, for a picture or file address, the `orch-frame` query value).
+asks for passes for one add-on and hands them to that add-on's own page (never a file, a ticket page or any other
+address under it) in the frame address's fragment, which is never sent in a request.
 
-A pass:
-- works for ONE add-on: its pages under /addon/<name>/ and the few dashboard calls an add-on page makes
-  (FRAME_ROOT_PATHS); never for minting another pass, the sign-in or any other dashboard call;
-- belongs to the page session that minted it: a new sign-in or a revoked one ends every pass;
-- is kept in memory only (a hash of it), lives LIFE seconds, at most MAX at a time;
-- is read-only when the page that asked had no sign-in (watch-only on this computer, as before the frames moved).
+Two passes are minted together:
+- the pass (`kind="header"`), sent only as X-Orch-Frame: the add-on's pages under /addon/<name>/ and the dashboard
+  calls that add-on's page makes (FRAME_ROOT); it acts when the page that asked could act;
+- the file pass (`kind="file"`), sent only as the `orch-frame` query value of a picture, file or download address
+  (an <img> or a link cannot send a header): GET under /addon/<name>/ only, never acts. A file pass seen in a
+  log or a history can only read that add-on's pages for the rest of its short life.
+
+Every pass belongs to the page session that minted it and to the address it was minted on (host name, and this
+computer's port or the port for other computers): a new or revoked sign-in, another host name or the other port
+ends it. Kept in memory only (a hash of it), LIFE seconds, at most MAX at a time.
 """
 
 from __future__ import annotations
@@ -22,10 +26,14 @@ import time
 
 FRAME_HEADER = "X-Orch-Frame"
 FRAME_PARAM = "orch-frame"
-FRAME_ROOT_PATHS = ("/api/act", "/api/events", "/api/term", "/api/term/keys")
+# The dashboard calls an add-on page makes itself (beyond its own /addon/<name>/): Focus shows and types into the
+# live helper session and acts through the dashboard. Every other add-on page: none.
+FRAME_ROOT = {"focus": ("/api/act", "/api/events", "/api/term", "/api/term/keys")}
+ALL_ROOT_PATHS = frozenset(p for paths in FRAME_ROOT.values() for p in paths)
 PASS_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
-LIFE = 8 * 3600
-MAX = 64
+LIFE = 3600
+MAX = 128
+KINDS = ("header", "file")
 
 
 def _digest(value: str) -> str:
@@ -39,27 +47,28 @@ class FramePasses:
         self._lock = threading.Lock()
         self._life = life
         self._limit = limit
-        self._passes: dict[
-            str, tuple[str, bool, str, float]
-        ] = {}  # digest -> (addon, act, session tag, expires)
+        # digest -> (addon, act, tag, expires, kind)
+        self._passes: dict[str, tuple[str, bool, str, float, str]] = {}
 
-    def mint(self, addon: str, act: bool, session_tag: str) -> str:
-        value = secrets.token_urlsafe(32)
+    def mint(self, addon: str, act: bool, tag: str) -> tuple[str, str]:
+        """(pass, file pass) for one add-on page."""
+        header, file = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         now = time.time()
         with self._lock:
             self._passes = {k: v for k, v in self._passes.items() if v[3] > now}
-            while len(self._passes) >= self._limit:  # the oldest goes first
+            while len(self._passes) >= self._limit - 1:  # the oldest go first
                 self._passes.pop(min(self._passes, key=lambda k: self._passes[k][3]))
-            self._passes[_digest(value)] = (addon, bool(act), session_tag, now + self._life)
-        return value
+            self._passes[_digest(header)] = (addon, bool(act), tag, now + self._life, "header")
+            self._passes[_digest(file)] = (addon, False, tag, now + self._life, "file")
+        return header, file
 
-    def check(self, value: str | None, session_tag: str) -> tuple[str, bool] | None:
-        """(add-on, may act) for a live pass of this session, else None."""
-        if not isinstance(value, str) or not PASS_RE.fullmatch(value):
+    def check(self, value: str | None, tag: str, kind: str) -> tuple[str, bool] | None:
+        """(add-on, may act) for a live pass of this kind, session and address, else None."""
+        if kind not in KINDS or not isinstance(value, str) or not PASS_RE.fullmatch(value):
             return None
         with self._lock:
             hit = self._passes.get(_digest(value))
-        if not hit or hit[3] <= time.time() or not hmac.compare_digest(hit[2], session_tag):
+        if not hit or hit[3] <= time.time() or hit[4] != kind or not hmac.compare_digest(hit[2], tag):
             return None
         return hit[0], hit[1]
 
@@ -68,11 +77,13 @@ class FramePasses:
             self._passes.clear()
 
 
-def session_tag(session) -> str:
-    """Ties a pass to the page session: a new secret (new sign-in) or a revoked session ends every pass."""
+def pass_tag(session, host: str, remote: bool) -> str:
+    """Ties a pass to the page session (a new secret or a revoked session ends it) and to the address it was
+    minted on (the Host name and which port)."""
     if session is None:
-        return "none"
-    if getattr(session, "revoked", False):
+        base = "none"
+    elif getattr(session, "revoked", False):
         return "revoked:" + secrets.token_hex(8)  # never equal to a stored tag
-    secret = getattr(session, "secret", "") or ""
-    return _digest("orch-frame:" + secret)
+    else:
+        base = "orch-frame:" + (getattr(session, "secret", "") or "")
+    return _digest(base + "\n" + ("remote" if remote else "local") + "\n" + (host or "").strip().lower())
