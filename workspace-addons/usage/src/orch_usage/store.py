@@ -314,6 +314,87 @@ def sync_found(accounts: list[dict], rows: list[dict], found, provider: str, rea
         rows.append(_line(USAGE, "account found", a, None, {"label": a["label"], "order": a["order"]}))
 
 
+PROVIDERS = ("anthropic", "openai")  # API credits Usage can count for skills (Claude API, OpenAI)
+_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}")
+_SECRETISH = re.compile(r"@|sk-|key-|[A-Za-z0-9_\-]{32,}")
+
+
+def check_known(k) -> dict:
+    """One credit a skill knows (`orch usage ask --known -`), checked; Refused in plain words when it is not right.
+
+    {"name", "label", "log", "limit" ($ a month, optional), "since" (the reset day, optional), "for" (kinds),
+    "first" (place it first), "unnamed"}. Never a key: a label that looks like a login or key is refused."""
+    if not isinstance(k, dict):
+        raise Refused("A known credit must be an object.")
+    name, label, log = k.get("name"), k.get("label"), k.get("log")
+    if not isinstance(name, str) or not _NAME.fullmatch(name) or _SECRETISH.search(name):
+        raise Refused("A known credit needs a short name, like main.")
+    if not isinstance(label, str) or not label.strip() or len(label) > 64 or _SECRETISH.search(label):
+        raise Refused(f"The label of credit {name} is missing, too long or looks like a login or key.")
+    if not isinstance(log, str) or not log.strip() or len(log) > 512:
+        raise Refused(f"Credit {name} needs the path of its spend log.")
+    lim = k.get("limit")
+    if lim is not None and (not isinstance(lim, (int, float)) or isinstance(lim, bool) or not lim > 0):
+        raise Refused(f"The limit of credit {name} must be a number above 0.")
+    since = k.get("since")
+    if since is not None and not (isinstance(since, str) and _TIME.fullmatch(since)):
+        raise Refused(f"The reset day of credit {name} must look like 2026-11-17T00:00:00Z.")
+    kinds = k.get("for") or []
+    if not isinstance(kinds, list) or not all(x in KINDS for x in kinds):
+        raise Refused(f"Credit {name}: kinds of work must be from " + ", ".join(KINDS) + ".")
+    return {
+        "name": name,
+        "label": label.strip(),
+        "log": log.strip(),
+        "limit": lim,
+        "since": since,
+        "for": [x for x in KINDS if x in kinds],
+        "first": k.get("first") is True,
+        "unnamed": k.get("unnamed") is True,
+    }
+
+
+def credit_of(accounts: list[dict], provider: str, name: str) -> dict | None:
+    for a in accounts:
+        src = a.get("source", {})
+        if a["type"] == "api-key" and a.get("provider") == provider and src.get("name") == name:
+            return a
+    return None
+
+
+def sync_known(accounts: list[dict], rows: list[dict], provider: str, known: list[dict]) -> None:
+    """Add the API credits a credit skill knows that Usage does not list yet, with the skill's own starting rule
+    (a monthly $ limit from its reset day, its kinds of work). A credit already listed is left as the person set it."""
+    if provider not in PROVIDERS:
+        raise Refused("Usage counts API credits of Claude API (anthropic) and OpenAI (openai) only.")
+    for k in known:
+        if credit_of(accounts, provider, k["name"]):
+            continue
+        limits = []
+        if k["limit"] is not None:
+            lim = {"value": k["limit"], "unit": "$", "period": "month"}
+            if k["since"]:
+                lim["since"] = k["since"]
+            limits.append(lim)
+        src = {"reader": "spend-log", "path": k["log"], "name": k["name"]}
+        if k["unnamed"]:
+            src["unnamed"] = True
+        a = {
+            "id": new_id(accounts),
+            "label": k["label"],
+            "type": "api-key",
+            "provider": provider,
+            "source": src,
+            "on": True,
+            "order": 0 if k["first"] else len(accounts) + 1,
+            "rule": {"limits": limits, "for": k["for"], "ends": None},
+            "prev": None,
+        }
+        accounts.append(a)
+        _renumber(accounts)
+        rows.append(_line(USAGE, "account found", a, None, {"label": a["label"], "order": a["order"]}))
+
+
 def _rule_change(a: dict, rows: list[dict], who: str, what: str, new_rule: dict, end: str | None) -> None:
     old = copy.deepcopy(a["rule"])
     if not _check_rule(new_rule):
@@ -409,6 +490,8 @@ def set_limit(
         if period == "until":
             lim["until"] = until
         if same:
+            if period == "month" and same[0].get("since"):
+                lim["since"] = same[0]["since"]  # a new number keeps the credit's reset day
             limits[limits.index(same[0])] = lim
         elif len(limits) >= MAX_LIMITS:
             raise Refused(
@@ -419,6 +502,18 @@ def set_limit(
         what = f"limit {fmt_value(value, unit)} ({PERIOD_WORDS[period]})"
     limits.sort(key=lambda x: PERIODS.index(x["period"]))
     _rule_change(a, rows, who, what, rule, end)
+
+
+def set_resets(a: dict, rows: list[dict], who: str, day: str) -> None:
+    """The day a monthly $ limit starts again (a credit reset on the 17th counts from the 17th to the 17th)."""
+    rule = copy.deepcopy(a["rule"])
+    hit = [x for x in rule["limits"] if x["period"] == "month" and x["unit"] == "$"]
+    if not hit:
+        raise Refused(
+            f"{a['label']} has no monthly $ limit. Set one first: orch usage limit {a['label']} $100."
+        )
+    hit[0]["since"] = day
+    _rule_change(a, rows, who, f"month starts again on day {to_time(day).astimezone().day}", rule, None)
 
 
 def set_period(
@@ -493,6 +588,39 @@ def set_order(accounts: list[dict], a: dict, rows: list[dict], who: str, place: 
     for i, x in enumerate(accounts, 1):
         x["order"] = i
     rows.append(_line(who, f"order {old} to {place}", a, old, place))
+
+
+def _add_months(d: datetime, n: int) -> datetime:
+    import calendar
+
+    y, m = divmod(d.month - 1 + n, 12)
+    y, m = d.year + y, m + 1
+    return d.replace(year=y, month=m, day=min(d.day, calendar.monthrange(y, m)[1]))
+
+
+def month_window(lim: dict, at: datetime) -> tuple[datetime, datetime]:
+    """(start, next start) of a monthly limit at `at`. With `since` (the day the credit starts again, e.g. a reset on
+    the 17th) a month runs from that day to the same day of the next month; without it, the calendar month. Both in
+    this computer's time, worked out on the local calendar so a change of summer time never moves the reset."""
+    local = at.astimezone().replace(tzinfo=None)
+    anchor = None
+    if isinstance(lim.get("since"), str) and _TIME.fullmatch(lim["since"]):
+        anchor = to_time(lim["since"]).astimezone().replace(tzinfo=None)
+    if anchor is None:
+        start = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        nxt = _add_months(start, 1)
+    elif anchor > local:
+        start, nxt = anchor, _add_months(anchor, 1)  # not reset yet: nothing counts before it
+    else:
+        n = (local.year - anchor.year) * 12 + local.month - anchor.month
+        if _add_months(anchor, n) > local:
+            n -= 1
+        start, nxt = _add_months(anchor, n), _add_months(anchor, n + 1)
+    return start.astimezone(), nxt.astimezone()  # naive local -> aware, with the right offset for that day
+
+
+def utc_text(d: datetime) -> str:
+    return d.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def fmt_value(value: float, unit: str) -> str:

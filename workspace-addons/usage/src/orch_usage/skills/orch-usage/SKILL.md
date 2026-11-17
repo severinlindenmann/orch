@@ -12,7 +12,8 @@ The person sees and changes the same on the Usage page of the dashboard; its cli
 ## When to use
 - The person asks how much of a subscription or credit is used, or which account is in use now.
 - The person asks to change a limit, a period, the order, to turn an account on or off, or "only until <date>".
-- You need to know whether an account still has room before heavy work.
+- You need to know whether an account still has room before heavy work, or before a subagent or a credit
+  skill spends: `orch usage ask <kind of work>`.
 
 ## Recipes
 
@@ -39,6 +40,17 @@ The person sees and changes the same on the Usage page of the dashboard; its cli
     orch usage end <account> none                  # keep the rule, no end
 
 When a rule ends it falls back to the rule before its last change, and the history says so.
+
+**Before you spend** (your own subagent, or a credit skill such as a Claude API or OpenAI call)
+
+    orch usage ask reviews                         # a subagent: Lead, Code, Reviews, Builds, Scripts or Helpers
+    orch usage ask reviews --provider openai       # a credit skill: only OpenAI credits (or anthropic)
+
+It answers which account to use (its label, and for an API credit the name the credit skill already uses for it,
+never a key), "nothing is set" (go ahead as usual), or No room with when it starts again (exit 3). On No room do not
+start the work: say so on the ticket and wait. API credits count what their spend log says since the start of the
+month (or since their reset day: `orch usage limit <account> $100 --period month --resets 2026-11-17`). A credit
+skill lists the credits it knows the first time it asks; the person changes their rules afterwards like any other.
 
 **Switching early** (subscriptions, through the account switcher)
 

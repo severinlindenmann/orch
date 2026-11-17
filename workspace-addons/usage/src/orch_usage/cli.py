@@ -1,4 +1,4 @@
-"""orch usage list|history|limit|period|order|on|off|end|switching|act|run|start|stop|status
+"""orch usage list|history|limit|period|order|on|off|end|for|ask|switching|act|run|start|stop|status
 (store: store.py; readers: readers/; early switching: switching.py; background process: service.py)."""
 
 from __future__ import annotations
@@ -124,17 +124,24 @@ def parse_time(text: str, now: datetime | None = None) -> str:
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def parse_day(text: str) -> str:
+    """YYYY-MM-DD, past or future: the start of that day, this computer's time, as UTC."""
+    t = (text or "").strip()
+    if not re.fullmatch(r"\d{4}-\d\d-\d\d", t):
+        raise Refused(f"'{text}' is not a day. Write it like 2026-11-17.")
+    try:
+        d = datetime.strptime(t, "%Y-%m-%d").astimezone()
+    except ValueError:
+        raise Refused(f"'{text}' is not a day. Write it like 2026-11-17.") from None
+    return d.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 # ---------------------------------------------------------------- reading use
 
 
 def _period_start(period: str, lim: dict, at: datetime) -> str | None:
     if period == "month":
-        local = at.astimezone()
-        return (
-            local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            .astimezone(UTC)
-            .strftime("%Y-%m-%dT%H:%M:%SZ")
-        )
+        return store.utc_text(store.month_window(lim, at)[0])
     if period == "week":
         return (at - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return lim.get("since")
@@ -298,6 +305,36 @@ def run(args) -> int:
             raise Refused("The start question was not a JSON object.")
         print(json.dumps(routing.decide(root, req), ensure_ascii=False))
         return 0
+    if cmd == "ask":  # a credit skill or a helper's own subagent, before it spends (asking.py)
+        from . import asking
+
+        known = None
+        if args.known is not None:
+            if args.known != "-":
+                raise Refused("Give the known credits on stdin: --known -")
+            if not args.provider:
+                raise Refused("Known credits need --provider anthropic or openai.")
+            try:
+                raw = json.loads(sys.stdin.read() or "[]")
+            except ValueError:
+                raise Refused("The known credits were not JSON.") from None
+            if not isinstance(raw, list) or len(raw) > 10:
+                raise Refused("The known credits must be a list of at most 10.")
+            known = [store.check_known(k) for k in raw]
+        kind = store.parse_kinds([args.kind])
+        if not kind or len(kind) != 1:
+            raise Refused("Ask for one kind of work: " + ", ".join(store.KIND_WORDS.values()) + ".")
+        ans = asking.ask(root, kind[0], args.provider, args.name, known)
+        if args.json:
+            print(json.dumps(ans, ensure_ascii=False))
+        elif ans["go"] and ans.get("account"):
+            left = f" (${ans['left']:g} left)" if ans.get("left") is not None else ""
+            print(f"Use {ans['account']}{left}.")
+        elif ans["go"]:
+            print("Nothing is set for this kind of work in Usage: go ahead as usual.")
+        else:
+            print(ans["why"])
+        return 0 if ans["go"] else 3
     if cmd == "needs":
         from . import routing
 
@@ -317,6 +354,8 @@ def run(args) -> int:
             value, unit = parse_value(args.value)
             until = parse_time(args.until) if args.until else None
             store.set_limit(a, rows, who, value, unit, parse_period(args.period), until, end)
+            if args.resets:
+                store.set_resets(a, rows, who, parse_day(args.resets))
             if until:
                 for lim in a["rule"]["limits"]:
                     if lim["period"] == "until" and "since" not in lim:
@@ -473,6 +512,11 @@ def main(argv=None) -> int:
     p("list")
     p("before-start")
     p("needs")
+    s = p("ask")
+    s.add_argument("kind")
+    s.add_argument("--provider")
+    s.add_argument("--name")
+    s.add_argument("--known")
     s = p("history")
     s.add_argument("--account")
     s = p("limit")
@@ -480,6 +524,7 @@ def main(argv=None) -> int:
     s.add_argument("value")
     s.add_argument("--period")
     s.add_argument("--until")
+    s.add_argument("--resets", help="the day a monthly credit starts again, e.g. 2026-11-17")
     s.add_argument("--end")
     s.add_argument("--by")
     s = p("period")

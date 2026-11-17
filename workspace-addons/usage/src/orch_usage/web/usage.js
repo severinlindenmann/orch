@@ -97,7 +97,7 @@
     if (used != null) pct = b.unit === '%' ? used : (b.limit ? used / b.limit * 100 : 0);
     pct = Math.max(0, Math.min(100, pct));
     const head = used == null ? 'not read yet' : amount(used, b.unit) + (b.estimated ? ' (estimated)' : '');
-    const right = b.unit === '%' ? resetWords(b.resets_at, used) : (b.until ? 'ends ' + dateWords(b.until) : '');
+    const right = b.unit === '%' ? resetWords(b.resets_at, used) : (b.until ? 'ends ' + dateWords(b.until) : b.resets_at ? resetWords(b.resets_at, true) : '');
     const fill = h('span');
     fill.style.setProperty('--value', pct + '%');
     return h('div', {className: 'progress-labeled'},

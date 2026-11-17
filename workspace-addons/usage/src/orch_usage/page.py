@@ -61,6 +61,8 @@ def _bars(row: dict) -> list[dict]:
             bar.update(unit="$", used=u.get("spent"), estimated=bool(u.get("estimated")), note=u.get("note"))
             if lim and lim["period"] == "until":
                 bar["until"] = lim.get("until")
+            elif lim and lim["period"] == "month":  # when the month's credit starts again (its reset day)
+                bar["resets_at"] = store.utc_text(store.month_window(lim, datetime.now(UTC))[1])
         if lim:
             bar["limit"] = lim["value"]
             bar["limit_unit"] = lim["unit"]

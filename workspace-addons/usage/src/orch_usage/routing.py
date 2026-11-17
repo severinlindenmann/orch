@@ -23,7 +23,7 @@ Only labels, numbers and times: never a key or login.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import store, switching
@@ -87,10 +87,7 @@ def _credit_room(a: dict, at: datetime) -> tuple[bool, str, str | None]:
 
 def _next(lim: dict, at: datetime) -> str | None:
     if lim["period"] == "month":
-        local = at.astimezone()
-        first = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        nxt = (first + timedelta(days=32)).replace(day=1)
-        return nxt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return store.utc_text(store.month_window(lim, at)[1])
     if lim["period"] == "until":
         return None  # the limit holds until its date passes; no wake time to give
     return None
