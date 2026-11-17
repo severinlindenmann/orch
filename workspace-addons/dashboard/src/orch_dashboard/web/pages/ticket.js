@@ -1161,14 +1161,25 @@ function ticketAddStep(t) {
   const ask = t.epic ? 'What needs doing in this ticket?' : 'What is this step about?';  // an epic holds tickets (ORCH-14)
   const {d, actions} = dialog(ask);
   const input = h('input', {className:'input', 'aria-label':ask, maxlength:200});
+  // ORCH-156: or a ticket that already exists moves in (its "Part of" changes). Not this ticket, not one it is
+  // part of (a loop), not a closed one, not one already in it. FOLLOW-UP: kit select, a native one until then.
+  const all = tickets(), above = new Set([t.id]);
+  for (let p = window.DashHelpers.parentOf(all, t); p && !above.has(p.id); p = window.DashHelpers.parentOf(all, p)) above.add(p.id);
+  const inside = new Set(window.DashHelpers.childrenOf(all, t).map(c => c.id));
+  const existing = all.filter(x => x && !above.has(x.id) && !inside.has(x.id) && !['done', 'dropped'].includes(x.status)).sort((x, y) => window.DashHelpers.creationOrder(y, x));
+  const pick = existing.length ? h('select', {className:'input', 'aria-label':'Or pick a ticket that already exists'},
+    h('option', {value:''}, 'Or pick a ticket that already exists'),
+    existing.map(x => h('option', {value:x.id}, [x.key, clean(x.title)].filter(Boolean).join(' ')))) : null;
+  if (pick) pick.onchange = () => { input.hidden = !!pick.value; };
   const send = ticketButton('Add', 'primary', async () => {
-    const title = input.value.trim(); if (!title || send.disabled) return;
+    const moved = pick && pick.value ? existing.find(x => x.id === pick.value) : null;
+    const title = input.value.trim(); if ((!title && !moved) || send.disabled) return;
     send.disabled = true;
-    const result = await act('ticket.new', {title, parent:t.id});
+    const result = moved ? await act('ticket.edit', {ticket:moved.id, parent:t.id, if_revision:moved.revision}) : await act('ticket.new', {title, parent:t.id});
     if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(changeError(result), 'error'); }
   });
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
-  actions.append(send); d.append(input, actions); window.orch.open(d); input.focus();
+  actions.append(send); d.append(h('div', {className:'stack'}, input, pick), actions); window.orch.open(d); input.focus();
 }
 function ticketParts(t, children) {
   const add = snapshot ? null : ticketButton(t.epic ? '+ Add a ticket' : '+ Add a step', 'ghost add-row', () => ticketAddStep(t));
@@ -1461,7 +1472,7 @@ function ticketProperties(t, parent) {
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, parent ? field('Sub-ticket of', h('a', {href:href(parent.id)}, partName(parent))) : null,
+    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)),
       ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Helper strength', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
@@ -1615,6 +1626,20 @@ const MODEL_NAMES = {sonnet:'Sonnet', opus:'Opus'};
 function modelChoice(t) {
   const m = t.model && MODEL_NAMES[t.model.name] ? t.model : null;
   return m ? {name:m.name, auto:m.by === 'orch', why:m.why ? clean(String(m.why)) : ''} : null;
+}
+// ORCH-156: what this ticket is part of (an epic, another ticket); a person puts it under one that exists or takes
+// it out. Never itself or a ticket inside it; epics first. FOLLOW-UP: kit select, a native one like Model until then.
+function partOfField(t, parent) {
+  const was = parent ? parent.id : '';
+  const select = h('select', {'aria-label':'Part of', 'data-key':'part-of-' + t.id},
+    h('option', {value:''}, 'Not part of another ticket'),
+    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.epic ? ' (epic)' : ''))));
+  select.value = was;
+  select.onchange = async () => {
+    const result = await act('ticket.edit', {ticket:t.id, parent:select.value || null, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
+  };
+  return select;
 }
 function modelField(t) {
   const m = modelChoice(t);
@@ -1858,6 +1883,10 @@ function shippedFrame(e) {
   if (!frame || !frame.contentWindow || e.source !== frame.contentWindow) return null;
   return {frame, addon:r.id};
 }
+// A bridge action (idea, ask, Looks good, send) runs only right after a real click or key press of the person: the
+// browser counts one inside the add-on frame for this page too, and no script can make one up (ORCH-186 review M2).
+const personClicked = () => !!globalThis.navigator?.userActivation?.isActive;
+const NO_CLICK = 'Click the button again to do this.';
 function embedQuestionRequest(e) {
   const data = e && e.data;
   if (!data || typeof data !== 'object' || data.type !== 'orch.question') return null;
@@ -1910,11 +1939,12 @@ function embedIdeaRequest(e) {
   if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id) || typeof data.text !== 'string') return null;
   const text = data.text.replace(IDEA_HIDDEN, ' ').replace(/\s+/g, ' ').trim().replace(/^-+\s*/, '');
   if (!text) return null;
-  return {...shown, id:data.id, text};
+  return {...shown, id:data.id, text, clicked:personClicked()};
 }
 let embedIdeaBusy = false;  // one idea at a time: a second click while saving is dropped
 async function fileEmbedIdea(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.idea.failed', error:NO_CLICK});
   if (req.text.length > IDEA_MAX) return reply({type:'orch.idea.failed', error:'An idea here has at most ' + IDEA_MAX + ' characters.'});
   if (embedIdeaBusy) return;
   embedIdeaBusy = true;
@@ -1942,11 +1972,12 @@ function embedLooksGoodRequest(e) {
   if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
   if (!Array.isArray(data.tickets) || !data.tickets.length || data.tickets.length > EMBED_BATCH_MAX) return null;
   if (!data.tickets.every(x => typeof x === 'string' && EMBED_TICKET.test(x))) return null;
-  return {...shown, id:data.id, tickets:[...new Set(data.tickets)]};
+  return {...shown, id:data.id, tickets:[...new Set(data.tickets)], clicked:personClicked()};
 }
 let embedLooksGoodBusy = false;  // one batch at a time
 async function looksGoodAll(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.looksgood.failed', error:NO_CLICK});
   if (embedLooksGoodBusy) return;
   embedLooksGoodBusy = true;
   try {
@@ -1954,7 +1985,10 @@ async function looksGoodAll(req) {
       const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
       if (res.ok) { mutation++; accept(await res.json()); }
     } catch (_) { /* Fall back to what the page already has. */ }
-    const waiting = req.tickets.map(ticketOf).filter(t => t && t.status === 'review');
+    // only results of this add-on (tickets that carry its data), as with sending: never another page's tickets
+    const listed = req.tickets.map(ticketOf);
+    if (listed.some(t => t && (!t.ext || typeof t.ext !== 'object' || !t.ext[req.addon]))) return reply({type:'orch.looksgood.failed', error:'Only this page\u2019s own results can get Looks good here.'});
+    const waiting = listed.filter(t => t && t.status === 'review');
     if (!waiting.length) return reply({type:'orch.looksgood.failed', error:'Nothing here is waiting for your Looks good any more.'});
     await Promise.all(waiting.map(t => {
       const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
@@ -1984,11 +2018,12 @@ function embedAskRequest(e) {
   const shown = shippedFrame(e);
   if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
   if (typeof data.target !== 'string' || !EMBED_ASK_TARGET.test(data.target)) return null;
-  return {...shown, id:data.id, target:data.target};
+  return {...shown, id:data.id, target:data.target, clicked:personClicked()};
 }
 let embedAskBusy = false;  // one ask at a time: a second click while sending is dropped
 async function fileEmbedAsk(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.ask.failed', error:NO_CLICK});
   if (embedAskBusy) return;
   embedAskBusy = true;
   try {
@@ -2017,11 +2052,12 @@ function embedSendRequest(e) {
   if (!t || t.id !== data.ticket || !t.ext || typeof t.ext !== 'object' || !t.ext[shown.addon]) return null;  // only its own tickets
   const text = data.text.replace(IDEA_HIDDEN, m => m === '\n' ? '\n' : ' ').trim();
   if (!text) return null;
-  return {...shown, id:data.id, ticket:data.ticket, text};
+  return {...shown, id:data.id, ticket:data.ticket, text, clicked:personClicked()};
 }
 let embedSendBusy = false;  // one message at a time: a second click while sending is dropped
 async function sendEmbedMessage(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.send.failed', error:NO_CLICK});  // sending and starting a helper: a click
   if (req.text.length > EMBED_SEND_MAX) return reply({type:'orch.send.failed', error:'That is too long (at most ' + EMBED_SEND_MAX + ' characters).'});
   if (embedSendBusy) return;
   embedSendBusy = true;
