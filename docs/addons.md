@@ -125,7 +125,8 @@ $ orch pull-requests queue remove <pull request url>
 ```
 
 `queue add` starts the runner in the background; it stops when the queue is empty. A helper does not wait: it puts
-its ready pull request in line and finishes; the verdict (merged, or why it left the queue) goes on the ticket. A
+its ready pull request in line and finishes; the verdict (merged, or why it left the queue) goes on the ticket, and
+when it left the queue the ticket's helper is woken with the reason. A
 pull request whose files changed on the base branch since it took the base in is checked once on top of the base
 branch; the queue never merges the base into it and runs its checks again. Every GitHub write counts toward this
 computer's write limit (`orch github writes`); the queue's own merges are counted but never wait for the hourly

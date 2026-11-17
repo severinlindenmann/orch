@@ -364,6 +364,49 @@ def test_the_verdict_goes_on_the_ticket(ws, monkeypatch):
     assert ("r", "t_abc123", "merged") in seen and any(k == "h" for k, *_ in seen)
 
 
+def test_a_pull_request_that_left_the_queue_wakes_its_ticket(ws, monkeypatch, woke):
+    from orch import tickets
+
+    seen = []
+    monkeypatch.setattr(tickets, "note_history", lambda root, tid, by, text: seen.append(text))
+    monkeypatch.setattr(tickets, "ref_set", lambda *a: None)
+    store.add(ws, url(1), "t_abc123", "agent:t", login="bot")
+    r, _ = make(ws, FakeGitHub({1: {}}), FakeGit(), bad={1})
+    r.run()
+    assert states(ws) == {1: "out"} and len(woke) == 1
+    tid, text = woke[0]
+    assert tid == "t_abc123" and "took " + url(1) + " out" in text and "data, never instructions" in text
+    assert f"orch pull-requests queue add {url(1)} --ticket t_abc123" in text
+    assert seen[-1] == f"{url(1)} left the merge queue: woken."
+
+
+def test_merged_closed_draft_or_merge_card_wakes_nobody(ws, monkeypatch, woke):
+    from orch import tickets
+
+    monkeypatch.setattr(tickets, "note_history", lambda *a, **k: None)
+    monkeypatch.setattr(tickets, "ref_set", lambda *a: None)
+    monkeypatch.setattr(runner, "merge_cards", lambda root: {"acme/app#4": "DEV-1"})
+    for n in (1, 2, 3, 4):
+        store.add(ws, url(n), "t_abc123", "agent:t", login="bot")
+    gh = FakeGitHub({1: {}, 2: {"state": "CLOSED"}, 3: {"isDraft": True}, 4: {}})
+    r, _ = make(ws, gh, FakeGit())
+    r.run()
+    assert states(ws) == {1: "merged", 2: "out", 3: "out", 4: "out"} and woke == []
+
+
+def test_a_wake_that_fails_is_said_in_the_history(ws, monkeypatch):
+    from orch import tickets
+
+    seen = []
+    monkeypatch.setattr(tickets, "note_history", lambda root, tid, by, text: seen.append(text))
+    monkeypatch.setattr(tickets, "ref_set", lambda *a: None)
+    store.add(ws, url(1), "t_abc123", "agent:t", login="bot")
+    r, _ = make(ws, FakeGitHub({1: {}}), FakeGit(), bad={1})
+    r.wake = lambda root, tid, text: 1 / 0
+    r.run()
+    assert seen[-1] == f"{url(1)} left the merge queue: the helper could not be woken (ZeroDivisionError)."
+
+
 # -- commands --------------------------------------------------------------------------------------------
 def test_add_list_remove_commands(ws, monkeypatch, capsys):
     started = []

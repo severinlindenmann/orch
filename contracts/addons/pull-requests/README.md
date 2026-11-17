@@ -85,7 +85,11 @@ after an error and at every start the runner closes the group pull requests that
 their branches. A close or delete that gets no room in the write limit or no answer stays in the file for the
 next round; a branch that could not be deleted 5 times is left to a person with a log line. The runner never
 deletes `orch-queue/*` branches it did not write down: two workspaces on one repository each keep their own. Group titles are
-written as code text, so words in a title never close issues; only GitHub's own closing references are repeated. Each verdict goes on the entry's ticket (history line and reference state). Every GitHub
+written as code text, so words in a title never close issues; only GitHub's own closing references are repeated. Each verdict goes on the entry's ticket (history line and reference state). When an entry with a ticket leaves
+the queue unmerged, the ticket's helper is woken with the reason and the `queue add` line to run again (the same
+wake as failed checks: a live helper gets it as input, otherwise one is started; a history line says which), since
+helpers put their pull request in line and finish. Not for one that was closed, made a draft or is merged with a
+Merge card (reference states `closed`, `draft`, `owner merges`). Every GitHub
 write takes a slot of `orch.ghlimit`, except the merge itself: the queue merges one group per run of the checks,
 so its merges are counted (`orch github writes`) but never wait for the hourly merge count. `orch ref wait
 --merge` outside the queue still waits for it and still takes the base in.

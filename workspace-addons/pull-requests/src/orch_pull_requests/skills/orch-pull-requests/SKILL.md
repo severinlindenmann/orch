@@ -23,8 +23,8 @@ Mark the pull request ready first (after your last push), then add it and finish
 checks. Exit 0 = in line; exit 2 = not queued, the line says why (a draft, a base branch the queue does not merge
 into, changes requested, another GitHub login): fix it and add it again. The verdict goes on the ticket: the pull
 request link shows `merged`, or a history line says why it left the queue (checks failed, a draft, closed, changes
-requested, conflicts with the base branch, GitHub did not answer three times); on the ticket's next run fix
-that, push and add it again. The pull request must go into an allowed base branch (develop unless the workspace
+requested, conflicts with the base branch, GitHub did not answer three times) and the ticket's helper is woken
+with that reason: fix it, push and add it again. The pull request must go into an allowed base branch (develop unless the workspace
 says otherwise; never main). Do not take the base branch in by hand to get it merged: a pull request that fell
 behind is checked once on top of the base branch by the queue.
 
