@@ -264,8 +264,7 @@ def test_a_retry_after_an_unclear_failure_sends_the_same_message(proj, run, conn
     assert len(relay.sync_closed(proj, now=1000.0 + relay.CLOSE_RETRY + 1)) == 1
     assert len(raws) == 2
     first, again = raws
-    keep = ("id", "created_at", "body")
-    assert [again[k] for k in keep] == [first[k] for k in keep]
+    assert again == first  # the relay hashes the whole message
     assert first["body"]["taken_back"]["reason"] == "Answered in orch"
     assert relay.sync_closed(proj, now=1000.0 + 2 * relay.CLOSE_RETRY + 2) == []
     assert len(raws) == 2
