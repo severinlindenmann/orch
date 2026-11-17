@@ -217,6 +217,16 @@ def test_found_on_a_mac_lists_the_persons_jobs_and_hides_secrets(cli, mac, tools
     items = {i["id"]: i for i in out["found"]}
     assert set(items) == {"launchd:com.example.web-preview", "launchd:com.example.backup"}
     web = items["launchd:com.example.web-preview"]
+    if web["name"] != "web-preview":  # TEMP diagnostic for CI (ORCH-378), removed before merge
+        import traceback
+
+        try:
+            from orch import secretscan
+
+            got = repr(secretscan.find("web-preview", Path.cwd()))
+        except Exception:  # noqa: BLE001
+            got = traceback.format_exc()
+        pytest.fail(f"DIAG name={web['name']!r} platform={sys.platform} find={got}")
     assert web["name"] == "web-preview" and web["running"] is True and web["auto"] is True
     assert web["since"] == "2026-11-17T16:19:15Z" or web["since"].endswith("Z")
     assert web["how"] == {
