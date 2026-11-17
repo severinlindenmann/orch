@@ -160,7 +160,7 @@ MAX_ITEMS = 40
 
 def checks_state(rollup) -> tuple[str, str]:
     """(tone, plain words) of a pull request's checks (ORCH-183): ("done", "All 18 checks passed"),
-    ("working", "3 of 18 checks still running"), ("failed", "1 check failed: gate"). The newest run of each
+    ("working", "3 of 18 checks still running"), ("failed", "1 check failed: lint"). The newest run of each
     check counts, as in passed()."""
     if not isinstance(rollup, list) or not rollup:
         return "working", "No checks have run yet"

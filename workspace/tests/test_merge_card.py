@@ -293,7 +293,7 @@ def test_a_release_card_shows_what_goes_out_and_the_checks(tk, run, gh):
         "status": "COMPLETED",
         "conclusion": "SUCCESS",
         "workflowName": "ci",
-        "name": "gate",
+        "name": "lint",
         "startedAt": "1",
     }
     gh.summary = {
@@ -336,7 +336,7 @@ def test_a_failed_check_turns_the_status_red_and_says_why(tk, run, gh):
         "status": "COMPLETED",
         "conclusion": "FAILURE",
         "workflowName": "ci",
-        "name": "gate",
+        "name": "lint",
         "startedAt": "1",
     }
     gh.summary = {
@@ -348,7 +348,7 @@ def test_a_failed_check_turns_the_status_red_and_says_why(tk, run, gh):
     }
     assert _ask(run, tid)[0] == 0
     pv = _q(root, tid)["card"]["preview"]
-    assert pv["status"]["tone"] == "failed" and pv["status"]["text"].startswith("1 check failed: gate")
+    assert pv["status"]["tone"] == "failed" and pv["status"]["text"].startswith("1 check failed: lint")
     assert pv["paras"][0] == "Merging now would put work live that failed a check."
     assert "may have changed" in pv["paras"][1]
 

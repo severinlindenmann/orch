@@ -125,13 +125,13 @@ test('a card with its own answers (a Factory start): its buttons in place of the
 });
 
 test('a merge card box: the checks as a status pill, rows with key and number, a small footer (ORCH-183)', () => {
-  const pv = {type:'doc', heading:'What goes out · 2 changes', status:{tone:'failed', text:'1 check failed: gate · checked 11:02'},
+  const pv = {type:'doc', heading:'What goes out · 2 changes', status:{tone:'failed', text:'1 check failed: lint · checked 11:02'},
     paras:['Merging now would put work live that failed a check.'], rows:[{title:'Bigger pictures', n:1168, key:'ORCH-172'}, {title:'and 1 other commit'}], foot:'Exact version: 89984e4'};
   const {host} = deck([{id:'m', kind:'link', kindLabel:'Publish', title:'Release 32', okLabel:'Merge', preview:pv}]);
   const box = host.querySelector('.swipe-preview .doc');
   const st = box.querySelector('.doc-status');
   assert.ok(st.classList.contains('failed'), 'a failed check is red');
-  assert.match(st.textContent, /1 check failed: gate/);
+  assert.match(st.textContent, /1 check failed: lint/);
   const rows = box.querySelectorAll('.doc-row');
   assert.deepEqual(rows.map(r => r.querySelector('.doc-row-title').textContent), ['Bigger pictures', 'and 1 other commit']);
   assert.equal(rows[0].querySelector('.doc-row-key').textContent, 'ORCH-172');
