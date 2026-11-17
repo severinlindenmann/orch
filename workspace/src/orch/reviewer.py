@@ -377,6 +377,10 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     answers = answer_routine(root, dry_run) if answers_on else []
     if not config.reviewer_on(root):
         return {"off": False, "paused": False, "actions": [], "answers": answers}
+    from orch import lookreview
+
+    look = lookreview.on(root)
+    own = lookreview.own(root) if look else set()
     state = _read_state(root)
     actions = []
     in_review = set()
@@ -388,7 +392,10 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         mine = state.get(tid, {})
         if mine.get("rev") == t.get("revision"):
             continue  # decided already and nothing changed since
-        res = decide(root, t, [facts_of(u) for u in pr_urls(root, t)], int(mine.get("back") or 0))
+        facts = [facts_of(u) for u in pr_urls(root, t)]
+        res = decide(root, t, facts, int(mine.get("back") or 0))
+        if look and res["verdict"] == "leave" and tid not in own:  # bigger work: a second look (ORCH-175)
+            res = lookreview.triage(t, facts, res, int(mine.get("back") or 0)) or res
         row = {"ticket": tid, "key": t.get("key") or tid, **res, "done": False}
         if res["verdict"] == "wait" or dry_run:
             actions.append(row)
@@ -399,6 +406,8 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             elif res["verdict"] == "back":
                 after = _send_back(root, tid, res["why"])
                 mine["back"] = int(mine.get("back") or 0) + 1
+            elif res["verdict"] == "queue":
+                after = lookreview.queue(root, tid, res["why"])
             else:
                 after = tickets.log(root, tid, "Left for you by the Reviewer: " + res["why"], BY)
         except Refused as e:  # changed under us (moved, answered): look again next pass
@@ -418,7 +427,8 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
                         continue
                 state[tid].pop("rev", None)
         _write_state(root, state)
-    return {"off": False, "paused": False, "actions": actions, "answers": answers}
+    second = lookreview.tend(root, dry_run) if look else []
+    return {"off": False, "paused": False, "actions": actions, "answers": answers, "second_look": second}
 
 
 VERDICT_WORDS = {
@@ -426,6 +436,7 @@ VERDICT_WORDS = {
     "leave": "left for you",
     "back": "sent back",
     "wait": "not yet",
+    "queue": "in line for a second look",
 }
 
 
@@ -438,6 +449,7 @@ def text(result: dict, dry_run: bool = False) -> str:
     for a in result["actions"]:
         word = VERDICT_WORDS[a["verdict"]]
         lines.append(f"{a['key']}: {'would be ' if dry_run else ''}{word}: {a['why']}")
+    lines += [f"Second look: {x}" for x in result.get("second_look") or []]
     for a in result.get("answers") or []:
         if a["routine"]:
             word = "would be answered for you" if dry_run or not a["done"] else "answered for you"

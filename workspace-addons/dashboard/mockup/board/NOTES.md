@@ -113,3 +113,8 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - Date picker (kit): today is marked with a ring and `aria-current="date"`; it opens as a small 340 px popup, not the 480 px dialog width.
 - `new.html` and `new.js` show the draft line with Discard and the picture thumbnail.
 - Board: a sub-ticket that has its own card in the same column is no longer listed again inside its parent's card; sub-tickets in other columns still are.
+
+## Releases (ORCH-37, owner picked "a release is a parent ticket", 17 Nov)
+
+- `list.html`: a release is its own group above the status groups ("Release 26 · 1 of 4 done", Open release), with its epic, the epic's tickets and its other tickets as one tree; each row carries its status chip. Finished releases start folded.
+- `../ticket/ticket-working.html`: Properties has a Release switch under Part of; Part of offers releases first, marked "(release)".
