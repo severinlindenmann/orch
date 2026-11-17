@@ -53,6 +53,7 @@ def orch(*args: str, stdin: str | None = None) -> dict | str:
     """One orch command in the demo workspace (this Python, isolated mode). Returns parsed --json output."""
     r = subprocess.run(
         [sys.executable, "-I", "-m", "orch", *args],
+        check=False,  # the return code is read below
         cwd=WS,
         input=stdin if stdin is not None else "",
         capture_output=True,
@@ -77,8 +78,10 @@ def seed() -> dict:
     fake.chmod(0o755)
     cfg = WS / ".orch" / "config.toml"
     text = re.sub(r"(?m)^agent = .*\n", "", cfg.read_text() if cfg.exists() else "")  # init's own pick goes
-    text = text.replace("[workspace]\n", '[workspace]\nagent = "standin"\n', 1) if "[workspace]\n" in text else (
-        text + '\n[workspace]\nagent = "standin"\n'
+    text = (
+        text.replace("[workspace]\n", '[workspace]\nagent = "standin"\n', 1)
+        if "[workspace]\n" in text
+        else (text + '\n[workspace]\nagent = "standin"\n')
     )
     cfg.write_text(text + f'\n[agents.standin]\nadapter = "generic"\ncommand = "sh {fake} {{prompt}}"\n')
     # A settings command runs only once this computer allowed it; unallowed, orch would fall back to the first agent
@@ -88,7 +91,9 @@ def seed() -> dict:
     key = next(p["key"] for p in config.pending_agents(WS) if p["name"] == "standin")
     config.allow_agent(WS, "standin", key)
     if adapters.chosen(WS) != "standin" or config.pending_agents(WS):
-        sys.exit("the stand-in helper is not the one that would run: refusing to start (a real agent could run)")
+        sys.exit(
+            "the stand-in helper is not the one that would run: refusing to start (a real agent could run)"
+        )
     for name in ("claude", "codex"):
         if adapters.find_binary(name) != str(BIN / name):
             sys.exit(f"{name} would not be the stand-in here: refusing to start (a real agent could run)")
@@ -104,11 +109,39 @@ def seed() -> dict:
 
     lunch = new("lunch", "Plan the team lunch", "Collect who comes", "Pick the restaurant", "Send the invite")
     orch("ticket", "status", lunch, "active")
-    orch("check", "done", lunch, "c1", "--summary", "Nine of twelve come; two eat vegetarian.", "--note", "Asked in the team chat.")
-    orch("ask", lunch, "Which restaurant?", "--option", "Pilatus Stube", "--option", "Seehaus", "--recommend", "Seehaus")
+    orch(
+        "check",
+        "done",
+        lunch,
+        "c1",
+        "--summary",
+        "Nine of twelve come; two eat vegetarian.",
+        "--note",
+        "Asked in the team chat.",
+    )
+    orch(
+        "ask",
+        lunch,
+        "Which restaurant?",
+        "--option",
+        "Pilatus Stube",
+        "--option",
+        "Seehaus",
+        "--recommend",
+        "Seehaus",
+    )
     menu = new("menu", "Send the menu to the team", "Write the menu text")
     orch("ticket", "status", menu, "active")
-    orch("check", "done", menu, "c1", "--summary", "Menu written, three dishes.", "--note", "Short text, plain words.")
+    orch(
+        "check",
+        "done",
+        menu,
+        "c1",
+        "--summary",
+        "Menu written, three dishes.",
+        "--note",
+        "Short text, plain words.",
+    )
     orch("ticket", "summary", menu, "Menu text is written and ready to send.")
     orch("ticket", "status", menu, "done")
     new("table", "Book a table for Friday", "Call the restaurant", "Confirm the time")
@@ -119,9 +152,10 @@ def seed() -> dict:
 IDS = seed()
 (D / "seed.json").write_text(json.dumps(IDS))
 
-from orch import pagelaunch  # noqa: E402
-from orch.pagesession import SELF  # noqa: E402
-from orch_dashboard.server import make_server  # noqa: E402
+from orch import pagelaunch
+from orch.pagesession import SELF
+
+from orch_dashboard.server import make_server
 
 srv = make_server(WS, PORT, orch_bin=SELF)
 print(f"ready http://127.0.0.1:{PORT} {json.dumps(IDS)}", flush=True)

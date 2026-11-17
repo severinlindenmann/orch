@@ -18,6 +18,10 @@ Read from the code by `catalogue.cjs`, never typed by hand:
 
 `node clickthrough/catalogue.cjs` prints the list and what has no click-through yet.
 
+`not-yet.json` holds the features that have no click-through yet because the demo cannot do them (they need a
+relay, publish, GitHub, an installed add-on, an update source, an agent login or a stuck copy), each with why. The
+list only shrinks: the check fails for a listed feature that has a click-through now. A new feature never goes on it.
+
 ## Run them
 
     node workspace-addons/dashboard/clickthrough/run.cjs                     all of them (as in CI)
@@ -27,7 +31,9 @@ Read from the code by `catalogue.cjs`, never typed by hand:
 
 Needs Node, uv and Playwright with Chromium (`PW_DIR=<folder with node_modules/playwright>` if it is not global).
 Everything runs in a throw-away home under `~/.orch-test` with `env -i`; the orch of this computer is never touched.
-The helper is a stand-in script (`fake-agent.sh`): a Start click never runs a real agent.
+No real agent can run: the workspace helper is a stand-in script, and programs named `claude` and `codex` are
+stand-ins first on PATH, so a Start, a Test or a ticket pinned to Claude runs a stand-in. `server.py` refuses to
+start otherwise. A click-through that needs a helper's own move (a chat reply, a proposal) uses `orch(...)`.
 
 ## Write one
 
@@ -51,6 +57,7 @@ module.exports = {
 };
 ```
 
+- `orch(...words)` runs this checkout's orch in the demo workspace as the stand-in helper; `workspace` is its folder.
 - `open(hash)` goes to a dashboard address and waits until it is drawn; `reload()` reloads and waits.
 - `act(op, fn)` runs `fn` (your click) and waits for the page to send `op`; it fails when the server refuses it.
   `act(op, fn, {refused: true})` is for an action that is meant to be refused here (it needs an outside service

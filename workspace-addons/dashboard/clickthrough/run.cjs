@@ -238,13 +238,15 @@ async function main() {
   const failed = results.filter(r => r.problems.length);
   let missing = [];
   if (!o.only) {
-    missing = catalogue.features().filter(k => !done.has(k));
+    const later = catalogue.notYet();
+    missing = catalogue.features().filter(k => !done.has(k) && !later.has(k));
     if (missing.length) {
       console.log('\nThese dashboard features have no passing click-through (add one in workspace-addons/dashboard/clickthrough/features/):');
       for (const k of missing) console.log(`  - ${k}`);
     }
   }
-  console.log(`\n${results.length - failed.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${catalogue.features().length - missing.length} of ${catalogue.features().length} features done`}.`);
+  const waiting = catalogue.notYet().size;
+  console.log(`\n${results.length - failed.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${catalogue.features().length - missing.length - waiting} of ${catalogue.features().length} features done, ${waiting} on the not-yet list (clickthrough/not-yet.json)`}.`);
   return failed.length || missing.length ? 1 : 0;
 }
 
