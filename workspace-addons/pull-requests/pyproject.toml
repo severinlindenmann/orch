@@ -1,0 +1,23 @@
+[project]
+name = "orch-pull-requests"
+version = "0.1.0"
+description = "Merge queue: pull requests wait in line and are merged in groups after one run of the checks."
+requires-python = ">=3.11"
+dependencies = []
+
+# Module only: orch finds orch-addon.toml next to it (find_spec) and never imports it.
+[project.entry-points."orch.addons"]
+pull-requests = "orch_pull_requests"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orch_pull_requests"]
+
+[tool.ruff]
+line-length = 110

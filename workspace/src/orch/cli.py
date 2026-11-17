@@ -30,6 +30,7 @@ from orch import (
     cli_run,
     cli_screen,
     cli_secret,
+    cli_shot,
     cli_status,
     diag,
     diag_incident,
@@ -779,6 +780,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_record.add_parsers(sub, common)
     cli_secret.add_parsers(sub, common)
     cli_screen.add_parsers(sub, common)
+    cli_shot.add_parsers(sub, common)
     cli_config.add_parsers(sub, common)
     cli_github.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
@@ -998,7 +1000,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_github.dispatch(args, root)
     ):
         pass
-    elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root):
+    elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root) or cli_shot.dispatch(args, root):
         pass
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(

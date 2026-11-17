@@ -2,9 +2,9 @@
 // Tickets list, tree and board. Filter preferences last only for this page session.
 const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
-let ticketSearch = '', ticketMine = false, ticketPerson = '';
+let ticketSearch = '', ticketMine = false, ticketPerson = '', ticketGroup = '';
 // Saved views live on the address: #tickets?view=needs-you|working|done-week.
-const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['working', 'Working'], ['done-week', 'Done this week']];
+const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['working', 'Working'], ['backlog', 'To do'], ['done-week', 'Done this week']];
 // Views reached only by a link (Home's "All finished today"), with no chip of their own.
 const LINK_VIEWS = [['done-today', 'Finished today']];
 function savedView() {
@@ -17,14 +17,15 @@ function inView(t, view, nowMs = Date.now()) {
   const status = window.DashHelpers.columnOf(shown(t).status);
   if (view === 'needs-you') return (status !== 'done' && (questions(t).length > 0 || status === 'review')) || changesPending(t);
   if (view === 'working') return status === 'active';
+  if (view === 'backlog') return status === 'open';
   if (view === 'done-today') { const at = new Date(t.done_at || t.completed_at || t.updated_at); return status === 'done' && at.toDateString() === new Date(nowMs).toDateString(); }
   if (view === 'done-week') { const at = Date.parse(t.done_at || t.updated_at); return status === 'done' && (!Number.isFinite(at) || nowMs - at <= 7 * 86400000); }
   return true;
 }
-function filterTickets(items, query, mine, me = '', person = '', view = '') {
+function filterTickets(items, query, mine, me = '', person = '', view = '', group = '') {
   const needle = String(query || '').trim().toLowerCase();
   return items.filter(t => (!mine || (me ? String(t.owner || '') === me : !String(t.owner || '').startsWith('agent:'))) &&
-    (!person || String(t.owner || '') === person) && (!view || inView(t, view)) &&
+    (!person || String(t.owner || '') === person) && (!group || t.id === group || t.parent === group) && (!view || inView(t, view)) &&
     (!needle || keyMatch(t, needle) || [t.title, /^#?\d+$/.test(needle) ? '' : t.key, t.owner, t.note].some(value => String(value || '').toLowerCase().includes(needle))));
 }
 // ORCH-58: "58" or "ORCH-58" finds that ticket by its number (exact, so 58 is not ORCH-158); words search the text.
@@ -80,7 +81,7 @@ function ticketAttentionChip(t, section) {
 const localDay = at => window.UI?.stamp ? window.UI.stamp(at, {time:false}) : '';
 // A helper worked on it before (sessions) but it is not running now: paused, not new. Typed tasks alone are not.
 const ticketIsPaused = t => array(t.sessions).length > 0;
-function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView()); }
+function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView(), ticketGroup); }
 // A native select styled with the kit's input class (the kit has no custom select yet).
 function ticketSelect(label, key, choices, value, onChange) {
   const select = h('select', {className:'input ticket-select', 'aria-label':label, 'data-key':key}, choices.map(([id, text]) => h('option', {value:id, selected:id === value ? '' : null}, text)));
@@ -104,14 +105,16 @@ function viewChips() {
     TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered, {href:id ? '#tickets?view=' + id : '#tickets', 'data-key':'view-chip-' + (id || 'all')})), own, save);
 }
 function ticketFilters() {
-  const input = h('input', {className:'input', type:'search', placeholder:'58 or words', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
+  const input = h('input', {className:'input', type:'search', placeholder:'Search by number or words', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); render(); });
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
   const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; render(); }) : null;
-  return [h('span', {className:'grow'}), person, h('label', {className:'search-field'}, input)];
+  const all = tickets(), heads = all.filter(t => all.some(c => c.parent === t.id || (c.parent && c.parent === t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
+  const group = heads.length || ticketGroup ? ticketSelect('Group', 'ticket-group', [['', 'All groups'], ...heads.map(t => [t.id, clean(t.title).slice(0, 40)])], ticketGroup, value => { ticketGroup = value; render(); }) : null;
+  return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];
 }
 function clearTicketFilters() {
-  ticketSearch = ''; ticketMine = false; ticketPerson = '';
+  ticketSearch = ''; ticketMine = false; ticketPerson = ''; ticketGroup = '';
   if (savedView()) location.hash = '#tickets';
   const input = document.querySelector('[data-key="ticket-search"]');
   if (input) input.value = '';
@@ -314,7 +317,7 @@ function ticketTable(visible) {
 // Phone (ORCH-73, owner 16 Nov): the same groups as short rows (master UI.shortGroup), never a squeezed table.
 // One row: number and title, one fact, one thing on the right (Answer where the person is needed, else steps n/m or an
 // Idle/Stuck chip). A group shows its first PHONE_ROWS rows, then "n more".
-const PHONE_ROWS = 5, phoneMore = new Set();
+const PHONE_ROWS = 8, phoneMore = new Set();
 const SHORT_ICON = {waiting:'needs', review:'check', active:'working', blocked:'todo', open:'todo', done:'done'};
 function shortFact(t, row) {
   const ago = iso => iso && window.DashHelpers.ago ? window.DashHelpers.ago(iso, Date.now()) : '';
@@ -372,7 +375,7 @@ function list() {
   const needN = typeof needsYouTotal === 'function' ? needsYouTotal() : 0;
   const pill = needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null;
   const top = [heading('Tickets', 'Every ticket, from To do to Done.', {actions:fragment(pill, triageButton())}), viewToggle()];
-  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
+  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {className:'wide-only', 'data-key':'board-wide'}, board()), window.UI?.shortGroup ? phoneList(visible) : null);
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
     h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),

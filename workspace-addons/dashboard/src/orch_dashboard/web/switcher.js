@@ -49,20 +49,23 @@
 
   function item(w) {
     const L = window.OrchLook;
-    const details = n('span', {className: 'grow ws-item-details'},
-      n('span', {className: 'ws-item-name'}, w.name),
-      typeof w.type === 'string' && w.type.trim() ? n('small', {className: 'meta'}, w.type) : null);
-    const needs = Number.isInteger(w.needs)
+    // The row follows the gallery (.sw-item): name with one grey sub-label under it ("Current", "Not running" or the
+    // type), and one thing on the right (who waits, else the tick on the current one). The name ends with "…" when long.
+    // The current row shows the same name as the box above it (the display name), not the folder name.
+    const label = w.here && typeof L.name === 'function' && L.name() ? L.name() : w.name;
+    const sub = w.here ? 'Current' : !w.url ? 'Not running' : typeof w.type === 'string' && w.type.trim() ? w.type : null;
+    const details = n('span', {className: 'grow sw-item-details'},
+      n('span', {className: 'ws-item-name'}, label), sub ? n('span', {className: 'meta'}, sub) : null);
+    const needs = Number.isInteger(w.needs) && w.needs > 0
       ? n('span', {className: 'sw-needs'}, w.needs + (w.needs === 1 ? ' needs you' : ' need you')) : null;
     const status = n('span', {className: 'sw-item-status'},
-      w.here ? n('span', {className: 'sw-current'}, n('span', {'aria-hidden': 'true'}, '✓ '), 'Current')
-        : w.url ? null : n('span', {className: 'meta'}, 'Not running'), needs);
+      needs || (w.here ? n('span', {className: 'sw-tick', 'aria-hidden': 'true'}, '✓') : null));
     // Running workspaces on this computer are links (switching = opening their dashboard); the current one and stopped ones are not.
     const attrs = {className: 'sw-item' + (w.here || w.url ? '' : ' off'), role: 'menuitem', 'data-testid': 'ws-item'};
     if (w.here) Object.assign(attrs, {'aria-current': 'true'});
     else if (w.url) attrs.href = w.url;
     else attrs['aria-disabled'] = 'true';
-    const row = n(w.url && !w.here ? 'a' : 'div', attrs, L.badge(w, w.name, 32), details, status);
+    const row = n(w.url && !w.here ? 'a' : 'div', attrs, L.badge(w, label, 32), details, status);
     if (!w.url || w.here) row.tabIndex = 0;
     row.onclick = () => { if (w.here) { close(); box.focus(); } };
     return row;
