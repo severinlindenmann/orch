@@ -223,6 +223,20 @@ test('Undo moves the ticket back', async () => {
   await new Promise(r => setTimeout(r, 10));
   assert.equal(ctx.state.tickets[0].status, 'review');
 });
+// ORCH-248 (owner 17 Nov): a move to Working by hand offers Start instead of a silent fall back to To do.
+test('a move to Working offers Start helper, a move to Done does not', async () => {
+  const acts = [];
+  const ctx = moveContext(async () => ({ok:true}));
+  ctx.act = async (op, args) => { acts.push([op, args]); return {ok:true}; };
+  await ctx.moveTicket('t1', 'active');
+  const offer = ctx.toasts.find(t => t.text === 'No helper is working on it yet.');
+  assert.ok(offer, 'the offer is shown');
+  await offer.undo.listeners.click();
+  assert.equal(JSON.stringify(acts), JSON.stringify([['run.start', {ticket:'t1'}]]));
+  const done = moveContext(async () => ({ok:true}));
+  await done.moveTicket('t1', 'done');
+  assert.equal(done.toasts.some(t => /No helper/.test(t.text)), false);
+});
 // ORCH-152: a move to Waiting or Superseded writes its detail with the status; Undo puts the old wait back.
 test('a lane move sends the wait date or the replacing ticket, and Undo restores the wait', async () => {
   const sent = [];

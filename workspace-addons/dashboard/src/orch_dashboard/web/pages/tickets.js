@@ -409,6 +409,17 @@ function askReplacedBy(t, from) {
 const movePending = new Map();
 // Optimistic: the card moves and the notice (with Undo) shows at once; a failed save puts the card back.
 // `extra`: more arguments of the change (Accept on a ticket in Review sends the review tip it showed).
+function offerStart(id) {
+  const toast = window.orch.toast('No helper is working on it yet.', 'ok');
+  if (!toast?.querySelector) return;
+  const start = h('button', {type:'button', className:'btn ghost sm', 'data-action':'offer-start'}, 'Start helper');
+  start.addEventListener('click', async () => {
+    toast.remove();
+    const result = await act('run.start', {ticket:id});
+    if (!result.ok) window.orch.toast(changeError(result), 'error');
+  });
+  toast.querySelector('button[aria-label="Dismiss notification"]')?.before(start);
+}
 function moveTicket(id, status, undoing = false, extra = {}) {
   const quiet = extra.quiet === true;  // the caller shows one toast for a whole batch
   if ('quiet' in extra) { extra = {...extra}; delete extra.quiet; }
@@ -444,6 +455,8 @@ function moveTicket(id, status, undoing = false, extra = {}) {
     if (!result.ok) { set(previous, before); toast?.remove?.(); window.orch.toast(changeError(result), 'error'); }
     unfade();
     render();
+    // ORCH-248 (owner 17 Nov): a move to Working by hand starts no helper; offer Start instead of the silent fall back to To do.
+    if (result.ok && status === 'active' && !undoing && !quiet && state.runs?.[id]?.running !== true) offerStart(id);
   })();
   movePending.set(id, run);
   run.finally(() => { if (movePending.get(id) === run) movePending.delete(id); });
