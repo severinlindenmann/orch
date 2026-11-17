@@ -79,6 +79,8 @@ Each time you are woken, ask Factory what to do next and follow it:
 
 - `start-crew`: `orch factory crew add <order> <task>` then `orch factory crew start <order> <task>` for the tasks of this
   stage (one sub-ticket per task; never `orch run start` on crew tickets yourself).
+  Then wait for the crew with a real wait, one per crew ticket: `orch wait <order> --on ticket:<crew ticket>`. Never
+  just end your turn: orch then knows what you wait for and wakes you when the ticket finishes or merges.
 - Check the crew's results against the done-means points (evidence on the checks), then move on.
 - Words that people read in a built app use the right singular and plural ("1 point", "2 points", never "1 pts"): tell
   the builders in their task text, and look for it when you check the results.
@@ -90,7 +92,8 @@ Each time you are woken, ask Factory what to do next and follow it:
 - At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo` (anything that
   sends, publishes, deploys, deletes, pays or touches main/production is `cant-undo`: Factory refuses it otherwise); a recommended
   answer only on routine items; list what was checked AND what was not checked, and every small change made during the run.
-- `wait`: end your turn; you are woken when the owner answers.
+- `wait`: record it (`orch wait <order> --on question:<q>` or `--on ticket:<crew ticket>`), then end your turn; you are
+  woken when the owner answers or the ticket moves.
 - `resume` (autopilot order, the owner's grant is still live): look at the open stops of the orders you work on and
   decide the routine and taste items with `orch factory decide` (see Autopilot below), then end your turn. You are woken
   again when something new needs you.
