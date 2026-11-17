@@ -1,4 +1,4 @@
-"""orch services list|add|start|stop|restart|auto|remove|log|act|view (contract: contracts/addons/services/README.md)."""
+"""orch services list|found|add|adopt|start|stop|restart|auto|remove|log|act|view (contract: contracts/addons/services/README.md)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from . import drivers, store
 from .store import Refused
 
 MASK = "••••••"
-ACT_VERBS = ("start", "stop", "restart", "auto-on", "auto-off", "remove")
+ACT_VERBS = ("start", "stop", "restart", "auto-on", "auto-off", "remove", "adopt")
 
 
 def _root(start: str) -> Path:
@@ -78,11 +78,13 @@ def _program(root: Path, rec: dict, strict: bool = True) -> str:
 def _spec(root: Path, rec: dict, wid: str | None = None, strict: bool = True) -> drivers.Spec:
     cwd = (root / rec.get("cwd", ".")).resolve()
     log = store.log_path(root, rec["id"]).absolute()
-    argv = [_program(root, rec, strict), *rec["command"][1:]]
+    # an adopted service runs from its own entry: its command words are only shown, never looked up
+    argv = [_program(root, rec, strict and rec.get("adopted") is None), *rec["command"][1:]]
     for s in (str(cwd), str(log), *argv):
         if "\n" in s or "\r" in s or "\x00" in s:
             raise Refused("A path or word of this service has a line break in it. Fix it and try again.")
     env = {"PATH": os.environ.get("PATH") or "/usr/bin:/bin"}
+    ext = _adopted(rec)
     return drivers.Spec(
         sid=rec["id"],
         name=rec["name"],
@@ -92,7 +94,29 @@ def _spec(root: Path, rec: dict, wid: str | None = None, strict: bool = True) ->
         log=log,
         auto=bool(rec.get("auto")),
         env=env,
+        external=ext["entry"] if ext else None,
+        external_path=Path(ext["path"]) if ext and ext.get("path") else None,
     )
+
+
+def _adopted(rec: dict) -> dict | None:
+    """The existing entry an adopted service points at, or None (orch made it)."""
+    a = rec.get("adopted")
+    if not isinstance(a, dict) or a.get("kind") not in ("launchd", "systemd"):
+        return None
+    if not isinstance(a.get("entry"), str) or not re.fullmatch(r"[A-Za-z0-9@._-]{1,200}", a["entry"]):
+        return None
+    if a.get("path") is not None and not (isinstance(a["path"], str) and a["path"].startswith("/")):
+        return None
+    return a
+
+
+def _same_kind(drv: drivers.Driver, rec: dict) -> None:
+    a = rec.get("adopted")
+    if a is not None and (_adopted(rec) is None or a.get("kind") != drv.name):
+        raise Refused(
+            f"{rec['name']} was found on another kind of computer. Forget it: orch services remove {rec['id']}"
+        )
 
 
 def _driver() -> drivers.Driver:
@@ -133,6 +157,7 @@ def _rows(root: Path) -> tuple[list[dict], int, str | None]:
         st = None
         if drv and wid:
             try:
+                _same_kind(drv, r)
                 st = drv.status(_spec(root, r, wid, strict=False))
             except Refused:
                 st = None
@@ -186,10 +211,7 @@ def _mask_line(line: str, root: Path) -> str:
 
 
 def tail_masked(root: Path, path: Path, lines: int) -> list[str]:
-    try:
-        from orch import secretscan
-    except ImportError:  # the core is always there (python -m under orch); never a silent pass
-        raise Refused("Could not check the log for secrets. Update orch and try again.") from None
+    _scanner()
     if not path.is_file():
         return []
     with open(path, "rb") as f:
@@ -202,7 +224,21 @@ def tail_masked(root: Path, path: Path, lines: int) -> list[str]:
         got = got[1:]  # the first line may be cut
     if got and got[-1] == "":
         got = got[:-1]
-    got = [re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", ln) for ln in got[-lines:]]
+    return mask_lines(root, got[-lines:])
+
+
+def _scanner():
+    try:
+        from orch import secretscan
+    except ImportError:  # the core is always there (python -m under orch); never a silent pass
+        raise Refused("Could not check the log for secrets. Update orch and try again.") from None
+    return secretscan
+
+
+def mask_lines(root: Path, got: list[str]) -> list[str]:
+    """Each line through the core secret scan; a hit shows ••••••."""
+    secretscan = _scanner()
+    got = [re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", ln) for ln in got]
     text = "\n".join(got)
     try:
         hits = {h["line"] for h in secretscan.find(text, root)}
@@ -297,8 +333,15 @@ def cmd_add(args, root: Path) -> int:
 
 
 def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
+    if verb == "adopt":
+        return cmd_adopt(args, root, sid)
     rec = store.get(root, sid)
+    if verb == "remove" and rec.get("adopted") is not None:  # orch did not make its entry: only forget it
+        store.delete(root, rec["id"])
+        nxt = f"{rec['name']} is no longer managed by orch; the job itself is left as it is on this computer."
+        return _emit(args, {"removed": rec["id"], "forgotten": True, "next": nxt}, nxt)
     drv = _driver()
+    _same_kind(drv, rec)
     wid = _workspace_id(root)
     if verb in ("auto-on", "auto-off"):
         want = verb == "auto-on"
@@ -336,12 +379,109 @@ def cmd_log(args, root: Path) -> int:
     n = args.lines
     if not 1 <= n <= 1000:
         raise Refused("Give a number of lines from 1 to 1000.")
-    lines = tail_masked(root, store.log_path(root, rec["id"]), n)
+    lines = _log_lines(root, rec, n)
     if args.json:
         print(json.dumps({"id": rec["id"], "lines": lines}, ensure_ascii=False))
         return 0
     print("\n".join(lines) if lines else f"{rec['name']} has not written anything yet.")
     return 0
+
+
+def _log_lines(root: Path, rec: dict, n: int) -> list[str]:
+    a = _adopted(rec)
+    if rec.get("adopted") is None:
+        return tail_masked(root, store.log_path(root, rec["id"]), n)
+    if a and a["kind"] == "launchd" and a.get("path"):
+        from .found import launchd_log
+
+        log = launchd_log(Path(a["path"]))
+        return tail_masked(root, log, n) if log else []
+    if a and a["kind"] == "systemd":
+        tool = shutil.which("journalctl")
+        if not tool:
+            return []
+        cp = drivers.run_tool([tool, "--user", "-u", a["entry"], "-n", str(n), "-o", "cat", "--no-pager"])
+        return mask_lines(root, cp.stdout.splitlines()[-n:]) if cp.returncode == 0 else []
+    return []
+
+
+# ---------------------------------------------------------------- found and adopt
+
+
+def _found_text(items: list[dict]) -> str:
+    if not items:
+        return "Nothing found: orch sees no other background jobs of your account on this computer."
+    lines = []
+    for it in items:
+        bits = ["Running" if it["running"] else "Stopped"]
+        if it["auto"]:
+            bits.append("starts by itself")
+        lines.append(f"{it['id']}  {it['name']}  ({', '.join(bits)}) - {it['what']}")
+    lines.append("Next: orch services adopt <id> to manage one with orch (nothing changes until then)")
+    return "\n".join(lines)
+
+
+def _slug(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40].strip("-")
+    return s or "found"
+
+
+def _free_id(root: Path, want: str | None, name: str) -> str:
+    if want:
+        sid = store.check_id(want)
+        if store.exists(root, sid):
+            raise Refused(f"There is already a service {sid}. Pick another id with --id.")
+        return sid
+    base = _slug(name)
+    for i in range(1, 100):
+        sid = base if i == 1 else f"{base[:36]}-{i}"
+        if not store.exists(root, sid):
+            return sid
+    raise Refused("Could not pick an id for it. Give one with --id.")
+
+
+def cmd_adopt(args, root: Path, fid: str) -> int:
+    """Manage with orch: a record that points at the existing entry. The entry itself is not touched."""
+    from . import found
+
+    if isinstance(fid, str) and fid.startswith("process:"):
+        it = found.get(root, fid)
+        cmd = " ".join(it["command"])
+        raise Refused(
+            f"{it['name']} is a program without a service entry, so orch cannot take it over as it is: to keep it "
+            f'running with orch, stop it yourself, then add it: orch services add "{it["name"]}" --id <id> -- {cmd}'
+        )
+    it = found.get(root, fid)
+    drv = _driver()
+    how = it["how"]
+    if how.get("kind") != drv.name:
+        raise Refused(f"{it['name']} cannot be managed on this computer. Run orch services found again.")
+    name = store.clean_name(getattr(args, "name", None) or it["name"])
+    sid = _free_id(root, getattr(args, "id", None), name)
+    try:
+        command = store.clean_command(it["command"])
+    except Refused:
+        command = [it["name"]]
+    entry = how["label"] if how["kind"] == "launchd" else how["unit"]
+    made_by: dict = {"found": True}
+    if getattr(args, "ticket", None):
+        made_by["ticket"] = _ticket_key(root, args.ticket)
+    rec = {
+        "schema": store.SCHEMA,
+        "id": sid,
+        "name": name,
+        "command": command,
+        "cwd": ".",
+        "auto": bool(it["auto"]),
+        "created_at": store.now(),
+        "made_by": made_by,
+        "adopted": {"kind": how["kind"], "entry": entry, "path": how.get("path")},
+    }
+    wid = _workspace_id(root)
+    store.save(root, rec)
+    row = _state(root, drv, rec, wid)
+    nxt = f"{name} is now managed by orch (id {sid}); it was not moved, changed or restarted."
+    return _emit(args, {"service": row, "next": nxt}, nxt)
 
 
 def run(args) -> int:
@@ -355,6 +495,13 @@ def run(args) -> int:
         return _emit(args, data, _list_text(rows, bad, note))
     if cmd == "add":
         return cmd_add(args, root)
+    if cmd == "found":
+        from . import found
+
+        items = found.scan(root)
+        return _emit(args, {"found": items}, _found_text(items))
+    if cmd == "adopt":
+        return cmd_adopt(args, root, args.found_id)
     if cmd in ("start", "stop", "restart", "remove"):
         return cmd_simple(args, root, cmd, args.id)
     if cmd == "auto":
@@ -389,6 +536,12 @@ def main(argv=None) -> int:
         return s
 
     p("list")
+    p("found")
+    s = p("adopt")
+    s.add_argument("found_id")
+    s.add_argument("--name")
+    s.add_argument("--id")
+    s.add_argument("--ticket")
     s = p("add")
     s.add_argument("name")
     s.add_argument("--id", required=True)

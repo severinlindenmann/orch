@@ -38,6 +38,18 @@ itself.
 
     orch services remove <id>
 
+**Found on this computer** (jobs of the person's account that orch did not make; only reads, changes nothing)
+
+    orch services found
+
+**Manage with orch** (only after the person chose it for that job; nothing is moved, rewritten or restarted)
+
+    orch services adopt launchd:com.example.web --name "Web preview" --ticket <id>
+
+From then on start, stop, restart, auto and log work on it by its new id. `remove` on it only forgets it; the job
+stays as it is. A plain program (`process:<pid>`) cannot be taken over: stop it and add it with `orch services add`.
+On a Mac without `lsof`, programs running in the workspace folder cannot be found (only login jobs are listed).
+
 Every command takes `--json`.
 
 ## Rules
@@ -45,3 +57,4 @@ Every command takes `--json`.
 - Never put a secret into the command: use `orch secret exec` inside the command instead.
 - Always the person's own account: never sudo, never a system-wide service.
 - Say the service by its name to the person, not by its id.
+- orch shows found services; it changes one only after the person chooses Manage with orch.

@@ -54,9 +54,23 @@
           "type": "object",
           "required": ["found"],
           "additionalProperties": false,
-          "properties": { "found": { "const": true } }
+          "properties": {
+            "found": { "const": true },
+            "ticket": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,40}$" }
+          }
         }
       ]
+    },
+    "adopted": {
+      "description": "Only on a found service the person chose to manage with orch: the existing entry it points at. orch acts on that entry and never writes, moves or renames it; remove only forgets the record.",
+      "type": "object",
+      "required": ["kind", "entry"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["launchd", "systemd"] },
+        "entry": { "type": "string", "pattern": "^[A-Za-z0-9@._-]{1,200}$", "description": "The launchd label or the systemd user unit name." },
+        "path": { "type": ["string", "null"], "pattern": "^/", "description": "The plist or unit file, absolute." }
+      }
     },
     "created_at": { "type": "string", "format": "date-time", "pattern": "Z$" }
   },

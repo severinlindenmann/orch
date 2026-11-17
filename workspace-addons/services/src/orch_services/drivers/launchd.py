@@ -15,13 +15,13 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import Driver, Spec, Status, Unavailable, run_tool, tool_failed
+from . import Driver, Spec, Status, Unavailable, adopted_gone, run_tool, tool_failed
 
 NOT_LOADED = (3, 113)  # "Could not find service" (113) / "No such process" (3)
 
 
 def label(spec: Spec) -> str:
-    return f"ch.orch.svc.{spec.workspace_id}.{spec.sid}"
+    return spec.external or f"ch.orch.svc.{spec.workspace_id}.{spec.sid}"
 
 
 def render(spec: Spec) -> bytes:
@@ -56,6 +56,8 @@ class Launchd(Driver):
         return f"{self.domain}/{label(spec)}"
 
     def _write(self, spec: Spec) -> None:
+        if spec.external:  # adopted: the person's own plist is never rewritten
+            return
         p = self.entry_path(spec)
         p.parent.mkdir(parents=True, exist_ok=True)
         spec.log.parent.mkdir(parents=True, exist_ok=True)
@@ -83,6 +85,8 @@ class Launchd(Driver):
             raise Unavailable("there is no login session for your account (log in on this Mac's screen once)")
 
     def entry_path(self, spec: Spec) -> Path:
+        if spec.external_path:
+            return spec.external_path
         return Path.home() / "Library" / "LaunchAgents" / f"{label(spec)}.plist"
 
     def install(self, spec: Spec) -> None:
@@ -91,6 +95,8 @@ class Launchd(Driver):
 
     def start(self, spec: Spec) -> None:
         if not self.entry_path(spec).exists():
+            if spec.external:
+                raise adopted_gone(spec)
             self._write(spec)
         if self._loaded(spec):
             if not self.status(spec).running:
@@ -136,6 +142,10 @@ class Launchd(Driver):
         return Status(running=True, pid=n, since=_started(n))
 
     def uninstall(self, spec: Spec) -> None:
+        if (
+            spec.external
+        ):  # never reached through the CLI (remove only forgets an adopted one); kept safe anyway
+            return
         self.stop(spec)
         try:
             self.entry_path(spec).unlink()
