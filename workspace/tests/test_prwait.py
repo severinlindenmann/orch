@@ -103,6 +103,54 @@ def test_unreadable_rules_are_not_green():
     assert not v.green and "rules" in v.why
 
 
+def test_not_green_without_an_answer_is_marked_unknown_and_a_failed_check_is_not():
+    class NoRules(prwait.Replay):
+        def required(self):
+            raise prwait.Refused("could not read the rules of the base branch develop")
+
+    assert prwait.wait(NoRules(_one("SUCCESS"))).unknown
+    assert not prwait.wait(prwait.Replay(_one("FAILURE"))).unknown
+    assert prwait.wait(prwait.Replay({"isDraft": None, "polls": [[]]})).unknown  # unreadable
+    assert not prwait.wait(prwait.Replay({"isDraft": True, "polls": [[]]})).unknown  # a draft is an answer
+    assert prwait.wait(prwait.Replay({"polls": [[]]})).unknown  # no checks in time
+    pending = [{"name": "build", "state": "PENDING", "bucket": "pending"}]
+    assert prwait.wait(prwait.Replay({"polls": [pending]}), timeout=600).unknown
+
+
+class _Green(prwait.Replay):
+    def __init__(self):
+        super().__init__(
+            {"polls": [[{"name": "test", "state": "SUCCESS", "bucket": "pass"}]], "required": []}
+        )
+        self.url, self.gh = "https://github.com/o/r/pull/1", "/fake/gh"
+
+    def view(self):
+        return {"state": "OPEN", "isDraft": False, "baseRefName": "develop", "headRefOid": "a" * 40}
+
+    def landed(self, head, base):
+        return []
+
+    def changed_files(self):
+        return ["x.py"]
+
+
+def test_before_merge_is_asked_right_before_the_merge_and_can_stop_it(monkeypatch):
+    merges, asked, order = [], [], []
+    monkeypatch.setattr(_Green, "take", lambda self, kind, what: order.append("room") or True)
+    monkeypatch.setattr(prwait.ghlimit, "give_back", lambda kind, what: order.append("back"))
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, t=30: merges.append(argv) or subprocess.CompletedProcess(argv, 0)
+    )
+    src = _Green()
+    o = prwait.run_one(
+        src.url, True, src=src, before_merge=lambda head: asked.append(head) or "it was closed"
+    )
+    assert not o.ok and o.status == "held" and "it was closed" in o.line and merges == []
+    assert asked == ["a" * 40] and order == ["room", "back"]  # asked after the wait for room
+    o = prwait.run_one(src.url, True, src=src, before_merge=lambda head: None)
+    assert o.ok and o.status == "merged" and len(merges) == 1
+
+
 def test_a_dropped_connection_is_retried_and_other_errors_are_not(monkeypatch):
     calls = []
 

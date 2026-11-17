@@ -23,9 +23,9 @@ def url(n: int) -> str:
 
 # -- store -----------------------------------------------------------------------------------------------
 def test_add_keeps_order_and_never_twice(ws):
-    _, new_a = store.add(ws, url(1), None, "agent:t")
-    store.add(ws, url(2) + " ", None, "agent:t")
-    again, new = store.add(ws, url(1), "t_abc123", "agent:t")
+    _, new_a = store.add(ws, url(1), None, "agent:t", login="bot")
+    store.add(ws, url(2) + " ", None, "agent:t", login="bot")
+    again, new = store.add(ws, url(1), "t_abc123", "agent:t", login="bot")
     assert new_a and not new and again["ticket"] == "t_abc123"
     assert [r["number"] for r in store.read(ws)] == [1, 2]
     assert all(r["state"] == "waiting" for r in store.read(ws))
@@ -33,12 +33,12 @@ def test_add_keeps_order_and_never_twice(ws):
 
 def test_refuses_what_is_no_pull_request(ws):
     with pytest.raises(Refused):
-        store.add(ws, "https://github.com/acme/app/issues/3", None, "agent:t")
+        store.add(ws, "https://github.com/acme/app/issues/3", None, "agent:t", login="bot")
 
 
 def test_remove_and_back_to_front(ws):
     for n in (1, 2, 3):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     assert store.remove(ws, url(1), "human:p")
     assert not store.remove(ws, url(1), "human:p")
     store.set_state(ws, url(3), store.RUNNING, "in a group")
@@ -47,7 +47,7 @@ def test_remove_and_back_to_front(ws):
     store.back_to_front(ws, [url(3)], "again")
     assert [r["number"] for r in store.waiting(ws)] == [3, 2]
     # a finished entry can be queued again as a new one
-    store.add(ws, url(1), None, "agent:t")
+    store.add(ws, url(1), None, "agent:t", login="bot")
     assert [r["state"] for r in store.read(ws) if r["number"] == 1] == ["out", "waiting"]
 
 
@@ -55,7 +55,7 @@ def test_lock_held_by_a_dead_process_is_taken_over(ws):
     lock = store.folder(ws) / "queue.lock"
     lock.mkdir(parents=True)
     (lock / "owner").write_text("999999 2001-01-01T00:00:00Z", encoding="utf-8")
-    store.add(ws, url(1), None, "agent:t")
+    store.add(ws, url(1), None, "agent:t", login="bot")
     assert not lock.exists()
 
 
@@ -122,19 +122,28 @@ class Outcome:
 
 
 class FakeGitHub:
-    def __init__(self, prs: dict[int, dict]):
-        self.prs = prs  # number -> {state, isDraft, failed}
+    def __init__(self, prs: dict[int, dict], login: str | None = "bot"):
+        self.prs = prs  # number -> {state, isDraft, failed, base, review, fork}
         self.groups: dict[str, list[int]] = {}
+        self.gstate: dict[str, str] = {}  # group pull request -> state
         self.closed, self.deleted = [], []
+        self.me = login
+
+    def login(self):
+        return self.me
 
     def pr(self, u):
-        if "/pull/9" in u:
+        if u.endswith("/pull/9"):
             return None
         n = int(u.rsplit("/", 1)[1])
+        if n not in self.prs:  # a group pull request
+            return {"state": self.gstate.get(u, "OPEN"), "isDraft": False, "baseRefName": "develop",
+                    "headRefOid": "c" * 40, "number": n, "title": "Merge queue"}  # fmt: skip
         p = self.prs[n]
-        return {"state": p.get("state", "OPEN"), "isDraft": p.get("isDraft", False), "baseRefName": "develop",
+        return {"state": p.get("state", "OPEN"), "isDraft": p.get("isDraft", False),
+                "baseRefName": p.get("base", "develop"), "reviewDecision": p.get("review", ""),
                 "isCrossRepository": p.get("fork", False),
-                "headRefOid": f"{n:040d}", "number": n, "title": f"Change {n}",
+                "headRefOid": p.get("head", f"{n:040d}"), "number": n, "title": f"Change {n}",
                 "closingIssuesReferences": [{"number": 100 + n, "repository": {"name": "app", "owner": {"login": "acme"}}}]}  # fmt: skip
 
     def own_checks_failed(self, u):
@@ -148,6 +157,7 @@ class FakeGitHub:
 
     def close(self, u):
         self.closed.append(u)
+        self.gstate[u] = "CLOSED"
         return True
 
     def delete_branch(self, repo, branch):
@@ -179,17 +189,22 @@ def make(ws, gh, git, bad=(), log=None):
     def sleep(secs):
         t[0] += secs
 
-    def waiter(u):
+    def waiter(u, before_merge=None):
         calls.append(u)
         members = gh.groups.get(u) or [int(u.rsplit("/", 1)[1])]
         if any(m in bad for m in members):
             return Outcome(u, False, "checks failed", f"Checks of {u}: NOT green")
+        held = before_merge and before_merge(gh.pr(u)["headRefOid"])
+        if held:
+            return Outcome(u, False, "held", f"not merged: {held}")
         for m in members:
             gh.prs[m]["state"] = "MERGED"
+        gh.gstate[u] = "MERGED"
         return Outcome(u, True, "merged", f"Merged {u} on green checks.")
 
     r = runner.Runner(ws, gh, lambda repo: git, waiter=waiter, take=lambda k, w: True,
                       log=(log if log is not None else (lambda s: None)), clock=lambda: t[0], sleep=sleep)  # fmt: skip
+    r.sign_in()  # run() does this itself; tests that call next_batch() directly need it too
     return r, calls
 
 
@@ -198,7 +213,7 @@ def states(ws):
 
 
 def test_one_pull_request_goes_to_the_core_waiter(ws):
-    store.add(ws, url(1), None, "agent:t")
+    store.add(ws, url(1), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}})
     r, calls = make(ws, gh, FakeGit())
     r.run()
@@ -207,7 +222,7 @@ def test_one_pull_request_goes_to_the_core_waiter(ws):
 
 def test_a_green_group_merges_all_with_one_check_run(ws):
     for n in (1, 2, 3):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh, git = FakeGitHub({1: {}, 2: {}, 3: {}}), FakeGit()
     r, calls = make(ws, gh, git)
     r.run()
@@ -220,7 +235,7 @@ def test_a_green_group_merges_all_with_one_check_run(ws):
 
 def test_a_red_group_is_split_and_the_good_ones_still_merge(ws):
     for n in (1, 2, 3, 4):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh = FakeGitHub({n: {} for n in (1, 2, 3, 4)})
     r, calls = make(ws, gh, FakeGit(), bad={3})
     r.run()
@@ -231,7 +246,7 @@ def test_a_red_group_is_split_and_the_good_ones_still_merge(ws):
 
 def test_entries_that_cannot_be_merged_leave_with_a_reason(ws):
     for n in (1, 2, 3, 4, 9):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh = FakeGitHub(
         {1: {"state": "MERGED"}, 2: {"state": "CLOSED"}, 3: {"isDraft": True}, 4: {"failed": True}}
     )
@@ -244,7 +259,7 @@ def test_entries_that_cannot_be_merged_leave_with_a_reason(ws):
 
 def test_a_conflicting_pull_request_runs_alone_after_the_group(ws):
     for n in (1, 2, 3):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}, 2: {}, 3: {}})
     r, calls = make(ws, gh, FakeGit(conflicts={2}))
     r.run()
@@ -255,7 +270,7 @@ def test_a_conflicting_pull_request_runs_alone_after_the_group(ws):
 
 def test_a_group_that_cannot_be_pushed_is_retried_then_leaves(ws):
     for n in (1, 2):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}, 2: {}})
     r, calls = make(ws, gh, FakeGit(push_fails=True))
     r.run()
@@ -266,15 +281,15 @@ def test_a_group_that_cannot_be_pushed_is_retried_then_leaves(ws):
 
 def test_a_pull_request_with_a_new_commit_waits_again(ws):
     for n in (1, 2):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}, 2: {}})
     r, _ = make(ws, gh, FakeGit())
     real = r.waiter
 
-    def waiter(u):
-        o = real(u)
+    def waiter(u, before_merge=None):
+        o = real(u, before_merge)
         if u in gh.groups:
-            gh.prs[2]["state"] = "OPEN"  # its new head is not in the group
+            gh.prs[2].update(state="OPEN", head="e" * 40)  # its new head is not in the group
         return o
 
     r.waiter = waiter
@@ -289,7 +304,7 @@ def test_the_verdict_goes_on_the_ticket(ws, monkeypatch):
     seen = []
     monkeypatch.setattr(tickets, "note_history", lambda root, tid, by, text: seen.append(("h", tid, text)))
     monkeypatch.setattr(tickets, "ref_set", lambda root, tid, u, status, by: seen.append(("r", tid, status)))
-    store.add(ws, url(1), "t_abc123", "agent:t")
+    store.add(ws, url(1), "t_abc123", "agent:t", login="bot")
     r, _ = make(ws, FakeGitHub({1: {}}), FakeGit())
     r.run()
     assert ("r", "t_abc123", "merged") in seen and any(k == "h" for k, *_ in seen)
@@ -299,6 +314,7 @@ def test_the_verdict_goes_on_the_ticket(ws, monkeypatch):
 def test_add_list_remove_commands(ws, monkeypatch, capsys):
     started = []
     monkeypatch.setattr(cli, "start_runner", lambda root: started.append(root))
+    monkeypatch.setattr(cli, "_github", lambda: FakeGitHub({1: {}, 2: {}}))
     assert cli.main(["queue", "add", url(1)]) == 0
     assert "Added to the merge queue" in capsys.readouterr().out and started
     assert cli.main(["queue", "add", url(2), "--json"]) == 0
@@ -311,7 +327,7 @@ def test_add_list_remove_commands(ws, monkeypatch, capsys):
 
 def test_wait_reports_the_end(ws, monkeypatch, capsys):
     monkeypatch.setattr(cli, "start_runner", lambda root: None)
-    store.add(ws, url(1), None, "agent:t")
+    store.add(ws, url(1), None, "agent:t", login="bot")
     store.set_state(ws, url(1), store.MERGED, "Merged it with the group.")
     assert cli._wait(ws, url(1), 1, False) == 0
     assert "Merged it" in capsys.readouterr().out
@@ -329,7 +345,7 @@ def test_a_pull_request_with_a_merge_card_on_any_ticket_is_never_merged_here(ws,
         runner, "merge_cards", lambda root: {runner.pr_key(url(2).replace("acme/app", "Acme/App")): "DM1-7"}
     )
     for n in (1, 2):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     r, calls = make(ws, FakeGitHub({1: {}, 2: {}}), FakeGit())
     r.run()
     assert calls == [url(1)] and states(ws) == {1: "merged", 2: "out"}
@@ -338,7 +354,7 @@ def test_a_pull_request_with_a_merge_card_on_any_ticket_is_never_merged_here(ws,
 
 def test_a_head_that_moved_before_the_fetch_is_left_out_of_the_group(ws):
     for n in (1, 2, 3):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh, git = FakeGitHub({1: {}, 2: {}, 3: {}}), FakeGit()
     real = git.fetch
     pushed = {"done": False}
@@ -364,7 +380,7 @@ def test_a_title_cannot_close_issues():
 
 def test_a_fork_pull_request_runs_alone(ws):
     for n in (1, 2, 3):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}, 2: {"fork": True}, 3: {}})
     r, calls = make(ws, gh, FakeGit())
     r.run()
@@ -374,18 +390,20 @@ def test_a_fork_pull_request_runs_alone(ws):
 
 def test_entries_a_dead_runner_left_running_go_back_in_line(ws):
     for n in (1, 2):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     store.set_state(ws, url(1), store.RUNNING, "in the group", group="https://github.com/acme/app/pull/77")
+    store.change_group(ws, REPO, "orch-queue/develop-5", url="https://github.com/acme/app/pull/77")
     gh = FakeGitHub({1: {}, 2: {}})
     r, _ = make(ws, gh, FakeGit())
     r.run()
-    assert gh.closed == ["https://github.com/acme/app/pull/77"]
+    assert gh.closed == ["https://github.com/acme/app/pull/77"] and "orch-queue/develop-5" in gh.deleted
+    assert store.groups(ws) == []
     assert states(ws) == {1: "merged", 2: "merged"}
 
 
 def test_no_room_in_the_write_limit_pauses_without_using_up_tries(ws):
     for n in (1, 2):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}, 2: {}})
     r, calls = make(ws, gh, FakeGit())
     refused = {"n": 0}
@@ -403,7 +421,7 @@ def test_no_room_in_the_write_limit_pauses_without_using_up_tries(ws):
 
 def test_a_removed_entry_is_not_claimed(ws):
     for n in (1, 2):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     rows = store.waiting(ws)
     store.remove(ws, url(2), "human:p")
     assert [b["number"] for b in store.claim(ws, rows)] == [1]
@@ -411,7 +429,7 @@ def test_a_removed_entry_is_not_claimed(ws):
 
 def test_a_crash_puts_the_batch_back_in_line(ws):
     for n in (1, 2):
-        store.add(ws, url(n), None, "agent:t")
+        store.add(ws, url(n), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {}, 2: {}})
     git = FakeGit()
     boom = {"n": 0}
@@ -437,22 +455,22 @@ def test_a_stale_lock_without_owner_is_taken_over(ws):
     lock.mkdir(parents=True)
     old = time.time() - 100
     os.utime(lock, (old, old))
-    store.add(ws, url(1), None, "agent:t")
+    store.add(ws, url(1), None, "agent:t", login="bot")
     assert not lock.exists() and len(store.read(ws)) == 1
 
 
 def test_a_damaged_queue_file_is_never_overwritten(ws):
-    store.add(ws, url(1), None, "agent:t")
+    store.add(ws, url(1), None, "agent:t", login="bot")
     f = store.folder(ws) / "queue.json"
     f.write_text("{not json", encoding="utf-8")
     with pytest.raises(Refused):
-        store.add(ws, url(2), None, "agent:t")
+        store.add(ws, url(2), None, "agent:t", login="bot")
     assert f.read_text(encoding="utf-8") == "{not json"
 
 
 def test_unreadable_tickets_merge_nothing(ws, monkeypatch):
     monkeypatch.setattr(runner, "merge_cards", lambda root: None)
-    store.add(ws, url(1), None, "agent:t")
+    store.add(ws, url(1), None, "agent:t", login="bot")
     r, calls = make(ws, FakeGitHub({1: {}}), FakeGit())
     assert r.next_batch() == [] and not calls and states(ws) == {1: "waiting"}
 
