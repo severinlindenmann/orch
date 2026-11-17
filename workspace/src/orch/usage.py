@@ -117,8 +117,8 @@ def _stamp(d: dict) -> float | None:
 
 def _read_file(path: Path) -> dict:
     """One transcript: {"use": {family: {"in": n, "out": n}}, "cost": dollars at list price, "secs": working
-    seconds}. Each message id counts once (its last usage). Working time = the sum of the gaps between two dated
-    lines, a gap over PAUSE_SECONDS left out."""
+    seconds}. Each message id counts once (its last usage). Working time = the sum of the gaps between two
+    dated lines, a gap over PAUSE_SECONDS left out."""
     seen: dict[str, tuple[str, int, int, float]] = {}
     anon = 0
     secs, last = 0.0, None
@@ -172,8 +172,8 @@ MISS_RETRY = 600  # a session whose conversation was not found is looked for aga
 
 def _files(proj: Path, sid: str, where: dict | None = None) -> list[Path]:
     """The conversation files of one session: <proj>/<folder>/<sid>.jsonl and its helpers' files. `where`
-    remembers the folders a session was found in (and when it was missed), so a dashboard refresh does not list
-    thousands of folders for every session (ORCH-189: 5 s per refresh before)."""
+    remembers the folders a session was found in (and when it was missed), so a dashboard refresh does not
+    list thousands of folders for every session (ORCH-189: 5 s per refresh before)."""
     if not proj.is_dir() or not valid_session_id(sid):
         return []
     import time

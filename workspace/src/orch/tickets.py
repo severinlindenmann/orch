@@ -1510,9 +1510,10 @@ def _utc(text: object) -> datetime | None:
 
 
 def stuck_why(ticket: dict, now: datetime | None = None) -> str | None:
-    """ORCH-189, the one Stuck rule beside a stuck helper (which only the run knows): "question" when a question
-    has waited more than STUCK_HOURS, "quiet" when a Working ticket had no news that long, "overdue" past its due
-    date; None otherwise and for finished, dropped or in-Review tickets. Read-only, nothing is stored."""
+    """ORCH-189, the one Stuck rule beside a stuck helper (which only the run knows): "question" when a
+    question has waited more than STUCK_HOURS, "quiet" when a Working ticket had no news that long, "overdue"
+    past its due date; None otherwise and for finished, dropped or in-Review tickets. Read-only, nothing is
+    stored."""
     status = ticket.get("status")
     if status in ("done", "dropped", "review"):
         return None

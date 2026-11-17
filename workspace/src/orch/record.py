@@ -1069,8 +1069,9 @@ def note_lost(ws, run, reason, *, now=None, error=None):
 
 def lost_in(ws, day_from: str, day_to: str) -> dict:
     """ORCH-189: how many hook lines of proven runs were lost between two days (YYYY-MM-DD, both included), by
-    reason, from alerts/hook-lost-<day>.jsonl. Insights shows it, so a record that counts nothing is never read
-    as "nothing was used". {"lines": n, "reasons": {reason: n}, "errors": {type name: n}}; never raises."""
+    reason, from alerts/hook-lost-<day>.jsonl. Insights shows it, so a record that counts nothing is
+    never read as "nothing was used".
+    {"lines": n, "reasons": {reason: n}, "errors": {type name: n}}; never raises."""
     out: dict = {"lines": 0, "reasons": {}, "errors": {}}
     try:
         start = datetime.fromisoformat(day_from).date()
