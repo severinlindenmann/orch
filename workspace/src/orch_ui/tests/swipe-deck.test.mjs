@@ -115,7 +115,7 @@ test('a card with its own answers (a Factory start): its buttons in place of the
   assert.equal(own.hidden, false);
   const btns = own.children;
   assert.deepEqual(btns.map(b => b.textContent), ['Not now', 'Change it', 'Start']);
-  assert.ok(btns.every(b => b.className === 'btn outline'), 'none filled: starting a helper is never the easiest click');
+  assert.ok(btns.every(b => b.className === 'swipe-act own'), 'the same answer button as every card, none filled: starting a helper is never the easiest click');
   host.listeners.keydown.forEach(f => f({key:'ArrowRight', target:host, preventDefault() {}}));
   await wait(160);
   assert.equal(decided.length, 0, 'the arrow keys do not pick for the person');

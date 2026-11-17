@@ -142,7 +142,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const stage=el('div','swipe-stage'),live=el('div','sr-only');live.setAttribute('aria-live','polite');
  /* bottom: the three answers + Later */
  const acts=el('div','swipe-actions');
- const mk=(cls,icon,label,key,fn)=>{const r=el('span','ring');r.append(ic(icon,cls==='ok'?28:24));const l=el('span','act-label'),w=el('span','act-word',label);l.append(w);if(key)l.append(el('kbd','',key));const b=btn('swipe-act '+cls,[r,l]);b.onclick=fn;return b};
+ const mk=(cls,icon,label,key,fn)=>{const r=el('span','ring');if(icon)r.append(ic(icon,18));const l=el('span','act-label'),w=el('span','act-word',label);l.append(w);if(key)l.append(el('kbd','',key));const b=btn('swipe-act '+cls,icon?[r,l]:[l]);b.onclick=fn;return b};
  const noBtn=mk('no','x',"Don't do",'←',()=>fly('no')),talkBtn=mk('talk',o.voice?'mic':'comment','Comment','↓',()=>fly('talk')),okBtn=mk('ok','check','Looks good','→',()=>fly('ok'));
  const laterBtn=btn('btn ghost sm swipe-later',['Later']);laterBtn.append(el('kbd','','↑'));laterBtn.onclick=()=>fly('later');
  const ownRow=el('div','swipe-own');ownRow.hidden=true;
@@ -206,7 +206,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
   okBtn.classList.toggle('wait',okWord(it)==='Pick one');talkBtn.hidden=sendsBack(it);
   const own=ownAnswers(it);[noBtn,okBtn].forEach(b=>{b.hidden=!!own});if(own)talkBtn.hidden=true;ownRow.hidden=!own;
-  ownRow.replaceChildren(...(own||[]).map(a=>{const b=btn('btn outline',[a.label]);b.dataset.picked=a.picked;b.onclick=()=>answerOwn(a);return b}));
+  ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
