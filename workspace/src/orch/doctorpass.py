@@ -567,8 +567,13 @@ def process_dirs() -> list[str] | None:
 
 
 def _in_use(path: Path, cwds: list[str]) -> bool:
-    p = str(path)
-    return any(c == p or c.startswith(p + "/") for c in cwds)
+    """A process works in `path` or below; on Windows also with `\\` and in any letter case."""
+    p = os.path.normcase(os.path.normpath(str(path)))
+    for c in cwds:
+        c = os.path.normcase(os.path.normpath(c))
+        if c == p or c.startswith(p.rstrip(os.sep) + os.sep):
+            return True
+    return False
 
 
 def _own(path: Path) -> bool:

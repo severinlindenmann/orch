@@ -303,6 +303,13 @@ def test_clean_keeps_a_copy_a_process_works_in(repo, monkeypatch):
     assert (copies / "done").is_dir()
 
 
+def test_in_use_matches_the_folder_and_below_only():
+    base = os.path.join(os.sep, "w", "copies", "done")
+    assert doctorpass._in_use(Path(base), [base, os.path.join(os.sep, "other")])
+    assert doctorpass._in_use(Path(base), [os.path.join(base, "sub", "deep")])
+    assert not doctorpass._in_use(Path(base), [base + "-2", os.path.join(os.sep, "w", "copies")])
+
+
 def test_clean_keeps_everything_when_process_folders_are_unknown(repo, monkeypatch):
     main, copies = repo
     monkeypatch.setattr(doctorpass, "process_dirs", lambda: None)
