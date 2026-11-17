@@ -828,7 +828,9 @@ def _set_aside_legacy(dest: Path, root: Path) -> None:
     import time
 
     keep = harness_dir(root) / "replaced-skills"
+    check_harness(root, keep)  # .orch, harness and this folder: real folders inside the project, no links
     keep.mkdir(parents=True, exist_ok=True)
+    check_harness(root, keep)
     shutil.move(str(dest), str(keep / f"{dest.name}-{time.strftime('%Y%m%d-%H%M%S')}"))
 
 
