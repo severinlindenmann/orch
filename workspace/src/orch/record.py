@@ -734,7 +734,16 @@ def _lock(ws, run, wait=None):
     rel = ("runs", f"{run}.lock")
     deadline = time.monotonic() + (_LOCK_WAIT if wait is None else wait)
     while True:
-        fd = _open(ws, rel, "create_excl", create_dirs=True)
+        try:
+            fd = _open(ws, rel, "create_excl", create_dirs=True)
+        except RecordUnavailable as error:
+            if os.name != "nt" or error.reason != "io":
+                raise
+            # Windows answers "access denied" for a lock file another writer is deleting right now
+            if time.monotonic() >= deadline:
+                raise RecordBusy("The record is busy.") from None
+            time.sleep(0.005)
+            continue
         if fd is not None:
             try:
                 locked = _try_lock(fd)
