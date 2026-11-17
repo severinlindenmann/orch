@@ -408,6 +408,8 @@ _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
 
 def stray_tmux(under: str) -> list[str]:
     """Socket names of orch tmux servers whose working folder is `under` or below (reads `ps` only)."""
+    if not Path("/bin/ps").exists():  # Windows: no ps and no tmux
+        return []
     out = subprocess.run(["/bin/ps", "-axo", "command="], check=False, capture_output=True, text=True).stdout
     return sorted(
         {
