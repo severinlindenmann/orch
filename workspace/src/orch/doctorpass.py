@@ -35,6 +35,7 @@ first is open, none when all is fine), and hold back automatic helper starts whi
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -538,11 +539,19 @@ def worktrees(repo: Path) -> list[Path]:
 
 
 def _du(path: Path) -> int:
-    r = subprocess.run(["du", "-sk", str(path)], capture_output=True, text=True, timeout=300)
+    """Size in bytes, for the report only. Windows has no `du`: a missing program must never stop a clean-up
+    (it raised FileNotFoundError, and clean() skipped every copy and test folder on Windows)."""
     try:
+        r = subprocess.run(["du", "-sk", str(path)], capture_output=True, text=True, timeout=300)
         return int(r.stdout.split()[0]) * 1024
-    except (ValueError, IndexError):
-        return 0
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
+        pass
+    total = 0
+    for dp, _dns, fns in os.walk(path):  # does not follow links into other folders
+        for n in fns:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(dp, n)).st_size
+    return total
 
 
 def process_dirs() -> list[str] | None:
