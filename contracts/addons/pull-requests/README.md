@@ -65,7 +65,11 @@ back), because `reviewDecision` is empty when the base branch's rules require no
 did not change counts as a try. A member that changed is taken out (closed, draft, base not allowed, review, Merge card) or
 put back in line (new commit, another allowed base branch); a group that was stopped this way is closed and the
 rest wait again. One left: the core waiter
-(`orch.prwait.run_one`, merge on green). Several: a group commit built in a bare blobless copy
+(`orch.prwait.run_one(url, True, queue=True)`, merge on green). In queue mode the waiter never takes the base
+branch into the pull request's branch: when the base got commits that touch its files since it took the base in,
+it answers `behind`, and the runner checks it once on top of the base as a group of one (a group commit of just
+that pull request, its own group pull request "Merge queue: #a"); red, a conflict with the base, or a fork then
+leaves the queue with what to do. So no pull request runs its checks again after each merge. Several: a group commit built in a bare blobless copy
 (`git merge-tree --write-tree` + `git commit-tree`, nothing checked out), pushed to `orch-queue/<base>-<unix time>-<workspace mark>` (6 hex characters of the workspace path, so two
 workspaces never share a branch),
 one pull request "Merge queue: #a, #b" whose body lists them and repeats their `Closes` references, merged by the
@@ -81,8 +85,14 @@ after an error and at every start the runner closes the group pull requests that
 their branches. A close or delete that gets no room in the write limit or no answer stays in the file for the
 next round; a branch that could not be deleted 5 times is left to a person with a log line. The runner never
 deletes `orch-queue/*` branches it did not write down: two workspaces on one repository each keep their own. Group titles are
-written as code text, so words in a title never close issues; only GitHub's own closing references are repeated. Each verdict goes on the entry's ticket (history line and reference state). Every GitHub
-write takes a slot of `orch.ghlimit`.
+written as code text, so words in a title never close issues; only GitHub's own closing references are repeated. Each verdict goes on the entry's ticket (history line and reference state). When an entry with a ticket leaves
+the queue unmerged, the ticket's helper is woken with the reason and the `queue add` line to run again (the same
+wake as failed checks: a live helper gets it as input, otherwise one is started; a history line says which), since
+helpers put their pull request in line and finish. Not for one that was closed, made a draft or is merged with a
+Merge card (reference states `closed`, `draft`, `owner merges`). Every GitHub
+write takes a slot of `orch.ghlimit`, except the merge itself: the queue merges one group per run of the checks,
+so its merges are counted (`orch github writes`) but never wait for the hourly merge count. `orch ref wait
+--merge` outside the queue still waits for it and still takes the base in.
 
 Known limit: a base branch whose rules require an approving review never merges a group pull request (nobody
 reviews it); its members end after 3 tries. The queue is meant for base branches without that rule.

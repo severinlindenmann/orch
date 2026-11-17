@@ -44,7 +44,8 @@ test('loaded before the layer and the bar, served as a page module, polled only 
 
 test('the bar and the panes read the sessions API, not the tickets and runs', () => {
   const bar = fs.readFileSync(path.join(WEB, 'pages/livebar.js'), 'utf8');
-  assert.doesNotMatch(bar, /state\.runs|helperState\(/);
+  // the bar's own painting (after module.exports); the ticket's session button keeps the dashboard's state (liveTicketSession)
+  assert.doesNotMatch(bar.slice(bar.indexOf('module.exports')), /state\.runs|helperState\(/);
   assert.match(bar, /LiveSessions/);
   const layer = fs.readFileSync(path.join(WEB, 'pages/live-layer.js'), 'utf8');
   assert.match(layer, /LiveSessions\?\.get\(/);

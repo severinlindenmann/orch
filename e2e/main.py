@@ -373,23 +373,13 @@ def main() -> int:
 
 
 def leaked_servers(tmp: Path) -> list[int]:
-    """Add-on servers (orch_dashboard, orch_focus ...) whose folder is under this run's temp root; they are ended here."""
-    out = subprocess.run(["ps", "-axo", "pid,command"], capture_output=True, text=True).stdout
+    """Add-on servers (orch_dashboard, orch_focus, orch_factory ...) whose folder is under this run's temp root or under
+    a folder a scenario made outside it (lib.EXTRA_ROOTS); they are ended here and the run fails (LEAK)."""
     found = []
-    for ln in out.splitlines():
-        pid_s, _, cmd = ln.strip().partition(" ")
-        if " -m orch_" not in cmd or not pid_s.isdigit():
-            continue
-        lsof = subprocess.run([shutil.which("lsof") or "/usr/sbin/lsof", "-a", "-d", "cwd", "-p", pid_s, "-Fn"], capture_output=True, text=True).stdout
-        cwd = next((x[1:] for x in lsof.splitlines() if x.startswith("n")), "")
-        if cwd and (cwd == str(tmp) or cwd.startswith(str(tmp) + os.sep)):
-            found.append(int(pid_s))
-            print(f"LEAK pid {pid_s}: {cmd[:160]}")
-    for pid in found:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
+    for pid, cmd in lib.orch_processes_under([tmp, *lib.EXTRA_ROOTS]):
+        found.append(pid)
+        print(f"LEAK pid {pid}: {cmd[:160]}")
+    lib.end_processes(found)
     return found
 
 

@@ -10,6 +10,8 @@ why it failed (orch then stays on the old version, and tries again some hours la
 
 A development build follows its branch closely (a demo kept on the newest develop): it looks every 15
 minutes, and a commit whose update failed is not tried again; the next newer commit is, at the next look.
+It waits for working helpers at most an hour (a demo's stand-in helpers never end); a person's click, a
+running update and a service restart still hold it back.
 
 Machine-wide, in the orch home: one install serves every workspace. Files: auto-update.json (the setting),
 auto-update-state.json (next check, the update under way), auto-update-note.json (the note for Home)."""
@@ -26,6 +28,7 @@ from orch.errors import Refused
 
 CHECK_EVERY = 3600  # seconds between two looks at the install source
 BRANCH_CHECK_EVERY = 900  # a development build (a branch such as develop) looks every 15 minutes
+BRANCH_MAX_WAIT = 3600  # a development build waits for working helpers at most an hour, then updates anyway
 RETRY_BUSY = 300  # not a quiet moment: look again after five minutes
 RETRY_FAILED = 6 * 3600  # an update that failed: try again after six hours
 QUIET_AFTER_CLICK = 120  # a person clicked in the dashboard less than two minutes ago: not quiet yet
@@ -138,7 +141,9 @@ def _services_busy() -> bool:
         return True
 
 
-def busy_reason(root: Path, last_click: float | None = None, clicking: bool = False) -> str | None:
+def busy_reason(
+    root: Path, last_click: float | None = None, clicking: bool = False, helpers: bool = True
+) -> str | None:
     """Why now is not a quiet moment (plain words for the log), or None. `last_click` (time.time()) and
     `clicking` come from the dashboard: a person's click still under way, or one a moment ago."""
     from orch import addons
@@ -149,7 +154,7 @@ def busy_reason(root: Path, last_click: float | None = None, clicking: bool = Fa
         roots = addons._registered_workspaces(root)
     except Exception:  # noqa: BLE001
         roots = {Path(root).resolve()}
-    n = _helpers_at_work(roots)
+    n = _helpers_at_work(roots) if helpers else 0
     if n:
         return f"{n} helper{'s are' if n > 1 else ' is'} working"
     if _update_under_way():
@@ -273,6 +278,7 @@ def tick(
     info = updateinfo.info(use_cache=False)
     if info.get("update_available") is not True or not info.get("newest"):
         st["next"] = now + _every()
+        st.pop("busy_since", None)
         _write("auto-update-state.json", st)
         return "current" if info.get("newest") else "unknown"
     if st.get("failed_sha") and info["newest"].get("sha") == st["failed_sha"]:
@@ -280,15 +286,24 @@ def tick(
         _write("auto-update-state.json", st)
         return "later"
     why = busy_reason(root, last_click, clicking)
+    if why and why.endswith(" working") and _ref() != "main":
+        since = st.get("busy_since")
+        since = since if isinstance(since, (int, float)) else now
+        if now - since >= BRANCH_MAX_WAIT:  # a development build: helpers held it back long enough
+            why = busy_reason(root, last_click, clicking, helpers=False)
+        else:
+            st["busy_since"] = since
     if why:
         st["next"] = now + RETRY_BUSY
         _write("auto-update-state.json", st)
         return f"waiting: {why}"
+    st.pop("busy_since", None)
     try:
         with services.locked(timeout=1):  # one dashboard of this machine starts it, never two
             st = _read("auto-update-state.json")
             if st.get("attempt"):
                 return "updating"
+            st.pop("busy_since", None)
             have, newest = info["installed"], info["newest"]
             st["attempt"] = {
                 "at": int(now),

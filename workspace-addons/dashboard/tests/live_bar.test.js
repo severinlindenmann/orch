@@ -4,11 +4,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const helpers = require('../src/orch_dashboard/web/helpers.js');
 const bar = require('../src/orch_dashboard/web/pages/livebar.js');
 
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
 const KIT = path.join(__dirname, '../../../workspace/src/orch_ui/static');
 
+const run = state => ({running:true, helper:{state}, claim:{agent:'agent:claude'}});  // for the ticket's session button
+const t = (id, key, extra = {}) => ({id, key, title:'Title of ' + key, status:'active', questions:[], ...extra});
 const sess = (id, key, status, extra = {}) => ({id, key, title:'Title of ' + key, status, word:status === 'working' ? 'Working' : '', ...extra});
 
 test('sessions by state from the live sessions API: needs you, working, in line, idle; pinned is taken out of the counts', () => {
@@ -73,4 +76,32 @@ test('plugs into the layer: a chip opens its session there, open ones are marked
   assert.match(src, /mount\(host, opts = \{\}\)/);
   const css = fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8');
   assert.ok(css.includes('.lbar.lbar-docked{position:relative') && css.includes('.lbar-chip[aria-current=true]{'));
+});
+
+// ORCH-365: the Focus button on every ticket says what pressing it does, from the same session states as the bar.
+test('the Focus button word: Answer, Watch, Open, In line, Start; none on a finished ticket without a helper', () => {
+  const ask = {questions:[{id:'q1', text:'Which one?'}]};
+  const verb = (tk, r) => bar.liveFocusVerb(tk, r, helpers.helperState);
+  assert.equal(verb(t('t_a', 'ORCH-1'), run('you')), 'Answer');
+  assert.equal(verb(t('t_b', 'ORCH-2'), run('working')), 'Watch');
+  assert.equal(verb(t('t_c', 'ORCH-3'), run('idle')), 'Open');
+  assert.equal(verb(t('t_d', 'ORCH-4'), {running:false, hold:'Waits for a free place'}), 'In line');
+  assert.equal(verb(t('t_e', 'ORCH-5', {status:'ready'}), undefined), 'Start');
+  assert.equal(verb(t('t_f', 'ORCH-6', {status:'waiting', ...ask}), undefined), 'Answer', 'an open question with no helper');
+  assert.equal(verb(t('t_g', 'ORCH-7', {questions:[{id:'q1', text:'x', answer:'yes'}]}), undefined), 'Start', 'an answered question is not one');
+  for (const status of ['done', 'dropped', 'superseded']) assert.equal(verb(t('t_h', 'ORCH-8', {status, ...ask}), undefined), '', status);
+  assert.equal(verb(t('t_i', 'ORCH-9', {status:'done'}), run('working')), 'Watch', 'a helper still running on a done ticket can be watched');
+  assert.equal(verb(null, null), '');
+});
+
+test('the ticket page and every ticket row use the one Focus button; a pane has Open ticket, also in More', () => {
+  const read = f => fs.readFileSync(path.join(WEB, 'pages', f), 'utf8');
+  const ticket = read('ticket.js'), list = read('tickets.js'), layer = read('live-layer.js');
+  assert.equal((ticket.match(/liveFocusButton\(t, true\)/g) || []).length, 2, 'both ticket page headers (working and not)');
+  assert.match(list, /function ticketRowFocus/);
+  assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');
+  assert.match(list, /function shortSide[^]*?liveFocusButton\(t\)/, 'the phone row');
+  assert.match(layer, /function liveFocusButton[^]*?livePreviewOn\(\)/, 'only behind the Preview switch');
+  assert.match(layer, /'data-key':'live-open-ticket'/);
+  assert.match(layer, /'data-key':'live-more-ticket'/);
 });
