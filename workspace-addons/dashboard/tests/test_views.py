@@ -373,6 +373,12 @@ def test_accordion_fields_pass_the_check():
     assert check_view(_acc_view()) is not None
 
 
+def test_a_switch_may_say_what_it_turns_on():
+    v = _acc_view()
+    v["blocks"][0]["items"][0]["toggle"]["text"] = "Repeats"
+    assert check_view(v) is not None
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -380,6 +386,8 @@ def test_accordion_fields_pass_the_check():
         lambda i: i["actions"][0]["action"].update(command="rm"),
         lambda i: i["actions"][0]["action"]["args"].update(x="<b>"),
         lambda i: i["toggle"].update(on="yes"),
+        lambda i: i["toggle"].update(text="x" * 25),
+        lambda i: i["toggle"].update(text=""),
         lambda i: i["tickets"][0].update(id="../x"),
         lambda i: i["detail"][0].update(html="<b>"),
         lambda i: i["detail"].extend([{"label": "x"}] * 12),

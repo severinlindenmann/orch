@@ -563,3 +563,33 @@ def test_table_rows_become_cards_on_a_phone():
     phone = widgets[widgets.index("ORCH-136") :]
     assert "@media(max-width:720px)" in phone and "attr(data-label)" in phone and "display:block" in phone
     assert ".file-row>.file-actions{flex:1 0 100%}" in (css / "components.css").read_text()
+
+
+def _switch_table(text=None):
+    toggle = {"on": True, "label": "Weekly report on or off", "action": {"op": "addon.act", "args": {"verb": "toggle", "target": "t_abcdef"}}}
+    if text:
+        toggle["text"] = text
+    return {"blocks": [{"type": "table", "title": "Repeats", "columns": [{"key": "name", "label": "Ticket", "type": "text"}],
+                        "rows": [{"cells": {"name": "Weekly report"}, "toggle": toggle}]}]}
+
+
+@node
+def test_a_table_switch_says_what_it_turns_on(tmp_path):
+    """Bug hunt 17 Nov: at phone width the Automation card showed a bare switch. The add-on's words name the column
+    and sit on each switch cell (shown beside the switch on a phone card); without them the column says On."""
+    nodes = list(walk(run(tmp_path, _switch_table("Repeats"))))
+    assert [n["text"] for n in nodes if n["tag"] == "th"][-1] == "Repeats"
+    cell = [n for n in nodes if n["cls"] == "cell-toggle"][0]
+    assert cell["data"]["label"] == "Repeats" and cell["kids"][0]["attrs"]["role"] == "switch"
+    nodes = list(walk(run(tmp_path, _switch_table())))
+    assert [n["text"] for n in nodes if n["tag"] == "th"][-1] == "On"
+    assert [n for n in nodes if n["cls"] == "cell-toggle"][0]["data"]["label"] == "On"
+
+
+@node
+def test_a_list_switch_shows_its_words_beside_it(tmp_path):
+    view = json.loads(json.dumps(ACCORDION))
+    view["blocks"][0]["items"][0]["toggle"]["text"] = "Repeats"
+    nodes = list(walk(run(tmp_path, view)))
+    words = [n for n in nodes if n["cls"] == "switch-text"]
+    assert len(words) == 1 and words[0]["text"] == "Repeats" and words[0]["attrs"]["aria-hidden"] == "true"
