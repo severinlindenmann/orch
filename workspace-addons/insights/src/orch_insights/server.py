@@ -176,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/overview":
             return self._json(build_overview(read_counts(self.root, self.orch_bin)))
         if path == "/api/models":
-            return self._json(build_models(self._read("usage", "--days", "30", "--json")))
+            return self._json(build_models(self._read("tokens", "--days", "30", "--json")))
         if path.startswith("/api/list/") and path[10:] in KINDS:
             return self._json(build_list(read_counts(self.root, self.orch_bin), path[10:]))
         if path == "/api/checkup":

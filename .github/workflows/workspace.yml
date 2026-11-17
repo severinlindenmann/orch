@@ -17,8 +17,9 @@ jobs:
       matrix:
         os: ${{ fromJSON(inputs.windows && (inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') || (inputs.full && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]')) }}
     runs-on: ${{ matrix.os }}
-    # The suite takes 3-6 min; a hung test must not hold the runner for GitHub's 6 h default.
-    timeout-minutes: 40  # the full suite (6000+ tests) outgrew 20 min on macOS
+    # The full suite (7000+ tests): 15 min on Ubuntu, 22-40 min on macOS (runner speed varies up to 2x, ORCH-260).
+    # A hanging test stops after 300 s (pytest-timeout in workspace/pyproject.toml), not at the job limit.
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 40 || 60 }}
     defaults:
       run:
         working-directory: workspace
