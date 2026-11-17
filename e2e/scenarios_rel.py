@@ -7,7 +7,7 @@ import os
 import time
 from pathlib import Path
 
-from lib import Fail, Skip, check, http, scenario, tar_gz
+from lib import Fail, Skip, check, http, scenario, tar_gz, wait_for
 from scenarios_ws import _fake_agent, tload
 
 SECRET = "SECRET-PLAIN-MARKER-7f3a"
@@ -151,6 +151,11 @@ def _agent_runs(log: Path) -> int:
     return len(re.findall(r"^end \d+$", log.read_text(), re.M)) if log.exists() else 0  # one end line per finished run
 
 
+def _agent_starts(log: Path) -> int:
+    import re
+    return len(re.findall(r"^start \d+ ", log.read_text(), re.M)) if log.exists() else 0  # the prompt may hold "start"
+
+
 def _automation_on(e, ws):
     """R6-R8 need the automation add-on in this workspace; A5 turns it on too, but the R group runs alone as well."""
     e.sh(["orch", "addon", "add", "automation", "--yes"], cwd=e.ws(ws), check_rc=True, timeout=600)
@@ -203,7 +208,8 @@ def r7(e):
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
     _sched_once(e, "Reports")  # work an earlier scenario left (R6 delegates a ticket) runs now, not inside the count below
-    time.sleep(4)
+    # a run started before (detached) may still be in its 3 s: wait until every start has its end line
+    wait_for(lambda: _agent_starts(log) <= _agent_runs(log), 30, 0.5)
     base = _agent_runs(log)
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "run the weekly report")
     st = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"]["key"] == "weekly-report"]
