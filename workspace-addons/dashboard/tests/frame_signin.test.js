@@ -35,6 +35,7 @@ function frameEnv(hash, state = null) {
     parent:{postMessage:(m, o) => posts.push([m, o])},
     history:{state, replaceState:(s, _t, url) => { win.history.state = s; replaced.push(url); loc.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; }},
     fetch:(input, init) => { fetched.push([String(input), init]); return Promise.resolve({status:200}); },
+    addEventListener:() => {},
     document:{addEventListener:(n, f) => { listeners[n] = f; }},
     URL, Headers, Date, Request:undefined, EventSource:undefined,
   };

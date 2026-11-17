@@ -237,7 +237,8 @@ def _show(t: dict, root: Path) -> str:
     from orch import modelpick
 
     if modelpick.label(t):
-        extra.append(f"Model: {modelpick.label(t)}")
+        reason = modelpick.why(t)
+        extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
@@ -346,7 +347,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager", "triage"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -440,6 +441,15 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     x = sub.add_parser("usage", parents=[common], help="tokens per model and per ticket (read-only)")
     x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
+    x = sub.add_parser("triage", parents=[common], help="list the tickets that need a look (read-only)")
+    x.add_argument(
+        "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
+    )
+    x.add_argument(
+        "--lanes",
+        help="lanes to go through, e.g. backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded "
+        "(default: every lane except Done, Won't do and Superseded)",
+    )
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
@@ -561,6 +571,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
     x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
+    x.add_argument("--estimate-minutes", type=int, help="your estimate of the helper time, in whole minutes")
+    x.add_argument("--estimate-cost", type=float, help="your estimate of the cost in dollars at list price")
     x = t.add_parser(
         "model",
         parents=[common],
@@ -956,6 +968,20 @@ def run(args: argparse.Namespace) -> None:
 
         data = usage.workspace_usage(root, max(args.days, 1))
         _out(args, data, usage.text(data))
+    elif cmd == "triage":
+        from orch import triage
+
+        if args.start:
+            r = triage.start(root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes))
+            how = "a helper started on it" if r["started"] else f"it waits for a helper ({r['why']})"
+            _out(
+                args,
+                r,
+                f"Opened {r['ticket']} with {r['open']} tickets, {r['findings']} worth a look: {how}.",
+            )
+        else:
+            res = triage.collect(root, lanes=triage.parse_lanes(args.lanes))
+            _out(args, res, triage.list_text(res))
     elif cmd == "update":
         if not args.project_only:  # first: with another ORCH_HOME there is nothing to update
             addons.tool_env_change_ok()
@@ -1128,7 +1154,8 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, f'Title written: "{t["title"]}"')
     elif cmd == "ticket" and sub == "tidy":
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description)
+        est = {"minutes": args.estimate_minutes, "cost": args.estimate_cost}
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est)
         _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import runs_live as _live

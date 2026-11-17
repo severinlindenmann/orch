@@ -331,6 +331,36 @@
         "complete": {
           "type": "boolean",
           "description": "false when `unavailable` is not empty: the counts are partial."
+        },
+        "lost": {
+          "description": "ORCH-189: hook lines of proven runs that were lost in the window (nothing recorded), by reason and by the error type that turned recording off. Optional; Insights shows it so an empty record is not read as no use.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lines",
+            "reasons",
+            "errors"
+          ],
+          "properties": {
+            "lines": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reasons": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "errors": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
         }
       }
     },
