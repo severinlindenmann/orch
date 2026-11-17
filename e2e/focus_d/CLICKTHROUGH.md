@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 3 ready (the script clicks them), 22 pending (not built yet).
+25 steps: 4 ready (the script clicks them), 21 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -218,7 +218,7 @@ Must be seen:
 ## 13. Focus stays open with typed text and split while you change pages
 
 - Part: layer (draft D feature 7)
-- State: pending, waits for: Pages change without a full reload (crew task soft-pages)
+- State: ready, clicked by the script
 - Pictures: `fd-13-stays-open-1280.png`, `fd-13-stays-open-1920.png`, `fd-13-stays-open-390.png`
 
 Do:
