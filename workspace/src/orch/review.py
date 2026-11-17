@@ -877,18 +877,26 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
         tickets.note_history(root, tid, by, line, via)
 
 
-def tend_releases(root: Path, dry_run: bool = False, checks_of=None, merge_with=None) -> dict:
+def tend_releases(
+    root: Path, dry_run: bool = False, checks_of=None, merge_with=None, release_check=None
+) -> dict:
     """One pass of the release keeper (`orch review tend-releases`): every unanswered release Merge card
     (`orch ask ... --merge --release`) whose pull request is open, not a draft, still on the card's commit and
     green on every check is merged with the gh login of this computer (the owner's: ghmerge drops helper
     tokens) and recorded as answered by the release keeper. Only while the owner turned it on in Settings
     (`workflow.release_merge`) and automation is not paused. Returns {"off", "paused", "actions": [{ticket,
     key, question, url, verdict, why, done}]}; verdict is merge, wait or stale. dry_run only says it.
+    Only a real release merges: from a release/... branch into the default branch, changing nothing that is
+    not on develop already (ghmerge.release_problem), so a card a helper marks --release on other work never
+    merges by itself. Refused inside a helper (an agent tool in the environment), like the Merge click.
     No AI call: a repeating automation script runs it."""
     from orch import brake, config, ghmerge
 
     checks_of = checks_of or ghmerge.checks
     merge_with = merge_with or ghmerge.merge
+    release_check = release_check or ghmerge.release_problem
+    if tickets.agent_tool():
+        raise Refused("Releases merge from the automation on this computer, not inside a helper.")
     if not config.release_merge_on(root):
         return {"off": True, "paused": False, "actions": []}
     if brake.paused(root) is not None:
@@ -914,6 +922,8 @@ def tend_releases(root: Path, dry_run: bool = False, checks_of=None, merge_with=
                 row.update(verdict="stale", why="the pull request changed or closed; a new card is needed")
             elif not got["green"]:
                 row.update(verdict="wait", why="not every check is green yet")
+            elif (why := release_check(url, head)) is not None:
+                row.update(verdict="wait", why=f"not a release that merges by itself: {why}")
             else:
                 row.update(verdict="merge", why="every check is green")
             if row["verdict"] != "merge" or dry_run:

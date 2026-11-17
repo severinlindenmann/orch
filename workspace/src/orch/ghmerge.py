@@ -153,6 +153,38 @@ def checks(url: str) -> dict | None:
     return {"state": data["state"], "head": head, "green": green}
 
 
+RELEASE_PREFIX = "release/"
+RELEASE_FROM = "develop"  # a release only carries what is on this branch already (reviewed there)
+
+
+def release_problem(url: str, head: str) -> str | None:
+    """Why a pull request is not a release that may merge without a click (None = it is one): it must
+    come from a release/... branch into the repository's default branch, and change nothing that is not on
+    develop already (GitHub's compare develop...<commit> lists no file). Read-only, with any login."""
+    repo, _ = _parts(url)
+    gh = shutil.which("gh")
+    if gh is None or not SHA.fullmatch(str(head or "")):
+        return "GitHub could not be read"
+    try:
+        v = _gh_plain(gh, ["pr", "view", url, "--json", "baseRefName,headRefName"], 15)
+        pr = json.loads(v.stdout) if v.returncode == 0 else None
+        d = _gh_plain(gh, ["api", f"repos/{repo}", "--jq", ".default_branch"], 15)
+        c = _gh_plain(
+            gh, ["api", f"repos/{repo}/compare/{RELEASE_FROM}...{head}", "--jq", ".files | length"], 20
+        )
+    except (Refused, ValueError):
+        return "GitHub could not be read"
+    if not isinstance(pr, dict) or v.returncode != 0 or d.returncode != 0:
+        return "GitHub could not be read"
+    if not str(pr.get("headRefName") or "").startswith(RELEASE_PREFIX):
+        return f"it does not come from a {RELEASE_PREFIX}... branch"
+    if pr.get("baseRefName") != d.stdout.strip():
+        return "it does not go into the default branch"
+    if c.returncode != 0 or c.stdout.strip() != "0":
+        return f"it changes files that are not on {RELEASE_FROM}"
+    return None
+
+
 def head_of(url: str) -> str:
     """The newest commit of an open pull request, read when the card is made: the click merges exactly it."""
     _parts(url)

@@ -9,9 +9,16 @@ import pytest
 from test_merge_card import HEAD, PR, FakeGh, _q
 from test_merge_card import gh as gh  # noqa: F401  (the fixture)
 
-from orch import brake, review, tickets
+from orch import brake, ghmerge, review, tickets
 
 GREEN = {"state": "OPEN", "head": HEAD, "green": True}
+
+
+@pytest.fixture(autouse=True)
+def a_real_release(monkeypatch):
+    """GitHub says: a release/... branch into the default branch with nothing that is not on develop."""
+    monkeypatch.setattr(ghmerge, "release_problem", lambda url, head: None)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
 
 
 @pytest.fixture
@@ -150,3 +157,63 @@ def test_cli_tend_releases(tk, run):
     _on(run)
     code, out, _ = run("review", "tend-releases", "--dry-run", "--json")
     assert code == 0 and json.loads(out)["off"] is False
+
+
+def test_other_work_marked_release_never_merges_by_itself(tk, run, monkeypatch):
+    root, tid = tk
+    _ask(run, tid, "--release")
+    _on(run)
+    monkeypatch.setattr(
+        ghmerge, "release_problem", lambda url, head: "it does not come from a release/... branch"
+    )
+    res = review.tend_releases(root, checks_of=lambda u: GREEN)
+    assert res["actions"][0]["verdict"] == "wait" and "release/" in res["actions"][0]["why"]
+    assert not FakeGh.current.merges and _q(root, tid)["answer"] is None
+
+
+def test_refused_inside_a_helper(tk, run, monkeypatch):
+    root, tid = tk
+    _ask(run, tid, "--release")
+    _on(run)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    with pytest.raises(tickets.Refused):
+        review.tend_releases(root, checks_of=lambda u: GREEN)
+    assert not FakeGh.current.merges
+
+
+class ReleaseGh:
+    """gh for ghmerge.release_problem: the pull request's branches, the default branch, the compare count."""
+
+    def __init__(self, head_ref="release/part30-1117", base="main", default="main", files="0"):
+        self.head_ref, self.base, self.default, self.files = head_ref, base, default, files
+
+    def __call__(self, argv, **kw):
+        import subprocess
+
+        args = argv[1:]
+        if args[:2] == ["pr", "view"]:
+            out = json.dumps({"baseRefName": self.base, "headRefName": self.head_ref})
+        elif args[:2] == ["api", "repos/acme/app"]:
+            out = self.default + "\n"
+        elif args[0] == "api" and "/compare/develop..." in args[1]:
+            out = self.files + "\n"
+        else:
+            raise AssertionError(args)
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+
+@pytest.mark.parametrize(
+    ("gh_kw", "want"),
+    [
+        ({}, None),
+        ({"head_ref": "feat/sneaky"}, "release/"),
+        ({"base": "develop"}, "default branch"),
+        ({"files": "3"}, "not on develop"),
+    ],
+)
+def test_release_problem(monkeypatch, gh_kw, want):
+    monkeypatch.undo()  # the real check, not the autouse stand-in
+    monkeypatch.setattr(ghmerge.shutil, "which", lambda name: "/fake/bin/gh")
+    monkeypatch.setattr(ghmerge.subprocess, "run", ReleaseGh(**gh_kw))
+    got = ghmerge.release_problem(PR, HEAD)
+    assert got is None if want is None else want in got
