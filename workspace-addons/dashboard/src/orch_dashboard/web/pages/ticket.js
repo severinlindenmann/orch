@@ -1106,6 +1106,10 @@ function ticketChangesEditor(t) {
   // new changes arrived after you looked (the Done still happens; bringing them back then needs your OK).
   const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
   const done = ticketButton('Looks good', 'primary sm', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}), {'data-key':'ticket-button-Accept-' + (tip ? tip.slice(0, 20) : 'none')}); // keyed by the tip: a refresh never keeps a handler with a stale one
+  // ORCH-250: with a step still open Looks good is off and says why; Send back is the way on.
+  const unfinished = array(t.checklist).filter(c => !c.done && !c.wont_do).length;
+  if (unfinished) { done.disabled = true; done.setAttribute('aria-disabled', 'true'); }
+  const unfinishedNote = unfinished ? h('span', {className:'meta warn', 'data-key':'ticket-review-open-steps'}, '! ' + (unfinished === 1 ? '1 step is' : unfinished + ' steps are') + ' not finished. Send it back to get ' + (unfinished === 1 ? 'it' : 'them') + ' done.') : null;
   const row = h('div', {className:'row ticket-review-actions'});
   const open_parts = array(t.proof?.uncovered).length;
   const uncovered = open_parts ? h('span', {className:'meta warn', 'data-key':'ticket-review-uncovered'}, '! ' + (open_parts === 1 ? '1 part' : open_parts + ' parts') + ' of “Done when” ' + (open_parts === 1 ? 'has' : 'have') + ' no task') : null;
@@ -1134,7 +1138,7 @@ function ticketChangesEditor(t) {
     };
     host.replaceChildren(h('div', {className:'stack-sm'}, h('label', {className:'ticket-ask-label', for:fid}, 'What should change?'), input, h('div', {className:'row'}, send, cancel))); input.focus();
   });
-  row.append(...[done, open, uncovered, shown].filter(Boolean)); host.append(row); return host;
+  row.append(...[done, open, unfinishedNote, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
   const card = q.card && typeof q.card === 'object' ? q.card : null;
@@ -1515,7 +1519,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
     else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', focusTicketAnswer, {'data-key':'ticket-answer'})); }
     else if (fresh) actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'}));
-    else if (ticketPaused(t, run)) actions.push(ticketButton('Resume', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'}));
+    else if (ticketPaused(t, run)) actions.push(ticketButton('Continue', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'}));
     if (menu) actions.push(menu);
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
@@ -1572,7 +1576,7 @@ function detail(t) {
   const parent = window.DashHelpers.parentOf(tickets(), t), children = window.DashHelpers.childrenOf(tickets(), t);
   loadArtifacts(t, selected === 'files');
   loadRelease(t);
-  const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
+  const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status) && !(typeof justStarted === 'function' && justStarted(t.id));
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
