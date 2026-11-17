@@ -116,9 +116,7 @@ def test_open_agent_proposal_and_moved_conversation():
     index = (webjs.WEB / "index.html").read_text()
     assert 'data-action="open-agent"' in index
     assert "getElementById('open-agent').hidden = snapshot" in app
-    assert (
-        '<span class="btn-word-wide">Ask the helper</span></button>' in index and ">Open agent<" not in index
-    )
+    assert '<span class="btn-word-wide">Chat</span></button>' in index and ">Open agent<" not in index
     for text in (
         "New conversation with your helper",
         "Talk it through first. When you are ready, the helper can make the ticket.",
@@ -134,7 +132,7 @@ def test_open_agent_proposal_and_moved_conversation():
 def test_open_helper_lives_in_the_topbar_only():
     app = (webjs.WEB / "app.js").read_text(encoding="utf-8")
     index = (webjs.WEB / "index.html").read_text(encoding="utf-8")
-    # the shell moved "Ask the helper" out of the sidebar nav; the topbar button is the one entry
+    # the shell moved "Chat" out of the sidebar nav; the topbar button is the one entry
     assert "nav-helper" not in app and "'data-nav':'open-agent'" not in app
     assert "getElementById('open-agent').addEventListener('click', () => chatOpenAgent())" in app
     assert 'id="open-agent"' in index

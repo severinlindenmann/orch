@@ -44,7 +44,7 @@ the panel with "All services" to go back.
 - No status look for a service. Running uses the Done pill colour with a plain green dot (the Done tick would say
   "finished", the Working arc spins all the time); Failing uses the failed pill with the Needs-you mark.
 - The shared Preview pill (`state-controls.js`) has no Error button; the page adds one to it with a few lines.
-- `UI.state` takes a button with a click handler only; the Empty state's next step is a link ("Ask the helper"), so
+- `UI.state` takes a button with a click handler only; the Empty state's next step is a link ("Chat"), so
   it is appended by hand.
 - No master-detail layout. The page uses `.chat-grid` (272 px list + panel) and `.focus-list` rows; on a phone the
   page script swaps list and panel because `.chat-grid` has no phone rule.
