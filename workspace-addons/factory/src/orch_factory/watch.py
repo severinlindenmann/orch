@@ -164,6 +164,8 @@ def once(root):
             new = {"crew": crew, "woken": sorted(set(entry.get("woken", [])) | set(ids))}
             if measured is not None:
                 new["measured"] = measured
+            if why and entry.get("held"):
+                new["held"] = entry["held"]  # kept until a start goes through or nothing waits for one
             if new != entry:
                 orders[t["id"]] = new
                 changed = True
@@ -181,18 +183,38 @@ def once(root):
             why = f"{why}; Factory could not start the {stage} stage itself: {done}"
         try:
             orchcli.call(root, "run", "start", order, write=True)
-        except Refused:
+        except Refused as error:
             with store.locked():  # the start did not happen: allow the next pass to try again
                 orders = _load(store)
-                orders[order] = old
+                # the reason is kept for the page ("why is nothing working"), ORCH-277
+                orders[order] = {**old, "held": {"why": _plain(error), "at": clock().isoformat()}}
                 _save(store, orders)
             continue
+        with store.locked():
+            orders = _load(store)
+            if orders.get(order, {}).pop("held", None) is not None:
+                _save(store, orders)
         try:
             orchcli.call(root, "log", order, f"Factory woke the manager: {why}", write=True)
         except Refused:
             pass
         woke.append({"order": order, "why": why})
     return woke
+
+
+def _plain(error, cap=200):
+    text = " ".join(str(error).split())
+    return text if len(text) <= cap else text[: cap - 1] + "…"
+
+
+def held(store):
+    """{order id: {"why", "at"}} for the orders whose manager start core refused on the last try (machine busy,
+    helper limit, no agent), read for the page."""
+    return {
+        o: e["held"]
+        for o, e in _load(store).items()
+        if isinstance(e, dict) and isinstance(e.get("held"), dict)
+    }
 
 
 def start_stage(root, order, stage):

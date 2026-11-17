@@ -279,6 +279,22 @@ def test_help_lists_the_fields(command):
     )
 
 
+def test_help_says_what_each_command_takes(run):
+    """ORCH-277: start/status/view take no order; the help says so and an order gets a plain refusal."""
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-m", "orch_factory", "--help"], capture_output=True, text=True, check=True
+    ).stdout
+    for command in ("start", "status", "view", "show", "next", "list", "stop"):
+        assert f"\n    {command} " in out, command
+    assert "start the Factory watcher (takes no order" in out
+    for command in ("start", "status", "view", "list"):
+        refused = run(command, "t_abcdef", code=2)
+        assert refused["code"] == "invalid" and "takes no order" in refused["error"]
+        assert "unrecognized" not in refused["error"]
+
+
 def test_skill_names_the_schema_command_and_steps():
     import orch_factory
 

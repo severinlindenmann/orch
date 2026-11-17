@@ -3,6 +3,7 @@ on: workflow_call
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20  # ~1.5 min with a warm cache; room for a cold cargo build
     defaults:
       run:
         working-directory: relay
