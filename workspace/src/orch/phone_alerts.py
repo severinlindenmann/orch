@@ -26,6 +26,11 @@ LABEL_MAX = 60
 TEXT_MAX = 500
 _KEY = re.compile(r"[A-Z0-9]{2,4}-[1-9][0-9]{0,8}")
 _NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
+# an e-mail address or a host name inside a label (a self-written check label could carry one to the phone)
+_PRIVATE = re.compile(
+    r"\S+@\S+|(?:https?://)?(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?::\d+)?(?:/\S*)?|\b\d{1,3}(?:\.\d{1,3}){3}\b",
+    re.I,
+)
 _TIME = "%Y-%m-%dT%H:%M:%SZ"
 _DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 _MONTHS = (
@@ -44,7 +49,10 @@ def _line(text: str, n: int) -> str:
 def label(item: dict) -> str:
     """The tool's name as dashboard Home says it (helpers.js needName): "GitHub login", "Payments key"."""
     kind = item.get("kind") if item.get("kind") in KINDS else "login"
-    base = _line(str(item.get("label") or item.get("name") or ""), LABEL_MAX)
+    base = _line(
+        _PRIVATE.sub(" ", _line(str(item.get("label") or ""), 200)), LABEL_MAX
+    )  # no address or host name
+    base = base or _line(str(item.get("name") or ""), LABEL_MAX)
     low = base.lower()
     name = base if low == kind or low.endswith(" " + kind) else f"{base} {kind}".strip()
     return _line(name, LABEL_MAX)
@@ -85,6 +93,18 @@ def alert(item: dict) -> dict | None:
         "stops": keys[:STOPS_MAX],
         "no_new_work": bool(item.get("chosen")) and state == "renew",
     }
+
+
+def known(root: Path, items: list) -> list[dict]:
+    """The rows of the last check, limited to the checks this workspace really has, with the label and kind
+    taken from those checks (never from the saved row: it only supplies name, state, end date, tickets)."""
+    by_name = {r["name"]: r for r in health.recipes(root)}
+    out = []
+    for item in items:
+        r = by_name.get(item.get("name")) if isinstance(item, dict) else None
+        if r and isinstance(r.get("label"), str) and r.get("kind") in KINDS:
+            out.append({**item, "label": r["label"], "kind": r["kind"]})
+    return out
 
 
 def text(a: dict, tz: tzinfo | None = None) -> str:
@@ -151,7 +171,7 @@ def sync(root: Path, now: datetime | None = None, tz: tzinfo | None = None) -> l
     sent = net.read_json(path, {})
     sent = sent if isinstance(sent, dict) else {}
     ids = []
-    for body in due(doc["items"], sent, tz):
+    for body in due(known(root, doc["items"]), sent, tz):
         a = body["tool_alert"]
         try:
             relay.scan_outgoing(root, body)  # never a secret leaves (R5.2); refused before anything is kept

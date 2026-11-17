@@ -80,6 +80,38 @@ $ orch lessons rm <id>
 A secret in the text is refused. When the lessons are over 3 KB, helpers see only the newest; the helper merges or
 removes old ones itself. Files: `.orch/addons/lessons/` (gitignored).
 
+## Pull requests (merge queue)
+
+When many pull requests are ready at once, merging them one by one makes each later one take the base branch in and
+run its checks again. The merge queue puts them in line instead: up to five of one repository go on one group branch,
+the checks run once, and they are merged together on green. A red group is split in halves and tried again, so the
+good ones still get merged. A program does the waiting and merging; it needs `gh` signed in and git 2.38 or newer.
+
+```sh
+$ orch addon add pull-requests --yes
+$ orch pull-requests queue add <pull request url> --ticket <id> --wait   # exit 0 = merged
+$ orch pull-requests queue list
+$ orch pull-requests queue remove <pull request url>
+```
+
+`queue add` starts the runner in the background; it stops when the queue is empty. Every GitHub write counts toward
+this computer's write limit (`orch github writes`). A pull request a person merges with a Merge card is never queued.
+Files: `.orch/addons/pull-requests/` (gitignored).
+
+**Merge when green.** A switch on each ticket (Details, Pull requests; off until you turn it on). When it is on, the
+ticket's open pull requests go into the merge queue by themselves once they are ready (not a draft), and are merged
+when every check passed, only the commit that was checked. No helper has to wait for it. `orch start` runs the
+watcher that looks every minute.
+
+```sh
+$ orch ticket set <id> pull-requests.merge_when_green on
+$ orch start
+$ orch ticket set <id> pull-requests.merge_when_green off   # a waiting pull request leaves the queue
+```
+
+One that left the queue (checks failed, a conflict) comes back with the next push. Never a draft, never a pull request
+a person merges with a Merge card.
+
 ## Write your own add-on
 
 The core knows no add-on by name. An add-on is a folder with an `orch-addon.toml`
