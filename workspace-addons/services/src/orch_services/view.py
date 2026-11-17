@@ -8,6 +8,7 @@ footnote to Automation. The dashboard draws the block; every button sends `addon
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -164,8 +165,11 @@ def _service_item(root: Path, r: dict) -> dict:
 
 def _found_item(f: dict) -> dict | None:
     sid, name = f.get("id"), f.get("name")
-    if not (isinstance(sid, str) and ITEM_ID.fullmatch(sid) and isinstance(name, str) and name.strip()):
+    if not (isinstance(sid, str) and 0 < len(sid) <= 200 and isinstance(name, str) and name.strip()):
         return None
+    # Found ids keep the platform's label (often with capitals); the page takes only a plain id, so the item gets
+    # a stable one of its own and Manage with orch still sends the real found id.
+    vid = sid if ITEM_ID.fullmatch(sid) else "found-" + hashlib.sha1(sid.encode("utf-8")).hexdigest()[:12]
     since = _when(f.get("since"))
     facts = [
         {"label": "Found", "value": (f"Running since {since}" if since else "Running") + ", not made by orch"}
@@ -173,7 +177,7 @@ def _found_item(f: dict) -> dict | None:
     if isinstance(f.get("what"), str) and f["what"].strip():
         facts.append({"label": "What it is", "value": _plain(f["what"])})
     return {
-        "id": sid,
+        "id": vid,
         "title": _plain(name, 80),
         "state": {"label": "Running, not managed", "tone": "neutral"},
         "panel": {

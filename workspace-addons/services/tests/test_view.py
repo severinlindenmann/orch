@@ -101,13 +101,17 @@ def test_found_group_shows_only_manage_with_orch_and_nothing_when_empty(ws):
             "name": "Old test page on port 8794",
             "what": "A page somebody started by hand",
         },
-        {"id": "Bad Id", "name": "skipped"},
+        {"id": "launchd:ch.Example.Forwarder", "name": "Forwarder"},
+        {"id": "", "name": "skipped"},
     ]
     view = build(ws, (rows, 0, None), found=found)
     assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
     (group,) = view["blocks"][0]["groups"]
-    assert group["title"] == "Found on this computer" and len(group["items"]) == 1
-    item = group["items"][0]
+    assert group["title"] == "Found on this computer" and len(group["items"]) == 2
+    item, real = group["items"]
+    # a real label with capitals gets a plain page id; Manage with orch still sends the real found id
+    assert real["id"].startswith("found-")
+    assert real["panel"]["buttons"][0]["action"]["args"]["target"] == "launchd:ch.Example.Forwarder"
     assert item["state"] == {"label": "Running, not managed", "tone": "neutral"}
     assert item["panel"]["buttons"] == [
         {

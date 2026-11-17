@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -561,7 +562,13 @@ def run(args) -> int:
     if cmd == "view":
         from .view import build
 
-        print(json.dumps(build(root, _rows(root)), ensure_ascii=False))
+        try:  # read-only; a computer that cannot list its jobs simply shows no Found group
+            from . import found
+
+            found_items = found.scan(root)
+        except (OSError, ValueError, Refused, subprocess.SubprocessError):
+            found_items = []
+        print(json.dumps(build(root, _rows(root), found_items), ensure_ascii=False))
         return 0
     raise Refused(f"Unknown command {cmd}.")
 
