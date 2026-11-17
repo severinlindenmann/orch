@@ -2283,7 +2283,7 @@ function embedActRequest(e) {
 }
 let embedActBusy = false;  // one setting at a time: a second click while saving is dropped
 async function runEmbedAct(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (embedActBusy) return reply({type:'orch.act.failed', error:'Still saving the last change. Try again in a moment.'});
   embedActBusy = true;
   try {
