@@ -234,7 +234,7 @@ def test_check_keeps_the_last_result(proj, tools):
     doc = health.check(proj, NOW)
     assert doc["checked_at"] == "2026-11-16T12:00:00Z"
     assert health.last(proj) == doc
-    assert HIDDEN not in (proj / ".orch" / "run" / "health.json").read_text(encoding="utf-8")
+    assert HIDDEN not in health._path(proj).read_text(encoding="utf-8")
 
 
 def test_command_text_and_json(proj, run, new_ticket, tools):

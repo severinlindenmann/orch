@@ -15,11 +15,13 @@ A recipe says which command to run and how to read its answer:
 States: works | soon (runs out within WARN_DAYS) | renew (stopped working, a person renews it) |
 unreachable (the command could not run or gave no readable answer). Nothing else the command prints is
 kept, shown or logged, so no key and no account detail can leave through here (R5.2). The last result
-is kept in .orch/run/health.json for the dashboard and the phone; it holds the same few facts.
+is kept in the guarded orch home (key folder, health.json) for the dashboard and the phone, never in .orch/run
+where a helper could write it; it holds the same few facts.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -31,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from orch import adapters, net, runs, runs_live, tickets
+from orch.errors import Refused
 
 WARN_DAYS = 3  # the warning starts this many days before the end
 TIMEOUT = 10  # seconds for one status command
@@ -260,7 +263,12 @@ def overview(root: Path, now: datetime | None = None) -> list[dict]:
 
 
 def _path(root: Path) -> Path:
-    return runs.run_dir(Path(root)) / "health.json"
+    """In the guarded orch home, never .orch/run: the dashboard and the phone show these rows (a name, a
+    state, a Renew or Replace button), so a helper must not be able to write them (security review, ORCH-46).
+    Refused when this workspace has no guarded home."""
+    from orch import home as orch_home
+
+    return orch_home.key_dir(Path(root)) / "health.json"
 
 
 def save(root: Path, rows: list[dict], now: datetime | None = None) -> dict:
@@ -269,13 +277,24 @@ def save(root: Path, rows: list[dict], now: datetime | None = None) -> dict:
         "checked_at": (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "items": rows,
     }
-    net.write_json(_path(root), doc)
+    try:
+        path = _path(root)
+    except Refused:  # no guarded home here: nothing is kept, so nothing is shown
+        return doc
+    net.write_json(path, doc)
+    with contextlib.suppress(OSError):
+        os.chmod(path, 0o600)
+    with contextlib.suppress(OSError):  # the place before ORCH-46's review; never read again
+        (runs.run_dir(Path(root)) / "health.json").unlink()
     return doc
 
 
 def last(root: Path) -> dict | None:
-    """The last saved result, or None (never checked, or the file is not one)."""
-    doc = net.read_json(_path(root), None)
+    """The last saved result, or None (never checked, no guarded home, or the file is not one)."""
+    try:
+        doc = net.read_json(_path(root), None)
+    except Refused:
+        return None
     if not (
         isinstance(doc, dict) and doc.get("schema") == "orch.health/1" and isinstance(doc.get("items"), list)
     ):
@@ -315,7 +334,7 @@ def soon(root: Path, *, force: bool = False, now: float | None = None) -> bool:
         now = now if now is not None else time.time()
         if not (force or due(root, now)):
             return False
-        mark = runs.run_dir(Path(root)) / "health-asked"
+        mark = _path(root).with_name("health-asked")  # guarded too: a helper cannot hold the checks back
         try:
             if now - mark.stat().st_mtime < ASK_EVERY:
                 return False

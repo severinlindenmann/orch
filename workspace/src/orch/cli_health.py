@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import health, history, net, nextstep, renew
+from orch import health, history, net, nextstep, renew, tickets
 
 NONE_SET = "Nothing here tells orch whether it works."
 
@@ -94,18 +94,22 @@ def dispatch(args, root: Path) -> bool:
     if action == "renew":
         if args.worker:
             raise SystemExit(renew.work(root, args.name))
+        by = tickets.acting_by(args)  # renew.person_only refuses an agent and a helper run on every path
         if args.code is not None:
-            st = renew.code(root, args.name, _stdin_line() if args.code == "-" else args.code)
+            renew.person_only(by)  # before anything is read from stdin
+            st = renew.code(root, args.name, _stdin_line() if args.code == "-" else args.code, by=by)
         elif args.status:
-            st = renew.status(root, args.name)
+            st = renew.status(root, args.name, by=by)
         elif args.cancel:
-            st = renew.cancel(root, args.name)
+            st = renew.cancel(root, args.name, by=by)
         else:
-            st = renew.start(root, args.name)
+            st = renew.start(root, args.name, by=by)
         _out(args, st, renew_line(st))
         return True
     if action == "replace":
-        res = renew.replace_key(root, args.name, sys.stdin.read().removesuffix("\n").removesuffix("\r"))
+        by = tickets.acting_by(args)
+        renew.person_only(by)  # before the value is read
+        res = renew.replace_key(root, args.name, sys.stdin.read(), by=by)
         ok = res["state"] in ("works", "soon")
         text = "The new key is in and works." if ok else "The new key is in, but the check still fails."
         if res.get("went_on"):
