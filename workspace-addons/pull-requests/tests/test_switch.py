@@ -29,8 +29,12 @@ class FakeGitHub:
         p = self.prs.get(n)
         if p is None:
             return None
-        return {"state": p.get("state", "OPEN"), "isDraft": p.get("isDraft", False), "baseRefName": "develop",
+        return {"state": p.get("state", "OPEN"), "isDraft": p.get("isDraft", False),
+                "baseRefName": p.get("base", "develop"), "reviewDecision": p.get("review", ""),
                 "headRefOid": p.get("head", f"{n:040d}"), "number": n}  # fmt: skip
+
+    def login(self):
+        return "helper-bot"
 
     def own_checks_failed(self, u):
         return self.prs[int(u.rsplit("/", 1)[1])].get("failed", False)
@@ -71,10 +75,10 @@ def test_switch_on_puts_ready_pull_requests_in_the_queue_once(ws):
 
 
 def test_a_pull_request_on_two_switched_on_tickets_is_queued_once(ws):
-    first = ticket(ws, 1)
-    ticket(ws, 1)
+    both = {ticket(ws, 1), ticket(ws, 1)}
     got = tend(ws, FakeGitHub({1: {}}))
-    assert got["added"] == [url(1)] and queued(ws) == [(1, "waiting", first)]
+    [(n, state, tid)] = queued(ws)  # which ticket comes first depends on the random ticket ids
+    assert got["added"] == [url(1)] and (n, state) == (1, "waiting") and tid in both
 
 
 def test_the_runner_starts_when_something_was_queued(ws):
@@ -180,23 +184,14 @@ def test_switch_off_and_on_starts_over(ws):
 
 
 def test_the_merge_itself_is_the_queue_runners_through_the_core_waiter(ws):
-    """The switch only queues; the runner merges a single pull request with orch.prwait.run_one(url, True)
-    (only the checked commit, write limit inside) and never a draft."""
+    """The switch only queues (through runner.admit, with the login); the hardened runner merges a single pull
+    request with the core waiter (only the checked commit, write limit inside). Same fakes as the queue tests."""
+    import test_queue
+
     ticket(ws, 1)
-    tend(ws, FakeGitHub({1: {}}))
-    calls = []
-
-    class W:
-        def __call__(self, u):
-            calls.append(u)
-            from types import SimpleNamespace
-
-            return SimpleNamespace(url=u, ok=True, status="merged", line=f"Merged {u}.")
-
-    gh = FakeGitHub({1: {}})
-    gh.close = lambda u: True
-    r = runner.Runner(ws, gh, lambda repo: None, waiter=W(), take=lambda k, w: True, log=lambda s: None,
-                      sleep=lambda s: None)  # fmt: skip
+    gh = test_queue.FakeGitHub({1: {}})
+    assert tend(ws, gh)["added"] == [url(1)]
+    r, calls = test_queue.make(ws, gh, test_queue.FakeGit())
     r.run()
     assert calls == [url(1)] and queued(ws)[0][1] == "merged"
 
@@ -294,3 +289,15 @@ def test_start_says_plainly_when_the_add_on_is_not_on(ws, monkeypatch):
     with pytest.raises(store.Refused, match="not on here"):
         service.start(ws)
     assert not (store.folder(ws) / "watch.log").exists()  # nothing was started
+
+
+def test_the_queue_gate_decides_base_branch_reviews_and_login(ws):
+    """runner.admit (ORCH-181): never into main, never with changes requested; the entry carries base and login."""
+    ticket(ws, 1, 2, 3)
+    gh = FakeGitHub({1: {}, 2: {"base": "main"}, 3: {"review": "CHANGES_REQUESTED"}})
+    got = tend(ws, gh)
+    assert got["added"] == [url(1)]
+    why = dict(got["skipped"])
+    assert "merges only into develop" in why[url(2)] and "not queued" in why[url(3)]
+    [row] = store.read(ws)
+    assert (row["base"], row["login"]) == ("develop", "helper-bot")

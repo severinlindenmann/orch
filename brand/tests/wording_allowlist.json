@@ -1,8 +1,9 @@
 {
+ "publish/web/portal.js": {
+  "Node": 1
+ },
  "relay/web/portal.html": {
-  "Signature": 1,
-  "agent": 2,
-  "agents": 2
+  "Signature": 1
  },
  "workspace-addons/automation/src/orch_automation/cli.py": {
   "Scheduler": 3,

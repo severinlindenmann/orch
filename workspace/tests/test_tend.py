@@ -51,7 +51,7 @@ def _since(seconds_ago):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
 
 
-def _live(proj, tid, pid, idle_for, state="idle", run="r_test1234"):
+def _live(proj, tid, pid, idle_for, state="idle", run="r_test1234", started=7200):
     runs._write(
         proj,
         {
@@ -62,8 +62,8 @@ def _live(proj, tid, pid, idle_for, state="idle", run="r_test1234"):
             "agent": "generic",
             "mode": "live",
             "pid": pid,
-            "started_at": _since(7200),
-            "renewed_at": _since(7200),
+            "started_at": _since(started),
+            "renewed_at": _since(started),
             "live": {"state": state, "since": _since(idle_for)},
         },
     )
@@ -400,3 +400,59 @@ def test_a_start_handed_over_by_a_script_queues_under_load(proj, new_ticket, mon
         runs_live.start_live(proj, tid, "agent:x", "claude", fresh=False, take_over=False, busy_text="wait")
     assert e.value.extra["pending"] and "very busy" in str(e.value)
     assert runs_live.waiting_line(proj) == [(tid, "normal")]
+
+
+# ---------------------------------------------------------------- ORCH-190: stopped right after the start
+
+
+def test_a_helper_that_stopped_right_after_its_start_is_reminded_within_minutes(proj, new_ticket, child):
+    """It went idle 20 s after its start (asked for a go-ahead in its own window): reminded after 3 minutes,
+    not 20, with words that say nobody reads that window."""
+    tid = new_ticket()
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=4 * 60, started=4 * 60 + 20)
+    res = tend.run(proj)
+    assert [a["action"] for a in res["actions"]] == ["nudge"]
+    sent = [i for i in runs.undelivered(proj, tid) if i["by"] == tend.BY]
+    assert len(sent) == 1 and "stopped right after the start" in sent[0]["text"]
+    assert "right after its start" in _history(proj, tid)[0]
+    assert tend._read_state(proj)[tid]["early"] is True
+
+
+def test_a_helper_idle_early_but_under_three_minutes_is_left(proj, new_ticket, child):
+    tid = new_ticket()
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=2 * 60, started=2 * 60 + 20)
+    assert tend.run(proj)["actions"] == []
+
+
+def test_a_helper_that_worked_first_waits_the_usual_twenty_minutes(proj, new_ticket, child):
+    tid = new_ticket()
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=4 * 60, started=30 * 60)  # it worked 26 minutes, then went quiet
+    assert tend.run(proj)["actions"] == []
+
+
+def test_still_idle_after_the_early_reminder_starts_fresh_without_a_person(proj, new_ticket, child, starts):
+    """No wait for the idle limit: five minutes after the reminder with nothing changed, it starts fresh."""
+    tid = new_ticket()
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=9 * 60, started=9 * 60 + 20)
+    _nudged(proj, tid, early=True)
+    assert tend.run(proj, now=_later(4))["actions"] == []
+    assert starts == []
+    res = tend.run(proj, now=_later(5))
+    assert [a["action"] for a in res["actions"]] == ["restart"]
+    assert starts == [(tid, runs_live.AUTOMATION_BY, {"fresh": True})]
+    assert "Started the helper fresh" in _history(proj, tid)[0]
+
+
+def test_an_early_helper_that_moved_after_the_reminder_is_not_restarted(proj, new_ticket, child, starts):
+    tid = new_ticket()
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=9 * 60, started=9 * 60 + 20)
+    _nudged(proj, tid, early=True)
+    time.sleep(2.1)
+    tickets.log(proj, tid, "Started on the first task.", "agent:generic")
+    assert _actions(tend.run(proj, now=_later(6))) == []
+    assert starts == []

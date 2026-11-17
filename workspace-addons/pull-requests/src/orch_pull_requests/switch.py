@@ -2,7 +2,8 @@
 
 `tend` is one pass over the tickets (the background service runs it every minute, `orch pull-requests tend` once):
 
-- switch on: each open pull request of the ticket that is ready (not a draft) goes into the merge queue. The
+- switch on: each open pull request of the ticket that is ready (not a draft) and that the queue admits
+  (runner.admit: an allowed base branch, never main by default; no changes requested; the login it merges with) goes into the merge queue. The
   queue runner merges it only on green checks of the checked commit (orch.prwait), every GitHub write through
   this computer's write limit (orch.ghlimit). Never a pull request a person merges with a Merge card on any
   ticket; never a draft (the runner checks both again before it merges).
@@ -79,7 +80,7 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
     "removed": [url], "skipped": [(url, why)]}. Refused when the tickets cannot be read (nothing is queued)."""
     from orch import stuck, tickets
 
-    from .runner import merge_cards, pr_key
+    from .runner import admit, merge_cards, pr_key
 
     try:
         all_tickets = tickets.list_all(root)
@@ -135,9 +136,14 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
             if why:
                 out["skipped"].append((url, why))
                 continue
+            try:  # the queue's own gate: allowed base branch, no changes requested, the merging login
+                got = admit(root, gh, url)
+            except Refused as e:
+                out["skipped"].append((url, str(e)))
+                continue
             head = v["headRefOid"]
             tries = prev.get("tries", 0) + 1 if prev.get("head") == head else 1
-            queue[k], _ = store.add(root, url, t["id"], BY)  # linked on two tickets: queued once
+            queue[k], _ = store.add(root, url, t["id"], BY, **got)  # linked on two tickets: queued once
             seen[k] = {"head": head, "tries": tries, "at": now, "ticket": t["id"]}
             out["added"].append(url)
             log(f"Merge when green on {t.get('key') or t['id']}: {url} is in the merge queue.")
