@@ -125,21 +125,36 @@ def test_a_dropped_connection_is_retried_and_other_errors_are_not(monkeypatch):
 
 
 class FakePull(prwait.Replay):
-    """One pull request: a recorded case for its checks plus what `gh pr view` and the compare say."""
+    """One pull request: a recorded case for its checks plus what GitHub says about the branch: the files it
+    changes, the files that landed on develop since it took develop in (one list per look), and whether
+    GitHub can take develop in."""
 
-    def __init__(self, url, case, state="OPEN", behind=0, head_after=None):
+    def __init__(self, url, case, state="OPEN", head_after=None, changed=None, landed=None, can_update=True):
         super().__init__(case)
-        self.url, self.gh, self.state = url, "/fake/gh", state
-        self.behind_by, self.head_after = behind, head_after
-        self.views = 0
+        self.url, self.gh, self.state, self.head, self.head_after = url, "/fake/gh", state, HEAD, head_after
+        self.changed = ["workspace/src/orch/prwait.py"] if changed is None else changed
+        self.landings = list(landed or [[]])
+        self.can_update, self.updates, self.views = can_update, [], 0
 
     def view(self):
         self.views += 1
-        head = self.head_after if (self.head_after and self.views > 1) else HEAD
-        return {"state": self.state, "isDraft": False, "baseRefName": "develop", "headRefOid": head}
+        if self.head_after and self.views > 1:
+            self.head = self.head_after
+        return {"state": self.state, "isDraft": False, "baseRefName": "develop", "headRefOid": self.head}
 
-    def gh_json(self, *args):
-        return {"behind_by": self.behind_by}
+    def landed(self, head, base):
+        return self.landings.pop(0) if len(self.landings) > 1 else self.landings[0]
+
+    def changed_files(self):
+        return self.changed
+
+    def update_branch(self, head):
+        self.updates.append(head)
+        if not self.can_update:
+            return None
+        self.head = f"{len(self.updates):x}" * 40
+        self.n = 0  # the new commit's checks are waited for from the start
+        return self.head
 
 
 @pytest.fixture
@@ -200,11 +215,73 @@ def test_merge_on_green_takes_only_the_checked_commit(proj, tk, run, fake_gh):
     assert _ref_status(proj, tk, PR) == "merged"
 
 
-def test_behind_its_base_is_never_merged(proj, tk, run, fake_gh):
+def test_overlap_rule_by_file_and_by_test_module():
+    mine = ["workspace/src/orch/prwait.py", "workspace/tests/test_cli.py"]
+    assert prwait.overlap(mine, ["docs/x.md", "workspace/src/orch/review.py"]) == []
+    assert prwait.overlap(mine, ["workspace/src/orch/prwait.py"]) == ["workspace/src/orch/prwait.py"]
+    assert prwait.overlap(mine, ["workspace/tests/test_prwait.py"]) == ["workspace/tests/test_prwait.py"]
+    assert prwait.overlap(mine, ["workspace/src/orch/cli.py"]) == [
+        "workspace/src/orch/cli.py"
+    ]  # its test changed
+    assert prwait.overlap(["web/app.js"], ["web/tests/app.test.js"]) == ["web/tests/app.test.js"]
+    assert prwait.overlap(["a/__init__.py"], ["b/__init__.py"]) == []  # same name, another module
+
+
+def test_develop_moved_without_touching_it_merges_and_says_so(proj, tk, run, fake_gh):
     pulls, merges = fake_gh
-    pulls[PR] = FakePull(PR, _case("pr978-second-run"), behind=2)
+    pulls[PR] = FakePull(
+        PR, _case("pr978-second-run"), landed=[["docs/notes.md", "workspace/src/orch/review.py"]]
+    )
     code, out, _ = run("ref", "wait", tk, "--merge")
-    assert code == 1 and merges == [] and "behind develop" in out
+    assert code == 0, out
+    assert pulls[PR].updates == [] and len(merges) == 1  # no second CI run
+    assert "develop moved (2 files changed there), none of them touch this pull request" in out
+
+
+def test_nothing_new_on_develop_merges_and_says_so(proj, tk, run, fake_gh):
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    code, out, _ = run("ref", "wait", tk, "--merge")
+    assert code == 0 and len(merges) == 1 and "develop had nothing new" in out
+
+
+def test_overlap_takes_develop_in_waits_again_then_merges_the_new_commit(proj, tk, run, fake_gh):
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"), landed=[["workspace/tests/test_prwait.py"], []])
+    code, out, err = run("ref", "wait", tk, "--merge")
+    assert code == 0, out + err
+    assert pulls[PR].updates == [HEAD]  # develop taken in once, on the checked commit
+    assert "taking develop in and waiting for the checks once more" in err
+    assert merges[0][-1] == "1" * 40  # the new commit, after its own green checks
+    assert "develop taken in 1x first" in out
+
+
+def test_overlap_with_red_checks_after_taking_develop_in_is_not_merged(proj, tk, run, fake_gh):
+    pulls, merges = fake_gh
+    pull = FakePull(PR, _case("pr978-second-run"), landed=[["workspace/src/orch/prwait.py"]])
+    red = _case("pr978-first-run")
+    pull.update_branch = lambda head, _u=pull.update_branch: (setattr(pull, "polls", red["polls"]), _u(head))[
+        1
+    ]
+    pulls[PR] = pull
+    code, out, _ = run("ref", "wait", tk, "--merge")
+    assert code == 1 and merges == [] and "after taking develop in: NOT green" in out
+
+
+def test_overlap_that_github_cannot_take_in_is_left_to_the_helper(proj, tk, run, fake_gh):
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(
+        PR, _case("pr978-second-run"), landed=[["workspace/src/orch/prwait.py"]], can_update=False
+    )
+    code, out, _ = run("ref", "wait", tk, "--merge")
+    assert code == 1 and merges == [] and "by hand" in out
+
+
+def test_overlap_every_round_stops_after_two_rounds(proj, tk, run, fake_gh):
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"), landed=[["workspace/src/orch/prwait.py"]])
+    code, out, _ = run("ref", "wait", tk, "--merge")
+    assert code == 1 and merges == [] and len(pulls[PR].updates) == 2 and "keeps changing" in out
 
 
 def test_a_new_commit_while_waiting_is_not_merged(proj, tk, run, fake_gh):
@@ -259,3 +336,29 @@ def test_a_persons_merge_card_is_never_merged_here(proj, tk, run, fake_gh, monke
     pulls[PR] = FakePull(PR, _case("pr978-second-run"))
     code, _, err = run("ref", "wait", tk, "--merge")
     assert code == 2 and merges == [] and "Merge card" in err
+
+
+def test_after_taking_develop_in_only_githubs_merge_commit_is_taken(monkeypatch):
+    """Someone pushes while develop is taken in: that commit is never waited for and merged in its place."""
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+    monkeypatch.setattr(prwait.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, timeout=30: subprocess.CompletedProcess(argv, 0, "{}", "")
+    )
+    new, base_tip = "c" * 40, "d" * 40
+
+    def live(parents, base_has_it=True):
+        src = prwait.Live(PR)
+        src.base = "develop"
+        answers = {
+            f"repos/acme/app/commits/{new}": {"parents": [{"sha": p} for p in parents]},
+            f"repos/acme/app/compare/develop...{base_tip}": {"ahead_by": 0 if base_has_it else 3},
+        }
+        src.view = lambda: {"state": "OPEN", "isDraft": False, "baseRefName": "develop", "headRefOid": new}
+        src.gh_json = lambda *args: answers.get(args[1])
+        return src
+
+    assert live([HEAD, base_tip]).update_branch(HEAD) == new
+    assert live([HEAD]).update_branch(HEAD) is None  # a plain push on top
+    assert live(["e" * 40, base_tip]).update_branch(HEAD) is None  # a merge, but not of the checked commit
+    assert live([HEAD, base_tip], base_has_it=False).update_branch(HEAD) is None  # merged something else

@@ -14,7 +14,7 @@ def check(snap):
     for tid, r in run_recs.items():
         age = r.get("heartbeat_age_s")
         if r.get("process") == "alive" and age is not None and age > QUIET_S:
-            bad.append(f"{tid} run {r['run']}: process alive, last heartbeat {int(age // 60)} min ago")
+            bad.append(f"{tid} run {r['run']} - process alive, last heartbeat {int(age // 60)} min ago")
     if bad:
         return verdict(
             NAME, "problem", "progress unknown: the process is alive but has not reported for a while", bad

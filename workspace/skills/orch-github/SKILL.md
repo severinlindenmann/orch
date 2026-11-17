@@ -55,7 +55,7 @@ When the ticket or the workspace rules say to merge the pull request once its ch
 
     orch ref wait <ticket> --merge     # waits for every check (no AI call), merges only on green, notes the verdict
 
-It waits for the ticket's open pull requests one after the other, merges each only while it is up to date with its base branch and only the commit that was checked, and stops at the first that is not green. Run it bare (exit 0 = all green and merged, 1 = not; the last line says why), not through a pipe. Without `--merge` it only waits and writes the verdict.
+It waits for the ticket's open pull requests one after the other, merges each on green (only the commit that was checked; GitHub's branch rules decide the rest), and stops at the first that is not green. When the base branch got changes to the same files (or their tests) since the branch took it in, it takes the base branch in and waits for the checks once more; its output says which case it was. Run it bare (exit 0 = all green and merged, 1 = not; the last line says why), not through a pipe. Without `--merge` it only waits and writes the verdict.
 
 Checks failed: fix, push and wait again. You may not merge (branch rules, no rights): say so in the ticket summary. Never leave a pull request open with passed checks and stop without a word; orch then shows the person "passed its checks but was not merged".
 
