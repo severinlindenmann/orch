@@ -439,3 +439,151 @@ def test_build_output_behind_a_link_is_never_removed(repo, tmp_path, monkeypatch
     cfg = doctorpass.clean_setup({"clean": {"repos": [str(main)], "worktree_roots": [str(copies)]}})
     doctorpass.clean(cfg, apply=True)
     assert (outside / "target" / "CACHEDIR.TAG").is_file()
+
+
+# ------------------------------------------------------------------ repeats that stopped (ORCH-119)
+
+NOW = datetime(2026, 11, 17, 12, 0, tzinfo=UTC)
+
+
+def _rep(tid, next_run, last_run=None, status="open", **more):
+    a = {"recurring": True, "cron": "*/15 * * * *", "next_run": next_run, **more}
+    if last_run:
+        a["last_run"] = last_run
+    return {"id": tid, "key": "DM1-9", "title": "Demo update", "status": status, "ext": {"automation": a}}
+
+
+def test_a_repeat_late_by_more_than_its_slack_is_overdue():
+    on_time = _rep("t_a", "2026-11-17T11:45:00Z", "2026-11-17T11:30:00Z")  # 15 min late: fine
+    late = _rep("t_b", "2026-11-17T11:30:00Z", "2026-11-17T11:15:00Z")  # 30 min late, last run 45 min ago
+    got = doctorpass.overdue_repeats([on_time, late], NOW, 30)
+    assert [r["ticket"] for r in got] == ["t_b"]
+
+
+def test_a_slow_repeat_gets_one_interval_capped_at_a_day():
+    hourly = _rep("t_h", "2026-11-17T11:00:00Z", "2026-11-17T10:00:00Z")  # 1 h late, 1 h interval: overdue
+    weekly = _rep("t_w", "2026-11-16T13:00:00Z", "2026-11-09T13:00:00Z")  # 23 h late: not yet
+    weekly_late = _rep("t_x", "2026-11-16T11:00:00Z", "2026-11-09T11:00:00Z")  # a day late: overdue
+    hourly_ok = _rep("t_k", "2026-11-17T11:30:00Z", "2026-11-17T10:30:00Z")  # 30 min late of an hour
+    got = doctorpass.overdue_repeats([hourly, weekly, weekly_late, hourly_ok], NOW, 30)
+    assert sorted(r["ticket"] for r in got) == ["t_h", "t_x"]
+
+
+def test_paused_closed_unplanned_and_not_repeating_are_left_out():
+    old = "2026-11-10T00:00:00Z"
+    rows = [
+        _rep("t_p", old, paused=True),
+        _rep("t_d", old, status="dropped"),
+        _rep("t_n", None),
+        _rep("t_r", old, recurring=False),
+        _rep("t_f", "not a time"),
+        {"id": "t_plain", "status": "open"},
+        _rep("t_done", old, status="done"),  # a finished repeat still runs again: counted
+    ]
+    assert [r["ticket"] for r in doctorpass.overdue_repeats(rows, NOW, 30)] == ["t_done"]
+
+
+def test_the_pass_opens_one_ticket_for_a_stopped_repeat(ws):
+    rows = [_rep("t_b", "2026-11-17T11:00:00Z", "2026-11-17T10:45:00Z")]
+    res = doctorpass.run_pass(ws, sim={**FINE, "repeats": rows}, cleanup=False, now=NOW)
+    assert res["problems"] == ["repeat-t_b"]
+    assert _titles(ws) == ["Repeat stopped: Demo update"]
+    t = tickets.load(ws, res["opened"][0]["ticket"])
+    assert "2026-11-17 11:00 UTC" in t["note"] and "2026-11-17 10:45 UTC" in t["note"]
+    again = doctorpass.run_pass(ws, sim={**FINE, "repeats": rows}, cleanup=False, now=NOW)
+    assert again["opened"] == [] and len(_titles(ws)) == 1
+
+
+def test_the_pass_reads_repeats_from_the_real_tickets(ws):
+    t = tickets.create(ws, "Report watcher", "human:owner")
+    a = {"recurring": True, "cron": "*/15 * * * *", "next_run": "2026-11-17T10:00:00Z"}
+    tickets.ext_set(ws, t["id"], "automation", json.dumps(a), "human:owner")
+    res = doctorpass.run_pass(ws, sim=FINE, cleanup=False, now=NOW)
+    assert res["problems"] == [f"repeat-{t['id']}"]
+    later = datetime(2026, 11, 17, 10, 10, tzinfo=UTC)  # before the planned time passed long: nothing
+    assert doctorpass.checks(doctorpass.setup(ws), doctorpass.Probes(ws, FINE, later), {}) == []
+
+
+def test_late_min_comes_from_the_setup(ws):
+    doctorpass.save_setup(ws, {**SETUP, "repeats": {"late_min": 120}})
+    rows = [_rep("t_b", "2026-11-17T11:00:00Z", "2026-11-17T10:45:00Z")]  # 1 h late < 2 h
+    assert doctorpass.run_pass(ws, sim={**FINE, "repeats": rows}, cleanup=False, now=NOW)["problems"] == []
+
+
+# ------------------------------------------------------------------ weekly account use (ORCH-119)
+
+ACC = {"command": ["cswap", "list", "--json"], "cap_pct": 95}
+
+
+def _switcher(*pcts):
+    return {
+        "schemaVersion": 1,
+        "accounts": [
+            {"number": i, "usage": {"sevenDay": {"pct": p, "resetsAt": f"2026-11-1{8 + i}T20:00:00+00:00"}}}
+            for i, p in enumerate(pcts)
+        ],
+    }
+
+
+def test_week_use_reads_both_shapes_and_skips_the_rest():
+    assert [w["pct"] for w in doctorpass.week_use(_switcher(100.0, 96))] == [100.0, 96.0]
+    own = {"accounts": [{"week_pct": 97, "week_resets_at": "2026-11-18T20:00:00Z"}, {"week_pct": "x"}]}
+    assert [w["pct"] for w in doctorpass.week_use(own)] == [97.0]
+    assert doctorpass.week_use([{"week_pct": 50, "disabled": True}, {"usage": None}, 3]) == []
+    assert doctorpass.week_use(None) == [] and doctorpass.week_use("text for people") == []
+
+
+def test_every_account_used_up_opens_one_ticket(ws):
+    doctorpass.save_setup(ws, {**SETUP, "accounts": ACC})
+    res = _pass(ws, accounts=_switcher(100.0, 95.0))
+    assert res["problems"] == ["accounts-week"]
+    t = tickets.load(ws, res["opened"][0]["ticket"])
+    assert t["title"] == "Every account has used up its week"
+    assert "100%, 95%" in t["note"] and "2026-11-18 20:00 UTC" in t["note"]
+
+
+def test_one_account_with_room_or_no_reading_is_no_problem(ws):
+    doctorpass.save_setup(ws, {**SETUP, "accounts": ACC})
+    assert _pass(ws, accounts=_switcher(100.0, 94.0))["problems"] == []
+    assert _pass(ws, accounts=None)["problems"] == []
+    assert _pass(ws, accounts={"accounts": []})["problems"] == []
+
+
+def test_without_an_account_command_nothing_is_read(ws):
+    assert "accounts" not in doctorpass.setup(ws)
+    assert _pass(ws, accounts=_switcher(100.0))["problems"] == []
+
+
+def test_the_account_command_runs_without_a_shell(ws, tmp_path):
+    out = tmp_path / "use.json"
+    out.write_text(json.dumps({"accounts": [{"week_pct": 99}, {"week_pct": 98}]}))
+    code = f"import sys; sys.stdout.write(open({str(out)!r}).read())"
+    doctorpass.save_setup(ws, {**SETUP, "accounts": {"command": [sys.executable, "-c", code]}})
+    p = doctorpass.Probes(ws, FINE)
+    assert [
+        w["pct"] for w in doctorpass.week_use(p.accounts(doctorpass.setup(ws)["accounts"]["command"]))
+    ] == [
+        99.0,
+        98.0,
+    ]
+    assert p.accounts(["no-such-command-orch-119"]) is None
+    assert (
+        p.accounts([sys.executable, "-c", "print('Account 1: 99%')"]) is None
+    )  # text for people is not read
+    assert p.accounts([sys.executable, "-c", "raise SystemExit(3)"]) is None
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"accounts": {"command": "cswap list --json"}},
+        {"accounts": {"command": []}},
+        {"accounts": {"command": ["cswap"], "cap_pct": 0}},
+        {"accounts": {"command": ["cswap"], "other": 1}},
+        {"repeats": {"late_min": 1}},
+        {"repeats": {"every": 5}},
+    ],
+)
+def test_a_bad_repeats_or_accounts_setup_is_refused(bad):
+    with pytest.raises(doctorpass.Refused):
+        doctorpass.clean_setup({**SETUP, **bad})

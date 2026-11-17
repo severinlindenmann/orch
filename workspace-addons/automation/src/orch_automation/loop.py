@@ -89,8 +89,15 @@ def start_script(root: Path, t: dict, name: str) -> dict:
 
 def record_last_run(root: Path, t: dict, now: datetime, by: str | None = None) -> None:
     """The one writer of "last run" (ext.automation.last_run, read by the dashboard view and by the due check);
-    used by the scheduled loop and by Run now."""
-    orchcli.set_ext(root, t, by=by, last_run=fmt(now))
+    used by the scheduled loop and by Run now. A repeat also gets its next planned time (ext.automation.next_run),
+    so core's scheduled health checks notice a repeat that stopped without reading cron themselves."""
+    sched = (t.get("ext") or {}).get("automation") or {}
+    nxt = None
+    if sched.get("recurring") is True and isinstance(sched.get("cron"), str):
+        tz = zone(sched.get("tz")) or zone(workspace_tz(root)) or UTC
+        nxt = next_after(sched["cron"], now, tz)
+    extra = {"next_run": fmt(nxt)} if nxt else {}
+    orchcli.set_ext(root, t, by=by, last_run=fmt(now), **extra)
     update_state(root, t["id"], last_run=fmt(now))
 
 

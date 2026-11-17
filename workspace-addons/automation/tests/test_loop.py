@@ -81,6 +81,18 @@ def test_recurring_cron_and_catch_up(ws):
     assert s.tick(T(7, 1, d=5)) == ["t_rec00001"]
     t = tk(ws, "t_rec00001")
     assert t["ext"]["automation"]["last_run"] == "2026-11-05T07:01:00Z"
+    assert t["ext"]["automation"]["next_run"] == "2026-11-06T07:00:00Z"  # core's health checks read it
+
+
+def test_next_run_is_saved_in_the_repeat_s_time_zone(ws):
+    add_ticket(
+        ws,
+        "t_rec00009",
+        created_at="2026-11-01T00:00:00Z",
+        ext={"automation": {"recurring": True, "cron": "0 7 * * *", "tz": "Europe/Zurich"}},
+    )
+    assert Scheduler(ws).tick(T(8, 0, d=4)) == ["t_rec00009"]
+    assert tk(ws, "t_rec00009")["ext"]["automation"]["next_run"] == "2026-11-05T06:00:00Z"  # 07:00 in Zurich
 
 
 def test_cron_busy_sets_last_run_no_pile_up(ws):
