@@ -3,7 +3,7 @@
 schema = "orch.addon/1"
 orch_api = 1
 name = "pull-requests"
-version = "0.1.0"
+version = "0.1.1"
 description = "Merge queue: pull requests wait in line and are merged in groups after one run of the checks."
 run = "orch_pull_requests"
 skill = "skills/orch-pull-requests"

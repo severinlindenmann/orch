@@ -43,10 +43,12 @@ def _ticket(root: Path, ref: str | None, url: str) -> str | None:
         return None
     from orch import review, tickets
 
+    from .runner import pr_key
+
     tid = tickets.resolve(root, ref.strip())
     t = tickets.load(root, tid)
     for q in t.get("questions") or []:
-        if q.get("answer") is None and review.merge_url(q) == url:
+        if q.get("answer") is None and pr_key(review.merge_url(q) or "") == pr_key(url):
             raise Refused(f"A person merges {url} with the Merge card on {t.get('key') or tid}; not queued.")
     return t["id"]
 
@@ -92,8 +94,13 @@ def start_runner(root: Path) -> None:
         )  # fmt: skip
 
 
-def _run(root: Path) -> int:
+def _github():
     from .github import GitHub
+
+    return GitHub()
+
+
+def _run(root: Path) -> int:
     from .group import Git
     from .runner import Runner
 
@@ -102,12 +109,19 @@ def _run(root: Path) -> int:
     while _hold_runner(root):
         ran = True
         try:
-            r = Runner(root, GitHub(), lambda repo: Git(folder, repo), log=lambda s: print(s, flush=True))
+            r = Runner(root, _github(), lambda repo: Git(folder, repo), log=lambda s: print(s, flush=True))
             r.run()
+            more = r.has_work()  # an add that came while the lock was still ours started no runner
         finally:
             store._drop_lock(_runner_lock(root))
-        if not store.waiting(root):  # an add that came while the lock was still ours started no runner
-            print("The merge queue is empty.", flush=True)
+        if not more:
+            other = len(store.waiting(root))
+            print(
+                f"Nothing waits for this runner; {other} wait for a runner on the GitHub login that added them."
+                if other
+                else "Nothing waits in the merge queue.",
+                flush=True,
+            )
             return 0
     if not ran:
         print("The merge queue runs already.")
@@ -177,9 +191,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             print(f"{args.url} does not wait in the merge queue.")
             return 1
-        repo, number = store.parse_url(args.url)
-        url = f"https://github.com/{repo}/pull/{number}"
-        row, new = store.add(root, url, _ticket(root, args.ticket, url), _actor())
+        from .runner import admit
+
+        url = store.canonical(args.url)
+        ticket = _ticket(root, args.ticket, url)
+        old = store.find(store.read(root), url)
+        seen = {} if old and old.get("state") not in FINISHED else admit(root, _github(), url)
+        row, new = store.add(root, url, ticket, _actor(), **seen)
         start_runner(root)
         if not args.wait:
             ahead = [x for x in store.read(root) if x.get("state") not in FINISHED and x["url"] != url]
