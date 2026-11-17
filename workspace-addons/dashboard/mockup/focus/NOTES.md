@@ -218,3 +218,14 @@ Narrow panes (three at 1280, more than one on the right, a phone) fold pin and p
 phone shows only the selected session and has no add beside. The split and the selection are kept per browser and
 stay while the page changes. Pins are kept in this browser (the bar's key) until the wall stores them in orch.
 Master: `.live-*` in widgets.css (style guide: Live layer); click-through step 12.
+
+## Earlier sessions, built (ORCH-363, 17 Nov)
+
+orch keeps the last 10 sessions per ticket on this computer (the ones in use included; only the ids are forgotten,
+never the tool's own files). Behind the Preview switch each pane has a History button (in More when the pane is
+narrow) that shows the draft's "Earlier sessions" list instead of the session: time, first message, number of
+messages and the tool, newest first; the one in use says In use, one whose conversation is not on this computer has no
+Reopen. Reopen starts the helper on that conversation (`orch run start <ticket> --session <id>`); while a helper works
+the buttons are off with one line why. The draft's Start choice above the list (continue, fresh start, tool and model)
+is the Start task; this draft lost only its "To build" chip and note. Master: `.live-hist*` in widgets.css (style guide:
+Live layer); click-through step 26.

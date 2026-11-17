@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 7 ready (the script clicks them), 18 pending (not built yet).
+26 steps: 8 ready (the script clicks them), 18 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -438,4 +438,21 @@ Must be seen:
 - The wall is one column.
 - The layer opens at the bottom and shows one session; right falls back to bottom.
 - Nothing scrolls sideways; every button can be reached.
+
+## 26. Earlier sessions in the History tab, reopened with one click
+
+- Part: sessions (draft D feature 4)
+- State: ready, clicked by the script
+- Pictures: `fd-26-history-1280.png`, `fd-26-history-1920.png`, `fd-26-history-390.png`
+
+Do:
+
+1. Open a session in the layer and press History (in More when the pane is narrow).
+2. Press Reopen on an earlier session.
+
+Must be seen:
+
+- Up to 10 sessions of the ticket, newest first, each with its time, first message and number of messages.
+- The session in use says In use; one that is not on this computer has no Reopen.
+- Reopen starts the helper on that conversation and the list closes.
 
