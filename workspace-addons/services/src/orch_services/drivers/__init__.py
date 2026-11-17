@@ -81,6 +81,11 @@ class Driver:
         """Stop it and remove the platform entry (the log file stays)."""
         raise NotImplementedError
 
+    def runs(self, spec: Spec) -> int | None:
+        """How often the computer's service tool started it so far (a growing count), or None when it cannot say.
+        The health check counts the starts orch did not ask for as failures."""
+        return None
+
 
 def run_tool(argv: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
     try:
