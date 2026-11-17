@@ -153,6 +153,8 @@ the first rows without any extra work.
 - SX-19 Dates: "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32", 24 h, elapsed as "running 53 min" (F4, round-2 note).
   Built: `UI.stamp(value, {time:false, now})` and `UI.clock(value)` in `date.js` are the only way to write a date or time on a page (the dashboard's `date()`, `time()` and `DashHelpers.stamp` call the same rules). Never `toLocaleString`.
 - Ticket header strip (14 Nov): `.strip` = one status pill (`UI.statusIcon`), the title, one sentence, one main action, then the tabs. No stepper. The helper is just "Helper"; the review state is always "Check" with "Looks good" / "Send back".
+- Working ticket (ORCH-70, owner 16 Nov): `.strip.strip-plain` without a box; `.strip-kicker` above the `t-title`
+  (key · helper pill · helper · minutes); one Watch live; Stop and the copy commands in the ⋯ menu; no helper bar.
 - File cards (14 Nov): one `.file-tile` per file (thumbnail, name, kind · size · date). A CSV thumbnail is a `.mini-table`, Markdown is rendered (`FileViewer.renderMd`). A toolbar (search, sort, cards/list) only above 6 files.
 - SX-20 One source per count and status: sidebar badge = Home headline = Tickets group count; a newer system event
 

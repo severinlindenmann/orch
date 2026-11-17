@@ -12,9 +12,11 @@ are the tests in tests/fixtures/prwait/):
 - FAILURE, CANCELLED, TIMED_OUT, NEUTRAL, ACTION_REQUIRED, no checks in time, or still pending at the timeout:
   never green. Anything unreadable keeps waiting or reads as not green, never as green.
 
-Merging (`--merge`) takes only the commit that was checked (`--match-head-commit`), only while the branch
-contains its base branch's newest commit, and runs with the helper's own GitHub login (GitHub's branch rules
-decide the rest). A pull request a person merges with a Merge card is never merged here.
+Merging (`--merge`) takes only the commit that was checked (`--match-head-commit`) and runs with the helper's
+own GitHub login; GitHub's branch rules decide the rest. When the base branch got commits since the branch
+last took it in and they touch a file the pull request changes (or a test file of the same module), the
+base branch is taken in and the checks are waited for once more, so two green pull requests on the same
+code cannot break it together. A pull request a person merges with a Merge card is never merged here.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 
@@ -176,6 +179,54 @@ class Live:
         )
         return checks if isinstance(checks, list) else [], ", ".join(open_)
 
+    def landed(self, head: str, base: str) -> list[str] | None:
+        """Files changed on the base branch since the branch last took it in ([] when nothing landed)."""
+        got = self.gh_json("api", f"repos/{self.repo}/compare/{head}...{base}")
+        if not isinstance(got, dict) or not isinstance(got.get("ahead_by"), int):
+            return None
+        if got["ahead_by"] == 0:
+            return []
+        files = [f.get("filename") for f in got.get("files") or [] if isinstance(f, dict)]
+        return [f for f in files if isinstance(f, str)] or None  # commits but no files listed: unknown
+
+    def changed_files(self) -> list[str] | None:
+        got = _run([self.gh, "pr", "diff", self.url, "--name-only"], 60)
+        names = [x.strip() for x in got.stdout.splitlines() if x.strip()] if got.returncode == 0 else []
+        return names or None
+
+    def update_branch(self, head: str) -> str | None:
+        """Take the base branch in on GitHub (a merge commit, as a person's Update branch button); the new
+        newest commit, or None when GitHub could not (a conflict)."""
+        got = _run(
+            [self.gh, "api", "-X", "PUT", f"repos/{self.repo}/pulls/{self.num}/update-branch",
+             "-f", f"expected_head_sha={head}"],
+            60,
+        )  # fmt: skip
+        if got.returncode != 0:
+            return None
+        for _ in range(20):  # GitHub makes the merge commit a moment later
+            time.sleep(15)
+            v = self.view()
+            if v and v.get("headRefOid") != head:
+                new = v["headRefOid"]
+                # only GitHub's own merge of the checked commit and the base branch: any other new commit
+                # (someone pushed meanwhile) is never taken for it
+                if not self.merge_of(new, head):
+                    return None
+                self.start = time.monotonic()  # the wait for the new checks starts now
+                return new
+        return None
+
+    def merge_of(self, sha: str, head: str) -> bool:
+        """True when `sha` is a merge commit whose first parent is `head` and whose second parent is on the
+        base branch."""
+        got = self.gh_json("api", f"repos/{self.repo}/commits/{sha}")
+        parents = [p.get("sha") for p in (got or {}).get("parents") or [] if isinstance(p, dict)]
+        if len(parents) != 2 or parents[0] != head:
+            return False
+        on_base = self.gh_json("api", f"repos/{self.repo}/compare/{self.base}...{parents[1]}")
+        return isinstance(on_base, dict) and on_base.get("ahead_by") == 0
+
     def sleep(self, secs: float) -> None:
         time.sleep(secs)
 
@@ -246,12 +297,36 @@ def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) 
     )
 
 
-def behind(src: Live, head: str, base: str) -> bool | None:
-    """True when the branch lacks its base branch's newest commit, None when GitHub did not say."""
-    got = src.gh_json("api", f"repos/{src.repo}/compare/{base}...{head}", "--jq", "{behind_by: .behind_by}")
-    if not isinstance(got, dict) or not isinstance(got.get("behind_by"), int):
-        return None
-    return got["behind_by"] > 0
+TEST_PREFIX, TEST_SUFFIXES = "test_", ("_test", ".test", ".spec")
+UPDATE_ROUNDS = 2  # times develop is taken in for an overlap before it is left to the helper
+MANY_FILES = 300  # GitHub's compare lists at most this many: more than that counts as an overlap
+
+
+def _module(path: str) -> tuple[str, bool]:
+    """(module name, is a test file): tests/test_prwait.py and src/orch/prwait.py are both prwait."""
+    full = path.rsplit("/", 1)[-1]
+    stem = full.split(".", 1)[0]
+    test = (
+        stem.startswith(TEST_PREFIX) or stem.endswith("_test") or any(f"{x}." in full for x in TEST_SUFFIXES)
+    )
+    return stem.removeprefix(TEST_PREFIX).removesuffix("_test"), test
+
+
+def overlap(changed: list[str], landed: list[str]) -> list[str]:
+    """The files that landed on the base branch and touch the pull request: the same file, a test file of a
+    module the pull request changes, or a module whose test file the pull request changes."""
+    mine = set(changed)
+    mods: dict[str, set[bool]] = {}
+    for f in changed:
+        name, test = _module(f)
+        if name:
+            mods.setdefault(name, set()).add(test)
+    hits = []
+    for f in landed:
+        name, test = _module(f)
+        if f in mine or (name in mods and (test or True in mods[name])):
+            hits.append(f)
+    return hits
 
 
 @dataclass
@@ -264,8 +339,11 @@ class Outcome:
 
 
 def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | None = None) -> Outcome:
-    """Wait for one pull request's checks; with merge, merge it on green while it is up to date with its
-    base branch and its newest commit is still the one that was checked."""
+    """Wait for one pull request's checks; with merge, merge it on green as GitHub's branch rules allow, only
+    its checked commit. When the base branch got commits since the branch last took it in, and they touch a
+    file the pull request changes (or a test file of the same module), the base branch is taken in first and
+    the checks are waited for once more: two green pull requests on the same code must not break it
+    together."""
     src = src or Live(url)
     v = src.view()
     if v is None:
@@ -275,23 +353,57 @@ def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | No
     if v.get("state") != "OPEN":
         return Outcome(url, False, "closed", f"{url} is closed; nothing was done.")
     head, base = v["headRefOid"], v.get("baseRefName") or ""
-    stale = f"{url} is behind {base}: merge {base} into the branch and push, then run this again."
-    if merge and behind(src, head, base):
-        return Outcome(url, False, "behind", stale)  # old red checks on a stale branch say nothing
     verdict = wait(src, timeout=timeout)
     if not verdict.green:
         return Outcome(url, False, "checks failed", f"Checks of {url}: {verdict.line()}", verdict)
     if not merge:
         return Outcome(url, True, "checks passed", f"Checks of {url}: {verdict.line()}", verdict)
-    now = src.view()
-    if now is None or now.get("headRefOid") != head:
-        line = f"{url} got a new commit while its checks ran; not merged."
-        return Outcome(url, False, "changed", line, verdict)
-    if behind(src, head, now.get("baseRefName") or base) is not False:  # base moved while CI ran
-        return Outcome(url, False, "behind", stale, verdict)
+    rounds = 0
+    while True:
+        now = src.view()
+        if now is None or now.get("headRefOid") != head:
+            line = f"{url} got a new commit while its checks ran; not merged."
+            return Outcome(url, False, "changed", line, verdict)
+        base = now.get("baseRefName") or base
+        landed, changed = src.landed(head, base), src.changed_files()
+        if landed is None or changed is None:
+            line = f"GitHub did not say what changed on {base} or in {url}; not merged. Run it again."
+            return Outcome(url, False, "checks passed", line, verdict)
+        hits = overlap(changed, landed) if len(landed) < MANY_FILES else landed[:3]
+        if not landed:
+            case = f"{base} had nothing new since the branch took it in"
+            break
+        if not hits:
+            case = f"{base} moved ({len(landed)} files changed there), none of them touch this pull request"
+            break
+        shown = ", ".join(hits[:3]) + (" ..." if len(hits) > 3 else "")
+        if rounds >= UPDATE_ROUNDS:
+            line = (
+                f"{base} keeps changing files of {url} ({shown}); not merged. Take {base} in, push, "
+                "then run this again."
+            )
+            return Outcome(url, False, "behind", line, verdict)
+        rounds += 1
+        note = f"{base} changed files of this pull request since it took {base} in ({shown}): "
+        print(note + f"taking {base} in and waiting for the checks once more.", file=sys.stderr, flush=True)
+        new = src.update_branch(head)
+        if new is None:
+            line = (
+                f"{base} changed files of {url} ({shown}) and was not taken in (a conflict, or a push "
+                f"meanwhile); not merged. Merge {base} into the branch by hand and push, then run this again."
+            )
+            return Outcome(url, False, "behind", line, verdict)
+        head = new
+        verdict = wait(src, timeout=timeout)
+        if not verdict.green:
+            line = f"Checks of {url} after taking {base} in: {verdict.line()}"
+            return Outcome(url, False, "checks failed", line, verdict)
     done = _run([src.gh, "pr", "merge", url, "--merge", "--match-head-commit", head], 60)
     if done.returncode != 0:
         why = next((x.strip() for x in (done.stderr or done.stdout).splitlines() if x.strip()), "no reason")
-        line = f"Checks of {url} passed but GitHub did not merge it: {why[:200]}"
+        line = f"Checks of {url} passed but GitHub did not merge it ({case}): {why[:200]}"
         return Outcome(url, False, "checks passed", line, verdict)
-    return Outcome(url, True, "merged", f"Merged {url} on green checks ({verdict.why}).", verdict)
+    took = f"; {base} taken in {rounds}x first" if rounds else ""
+    return Outcome(
+        url, True, "merged", f"Merged {url} on green checks ({verdict.why}); {case}{took}.", verdict
+    )
