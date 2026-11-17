@@ -1,7 +1,7 @@
 'use strict';
 // Soft page changes (ORCH-336), behind the Preview switch (livePreviewOn, pages/live.js). The dashboard already
 // draws every page from its #address without loading the document again; with Preview on it also:
-// - keeps what sits in the keep place (<div id="keep"> in index.html, outside <main>) across every page change:
+// - keeps what sits in the keep place (<div id="keep"> in index.html, right after <main> in .shell-body, outside it) across every page change:
 //   nothing here or in render() redraws it, and a page change does not close a dialog that sits in it. The bar and
 //   the layer of the new live page mount there (window.orchKeep.mount(node)),
 // - turns a click on a link to this same dashboard page that the browser would load again ("/", "/index.html#...")

@@ -110,7 +110,7 @@ test('every page change is said once as orch:page with from, to and kind', () =>
 });
 
 test('the keep place sits outside <main> and the page, and window.orchKeep mounts into it', () => {
-  assert.match(index, /<\/main>\s*<\/div>\s*<\/div>\s*<div id="keep" data-keep><\/div>/, 'one keep place after the shell, outside main');
+  assert.match(index, /<div class="shell-body">[\s\S]*<\/main>\s*<div id="keep" data-keep><\/div>\s*<\/div>/, 'one keep place right after main in the page column, outside main');
   assert.equal((index.match(/id="keep"/g) || []).length, 1);
   assert.ok(index.indexOf('pages/soft.js') > index.indexOf('pages/live.js') && index.indexOf('pages/soft.js') < index.indexOf('src="app.js"'));
   const {ctx, keep} = load();
