@@ -15,8 +15,9 @@ _MANIFEST = "manifest field of contracts/addon-manifest.md, not a package name"
 _FOLLOW_UP = "follow-up: core still names this add-on's setting/marker (see #837)"
 _GONE = "removed by #799"
 _TOKENS = "the record kind 'usage' / the providers' JSON key for token use, not the Usage add-on"
+_KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), not the add-on"
 ALLOW = {
-    "orch/addons.py": {"dashboard": _MANIFEST},
+    "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
     "orch/cli.py": {"dashboard": _MANIFEST},
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
@@ -35,8 +36,14 @@ ALLOW = {
     "orch/record.py": {"usage": _TOKENS},
     "orch/usage.py": {"usage": _TOKENS},
     "orch/doctorpass.py": {
-        "usage": "the account switcher's JSON key for an account's use, not the Usage add-on"
+        "usage": "the account switcher's JSON key for an account's use, not the Usage add-on",
+        "services": _KEY,
     },
+    "orch/cli_look.py": {"services": _KEY},
+    "orch/diag_collect.py": {"services": _KEY},
+    "orch/diag_report.py": {"services": _KEY},
+    "orch/look.py": {"services": _KEY},
+    "orch/winfinish.py": {"services": _KEY},
 }
 
 

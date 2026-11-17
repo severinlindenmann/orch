@@ -34,6 +34,7 @@ test('helpers: time and money words, totals, stuck lines, this week', () => {
   assert.deepEqual(helpers.spendTotal([{spend:{cost:1, seconds:60}}, {}, {spend:{cost:2.5, seconds:120}}]), {cost:3.5, seconds:180});
   const now = Date.parse('2026-11-18T12:00:00Z');
   assert.equal(helpers.stuckWords({stuck:'question', questions:[{sent_at:'2026-11-15T12:00:00Z'}]}, now), 'Question waits 3 days');
+  assert.equal(helpers.stuckWords({stuck:'question', questions:[{asked_at:'2026-11-16T12:00:00Z'}]}, now), 'Question waits 2 days');
   assert.equal(helpers.stuckWords({stuck:'quiet', quiet_since:'2026-11-17T10:00:00Z'}, now), 'No news for 26 h');
   assert.equal(helpers.stuckWords({stuck:'overdue'}, now), 'Past its due date');
   assert.equal(helpers.stuckWords({}, now), '');

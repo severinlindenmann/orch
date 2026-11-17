@@ -23,7 +23,6 @@ const WIDGETS = ['Markdown', 'Text and logs', 'Code', 'JSON and YAML', 'Table', 
   'Video and recording', 'Audio', 'Chart', 'Change', 'Pull request or issue link', 'Archive', 'Plain link', 'Unknown file'];
 
 const T = {
-  preview: 'Preview switch for the new Focus (ORCH-264)',
   pages: 'Pages change without a full reload (crew task soft-pages)',
   bar: 'The bar under every page (crew task bar)',
   layer: 'The layer: bottom, right, full screen (crew task layer)',
@@ -50,6 +49,117 @@ async function mainHasText(page) {
   }, null, { timeout: 20000 });
 }
 
+// Step 3. The test dashboard reads files only, so it has no add-on list (that comes from the orch command): the step
+// adds the live-session add-on to the page's state and answers the switch's one call (focus_preview.set) like the
+// server does. Everything else is the real page: Settings row, the click, the address, today's frame, the new page.
+async function previewSwitch(page, dash) {
+  let on = false;
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  let last = null;
+  const dress = st => {
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: on,
+      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    last = st;
+    return st;
+  };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    route.fulfill({ response: res, json: dress(await res.json()) });
+  });
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'focus_preview.set') return route.continue();
+    on = body.args.on === true;
+    route.fulfill({ json: dress({ ...last }) });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+  const sw = '[data-key="addon-detail-live-preview"]';
+  const settings = async want => {
+    await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
+    await page.waitForSelector(sw, { timeout: 20000 });
+    if (await page.getAttribute(sw, 'aria-checked') !== String(!want)) throw new Error('the Preview switch is not ' + (want ? 'off' : 'on') + ' before the click');
+    await page.click(sw);
+    await page.waitForSelector(`${sw}[aria-checked="${want}"]`, { timeout: 10000 });
+  };
+  const focusPage = async () => { await page.evaluate(() => { location.hash = '#addon/focus'; }); await page.waitForTimeout(300); };
+  await page.goto(dash + '/#settings/addons/focus');
+  await page.waitForSelector(sw, { timeout: 20000 });
+  await focusPage();
+  await page.waitForSelector('iframe.embed', { timeout: 10000 });  // off: today's Focus
+  await settings(true);
+  await focusPage();
+  await page.waitForSelector('[data-key="live-next"]', { timeout: 10000 });
+  if (await page.$('iframe.embed')) throw new Error('today\'s Focus still shows with Preview on');
+  if ((await page.textContent('[data-key="live-next-tag"]')).trim() !== 'Preview') throw new Error('the new Focus is not marked Preview');
+  await settings(false);
+  await focusPage();
+  await page.waitForSelector('iframe.embed', { timeout: 10000 });  // off again: today's Focus is back
+  await settings(true);
+  await focusPage();
+  await page.waitForSelector('[data-key="live-next"]', { timeout: 10000 });
+  await noSideways(page);
+}
+
+// Step 9. The test dashboard has no running helpers, so the step gives the page draft D's 24 sessions (3 need you,
+// 1 pinned, 3 working, 9 in line, 8 idle) as runs of extra tickets in its state, with the Preview switch on. Pinning is
+// kept in the browser until the wall stores it. Everything else is the real page: the bar, its fold, list and search.
+const BAR_SESSIONS = [
+  ['wait', 'ORCH-238', 'Add files and notes to a ticket'], ['wait', 'ORCH-201', 'Send the weekly summary'],
+  ['wait', 'ORCH-214', 'New price list for the shop'], ['run', 'ORCH-228', 'Pages change without a full reload', 'pin'],
+  ['run', 'ORCH-232', 'Insights and usage counts'], ['run', 'ORCH-235', 'Check the links on the help pages'],
+  ['run', 'ORCH-240', 'Tidy the release notes'],
+  ...['Search in the help pages', 'Export tickets to a table', 'Faster first page', 'Monthly report for sales',
+    'Tidy the settings page', 'Spelling check in mails', 'New logo on every page', 'Calendar for the team',
+    'Backup check every night'].map((t, i) => ['queue', 'ORCH-' + (205 + 2 * i), t]),
+  ...['Survey for customers', 'Opening hours page', 'Newsletter for autumn', 'Price page for schools',
+    'Photo page for the shop', 'Welcome mail', 'Order form', 'Holiday plan'].map((t, i) => ['idle', 'ORCH-' + (241 + i), t]),
+];
+async function liveBarState(page) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const HELPER = { wait: 'you', run: 'working', idle: 'idle' };
+  await page.addInitScript(() => { try { localStorage.setItem('orch.live.pins', JSON.stringify(['t_bar228'])); } catch (e) { /* none */ } });
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    const base = (st.tickets || [])[0] || {};
+    const extra = BAR_SESSIONS.map(([s, key, title]) => ({ ...base, id: 't_bar' + key.slice(5), key, title,
+      status: 'active', questions: [], checks: [], sessions: [] }));
+    st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_bar')), ...extra];
+    st.runs = { ...(st.runs || {}) };
+    BAR_SESSIONS.forEach(([s, key]) => {
+      st.runs['t_bar' + key.slice(5)] = s === 'queue' ? { running: false, hold: 'Waits for a free place' }
+        : { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } };
+    });
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    route.fulfill({ response: res, json: st });
+  });
+}
+
+// The bar is one row that never wraps and stays inside the page.
+async function barIsOneRow(page) {
+  const r = await page.evaluate(() => {
+    const bar = document.getElementById('live-bar'), sw = bar && bar.querySelector('.lbar-sw');
+    if (!bar) return { missing: true };
+    const tops = [...sw.children].map(c => Math.round(c.getBoundingClientRect().top));
+    const box = bar.getBoundingClientRect();
+    return { rows: new Set(tops).size, cut: sw.scrollWidth - sw.clientWidth, h: box.height, bottom: box.bottom, vh: innerHeight };
+  });
+  if (r.missing) throw new Error('the bar is not under the page');
+  if (r.rows > 1 || r.cut > 1) throw new Error(`the bar wraps or cuts (${r.rows} rows, ${r.cut} px cut)`);
+  if (r.h > 64) throw new Error(`the bar is ${r.h} px high, more than one row`);
+  if (r.bottom > r.vh + 1) throw new Error('the bar is below the screen');
+}
+
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -74,10 +184,12 @@ const STEPS = [
   },
   {
     n: 3, pic: 'fd-03-preview-on', area: 'start', title: 'Turn the new Focus on with the Preview switch', feature: [],
-    waits: T.preview,
     do: ['Open Settings and turn on the Preview switch for the new Focus.', 'Open Focus from the side bar.'],
-    see: ['Focus opens as the wall of sessions (step 4).', 'The switch is marked Preview.',
+    see: ['Focus opens as the new Focus, marked Preview (the wall of step 4 fills it).', 'The switch is marked Preview.',
       'Turning it off again brings back today\'s Focus.'],
+    async run({ page, dash }) {
+      await previewSwitch(page, dash);
+    },
     draft: { q: '' },
   },
   {
@@ -122,11 +234,34 @@ const STEPS = [
   },
   {
     n: 9, pic: 'fd-09-bar', area: 'bar', title: 'The bar under every page', feature: [7, 11],
-    waits: T.bar,
     do: ['Open Home, then Tickets, then Review.', 'Press the "in line" count in the bar.', 'Type in the list\'s search.'],
     see: ['The bar is under every page, calm, on one line that never wraps.',
       'Chips only for sessions that need you and pinned ones; the rest are counts such as "9 in line".',
       'A count opens a list you can search.'],
+    async run({ page, dash }) {
+      await liveBarState(page);
+      for (const where of ['#home', '#tickets', '#review']) {
+        await page.goto(dash + '/' + where);
+        await mainHasText(page);
+        await page.waitForSelector('#live-bar .lbar-sw', { timeout: 10000 });
+        await barIsOneRow(page);
+        await noSideways(page);
+      }
+      const words = await page.textContent('#live-bar');
+      if (!/ORCH-238|Needs you|3/.test(words)) throw new Error('the bar does not show the sessions that need you');
+      // the "in line" count, or the More count it folded into when the row is short
+      const count = (await page.$('#live-bar [data-lbar-list="queue"]')) ? 'queue' : 'more';
+      await page.click(`#live-bar [data-lbar-list="${count}"]`);
+      await page.waitForSelector('#live-bar .lbar-pop .lbar-row', { timeout: 5000 });
+      const head = await page.textContent('#live-bar .lbar-pop-h');
+      if (count === 'queue' && head.trim() !== 'In line (9)') throw new Error(`the list says "${head}", not "In line (9)"`);
+      await page.fill('#live-bar [data-lbar-q]', 'logo');
+      await page.waitForFunction(() => document.querySelectorAll('#live-bar .lbar-row').length === 1, null, { timeout: 5000 });
+      if (!/New logo on every page/.test(await page.textContent('#live-bar .lbar-list'))) throw new Error('the search does not find "logo"');
+      await page.fill('#live-bar [data-lbar-q]', '');
+      await page.waitForFunction(n => document.querySelectorAll('#live-bar .lbar-row').length >= n, 9, { timeout: 5000 });
+      await noSideways(page);
+    },
     draft: { q: '?page=home&many=1&list=queue' },
   },
   {
@@ -255,4 +390,4 @@ const STEPS = [
   },
 ];
 
-module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText };
+module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText, liveBarState, barIsOneRow };

@@ -17,6 +17,7 @@ const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-sync-card');
 const DASH = path.join(__dirname, '..', 'workspace-addons', 'dashboard');
 const WEB = path.join(DASH, 'src', 'orch_dashboard', 'web');
 const FIX = path.join(DASH, 'tests', 'fixtures');
+const KIT = path.join(__dirname, '..', 'workspace', 'src', 'orch_ui', 'static');
 const BASE = 'http://dash.test';
 const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'";
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
@@ -78,15 +79,17 @@ async function serve(context, state, fake) {
     }
     if (url.pathname === '/api/events') return route.fulfill({status: 204, body: ''});
     if (url.pathname.startsWith('/api/')) return route.fulfill({status: 404, body: ''});
-    const file = path.join(WEB, url.pathname === '/' ? 'index.html' : path.normalize(url.pathname).replace(/^[/\\]+/, ''));
-    if (!file.startsWith(WEB) || !fs.existsSync(file)) return route.fulfill({status: 404, body: ''});
+    const rel = url.pathname === '/' ? 'index.html' : path.normalize(url.pathname).replace(/^[/\\]+/, '');
+    const kit = rel.startsWith('kit' + path.sep);
+    const file = kit ? path.join(KIT, rel.slice(4)) : path.join(WEB, rel);
+    if (!file.startsWith(kit ? KIT : WEB) || !fs.existsSync(file)) return route.fulfill({status: 404, body: ''});
     return route.fulfill({status: 200, contentType: TYPES[path.extname(file)] || 'application/octet-stream',
       headers: {'Content-Security-Policy': CSP}, body: fs.readFileSync(file)});
   });
 }
 
 async function open(browser, width, start, mutate = s => s) {
-  const context = await browser.newContext({viewport: {width, height: 900}, colorScheme: 'dark'});
+  const context = await browser.newContext({viewport: {width, height: 900}, colorScheme: 'dark', timezoneId: 'UTC'});
   const state = mutate(fixture()), fake = fakeSync(start);
   await serve(context, state, fake);
   const page = await context.newPage();
@@ -100,7 +103,7 @@ const noSideways = page => page.evaluate(() => document.documentElement.scrollWi
 test('Sync card: open Settings, pick On this computer only, review, Save, status line; screenshots', {timeout: 180_000}, async () => {
   const {chromium} = require(path.join(PW, 'playwright'));
   fs.mkdirSync(OUT, {recursive: true});
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
   try {
     // 1. the flow (1440)
     {
@@ -127,9 +130,9 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
         const {context, page, errors} = await open(browser, width, {mode: 'remote', remote: 'https://files.example.org/mia/month-end', shown: 'synced',
           last_ok: '2026-11-11T10:15:00', not_synced: [{name: 'scans-march.zip', why: 'too big, stays on this computer'}, {name: 'payroll-access.txt', why: 'may contain a password or access key'}]});
         const card = page.locator('#sync-card');
-        await page.locator('[data-key="sync-status"]').filter({hasText: 'Last synced 10:15'}).waitFor();
-        await page.locator('[data-key="sync-skipped"]').click();
-        await page.locator('#sync-details[open]').waitFor();
+        await page.locator('[data-key="sync-status"]').filter({hasText: /Last synced (\w{3} )?10:15/}).waitFor();
+        await page.locator('[data-key="sync-skipped"]').waitFor();   // "2 files not synced"; the list under it is always shown
+        await page.locator('#sync-details').getByText('Not synced: scans-march.zip').waitFor();
         await page.locator('[data-key="sync-check"]').click();
         await page.locator('[data-key="sync-check-res"]').filter({hasText: 'Connection works'}).waitFor();
         await shot(page, card, `A-${width}`);
@@ -183,7 +186,9 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
     for (const width of [1440, 390]) {
       const {context, page, fake, errors} = await open(browser, width, {});
       await page.goto(BASE + '/#home');
-      await page.getByRole('button', {name: 'Show all'}).click();
+      await page.locator('#needs-you').waitFor();
+      const showAll = page.locator('#needs-you').getByRole('button', {name: 'Show all'});   // only when Home folds the list
+      if (await showAll.count()) await showAll.click();
       const rows = page.locator('.home-need.need-acts');
       await rows.first().waitFor();
       assert.equal(await rows.count(), 3);

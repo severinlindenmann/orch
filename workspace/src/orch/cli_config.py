@@ -49,6 +49,7 @@ KEYS = (
     "diag.enabled",
     "diag.report_tickets",
     "focus.session_typing",
+    "focus.preview",
     "update.auto",
     *config.INSIGHTS_KEYS,
     *ghlimit.SETTING_KEYS,
@@ -300,6 +301,7 @@ def _config(args, root: Path) -> None:
             "diag.enabled": lambda: config.diag_enabled(root),
             "diag.report_tickets": lambda: report_tickets.enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
+            "focus.preview": lambda: config.focus_preview_on(root),
             "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
@@ -427,6 +429,15 @@ def _config(args, root: Path) -> None:
             args,
             {"focus.session_typing": value},
             "Saved: typing into the helper's screen is " + ("on." if value else "off."),
+        )
+    elif args.sub == "set" and args.key == "focus.preview":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = config.set_focus_preview(root, args.value == "on")
+        _out(
+            args,
+            {"focus.preview": value},
+            "Saved: Focus shows " + ("the new Focus (Preview)." if value else "today's Focus."),
         )
     elif args.sub == "set" and args.key == "update.auto":
         if args.value not in ("on", "off"):

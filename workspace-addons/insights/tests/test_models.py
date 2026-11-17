@@ -121,6 +121,11 @@ def test_team_time_cost_finished_stuck_and_people():
     assert build_models(usage(totals={}, tickets=[], seconds=60, cost=0, finished=0))["team"]["each"] is None
     assert build_team(usage()) is None, "an older orch without the numbers: no section"
     assert build_team(usage(seconds="x", cost=True, finished=-1))["time"] == "–"
+    none = build_team(
+        usage(seconds=0, cost=0, finished=0, team=[{"owner": "human:anna", "seconds": 0, "cost": 0}])
+    )
+    assert none["cost"] == "–" and none["time"] == "–" and none["people"][0]["cost"] == "–"
+    assert none["note"].startswith("Not recorded") and team["note"] == ""
 
 
 def test_page_has_the_team_section():
@@ -130,5 +135,7 @@ def test_page_has_the_team_section():
     html, js = web.joinpath("index.html").read_text(), web.joinpath("insights.js").read_text()
     for part in ('id="team"', 'id="team-stats"', ">By person<", 'id="people-rows"', 'id="lost-note"'):
         assert part in html
+    checkup = web.joinpath("checkup.js").read_text()
+    assert "hour12: false" in checkup, "check-up time is 24 hours like the rest of orch"
     for word in ("Helper time", "at list price", "Tickets finished", "Stuck now"):
         assert word in js
