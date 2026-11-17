@@ -325,7 +325,9 @@ def test_only_one_runner_holds_the_lock(ws):
 
 
 def test_a_pull_request_with_a_merge_card_on_any_ticket_is_never_merged_here(ws, monkeypatch):
-    monkeypatch.setattr(runner, "merge_cards", lambda root: {url(2): "DM1-7"})
+    monkeypatch.setattr(
+        runner, "merge_cards", lambda root: {runner.pr_key(url(2).replace("acme/app", "Acme/App")): "DM1-7"}
+    )
     for n in (1, 2):
         store.add(ws, url(n), None, "agent:t")
     r, calls = make(ws, FakeGitHub({1: {}, 2: {}}), FakeGit())
@@ -446,3 +448,14 @@ def test_a_damaged_queue_file_is_never_overwritten(ws):
     with pytest.raises(Refused):
         store.add(ws, url(2), None, "agent:t")
     assert f.read_text(encoding="utf-8") == "{not json"
+
+
+def test_unreadable_tickets_merge_nothing(ws, monkeypatch):
+    monkeypatch.setattr(runner, "merge_cards", lambda root: None)
+    store.add(ws, url(1), None, "agent:t")
+    r, calls = make(ws, FakeGitHub({1: {}}), FakeGit())
+    assert r.next_batch() == [] and not calls and states(ws) == {1: "waiting"}
+
+
+def test_card_keys_ignore_case():
+    assert runner.pr_key("https://github.com/Acme/App/pull/007") == runner.pr_key(url(7)) == "acme/app#7"

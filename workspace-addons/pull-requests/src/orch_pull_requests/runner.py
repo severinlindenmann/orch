@@ -86,11 +86,16 @@ class Runner:
             return [] if store.waiting(self.root) else None
         repo, base, batch = rows[0]["repo"], None, []
         cards = merge_cards(self.root)
+        if cards is None:  # tickets unreadable: nothing is merged until it is known who merges what
+            self.log("The tickets could not be read; the merge queue waits and tries again.")
+            self.sleep(PAUSE_SECS)
+            return []
         for r in rows:
             if r["repo"] != repo or len(batch) >= MAX_GROUP:
                 continue
-            if r["url"] in cards:
-                line = f"A person merges {r['url']} with the Merge card on {cards[r['url']]}; it left the merge queue."
+            card = cards.get(pr_key(r["url"]))
+            if card:
+                line = f"A person merges {r['url']} with the Merge card on {card}; it left the merge queue."
                 self.finish(r, OUT, line, "")
                 continue
             v = self.gh.pr(r["url"])
@@ -281,20 +286,28 @@ def _state(root: Path, url: str) -> str | None:
     return row.get("state") if row else None
 
 
-def merge_cards(root: Path) -> dict[str, str]:
-    """{pull request url: ticket key} for every unanswered Merge card in the workspace: a person merges those."""
+def pr_key(url: str) -> str | None:
+    """One spelling per pull request: GitHub owner and repository names do not care about case."""
+    m = store.PR_URL.fullmatch((url or "").strip())
+    return f"{m[1].lower()}#{int(m[2])}" if m else None
+
+
+def merge_cards(root: Path) -> dict[str, str] | None:
+    """{pull request key: ticket key} for every unanswered Merge card in the workspace: a person merges those.
+    None when the tickets cannot be read (the caller then merges nothing)."""
     from orch import review, tickets
 
     out = {}
     try:
         rows = tickets.list_all(root)
-    except Exception:  # noqa: BLE001 - unreadable tickets: no card known (the core waiter still checks GitHub)
-        return out
+    except Exception:  # noqa: BLE001 - unreadable tickets: fail closed
+        return None
     for t in rows:
         for q in t.get("questions") or []:
             u = review.merge_url(q) if isinstance(q, dict) and q.get("answer") is None else None
-            if u:
-                out[u] = str(t.get("key") or t.get("id"))
+            k = pr_key(u) if u else None
+            if k:
+                out[k] = str(t.get("key") or t.get("id"))
     return out
 
 
