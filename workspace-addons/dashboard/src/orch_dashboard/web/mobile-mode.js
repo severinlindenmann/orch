@@ -6,6 +6,8 @@
   const ASK_OFF_KEY = 'orch.mobileMode.dontAsk';
   const HOURS = [4, 8, 12, 24];
   let mm = null, busy = false, asking = false, toastedEnd = '';
+  // ORCH-227: a picked "Switch off after" shows at once ("Saving…"); a click while one saves is sent after it.
+  let pendingHours = null, queuedHours = null;
   const needsPhone = () => !!mm && !mm.on && mm.phones === 0;
   const bar = document.getElementById('mm-bar');
   const toggle = document.getElementById('mm-toggle');
@@ -124,6 +126,32 @@
     return r;
   }
 
+  // The hours buttons follow the pick at once, before the answer (the page draws Settings again only on a new state).
+  function markHours() {
+    const shown = pendingHours ?? mm?.default_hours;
+    document.querySelectorAll('[data-mm-hours]').forEach(b => {
+      const on = Number(b.dataset.mmHours) === shown;
+      b.classList.toggle('primary', on); b.classList.toggle('ghost', !on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    const saving = document.querySelector('[data-key="mm-hours-saving"]');
+    if (saving) saving.hidden = pendingHours == null;
+  }
+  async function chooseHours(n) {
+    pendingHours = n;
+    markHours();
+    if (busy) { queuedHours = n; return; }
+    let r = await call('mobile.hours', {hours: n});
+    while (queuedHours != null) {
+      const next = queuedHours;
+      queuedHours = null;
+      if (next !== mm?.default_hours) r = await call('mobile.hours', {hours: next});
+    }
+    pendingHours = null;
+    markHours();
+    return r;
+  }
+
   const closeChip = () => { if (chip) chip.open = false; };
   async function turnOn() { asking = false; await call('mobile.set', {on: true}); }
 
@@ -137,7 +165,7 @@
       else { asking = !asking; paint(); }
       return;
     }
-    if (t.dataset.mmHours) { await call('mobile.hours', {hours: Number(t.dataset.mmHours)}); return; }
+    if (t.dataset.mmHours) { await chooseHours(Number(t.dataset.mmHours)); return; }
     switch (t.dataset.mm) {
       case 'confirm': store.set(!!document.getElementById('mm-dont')?.checked); await turnOn(); break;
       case 'cancel': asking = false; paint(); break;
@@ -166,7 +194,7 @@
   window.OrchMobileMode = {
     settingsSection(h) {
       if (!mm || needsPhone()) return null;
-      const choices = mm.hours_choices?.length ? mm.hours_choices : HOURS;
+      const choices = mm.hours_choices?.length ? mm.hours_choices : HOURS, shown = pendingHours ?? mm.default_hours;
       return h('div', {'data-key': 'settings-mobile-mode'},
         h('div', {className: 'card-row name-row'}, h('span', {className: 'set-label'}, 'Send questions'),
           h('div', {className: 'grow set-ctl'}, h('p', {}, 'Questions also go to your phone'),
@@ -175,9 +203,10 @@
             'data-mm': 'switch', 'data-key': 'mm-switch', 'data-testid': 'mobile-mode-switch', disabled: busy}, mm.on ? 'On' : 'Off')),
         h('div', {className: 'card-row name-row'}, h('span', {className: 'set-label'}, 'Switch off after'),
           h('div', {className: 'grow set-ctl mm-hours', role: 'radiogroup', 'aria-label': 'Switch off by itself after', 'data-testid': 'mobile-mode-hours'},
-            choices.map(n => h('button', {type: 'button', className: 'btn sm ' + (n === mm.default_hours ? 'primary' : 'ghost'), role: 'radio',
-              'aria-checked': n === mm.default_hours ? 'true' : 'false', 'data-mm-hours': n, 'data-key': 'mm-hours-' + n,
-              'data-testid': 'mobile-mode-hours-' + n}, n + ' h')))));
+            choices.map(n => h('button', {type: 'button', className: 'btn sm ' + (n === shown ? 'primary' : 'ghost'), role: 'radio',
+              'aria-checked': n === shown ? 'true' : 'false', 'data-mm-hours': n, 'data-key': 'mm-hours-' + n,
+              'data-testid': 'mobile-mode-hours-' + n}, n + ' h')),
+            h('span', {className: 'meta', role: 'status', 'data-key': 'mm-hours-saving', hidden: pendingHours == null}, 'Saving…'))));
     },
   };
 })();

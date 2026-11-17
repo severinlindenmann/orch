@@ -204,7 +204,7 @@ def tend(root: Path, dry_run: bool = False, now: datetime | None = None) -> list
             root,
             f"{TITLE} {day} ({len(todo)})",
             tickets.REVIEWER,
-            fields={"note": NOTE, "done_when": DONE_WHEN},
+            fields={"note": NOTE, "done_when": DONE_WHEN, "model_hint": "small"},
         )
     except Refused as e:
         return [*out, f"could not open a second look: {e}"]

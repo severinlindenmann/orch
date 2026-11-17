@@ -526,6 +526,15 @@ def _check_edit(a):
     return ["check", "edit", _tid(a.get("ticket")), cid], flags, [_text(a.get("text"))]
 
 
+def _check_move(a):
+    """Put a task after another (ticket page Move up / Move down): `orch check move <ticket> <task> --after <task>`."""
+    _only(a, ("ticket", "check", "after"))
+    cid, after = a.get("check"), a.get("after")
+    if not all(isinstance(v, str) and CID.fullmatch(v) for v in (cid, after)):
+        raise BadRequest("Choose a task.")
+    return ["check", "move", _tid(a.get("ticket")), cid], [f"--after={after}"], []
+
+
 def _check_remove(a):
     _only(a, ("ticket", "check"))
     cid = a.get("check")
@@ -1095,6 +1104,7 @@ OPS = {
     "check.reopen": _check_reopen,
     "check.edit": _check_edit,
     "check.remove": _check_remove,
+    "check.move": _check_move,
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,
