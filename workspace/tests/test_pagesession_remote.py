@@ -112,3 +112,19 @@ def test_no_same_computer_limit_is_left_in_the_product():
             text = f.read_text(errors="replace")
             bad += [f"{f.relative_to(REPO)}: {p.pattern}" for p in FORBIDDEN if p.search(text)]
     assert bad == [], bad
+
+
+def test_a_watch_only_server_says_why_it_cannot_sign_in(tws, monkeypatch):
+    """ORCH-387: a page server started inside an agent tool's terminal never signs anyone in. Its refusal must say
+    so, not 'This link was already used' (which sent a tester after the wrong cause)."""
+    from orch_dashboard import server as dash
+    from orch_focus import server as focus
+
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    s = pagesession.PageSession(tws, "dashboard", 8420)
+    assert not s.active
+    for link_msg in (dash._link_msg, focus._link_msg):
+        msg = link_msg(s, "x").decode()
+        assert msg == pagesession.WATCH_ONLY_MSG and "already used" not in msg
+    s.active, s.revoked = True, False
+    assert b"already used" in dash._link_msg(s, "dashboard")
