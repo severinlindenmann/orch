@@ -17,9 +17,9 @@ test('Contacts replaces "Phone & workspaces" everywhere in the product', () => {
   assert.match(toml, /title = "Contacts"/);
   assert.doesNotMatch(web('pages/chat.js'), /Phone & workspaces/);
 });
-test('the Tickets page shows the views as chips with a save chip', () => {
+test('the Tickets page shows the views as chips (no save chip since ORCH-236)', () => {
   assert.match(tickets, /function viewChips\(/);
-  assert.match(tickets, /Save view/);
+  assert.doesNotMatch(tickets, /Save view/);
   assert.match(tickets, /Done this week/);
   assert.doesNotMatch(tickets, /'Working now'/);
 });

@@ -60,6 +60,8 @@ autopilot|change|stop` shows the others; `--help` of each command lists the fiel
 Fill it completely, with a short reason for every choice:
 - **line**: the stages for THIS project; a stop only where the owner's judgement matters (taste, can't undo); the last item
   is always the `ship` stop. Skip stages the chat already settled and say why (`skipped`).
+  A stage waits for the stage before it. When it does not need it, give it `after`: the earlier stages it waits for
+  (`[]` = right after Start). Stages that do not wait for each other run at the same time; `ship` waits for all.
 - **crew**: roles and the tool each uses, from what this project has (the workspace agent, `orch agents`). Prefer the
   project's defaults.
 - **needs**: connections, skills, tools; mark what is ready; for what is missing give the one-click fix in plain words.
@@ -79,7 +81,19 @@ Each time you are woken, ask Factory what to do next and follow it:
 
 - `start-crew`: `orch factory crew add <order> <task>` then `orch factory crew start <order> <task>` for the tasks of this
   stage (one sub-ticket per task; never `orch run start` on crew tickets yourself).
+  Several stages can be on at once: call `next` again after starting a crew, it gives the next stage that can
+  start (also while another stage's stop waits for the owner).
+  When no further stage can start, wait for the crew with a real wait, one per crew ticket:
+  `orch wait <order> --on ticket:<crew ticket>`. Never
+  just end your turn: orch then knows what you wait for and wakes you when the ticket finishes or merges.
 - Check the crew's results against the done-means points (evidence on the checks), then move on.
+- The owner judges a stage on ONE review card built from the crew's evidence: pictures of the built screens, a short
+  demo, the tests (passed or failed) and whether the code is merged. So tell every builder in the task text to attach
+  to its checks: a screenshot of each built screen (`--file <png>`, phone width and desktop), a short demo of the flow
+  (`--file <gif, mp4 or webm>`, a few seconds), every test run with `orch check record` (its exit), and the pull
+  request (`orch ref add`). A result without them shows the owner "nothing to show".
+- A message from the owner "Change at <stage>: <words>" comes from that review card: send the stage's crew tickets
+  back with those words (`orch run send <crew> "<words>"`), and they come back to the owner for a new review.
 - Words that people read in a built app use the right singular and plural ("1 point", "2 points", never "1 pts"): tell
   the builders in their task text, and look for it when you check the results.
 - Pictures at a stop: for every taste item copy the tester's screenshots of that screen (phone width and desktop) to
@@ -90,7 +104,8 @@ Each time you are woken, ask Factory what to do next and follow it:
 - At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo` (anything that
   sends, publishes, deploys, deletes, pays or touches main/production is `cant-undo`: Factory refuses it otherwise); a recommended
   answer only on routine items; list what was checked AND what was not checked, and every small change made during the run.
-- `wait`: end your turn; you are woken when the owner answers.
+- `wait`: record it (`orch wait <order> --on question:<q>` or `--on ticket:<crew ticket>`), then end your turn; you are
+  woken when the owner answers or the ticket moves.
 - `resume` (autopilot order, the owner's grant is still live): look at the open stops of the orders you work on and
   decide the routine and taste items with `orch factory decide` (see Autopilot below), then end your turn. You are woken
   again when something new needs you.

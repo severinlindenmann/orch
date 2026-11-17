@@ -99,7 +99,7 @@ test('phone list: groups as short rows, Answer where the person is needed, steps
   const {c, groups} = listCtx(list);
   const out = c.phoneList(list);
   assert.match(out.attrs.className, /phone-only/);
-  assert.deepEqual(groups.map(g => g.title), ['Needs you', 'Working', 'To do']);
+  assert.deepEqual(groups.map(g => g.title), ['Needs you', 'Working', 'Backlog']);
   const need = groups[0].rows[0];
   assert.equal(need.key, 'WS-1');
   assert.match(need.fact, /^Question/);
@@ -109,11 +109,11 @@ test('phone list: groups as short rows, Answer where the person is needed, steps
   assert.equal(groups[2].rows[0].side, null, 'no steps: nothing on the right');
 });
 
-test('phone list: a long group shows 5 rows and "n more"; a folded group no rows', () => {
-  const list = Array.from({length:8}, (_, i) => ({id:'o' + i, key:'WS-' + i, title:'T' + i, status:'open'}));
+test('phone list: a long group shows 8 rows and "n more"; a folded group no rows', () => {
+  const list = Array.from({length:11}, (_, i) => ({id:'o' + i, key:'WS-' + i, title:'T' + i, status:'open'}));
   const {c, groups} = listCtx(list);
   c.phoneList(list);
-  assert.equal(groups[0].rows.length, 5);
+  assert.equal(groups[0].rows.length, 8);
   assert.equal(groups[0].more.label, '3 more');
   vm.runInContext("foldedGroups.add('open')", c);
   groups.length = 0;
@@ -121,11 +121,11 @@ test('phone list: a long group shows 5 rows and "n more"; a folded group no rows
   assert.equal(groups[0].folded, true);
 });
 
-test('the table and the List/Board switch are wide-only; the phone list rides along in list and board view', () => {
+test('the table is wide-only with the phone list beside it; the List/Board switch and the Board show on the phone too (ORCH-240)', () => {
   assert.match(listSrc, /className:'table-wrap wide-only'/);
-  assert.match(listSrc, /className:'view-toggle wide-only'/);
+  assert.match(listSrc, /className:'view-toggle', role:'group'/);
   assert.match(listSrc, /fragment\(ticketTable\(visible\), window\.UI\?\.shortGroup \? phoneList\(visible\) : null\)/);
-  assert.match(listSrc, /className:'wide-only', 'data-key':'board-wide'/);
+  assert.match(listSrc, /h\('div', \{'data-key':'board-wide'\}, board\(\)\)/);
 });
 
 test('the shell paints the bottom bar with the needs-you number on Review and More opening the side menu', () => {

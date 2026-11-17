@@ -98,3 +98,24 @@ test('the ended notice is one toast, marked seen, never a banner that stays', ()
   assert.deepEqual(toasts, [['Mobile mode ended after its time ran out.', 'ok']]);
   assert.deepEqual(acts, ['mobile.ack']);
 });
+test('ORCH-184: a mode whose end time has passed is shown as ended, not "Phone until HH:MM"', () => {
+  const c = load();
+  c.state({...base, phones:1, on:true, ends_at:soon(-60000), awake:'ok'});
+  assert.equal(c.chip.hidden, true);
+  assert.equal(c.bar.hidden, true);
+  assert.equal(c.label.textContent, 'Phone');
+  const helpers = require('../src/orch_dashboard/web/helpers.js');
+  assert.equal(helpers.mobileOn({on:true, ends_at:soon(-1000)}), false);
+  assert.equal(helpers.mobileOn({on:true, ends_at:soon(60000)}), true);
+  assert.equal(helpers.mobileOn({on:true}), true);
+});
+test('ORCH-286: an end time on another day says the day, in the chip, the menu and the sidebar label', () => {
+  const c = load();
+  c.state({...base, phones:1, on:true, ends_at:soon(26 * 3600 * 1000), awake:'ok'});
+  assert.match(text(c.chip.children[0]), /^Phone until tomorrow \d\d:\d\d$/);
+  assert.match(c.label.textContent, /^Phone · until tomorrow \d\d:\d\d$/);
+  assert.match(text(c.chip.children[1]), /Questions go to your phone until tomorrow \d\d:\d\d/);
+  const c2 = load();
+  c2.state({...base, phones:1, on:true, ends_at:soon(4 * 24 * 3600 * 1000), awake:'ok'});
+  assert.match(text(c2.chip.children[0]), /^Phone until (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d\d:\d\d$/);
+});

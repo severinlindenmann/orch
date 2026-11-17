@@ -42,9 +42,10 @@ ask; its list replaces the one above.
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
-    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" [--owner <name>] [--due YYYY-MM-DD]
+    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> [--owner <name>] [--due YYYY-MM-DD]
                                         # a NEW ticket, first thing, no asking: fix typos, short clear title, a description and a
-                                        # done-when line from the person's note (kept when they wrote one); owner / due only where
+                                        # done-when line from the person's note (kept when they wrote one); your estimate of the
+                                        # helper time and cost at list price for the whole ticket; owner / due only where
                                         # their text says them (their title stays in the history)
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
@@ -56,7 +57,8 @@ In a live session, when you see `New input on orch ticket <id>` or `Your task fo
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
 Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, reminds a helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
-The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes stay in Review with one line why; `--dry-run` only says it. What it accepted: `orch review accepted [--since yesterday]`.
+The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes, or a part of Done when that no task covers, stay in Review with one line why; `--dry-run` only says it. When the person also turned on `workflow.reviewer_answers`, the same pass answers a plain question for them with your recommended option after 30 minutes, unless it names concept, words, look, money, production or something that cannot be undone; so recommend the option you would pick. What it accepted and answered: `orch review accepted [--since yesterday]`.
+Its second look (only when the person also turned on `workflow.reviewer_look`): bigger work it leaves waits in line, and one helper on the small model checks each Done-when part and the pictures, then decides each ticket with `orch review verdict <ticket> accept|back|leave "<one line>" --point "<point>: shown"` (only for tickets in that line; never for your own ticket).
 Releases (for a script that repeats, only when the person turned on `workflow.release_merge` in Settings): a release Merge card made with `orch ask ... --merge --release` is merged for the person by `orch review tend-releases` once every check of its pull request is green; otherwise the person clicks Merge. `--dry-run` only says it.
 
 **Finish a step**
@@ -119,8 +121,9 @@ To keep a text file or picture with a ticket yourself: `orch ticket attach <id> 
 
 **The work needs a bigger model**
 
-orch starts most tickets on Sonnet and hard ones (design, security, a migration, a crash or
-flaky test, part of a bigger plan) on Opus. When your plan shows design, security or several parts, or you
+orch starts a ticket on Opus unless it is clearly a small, mechanical fix (a typo, a word, a label, one
+line), which starts on Sonnet; design, look, layout, concept, security and feature work always start on
+Opus, and the ticket shows in one line why. When your plan shows design, security or several parts, or you
 failed twice at the same problem, move the ticket up; one history line says why:
 
     orch ticket model <id> up --why "<what makes it hard, a few plain words>"
@@ -129,7 +132,14 @@ In a live session finish your reply: orch switches the same conversation to Opus
 a ticket up by itself after two failed check runs on one step. It never moves down by itself, and a person's
 choice of model always stays (ask them instead). Your own subagents follow the same rule: the small model for
 searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
-Tokens per model and per ticket, and how many tickets moved up: `orch usage` (Insights shows the same).
+Tokens per model and per ticket, and how many tickets moved up: `orch tokens` (Insights shows the same).
+
+Haiku (fastest) and Fable (drafts) are only ever a person's choice: orch and helpers never pick them. A
+ticket a person put on Fable works the drafts way (its start text says how): at least three clearly different,
+clickable drafts with realistic data from the person's own words, each challenged by a subagent on Opus, then
+ONE `--choose` card with the drafts side by side to pick from. `up` never changes Fable. A person picks the
+model on the ticket page or with `orch ticket model <id> haiku|sonnet|opus|fable|auto`; a running helper
+switches when its turn ends.
 
 **Need an answer or blocked**
 
@@ -161,6 +171,18 @@ review): give each the same `--group "<short name>"`; the person sees them as on
 Links to look at beside the card (a mockup, an issue): `--ref "Mockup=http://…"` (up to 5). A line under one option of
 a choice: `--describe "A=Keeps the menu as it is"`.
 
+**Cards are short and visual, never a text wall** (owner 17 Nov: "I will never read reviews like that"). A headline is one sentence; everything long goes in `details`, which sits behind one click. Pick the format that fits the news, as in the style guide (`/styleguide`, "Review card formats"):
+- Work finished: a Check card (orch builds it: headline, progress bar, chips, short steps). Put your result in the ticket summary: its FIRST sentence is the headline, so make it say the outcome.
+- Looks different: `--before` and `--after` pictures, one line of words. Several ways: `--choose` with a picture per option.
+- Numbers: a chart. Order or how it works: a flow of at most 6 boxes. Wording or files changed: a diff.
+- Many items or a comparison: a table. Something failed: say what, where and what you need, in 2 lines. A page to try: `--link` with `--open`.
+Write the card as a JSON file and pass it with `--file card.json` on `--draft` or `--plan`:
+    {"headline": "Page load is 2.4 s faster.", "progress": {"done": 5, "total": 5},
+     "chips": [{"text": "17 tests passed", "tone": "ok"}], "flow": ["Idea", "Build", "Ticket"],
+     "chart": {"unit": " s", "bars": [{"label": "Before", "value": 4.2}, {"label": "After", "value": 1.8}]},
+     "diff": [{"op": "-", "text": "Approve"}, {"op": "+", "text": "Looks good"}], "details": ["Long text here."]}
+Chip tones: ok, warn, bad, info. Use only the fields you need. Add a screenshot (`--before`/`--after`) whenever the work has something to look at.
+
 A GitHub pull request only the person may merge: `orch ask <id> "Merge release 3?" --link "Release 3" --open <pull request address> --merge --then "<what follows>"`. The person's Merge click merges it with their own GitHub login; never merge it yourself.
 
 The ticket now waits for the answer (Waiting). Keep working on the steps that do not depend on it; stop only when
@@ -179,10 +201,19 @@ orch only records the wait. An add-on may wake the ticket when it is due; if non
 
 **Sub-tickets**
 
-    orch ticket new "<title>" --parent <id>      # set only when creating; the parent must exist
+    orch ticket new "<title>" --parent <id>      # a new ticket under a parent; the parent must exist
+    orch ticket edit <id> --parent <epic>        # put a ticket that already exists under an epic (--parent "" takes it out)
     orch ticket tree <id>
+    orch ticket order <lane> <id> <id> ...       # the order of tickets inside one board lane (todo, backlog ...), first to last
 
 Read the parent first, work only in yours, keep it at most 3 levels deep. Close the sub-tickets before the parent.
+
+**Tidy the tickets** (triage)
+
+    orch triage [--lanes backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded]   # read-only list of what needs a look
+    orch triage --start [--lanes ...]   # one dated Triage ticket with that list, and one helper on it (never two at once)
+
+On a Triage ticket, follow its note: change tickets yourself, one 'Triage:' line on each, every change in the summary.
 
 **Plan big work**
 
@@ -246,6 +277,10 @@ If work remains, leave it visible (open steps, a log line).
     orch look set --icon <id> --color <token>     # fit the folder name and what the work is about
 
 Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colours from the list, never invent an id. If a person already chose a field, orch refuses it: leave it. All of it is optional: if one is refused or fails, skip it; it is never a blocker for the work.
+
+**Screenshot a page or file** (never start a browser yourself: it can pop a keychain password window on the person's screen)
+
+    orch shot <address or html file> --width 1280,1920,390 --out <folder>    # one picture per width, prints the paths
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.

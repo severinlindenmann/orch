@@ -44,6 +44,10 @@ window.SWIPE_ITEMS=[
    {id:'A',title:'Plain',preview:{type:'doc',heading:'November news from the café',paras:['Short and safe.']}},
    {id:'B',title:'Question',suggested:true,preview:{type:'doc',heading:'Sunday coffee? You asked, we listened',paras:['Picks up the survey result.']}},
    {id:'C',title:'Offer',preview:{type:'doc',heading:'Free oat milk all November ☕',paras:['Promises an offer. Picking C asks you about the offer itself first.']}}]}},
+ /* a Factory start: Home's short form and Home's buttons, none filled (ORCH-183, owner choice B) */
+ {id:'f1',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-49',ticketId:'DT-49',ticketTitle:'Loyalty card',when:'today 10:00',title:"Start 'Loyalty card for regular customers'?",
+  text:'Regular customers collect stamps and get a free coffee after ten visits.\nRuns about 1 h 30 min · needs you for about 10 min · up to 2 h of helper time',preview:{type:'doc'},
+  answers:[{label:'Not now',picked:'Not now'},{label:'Change it',picked:'Edit'},{label:'Start',picked:'Start'}]},
  /* a plain question with no pictures (orch ask --option ...): plain rows, whole titles (ORCH-110) */
  {id:'o3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-48',ticketId:'DT-48',ticketTitle:'Export button',task:'o3',when:'today 10:40',title:'Which name for the export button?',
   then:'The helper uses the name you pick.',
@@ -65,7 +69,8 @@ window.SWIPE_ITEMS=[
  {id:'d7',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-47',ticketId:'DT-47',ticketTitle:'Opening hours page',when:'today 09:15',need:'Done when is not fully covered',title:'New opening hours on the website',
   why:'The helper says this is ready for your check.',okLabel:'Looks good',open:'https://example.com/pull/12',
   then:'The ticket is done.',
-  preview:{type:'doc',heading:'What was done',paras:['In short: Sunday 9–13 is on the website and the Google entry.','No task covers: “the poster at the door shows it”'],
+  files:[{label:'Opening hours page',type:'page',src:window.SWIPE_KIT+'samples/sample-page.html'},{label:'Door poster',type:'img',src:window.SWIPE_KIT+'demo-image.svg'}],/* the result's own files (ORCH-183) */
+  preview:{type:'doc',heading:'What was done',paras:['In short: Sunday 9–13 is on the website and the Google entry.','No task covers: “the poster at the door shows it”','What to do: send it back and say which part is missing, or approve it if that part does not matter.'],
    steps:['Done: Change the hours on the website — Page now says Sunday 9:00 – 13:00 · Ran: page check (all links fine) · PR #12','Done: Update the Google entry — Saved; Google shows the new hours']}},
  {id:'d8',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-48',ticketId:'DT-48',ticketTitle:'Supplier call',when:'today 09:20',title:'Call the supplier about oat milk',
   why:'The helper says this is ready for your check.',okLabel:'Looks good',

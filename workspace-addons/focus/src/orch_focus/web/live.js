@@ -3,12 +3,13 @@
   'use strict';
   const S = window.FocusStore;
   const {h, TID, toast, els, act, STATUS_WORD, plainNames, keyOf, hhmm, evText} = S;
-  /* the core's "The agent stopped … Continue goes on where it left off" line repeats at every stop: not shown here */
+  /* the core's "The helper stopped … Continue goes on where it left off" line repeats at every stop: not shown here */
   const NOISE = /Continue goes on where it left off|^(?:The )?helper started\b|^Updated .+ settings$/i;
 
   const FIELD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary', status: 'the status', done_when: 'the Done when line'};
   // The ticket lines orch writes itself, in the same plain words as the CLI and the dashboard.
   function plainLine(text, checklist) {
+    text = text.replace(/\(cron [^)]*\)/g, '(on its repeat)');  // older automation lines carry the raw rule (ORCH-232)
     const task = id => { const c = (checklist || []).find(x => x.id === id); return c && c.text ? ': ' + c.text : ''; };
     const addon = k => k.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
     let m;
@@ -20,7 +21,7 @@
     if ((m = /^Moved (c\d+) after c\d+$/.exec(text))) return 'Moved a task' + task(m[1]);
     if ((m = /^Created under (.+)$/.exec(text))) return 'Created under ' + m[1];
     if (text === 'Created') return 'Ticket created';
-    if ((m = /^Edited ([a-z_, ]+)$/.exec(text)) && !/[A-Z]/.test(m[1])) return 'Changed ' + m[1].split(/,\s*/).map(f => FIELD[f] || f).join(', ');
+    if ((m = /^Edited ([a-z_, ]+)(?: \(was: [\s\S]* \| now: [\s\S]*\))?$/.exec(text)) && !/[A-Z]/.test(m[1])) return 'Changed ' + m[1].split(/,\s*/).map(f => FIELD[f] || f).join(', ');
     if (/^Asked q\d+, waiting$/.test(text)) return 'Asked a question';
     if ((m = /^Answered q\d+: ([\s\S]*)$/.exec(text))) return 'Answered a question: ' + m[1];
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
@@ -195,7 +196,8 @@
     const story = checks.filter(c => !c.wont_do && (c.done || c.state === 'doing'));
     const st = window.FocusHelpers.sessionState(v), active = st.active;
     const nodes = [st.headline ? h('h2', {text: st.headline}) : null, ...recordNotes(v)].filter(Boolean);
-    if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
+    if (!asking && v.total) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
+    else if (!asking && !active) nodes.push(h('p', {class: 'meta', text: 'No tasks yet.'}));  // never "0 of 0" (ORCH-232)
     let now = null;
     const perTask = stepsByTask(v), runs = taskRuns(v);
     for (const c of story) {
@@ -361,7 +363,11 @@
     const r = S.state.view.run.running ? await act('run.stop', {ticket: TID}) : await act('run.start', {ticket: TID});
     if (!r.ok) toast(r.message, 'error'); else toast(S.state.view.run.running ? 'Started. Same conversation.' : 'Stopped. The work done so far is kept.', 'ok');
   }
-  async function startFresh() { const r = await act('run.start', {ticket: TID, fresh: true}); if (!r.ok) toast(r.message, 'error'); else toast('Started fresh from the ticket.', 'ok'); }
+  async function startFresh() {
+    const manager = !!(S.state.view && S.state.view.ticket.manager);  /* ORCH-147: an empty conversation, even while it runs */
+    const r = manager ? await act('manager.start', {fresh: true}) : await act('run.start', {ticket: TID, fresh: true});
+    if (!r.ok) toast(r.message, 'error'); else toast(manager ? 'Started a fresh conversation.' : 'Started fresh from the ticket.', 'ok');
+  }
   function renderWorking(v) {
     const running = v.run.running;
     els.working.hidden = true;

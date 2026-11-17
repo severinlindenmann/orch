@@ -6,7 +6,7 @@ import subprocess
 import pytest
 from conftest import CONTRACTS
 
-from orch_factory import authority
+from orch_factory import authority, flow
 from orch_factory.store import Refused, Store
 
 
@@ -624,10 +624,10 @@ def test_start_text_shows_what_matters(ws, run):
     order, _ = started(ws, run, data=json.dumps(p).encode())
     text = core(ws, "ticket", "show", order)["questions"][0]["text"]
     for part in (
-        "Stops: build, ship",
-        "Crew: manager claude, builder codex, reviewer claude",
-        "Cap: 2 h 30 min active",
-        "Ship: Merges the reviewed page into develop. (undo: A revert task.)",
+        "I will pause at: build, ship",
+        "Who works on it: manager claude, builder codex, reviewer claude",
+        "Time limit: 2 h 30 min active",
+        "What goes live: Merges the reviewed page into develop. (undo: A revert task.)",
         "Handover: photos → ws_design0001",
         "Unsure: Bookings go to Anna's calendar",
     ):
@@ -1054,4 +1054,94 @@ def test_start_text_keeps_the_shape_the_home_card_reads():
     assert m, text[:200]
     assert m.group(1) == render.clean(p["title"])
     assert m.group(3) == render.clean(p["goal"]).rstrip(". ")
-    assert re.search(r"\. Cap: (.+?) active\. ", text)
+    assert re.search(r"\. Time limit: (.+?) active\. ", text)
+
+
+# ORCH-277: stages that do not wait for each other run at the same time
+
+
+def parallel_proposal():
+    return run_proposal(
+        line=[
+            {"stage": "build", "stop": True, "why": "You judge the look."},
+            {"stage": "docs", "stop": True, "why": "You read the help text.", "after": []},
+            {"stage": "ship", "stop": True, "why": "You decide whether it goes live."},
+        ],
+        tasks=[
+            {
+                "slug": "booking-form",
+                "title": "Booking form",
+                "role": "builder",
+                "stage": "build",
+                "proves": [0],
+            },
+            {"slug": "help-text", "title": "Help text", "role": "builder", "stage": "docs"},
+            {"slug": "release", "title": "Prepare the release", "role": "builder", "stage": "ship"},
+        ],
+    )
+
+
+def test_independent_stages_start_together_and_ship_waits_for_both(ws, run):
+    order, _ = started(ws, run, data=parallel_proposal())
+    step = run("next", order)
+    assert step["step"] == "start-crew" and step["stage"] == "build"
+    run("crew", "add", order, "booking-form")
+    run("crew", "start", order, "booking-form")
+    step = run("next", order)  # build's crew works: docs does not wait for it
+    assert step["step"] == "start-crew" and step["stage"] == "docs"
+    run("crew", "add", order, "help-text")
+    run("crew", "start", order, "help-text")
+    d = flow.derive(ws, Store(ws), core(ws, "ticket", "show", order))
+    assert d["stages"] == ["build", "docs"]
+    assert [x["state"] for x in d["line"]] == ["doing", "doing", "todo"]
+    # a stop of build waits for you; docs still goes on
+    edit(ws, run("crew", "add", order, "booking-form")["ticket"], lambda t: t.update(status="done"))
+    q = ask_stop(ws, run, order, "build")
+    edit(ws, run("crew", "add", order, "help-text")["ticket"], lambda t: t.update(status="done"))
+    refused = run("stop", order, "--file", "-", data=stop_file("docs"), code=2)
+    assert "One question at a time" in refused["error"]
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    assert run("next", order)["stage"] == "docs"  # ship still waits for docs
+    q = ask_stop(ws, run, order, "docs")
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    step = run("next", order)
+    assert step["step"] == "start-crew" and step["stage"] == "ship"
+
+
+def test_a_crew_of_another_stage_starts_while_a_stop_waits(ws, run):
+    order, _ = started(ws, run, data=parallel_proposal())
+    run("next", order)
+    finish_crew(ws, run, order, "booking-form")
+    ask_stop(ws, run, order, "build")
+    step = run("next", order)
+    assert step["step"] == "start-crew" and step["stage"] == "docs"
+    run("crew", "add", order, "help-text")
+    run("crew", "start", order, "help-text")
+    assert run("next", order)["step"] == "wait"
+
+
+def test_without_after_the_line_stays_one_stage_at_a_time(ws, run):
+    order, _ = started(ws, run)
+    d = flow.derive(ws, Store(ws), core(ws, "ticket", "show", order))
+    assert d["stages"] == ["build"] and [x["state"] for x in d["line"]] == ["doing", "todo"]
+
+
+def test_a_stage_can_only_wait_for_earlier_stages(ws, run):
+    order = run("idea", "Booking page")["order"]
+    bad = json.loads(parallel_proposal())
+    bad["line"][0]["after"] = ["docs"]
+    refused = run("propose", order, "--file", "-", data=json.dumps(bad).encode(), code=2)
+    assert "only wait for stages before it" in refused["error"]
+
+
+def test_a_sent_back_stage_is_not_hidden_by_another_running_stage(ws, run):
+    order, _ = started(ws, run, data=parallel_proposal())
+    run("next", order)
+    form = finish_crew(ws, run, order, "booking-form")
+    q = ask_stop(ws, run, order, "build")
+    run("crew", "add", order, "help-text")
+    run("crew", "start", order, "help-text")  # docs runs
+    core(ws, "answer", order, q, "Send back", "--by", "human:anna")
+    edit(ws, form, lambda t: t.update(status="open"))  # the manager reopened the form for the rework
+    step = run("next", order)
+    assert step["step"] == "start-crew" and step["stage"] == "build" and step["comments"]

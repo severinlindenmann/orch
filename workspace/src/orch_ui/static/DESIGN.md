@@ -18,11 +18,12 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `components.css` | Shell, sidebar, topbar, page, card, button, input, badge, chip, table, tabs, segmented, progress, empty/error, skeleton, tooltip, toast, dialog, sheet, menu, the one `.chev` chevron. |
 | `widgets.css`, `widgets.js` | Added 14 Nov: status icon set, pill, empty/error/loading state, stat tile, labelled progress, sortable table, `data-tip` tooltip, sheet, dialog S/M/L, strip, board, file card, type utilities. `UI.statusIcon`, `UI.state`, `UI.stat`, `UI.progress`, `UI.table`, `UI.sheet`, `UI.chevron`. |
 | `widgets.css`, `widgets.js` (17 Nov, ORCH-73) | Phone: `.tabbar` / `UI.tabbar(items)` bottom bar (Home, Tickets, Review with the one needs-you number, More = the side menu; only up to 720 px, the top bar and side menu step aside), `.short-group` / `UI.shortGroup` short rows (number and title, one fact, one thing on the right: steps pill, chip or Answer), `.phone-only` / `.wide-only` to show one of two layouts by width. |
-| `review.js`, `review.html`, `review-boot.js` | Review stack (15 Nov): `UI.reviewPage` (Waiting deck on `UI.swipeDeck` + Answered list), `UI.answerRecord` and `UI.appliesNow` (answers under a ticket's questions), `UI.reviewFetchApi` (same-origin api of the page `orch review` serves). `review.html` is that page, `review-boot.js` signs in from the `#t=` fragment and starts it. Voice in the deck only with `voice:true`. |
+| `review.js`, `review.html`, `review-boot.js` | Review stack (15 Nov): `UI.reviewPage` (Waiting deck on `UI.swipeDeck` + Answered list), `UI.answerRecord` and `UI.appliesNow` (answers under a ticket's questions; every record names its ticket key and title, tiles are about 344x216 and a click or Enter opens one large in `UI.reviewViewer`: fits the width, tall pictures scroll, words in full in lines of at most 75 characters, ← → to the card's other tiles; ORCH-172), `UI.reviewFetchApi` (same-origin api of the page `orch review` serves). `review.html` is that page, `review-boot.js` signs in from the `#t=` fragment and starts it. Voice in the deck only with `voice:true`. |
 | `interaction.css`, `overlay.js`, `select.js`, `date.js`, `components.js` | Dialog lifecycle, custom select (one SVG chevron), calendar, toast with Undo (`UI.toast`), menus, tabs and segments keyboard. |
 | `motion.css`, `motion.js` | Motion tokens in use (see Motion contract). |
 | `icons.js` | One icon set, `icon('check', 16)`. |
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
+| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. |
 | `question-card*.js`, `composer.*` | Question card, chat composer. |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
@@ -286,6 +287,22 @@ Every type gets a real, useful representation, not merely a filename. `.preview-
 Every preview uses **Open, Download, Copy link**, in that order, always visible and keyboard reachable; Share can follow when relevant. `file://` clipboard access varies, so Copy link announces a fallback if unavailable. In the app use stable share URLs rather than file URLs. A static single-file sheet demonstrates the frame; multi-file sheets must add previous/next buttons, Left/Right keys and a file position label, and preserve their state in the URL (BP-32, BP-54).
 
 Above a 10 MB browser-render budget, show a bounded first-page/first-rows preview with an explicit partial-preview sentence. Limits are defaults to validate per renderer, not claims that every type uses the same parser. Failure keeps the same frame and says “Can’t preview this file” with Download. Do not expose raw renderer errors. Never insert untrusted HTML into the main document.
+
+### Result widgets (ORCH-263)
+Use `UI.result` for anything a helper hands back, on Focus and on ticket pages alike; do not build a page-local card.
+Small (168 px high) is a glance and the whole card opens the overlay; big sits on a ticket page with Download and Open
+big in its head; the overlay shows one result large. A plain link is a row that opens in a new tab and never gets an
+overlay. States: empty says what is missing in one sentence, loading keeps the shape (skeleton, `aria-busy`), error
+says "Can't preview this file." with Try again and Download, too big says so and shows the first part
+(`item.shown`) or, for media, only the sentence. Text goes in with `textContent` only; a web page only in an
+`<iframe sandbox="">`.
+
+### Live bar (ORCH-337)
+`.lbar` is the one row under every dashboard page while the new Focus is in Preview (dashboard `pages/livebar.js`).
+Sessions that need you are orange chips, pinned ones are chips after them, everything else is a quiet count ("3
+working", "9 in line", "2 idle") that opens a list (`.lbar-pop`, search from 9 sessions). It never wraps: it folds
+(`data-fold` 0 to 4) into counts instead, and on a phone it shows symbols and numbers above the tab bar. Counts in
+words read right: "1 session", "2 sessions". The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
 
 ## Loading, errors and performance
 

@@ -27,7 +27,8 @@ def idea(root, title, data, ticket_id=None):
             return _adopt(root, store, ticket_id, data)
         ticket = orchcli.call(root, "ticket", "new", title, write=True)
         path = f"drafts/{ticket['id']}/v1.md"
-        store.write(path, data, frozen=True)
+        # no draft text given: the title is v1, never an empty file (bug hunt 17 Nov: Read draft showed an empty box)
+        store.write(path, data if data.strip() else title.encode() + b"\n", frozen=True)
         orchcli.set_ext(root, ticket, role="order", kind="run", stage="draft", draft=1)
     return {"order": ticket["id"], "draft": str(store.path(path))}
 
@@ -86,6 +87,45 @@ def idea_act(root, text, by):
     return {"order": ticket["id"], "started": started, "text": words}
 
 
+def start_act(root, order, by):
+    """Start on a parked order's page (`orch factory act start --by human:<name> -- <order>`, run by the dashboard for
+    the person who pressed it, ORCH-277): the person's Not now is history, so Factory asks the same frozen proposal
+    again as a new question. The page then opens it in the dashboard's own question card, where the person presses
+    Start; nothing here answers it or starts a run. Returns {"order", "question"}."""
+    from . import flow
+
+    if not isinstance(by, str) or not PERSON.fullmatch(by):
+        raise Refused("Only a person's click starts a parked order here.", "refused")
+    store = Store(root)
+    with store.locked():
+        ticket = order_ticket(root, order)
+        order = ticket["id"]
+        d = flow.derive(root, store, ticket)
+        if d["phase"] != "parked" or not d["lead"]:
+            raise Refused("This order is not saved for later any more. Look at it again.", "conflict")
+        lead = d["lead"]
+        q, row = lead["q"], lead["row"]
+        options = list(q.get("options") or [])
+        new = orchcli.call(
+            root,
+            "ask",
+            order,
+            q["text"],
+            "--kind",
+            row["kind"],
+            *[x for o in options for x in ("--option", o)],
+            "--action",
+            json.dumps(q["action"]),
+            write=True,
+            by=by,
+        )
+        if new.get("kind") != row["kind"] or new.get("action") != q["action"]:
+            raise Refused("Orch returned a question for a different proposal.", "conflict")
+        keep = {k: v for k, v in row.items() if k not in ("id", "at", "q")}
+        store.journal_append({**keep, "q": new["id"]})
+    return {"order": order, "question": new["id"]}
+
+
 def _adopt(root, store, ticket_id, data):
     ticket = orchcli.ticket(root, ticket_id)
     ext = ticket.get("ext", {}).get("factory")
@@ -99,7 +139,7 @@ def _adopt(root, store, ticket_id, data):
         raise Refused(
             "Only an open ticket (not in review, done or dropped) can become a Factory order.", "invalid"
         )
-    text = data or str(ticket.get("note") or ticket.get("title") or "").encode()
+    text = data if data and data.strip() else str(ticket.get("note") or ticket.get("title") or "").encode()
     path = f"drafts/{ticket['id']}/v1.md"
     store.write(path, text, frozen=True)
     orchcli.set_ext(root, ticket, role="order", kind="run", stage="draft", draft=1)

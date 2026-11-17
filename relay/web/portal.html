@@ -112,7 +112,7 @@ function checkName(f){if(!f.elements.name.value.trim())throw new FieldError('Giv
 async function copy(value){try{await navigator.clipboard.writeText(value)}catch{const t=el('textarea',{value,readOnly:true});document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)throw Error('Copy is not available here. Select the text and copy it.')}toast('Copied')}
 function promptResult(r,title,extra){
  document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));
- show(...head('',title),el('section',{class:'card form-body'},extra||null,el('p',{},'Copy this and paste it into your agent, in the project that should use this workspace.'),el('div',{class:'copy-wrap'},el('pre',{class:'copy-box',id:'install-prompt'},r.prompt||''),button('Copy',()=>copy(r.prompt||''))),el('p',{class:'meta muted'},'This is shown only once. Copy it before you leave this page.'),el('a',{href:'#overview',class:'btn ghost',onclick:e=>{if(location.hash==='#overview'){e.preventDefault();route()}}},'Done')));
+ show(...head('',title),el('section',{class:'card form-body'},extra||null,el('p',{},'Copy this and paste it into your helper, in the project that should use this workspace.'),el('div',{class:'copy-wrap'},el('pre',{class:'copy-box',id:'install-prompt'},r.prompt||''),button('Copy',()=>copy(r.prompt||''))),el('p',{class:'meta muted'},'This is shown only once. Copy it before you leave this page.'),el('a',{href:'#overview',class:'btn ghost',onclick:e=>{if(location.hash==='#overview'){e.preventDefault();route()}}},'Done')));
 }
 let lastSeenShown='';
 function status(w){let t='Online';if(!w.online){t=w.last_seen?'Last seen '+ago(w.last_seen):'Not connected yet';const full=t;if(t===lastSeenShown)t='Offline';else lastSeenShown=t;return el('span',{class:'status',title:full},el('span',{class:'dot idle'}),t)}return el('span',{class:'status running'},el('span',{class:'dot live'}),t)}
@@ -300,12 +300,12 @@ async function config(v){
 }
 async function webhooks(v){
  const hooks=await all('/webhooks');if(v!==epoch)return;const filter=workspaceSelect(),list=panel('Webhooks'),rows=el('div');list.append(rows);
- function render(){const items=hooks.filter(h=>isKnown(h.workspace)&&(!filter.value||h.workspace===filter.value));rows.replaceChildren(...(items.length?items.map(h=>el('div',{class:'card-row'},el('div',{class:'grow'},el('h3',{},name(h.workspace)),sub((h.last_call_at?'Last event '+ago(h.last_call_at):'No events yet')+' · Made '+time(h.created_at)+(h.ticket?' · for ticket '+h.ticket:''))),el('span',{class:'chip'},h.mode==='once'?'One time':'Ongoing'),moreMenu(name(h.workspace),button('Delete webhook',async()=>{if(!await confirmDialog('Delete this webhook?','Outside services using it stop working.','Delete webhook'))return;await api('/webhooks/'+enc(h.id),'DELETE');hooks.splice(hooks.indexOf(h),1);render();toast('Webhook deleted');focusMain()},'ghost danger')))):[empty('No webhooks','Your agents create these when an outside service should wake a workspace.')]))}
+ function render(){const items=hooks.filter(h=>isKnown(h.workspace)&&(!filter.value||h.workspace===filter.value));rows.replaceChildren(...(items.length?items.map(h=>el('div',{class:'card-row'},el('div',{class:'grow'},el('h3',{},name(h.workspace)),sub((h.last_call_at?'Last event '+ago(h.last_call_at):'No events yet')+' · Made '+time(h.created_at)+(h.ticket?' · for ticket '+h.ticket:''))),el('span',{class:'chip'},h.mode==='once'?'One time':'Ongoing'),moreMenu(name(h.workspace),button('Delete webhook',async()=>{if(!await confirmDialog('Delete this webhook?','Outside services using it stop working.','Delete webhook'))return;await api('/webhooks/'+enc(h.id),'DELETE');hooks.splice(hooks.indexOf(h),1);render();toast('Webhook deleted');focusMain()},'ghost danger')))):[empty('No webhooks','Your helpers create these when an outside service should wake a workspace.')]))}
  filter.onchange=render;render();show(...head('','Webhooks'),el('div',{class:'filters'},field('Workspace',filter)),list);
 }
 
 // ---------- subscribers ----------
-const subscriberKinds=[['updates','Updates','Started, working, notes — can be a lot'],['questions','Questions','Asked by agents'],['results','Results','Done, failed, stopped'],['files','Files','Evidence files attached to results']];
+const subscriberKinds=[['updates','Updates','Started, working, notes — can be a lot'],['questions','Questions','Asked by helpers'],['results','Results','Done, failed, stopped'],['files','Files','Evidence files attached to results']];
 const subscriberPath=s=>'/subscribers/'+enc(s.id);
 const subscriberMembers=s=>[...new Set([...(s.workspaces||[]),...groupList.filter(g=>(s.groups||[]).includes(g.id)).flatMap(g=>g.members||[])])];
 function subscriberKindsText(s){const kinds=['updates','results','questions','files'].filter(k=>s.kinds?.[k]);return (kinds.length===4?'All kinds':kinds.map(k=>subscriberKinds.find(x=>x[0]===k)[1]).join(' · ')||'No kinds')+(s.can_answer?' · Answers':'')}
@@ -399,7 +399,7 @@ function subscribersPage(){
  const curl=el('details',{class:'card sub-try'},el('summary',{},'Test a connection (for developers)'),subscriberCurl());
  const doc=el('div',{class:'row'},el('p',{class:'meta muted grow'},'A short guide another tool can read to use a subscriber link.'),button('Copy doc',()=>copy(subscriberDoc()),'outline'));
  $('#top-add').hidden=!subList.length;
- show(el('header',{class:'page-heading'},el('h1',{tabindex:-1},'Subscribers'),el('p',{class:'muted'},'Let another app or tool get a copy of your workspace messages.')),panel('Your subscribers · '+subList.length,...(rows.length?rows:[empty('No subscribers yet','Add one to let a chat app, a script or another agent follow your workspaces.',button('Add subscriber',()=>subscriberDialog(),'primary'))])),doc,curl,activity);
+ show(el('header',{class:'page-heading'},el('h1',{tabindex:-1},'Subscribers'),el('p',{class:'muted'},'Let another app or tool get a copy of your workspace messages.')),panel('Your subscribers · '+subList.length,...(rows.length?rows:[empty('No subscribers yet','Add one to let a chat app, a script or another tool follow your workspaces.',button('Add subscriber',()=>subscriberDialog(),'primary'))])),doc,curl,activity);
 }
 async function subscriberActivity(s,host){
  const v=epoch,card=panel('Activity · '+s.name),content=el('div'),filters=el('div',{class:'row'});let revision=0;

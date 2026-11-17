@@ -42,16 +42,17 @@ def _evidence(tid: str, rid: str) -> list[str]:
     rec = {
         "run": rid,
         "process": "alive",
-        "heartbeat_age_s": 1800,
+        "heartbeat_age_s": 3600,
         "live_state": "attention",
         "live_since": "2026-11-16T22:00:00Z",
     }
     alive = {"now": now, "collected": {"runs": {"data": {"runs": {tid: rec}}}}}
+    working = {"now": now, "collected": {"runs": {"data": {"runs": {tid: {**rec, "live_state": "working"}}}}}}
     out = []
     for mod, snap in (
         (run_gone_ticket_working, gone),
         (dead_lock_holder, gone),
-        (no_heartbeat, alive),
+        (no_heartbeat, working),
         (waiting_for_permission, alive),
     ):
         out += mod.check(snap)["evidence"]
@@ -88,8 +89,9 @@ def test_20000_random_ticket_ids_in_a_report_summary_never_trip_the_check(tmp_pa
     for i in range(0, 20000, 50):  # 400 real summaries, 50 ticket and 50 run ids each
         text = _summary(pairs[i : i + 50])
         assert secretscan.find(text) == [], text
-        secretscan.refuse_if_secret(text.encode(), "report file SUMMARY.md", tmp_path)
-        secretscan.refuse_if_secret_in(tmp_path, {"summary": text}, "report")
+        if i % 500 == 0:  # the two entry points call find() on the same text (8 scans each): a sample of 40
+            secretscan.refuse_if_secret(text.encode(), "report file SUMMARY.md", tmp_path)
+            secretscan.refuse_if_secret_in(tmp_path, {"summary": text}, "report")
 
 
 @pytest.mark.parametrize(

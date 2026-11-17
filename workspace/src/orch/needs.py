@@ -99,6 +99,7 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
                     "answer": {
                         "question": q["id"],
                         "options": list(q.get("options") or []),
+                        "labels": _option_labels(q),
                         "recommended": q.get("recommended"),
                         "digest": tickets.question_digest(q),  # the question as shown: bound into the proof
                     },
@@ -108,7 +109,7 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
         until = w.get("until")
         if isinstance(until, str) and until < now:
             if w.get("kind") == "time":
-                text = f"Wake time passed; nothing started it. Start it: orch run start {t['id']}"
+                text = "Wake time passed and no helper started. Continue starts it."
                 cli = f"orch run start {t['id']}"
             else:
                 text = f"Waiting on {w.get('kind')} {w.get('ref', '')}".strip() + f", past {until}"
@@ -260,6 +261,17 @@ def addon_rows(root: Path, name: str, m: dict) -> list[dict]:
             "stale": True,
         }
     ]
+
+
+def _option_labels(q: dict) -> list[str]:
+    """One short line per option: "A Title" when a card option has its own title."""
+    pv = (q.get("card") or {}).get("preview") or {}
+    titles = {o.get("id"): o.get("title") for o in pv.get("options") or [] if isinstance(o, dict)}
+    out = []
+    for o in q.get("options") or []:
+        t = titles.get(o)
+        out.append(f"{o} {_clip(t, 40)}" if t and t != o else str(o))
+    return out
 
 
 def needs(root: Path) -> list[dict]:

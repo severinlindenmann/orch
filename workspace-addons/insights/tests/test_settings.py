@@ -129,7 +129,7 @@ def test_build_settings_rows(answer):
     keep = options(view["keep"])
     assert list(keep) == ["30", "90", "365"]
     assert keep["90"]["selected"] and not keep["30"]["selected"]
-    assert view["keep"]["note"] == "up to 2048 MB, oldest detail first. Counts are kept."
+    assert view["keep"]["note"] == "up to 2 GB, oldest detail first. Counts are kept."
     size = options(view["size"])
     assert [size[v]["label"] for v in size] == ["512 MB", "1 GB", "2 GB", "4 GB"]
     share = options(view["share_counts"])
@@ -841,6 +841,31 @@ def test_behind_the_dashboard_its_word_counts_from_any_computer(start_server, fa
         srv, setting("insights.keep_days", "365"), headers={**via, "X-Orch-Person": "x" * 40}
     )
     assert code == 403 and text.decode().startswith("Sign in to ")
+
+
+def test_the_dashboards_forwarded_action_acts(start_server, fake_orch, fake_session):
+    """ORCH-230: exactly the headers the dashboard proxy sends upstream (orch_dashboard.server._proxy, pinned in
+    test_page_proxy) and nothing a browser adds: no cookie, no page secret. Without Sec-Fetch-Site every save from
+    the framed page was refused as coming from another website."""
+    srv = start_server(session=fake_session)
+    port = srv.server_address[1]
+    raw = json.dumps(setting("insights.keep_days", "30")).encode()
+    forwarded = {
+        "Host": f"127.0.0.1:{port}",
+        "X-Forwarded-Prefix": "/addon/insights",
+        "X-Orch-Person": FakeSession.vouch,
+        "Origin": f"http://127.0.0.1:{port}",
+        "Sec-Fetch-Site": "same-origin",
+        "Content-Type": "application/json",
+        "Content-Length": str(len(raw)),
+    }
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request("POST", "/api/act", body=raw, headers=forwarded)
+    response = conn.getresponse()
+    code, text = response.status, response.read()
+    conn.close()
+    assert code == 200, text
+    assert stored(fake_orch)["keep_days"] == 30
 
 
 def test_sign_in_through_a_proxy_from_another_computer(start_server, fake_session):

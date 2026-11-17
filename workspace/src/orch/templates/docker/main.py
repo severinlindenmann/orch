@@ -4,8 +4,11 @@ The host gives every app HOST, PORT, BASE_PATH (/{{slug}}), DATA_DIR (kept acros
 without the /{{slug}} prefix; use relative links in pages (style.css, items), not BASE_PATH: private apps are served under a secret address.
 """
 
+from __future__ import annotations  # `dict | None` hints on Python 3.9 too (a host may run the app with an old python3)
+
 import html
 import os
+import socketserver
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -66,6 +69,11 @@ class App(BaseHTTPRequestHandler):
 
 class _Server(ThreadingHTTPServer):
     request_queue_size = 128  # the default backlog of 5 resets connections when a page loads many files
+
+    def server_bind(self):
+        # The stock bind also looks the host name up in DNS (unused here); that took 35 s on some machines.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
 
 
 def make_server(port: int) -> ThreadingHTTPServer:

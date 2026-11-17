@@ -400,6 +400,7 @@ def _schedules(
                     "toggle": {
                         "on": not paused,
                         "label": clean(t["title"], 40) + " on or off",
+                        "text": "Repeats",
                         "action": _act("toggle", t["id"]),
                     },
                     "actions": [
@@ -419,6 +420,30 @@ def _schedules(
                         else {"label": "Start now", "action": _act("run", t["id"])},
                         {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": t["id"]}}},
                     ],
+                },
+            )
+        )
+    # one-time wake-ups ("check again in 2 hours") sit in the same table, so every automation reads as
+    # either a repeat or a single run
+    for t in tickets:
+        w = t.get("waiting_on") or {}
+        until = parse(w.get("until")) if w.get("kind") == "time" else None
+        if not scheduled(t) or not until or _repeats(t, True):
+            continue
+        at = until.astimezone()
+        rows.append(
+            (
+                max(until, now),
+                {
+                    "cells": {
+                        "schedule": _name(t),
+                        "repeats": "Once",
+                        "next": "Paused" if not running else clean(at.strftime("%a %d %b, %H:%M"), 40),
+                        "last": "Not yet",
+                    },
+                    "link": t["id"],
+                    "subtitle": "One-time wake-up",
+                    "actions": [{"label": "Start now", "action": _act("run", t["id"])}],
                 },
             )
         )
@@ -507,7 +532,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
             "type": "table",
             "columns": [
                 {"key": "schedule", "label": "Ticket", "type": "text"},
-                {"key": "repeats", "label": "Repeats", "type": "text"},
+                {"key": "repeats", "label": "Plan", "type": "text"},
                 {"key": "next", "label": "Next time", "type": "text"},
                 {"key": "last", "label": "Last time", "type": "text"},
             ],

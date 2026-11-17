@@ -1,17 +1,28 @@
 """One pass of the helper watcher (`orch run tend`, ORCH-78): what a person watching the helpers did by hand.
 
-- A live session at its prompt whose ticket is finished (Review, Done, Dropped) or only waits (on a person's
-  answer, a time or another ticket) is ended. Its conversation stays on the ticket, so the answer, the time or
+- Sessions stay open as long as possible, so the tool's prompt cache stays warm (ORCH-149). A live
+  session at its prompt on a ticket that is Done or Dropped is ended after END_FINISHED_MINUTES. One on a
+  ticket in Review or that only waits (on a person's answer, a time or another ticket) is ended early only
+  when the sessions are full (runs_live._crowded); otherwise it stays open until the idle limit
+  (workspace.live_idle_minutes, an hour). Its conversation stays on the ticket, so the answer, the time or
   a person's Continue resumes it, and the slot is free for the next ticket meanwhile. A ticket waiting on
   another ticket is started again here once that one is finished (nothing else promises that wake-up).
   Waiting on something outside (a release, a CI run) is no reason to end: such a helper gets the reminder.
 - A live session idle at its prompt with nothing running for IDLE_MINUTES, on a ticket still being worked on,
   gets one message with what changed since it went quiet (ticket history, its pull request's last look, the
   open steps).
-- When it is still idle RESTART_MINUTES after that message and nothing happened on the ticket, its session is
-  ended and the helper is started fresh from the ticket (at most once per RESTART_EVERY per ticket; after that
-  the idle row in `orch needs` is for a person).
+- A helper that stopped right after its start (its first turn ended within EARLY_TURN_SECONDS, ORCH-190: it
+  asked "shall I go ahead?" in its own window, where nobody reads it, and the tool showed a greyed-out "go
+  ahead" in the box) gets that message after EARLY_IDLE_MINUTES instead, and is started fresh when it still
+  has not moved EARLY_RESTART_MINUTES after it: no person needed, no wait for the idle limit.
+- When it is still idle near the idle limit (BEFORE_LIMIT ahead of it; the cache is gone by then) and nothing
+  happened on the ticket since that message, its session is ended and the helper is started fresh from the
+  ticket (at most once per RESTART_EVERY per ticket; after that the idle row in `orch needs` is for a person).
 - Tickets waiting in line for a free slot start in priority order (runs_live.start_waiting).
+- ORCH-179: a helper that stopped on the subscription's usage limit (the last answer in its saved conversation
+  is the limit error, or its run ended on it) is noted with the reset time (limitstop). Until then nobody is
+  reminded, started fresh or woken, and automatic starts wait in line; after it, each noted ticket that is
+  still worked on starts again on its earlier conversation (a live session still at the limit is ended first).
 
 Every action is a line in the ticket's history. Nothing happens while automation is paused (`orch pause`). No
 daemon: a repeating automation script runs the pass. A session with input still waiting to go in, a running
@@ -25,14 +36,19 @@ import json
 import time
 from pathlib import Path
 
-from orch import brake, history, runs, runs_live, runwatch, stuck, tickets
+from orch import adapters, brake, history, limitstop, runs, runs_live, runwatch, stuck, tickets
 
 BY = "agent:helper-watcher"
 VIA = "watcher"
 IDLE_MINUTES = 20  # idle with nothing running, ticket still Working: one message
-RESTART_MINUTES = 10  # still idle this long after the message, nothing changed: start fresh
-END_WAITING_MINUTES = 5  # quiet this long while the ticket only waits: the session ends
-END_FINISHED_MINUTES = 10  # quiet this long on a finished ticket (runs_live.FINISHED_IDLE_SECONDS)
+EARLY_TURN_SECONDS = 5 * 60  # the first turn ended this soon after the start: it stopped instead of working
+EARLY_IDLE_MINUTES = 3  # such a helper gets the message this soon
+EARLY_RESTART_MINUTES = 5  # ... and is started fresh when nothing changed this long after it
+RESTART_MINUTES = 10  # at least this long after the message (and idle the full limit), nothing changed: fresh
+END_WAITING_MINUTES = 5  # quiet this long, waiting on a time or ticket (not a person), sessions full
+END_FINISHED_MINUTES = 10  # quiet this long on a Done/Dropped ticket, or in Review when full
+BEFORE_LIMIT = 5 * 60  # a stuck helper starts fresh this long before any `orch run` call closes it silently
+GONE = ("done", "dropped")  # nothing is left: no reason to keep the session warm
 RESTART_EVERY = 6 * 3600  # at most one fresh start per ticket in this time
 FINISHED = runs_live.FINISHED
 WAIT_KINDS = ("person", "time", "ticket")  # something wakes these; "external" gets the reminder instead
@@ -115,16 +131,24 @@ def _what_changed(root: Path, t: dict, since: str | None) -> str:
     return "\n".join(out)
 
 
-def nudge_text(root: Path, t: dict, idle_secs: int | None, since: str | None) -> str:
+EARLY_WORDS = (
+    "You stopped right after the start. Nobody reads this window: do not wait here for a go-ahead. "
+    "Ask a person only with orch ask, otherwise carry on.\n"
+)
+
+
+def nudge_text(root: Path, t: dict, idle_secs: int | None, since: str | None, early: bool = False) -> str:
     k = _key(t)
     return (
         f"The helper watcher: you have been idle at your prompt for {runwatch.span(idle_secs)} with nothing "
         f"running, and {k} is still being worked on.\n"
+        + (EARLY_WORDS if early else "")
         + _what_changed(root, t, since)
         + f"\nCarry on with the next open task. If you wait on something, say so (orch wait or orch ask); if "
-        f"you are finished, run orch ticket status {k} done. If nothing happens in {RESTART_MINUTES} "
-        "minutes, "
-        "this session is ended and a fresh one starts from the ticket."
+        f"you are finished, run orch ticket status {k} done. If nothing happens until it has been idle "
+        f"for {runwatch.span(EARLY_RESTART_MINUTES * 60 if early else int(runs_live.idle_seconds(root)))}"
+        + (" more" if early else "")
+        + ", this session is ended and a fresh one starts from the ticket."
     )
 
 
@@ -135,8 +159,28 @@ def restart_text(t: dict) -> str:
     )
 
 
+def _early(rec: dict, since: str | None) -> bool:
+    """The run went idle within EARLY_TURN_SECONDS of its start: its first turn ended before any real work."""
+    start, idle = _ts(rec.get("started_at")), _ts(since)
+    return start is not None and idle is not None and 0 <= idle - start <= EARLY_TURN_SECONDS
+
+
 def _waits(info: dict) -> list[dict]:
     return info.get("waiting_on") or []
+
+
+def limit_of(root: Path, rec: dict) -> dict | None:
+    """The usage-limit stop a live session shows (the last answer in its saved conversation), or None."""
+    sid = rec.get("session")
+    if not isinstance(sid, str) or not rec.get("agent"):
+        return None
+    try:
+        path = adapters.transcript_path(
+            rec["agent"], sid, root, folder=runs.workdir_for(root, rec, rec["ticket"])
+        )
+    except Exception:  # noqa: BLE001 - an unknown tool or copy: no limit seen
+        return None
+    return limitstop.from_transcript(path)
 
 
 def plan(root: Path, now: float | None = None) -> list[dict]:
@@ -144,20 +188,32 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
     now = time.time() if now is None else now
     state = _read_state(root)
     table = runwatch._table()
+    limit = runs_live.idle_seconds(root)  # the idle limit: the cache is gone after it
+    crowded = runs_live._crowded(root)
+    noted = limitstop.read(root).get("tickets") or {}
+    held = limitstop.active(root, now) is not None
     out = []
     for rec in runs_live.records(root):
         if rec.get("mode") != "live" or runs.state(rec) != "alive" or rec.get("closing"):
             continue
         tid = rec["ticket"]
         live = rec.get("live") or {}
+        if live.get("state") in ("idle", "attention") and tid not in noted:
+            hit = limit_of(root, rec)
+            if hit is not None:  # stopped on the usage limit: note it, nothing else until the reset
+                key = runs_live.ref(root, tid)
+                out.append({"ticket": tid, "key": key, "run": rec["run"], "action": "limit", "info": hit})
+                continue
+        if tid in noted:
+            continue  # held until the reset; then _resumes starts it again
         if live.get("state") != "idle" or runs.undelivered(root, tid):
             continue  # working, starting, a question on its screen, or input on the way in
         try:
             t = tickets.load(root, tid)
         except Exception:  # noqa: BLE001, S112 - a broken ticket is never acted on
             continue
-        if t.get("general") is True:
-            continue  # Chat: a person talks to it
+        if t.get("general") is True or t.get("manager") is True:
+            continue  # Chat and the Manager: a person talks to them; they are never nudged or ended
         info = runwatch.describe(root, tid, rec, table)
         waits = _waits(info)
         if any(w.get("kind") == "command" for w in waits):
@@ -167,20 +223,25 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
             continue
         row = {"ticket": tid, "key": _key(t), "run": rec["run"], "idle_seconds": quiet, "rec": rec, "t": t}
         if t.get("status") in FINISHED:
-            if quiet >= END_FINISHED_MINUTES * 60:
+            early = t.get("status") in GONE or crowded  # Review keeps its warm session unless full
+            if quiet >= (END_FINISHED_MINUTES * 60 if early else limit):
                 out.append({**row, "action": "end", "why": "finished"})
             continue
         kinds = [w["kind"] for w in waits if w.get("kind") in WAIT_KINDS]
         if kinds:
-            if quiet >= END_WAITING_MINUTES * 60:
+            # a person may still answer (a mockup round): that session keeps its hour, full or not (ORCH-254)
+            if quiet >= (END_WAITING_MINUTES * 60 if crowded and "person" not in kinds else limit):
                 what = ", ".join(w["what"] for w in waits if w.get("kind") in WAIT_KINDS)
                 out.append({**row, "action": "end", "why": "waiting", "waits": what})
             continue
+        if held:
+            continue  # the usage limit: a reminder or a fresh start would only stop on it again
         seen = state.get(tid) or {}
         nudged = _ts(seen.get("nudged_at")) if seen.get("run") == rec["run"] else None
         if nudged is None:
-            if quiet >= IDLE_MINUTES * 60:
-                out.append({**row, "action": "nudge", "since": info.get("idle_since")})
+            early = _early(rec, info.get("idle_since"))
+            if quiet >= (EARLY_IDLE_MINUTES if early else IDLE_MINUTES) * 60:
+                out.append({**row, "action": "nudge", "since": info.get("idle_since"), "early": early})
             continue
         helper = f"agent:{rec.get('agent')}"
         moved = any(
@@ -190,7 +251,10 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
         if moved:
             out.append({**row, "action": "forget"})  # it did something after the reminder: a new chance
             continue
-        if now - nudged < RESTART_MINUTES * 60 or quiet < RESTART_MINUTES * 60:
+        if seen.get("early"):  # it stopped right after the start: no wait for the idle limit
+            if now - nudged < EARLY_RESTART_MINUTES * 60 or quiet < EARLY_RESTART_MINUTES * 60:
+                continue
+        elif now - nudged < RESTART_MINUTES * 60 or quiet < max(limit - BEFORE_LIMIT, RESTART_MINUTES * 60):
             continue
         last = _ts(seen.get("restarted_at"))
         if last is not None and now - last < RESTART_EVERY:
@@ -198,7 +262,35 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
                 out.append({**row, "action": "leave"})
             continue
         out.append({**row, "action": "restart"})
-    return out + _wakes(root)
+    if held or any(r["action"] == "limit" for r in out):
+        return out  # nothing is woken while the limit holds
+    return out + _resumes(root, now) + _wakes(root)
+
+
+def _resumes(root: Path, now: float) -> list[dict]:
+    """Tickets that stopped on the usage limit, now that it reset: start them again where they stood. A ticket
+    that is finished, waits on something that wakes it, or is worked on again already is only forgotten."""
+    out = []
+    for tid in limitstop.due(root, now):
+        row: dict = {"ticket": tid, "key": tid, "action": "resume"}
+        try:
+            t = tickets.load(root, tid)
+        except Exception:  # noqa: BLE001 - a ticket that is gone is forgotten
+            out.append({**row, "action": "unlimit"})
+            continue
+        row.update(key=_key(t), t=t)
+        rec = runs.read(root, tid)
+        waits = runwatch.waiting_on(root, None, t, [])
+        if t.get("status") in FINISHED or any(w.get("kind") in WAIT_KINDS for w in waits):
+            out.append({**row, "action": "unlimit"})  # the answer, the time or the other ticket wakes it
+            continue
+        if rec and runs.state(rec) == "alive":
+            if rec.get("mode") != "live" or limit_of(root, rec) is None:
+                out.append({**row, "action": "unlimit"})  # it goes on already (a person, or a new turn)
+                continue
+            row["rec"] = rec
+        out.append(row)
+    return out
 
 
 def _wakes(root: Path) -> list[dict]:
@@ -257,6 +349,26 @@ def _restart(root: Path, row: dict) -> str:
     return f"run {r['run']}"
 
 
+def _resume(root: Path, row: dict) -> str:
+    """Start a ticket again after the usage limit reset (ending its session first when it still sits at the
+    limit). Returns the history line, or "" when its session could not be ended (the next pass tries
+    again)."""
+    tid = row["ticket"]
+    if row.get("rec") and not _end(root, row):
+        return ""
+    data = limitstop.read(root)
+    limitstop.forget(root, [tid])
+    runs.pending_add(root, tid, BY, "event", limitstop.resume_text(row["key"], data), VIA)
+    try:
+        r = runs.start(root, tid, runs_live.AUTOMATION_BY)
+        how = f"run {r['run']}"
+    except runs.Busy:
+        how = "it waits in line for a free slot"
+    except Exception as e:  # noqa: BLE001 - the reason goes into the history
+        how = f"it could not start: {e}"
+    return f"Started the helper again: the usage limit reset at {limitstop.clock(data.get('until'))} ({how})."
+
+
 def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
     """One pass: {"paused": bool, "actions": [...], "queue": [...]}. dry_run only says what it would do."""
     now = time.time() if now is None else now
@@ -273,7 +385,14 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
             done.append({**public, "done": False})
             continue
         line = ""
-        if action == "end" and _end(root, row):
+        if action == "limit":
+            if limitstop.note(root, tid, row["info"], now):
+                line = limitstop.stopped_text(row["info"])
+        elif action == "unlimit":
+            limitstop.forget(root, [tid])
+        elif action == "resume":
+            line = _resume(root, row)
+        elif action == "end" and _end(root, row):
             if row["why"] == "finished":
                 line = f"Ended the helper's session: the ticket is finished and it was quiet for {quiet}."
             else:
@@ -283,9 +402,13 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
                 )
             state.pop(tid, None)
         elif action == "nudge":
-            runs_live.send(root, tid, BY, nudge_text(root, row["t"], row["idle_seconds"], row.get("since")))
-            state[tid] = {"run": row["run"], "nudged_at": _iso(now)}
-            line = f"Reminded the helper: idle for {quiet} with nothing running."
+            early = bool(row.get("early"))
+            text = nudge_text(root, row["t"], row["idle_seconds"], row.get("since"), early)
+            runs_live.send(root, tid, BY, text)
+            state[tid] = {"run": row["run"], "nudged_at": _iso(now), **({"early": True} if early else {})}
+            line = f"Reminded the helper: idle for {quiet} with nothing running" + (
+                ", right after its start." if early else "."
+            )
         elif action == "forget":
             state.pop(tid, None)
         elif action == "wake":
@@ -316,7 +439,7 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
         if line:
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, line, BY)
-        if line or action == "forget":
+        if line or action in ("forget", "unlimit"):
             done.append({**public, "done": True, "text": line})
     # tickets whose state is about a run that no longer exists: keep a restart time, drop the rest
     live_runs = {r["ticket"]: r["run"] for r in runs_live.records(root)}
@@ -352,6 +475,8 @@ WORDS = {
     "restart": "started fresh",
     "leave": "left for a person",
     "wake": "started again (the ticket it waited on is finished)",
+    "limit": "held until the usage limit resets",
+    "resume": "started again (the usage limit reset)",
 }
 
 
@@ -360,7 +485,7 @@ def text(result: dict, dry_run: bool = False) -> str:
         return "Automation is paused here: the helper watcher did nothing. Turn it back on: orch resume."
     lines = []
     for a in result["actions"]:
-        if a["action"] == "forget":
+        if a["action"] in ("forget", "unlimit"):
             continue
         if a["action"] == "start":
             lines.append(f"{a['key']}: started from the line")

@@ -6,6 +6,8 @@
   const ASK_OFF_KEY = 'orch.mobileMode.dontAsk';
   const HOURS = [4, 8, 12, 24];
   let mm = null, busy = false, asking = false, toastedEnd = '';
+  // ORCH-227: a picked "Switch off after" shows at once ("Saving…"); a click while one saves is sent after it.
+  let pendingHours = null, queuedHours = null;
   const needsPhone = () => !!mm && !mm.on && mm.phones === 0;
   const bar = document.getElementById('mm-bar');
   const toggle = document.getElementById('mm-toggle');
@@ -14,10 +16,17 @@
     get: () => { try { return localStorage.getItem(ASK_OFF_KEY) === '1'; } catch (_) { return false; } },
     set: on => { try { on ? localStorage.setItem(ASK_OFF_KEY, '1') : localStorage.removeItem(ASK_OFF_KEY); } catch (_) { /* no storage: ask every time */ } },
   };
-  const hm = iso => {
+  // The end time with its day once it is not today: "16:31", "tomorrow 16:31", or "Thu 16:31" (ORCH-286).
+  const hm = (iso, nowMs) => {
     const d = iso ? new Date(iso) : null;
-    return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) : '';
+    if (!d || Number.isNaN(d.getTime())) return '';
+    const clock = d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+    const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((day(d) - day(new Date(nowMs == null ? Date.now() : nowMs))) / 86400000);
+    if (diff <= 0) return clock;
+    return (diff === 1 ? 'tomorrow' : d.toLocaleDateString('en-GB', {weekday: 'short'})) + ' ' + clock;
   };
+  window.mobileEndWords = hm;
   const node = (tag, attrs = {}, ...kids) => {
     const n = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
@@ -101,7 +110,14 @@
     if (label) label.textContent = mm.on ? 'Phone' + (hm(mm.ends_at) ? ' · until ' + hm(mm.ends_at) : '') : 'Phone';
   }
 
+  // A mode whose end time has passed is over, whatever the last state said: the chip, the switch and the bar all go quiet
+  // at the end time (the server ends it at its next read), so nothing says "until 08:46" at 10:10 (ORCH-184).
+  const settleLocal = () => {
+    const end = mm?.on && mm.ends_at ? Date.parse(mm.ends_at) : NaN;
+    if (Number.isFinite(end) && end <= Date.now()) mm = {...mm, on: false, ends_at: null, since: null, awake: null};
+  };
   function paint() {
+    settleLocal();
     document.body.classList.toggle('mobile-mode-on', !!mm?.on);
     if (!mm) { toggle.hidden = true; bar.hidden = true; if (chip) chip.hidden = true; return; }
     paintBar();
@@ -114,6 +130,32 @@
     busy = false;
     if (!r.ok) window.orch?.toast(r.text || 'That did not work.', 'error');
     paint();
+    return r;
+  }
+
+  // The hours buttons follow the pick at once, before the answer (the page draws Settings again only on a new state).
+  function markHours() {
+    const shown = pendingHours ?? mm?.default_hours;
+    document.querySelectorAll('[data-mm-hours]').forEach(b => {
+      const on = Number(b.dataset.mmHours) === shown;
+      b.classList.toggle('primary', on); b.classList.toggle('ghost', !on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    const saving = document.querySelector('[data-key="mm-hours-saving"]');
+    if (saving) saving.hidden = pendingHours == null;
+  }
+  async function chooseHours(n) {
+    pendingHours = n;
+    markHours();
+    if (busy) { queuedHours = n; return; }
+    let r = await call('mobile.hours', {hours: n});
+    while (queuedHours != null) {
+      const next = queuedHours;
+      queuedHours = null;
+      if (next !== mm?.default_hours) r = await call('mobile.hours', {hours: next});
+    }
+    pendingHours = null;
+    markHours();
     return r;
   }
 
@@ -130,7 +172,7 @@
       else { asking = !asking; paint(); }
       return;
     }
-    if (t.dataset.mmHours) { await call('mobile.hours', {hours: Number(t.dataset.mmHours)}); return; }
+    if (t.dataset.mmHours) { await chooseHours(Number(t.dataset.mmHours)); return; }
     switch (t.dataset.mm) {
       case 'confirm': store.set(!!document.getElementById('mm-dont')?.checked); await turnOn(); break;
       case 'cancel': asking = false; paint(); break;
@@ -140,6 +182,7 @@
     }
   });
 
+  if (typeof setInterval === 'function') setInterval(() => { if (mm?.on) paint(); }, 30000);  // the end time can pass between two states
   window.addEventListener('orch:state', event => {
     mm = event.detail?.mobile_mode || null;
     if (mm?.on) asking = false;
@@ -158,7 +201,7 @@
   window.OrchMobileMode = {
     settingsSection(h) {
       if (!mm || needsPhone()) return null;
-      const choices = mm.hours_choices?.length ? mm.hours_choices : HOURS;
+      const choices = mm.hours_choices?.length ? mm.hours_choices : HOURS, shown = pendingHours ?? mm.default_hours;
       return h('div', {'data-key': 'settings-mobile-mode'},
         h('div', {className: 'card-row name-row'}, h('span', {className: 'set-label'}, 'Send questions'),
           h('div', {className: 'grow set-ctl'}, h('p', {}, 'Questions also go to your phone'),
@@ -167,9 +210,10 @@
             'data-mm': 'switch', 'data-key': 'mm-switch', 'data-testid': 'mobile-mode-switch', disabled: busy}, mm.on ? 'On' : 'Off')),
         h('div', {className: 'card-row name-row'}, h('span', {className: 'set-label'}, 'Switch off after'),
           h('div', {className: 'grow set-ctl mm-hours', role: 'radiogroup', 'aria-label': 'Switch off by itself after', 'data-testid': 'mobile-mode-hours'},
-            choices.map(n => h('button', {type: 'button', className: 'btn sm ' + (n === mm.default_hours ? 'primary' : 'ghost'), role: 'radio',
-              'aria-checked': n === mm.default_hours ? 'true' : 'false', 'data-mm-hours': n, 'data-key': 'mm-hours-' + n,
-              'data-testid': 'mobile-mode-hours-' + n}, n + ' h')))));
+            choices.map(n => h('button', {type: 'button', className: 'btn sm ' + (n === shown ? 'primary' : 'ghost'), role: 'radio',
+              'aria-checked': n === shown ? 'true' : 'false', 'data-mm-hours': n, 'data-key': 'mm-hours-' + n,
+              'data-testid': 'mobile-mode-hours-' + n}, n + ' h')),
+            h('span', {className: 'meta', role: 'status', 'data-key': 'mm-hours-saving', hidden: pendingHours == null}, 'Saving…'))));
     },
   };
 })();

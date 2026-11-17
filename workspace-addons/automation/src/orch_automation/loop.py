@@ -31,6 +31,7 @@ def scheduled(t: dict) -> bool:
 
 
 FAST_FAIL_SECONDS = 10
+WAKE_RETRIES, WAKE_RETRY_MINUTES = 3, 5  # a wake-time start that failed: tries after the first, minutes apart
 QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
 KIND = "automation:failure"
 KINDS = (KIND,)
@@ -99,6 +100,17 @@ def record_last_run(root: Path, t: dict, now: datetime, by: str | None = None) -
     extra = {"next_run": fmt(nxt)} if nxt else {}
     orchcli.set_ext(root, t, by=by, last_run=fmt(now), **extra)
     update_state(root, t["id"], last_run=fmt(now))
+
+
+def repeat_words(cron: str, tz=None) -> str:
+    """Why a repeat started, in the person's words for the ticket history: "on its repeat, every 2 hours".
+    Never the raw rule ("cron 0 */2 * * *"): Focus and the ticket page show this line as is (ORCH-232)."""
+    from .view import cron_human  # view imports this module
+
+    words = cron_human(cron, tz)
+    if words.startswith("On a custom plan"):
+        return "on its repeat"
+    return "on its repeat, " + (words[0].lower() + words[1:] if words.startswith("Every ") else words)
 
 
 class Scheduler:
@@ -375,11 +387,25 @@ class Scheduler:
                 continue
             w = t.get("waiting_on") or {}
             until = parse(w.get("until")) if w.get("kind") == "time" else None
-            if until and until <= now and state.get(tid, {}).get("last_wake") != w.get("until"):
+            mine = state.get(tid, {})
+            fresh = mine.get("last_wake") != w.get("until")
+            # ORCH-255: a start that failed left the wait standing; look again a few times (5 min apart) before the
+            # person's Try again / Continue is the only way, so a passed wake time never leaves a ticket without a helper
+            again = (
+                not fresh
+                and mine.get("wake_tries", 0) < WAKE_RETRIES
+                and (parse(mine.get("wake_at")) or now) + timedelta(minutes=WAKE_RETRY_MINUTES) <= now
+                and orchcli.run_running(self.root, tid) is not True
+            )
+            if until and until <= now and (fresh or again):
                 res = self.start_due(tid, "wait time reached", now)
                 update_state(
-                    self.root, tid, last_wake=w.get("until")
-                )  # also after a failure: only "Try again" retries
+                    self.root,
+                    tid,
+                    last_wake=w.get("until"),
+                    wake_at=fmt(now),
+                    wake_tries=0 if fresh else mine.get("wake_tries", 0) + 1,
+                )  # also after a failure: retried WAKE_RETRIES times, then only "Try again"
                 if res != "failed":  # clear the wait only after core took the run (SA-15)
                     orchcli.call(self.root, "wait", tid, "--clear")
                     if t["status"] != "active" and not script_of(t):  # a script leaves the status alone
@@ -411,7 +437,7 @@ class Scheduler:
                     ):  # the agent finished the last one: open it again (a script never closes it)
                         orchcli.call(self.root, "ticket", "status", tid, "open")
                         orchcli.log(self.root, tid, "Opened again for the next run of this repeat.")
-                    res = self.start_due(run_tid, f"cron {cron}", now) if run_tid else "failed"
+                    res = self.start_due(run_tid, repeat_words(cron, tz), now) if run_tid else "failed"
                     if run_tid:  # a sub-ticket that could not be made is tried again next pass
                         record_last_run(
                             self.root, t, now

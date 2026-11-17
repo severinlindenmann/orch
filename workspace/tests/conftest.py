@@ -1,8 +1,10 @@
 import contextlib
 import hashlib
+import http.server
 import json
 import os
 import re
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -13,6 +15,16 @@ import pytest
 from orch import addons, cli, winfinish
 
 _REAL_HOME_FN = addons.real_home  # the true one, before any test fakes it
+
+
+def _bind_without_dns(self):
+    """http.server's bind looks the host name up in DNS for a field nothing reads; on the macOS CI runners the
+    first lookup in each process took 35 s (ORCH-260). Test servers skip it."""
+    socketserver.TCPServer.server_bind(self)
+    self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
+
+
+http.server.HTTPServer.server_bind = _bind_without_dns
 _TRACE_LOG = addons._trace_log_path()  # the true fallback trace file (temp folder), before any test fakes it
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
@@ -58,6 +70,65 @@ def _snapshot_one(base: Path, files: dict) -> None:
 
 _REAL_AT_START, _TRACE_AT_START = _snapshot_real_tool_home()
 _PYTEST_TMP = Path(tempfile.gettempdir()).resolve()
+
+# What a helper session (orch run) exports: the REAL workspace, run and ticket it works for. ORCH_ROOT beats
+# the current folder in orch's root lookup, so a test that inherited it wrote its tickets into the real list
+# whatever folder it chdir'd into (17 Nov: 'T', 'Do the thing', 'Export' in the owner's workspace). Gone for
+# the whole session, children included; a test that needs one sets it itself.
+_HELPER_VARS = (
+    "ORCH_ROOT", "ORCH_RUN", "ORCH_TICKET", "ORCH_AGENT", "ORCH_ADDON", "ORCH_AUTOMATION_NONCE", "ORCH_JOB",
+    "ORCH_JOB_TOKEN", "ORCH_VIA",
+)  # fmt: skip
+# the controller's list, handed to xdist workers (they start after the pop)
+_OUTER_VAR = "ORCH_TEST_OUTER_WORKSPACES"
+
+
+def _outer_workspaces(env, start: Path) -> list[Path]:
+    """The workspaces this run was started from: ORCH_ROOT's, and the nearest folder with .orch/ above the
+    start folder (the shared clone sits inside the real workspace)."""
+    found = []
+    raw = env.get("ORCH_ROOT")
+    if raw:
+        with contextlib.suppress(OSError, RuntimeError):
+            p = Path(raw).resolve()
+            if (p / ".orch").is_dir():
+                found.append(p)
+    with contextlib.suppress(OSError, RuntimeError):
+        start = start.resolve()
+        up = next((p for p in (start, *start.parents) if (p / ".orch").is_dir()), None)
+        if up is not None and up not in found:
+            found.append(up)
+    return found
+
+
+if _OUTER_VAR not in os.environ:
+    os.environ[_OUTER_VAR] = os.pathsep.join(map(str, _outer_workspaces(os.environ, Path.cwd())))
+_OUTER = [Path(p) for p in os.environ[_OUTER_VAR].split(os.pathsep) if p]
+for _k in _HELPER_VARS:
+    os.environ.pop(_k, None)
+
+
+def _outer_guard(found: Path, how: str) -> Path:
+    if found in _OUTER:
+        pytest.fail(
+            f"orch resolved {found} ({how}): the workspace this test run was started from. A test must work "
+            "in its own folder (fixture `proj`), never in a real workspace.",
+            pytrace=True,
+        )
+    return found
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _never_the_outer_workspace():
+    """Every root lookup (cli._find_root, history.here) that lands on the workspace this run started from
+    fails the test (pytest.fail is a BaseException: no `except Exception` in orch swallows it)."""
+    from orch import history
+
+    find, here = cli._find_root, history.here
+    cli._find_root = lambda: _outer_guard(find(), "workspace root")
+    history.here = lambda: _outer_guard(here(), "workspace of this command")
+    yield
+    cli._find_root, history.here = find, here
 
 
 def _ours(line: dict) -> bool:
@@ -349,6 +420,8 @@ _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
 
 def stray_tmux(under: str) -> list[str]:
     """Socket names of orch tmux servers whose working folder is `under` or below (reads `ps` only)."""
+    if not Path("/bin/ps").exists():  # Windows: no ps and no tmux
+        return []
     out = subprocess.run(["/bin/ps", "-axo", "command="], check=False, capture_output=True, text=True).stdout
     return sorted(
         {

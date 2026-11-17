@@ -399,3 +399,35 @@ test('fb18: a failed sync is one plain sentence and one button, never a raw erro
   assert.equal(byKey(ok.page, 'sync-error'), undefined);
   assert.equal(byKey(syncPage({...BASE, ...INFO, mode:'off', shown:'off'}).page, 'sync-where-info'), undefined);
 });
+
+test('ORCH-184: changing Sync in Settings drops the Sync page\'s saved view, so the page and Settings never disagree', async () => {
+  const {c} = context({answers:{set:{mode:'local'}, status:BASE}});
+  vm.runInContext("addonViews.sync = {state:'ok', view:{}}; addonViews.other = {state:'ok'};", c);
+  await vm.runInContext("syncAct('status', 'sync')", c);
+  assert.equal(vm.runInContext("!!addonViews.sync", c), true, 'reading the status keeps it');
+  await vm.runInContext("syncAct('set', 'local')", c);
+  assert.equal(vm.runInContext("addonViews.sync", c), undefined, 'a change drops it');
+  assert.equal(vm.runInContext("!!addonViews.other", c), true, 'other add-ons keep theirs');
+});
+
+test('before the sync status is read no choice is selected (not a false Off), then the real mode shows', () => {
+  const {c, ui} = context();
+  ui.card = null;
+  const before = c.syncCard(ON);
+  assert.deepEqual(all(before, n => n.attrs?.type === 'radio').map(n => [n.attrs.value, n.checked, n.attrs.disabled]), [['off', false, true], ['local', false, true], ['remote', false, true]]);
+  assert.match(text(byKey(before, 'sync-unread')), /Reading the sync setting/);
+  ui.card = {...BASE, mode:'local', remote:null};
+  const after = c.syncCard(ON);
+  assert.equal(byKey(after, 'sync-where-local').checked, true);
+  assert.equal(byKey(after, 'sync-unread'), undefined);
+});
+
+test('bug hunt 17 Nov: each place to keep a copy says what it does, and the Sync page does not repeat its heading', () => {
+  const {page} = syncPage({...BASE, ...INFO});
+  for (const [key, want] of [['off', /No copy is kept\./], ['local', /Nothing leaves this computer\./], ['remote', /private place you own/]])
+    assert.match(text(byKey(page, 'sync-where-says-' + key)), want);
+  assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'h3' && text(n) === 'Sync').length, 0);
+  const {c, ui} = context();
+  ui.card = {...BASE};
+  assert.equal(all(c.syncCard(ON), n => n.tag === 'h3' && text(n) === 'Sync').length, 1, 'Settings keeps the card heading');
+});

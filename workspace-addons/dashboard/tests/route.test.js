@@ -6,8 +6,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
 const routeSource = source.slice(source.indexOf('function route() {'), source.indexOf('function render('));
-function route(hash, addons) {
-  const ctx = {history:{replaceState(){}}, location:{hash}, snapshot:false, state:{settings:true}, addons:() => addons, decodeURIComponent};
+function route(hash, addons, extra = {}) {
+  const ctx = {history:{replaceState(){}}, location:{hash}, snapshot:false, state:{settings:true}, addons:() => addons, decodeURIComponent, ...extra};
   vm.createContext(ctx); vm.runInContext(routeSource, ctx);
   return ctx.route();
 }
@@ -20,6 +20,47 @@ test('#addon/focus is the Focus page; #open/focus/ and #open/focus/t/<id> forwar
   assert.deepEqual({...route('#open/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
   assert.deepEqual({...route('#addon/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
 });
+// ORCH-264: the Preview switch. Off (the default): every address of the live-session add-on is its own page, unchanged.
+// On: the same addresses show the new live page (kind 'live'), with the same path and address. The dashboard names no
+// add-on: the page is found by its live_session capability.
+const LIVE = {name:'focus', page:{path:'/', live_session:true}, dashboard:{label:'Focus'}};
+test('the Preview switch turns the live-session add-on\'s addresses into the new page; off they stay as they are', () => {
+  const ctxOf = on => ({livePreviewOn: () => on, livePageOf: id => [LIVE].find(a => a.name === id) || null});
+  for (const extra of [{}, ctxOf(false)]) {
+    assert.equal(route('#addon/focus', [LIVE], extra).kind, 'page');
+    assert.equal(route('#addon/focus/t/t_abc12345', [LIVE], extra).kind, 'page');
+  }
+  const on = ctxOf(true);
+  assert.deepEqual({...route('#addon/focus', [LIVE, OTHER], on)}, {kind:'live', id:'focus', path:'', hash:'#addon/focus'});
+  assert.deepEqual({...route('#open/focus/t/t_abc12345', [LIVE], on)}, {kind:'live', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
+  const PAGE = {name:'factory', page:{path:'/'}, dashboard:{label:'Factory'}};
+  assert.equal(route('#addon/factory', [LIVE, PAGE], on).kind, 'page', 'a page without live sessions never changes');
+  assert.equal(route('#addon/automation', [LIVE, OTHER], on).kind, 'addon');
+  assert.equal(route('#home', [LIVE], on).kind, 'home');
+  assert.equal(route('#addon/focus/../x', [LIVE], on).kind, 'notfound');
+});
+const liveSource = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/live.js'), 'utf8');
+test('livePreviewOn reads the one setting: on only when it is exactly true, never in a shared copy', () => {
+  const on = (state, snapshot = false) => { const ctx = {state, snapshot}; vm.createContext(ctx); vm.runInContext(liveSource, ctx); return ctx.livePreviewOn(); };
+  assert.equal(on({settings:{focus_preview_on:true}}), true);
+  for (const s of [{settings:{focus_preview_on:false}}, {settings:{}}, {}, null, {settings:{focus_preview_on:'true'}}]) assert.equal(on(s), false);
+  assert.equal(on({settings:{focus_preview_on:true}}, true), false);
+});
+test('the new live page is an empty shell with the Preview tag, the add-on\'s own name and a way back', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, kids:kids.flat(Infinity).filter(Boolean)});
+  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent};
+  vm.createContext(ctx); vm.runInContext(liveSource, ctx);
+  const all = n => [n, ...(n.kids || []).flatMap(k => typeof k === 'object' ? all(k) : [])];
+  const text = n => all(n).flatMap(x => (x.kids || []).filter(k => typeof k === 'string')).join(' ');
+  assert.equal(ctx.livePageOf('focus'), LIVE);
+  assert.equal(ctx.livePageOf('automation'), null);
+  const page = ctx.liveNextPage({kind:'live', id:'focus', path:''}), key = k => all(page).find(x => x.attrs?.['data-key'] === k);
+  assert.equal(text(key('live-next-tag')), 'Preview');
+  assert.match(text(key('live-next')), /The new Focus is being built; your helpers’ sessions will show here\./);
+  assert.equal(text(key('live-next-off')), 'Back to today’s Focus');
+  assert.equal(key('live-next-off').attrs.href, '#settings/addons/focus');
+  assert.equal(all(page).filter(x => x.tag === 'iframe').length, 0, 'not today\'s page');
+});
 test('an add-on without a page keeps its own tab; path tricks fall back', () => {
   assert.equal(route('#addon/automation', [FOCUS, OTHER]).kind, 'addon');
   assert.equal(route('#addon/focus/../x', [FOCUS]).kind, 'notfound');
@@ -28,7 +69,8 @@ test('an add-on without a page keeps its own tab; path tricks fall back', () => 
 });
 test('an add-on page opens at its own place after a second # (Home links to a Factory proposal, ORCH-60)', () => {
   assert.deepEqual({...route('#addon/focus/#/order/t_abc12345/proposal', [FOCUS])}, {kind:'page', id:'focus', path:'', inner:'/order/t_abc12345/proposal', hash:'#addon/focus/#/order/t_abc12345/proposal'});
-  for (const hash of ['#addon/focus/#/a/../b', '#addon/focus/#x', '#addon/focus/#/a#/b']) assert.equal(route(hash, [FOCUS]).kind, 'notfound', hash);
+  assert.equal(route('#addon/focus/t/x#results', [FOCUS]).inner, 'results');  // a place a Focus link names (ORCH-186)
+  for (const hash of ['#addon/focus/#/a/../b', '#addon/focus/#a.b', '#addon/focus/#/a#/b']) assert.equal(route(hash, [FOCUS]).kind, 'notfound', hash);
 });
 test('unknown addresses are Page not found; empty and #home stay Home; a query keeps its route', () => {
   for (const hash of ['#nope', '#tickets/x', '#ticketsx', '#addon/missing']) assert.equal(route(hash, [FOCUS]).kind, 'notfound', hash);
@@ -88,8 +130,8 @@ test('one needs-you count: every reader calls needsYouTotal', () => {
 
 test('shared words: status, steps and the updated time', () => {
   const H = require('../src/orch_dashboard/web/helpers.js');
-  assert.deepEqual(['open', 'ready', 'active', 'waiting', 'review', 'done'].map(s => H.statusWord(s)), ['To do', 'To do', 'Working', 'Needs you', 'Check', 'Done']);
-  assert.equal(H.stepsText(2, 5), '2 of 5 steps'); assert.equal(H.stepsText(1, 1), '1 of 1 step');
+  assert.deepEqual(['open', 'ready', 'active', 'waiting', 'review', 'done'].map(s => H.statusWord(s)), ['Backlog', 'To do', 'Working', 'Needs you', 'Check', 'Done']);
+  assert.equal(H.stepsText(2, 5), '2 of 5 tasks'); assert.equal(H.stepsText(1, 1), '1 of 1 task');
   const now = Date.parse('2024-01-01T12:00:00Z');
   assert.equal(H.updatedText(now - 20000, now), 'Updated just now');
   assert.equal(H.updatedText(now - 3 * 60000, now), 'Updated 3 min ago');
@@ -98,10 +140,12 @@ test('#settings is General; #settings/<tab> opens that tab on the same Settings 
   assert.deepEqual({...route('#settings', [])}, {kind:'settings', hash:'#settings', tab:'general', addon:null});
   for (const tab of ['general', 'agent', 'phone', 'addons']) assert.deepEqual({...route('#settings/' + tab, [])}, {kind:'settings', hash:'#settings', tab, addon:null});
   assert.deepEqual({...route('#settings/addons/publish', [])}, {kind:'settings', hash:'#settings', tab:'addons', addon:'publish'});  // one add-on's own settings page
+  // the address names the tab like its label; the old names still open the same tab
+  for (const [name, tab] of [['helper', 'agent'], ['contacts', 'phone']]) assert.deepEqual({...route('#settings/' + name, [])}, {kind:'settings', hash:'#settings', tab, addon:null});
   assert.equal(route('#settings/phone/publish', []).kind, 'notfound');
   assert.equal(route('#settings/nope', []).kind, 'notfound');  // an unknown tab is an unknown address: Page not found
 });
-test('the phone tab is role=tab and choosing it keeps Settings open at #settings/phone', () => {
+test('the phone tab is role=tab and choosing it keeps Settings open at #settings/contacts and adds a history entry', () => {
   const settingsSrc = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const nav = settingsSrc.slice(settingsSrc.indexOf("role:'tablist'"), settingsSrc.indexOf("h('div', {className:'settings-content'}"));
   assert.match(nav, /\['phone', phoneAddon\.dashboard\.label\]/);
@@ -110,10 +154,11 @@ test('the phone tab is role=tab and choosing it keeps Settings open at #settings
   const go = settingsSrc.slice(settingsSrc.indexOf('function settingsGo('), settingsSrc.indexOf('}', settingsSrc.indexOf('function settingsGo(')) + 1);
   const calls = [];
   const ctx = {settingsTab:'general', settingsReview:'x', location:{hash:'#settings'}, render:() => calls.push('render'),
-    history:{replaceState:(_s, _t, url) => { ctx.location.hash = url; calls.push('replace'); }}};
-  vm.createContext(ctx); vm.runInContext(go + '; settingsGo("phone");', ctx);
-  assert.equal(ctx.location.hash, '#settings/phone');
+    history:{pushState:(_s, _t, url) => { ctx.location.hash = url; calls.push('push'); }}};
+  const map = settingsSrc.slice(settingsSrc.indexOf('const SETTINGS_TAB_ADDRESS'), settingsSrc.indexOf('\n', settingsSrc.indexOf('const SETTINGS_TAB_ADDRESS')));
+  vm.createContext(ctx); vm.runInContext(map + '\n' + go + '; settingsGo("phone");', ctx);
+  assert.equal(ctx.location.hash, '#settings/contacts');
   assert.equal(ctx.settingsTab, 'phone');
-  assert.deepEqual(calls, ['replace', 'render']);
+  assert.deepEqual(calls, ['push', 'render']);
   assert.equal(route(ctx.location.hash, []).kind, 'settings');
 });

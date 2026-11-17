@@ -41,13 +41,13 @@
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
     els.stopL.textContent = running ? 'Pause work' : 'Continue';
     els.stop.setAttribute('aria-label', running ? 'Pause work' : 'Continue');
-    els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
+    els.compose.hidden = S.state.tab >= 2 || (v.state === 'done' && !running);  /* a done ticket is a read-only board unless a helper runs on it; a ticket in Check takes messages (ORCH-247) */
     S.views.compose.renderWaiting(v);
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
-    els.stop.hidden = (asking && !running) || (!running && !hasStarted);
-    els.fresh.disabled = running || asking || !hasStarted;
+    els.stop.hidden = false;  /* ORCH-255: Continue shows in every state while no helper runs (Pause while it does) */
+    els.fresh.disabled = t.manager ? asking : running || asking || !hasStarted;  /* the Manager starts fresh any time (ORCH-147) */
     els.review.hidden = !window.FocusHelpers.reviewBarShown(v);
     els.complete.hidden = v.state !== 'done';
     els.attachBtn.disabled = !(running && v.live);
@@ -139,7 +139,7 @@
       if (!tab || tab.hidden) return;
       S.state.tab = onScreen ? 0 : i;
       els.review.hidden = !S.state.view || !window.FocusHelpers.reviewBarShown(S.state.view);
-      els.compose.hidden = S.state.view?.state === 'done' || S.state.tab >= 2 || (S.state.view?.ticket.status === 'review' && !S.state.changesRequested);
+      els.compose.hidden = S.state.tab >= 2 || (S.state.view?.state === 'done' && !S.state.view?.run.running);
       [...els.tabs, ...(els.screenTab ? [els.screenTab] : [])].forEach(b => { const on = b === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; });
       if (screen) screen.place(onScreen);
       try { localStorage.setItem('focus-tab', onScreen ? 'screen' : ''); } catch (e) { /* not kept */ }
@@ -268,10 +268,12 @@
   /* A push (server-sent events) tells the page at once when a ticket or run file changed; the poll above is the
      slow fallback while the stream is up and the normal pace while it is down. Under the dashboard the stream is
      the dashboard's own (same origin, no proxy); opened directly it is Focus's own. */
-  if (typeof EventSource !== 'undefined') {
+  /* In the dashboard's sandboxed frame the stream is read with the frame pass (kit/frame.js, ORCH-186). */
+  const Stream = window.OrchFrame && window.OrchFrame.on ? window.OrchFrame.EventSource : window.EventSource;
+  if (typeof Stream !== 'undefined') {
     let stream, pending;
     const connect = () => {
-      stream = new EventSource('/api/events');
+      stream = new Stream('/api/events');
       stream.onopen = () => { live = true; };
       stream.onerror = () => { live = false; };
       stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(() => { fresh = true; poll(); }, Math.max(30, 500 - (Date.now() - lastFetch))); });

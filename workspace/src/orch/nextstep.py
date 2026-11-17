@@ -87,6 +87,12 @@ def _new(data, args) -> str:
     return f'add one task per step: orch check add {n} "<step>"'
 
 
+def _triage(data, args) -> str:
+    if (data or {}).get("ticket"):
+        return f"watch it: orch run status {data['ticket']}"
+    return "orch triage --start  (a helper goes through the list and tidies the tickets)"
+
+
 def _check_add(data, args) -> str:
     c = (data or {}).get("id", "<task>")
     return f'do the step, then record its evidence: orch check done {_tid(args)} {c} --note "<evidence>"'
@@ -173,6 +179,8 @@ def _status_cmd(data, args) -> str:
 
 def _ref_wait(data, args) -> str:
     """Says the verdict again: the last line is all a caller that reads through a pipe sees (PR 978)."""
+    if data and data[-1].get("status") == "owner merges":
+        return "GREEN; it changes a CI workflow, so the owner merges it with the Merge card: no push by hand"
     if data and all(o.get("ok") for o in data):
         merged = all(o.get("status") == "merged" for o in data)
         return "GREEN" + (
@@ -186,11 +194,15 @@ HINTS = {
     "update": _update,
     "start": "keep working; the dashboard link is above. orch ticket list",
     "stop": "orch ticket list",
+    "shot": "look at the pictures, then attach them: orch check done <id> <step> --file <picture>",
     "status": _status_cmd,
     "addon add": "orch addon list",
     "addon remove": "orch addon list",
     "addon uninstall": "orch addon list",
     "addon list": "turn one on with: orch addon add <name>",
+    "manager start": "talk to it in Focus, or join it: orch manager status",
+    "manager stop": "start it again any time: orch manager start",
+    "manager status": "orch manager start",
     "diag inspect": "orch diag query",
     "diag query": "orch diag report",
     "diag report": "share the report with whoever is helping you, then keep working: orch ticket list",
@@ -205,6 +217,7 @@ HINTS = {
     "ticket status": _status,
     "ticket edit": _on_ticket,
     "ticket set": _on_ticket,
+    "ticket order": "keep working: orch ticket list",
     "ticket summary": _on_ticket,
     "ticket outcome": _on_ticket,
     "ticket artifacts": _on_ticket,
@@ -225,6 +238,8 @@ HINTS = {
     "logins": _logins,
     "logins renew": _logins_renew,
     "logins replace": _logins_replace,
+    "logins add": "orch logins",
+    "logins remove": "orch logins",
     "pause": "turn it back on with: orch resume",
     "resume": "orch needs",
     "wait": "keep working on other tickets: orch ticket list",
@@ -251,15 +266,18 @@ HINTS = {
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": "keep working on what does not wait: orch ticket list",
-    "usage": "keep working: orch ticket list",
+    "tokens": "keep working: orch ticket list",
+    "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
     "review answer": "orch needs",
     "review wait": _on_ticket,
     "review link": "orch needs",
     "review tend": "orch review accepted  (what was accepted for you today)",
     "review tend-releases": "orch review list  (what still waits for the owner)",
+    "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
     "review accepted": "orch needs",
     "github expert": "orch ticket list  (a red run opened a top ticket)",
+    "github release": "orch ticket list  (a red run opened a top ticket)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",

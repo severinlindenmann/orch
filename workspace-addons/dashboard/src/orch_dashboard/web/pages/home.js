@@ -20,7 +20,7 @@ function parentLine(t) {
   const parent = ticketOf(t.parent || tickets().find(p => array(p.children).includes(t.id))?.id);
   return parent ? h('p', {className:'meta'}, parent.epic ? 'Part of the epic ' : 'Sub-ticket of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
 }
-const finishedAt = t => parse(t.done_at || t.completed_at || t.updated_at);
+const finishedAt = t => parse(window.DashHelpers.doneAt(t));
 
 function ticketRow(t) {
   const at = finishedAt(t);
@@ -315,7 +315,9 @@ function needCardQuestion(row) {
 function cardSetRow(row) {
   const t = ticketOf(row.ticket), open = array(t?.questions).filter(q => q.answer == null && !q.taken_back && q.card && typeof q.card === 'object');
   const names = [...new Set(open.map(q => q.group).filter(Boolean))], n = open.length || 1, key = 'need-set-' + (t?.id || row.id);
-  const title = names.length === 1 ? names[0] : clean(t?.title || 'Cards to look at');
+  // One card: the row says what it asks (its title, else its question); several: the set's name. Always with the ticket key.
+  const one = open.length === 1 ? open[0] : null, ask = one ? clean(one.card?.title || shortQuestion(one.text)) : '';
+  const title = ask || (names.length === 1 ? names[0] : clean(t?.title || 'Cards to look at'));
   const api = typeof reviewApi === 'function' ? reviewApi() : null, o = {fileUrl:api ? api.fileUrl : () => ''};
   const pics = window.UI?.cardShown ? open.slice(0, 3).map(q => {
     const g = window.UI.cardShown({card:q.card, ticket:t.id}, o), tiles = g ? [...g.children] : [];
@@ -325,10 +327,10 @@ function cardSetRow(row) {
     if (cap) cap.textContent = clean(q.card.title || '');
     return pick;
   }).filter(Boolean) : [];
-  const meta = [n === 1 ? '1 card to look at' : n + ' cards to look at', names.length === 1 && t && clean(t.title) !== title ? clean(t.title) : '', typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
+  const meta = [n === 1 ? '1 card to look at' : n + ' cards to look at', (names[0] && names[0] !== title ? names[0] : '') || (t && clean(t.title) !== title ? clean(t.title) : ''), typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
   const go = snapshot ? null : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + row.ticket + ':' + (open[0]?.id || row.answer?.question)), 'data-key':key + '-go'}, n === 1 ? 'Look at it' : 'Look at all ' + n);
   return h('div', {className:'card-row', 'data-key':key, 'data-need-row':row.id},
-    h('div', {className:'grow stack'}, h('div', {}, h('h3', {}, title), h('p', {className:'meta'}, meta)), pics.length ? h('div', {className:'decision-shown'}, pics) : null), go);
+    h('div', {className:'grow stack'}, h('div', {}, h('h3', {}, window.DashHelpers.keyTag(t, h), title), h('p', {className:'meta'}, meta)), pics.length ? h('div', {className:'decision-shown'}, pics) : null), go);
 }
 // A further question, startable failure or add-on row: the same one button the full card would open.
 function needListRow(row, count, same) {
@@ -364,7 +366,8 @@ function attentionCard(key, badge, cls, body, meta = '', action = null) {
 // "Review all": the cards of the Review page (state.review) in one go. The number is the same set of questions and
 // results Home already counts, so it is never added to Home's own total.
 function reviewAllButton() {
-  const n = typeof reviewCount === 'function' ? reviewCount() : 0;
+  // the one number, not the length of the card list; the card count only when the page holds cards the number does not
+  const cards = typeof reviewCount === 'function' ? reviewCount() : 0, n = cards ? (typeof needsYouTotal === 'function' && needsYouTotal()) || cards : 0;
   return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all', h('span', {className:'count'}, String(n))) : null;
 }
 // "Clear old": the questions that have waited more than a week go in one click. Same path as a one-click answer:
@@ -407,10 +410,14 @@ function clearOldButton() {
   return b;
 }
 function attentionSummary(groups, failed, results, changes) {
-  const questionsAsked = groups.filter(g => g.row.answer?.question).length, other = groups.length - questionsAsked + failed.length;
+  // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
+  // (failed starts, notes without a question, changes to add) follows "also", so title, subtitle and rows agree (ORCH-184)
+  // questions = the one number minus the results (every open question counts, also a same-worded one on two tickets)
+  const questionsAsked = Math.max(0, needsYouTotal() - results), other = groups.filter(g => !g.row.answer?.question).length + failed.length;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
-  return [part(questionsAsked, 'question', 'questions'), part(other, 'thing to look at', 'things to look at'),
-    part(results, 'result to check', 'results to check'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
+  const counted = [part(questionsAsked, 'question', 'questions'), part(results, 'result to check', 'results to check')].filter(Boolean).join(' · ');
+  const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
+  return counted && extra ? counted + ' · also ' + extra : counted || extra;
 }
 function homeSection(key, title, body, count = '', more = null) {
   return h('section', {className:'home-section', 'data-key':key, id:key === 'needs-you' ? key : null},
@@ -449,9 +456,9 @@ function needsToday() {
   const needs = live.filter(r => !window.DashHelpers.isNotice(r) && !window.DashHelpers.isBringBack(r));
   const failed = tickets().map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
   const groups = homeNeeds(needs), all = tickets();
-  const review = all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id));
+  const review = all.filter(t => t.status === 'review');  // each result to check is one row and one count, like the Review page cards
   const changes = all.filter(t => t.bring_back?.state === 'waiting');
-  const asked = groups.length + failed.length, results = all.filter(t => t.status === 'review');
+  const asked = groups.length + failed.length, results = review;
   // what helpers need: a login that runs out soon is a row of Home's list and counts in Home's title only (as drawn: the
   // menu badges count questions and results, which the Review page holds); the stopped ones are the banner
   const logins = loginWarnings();
@@ -485,8 +492,7 @@ function autoUpdateNote() {
 }
 // "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first.
 function doneAt(t) {
-  if (typeof t.done_at === 'string' && t.done_at) return t.done_at;
-  return (typeof ticketDoneEvent === 'function' ? ticketDoneEvent(t)?.at : '') || t.updated_at || t.created_at || '';
+  return window.DashHelpers.doneAt(t) || t.created_at || '';
 }
 function changedWords(t) {
   const o = typeof outcomeOf === 'function' ? outcomeOf(t) : {}, first = String(o.changed || o.why || '').split('\n')[0].trim();
@@ -548,11 +554,21 @@ function loginAction(item, key, quiet = false) {
   control.dataset.key = key + '-check';
   return control;
 }
+// A tool orch cannot renew itself says the one step the person takes (ORCH-48).
+// (page scope: Settings uses it too). Nothing when a Renew or Replace button is there, or it works.
+function loginHowText(item) {
+  return item && item.state !== 'works' && !item.renew && !item.key && typeof item.how === 'string' ? item.how : '';
+}
+function loginHow(item) {
+  const how = loginHowText(item);
+  return how ? h('p', {className:'meta', 'data-key':'login-how-' + item.name}, how) : null;
+}
 function loginSoonRow(item) {
   const key = 'login-soon-' + item.name, n = item.stops.length;
   return h('div', {className:'card-row', 'data-key':key, 'data-login':'soon'},
     h('div', {className:'grow'}, h('p', {}, h('strong', {}, 'The ' + clean(window.DashHelpers.needName(item)) + ' ends on ' + window.DashHelpers.needEnds(item) + '.')),
-      n ? h('p', {className:'meta'}, 'After that helpers stop on ' + n + (n === 1 ? ' ticket: ' : ' tickets: '), loginTicketLinks(item.stops)) : null),
+      n ? h('p', {className:'meta'}, 'After that helpers stop on ' + n + (n === 1 ? ' ticket: ' : ' tickets: '), loginTicketLinks(item.stops)) : null,
+      loginHow(item)),
     loginAction(item, key));
 }
 function loginBanner(stopped) {
@@ -563,7 +579,7 @@ function loginBanner(stopped) {
     const item = stopped[0], name = clean(window.DashHelpers.needName(item));
     return h('div', {className:'banner error', role:'alert', 'data-key':'login-stopped', 'data-login':'stopped'},
       h('div', {className:'grow'}, h('strong', {}, 'The ' + name + (item.state === 'unreachable' ? ' cannot be reached' : ' stopped working')),
-        lead ? h('p', {}, lead + (n ? ': ' : '.'), n ? loginTicketLinks(list) : null) : null),
+        lead ? h('p', {}, lead + (n ? ': ' : '.'), n ? loginTicketLinks(list) : null) : null, loginHow(item)),
       loginAction(item, 'login-stopped-' + item.name));
   }
   const names = stopped.map(i => clean(window.DashHelpers.needName(i))).join(' · ');
@@ -571,24 +587,37 @@ function loginBanner(stopped) {
     h('div', {className:'grow'}, h('strong', {}, stopped.length + ' things stopped working'), h('p', {}, (lead ? lead + '. ' : '') + names + '.')),
     snapshot ? null : h('a', {className:'btn primary sm', href:'#settings/agent', 'data-key':'login-see'}, 'See what to fix'));
 }
+// Tickets waiting in line for a helper, and why none starts now (ORCH-266: the computer looked busy and nothing said so).
+// No reason (only the short pause between two starts): no banner, it passes within seconds.
+function lineBanner() {
+  const line = snapshot ? null : state.start_line;
+  if (!line || !line.why || !array(line.waiting).length) return null;
+  const byId = new Map(tickets().map(t => [t.id, t])), list = array(line.waiting).map(id => byId.get(id)).filter(Boolean);
+  if (!list.length) return null;
+  const n = list.length, why = clean(line.why);
+  return h('div', {className:'banner attn', role:'status', 'data-key':'start-line'},
+    h('div', {className:'grow'}, h('strong', {}, 'No helper starts right now: ' + why + '.'),
+      h('p', {}, n + (n === 1 ? ' ticket waits' : ' tickets wait') + ' in line and ' + (n === 1 ? 'starts by itself' : 'start by themselves') + ' when that passes: ', loginTicketLinks(list))),
+    line.limit ? h('a', {className:'btn outline sm', href:'#settings/helper', 'data-key':'start-line-limit'}, 'Allow more helpers') : null);
+}
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further
 // question, result to check and change to add (one button each); the notes that need no answer are one quiet line.
 function home() {
   const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, count:counted} = needsToday(), all = tickets();
-  const needCount = counted + logins.soon.length;
+  const needCount = counted;  // THE number: title, Needs you pill, Review all, Review badge and Tickets pill; a login is a row and a banner
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   const helpers = window.DashHelpers.helperRows(all, state.runs);
   const quiet = working.filter(t => t.quiet_since);
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const banner = [loginBanner(logins.stopped), backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
+  const banner = [loginBanner(logins.stopped), lineBanner(), backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
   // The number counts open questions and results to check only (ORCH-63); the list below also holds failed starts,
   // changes to add and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
   // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
-  const shownCount = needCount + logins.stopped.length;
-  const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds ? 'Things to look at' : 'Nothing needs you';
+  const shownCount = needCount;
+  const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length);
   const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});

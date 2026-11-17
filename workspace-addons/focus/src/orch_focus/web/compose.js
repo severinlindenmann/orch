@@ -105,14 +105,15 @@
   function renderWaiting(v) {
     if (!pin) return;
     const list = (v && v.run && Array.isArray(v.run.waiting_input)) ? v.run.waiting_input : [];
-    const key = JSON.stringify(list.map(m => [m.id, m.text]));
+    const hold = (v && v.run && typeof v.run.hold === 'string') ? v.run.hold : '';  /* why an idle helper has not read it yet */
+    const key = JSON.stringify([hold, list.map(m => [m.id, m.text])]);
     if (key === pin.dataset.k) return;
     pin.dataset.k = key;
     pin.hidden = !list.length;
     pin.replaceChildren(...list.map(m => {
       const btn = h('button', {class: 'btn sm', type: 'button', text: 'Take back'});
       btn.addEventListener('click', () => takeBack(m, btn));
-      return h('article', {class: 'queued-msg'}, h('p', {text: m.text}), h('div', {class: 'row'}, h('span', {class: 'grow', text: 'Helper reads this after the current step'}), btn));
+      return h('article', {class: 'queued-msg'}, h('p', {text: m.text}), h('div', {class: 'row'}, h('span', {class: 'grow', text: hold || 'Helper reads this after the current step'}), btn));
     }));
   }
 

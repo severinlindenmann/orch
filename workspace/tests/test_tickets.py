@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -95,6 +96,34 @@ def test_status_flow_and_history(proj, run, new_ticket, validate):
     assert t["status"] == "done" and len(t["history"]) == 3
     with pytest.raises(SystemExit):
         run("ticket", "status", tid, "nonsense")
+
+
+def test_superseded_by_lives_only_on_a_dropped_ticket(proj, run, new_ticket, validate):
+    old, new = new_ticket(), new_ticket()
+    key = read(proj, new).get("key") or new
+    assert run("ticket", "status", old, "open", "--superseded-by", new)[0] == 2  # only with dropped
+    assert run("ticket", "status", old, "dropped", "--superseded-by", old)[0] == 2  # not itself
+    assert run("ticket", "status", old, "dropped", "--superseded-by", "t_nothere1")[0] == 2
+    code, out, _ = run("ticket", "status", old, "dropped", "--superseded-by", key)
+    assert code == 0 and "Superseded" in out
+    t = read(proj, old)
+    validate(t)
+    assert t["status"] == "dropped" and t["superseded_by"] == new
+    assert "Superseded by" in json.dumps(t["history"])
+    assert "Replaced by:" in run("ticket", "show", old)[1]
+    rev = t["revision"]
+    assert run("ticket", "patch", old, "--if-revision", str(rev), '{"status": "open"}')[0] == 0
+    assert "superseded_by" not in read(proj, old)  # any other status clears it
+    rev += 1
+    patch = json.dumps({"status": "dropped", "superseded_by": new})
+    assert run("ticket", "patch", old, "--if-revision", str(rev), patch)[0] == 0
+    assert read(proj, old)["superseded_by"] == new
+    assert run("ticket", "patch", new, "--if-revision", "1", json.dumps({"superseded_by": old}))[0] == 2
+    rev += 1
+    assert run("ticket", "patch", old, "--if-revision", str(rev), '{"superseded_by": null}')[0] == 0
+    t = read(proj, old)
+    assert t["status"] == "dropped" and "superseded_by" not in t
+    assert tickets.status_word(t) == "Won't do"
 
 
 def test_log_actor(proj, run, new_ticket, monkeypatch):
@@ -333,7 +362,7 @@ def test_new_with_bad_ext_makes_no_ticket(proj, run, bad):
         ("Patched owner, status (status open -> active)", "Changed the owner and status (now Working)"),
         ("Status open -> done", "Moved to Done"),
         ("Status done -> open", "Moved to Backlog"),
-        ("Added check c1", "Added a step"),
+        ("Added check c1", "Added a task"),
         ("Check c1 done", "Finished a task"),
         ("Set ext.focus", "Updated Focus settings"),
         ("Set ext.my-addon", "Updated My addon settings"),
@@ -348,7 +377,7 @@ def test_history_line_is_plain_words(stored, shown):
 
 def test_history_line_names_the_task():
     checks = [{"id": "c1", "text": "Write the test"}]
-    assert tickets.history_line("Added check c1", checks) == "Added a step: Write the test"
+    assert tickets.history_line("Added check c1", checks) == "Added a task: Write the test"
     assert tickets.history_line("Check c1 done", checks) == "Finished a task: Write the test"
     assert tickets.history_line("Check c9 done", checks) == "Finished a task"
 
@@ -357,7 +386,7 @@ def test_cli_shows_task_text_in_history_but_stores_machine_text(proj, run, new_t
     tid = new_ticket()
     run("check", "add", tid, "Write the test")
     out = run("ticket", "show", tid)[1]
-    assert "Added a step: Write the test" in out
+    assert "Added a task: Write the test" in out
     assert read(proj, tid)["history"][-1]["text"] == "Added check c1"
 
 
@@ -790,3 +819,58 @@ def test_proof_state_reworded_done_when_matches_task_text_loosely():
     c["text"] = "Add a test: 20 queued tickets, no limit set, helpers start in steps"
     ps = tickets.proof_state(_t([c], done_when=done_when))
     assert ps["uncovered"] == ["Usage belongs elsewhere."]
+
+
+def test_orch185_note_edit_history_carries_old_and_new_text(proj, new_ticket):
+    """ORCH-185: Activity can show the old and new note; the label still says "Changed the note"."""
+    tid = new_ticket("Edit me")
+    tickets.edit(proj, tid, None, "human:t", {"note": "first words"})
+    tickets.edit(proj, tid, None, "human:t", {"note": "second words " * 30})
+    lines = [h["text"] for h in read(proj, tid)["history"] if h["text"].startswith("Edited note")]
+    assert lines[0] == "Edited note (was: (empty) | now: first words)"
+    assert lines[1].startswith("Edited note (was: first words | now: second words")
+    assert lines[1].endswith("…)") and len(lines[1]) < 500
+    assert tickets.history_line(lines[0]) == "Changed the note"
+    assert tickets.history_line("Edited note") == "Changed the note"
+
+
+def test_history_line_never_shows_a_task_id():
+    """ORCH-240: Reopened / Renamed / Linked / Removed lines name the task, never 'c1'."""
+    checks = [{"id": "c1", "text": "Write the test"}]
+    for stored in (
+        "Reopened c1",
+        "Reopened c1 (old evidence: note)",
+        "Renamed c1 (was: a | now: b)",
+        "Linked c1 to Done when",
+        "Removed step c2 'Old one' (was done; evidence: note)",
+    ):
+        shown = tickets.history_line(stored, checks)
+        assert not re.search(r"\bc\d+\b", shown), shown
+    assert tickets.history_line("Removed step c2 'Old one' (was open)", checks).endswith("Old one")
+    assert tickets.history_line("Title changed (was: a | now: b)") == "Changed the title"
+
+
+def test_rename_title_owner_and_task_keep_old_and_new_text(proj, run, new_ticket):
+    """ORCH-240: the Activity can show what changed (was / now)."""
+    tid = new_ticket()
+    run("ticket", "edit", tid, "--owner", "Anna")
+    assert read(proj, tid)["history"][-1]["text"] == "Edited owner (was: (empty) | now: Anna)"
+    run("check", "add", tid, "Write the test")
+    run("check", "edit", tid, "c1", "Write two tests")
+    assert read(proj, tid)["history"][-1]["text"] == "Renamed c1 (was: Write the test | now: Write two tests)"
+
+
+def test_a_wait_until_a_date_keeps_what_it_waits_for(proj, new_ticket, validate):
+    """ORCH-235: Waiting has a date and, when a person gave one, a reason; a blank reason is left out."""
+    tid = new_ticket()
+    rev = read(proj, tid).get("revision", 0)
+    wait = {"kind": "time", "until": "2030-01-01T08:00:00Z", "ref": " The price list "}
+    data = {"status": "waiting", "waiting_on": wait}
+    tickets.patch(proj, tid, rev, json.dumps(data), "human:t")
+    t = read(proj, tid)
+    validate(t)
+    assert t["waiting_on"] == {"kind": "time", "until": "2030-01-01T08:00:00Z", "ref": "The price list"}
+    blank = tickets.waiting_value("time", "  ", "2030-01-01T08:00:00Z")
+    assert blank == {"kind": "time", "until": "2030-01-01T08:00:00Z"}
+    with pytest.raises(Refused):
+        tickets.waiting_value("time", "x" * 201, "2030-01-01T08:00:00Z")

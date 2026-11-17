@@ -22,6 +22,12 @@ from orch.errors import Refused
 PR_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}")
 # gh reads these before its own sign-in; a helper's environment may set them for a helper account
 TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+
+
+class MergeFailed(Refused):
+    """GitHub (or the pull request itself) refused the merge: the review card sends it back to the helper."""
+
+
 OPEN_IT = "Open the pull request and merge it there."
 JQ_VIEW = '[.state, (.reviewDecision // ""), .headRefOid] | @tsv'
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -154,6 +160,188 @@ def checks(url: str) -> dict | None:
     return {"state": data["state"], "head": head, "green": green}
 
 
+MERGE_COMMIT = re.compile(r"Merge pull request #([0-9]{1,9}) from ")
+MAX_ITEMS = 40
+
+
+def checks_state(rollup) -> tuple[str, str]:
+    """(tone, plain words) of a pull request's checks (ORCH-183): ("done", "All 18 checks passed"),
+    ("working", "3 of 18 checks still running"), ("failed", "1 check failed: lint"). The newest run of each
+    check counts, as in passed()."""
+    if not isinstance(rollup, list) or not rollup:
+        return "working", "No checks have run yet"
+    runs = [c for c in _newest(rollup) if isinstance(c, dict)]
+    failed, running = [], 0
+    for c in runs:
+        if "state" in c and "status" not in c:
+            word = c.get("state")
+            if word == "PENDING":
+                running += 1
+                continue
+        elif c.get("status") != "COMPLETED":
+            running += 1
+            continue
+        else:
+            word = c.get("conclusion")
+        if word not in PASSED:
+            failed.append(str(c.get("name") or c.get("context") or "a check")[:60])
+    if failed:
+        n = len(failed)
+        return "failed", f"{n} check{'' if n == 1 else 's'} failed: " + ", ".join(failed[:3]) + (
+            " …" if n > 3 else ""
+        )
+    if running:
+        return "working", f"{running} of {len(runs)} checks still running"
+    return "done", f"All {len(runs)} checks passed" if len(runs) > 1 else "The check passed"
+
+
+def summary(url: str, head: str) -> dict | None:
+    """What a merge card shows (ORCH-183, owner 17 Nov: "the address is a link, not the content"), read
+    once when the card is made, with whatever login this process has: {"title", "base", "checks" (plain
+    words), "items": [{"pr": n, "title"}], "other": commits that are no pull request merge}. Items come from
+    merge commit headlines, which a commit author writes: GitHub's own titles, never a ticket alone, and the
+    count of other commits is always shown. None when GitHub cannot be read or the newest commit is no longer
+    `head` (the commit the click merges): the card then shows only that commit."""
+    gh = shutil.which("gh")
+    if gh is None or not is_pr_url(url):
+        return None
+    try:
+        v = _gh_plain(
+            gh, ["pr", "view", url, "--json", "title,baseRefName,headRefOid,commits,statusCheckRollup"], 20
+        )
+        data = json.loads(v.stdout) if v.returncode == 0 else None
+    except (Refused, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("headRefOid") != head:
+        return None
+    items, seen, other = [], set(), 0
+    for c in data.get("commits") or []:
+        if not isinstance(c, dict):
+            continue
+        m = MERGE_COMMIT.match(str(c.get("messageHeadline") or ""))
+        if not m or m[1] in seen:
+            other += 1
+            continue
+        seen.add(m[1])
+        title = next((x.strip() for x in str(c.get("messageBody") or "").splitlines() if x.strip()), "")
+        items.append({"pr": int(m[1]), "title": title[:200]})
+    return {
+        "title": str(data.get("title") or "")[:200],
+        "base": str(data.get("baseRefName") or "")[:100],
+        "checks": checks_state(data.get("statusCheckRollup")),
+        "items": items[:MAX_ITEMS],
+        "more": max(0, len(items) - MAX_ITEMS),
+        "other": other,
+    }
+
+
+# A pull request that changes a CI workflow (ORCH-305, owner 17 Nov, option A): the helper account may push
+# it, GitHub holds it until the owner approves (CODEOWNERS), and the owner's Merge card shows these checks of
+# the lines it adds. A finding is said, never a reason to refuse: the owner decides. It reads lines, not YAML:
+# the patterns match anywhere in a line (flow style `{uses: x}` and quoted keys too), and the card never says
+# more than "nothing found in the added lines".
+WORKFLOW_DIR = ".github/workflows/"
+ACTIONS_DIR = ".github/actions/"
+SECRET = re.compile(
+    r"\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[|\))|\bsecrets['\"]?\s*:\s*['\"]?(inherit)\b"
+)
+PERMISSION = re.compile(r"\bpermissions['\"]?\s*:|:\s*['\"]?write\b|\bwrite-all\b")
+USES = re.compile(r"\buses['\"]?\s*:\s*['\"]?([^\s'\",}\]#]+)")
+OWN_ACTIONS = ("./", "actions/", "github/")
+RISKY_TRIGGERS = ("pull_request_target", "workflow_run")
+MAX_FINDINGS = 6
+
+
+def is_workflow(path) -> bool:
+    return isinstance(path, str) and path.startswith(WORKFLOW_DIR) and path.endswith((".yml", ".yaml"))
+
+
+def is_action(path) -> bool:
+    """A local action the workflows can run (`uses: ./...`): its change counts like a workflow's."""
+    return isinstance(path, str) and (
+        path.startswith(ACTIONS_DIR) or path.rsplit("/", 1)[-1] in ("action.yml", "action.yaml")
+    )
+
+
+def _is_ci(path) -> bool:
+    return is_workflow(path) or is_action(path)
+
+
+def check_workflows(files: list) -> dict | None:
+    """The check of a pull request's changed files as GitHub lists them ({filename, status, additions,
+    deletions, patch}): {"files": [{"name", "add", "del"}], "findings": [plain words]} for the CI workflow
+    files among them, None when it changes none. Only added lines count: a new secret, a permissions change,
+    an action from outside GitHub's own, a trigger that runs with more rights, a file without a patch."""
+    shown, found = [], []
+
+    def say(text: str) -> None:
+        if text not in found:
+            found.append(text)
+
+    for f in files if isinstance(files, list) else []:
+        if not isinstance(f, dict) or not (_is_ci(f.get("filename")) or _is_ci(f.get("previous_filename"))):
+            continue
+        name = str(f.get("filename"))
+        if not is_workflow(name) and not is_workflow(f.get("previous_filename")):
+            say(f"changes an action the workflows run: {name[:80]}")
+        shown.append({"name": name, "add": int(f.get("additions") or 0), "del": int(f.get("deletions") or 0)})
+        patch = f.get("patch")
+        if not isinstance(patch, str):
+            if f.get("status") != "removed":
+                say(f"{name.removeprefix(WORKFLOW_DIR)} is too big to check here: open it")
+            continue
+        for line in patch.splitlines():
+            if not line.startswith("+") or line.startswith("+++"):
+                continue
+            text = line[1:]  # comments too: a word too many is cheaper than one missed
+            for m in SECRET.finditer(text):
+                if m[1] != "GITHUB_TOKEN":
+                    say("passes all secrets on" if m[2] else f"reads a secret ({m[1] or 'all secrets'})")
+            if PERMISSION.search(text):
+                say("changes what a job may do on GitHub (permissions)")
+            for u in USES.finditer(text):
+                if not u[1].startswith(OWN_ACTIONS):
+                    say(f"uses an action from outside GitHub: {u[1][:80]}")
+            for trigger in RISKY_TRIGGERS:
+                if re.search(rf"\b{trigger}\b", text):
+                    say(f"runs on {trigger}, which has more rights than a pull request run")
+    if not shown:
+        return None
+    return {"files": shown, "findings": found[:MAX_FINDINGS], "more": max(0, len(found) - MAX_FINDINGS)}
+
+
+def workflow_check(url: str, head: str) -> dict | None:
+    """check_workflows() for exactly the commit `head` of the pull request at `url` (GitHub's compare of its
+    base branch with that commit), read-only with whatever login this process has. None when it changes no
+    CI workflow or GitHub cannot be read."""
+    gh = shutil.which("gh")
+    if gh is None or not is_pr_url(url) or not SHA.fullmatch(str(head or "")):
+        return None
+    repo, _ = _parts(url)
+    try:
+        v = _gh_plain(gh, ["pr", "view", url, "--json", "baseRefName"], 15)
+        base = (json.loads(v.stdout) if v.returncode == 0 else {}).get("baseRefName")
+        if not isinstance(base, str) or not base:
+            return None
+        c = _gh_plain(gh, ["api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".files"], 30)
+        files = json.loads(c.stdout) if c.returncode == 0 else None
+    except (Refused, ValueError, AttributeError):
+        return None
+    return check_workflows(files) if isinstance(files, list) else None
+
+
+def workflow_words(wf: dict) -> str:
+    """The one line a card shows for check_workflows()'s answer."""
+    found = list(wf.get("findings") or [])
+    if wf.get("more"):
+        found.append(f"and {wf['more']} more")
+    if not found:
+        return (
+            "Workflow check: no new secrets, permissions, outside actions or risky triggers in added lines."
+        )
+    return "Workflow check, look at this: " + "; ".join(found) + "."
+
+
 RELEASE_PREFIX = "release/"
 RELEASE_FROM = "develop"  # a release only carries what is on this branch already (reviewed there)
 
@@ -203,6 +391,21 @@ def head_of(url: str) -> str:
     return head
 
 
+def _unfinished_checks(gh: str, url: str) -> str | None:
+    """Plain words when the pull request's checks have not all passed yet ("3 of 18 checks still running",
+    "1 check failed: lint"), read now at GitHub; None when they passed, there are none (a repository without
+    checks), or GitHub could not be read (GitHub's own rules then decide)."""
+    try:
+        v = _gh(gh, ["pr", "view", url, "--json", "statusCheckRollup"], 15)
+        rollup = (json.loads(v.stdout) if v.returncode == 0 else {}).get("statusCheckRollup")
+    except (ValueError, AttributeError, Refused):
+        return None
+    if not isinstance(rollup, list) or not rollup:
+        return None
+    tone, words = checks_state(rollup)
+    return None if tone == "done" else words
+
+
 def merge(url: str, head: str, add_review: bool = True) -> dict:
     """Merge the pull request at `url` as the person signed in to gh, only while its newest commit is still
     `head` (what the card showed). Returns {"login", "already"}: already is True when it was merged before (a
@@ -224,7 +427,13 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
     if state != "OPEN":
         raise Refused("The pull request is closed on GitHub, so it cannot be merged. Open it to see why.")
     if now != head:
-        raise Refused(CHANGED)
+        raise MergeFailed(CHANGED)
+    unfinished = _unfinished_checks(gh, url)
+    if unfinished:  # say it plainly instead of GitHub's "base branch policy prohibits the merge"
+        raise Refused(
+            f"Its checks have not all passed yet ({unfinished}), so nothing was merged. "
+            "The card stays: click Merge again when they are green."
+        )
     if (
         add_review and review == "REVIEW_REQUIRED"
     ):  # the branch rules want a review: the click is the person's, on THIS commit
@@ -236,6 +445,6 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
         )  # fmt: skip
     done = _gh(gh, ["pr", "merge", url, "--merge", "--match-head-commit", head], 25)
     if done.returncode != 0:
-        raise Refused(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
+        raise MergeFailed(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
     ghlimit.count("merge", url)  # the person's own click never waits, but it uses up the hour too
     return {"login": login, "already": False}

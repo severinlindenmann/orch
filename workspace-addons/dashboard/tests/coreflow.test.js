@@ -223,3 +223,80 @@ test('Undo moves the ticket back', async () => {
   await new Promise(r => setTimeout(r, 10));
   assert.equal(ctx.state.tickets[0].status, 'review');
 });
+// ORCH-248 (owner 17 Nov): a move to Working by hand offers Start instead of a silent fall back to To do.
+test('a move to Working offers Start helper, a move to Done does not', async () => {
+  const acts = [];
+  const ctx = moveContext(async () => ({ok:true}));
+  ctx.act = async (op, args) => { acts.push([op, args]); return {ok:true}; };
+  await ctx.moveTicket('t1', 'active');
+  const offer = ctx.toasts.find(t => t.text === 'No helper is working on it yet.');
+  assert.ok(offer, 'the offer is shown');
+  await offer.undo.listeners.click();
+  assert.equal(JSON.stringify(acts), JSON.stringify([['run.start', {ticket:'t1'}]]));
+  const done = moveContext(async () => ({ok:true}));
+  await done.moveTicket('t1', 'done');
+  assert.equal(done.toasts.some(t => /No helper/.test(t.text)), false);
+});
+// ORCH-152: a move to Waiting or Superseded writes its detail with the status; Undo puts the old wait back.
+test('a lane move sends the wait date or the replacing ticket, and Undo restores the wait', async () => {
+  const sent = [];
+  const ctx = moveContext(async (op, body) => { sent.push(JSON.parse(JSON.stringify(body()))); return {ok:true}; });
+  ctx.window.DashHelpers = require('../src/orch_dashboard/web/helpers.js');
+  const until = '2030-01-07T08:00:00Z';
+  ctx.state.tickets = [{id:'t1', status:'open', revision:3}, {id:'t2', status:'waiting', waiting_on:{kind:'time', until}, revision:5}];
+  await ctx.moveTicket('t1', 'waiting', false, {data:{waiting_on:{kind:'time', until}}});
+  assert.deepEqual(sent[0].data, {status:'waiting', waiting_on:{kind:'time', until}});
+  assert.equal(ctx.toasts[0].text, 'Moved to Waiting');
+  await ctx.moveTicket('t1', 'dropped', false, {data:{superseded_by:'t2'}});
+  assert.deepEqual(sent[1].data, {status:'dropped', superseded_by:'t2'});
+  assert.equal(ctx.state.tickets[0].superseded_by, 't2');
+  assert.equal(ctx.toasts[1].text, 'Moved to Superseded');
+  await ctx.moveTicket('t2', 'ready');
+  assert.equal(ctx.state.tickets[1].waiting_on, null);
+  await ctx.toasts[2].undo.listeners.click();
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(sent.at(-1).data, {status:'waiting', waiting_on:{kind:'time', until}});
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.state.tickets[1].waiting_on)), {kind:'time', until});
+});
+// ORCH-235: Done on an epic whose sub-tickets are still open asks once ("Mark Done anyway" or Cancel); with all
+// sub-tickets finished it moves at once.
+function kidsContext(kidStatus) {
+  const sent = [], dialogs = [];
+  const ctx = moveContext(async (op, body) => { sent.push(JSON.parse(JSON.stringify(body()))); return {ok:true}; });
+  ctx.window.DashHelpers = require('../src/orch_dashboard/web/helpers.js');
+  ctx.state.tickets = [{id:'t1', status:'active', revision:3, title:'Spring catalogue', epic:true},
+    {id:'t2', key:'DM-2', status:kidStatus, parent:'t1', title:'Photos'}, {id:'t3', key:'DM-3', status:'done', parent:'t1', title:'Texts'}];
+  ctx.tickets = () => ctx.state.tickets;
+  ctx.activeTicket = t => !['done', 'dropped'].includes(t.status);
+  ctx.clean = v => String(v ?? '');
+  ctx.button = (label, cls, click) => ({label, click});
+  ctx.h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity), listeners:{}, addEventListener(t, f) { this.listeners[t] = f; }, remove() {}});
+  ctx.window.orch.close = d => d.listeners.close();
+  ctx.dialog = title => {
+    const d = {title, listeners:{}, parts:[], addEventListener(t, f) { d.listeners[t] = f; }, append(...p) { d.parts.push(...p); }, showModal() { d.open = true; }};
+    const actions = {buttons:[], append(b) { actions.buttons.push(b); }};
+    dialogs.push({d, actions}); return {d, actions};
+  };
+  return {ctx, sent, dialogs};
+}
+test('Done on an epic with an open sub-ticket asks first; Cancel keeps it, Mark Done anyway moves it', async () => {
+  let {ctx, sent, dialogs} = kidsContext('ready');
+  let run = ctx.moveTicket('t1', 'done');
+  assert.equal(dialogs.length, 1);
+  assert.match(dialogs[0].d.title, /open sub-tickets/);
+  assert.match(JSON.stringify(dialogs[0].d.parts), /1 sub-ticket is not done yet: DM-2/);
+  assert.equal(ctx.state.tickets[0].status, 'active', 'nothing moves before the answer');
+  ctx.window.orch.close(dialogs[0].d);  // Cancel
+  await run;
+  assert.equal(sent.length, 0); assert.equal(ctx.state.tickets[0].status, 'active');
+  ({ctx, sent, dialogs} = kidsContext('ready'));
+  run = ctx.moveTicket('t1', 'done');
+  dialogs[0].actions.buttons.find(b => b.label === 'Mark Done anyway').click();
+  await run;
+  assert.equal(sent.length, 1); assert.equal(sent[0].data.status, 'done');
+});
+test('Done on an epic whose sub-tickets are all finished moves at once', async () => {
+  const {ctx, sent, dialogs} = kidsContext('dropped');
+  await ctx.moveTicket('t1', 'done');
+  assert.equal(dialogs.length, 0); assert.equal(sent[0].data.status, 'done');
+});

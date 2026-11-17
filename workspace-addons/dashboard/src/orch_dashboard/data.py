@@ -464,6 +464,7 @@ def _mark_tickets(root: Path, tickets: list[dict]) -> None:
     add_proof_state(tickets, root)
     add_artifact_marks(tickets)
     add_quiet(tickets)
+    add_stuck(tickets)
 
 
 def add_proof_state(tickets: list[dict], root: Path | None = None) -> None:
@@ -495,6 +496,40 @@ def add_quiet(tickets: list[dict]) -> None:
             since = None
         if since:
             t["quiet_since"] = since
+
+
+def add_stuck(tickets: list[dict]) -> None:
+    """`stuck` ("question" | "quiet" | "overdue") from the core's one rule (ORCH-189); a stuck helper is added by
+    the page from the run. Not stored."""
+    try:
+        from orch import tickets as core
+    except ImportError:
+        return
+    for t in tickets:
+        t.pop("stuck", None)
+        try:
+            why = core.stuck_why(t)
+        except (TypeError, ValueError, AttributeError):
+            why = None
+        if why:
+            t["stuck"] = why
+
+
+def add_spend(root: Path, tickets: list[dict]) -> None:
+    """`spend` {cost, seconds} on tickets a helper worked on: helper time and money at list price, read from the
+    helpers' conversation files by the core (cached per file). Left out of snapshots (ORCH-189)."""
+    try:
+        from orch import usage
+    except ImportError:
+        return
+    try:
+        got = usage.spend(root, tickets)
+    except (OSError, TypeError, ValueError):
+        return
+    for t in tickets:
+        t.pop("spend", None)
+        if t.get("id") in got:
+            t["spend"] = got[t["id"]]
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
@@ -787,14 +822,14 @@ def _consent(r: dict) -> str:
     lines = [desc, head] if desc else [head]
     if r.get("source") == "local":
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
-    lines.append(f"Adds the command: orch {name}")
-    lines.append(f"Adds a skill and an entry in the local orch instructions: orch-{name}")
+    lines.append(f"Lets helpers and you use it from the terminal: orch {name}")
+    lines.append("Teaches your helpers how to use it.")
     if r.get("ticket_view"):
-        lines.append(f"Stores data on tickets under: ext.{name}")
+        lines.append("Keeps some extra information on your tickets.")
     if d and isinstance(d.get("label"), str):
         lines.append(f"Adds a dashboard tab: {d['label']}")
     if r.get("background"):
-        lines.append("Runs a background process.")
+        lines.append("Keeps running in the background while it is on.")
     return "\n".join(lines)[:1200]
 
 
@@ -887,11 +922,13 @@ def _ws_tags(root: Path) -> list[str]:
 
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
-    agents, rows = (
-        run_orch(orch_bin, ["agents", "--json"], root),
-        run_orch(orch_bin, ["addon", "list", "--json"], root),
-    )
-    private = run_orch(orch_bin, ["private", "--json"], root)
+    # the four `orch ... --json` reads side by side (one after the other they took seconds with helpers running)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_agents = pool.submit(run_orch, orch_bin, ["agents", "--json"], root)
+        f_rows = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
+        f_private = pool.submit(run_orch, orch_bin, ["private", "--json"], root)
+        f_perm = pool.submit(run_orch, orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
+    agents, rows, private = f_agents.result(), f_rows.result(), f_private.result()
     private = private if isinstance(private, dict) else {}
     private_lines = private.get("lines")
     git_private = {
@@ -920,7 +957,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         ],
     }
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
-    perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
+    perm = f_perm.result()
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     from orch.config import (
         agents_may_finish,
@@ -928,6 +965,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copies_mode,
         copy_setup,
         diag_enabled,
+        focus_preview_on,
         focus_session_typing,
         live_max,
         release_merge_on,
@@ -956,6 +994,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
         "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
+        "focus_preview_on": focus_preview_on(root),  # Settings > Add-ons: the Preview switch
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
@@ -1211,6 +1250,19 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
     return out
 
 
+def patch_settings(root: Path, orch_bin: str | None, state: dict, op: str) -> dict:
+    """A Settings click's answer (ORCH-227): the last full state with the Settings values read again (and Mobile
+    mode for a phone choice); everything else stays until the background build replaces it. Before, every choice
+    waited for a full build and the page showed the old choice for 4 to 12 s."""
+    out = dict(state)
+    out["settings"] = load_settings(root, orch_bin)
+    if op.startswith("mobile."):
+        out["mobile_mode"] = mobile.load_mobile(root, orch_bin)
+    out["now"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out["rev"] = state_rev(out)
+    return out
+
+
 def load_state(
     root: Path,
     orch_bin: str | None = None,
@@ -1219,7 +1271,7 @@ def load_state(
     with_settings: bool = False,
 ) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
-    from .actions import actor
+    from .actions import actor, computer_user
 
     # The independent `orch ... --json` reads run side by side; .result() in the old order raises as before.
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -1241,6 +1293,8 @@ def load_state(
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
+    else:
+        add_spend(root, tickets)
     _shape_refs(root, tickets, with_settings)
     kinds = link_kinds(raw) if with_addons else []
     if with_settings:
@@ -1258,6 +1312,7 @@ def load_state(
     state = {
         "workspace": root.name,
         "who": actor(root).removeprefix("human:"),
+        "login": computer_user(),  # the computer's login name: old lines recorded under it are the person's own
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "me": _me(root) if with_settings else None,
         "people": people.load(root)
@@ -1283,6 +1338,8 @@ def load_state(
         "build": _build() if with_settings else None,
         # Home and Settings > Helper: what helpers need (tool logins, connections, keys); live page only
         "logins": load_logins(root) if with_settings else None,
+        # Home: tickets waiting in line for a helper and why none starts now (ORCH-266); live page only
+        "start_line": start_line(root) if with_settings else None,
     }
     add_warmth(root, tickets, state["runs"])
     state["rev"] = state_rev(state)
@@ -1314,6 +1371,9 @@ def load_logins(root: Path) -> dict | None:
             row["renew"] = True
         if isinstance(r.get("key"), str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", r["key"]):
             row["key"] = r["key"]
+        # ORCH-48: what the person does to renew when orch cannot start the sign-in (plain text, one line)
+        if isinstance(r.get("how"), str) and re.fullmatch(r"[^\x00-\x1f\x7f<>]{1,160}", r["how"]):
+            row["how"] = r["how"]
         row["stops"] = [
             {"id": t.get("id"), "key": t.get("key"), "title": t.get("title")}
             for t in (r.get("stops") or [])
@@ -1327,6 +1387,16 @@ def _build() -> str | None:
     from . import update
 
     return update.build()
+
+
+def start_line(root: Path) -> dict | None:
+    """{"waiting": [ticket ids], "why": plain reason or None, "limit": n or None}, or None when nothing waits."""
+    try:
+        from orch import runs_live
+
+        return runs_live.line_status(root)
+    except Exception:  # noqa: BLE001 - an older orch or an unreadable line: Home simply shows no line
+        return None
 
 
 def _auto_update_note() -> dict | None:

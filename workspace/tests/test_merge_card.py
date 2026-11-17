@@ -22,6 +22,11 @@ class FakeGh:
         self.calls, self.envs, self.review, self.head = [], [], "", HEAD
         self.state, self.merge_rc, self.merge_err = state, merge_rc, merge_err
         self.login, self.user_rc = login, user_rc
+        self.files = None  # the changed files GitHub's compare lists for the card's commit (None: refused)
+        self.rollup = []  # statusCheckRollup that `gh pr view --json statusCheckRollup` answers
+        self.summary = (
+            None  # what `gh pr view --json title,...` answers when the card is made (None: refused)
+        )
 
     def __call__(self, argv, env=None, **kw):
         args = argv[1:]
@@ -30,6 +35,18 @@ class FakeGh:
         self.envs.append({k: env[k] for k in ghmerge.TOKEN_VARS if k in env})
         if args[:2] == ["api", "user"]:
             return subprocess.CompletedProcess(argv, self.user_rc, self.login + "\n", "")
+        if args[:2] == ["pr", "view"] and "title,baseRefName,headRefOid,commits,statusCheckRollup" in args:
+            if self.summary is None:
+                return subprocess.CompletedProcess(argv, 1, "", "not found")
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.summary), "")
+        if args[:2] == ["pr", "view"] and args[3:] == ["--json", "baseRefName"]:
+            if self.files is None:
+                return subprocess.CompletedProcess(argv, 1, "", "not found")
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"baseRefName": "develop"}), "")
+        if args[:2] == ["api", f"repos/acme/app/compare/develop...{self.head}"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.files), "")
+        if args[:2] == ["pr", "view"] and args[3:] == ["--json", "statusCheckRollup"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"statusCheckRollup": self.rollup}), "")
         if args[:2] == ["pr", "view"]:
             return subprocess.CompletedProcess(argv, 0, f"{self.state}\t{self.review}\t{self.head}\n", "")
         if args[:3] == ["api", "-X", "POST"]:
@@ -134,18 +151,44 @@ def test_not_now_merges_nothing(tk, run, gh):
     assert _q(root, tid)["decision"]["action"] == "dont"
 
 
-def test_refused_merge_saves_no_answer_and_can_be_clicked_again(tk, run, gh):
+def test_refused_merge_is_sent_back_to_the_helper_with_the_reason(tk, run, gh):
     root, tid = tk
     assert _ask(run, tid)[0] == 0
-    gh.merge_rc, gh.merge_err = 1, "X Pull request acme/app#12 is not mergeable: checks are failing.\n"
+    gh.merge_rc, gh.merge_err = (
+        1,
+        "X Pull request acme/app#12 is not mergeable: the base branch policy prohibits the merge.\n",
+    )
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    q = _q(root, tid)
+    assert q["answer"] is not None and q["decision"]["action"] == "send_back"
+    change = q["decision"]["changes"][0]
+    assert "Merge failed on GitHub, please fix it:" in change and "base branch policy prohibits" in change
+    assert "Open the pull request and merge it there." not in change
+    assert len(gh.merges) == 1
+
+
+def test_only_a_person_merge_refusal_still_refuses(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", "agent:claude")
+    assert code == 2 and _q(root, tid)["answer"] is None
+
+
+def test_running_checks_hold_the_merge_and_save_no_answer(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.rollup = [
+        {"name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "workflowName": "ci"},
+        {"name": "tests", "status": "IN_PROGRESS", "conclusion": "", "workflowName": "ci"},
+    ]
     code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
     assert code == 2
-    assert "GitHub did not merge it: Pull request acme/app#12 is not mergeable" in out + err
-    assert "Open the pull request and merge it there." in out + err
-    assert _q(root, tid)["answer"] is None
-    gh.merge_rc = 0
+    assert "1 of 2 checks still running" in out + err and "nothing was merged" in out + err
+    assert gh.merges == [] and _q(root, tid)["answer"] is None
+    gh.rollup[1].update(status="COMPLETED", conclusion="SUCCESS")
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
-    assert len(gh.merges) == 2 and _q(root, tid)["answer"] is not None
+    assert len(gh.merges) == 1
 
 
 def test_already_merged_is_not_merged_twice(tk, run, gh):
@@ -226,9 +269,9 @@ def test_a_required_review_is_the_persons_own_before_the_merge(tk, run, gh):
     gh.review = "REVIEW_REQUIRED"
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
     acts = [c[:2] for c in gh.calls]
-    assert acts == [["api", "user"], ["pr", "view"], ["api", "-X"], ["pr", "merge"]]
-    assert gh.calls[2][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
-    assert f"commit_id={HEAD}" in gh.calls[2] and "event=APPROVE" in gh.calls[2]
+    assert acts == [["api", "user"], ["pr", "view"], ["pr", "view"], ["api", "-X"], ["pr", "merge"]]
+    assert gh.calls[3][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
+    assert f"commit_id={HEAD}" in gh.calls[3] and "event=APPROVE" in gh.calls[3]
     assert all(e == {} for e in gh.envs)
 
 
@@ -267,22 +310,232 @@ def test_card_shows_and_pins_the_newest_commit(tk, run, gh):
     assert _ask(run, tid)[0] == 0
     q = _q(root, tid)
     assert q["action"] == {"merge": PR, "head": HEAD}
-    assert q["card"]["preview"]["paras"] == [PR, f"Commit {HEAD[:7]}"]
+    assert q["card"]["preview"] == {
+        "type": "doc",
+        "heading": "Pull request",
+        "foot": f"Exact version: {HEAD[:7]}",
+    }
+    assert PR not in json.dumps(q["card"]["preview"]), "the address is the Open link, not the content"
+    assert q["card"]["open"] == PR
 
 
-def test_a_push_after_the_card_is_never_merged(tk, run, gh):
+def test_a_release_card_shows_what_goes_out_and_the_checks(tk, run, gh):
+    """ORCH-183, owner 17 Nov: a Merge card shows what the person decides on, not the address."""
     root, tid = tk
+    code, out, _ = run("ticket", "new", "Review on desktop", "--json", "--by", "agent:x")
+    other = json.loads(out)["id"]
+    assert run("ref", "add", other, "https://github.com/acme/app/pull/7", "--by", "agent:x")[0] == 0
+    ok = {
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "workflowName": "ci",
+        "name": "build",
+        "startedAt": "1",
+    }
+    gh.summary = {
+        "title": "Release 32",
+        "baseRefName": "main",
+        "headRefOid": HEAD,
+        "commits": [
+            {"messageHeadline": "Merge pull request #7 from acme/feat/x", "messageBody": "Bigger pictures"},
+            {"messageHeadline": "Fix a typo", "messageBody": ""},
+            {
+                "messageHeadline": "Merge pull request #9 from acme/fix/y",
+                "messageBody": "Send back asks for words\n\nmore",
+            },
+        ],
+        "statusCheckRollup": [ok, {**ok, "name": "lint"}],
+    }
     assert _ask(run, tid)[0] == 0
-    gh.head, gh.review = "b" * 40, "REVIEW_REQUIRED"
-    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
-    assert code == 2 and "changed after the card was made" in out + err
-    assert gh.merges == [] and ["api", "-X"] not in [c[:2] for c in gh.calls]
-    assert _q(root, tid)["answer"] is None
+    pv = _q(root, tid)["card"]["preview"]
+    key = tickets.load(root, other)["key"]
+    assert pv["heading"] == "What goes out · 2 changes"
+    assert pv["rows"] == [
+        {"title": "Bigger pictures", "n": 7, "key": key},
+        {"title": "Send back asks for words", "n": 9},
+        {"title": "and 1 other commit"},
+    ], "GitHub's own titles, the linked ticket beside it, and the commits that are no pull request"
+    assert pv["status"]["tone"] == "done" and pv["status"]["text"].startswith(
+        "All 2 checks passed · checked "
+    )
+    assert "paras" not in pv, "all green: no warning lines"
+    assert pv["foot"] == f"Exact version: {HEAD[:7]}"
+    wire = review.wire_card(_q(root, tid)["card"], {})
+    review.check_wire_card(wire, 0)  # still a valid phone card: the rows and status become plain lines
+    assert wire["preview"]["steps"][0] == f"Bigger pictures (#7, {key})"
+    assert wire["preview"]["paras"][0].startswith("All 2 checks passed")
 
 
-def test_card_only_for_an_open_pull_request(tk, run, gh):
+def test_a_failed_check_turns_the_status_red_and_says_why(tk, run, gh):
     root, tid = tk
-    gh.state = "MERGED"
-    code, out, err = _ask_only(run, tid)
-    assert code == 2 and "not open on GitHub" in out + err
-    assert tickets.load(root, tid)["questions"] == []
+    bad = {
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "workflowName": "ci",
+        "name": "lint",
+        "startedAt": "1",
+    }
+    gh.summary = {
+        "title": "Release 33",
+        "baseRefName": "main",
+        "headRefOid": HEAD,
+        "statusCheckRollup": [bad],
+        "commits": [{"messageHeadline": "Merge pull request #9 from acme/fix/y", "messageBody": "Y"}],
+    }
+    assert _ask(run, tid)[0] == 0
+    pv = _q(root, tid)["card"]["preview"]
+    assert pv["status"]["tone"] == "failed" and pv["status"]["text"].startswith("1 check failed: lint")
+    assert pv["paras"][0] == "Merging now would put work live that failed a check."
+    assert "may have changed" in pv["paras"][1]
+
+
+def test_a_summary_of_another_commit_or_a_file_never_replaces_it(tk, run, gh, tmp_path):
+    root, tid = tk
+    gh.summary = {
+        "title": "Release 33",
+        "baseRefName": "main",
+        "headRefOid": "c" * 40,
+        "commits": [],
+        "statusCheckRollup": [],
+    }
+    assert _ask(run, tid)[0] == 0
+    assert "rows" not in _q(root, tid)["card"]["preview"], "read for another commit: only the pinned one"
+
+
+def test_checks_in_plain_words():
+    run_ = {"status": "COMPLETED", "conclusion": "SUCCESS", "workflowName": "ci", "startedAt": "1"}
+    assert ghmerge.checks_state([]) == ("working", "No checks have run yet")
+    assert ghmerge.checks_state([{**run_, "name": "a"}, {**run_, "name": "b"}]) == (
+        "done",
+        "All 2 checks passed",
+    )
+    two = [{**run_, "name": "a"}, {"status": "IN_PROGRESS", "name": "b"}]
+    assert ghmerge.checks_state(two) == ("working", "1 of 2 checks still running")
+    assert ghmerge.checks_state([{**run_, "name": "a", "conclusion": "FAILURE"}]) == (
+        "failed",
+        "1 check failed: a",
+    )
+
+
+def test_a_doc_box_takes_status_rows_and_foot_only_in_shape():
+    pv = {
+        "type": "doc",
+        "status": {"tone": "done", "text": "Fine"},
+        "rows": [{"title": "One", "n": 3, "key": "ORCH-1"}],
+    }
+    ok = {"kind": "draft", "title": "T", "then": "x", "preview": {**pv, "foot": "v"}}
+    review.validate_card(json.loads(json.dumps(ok)))
+    for bad in ({"tone": "pink", "text": "x"}, {"tone": "done"}, "Fine"):
+        with pytest.raises(review.Refused):
+            review.validate_card({**ok, "preview": {**ok["preview"], "status": bad}})
+    for bad in ([{"n": 3}], [{"title": "x", "n": -1}], [{"title": "x", "url": "https://x"}], "rows"):
+        with pytest.raises(review.Refused):
+            review.validate_card({**ok, "preview": {**ok["preview"], "rows": bad}})
+
+
+# ---- ORCH-305: a pull request that changes a CI workflow ----
+
+WF = ".github/workflows/addons.yml"
+
+
+def _wf_file(*added, name=WF, status="modified"):
+    patch = "@@ -1,2 +1,4 @@\n jobs:\n" + "".join(f"+{x}\n" for x in added)
+    return {"filename": name, "status": status, "additions": len(added), "deletions": 0, "patch": patch}
+
+
+def test_a_plain_workflow_change_says_it_was_checked():
+    wf = ghmerge.check_workflows(
+        [_wf_file("  pr-tests:", "    timeout-minutes: 10", "    steps:", "      - uses: actions/checkout@v4",
+                  "      - run: echo ${{ secrets.GITHUB_TOKEN }}"),
+         {"filename": "workspace/src/orch/x.py", "additions": 3, "deletions": 1, "patch": "+secrets.KEY"}]
+    )  # fmt: skip
+    assert wf == {"files": [{"name": WF, "add": 5, "del": 0}], "findings": [], "more": 0}
+    assert ghmerge.workflow_words(wf) == (
+        "Workflow check: no new secrets, permissions, outside actions or risky triggers in added lines."
+    )
+
+
+def test_no_workflow_file_is_no_workflow_check():
+    assert ghmerge.check_workflows([{"filename": ".github/CODEOWNERS", "patch": "+x"}]) is None
+    assert ghmerge.check_workflows("not a list") is None
+
+
+@pytest.mark.parametrize(
+    ("line", "words"),
+    [
+        ("      - run: curl -d ${{ secrets.DEPLOY_KEY }} x", "reads a secret (DEPLOY_KEY)"),
+        ("      env: ${{ toJSON(secrets) }}", "reads a secret (all secrets)"),
+        ("    permissions: write-all", "changes what a job may do on GitHub (permissions)"),
+        ("      contents: write", "changes what a job may do on GitHub (permissions)"),
+        ("  job: {permissions: {contents: read}}", "changes what a job may do on GitHub (permissions)"),
+        ("    steps: [{uses: someone/x@v1}]", "uses an action from outside GitHub: someone/x@v1"),
+        ('      - "uses": "someone/y@v2"', "uses an action from outside GitHub: someone/y@v2"),
+        ("    secrets: inherit", "passes all secrets on"),
+        ("      - uses: someone/action@v1", "uses an action from outside GitHub: someone/action@v1"),
+        (
+            "  pull_request_target:",
+            "runs on pull_request_target, which has more rights than a pull request run",
+        ),
+    ],
+)
+def test_each_risky_added_line_is_named(line, words):
+    assert ghmerge.check_workflows([_wf_file(line)])["findings"] == [words]
+
+
+def test_removed_lines_and_own_actions_are_not_findings():
+    f = _wf_file("      - uses: ./.github/actions/setup", "      - uses: github/codeql-action/init@v3")
+    f["patch"] += "-      - run: echo ${{ secrets.OLD }}\n-    permissions: write-all\n"
+    assert ghmerge.check_workflows([f])["findings"] == []
+
+
+def test_a_workflow_without_a_patch_says_open_it_and_a_removed_one_does_not():
+    big = {"filename": WF, "status": "modified", "additions": 900, "deletions": 0}
+    gone = {"filename": ".github/workflows/old.yml", "status": "removed", "additions": 0, "deletions": 40}
+    assert ghmerge.check_workflows([big, gone])["findings"] == [
+        "addons.yml is too big to check here: open it"
+    ]
+
+
+def test_the_merge_card_of_a_workflow_change_shows_the_check_first(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("      - uses: someone/action@v1")]
+    code, out, err = _ask(run, tid)
+    assert code == 0, err
+    card = _q(root, tid)["card"]
+    pv = card["preview"]
+    assert (
+        pv["paras"][0]
+        == "Workflow check, look at this: uses an action from outside GitHub: someone/action@v1."
+    )
+    assert pv["rows"][0] == {"title": f"{WF} (+1 −0)"}
+    assert "GitHub waits for you to approve it" in card["why"]
+    assert PR + "/files" in json.dumps(_q(root, tid))
+
+
+def test_the_click_on_a_workflow_card_approves_that_commit_then_merges(tk, run, gh):
+    root, tid = tk
+    gh.files = [_wf_file("    timeout-minutes: 10")]
+    gh.review = "REVIEW_REQUIRED"  # the develop rule wants the code owner's review
+    _ask(run, tid)
+    code, _, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, err
+    posts = [c for c in gh.calls if c[:3] == ["api", "-X", "POST"]]
+    assert posts and f"commit_id={HEAD}" in posts[0] and gh.merges
+
+
+def test_a_card_without_a_workflow_file_is_as_before(tk, run, gh):
+    root, tid = tk
+    gh.files = [{"filename": "README.md", "additions": 1, "deletions": 0, "patch": "+x"}]
+    _ask(run, tid)
+    card = _q(root, tid)["card"]
+    assert "paras" not in card["preview"] and card["why"].startswith("Your click merges it")
+
+
+def test_a_changed_local_action_counts_and_is_named():
+    act = _wf_file("    - uses: someone/z@v1", name=".github/actions/setup/action.yml")
+    wf = ghmerge.check_workflows([act])
+    assert wf["files"][0]["name"] == ".github/actions/setup/action.yml"
+    assert wf["findings"] == [
+        "changes an action the workflows run: .github/actions/setup/action.yml",
+        "uses an action from outside GitHub: someone/z@v1",
+    ]

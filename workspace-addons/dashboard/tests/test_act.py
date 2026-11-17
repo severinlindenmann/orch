@@ -99,9 +99,39 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("answer", {"ticket": "t_abcdef", "question": "q1", "digest": "x", "answer": "a"}),
         ("ticket.edit", {"ticket": "t_abcdef", "due": "tomorrow"}),
         ("ticket.edit", {"ticket": "t_abcdef"}),
+        ("ticket.edit", {"ticket": "t_abcdef", "parent": "--title=x"}),
+        ("ticket.edit", {"ticket": "t_abcdef", "parent": 7}),
+        ("ticket.order", {"lane": "To do", "tickets": ["t_abcdef"]}),
+        ("ticket.order", {"lane": "todo", "tickets": []}),
+        ("ticket.order", {"lane": "todo", "tickets": ["--json"]}),
+        ("ticket.order", {"lane": "todo", "tickets": "t_abcdef"}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"title": "x"}}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"id": "t_other1"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "weird"}, "if_revision": 1}),
+        # ORCH-152: a board wait is a time; Superseded names a ticket
+        (
+            "ticket.patch",
+            {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "ticket", "ref": "x"}}, "if_revision": 1},
+        ),
+        ("ticket.patch", {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "time"}}, "if_revision": 1}),
+        (
+            "ticket.patch",
+            {
+                "ticket": "t_abcdef",
+                "data": {"waiting_on": {"kind": "time", "until": "x", "ref": 5}},
+                "if_revision": 1,
+            },
+        ),
+        (
+            "ticket.patch",
+            {
+                "ticket": "t_abcdef",
+                "data": {"waiting_on": {"kind": "time", "until": "x", "on": "y"}},
+                "if_revision": 1,
+            },
+        ),
+        ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": "--all"}, "if_revision": 1}),
+        ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": 5}, "if_revision": 1}),
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
         ("run.start", {"ticket": "t_abcdef", "agent": "x"}),
         ("addon.start", {"name": "x"}),
@@ -170,6 +200,54 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             },
             ["ticket", "patch", "t_abcdef", "--if-revision=3", *common, "--", '{"title": "New"}'],
         ),
+        (  # ORCH-152: the board's Superseded lane
+            {
+                "op": "ticket.patch",
+                "args": {
+                    "ticket": "t_abcdef",
+                    "data": {"status": "dropped", "superseded_by": "ORCH-7"},
+                    "if_revision": 3,
+                },
+            },
+            [
+                "ticket",
+                "patch",
+                "t_abcdef",
+                "--if-revision=3",
+                *common,
+                "--",
+                '{"status": "dropped", "superseded_by": "ORCH-7"}',
+            ],
+        ),
+        (  # ORCH-235: a wait from the board or the ticket page has a date and may say what it waits for
+            {
+                "op": "ticket.patch",
+                "args": {
+                    "ticket": "t_abcdef",
+                    "data": {
+                        "status": "waiting",
+                        "waiting_on": {
+                            "kind": "time",
+                            "until": "2030-01-01T08:00:00Z",
+                            "ref": "The price list",
+                        },
+                    },
+                    "if_revision": 3,
+                },
+            },
+            [
+                "ticket",
+                "patch",
+                "t_abcdef",
+                "--if-revision=3",
+                *common,
+                "--",
+                (
+                    '{"status": "waiting", "waiting_on": {"kind": "time", "until": "2030-01-01T08:00:00Z", '
+                    '"ref": "The price list"}}'
+                ),
+            ],
+        ),
         (
             {
                 "op": "ticket.edit",
@@ -199,6 +277,18 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         (
             {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": ""}},
             ["ticket", "edit", "t_abcdef", "--due=", *common],
+        ),
+        (  # ORCH-156: a lane put in order, first to last
+            {"op": "ticket.order", "args": {"lane": "todo", "tickets": ["t_bbbbbb", "t_abcdef"]}},
+            ["ticket", "order", "todo", *common, "--", "t_bbbbbb", "t_abcdef"],
+        ),
+        (  # ORCH-156: "Part of" puts the ticket under an epic; null takes it out
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "parent": "t_epic01", "if_revision": 4}},
+            ["ticket", "edit", "t_abcdef", "--parent=t_epic01", "--if-revision=4", *common],
+        ),
+        (
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "parent": None}},
+            ["ticket", "edit", "t_abcdef", "--parent=", *common],
         ),
         (
             {"op": "log", "args": {"ticket": "t_abcdef", "text": "-hello"}},
@@ -295,6 +385,22 @@ def test_refusal_comes_back_as_plain_text(act_server, act_orch):
     (act_orch.parent / "mode.txt").write_text("refuse")
     code, text, _ = post(act_server, {"op": "run.stop", "args": {"ticket": "t_abcdef"}})
     assert code == 422 and text == "Nope, not allowed."
+
+
+def test_every_click_leaves_one_act_event_in_the_debug_log(act_server, act_orch, monkeypatch):
+    """ORCH-341: a click that left the ticket where it was must show in a problem report: op, ticket and the
+    answer's status (no arguments)."""
+    from orch_dashboard import server
+
+    seen = []
+    monkeypatch.setattr(server.diag, "log", lambda ev, lvl="debug", **kv: seen.append((ev, kv)))
+    (act_orch.parent / "mode.txt").write_text("refuse")
+    code, _, _ = post(act_server, {"op": "run.stop", "args": {"ticket": "t_abcdef"}})
+    assert code == 422
+    acts_ = [kv for ev, kv in seen if ev == "dashboard.act"]
+    assert len(acts_) == 1
+    assert acts_[0]["op"] == "run.stop" and acts_[0]["ticket"] == "t_abcdef" and acts_[0]["status"] == 422
+    assert set(acts_[0]) <= {"root", "op", "ticket", "status", "ms"}
 
 
 def test_no_orch_command_is_a_plain_503(ws):
@@ -1125,7 +1231,9 @@ def test_big_body_is_allowed_only_for_a_new_ticket(act_server, act_orch):
     assert s == 200
     c = acts(act_orch)[-1]
     assert c[:2] == ["ticket", "new"] and not any(a.startswith("--note=") and len(a) > 2100 for a in c)
-    assert any(a.startswith("--note=The full text is attached as note.md") for a in c)
+    assert not any(
+        a.startswith("--note=") for a in c
+    )  # ORCH-185: no helper instruction under "What you asked"
     s, _, _ = _post_raw(act_server, {"op": "log", "args": {"ticket": "t_abcdef", "text": "x"}, "pad": big})
     assert s == 400
     s, _, _ = _post_raw(act_server, {"op": "log", "args": {"ticket": "t_abcdef", "text": big[:30000]}})
@@ -1154,7 +1262,7 @@ def test_paste_long_text_keeps_the_note_short():
     text = "First line\n" + "word " * 800
     _, flags, tail = actions.OPS["ticket.paste"]({"text": text})
     assert tail == ["First line"]
-    assert flags == ["--title-auto", "--note=" + actions.LONG_NOTE]
+    assert flags == ["--title-auto"]  # ORCH-185: the Note stays empty; the text is the note.md file
     assert [n for n, _ in actions.attachments("ticket.paste", {"text": text})] == ["note.md"]
     # a short paste is unchanged: no file, the text is the note
     short = "Short title\nand some more"
@@ -1357,11 +1465,11 @@ def test_check_wont_do_refuses_bad_args(extra):
 
 def test_ticket_model_argv_and_refusals():
     common = ["--by", actions.actor(), "--json"]
-    for m in ("sonnet", "opus", "auto"):
+    for m in ("haiku", "sonnet", "opus", "fable", "auto"):
         assert actions.build_argv("ticket.model", {"ticket": "t_abcdef", "model": m}) == [
             "ticket", "model", "t_abcdef", m, *common,
         ]  # fmt: skip
-    for bad in ({"model": "fable"}, {"model": "--x"}, {"model": None}, {"model": "opus", "extra": 1}):
+    for bad in ({"model": "gpt"}, {"model": "--x"}, {"model": None}, {"model": "opus", "extra": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("ticket.model", {"ticket": "t_abcdef", **bad})
     assert actions.needs_session("ticket.model")  # a person's choice: never from a script
@@ -1408,6 +1516,23 @@ def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
     assert build_argv("copies.clean", {})[:3] == ["copy", "clean", "--json"]
     with pytest.raises(BadRequest):
         build_argv("copies.clean", {"path": "/"})
+
+
+def test_triage_start_takes_only_known_lanes():
+    from orch_dashboard.actions import BadRequest, build_argv, needs_session
+
+    argv = build_argv("triage.start", {"lanes": ["working", "backlog"]})
+    assert argv[:5] == ["triage", "--start", "--json", "--lanes", "backlog,working"]  # board order
+    assert needs_session("triage.start")  # a person's click only
+    for bad in (
+        {},
+        {"lanes": []},
+        {"lanes": ["all"]},
+        {"lanes": "backlog"},
+        {"lanes": ["backlog"], "ticket": "t_x"},
+    ):
+        with pytest.raises(BadRequest):
+            build_argv("triage.start", bad)
 
 
 def test_copies_remove_orphaned_takes_one_folder_name_only():
@@ -1644,3 +1769,39 @@ def test_addon_act_allow_script_takes_only_the_shown_key(act_orch, ws):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_epic_in_one_request_answers_with_every_ticket(act_server, act_orch):
+    """ORCH-185: one ticket.new with `steps` makes the epic and the tickets inside it, and the answer says which."""
+    body = {
+        "op": "ticket.new",
+        "args": {"title": "Epic", "epic": True, "steps": [{"title": "One"}, {"title": "Two"}]},
+    }
+    s, text, _ = _post_raw(act_server, body)
+    assert s == 200, text
+    made = [c for c in acts(act_orch) if c[:2] == ["ticket", "new"]]
+    assert len(made) == 3 and "--epic" in made[0]
+    assert [a for a in made[1] if a.startswith("--parent=")] and [
+        a for a in made[2] if a.startswith("--parent=")
+    ]
+    state = json.loads(text)
+    assert [m["index"] for m in state["steps"]["made"]] == [0, 1] and state["steps"]["failed"] == []
+
+
+def test_epic_with_a_bad_ticket_makes_nothing(act_server, act_orch):
+    body = {
+        "op": "ticket.new",
+        "args": {"title": "Epic", "epic": True, "steps": [{"title": "One"}, {"title": ""}]},
+    }
+    s, _, _ = _post_raw(act_server, body)
+    assert s == 400
+    assert not [c for c in acts(act_orch) if c[:2] == ["ticket", "new"]]
+
+
+def test_check_move_argv_and_refusals():
+    """ORCH-236: the ticket page moves a task up or down with `orch check move <ticket> <task> --after <task>`."""
+    argv = actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3"})
+    assert argv == ["check", "move", "t_abcdef", "c2", "--after=c3", "--by", actions.actor(), "--json"]
+    for bad in ({"after": "--x"}, {"after": None}, {"check": "bad"}, {"extra": 1}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3", **bad})

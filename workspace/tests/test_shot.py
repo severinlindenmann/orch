@@ -1,0 +1,154 @@
+"""`orch shot`: the browser always starts with the keychain-safe options; widths, files and cleanup."""
+
+from __future__ import annotations
+
+import base64
+import struct
+import zlib
+from pathlib import Path
+
+import pytest
+
+from orch import cli_shot
+from orch.errors import Refused
+
+
+def test_command_has_keychain_safe_flags():
+    cmd = cli_shot.command("/b", "/p", 1280, 800)
+    assert "--use-mock-keychain" in cmd and "--password-store=basic" in cmd
+    assert "--remote-debugging-pipe" in cmd and "--user-data-dir=/p" in cmd
+    # The picture is taken over the protocol now, never with --screenshot (that cut narrow widths).
+    assert not any(a.startswith("--screenshot") for a in cmd)
+
+
+def test_widths():
+    assert cli_shot.parse_widths("1280, 390") == [1280, 390]
+    for bad in ("", "abc", "50"):
+        with pytest.raises(Refused):
+            cli_shot.parse_widths(bad)
+
+
+def test_target_url(tmp_path):
+    f = tmp_path / "m.html"
+    f.write_text("<p>x</p>")
+    assert cli_shot.target_url(str(f)).startswith("file://")
+    assert cli_shot.target_url("http://127.0.0.1:1/") == "http://127.0.0.1:1/"
+    with pytest.raises(Refused):
+        cli_shot.target_url(str(tmp_path / "none.html"))
+
+
+class FakePipe:
+    """Answers the protocol calls `capture` makes and remembers them."""
+
+    def __init__(self):
+        self.calls = []
+        self.w = self.r = -1
+
+    def call(self, method, params=None, session=None, timeout=30):
+        self.calls.append((method, params or {}, session))
+        return {
+            "Target.createTarget": {"targetId": "T"},
+            "Target.attachToTarget": {"sessionId": "S"},
+            "Page.captureScreenshot": {"data": base64.b64encode(b"png").decode()},
+        }.get(method, {})
+
+    def wait_event(self, method, session, timeout):
+        self.calls.append((method, {}, session))
+        return True
+
+    def settle(self, session, quiet, deadline):
+        pass
+
+
+def fake_browser(monkeypatch):
+    pipes = []
+    monkeypatch.setattr(cli_shot, "find_browser", lambda: "/b")
+
+    def launch(cmd):
+        pipes.append((cmd, FakePipe()))
+        return None, pipes[-1][1]
+
+    monkeypatch.setattr(cli_shot, "_launch", launch)
+    return pipes
+
+
+def test_viewport_is_set_by_the_protocol_before_the_page_loads():
+    pipe = FakePipe()
+    assert cli_shot.capture(pipe, "http://x/", 390, 844, 1) == b"png"
+    names = [m for m, _, _ in pipe.calls]
+    metrics = next(p for m, p, _ in pipe.calls if m == "Emulation.setDeviceMetricsOverride")
+    assert metrics["width"] == 390 and metrics["height"] == 844
+    assert names.index("Emulation.setDeviceMetricsOverride") < names.index("Page.navigate")
+    assert names[-1] == "Target.closeTarget"
+
+
+def test_shoot_writes_files_and_removes_profile(tmp_path, monkeypatch):
+    f = tmp_path / "m.html"
+    f.write_text("<p>x</p>")
+    pipes = fake_browser(monkeypatch)
+    out = cli_shot.shoot(str(f), [1280, 390], tmp_path / "o", "n", None, 1)
+    assert [p.name for p in out] == ["n-1280.png", "n-390.png"]
+    assert all(p.read_bytes() == b"png" for p in out)
+    assert len(pipes) == 1  # one browser, one profile for every width
+    cmd, pipe = pipes[0]
+    profile = next(a for a in cmd if a.startswith("--user-data-dir=")).split("=", 1)[1]
+    assert not Path(profile).exists()
+    widths = [p["width"] for m, p, _ in pipe.calls if m == "Emulation.setDeviceMetricsOverride"]
+    assert widths == [1280, 390]
+    assert pipe.calls[-1][0] == "Browser.close"
+
+
+def test_launch_link_only_on_first_width(tmp_path, monkeypatch):
+    pipes = fake_browser(monkeypatch)
+    cli_shot.shoot("http://h/#launch=tok", [1280, 390], tmp_path, "n", None, 1)
+    urls = [p["url"] for m, p, _ in pipes[0][1].calls if m == "Page.navigate"]
+    assert urls == ["http://h/#launch=tok", "http://h/"]
+
+
+def _has_browser():
+    try:
+        cli_shot.find_browser()
+        return True
+    except Refused:
+        return False
+
+
+@pytest.mark.skipif(not _has_browser(), reason="no Chrome or Chromium here")
+def test_narrow_width_lays_out_that_wide(tmp_path):
+    # ORCH-219: headless Chrome keeps windows at least 500 wide; a 390 picture must still show a
+    # 390 wide page, not a 500 wide one cut at the right. The page paints its width as a bar.
+    f = tmp_path / "w.html"
+    f.write_text(
+        "<!doctype html><body style='margin:0'><div id=b style='height:40px;background:#000'></div>"
+        "<script>b.style.width=(innerWidth/2)+'px'</script>"
+    )
+    png = cli_shot.shoot(str(f), [390], tmp_path, "w", 200, 5)[0].read_bytes()
+    assert struct.unpack(">II", png[16:24]) == (390, 200)
+    assert _bar_width(png) == 195
+
+
+def _bar_width(png: bytes) -> int:
+    """Black pixels in the first row of a PNG (no image library needed)."""
+    w, _ = struct.unpack(">II", png[16:24])
+    depth, ctype = png[24], png[25]
+    assert depth == 8 and ctype in (2, 6)
+    bpp = 3 if ctype == 2 else 4
+    data, i = b"", 8
+    while i < len(png):
+        n = struct.unpack(">I", png[i : i + 4])[0]
+        if png[i + 4 : i + 8] == b"IDAT":
+            data += png[i + 8 : i + 8 + n]
+        i += 12 + n
+    raw = zlib.decompress(data)
+    row = raw[1 : 1 + w * bpp]
+    kind = raw[0]  # first row, nothing above: Up = None, Paeth = Sub, Average = half the left pixel
+    px, prev = [], [0] * bpp
+    for x in range(w):
+        p = list(row[x * bpp : x * bpp + bpp])
+        if kind in (1, 4):
+            p = [(p[k] + prev[k]) & 0xFF for k in range(bpp)]
+        elif kind == 3:
+            p = [(p[k] + prev[k] // 2) & 0xFF for k in range(bpp)]
+        prev = p
+        px.append(p)
+    return sum(1 for p in px if p[0] < 30 and p[1] < 30 and p[2] < 30)

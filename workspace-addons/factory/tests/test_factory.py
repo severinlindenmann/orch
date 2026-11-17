@@ -28,7 +28,8 @@ def setup(run, proposal):
 def test_idea_draft_propose(ws, run, proposal):
     idea = run("idea", "Booking page")
     order = idea["order"]
-    assert Path(idea["draft"]).read_bytes() == b""
+    # bug hunt 17 Nov: without draft text the title is v1, never an empty file (Read draft showed an empty box)
+    assert Path(idea["draft"]).read_bytes() == b"Booking page\n"
     draft = run("draft", order, "--file", "-", data=b"# Approved draft\r\n")
     assert Path(draft["draft"]).name == "v2.md"
     assert Path(draft["draft"]).read_bytes() == b"# Approved draft\r\n"
@@ -278,6 +279,22 @@ def test_help_lists_the_fields(command):
     )
 
 
+def test_help_says_what_each_command_takes(run):
+    """ORCH-277: start/status/view take no order; the help says so and an order gets a plain refusal."""
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-m", "orch_factory", "--help"], capture_output=True, text=True, check=True
+    ).stdout
+    for command in ("start", "status", "view", "show", "next", "list", "stop"):
+        assert f"\n    {command} " in out, command
+    assert "start the Factory watcher (takes no order" in out
+    for command in ("start", "status", "view", "list"):
+        refused = run(command, "t_abcdef", code=2)
+        assert refused["code"] == "invalid" and "takes no order" in refused["error"]
+        assert "unrecognized" not in refused["error"]
+
+
 def test_skill_names_the_schema_command_and_steps():
     import orch_factory
 
@@ -460,3 +477,12 @@ def test_skill_tells_the_manager_to_file_the_testers_pictures_with_the_stop():
 
     text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
     assert ".orch/addons/factory/stops/<order>/s<round>/" in text and '"after": "s1/make-poll.png"' in text
+
+
+def test_skill_tells_the_manager_to_wait_for_real_instead_of_ending_its_turn():
+    import orch_factory
+
+    text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
+    # ORCH-333: after start-crew the manager records what it waits for, so orch can wake it
+    assert "orch wait <order> --on ticket:<crew ticket>" in text
+    assert "Never\n  just end your turn" in text

@@ -474,6 +474,22 @@ def set_focus_session_typing(root: Path, value: bool) -> bool:
     return bool(value)
 
 
+FOCUS_PREVIEW_KEY = "focus.preview"  # the `orch config` key of the setting below
+
+
+def focus_preview_on(root: Path | None) -> bool:
+    """[focus] preview (default off): the dashboard's Focus page shows the new Focus, still being built,
+    instead of today's Focus. Off, or an unreadable config file: today's Focus, exactly as before."""
+    if root is None:
+        return False
+    return file_switch(root, "focus", "preview", False) is True
+
+
+def set_focus_preview(root: Path, value: bool) -> bool:
+    set_key(root, "focus", "preview", bool(value))
+    return bool(value)
+
+
 def record_keep_days(root: Path | None) -> int:
     """[record] keep_days as the file says it (snapped to the allowed list, default 90)."""
     return file_value(root, "record", "keep_days")
@@ -647,6 +663,32 @@ def reviewer_on(root: Path | None) -> bool:
 
 def set_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     set_key(root, "workflow", "reviewer", value)
+    return value
+
+
+def reviewer_answers_on(root: Path | None) -> bool:
+    """[workflow] reviewer_answers (default off): the Reviewer answers small, routine questions for the owner
+    with the helper's recommended option (reviewer.answer_routine). Only a person turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "reviewer_answers", False) is True
+
+
+def set_reviewer_answers(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "reviewer_answers", value)
+    return value
+
+
+def reviewer_look_on(root: Path | None) -> bool:
+    """[workflow] reviewer_look (default off): the Reviewer's second look (ORCH-175) checks bigger finished
+    work point by point with a helper on the small model and accepts it for the owner or sends it back."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "reviewer_look", False) is True
+
+
+def set_reviewer_look(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "reviewer_look", value)
     return value
 
 
