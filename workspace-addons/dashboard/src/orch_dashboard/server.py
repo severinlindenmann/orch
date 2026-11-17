@@ -565,7 +565,16 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.rfile.read(n)
             except (ValueError, OSError):
                 return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
-            up.update({"Origin": f"http://127.0.0.1:{port}", "Content-Type": "application/json"})
+            # The add-on sees the dashboard's own call: its own origin and same-origin. The browser's Sec-Fetch-Site
+            # (cross-site from a sandboxed frame) was checked by the dashboard's fence above; an add-on that refuses
+            # a missing Sec-Fetch-Site (Insights) refused every forwarded action without it.
+            up.update(
+                {
+                    "Origin": f"http://127.0.0.1:{port}",
+                    "Sec-Fetch-Site": "same-origin",
+                    "Content-Type": "application/json",
+                }
+            )
         for attempt in (0, 1):
             try:
                 conn = HTTPConnection("127.0.0.1", port, timeout=20)

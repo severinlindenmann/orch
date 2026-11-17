@@ -154,6 +154,7 @@ def test_post_passes_dashboard_fence_then_gets_the_addons_origin(stack):
     assert ok[0] == 200
     _, _, hd = SEEN[-1]
     assert hd["Origin"] == f"http://127.0.0.1:{port}" and hd["Host"] == f"127.0.0.1:{port}"
+    assert hd["Sec-Fetch-Site"] == "same-origin"  # Insights refuses an action without it (ORCH-230)
     n = len(SEEN)
     for headers in (
         {**j},
