@@ -4,6 +4,9 @@
         waits until one write of that kind fits this computer's limit and counts it; exit 0 = write now,
         exit 2 = no room in time (do not write)
     orch github writes      the writes of the last hour per kind, the limit and when the next one fits
+    orch github expert [--dry-run] [--known <problem>=<ticket>]
+        the Development expert's read-only pass over CI, pull requests and tickets (devexpert.py); off until
+        `orch config set github.dev_expert <role ticket>` and `github.dev_expert_repo <owner/name>`
 
 The limits are settings: `orch config set github.merge_per_hour 12` (also pr_, comment_, other_per_hour).
 """
@@ -33,6 +36,16 @@ def add_parsers(sub, common) -> None:
         help="minutes to wait for room (default 60)",
     )
     g.add_parser("writes", parents=[common], help="GitHub writes of the last hour and the limits")
+    e = g.add_parser(
+        "expert", parents=[common], help="the Development expert's pass over CI and pull requests"
+    )
+    e.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    e.add_argument(
+        "--known",
+        action="append",
+        metavar="PROBLEM=TICKET",
+        help="a red problem that already has its ticket, e.g. nightly-ci=ORCH-32 (no second ticket)",
+    )
 
 
 def _when(secs) -> str:
@@ -44,6 +57,12 @@ def _when(secs) -> str:
 def dispatch(args, root: Path | None) -> bool:
     if getattr(args, "cmd", None) != "github":
         return False
+    if args.sub == "expert":
+        from orch import devexpert
+
+        res = devexpert.run(root, dry_run=args.dry_run, known=devexpert.parse_known(args.known))
+        print(json.dumps(res, indent=2, default=str) if args.json else devexpert.text(res, args.dry_run))
+        return True
     if args.sub == "wait":
         if args.max_wait < 0:
             raise Refused("--max-wait is a number of minutes, 0 or more.")
