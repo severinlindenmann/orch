@@ -12,6 +12,7 @@ const TABS = [
 ];
 const kinds = {skill: 'skills', connection: 'connections', key: 'keys'};
 const MARKS = {working: '✓ ', look: '▲ ', new: '◇ ', idle: '', unknown: ''};
+const CANT_TELL = "Can't tell yet";
 const BADGE = {success: 'done', warning: 'attn', info: 'working', '': ''};
 let overview = null, lists = {}, active = 'skills', loading = false;
 
@@ -67,7 +68,9 @@ function metric(label, value, small) {
 function servicesTile(view, small) {
   const {count, known} = view.tabs.connections;
   if (known) return metric('Connected services', String(count), small || (count ? 'Used by your helpers' : 'None connected'));
-  return metric('Connected services', null, count ? `${plural(count, 'service')} used by your helpers` : 'orch can’t see this list yet');
+  // The full list is unknown: the services seen in use are still a true count (one number, ORCH-232); never a false 0.
+  if (count) return metric('Connected services', String(count), 'Used by your helpers · there may be more');
+  return metric('Connected services', null, 'orch can’t see this list yet');
 }
 
 // First day, nothing recorded yet: the same tiles as the overview, each saying when it fills.
@@ -116,6 +119,11 @@ function fillBars() {
 const short = (n, d, unit) => `${(n / d).toFixed(1).replace(/\.0$/, "")}${unit}`;
 const fmt = n => n >= 1e6 ? short(n, 1e6, "M") : n >= 1e3 ? short(n, 1e3, "k") : String(n);
 
+// Runs and tokens come from two records: runs without recorded tokens are not "no model use" (ORCH-232).
+function modelsEmptyText(view, runs) {
+  return runs > 0 ? 'Token use isn’t recorded for these runs yet.' : view.text;
+}
+
 function renderModels(view) {
   const host = byId('models');
   if (!view || view.error) { host.hidden = true; return; }
@@ -124,7 +132,7 @@ function renderModels(view) {
   bars.replaceChildren();
   rows.replaceChildren();
   rows.hidden = view.empty;
-  if (view.empty) { byId('models-text').textContent = view.text; return; }
+  if (view.empty) { byId('models-text').textContent = modelsEmptyText(view, overview && overview.runs); return; }
   byId('models-text').textContent = view.moved_text + '.';
   const most = Math.max(...view.models.map(m => m.tokens));
   view.models.forEach((m, index) => {
@@ -275,7 +283,9 @@ function renderServices() {
   if (!answer) { box.textContent = `${plural(count, 'connected service')} recorded.`; return; }
   box.replaceChildren(...answer.rows.map(row => {
     const line = node('p');
-    line.append(node('strong', row.name), document.createTextNode(` · ${row.state.text} · ${row.allowed}`));
+    // Only what is known: "Can't tell yet" twice on one line says nothing (ORCH-232).
+    const known = [row.state && row.state.text, row.allowed].filter(text => text && text !== CANT_TELL);
+    line.append(node('strong', row.name), document.createTextNode(known.map(text => ` · ${text}`).join('')));
     return line;
   }));
 }

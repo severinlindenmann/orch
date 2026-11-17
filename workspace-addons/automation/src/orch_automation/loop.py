@@ -101,6 +101,17 @@ def record_last_run(root: Path, t: dict, now: datetime, by: str | None = None) -
     update_state(root, t["id"], last_run=fmt(now))
 
 
+def repeat_words(cron: str, tz=None) -> str:
+    """Why a repeat started, in the person's words for the ticket history: "on its repeat, every 2 hours".
+    Never the raw rule ("cron 0 */2 * * *"): Focus and the ticket page show this line as is (ORCH-232)."""
+    from .view import cron_human  # view imports this module
+
+    words = cron_human(cron, tz)
+    if words.startswith("On a custom plan"):
+        return "on its repeat"
+    return "on its repeat, " + (words[0].lower() + words[1:] if words.startswith("Every ") else words)
+
+
 class Scheduler:
     def __init__(self, root: Path):
         self.root = root
@@ -411,7 +422,7 @@ class Scheduler:
                     ):  # the agent finished the last one: open it again (a script never closes it)
                         orchcli.call(self.root, "ticket", "status", tid, "open")
                         orchcli.log(self.root, tid, "Opened again for the next run of this repeat.")
-                    res = self.start_due(run_tid, f"cron {cron}", now) if run_tid else "failed"
+                    res = self.start_due(run_tid, repeat_words(cron, tz), now) if run_tid else "failed"
                     if run_tid:  # a sub-ticket that could not be made is tried again next pass
                         record_last_run(
                             self.root, t, now
