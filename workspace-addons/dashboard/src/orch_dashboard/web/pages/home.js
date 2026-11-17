@@ -551,8 +551,12 @@ function loginAction(item, key, quiet = false) {
   return control;
 }
 // A tool orch cannot renew itself says the one step the person takes (ORCH-48).
+// (page scope: Settings uses it too). Nothing when a Renew or Replace button is there, or it works.
+function loginHowText(item) {
+  return item && item.state !== 'works' && !item.renew && !item.key && typeof item.how === 'string' ? item.how : '';
+}
 function loginHow(item) {
-  const how = window.DashHelpers.needHow(item);
+  const how = loginHowText(item);
   return how ? h('p', {className:'meta', 'data-key':'login-how-' + item.name}, how) : null;
 }
 function loginSoonRow(item) {

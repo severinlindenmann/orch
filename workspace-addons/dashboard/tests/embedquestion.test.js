@@ -19,6 +19,7 @@ function setup({shipped = true, kind = 'page', tickets, snapshot = false, fresh}
     mutation:0, fetched:[], fetch:async url => { ctx.fetched.push(url); return {ok:true, json:async () => ({tickets:fresh || t})}; },
     accept:next => { t.splice(0, t.length, ...next.tickets); },
     addEventListener(){}, window:{orch:{open:d => calls.opened.push(d)}}};
+  ctx.orchFrameChan = () => 'ab'.repeat(16);  // the shown frame's per-frame code (settings.js, ORCH-186)
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow, frame};
 }
@@ -31,7 +32,12 @@ test('a valid message from the embedded shipped add-on iframe is accepted', () =
 test('foreign origin, other frame or window, null source, wrong type, bad ids are ignored', () => {
   const {ctx, frameWindow} = setup();
   assert.equal(ctx.embedQuestionRequest({...good(frameWindow), origin:'https://evil.example'}), null);
+  // ORCH-186: the shown shipped frame is sandboxed (origin "null"): it must carry its per-frame code
   assert.equal(ctx.embedQuestionRequest({...good(frameWindow), origin:'null'}), null);
+  const coded = {...good(frameWindow), origin:'null'}; coded.data = {...coded.data, chan:'ab'.repeat(16)};
+  assert.notEqual(ctx.embedQuestionRequest(coded), null);
+  assert.equal(ctx.embedQuestionRequest({...coded, data:{...coded.data, chan:'cd'.repeat(16)}}), null);
+  assert.equal(ctx.embedQuestionRequest({...coded, source:{}}), null);  // ...and come from that frame
   assert.equal(ctx.embedQuestionRequest({...good({}), source:{}}), null);
   assert.equal(ctx.embedQuestionRequest({...good(frameWindow), source:null}), null);
   assert.equal(ctx.embedQuestionRequest(good(frameWindow, {type:'orch.answer'})), null);
@@ -52,7 +58,7 @@ test('opening shows the dashboard-owned question, takes nothing from the message
   assert.equal(calls.acts.length, 0, 'nothing is answered until the person presses an option');
   assert.equal(calls.posts.length, 0);
   context.onAnswered();
-  assert.deepEqual(JSON.parse(JSON.stringify(calls.posts)), [[{type:'orch.question.done', ticket:'t_abcdef', question:'q1'}, 'http://127.0.0.1:8000']]);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.posts)), [[{type:'orch.question.done', ticket:'t_abcdef', question:'q1'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 test('an unknown or already answered question says so plainly and mounts no card', async () => {
   const {ctx, calls, frame} = setup();

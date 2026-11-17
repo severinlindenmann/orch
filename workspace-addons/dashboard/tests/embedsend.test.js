@@ -17,6 +17,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, status = 'ready
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:id => tickets.find(t => t.id === id),
     document:{querySelector:() => frame}, act:async (op, args) => { calls.acts.push([op, args]); return results[op] || {ok:true, status:200, state:op === 'run.send' ? {send_result:{id:'i_1', delivered:0, state:'none'}} : {}}; },
     addEventListener(){}, window:{orch:{toast(){}}}};
+  ctx.orchFrameChan = () => 'ab'.repeat(16);  // the shown frame's per-frame code (settings.js, ORCH-186)
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow};
 }
@@ -27,7 +28,12 @@ test('only the shown shipped add-on frame of this origin, for a ticket of its ow
   const {ctx, frameWindow} = setup();
   assert.equal(ctx.embedSendRequest(msg(frameWindow)).ticket, 't_order01');
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), origin:'https://evil.example'}), null);
+  // ORCH-186: the shown shipped frame is sandboxed (origin "null"): it must carry its per-frame code
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), origin:'null'}), null);
+  const coded = {...msg(frameWindow), origin:'null'}; coded.data = {...coded.data, chan:'ab'.repeat(16)};
+  assert.notEqual(ctx.embedSendRequest(coded), null);
+  assert.equal(ctx.embedSendRequest({...coded, data:{...coded.data, chan:'cd'.repeat(16)}}), null);
+  assert.equal(ctx.embedSendRequest({...coded, source:{}}), null);  // ...and come from that frame
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), source:{}}), null);
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), source:null}), null);
   for (const bad of [{type:'orch.idea'}, {type:'orch.send.done'}, {id:'x'}, {ticket:'t_other01'}, {ticket:'t_zzzzzz'}, {ticket:'../x'}, {text:5}, {text:'  \n '}]) assert.equal(ctx.embedSendRequest(msg(frameWindow, bad)), null);
@@ -46,7 +52,7 @@ test("the click sends the person's message with the dashboard's own run.send, th
   const {ctx, calls, frameWindow} = setup();
   await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.acts), [['run.send', {ticket:'t_order01', text:'Now plan the run.'}], ['run.start', {ticket:'t_order01'}]]);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.done', ticket:'t_order01', delivered:false, queued:true, started:true, id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.done', ticket:'t_order01', delivered:false, queued:true, started:true, id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 
 test('an agent already working gets the message without a second start', async () => {
@@ -60,7 +66,7 @@ test('a refused send (no page session: watch-only) starts nothing and tells the 
   const {ctx, calls, frameWindow} = setup({results:{'run.send':{ok:false, status:403, text:'Sign in to do this: open the dashboard with a sign-in link from orch.'}}});
   await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
   assert.deepEqual(calls.acts.map(a => a[0]), ['run.send']);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 
 test('too long is refused before any act; a second click while sending sends once', async () => {

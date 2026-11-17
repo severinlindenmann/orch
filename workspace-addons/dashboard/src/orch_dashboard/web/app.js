@@ -296,7 +296,7 @@ function route() {
     if (open && !open[2].startsWith('/') && !open[2].includes('..') && addons().some(a => a.name === open[1] && a.page)) return {kind:'page', id:open[1], path:open[2], hash:'#addon/' + open[1] + (open[2] ? '/' + open[2] : '')};
     // An add-on page's own place can follow a second # (#addon/factory/#/order/<id>/proposal, Home's link to a
     // proposal): it goes to the frame as the page's own hash.
-    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?(?:#(\/[A-Za-z0-9_/-]*))?$/.exec(hash);
+    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?(?:#([A-Za-z0-9_/-]*))?$/.exec(hash);
     if (own && !(own[2] || '').startsWith('/') && !(own[2] || '').includes('..') && addons().some(a => a.name === own[1] && a.page)) return {kind:'page', id:own[1], path:own[2] || '', ...(own[3] ? {inner:own[3]} : {}), hash};
     if (hash.startsWith('#addon/')) {
       const id = decodeURIComponent(hash.slice(7));
@@ -316,10 +316,11 @@ function needsCountFrame() {
 }
 function postNeedsCount(n) {
   const win = needsCountFrame();
-  try { win?.postMessage({type:'orch.needs.count', count:n}, location.origin); } catch (_) { /* the page was left */ }
+  try { win?.postMessage({type:'orch.needs.count', count:n}, '*'); } catch (_) { /* the page was left */ }  // the frame's origin is opaque (sandboxed)
 }
 globalThis.addEventListener?.('message', e => {
-  if (e.origin !== location.origin || e.data?.orch !== 'needs-count' || !state) return;
+  const chan = e.origin === 'null' && !!e.data?.chan && e.data.chan === globalThis.orchFrameChan?.();  // sandboxed frame: its code
+  if ((e.origin !== location.origin && !chan) || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
 function render(arrived = new Set()) {
@@ -662,7 +663,13 @@ main.addEventListener('drop', event => {
   const id = dragging;
   dragging = '';
   main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target'));
-  moveToLane(id, col.dataset.status, col);
+  const t = ticketOf(id), lane = col.dataset.status;
+  if (t && boardLane(t) === lane) {  // ORCH-156: inside its own lane a drop puts the card above the one it lands on
+    const family = event.target.closest?.('.col-body > .board-family'), over = family?.querySelector('.ticket-card')?.dataset.ticket;
+    orderInLane(id, lane, over && over !== id ? over : over === id ? id : null);
+    return;
+  }
+  moveToLane(id, lane, col);
 });
 main.addEventListener('change', async event => {
   const cap = event.target.closest('[data-key="settings-copies-max"]');
@@ -837,6 +844,7 @@ main.addEventListener('click', async event => {
   }
   if (action === 'task-toggle') { await toggleTask(control.dataset.ticket, control.dataset.check); return; }
   if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
+  if (action === 'lane-up' || action === 'lane-down') { control.closest('details')?.removeAttribute('open'); await laneStep(control.dataset.ticket, control.dataset.lane, action === 'lane-up' ? -1 : 1); return; }
   if (action === 'view') {
     ticketView = control.dataset.view === 'board' ? 'board' : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
