@@ -1660,7 +1660,7 @@ function startInline(control) {
     return;
   }
   const input = el(MULTILINE.includes(field) ? 'textarea' : 'input', 'input inline-input');
-  if (MULTILINE.includes(field)) input.rows = Math.min(20, Math.max(3, before.split('\n').length + 1)); else input.type = 'text';
+  if (MULTILINE.includes(field)) input.rows = 3; else input.type = 'text';
   if (field === 'title') input.maxLength = 200;
   input.value = before;
   input.setAttribute('aria-label', capitalise(field));
@@ -1668,12 +1668,15 @@ function startInline(control) {
   host.replaceChildren(input, el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'));
   input.focus();
   if (MULTILINE.includes(field)) {
-    // Show the whole note: grow with the text, and start at the top instead of the end.
-    const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight + 2, window.innerHeight * 0.6) + 'px'; };
-    const top = () => { grow(); input.scrollTop = 0; window.scrollTo(window.scrollX, window.scrollY); };
-    input.setSelectionRange(input.value.length, input.value.length);
-    top(); requestAnimationFrame(top); setTimeout(top, 150);
-    input.addEventListener('input', grow);
+    // Small by default (3 rows, from the top); "Show all" opens the whole note, "Show less" goes back.
+    let open = false;
+    const fit = () => { input.style.height = open ? 'auto' : ''; if (open) input.style.height = Math.min(input.scrollHeight + 2, window.innerHeight * 0.6) + 'px'; };
+    const more = button('Show all', 'ghost xs', () => { open = !open; more.textContent = open ? 'Show less' : 'Show all'; fit(); input.scrollTop = 0; input.focus(); });
+    more.type = 'button';
+    more.addEventListener('mousedown', event => event.preventDefault());  // keep the box focused, so it does not save
+    input.setSelectionRange(0, 0); input.scrollTop = 0;
+    if (input.scrollHeight > input.clientHeight + 2) host.append(more);
+    input.addEventListener('input', () => { if (open) fit(); });
   }
   let done = false;
   const finish = async save => {
