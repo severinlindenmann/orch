@@ -1,4 +1,4 @@
-# Services (ORCH-268, Preview add-on)
+# Services (ORCH-268)
 
 The product tab follows this page since ORCH-326 (see "Built" below). `services.html` is the page the owner picked on 17 Nov
 (layout C of three drafts: table, cards by state, list and panel). `services-data.js` holds the demo snapshot and
