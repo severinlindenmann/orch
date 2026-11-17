@@ -335,8 +335,9 @@
     for (const t of arr(tickets)) {
       const run = runs && runs[t.id], st = helperState(run, t);
       if (!st) continue;
-      const tasks = arr(t.checklist).filter(c => c && !c.wont_do), at = tasks.findIndex(c => c.state === 'doing');
-      const n = at >= 0 ? at : tasks.findIndex(c => !c.done);
+      // every task counts, a skipped one too, so "Step 3 of 4" matches the "3/4" of the Tickets list and the ticket
+      const tasks = arr(t.checklist).filter(Boolean), at = tasks.findIndex(c => !c.wont_do && c.state === 'doing');
+      const n = at >= 0 ? at : tasks.findIndex(c => !c.done && !c.wont_do);
       out.push({ticket: t, ...st, step: tasks.length && n >= 0 ? {n: n + 1, of: tasks.length} : null,
         minutes: Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
         idle: Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null,
