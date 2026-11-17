@@ -191,11 +191,11 @@ def doctor(root: Path) -> dict:
                     "Run: orch diag inspect",
                 )
             )
-        from orch import doctorpass
+    from orch import doctorpass
 
-        late = doctorpass.overdue_row(root)
-        if late:
-            rows.append(late)
+    late = doctorpass.overdue_row(root)  # once, after the run checks (it sat inside their loop: ORCH-104)
+    if late:
+        rows.append(late)
     problems = [r for r in rows if not r["ok"]]
     return {"ok": not problems, "problems": len(problems), "checks": rows}
 
