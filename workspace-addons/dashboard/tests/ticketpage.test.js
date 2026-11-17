@@ -653,16 +653,22 @@ test('Looks good says when part of Done when has no task; nothing when all is co
   assert.match(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:['a']}})), /1 part of “Done when” has no task/);
   assert.doesNotMatch(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:[]}})), /Done when/);
 });
-test('Answer in the header plays the needs-you fade and shows a focus ring on the first answer (ORCH-234)', () => {
-  const focused = [], scrolled = [], classes = new Set(['card', 'next-question', 'needs-in']), log = [];
-  const card = {scrollIntoView:o => scrolled.push(o), get offsetWidth() { log.push('reflow'); return 1; }, querySelector:() => ({focus:o => focused.push(o)}),
-    classList:{remove:c => { log.push('remove ' + c); classes.delete(c); }, add:c => { log.push('add ' + c); classes.add(c); }}};
-  const c = context({main:{querySelector:sel => sel === '.next-question' ? card : null}});
-  assert.equal(c.focusTicketAnswer(), true);
-  assert.equal(scrolled[0].block, 'center');
-  assert.deepEqual(log, ['remove needs-in', 'reflow', 'add needs-in'], 'the fade restarts on every press');
-  assert.equal(focused[0].focusVisible, true, 'the focus ring shows after a mouse click');
-  assert.equal(focused[0].preventScroll, true);
-  const none = context({main:{querySelector:() => null}});
-  assert.equal(none.focusTicketAnswer(), false);
+test('Answer in the header opens the answer window like the ticket list; without one it brings the card into view (ORCH-234)', () => {
+  const opened = [], trigger = {};
+  const needs = [{ticket:'t_other', kind:'question'}, {ticket:'t_one', kind:'stopped'}, {ticket:'t_one', kind:'question'}];
+  const DashHelpers = {...helpers, needAction:n => ({kind:n.kind === 'question' ? 'answer' : 'run'})};
+  const c = context({needsList:() => needs, openNeed:(row, t) => opened.push([row, t]), main:{querySelector:() => null}});
+  c.window.DashHelpers = DashHelpers;
+  assert.equal(c.focusTicketAnswer('t_one', trigger), 'window');
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][0], needs[2], 'the question of this ticket, never a stopped-helper row (that would restart it)');
+  assert.equal(opened[0][1], trigger);
+  const focused = [], log = [];
+  const card = {scrollIntoView:o => log.push('scroll ' + o.block), get offsetWidth() { log.push('reflow'); return 1; }, querySelector:() => ({focus:o => focused.push(o)}),
+    classList:{remove:x => log.push('remove ' + x), add:x => log.push('add ' + x)}};
+  const lone = context({needsList:() => [], openNeed:() => assert.fail('no window without a need'), main:{querySelector:sel => sel === '.next-question' ? card : null}});
+  assert.equal(lone.focusTicketAnswer('t_one', trigger), 'card');
+  assert.deepEqual(log, ['scroll center', 'remove needs-in', 'reflow', 'add needs-in'], 'the fade restarts on every press');
+  assert.equal(focused.length, 1);
+  assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
 });

@@ -942,18 +942,19 @@ function phoneEntry(tid, entry) {
   return h('div', {className:'phone-entry'}, p.text ? h('p', {}, clean(p.text)) : null, body);
 }
 // Ticket-only controls bind properties: the shared h() serializes attributes.
-// The header Answer button (ORCH-234): the question card stands above every tab, so it is mostly in view already and a
-// plain scroll and script focus (no ring after a mouse click) did nothing a person could see. It now brings the
-// question to the middle, plays the soft "needs you" fade on it once and puts a visible focus ring on the first
-// (suggested) answer.
-function focusTicketAnswer() {
+// The header Answer button (ORCH-234): it only scrolled to the question card, which stands above every tab and so was
+// in view already, and focused it without a ring: nothing a person could see. It now opens the same answer window as
+// Answer in the ticket list (openNeed). Without a waiting question for this ticket it brings the card to the middle
+// and plays the soft "needs you" fade once.
+function focusTicketAnswer(id, trigger) {
+  const need = (typeof needsList === 'function' ? needsList() : []).find(n => n && n.ticket === id && window.DashHelpers.needAction(n).kind === 'answer');
+  if (need) { openNeed(need, trigger); return 'window'; }
   const card = main.querySelector('.next-question');
-  if (!card) return false;
+  if (!card) return '';
   card.scrollIntoView({block:'center', behavior:'smooth'});
   card.classList.remove('needs-in'); void card.offsetWidth; card.classList.add('needs-in');
-  const target = card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button');
-  target?.focus({preventScroll:true, focusVisible:true});
-  return true;
+  card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button')?.focus({preventScroll:true});
+  return 'card';
 }
 function ticketButton(label, cls, click, attrs = {}) {
   const node = h('button', {type:'button', className:'btn ' + cls, 'data-key':'ticket-button-' + label, ...attrs}, label);
@@ -1517,7 +1518,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   if (!snapshot) {
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'active'), {'data-key':'ticket-reopen'}));
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
-    else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', focusTicketAnswer, {'data-key':'ticket-answer'})); }
+    else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', e => focusTicketAnswer(t.id, e?.currentTarget), {'data-key':'ticket-answer'})); }
     else if (fresh) actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'}));
     else if (ticketPaused(t, run)) actions.push(ticketButton('Resume', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'}));
     if (menu) actions.push(menu);
