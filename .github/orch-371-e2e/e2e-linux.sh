@@ -6,9 +6,9 @@ SHA="$1"; MODE="$2"; OUT="$3"; HERE="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$OUT/shots"
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
-R=$(mktemp -d "$HOME/.orch-e2e-XXXX"); W=$R/ws/svc-walk; mkdir -p "$W" "$R/home"
+mkdir -p "$HOME/.orch-test"; R=$(mktemp -d "$HOME/.orch-test/e2e-XXXX"); W=$R/ws/svc-walk; mkdir -p "$W" "$R/home"
 if [ "$MODE" = sealed ]; then H=$R/home; else H=$HOME; fi
-OH=$(mktemp -d "$H/.orch-test-XXXX")/orch-tool   # orch's own folder is always sealed (must be under HOME)
+OH=$R/orch-tool   # orch's own folder is always sealed (under the account's ~/.orch-test)
 UVH=$R/uv
 E() {
   (cd "$W" && env -i HOME="$H" ORCH_HOME="$OH" ORCH_HOME_STRICT=1 ORCH_INSTALL_KIND=test ORCH_REF="$SHA" \
