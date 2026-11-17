@@ -89,7 +89,7 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - An epic's "+ Add a ticket" window keeps the title box and adds "Or pick a ticket that already exists"; picking one hides the title box, Add moves that ticket in.
 
 ### board.html
-- Inside a lane the person drags a card above another to put them in order; the order is kept per lane. Cards that came into the lane since stay on top.
+- Inside a lane the person drags a card above another to put them in order (a drop on empty space puts it last); the order is kept per lane. Cards that came into the lane since stay on top. The card's ⋯ menu adds "Move up" and "Move down" under the lanes (by keyboard, no dragging), only where the card can move.
 
 ## Revised after the owner's answer (16 Nov, ORCH-62)
 

@@ -662,7 +662,13 @@ main.addEventListener('drop', event => {
   const id = dragging;
   dragging = '';
   main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target'));
-  moveToLane(id, col.dataset.status, col);
+  const t = ticketOf(id), lane = col.dataset.status;
+  if (t && boardLane(t) === lane) {  // ORCH-156: inside its own lane a drop puts the card above the one it lands on
+    const family = event.target.closest?.('.col-body > .board-family'), over = family?.querySelector('.ticket-card')?.dataset.ticket;
+    orderInLane(id, lane, over && over !== id ? over : over === id ? id : null);
+    return;
+  }
+  moveToLane(id, lane, col);
 });
 main.addEventListener('change', async event => {
   const cap = event.target.closest('[data-key="settings-copies-max"]');
@@ -837,6 +843,7 @@ main.addEventListener('click', async event => {
   }
   if (action === 'task-toggle') { await toggleTask(control.dataset.ticket, control.dataset.check); return; }
   if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
+  if (action === 'lane-up' || action === 'lane-down') { control.closest('details')?.removeAttribute('open'); await laneStep(control.dataset.ticket, control.dataset.lane, action === 'lane-up' ? -1 : 1); return; }
   if (action === 'view') {
     ticketView = control.dataset.view === 'board' ? 'board' : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }

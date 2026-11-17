@@ -197,3 +197,34 @@ test('ORCH-157: the To do view keeps only backlog tickets', () => {
   const c = listCtx();
   assert.deepEqual(c.filterTickets([{id:'a', status:'open'}, {id:'b', status:'active'}], '', false, '', '', 'backlog').map(t => t.id), ['a']);
 });
+
+test('ORCH-156: a lane keeps the person\'s order; Move up / Move down and a drop send the whole lane first to last', async () => {
+  const sent = [];
+  const st = {runs:{}, tickets:[
+    {id:'a', title:'A', status:'ready'}, {id:'b', title:'B', status:'ready'}, {id:'c', title:'C', status:'ready'}, {id:'x', title:'X', status:'open'}]};
+  const c = listCtx({state:st, sorted:l => l.slice(), locks:new Set(), changeUnavailable:() => false, changeError:r => r.text,
+    act:async (op, a) => { sent.push([op, a]); return {ok:true}; }, render(){}, window:{DashHelpers:helpers, UI:{...kitWindow(), ...require('./kit_state.js')}, orch:{toast(){}}}});
+  assert.deepEqual(c.laneTickets('ready').map(t => t.id), ['a', 'b', 'c']);
+  await c.laneStep('c', 'ready', -1);
+  assert.equal(JSON.stringify(sent.pop()), JSON.stringify(['ticket.order', {lane:'ready', tickets:['a', 'c', 'b']}]));
+  assert.deepEqual(c.laneTickets('ready').map(t => t.id), ['a', 'c', 'b'], 'the cards move at once');
+  await c.laneStep('a', 'ready', 1);
+  assert.deepEqual(sent.pop()[1].tickets, ['c', 'a', 'b']);
+  await c.orderInLane('b', 'ready', 'c');  // dropped on C: lands above it
+  assert.deepEqual(sent.pop()[1].tickets, ['b', 'c', 'a']);
+  await c.orderInLane('b', 'ready', 'b');  // dropped on itself: nothing is sent
+  await c.laneStep('b', 'ready', -1);  // already first
+  assert.equal(sent.length, 0);
+  const items = [...c.laneOrderItems(st.tickets.find(t => t.id === 'b'), 'ready').map(text)];
+  assert.deepEqual(items, ['Move down']);
+  assert.equal(c.laneOrderItems(st.tickets.find(t => t.id === 'x'), 'open'), null, 'one card alone: no order choices');
+});
+test('ORCH-156: a failed save puts the cards back and says why', async () => {
+  const toasts = [];
+  const st = {runs:{}, tickets:[{id:'a', title:'A', status:'ready'}, {id:'b', title:'B', status:'ready'}]};
+  const c = listCtx({state:st, sorted:l => l.slice(), locks:new Set(), changeUnavailable:() => false, changeError:r => r.text,
+    act:async () => ({ok:false, text:'Saving did not work.'}), render(){}, window:{DashHelpers:helpers, UI:{...kitWindow(), ...require('./kit_state.js')}, orch:{toast:(...x) => toasts.push(x)}}});
+  await c.laneStep('b', 'ready', -1);
+  assert.deepEqual(c.laneTickets('ready').map(t => t.id), ['a', 'b']);
+  assert.deepEqual(toasts[0], ['Saving did not work.', 'error']);
+});
