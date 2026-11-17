@@ -312,3 +312,10 @@ test('mapCard: the files of a Check card become tiles with urls; unknown types a
   assert.deepEqual(JSON.parse(JSON.stringify(it.files)), [{label: 'Cover photo', type: 'img', src: '/f/evidence/shop.png'}, {label: 'Result', type: 'page', src: '/f/evidence/result.html'}]);
   assert.equal(UI.review.mapCard(card('a'), fakeApi([[]]), NOW).files.length, 0);
 });
+
+test('mapCard: own answer buttons pass through (label and pick, at most 4)', () => {
+  const {UI} = load();
+  const it = UI.review.mapCard(card('a', {answers:[{label:'Not now', picked:'Not now'}, {label:'', picked:'x'}, {label:'Start', picked:7}, {label:'Start', picked:'Start'}]}), fakeApi([[]]), NOW);
+  assert.equal(JSON.stringify(it.answers), JSON.stringify([{label:'Not now', picked:'Not now'}, {label:'Start', picked:'Start'}]));
+  assert.equal(UI.review.mapCard(card('b'), fakeApi([[]]), NOW).answers.length, 0);
+});

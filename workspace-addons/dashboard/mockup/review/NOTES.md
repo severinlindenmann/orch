@@ -24,3 +24,5 @@
   box is as tall as its words, with the result's own pictures, pages and PDFs as tiles under it; the card gives up
   height so the answers and Later stay on screen at 1440x900 and 390x844; "Done when is not fully covered" says what
   to do; a Factory proposal shows its title, goal and time like Home.
+- 17 Nov (ORCH-183, owner choice B): a Factory start on Review has Home's buttons Not now, Change it, Start (Start last), all
+  outlined, in place of the three answers; the arrow keys do not answer it.

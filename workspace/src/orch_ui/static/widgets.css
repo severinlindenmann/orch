@@ -883,3 +883,5 @@ a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-de
 .swipe-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:720px){.swipe-file{width:112px}.swipe-file-thumb{height:64px}}
 @media(max-width:720px){body:has(>.tabbar) .ui-toasts{bottom:calc(var(--touch) + var(--s4) + env(safe-area-inset-bottom))}body:has(>.tabbar):has(.swipe-actions:not([hidden])) .ui-toasts{bottom:calc(var(--touch) + 136px + env(safe-area-inset-bottom))}}
+/* A card with its own answers (a Factory start, ORCH-183 owner choice B): its buttons in place of the three, all outlined */
+.swipe-own{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s3)}

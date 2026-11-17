@@ -50,12 +50,14 @@ test('a Check result opens its own files: pictures and PDFs through /api/file, a
 });
 test('a Factory proposal on Review reads like Home: its title as the question, goal and time in short lines (ORCH-183)', async () => {
   const text = "Start 'Loyalty card for regular customers'? ~1 h 30 min · you're needed for ~10 min. Goal: Regular customers collect stamps. Done means: The card design is ready. Stops: ship. Cap: 2 h active. Crew: manager claude.";
-  const plain = {...CARD, id:'core:q:t_abcdef:q4', key:'q4', text, card:{kind:'choice', title:text, preview:{type:'options', options:[{id:'Start', title:'Start'}]}}};
+  const plain = {...CARD, id:'core:q:t_abcdef:q4', key:'q4', text, options:['Start', 'Edit', 'Not now'], card:{kind:'choice', title:text, preview:{type:'options', options:[{id:'Start', title:'Start'}]}}};
   const [fac, other] = await ctx({review:{cards:[plain, CARD]}}).reviewApi().stack();
   assert.equal(fac.card.title, "Start 'Loyalty card for regular customers'?");
   assert.match(fac.text, /^Regular customers collect stamps\.\nRuns about 1 h 30 min · needs you for about 10 min · up to 2 h of helper time$/);
   assert.doesNotMatch(fac.text, /Crew|Stops/);
-  assert.deepEqual(fac.card.preview, plain.card.preview, 'the answers stay the same');
+  assert.equal(JSON.stringify(fac.answers), JSON.stringify([{label:'Not now', picked:'Not now'}, {label:'Change it', picked:'Edit'}, {label:'Start', picked:'Start'}]), "Home's buttons, Start last (owner choice B)");
+  assert.equal(fac.card.preview, undefined, 'no second list of the same answers on the card');
+  assert.equal(plain.card.preview.type, 'options', 'the state itself is not changed');
   assert.equal(fac.digest, plain.digest, 'the answer still names what was asked');
   assert.equal(other, CARD, 'any other card as it is');
 });
@@ -203,4 +205,9 @@ test('"Accepted for you": hidden when empty, a link and the why line per row, on
   assert.equal(await c.reviewSendBack(row('t_aaaa11'), ' Keep the old name '), true);
   assert.deepEqual(JSON.parse(JSON.stringify(c.acts[0])), ['ticket.changes', {ticket:'t_aaaa11', text:'Keep the old name'}]);
   assert.equal(nodes(c.reviewAcceptedCard()).filter(n => n.tag === 'button').length, 0);
+});
+test('the All cards list names an own answer by its button word', () => {
+  const c = ctx({});
+  const it = {answers:[{label:'Change it', picked:'Edit'}]};
+  assert.equal(c.reviewWord({verdict:'ok', item:it, note:{picked:'Edit'}}), 'Change it');
 });

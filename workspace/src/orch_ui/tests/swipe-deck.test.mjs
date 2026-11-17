@@ -106,3 +106,20 @@ test('a Check card shows its own files as tiles that open them', () => {
   assert.equal(tiles[1].querySelector('iframe').getAttribute('sandbox'), '', 'a page only in a sandboxed frame');
   assert.equal(deck([check('b')]).host.querySelector('.swipe-files'), null, 'no files: no empty row');
 });
+
+test('a card with its own answers (a Factory start): its buttons in place of the three, all outlined, each answers with its pick', async () => {
+  const fac = {id:'f', kind:'choice', kindLabel:'Choose', title:"Start 'Loyalty card'?", preview:{type:'doc'}, answers:[{label:'Not now', picked:'Not now'}, {label:'Change it', picked:'Edit'}, {label:'Start', picked:'Start'}]};
+  const {host, decided, noBtn, talkBtn, okBtn} = deck([fac, draft('b')]);
+  assert.deepEqual([noBtn.hidden, talkBtn.hidden, okBtn.hidden], [true, true, true]);
+  const own = host.querySelector('.swipe-own');
+  assert.equal(own.hidden, false);
+  const btns = own.children;
+  assert.deepEqual(btns.map(b => b.textContent), ['Not now', 'Change it', 'Start']);
+  assert.ok(btns.every(b => b.className === 'btn outline'), 'none filled: starting a helper is never the easiest click');
+  host.listeners.keydown.forEach(f => f({key:'ArrowRight', target:host, preventDefault() {}}));
+  await wait(160);
+  assert.equal(decided.length, 0, 'the arrow keys do not pick for the person');
+  btns[1].click(); await wait(160);
+  assert.deepEqual(JSON.parse(JSON.stringify(decided)), [{id:'f', v:'ok', note:{picked:'Edit'}}]);
+  assert.equal(own.hidden, true, 'the next card has the usual three answers');
+});
