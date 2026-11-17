@@ -1537,8 +1537,9 @@ def sync_closed(root: Path, now: float | None = None) -> list[str]:
 
 def _send_closed(root: Path, qmid: str, tid: str, reason: str | None, at: float | None = None) -> str | None:
     """The one "Question taken back" text for the question we sent as message `qmid` (see send_taken_back).
-    `at` given (the sweep): a 403 from the relay (an older relay that closes only plain questions) frees the
-    record again, to be tried after CLOSE_RETRY seconds; every other refusal is final, only logged."""
+    `at` given (the sweep): a 403 (an older relay that closes only plain questions), 408, 429, a 5xx or no
+    status frees the record again, to be tried after CLOSE_RETRY seconds; any other 4xx (answered first,
+    taken back already, not ours) is final, only logged."""
     if reason is None:
         return None
 
@@ -1568,7 +1569,9 @@ def _send_closed(root: Path, qmid: str, tid: str, reason: str | None, at: float 
             log_send_failure(root, f"taken back {fixed['id']} not sent yet", "kept for the next try")
     except (Refused, OSError) as exc:
         log_send_failure(root, f"taken back {fixed['id']} failed", exc)
-        if at is not None and getattr(exc, "status", None) == 403:
+        status = getattr(exc, "status", None)
+        final = isinstance(status, int) and 400 <= status < 500 and status not in (403, 408, 429)
+        if at is not None and not final:  # an older relay (403), busy (429) or a server fault: later again
 
             def free(asked):
                 rec = asked.get(qmid)

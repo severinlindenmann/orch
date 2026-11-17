@@ -217,6 +217,27 @@ def test_an_older_relay_that_refuses_a_review_round_is_tried_again_later(proj, r
     assert [m["body"]["taken_back"]["reason"] for m in _closed(conn)] == ["Review finished in orch"]
 
 
+@pytest.mark.parametrize("status", [429, 500])
+def test_a_busy_or_failing_relay_is_tried_again_later(proj, run, conn, monkeypatch, status):  # noqa: F811
+    tid = _new_ticket(run)
+    _ask(run, tid)
+    assert run("answer", tid, "q1", "CSV", "--by", "human:me")[0] == 0
+    real = relay._post_message
+
+    def busy(root, raw):
+        if "taken_back" in json.loads(raw)["body"]:
+            e = relay.Refused("Try again later.")
+            e.status = status
+            raise e
+        return real(root, raw)
+
+    monkeypatch.setattr(relay, "_unreachable", lambda e: False)
+    monkeypatch.setattr(relay, "_post_message", busy)
+    assert relay.sync_closed(proj, now=1000.0) == []
+    monkeypatch.setattr(relay, "_post_message", real)
+    assert len(relay.sync_closed(proj, now=1000.0 + relay.CLOSE_RETRY + 1)) == 1
+
+
 def test_any_other_refusal_is_final(proj, run, conn, monkeypatch):  # noqa: F811
     tid = _new_ticket(run)
     _ask(run, tid)

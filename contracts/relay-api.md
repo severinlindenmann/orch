@@ -356,7 +356,7 @@ or moved to a newer round → `Review finished in orch`; an open question of a t
 done → `Ticket done`, whose ticket file is gone → `Ticket removed`; a take-back that never reached the relay → its own reason.
 Fixed reasons only: never the answer, a name or any other ticket text. The workspace checks every question it sent to `phones`,
 so questions settled before this existed close too, at most 20 per pull. A `403` (an older relay that does not take review
-rounds yet) is tried again after 6 hours; every other refusal is final and only logged. Proposal questions are not closed this way.
+rounds yet), `408`, `429` or `5xx` is tried again after 6 hours; any other `4xx` is final and only logged. Proposal questions are not closed this way.
 
 *Phone (vectors/taken-back-v1.json `phone`; built by G3c).* On a `taken_back` text whose `reply_to` is a question the phone
 shows, the card leaves Needs, the Review stack and the Chats "Needs your OK" row at once; no bubble, not unread. An unknown
