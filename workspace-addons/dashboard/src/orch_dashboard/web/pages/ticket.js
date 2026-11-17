@@ -1432,13 +1432,13 @@ function ticketSelectedTab(t) {
 // shape of the kit's answer record. They show under the ticket's questions, not on a tab of their own.
 function ticketReviewAnswers(t) {
   return array(t.questions).filter(q => q.answer != null && q.decision && typeof q.decision === 'object')
-    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
+    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
 // "What applies now" on top (when a card answer exists), then each card answer as a record; plain answers stay rows.
 function ticketAnswerNodes(t, plainRow) {
   const list = ticketReviewAnswers(t), api = typeof reviewApi === 'function' ? reviewApi() : null;
-  const o = {fileUrl:api ? api.fileUrl : () => '', now:new Date()}, byId = new Map(list.map(e => [e.key, e]));
+  const o = {fileUrl:api ? api.fileUrl : () => '', now:new Date(), showTicket:false}, byId = new Map(list.map(e => [e.key, e]));
   const rows = array(t.questions).filter(q => q.answer != null).slice().reverse()
     .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);

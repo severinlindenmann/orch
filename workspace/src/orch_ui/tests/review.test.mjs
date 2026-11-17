@@ -17,6 +17,8 @@ class N {
   setAttribute(k, v) { this.attrs[k] = v; }
   addEventListener(t, f) { (this.listeners[t] ||= []).push(f); }
   focus() {}
+  showModal() { this.open = true; }
+  fire(t, e = {}) { (this.listeners[t] || []).forEach(f => f({preventDefault() {}, ...e})); }
   all(pred, out = []) { if (pred(this)) out.push(this); this.children.forEach(c => c.all(pred, out)); return out; }
   byClass(c) { return this.all(n => n.className.split(' ').includes(c)); }
 }
@@ -28,10 +30,10 @@ function load() {
     state: o => { const n = new N('div'); n.className = 'state ' + o.kind; n.append(Object.assign(new N('strong'), {own: o.title || ''}), Object.assign(new N('p'), {own: o.text || ''})); n.opts = o; return n; },
     swipeDeck: (host, items, o) => { const d = {host, items, o, answers: {}, pins: {}, later: new Set(o.later || []), index: o.start || 0, busy: false}; decks.push(d); host.replaceChildren(); return d; },
   };
-  const document = {createElement: t => new N(t), visibilityState: 'visible'};
+  const document = {createElement: t => new N(t), visibilityState: 'visible', body: new N('body')};
   const window = {UI};
   vm.runInNewContext(read('review.js'), {window, document, setInterval, clearInterval, console});
-  return {UI, toasts, decks};
+  return {UI, toasts, decks, document};
 }
 
 const NOW = new Date(2026, 10, 15, 12, 0);
@@ -249,4 +251,51 @@ test('onChange: called with the deck when it is built and after every move or an
   assert.deepEqual(seen, [2]);
   decks[0].o.onChange();
   assert.deepEqual(seen, [2, 2]);
+});
+
+test('answerRecord: every card names its ticket and a title, never a bare "Answered" (ORCH-172)', () => {
+  const {UI} = load();
+  const untitled = {kind: 'choice', preview: {type: 'options', options: [{id: 'Yes', title: 'Yes'}, {id: 'No', title: 'No'}]}};
+  const long = 'Which helper should the always-on session in Focus be? A: the Chat helper itself, shown in Focus with its screen and a terminal command, or B: a separate manager.';
+  const rec = UI.answerRecord(entry({action: 'use', picked: 'No'}, {card: untitled, ticket_key: 'ORCH-147', ticket_title: 'Focus: always-on manager', text: long, shown: null}), {now: NOW, ticketHref: id => '#ticket/' + id});
+  const h3 = rec.all(n => n.tag === 'h3')[0].textContent;
+  assert.notEqual(h3, 'Answered'); assert.match(h3, /^Which helper should the always-on session/); assert.ok(h3.length <= 121 && h3.endsWith('…'));
+  const link = rec.all(n => n.tag === 'a' && n.href === '#ticket/T-1')[0];
+  assert.ok(link, 'the ticket key and title link to the ticket'); assert.equal(link.textContent, 'ORCH-147 · Focus: always-on manager');
+  assert.equal(UI.answerRecord(entry({action: 'approve'}, {card: {}, ticket_title: 'Fix the date', shown: null}), {now: NOW}).all(n => n.tag === 'h3')[0].textContent, 'Fix the date');
+  const own = UI.answerRecord(entry({action: 'approve'}, {ticket_key: 'ORCH-147', ticket_title: 'Focus'}), {now: NOW, showTicket: false});
+  assert.doesNotMatch(own.textContent, /ORCH-147/, 'the ticket page does not repeat its own key');
+});
+
+test('answerRecord: a card with nothing to show gets no empty "Reviewed" tile (ORCH-172)', () => {
+  const {UI} = load();
+  const rec = UI.answerRecord(entry({action: 'approve'}, {card: {kind: 'draft', preview: {type: 'doc'}}, shown: null}), {now: NOW});
+  assert.equal(rec.byClass('decision-shown').length, 0); assert.doesNotMatch(rec.textContent, /Reviewed/);
+  const words = UI.answerRecord(entry({action: 'approve'}, {card: {kind: 'check', title: 'Done', preview: {type: 'doc', heading: 'What was done', paras: ['Fixed it.']}}, shown: null}), {now: NOW});
+  assert.equal(words.byClass('decision-shot').length, 1, 'a words preview keeps its tile');
+});
+
+test('a click on a tile opens it large with the card\'s other tiles a step away (ORCH-172)', () => {
+  const {UI, document} = load();
+  const rec = UI.answerRecord(entry({action: 'approve'}, {card: {kind: 'draft', title: 'Tickets board', preview: {type: 'compare', before: {type: 'img', src: 'reviewed/aa/before.png'}, after: {type: 'img', src: 'reviewed/aa/after.png'}}}}), {fileUrl: (e, r) => '/f/' + r, now: NOW});
+  const tiles = rec.byClass('decision-shot');
+  assert.equal(tiles.length, 2); assert.equal(tiles[1].attrs['aria-label'], 'Open After large');
+  assert.equal(tiles[0].children[0].children[0].alt, 'Before', 'every picture has a name');
+  tiles[1].fire('click');
+  const d = document.body.children.at(-1);
+  assert.equal(d.tag, 'dialog'); assert.ok(d.open); assert.ok(d.className.includes('review-viewer'));
+  assert.match(d.textContent, /After/); assert.match(d.textContent, /2 of 2/);
+  assert.equal(d.byClass('review-viewer-body')[0].children[0].src, '/f/reviewed/aa/after.png');
+  d.fire('keydown', {key: 'ArrowLeft'});
+  assert.match(d.textContent, /1 of 2/); assert.equal(d.byClass('review-viewer-body')[0].children[0].src, '/f/reviewed/aa/before.png');
+});
+
+test('a words preview opens in full in the large view, not cut (ORCH-172)', () => {
+  const {UI, document} = load();
+  const paras = ['In short: helpers waiting for checks no longer take a place.', 'Merged on green with tests.', 'Third paragraph the tile does not show.'];
+  const rec = UI.answerRecord(entry({action: 'approve'}, {card: {kind: 'check', title: 'Helpers waiting', preview: {type: 'doc', heading: 'What was done', paras}}, shown: null}), {now: NOW});
+  assert.doesNotMatch(rec.textContent, /Third paragraph/);
+  rec.byClass('decision-shot')[0].fire('click');
+  const d = document.body.children.at(-1);
+  paras.forEach(p => assert.ok(d.textContent.includes(p)));
 });

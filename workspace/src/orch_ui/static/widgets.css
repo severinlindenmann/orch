@@ -371,9 +371,15 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .decision-verdict{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:13px;line-height:20px;font-weight:600;white-space:nowrap}
 .decision-verdict.ok{background:var(--brand-soft);color:var(--brand)}.decision-verdict.no{background:var(--danger-soft);color:var(--danger)}.decision-verdict.talk{background:var(--warning-soft);color:var(--warning)}
 .decision-by{font-size:13px;line-height:18px;color:var(--text-muted)}
-.decision-shown{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s2)}
+/* Tiles about twice the old 172x108 (owner 17 Nov: 50-100 percent bigger, no zoom step); a click or Enter opens one large (.review-viewer) */
+.decision-shown{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(288px,100%),344px));gap:var(--s3)}
 .decision-shot{position:relative;display:grid;gap:4px;font-size:12px;line-height:16px;color:var(--text-muted);background:none;border:0;padding:0;text-align:left;font-family:inherit;cursor:zoom-in}
-.decision-shot .opt-thumb{height:110px;flex:none}
+.decision-shot .opt-thumb{height:216px;flex:none}
+.decision-shot:hover .opt-thumb{border-color:var(--border-strong)}
+.decision-shot:focus-visible{outline:none}.decision-shot:focus-visible .opt-thumb{box-shadow:var(--focus-ring)}
+.decision-open{position:absolute;top:var(--s2);right:var(--s2);display:grid;place-items:center;width:24px;height:24px;border-radius:6px;background:var(--surface);border:1px solid var(--border);color:var(--text-muted)}
+.decision-shot .opt-thumb .doc{font-size:13px;line-height:18px;padding:var(--s3)}
+.decision-shot .opt-thumb .doc p{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .decision-shot.taken .opt-thumb{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
 .decision-shot.dim .opt-thumb{opacity:.45}
 .decision-shot b{color:var(--text)}
@@ -391,7 +397,8 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .review-queue-row{display:flex;align-items:center;gap:var(--s2);width:100%;min-width:0;justify-content:flex-start;font-weight:400;color:var(--text)}
 .review-queue-row>.review-queue-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .review-queue-row.is-now{font-weight:600;background:var(--surface-2)}.review-queue-row.is-done{color:var(--text-faint)}
-@media (max-width:1100px){.review-layout{grid-template-columns:minmax(0,1fr)}.review-side{display:none}}
+/* below 1440 the side column folds away so the card gets the page width (1280: 681 -> about 980 px); All on the deck still lists every card */
+@media (max-width:1439px){.review-layout{grid-template-columns:minmax(0,1fr)}.review-side{display:none}}
 /* Revision after the challenge (15 Nov): consequence line, urgency, Later, handle-only compare line, loading previews,
    narrow decks use the phone layout for options. */
 .swipe{container-type:inline-size}
@@ -434,7 +441,8 @@ iframe.loading{opacity:0}
    their pane on a dark ground with a zoom per side, a Today tile on a choice, groups in the list beside the deck. */
 .swipe-desk{--swipe-card-h:clamp(560px,calc(100vh - 300px),1000px)}
 .swipe-head{min-height:0;overflow:auto}.swipe-head:has(+ .swipe-preview:not(.plain)){max-height:45%}/* a picture below keeps its room; text and plain answers give the question all the space left (ORCH-137) */
-.swipe-head .swipe-text{color:var(--text);white-space:pre-line}
+.swipe-head .swipe-text{color:var(--text);white-space:pre-line;max-width:75ch;overflow-wrap:anywhere}
+.swipe-head .swipe-about,.swipe-head h3{max-width:75ch}
 .swipe-sug{font-size:12px;line-height:16px;font-weight:500;color:var(--brand);border:1px solid var(--brand);border-radius:999px;padding:0 6px;white-space:nowrap}
 .swipe-act .act-sug{justify-self:center;margin-top:-2px}
 .swipe-act.suggested .ring{box-shadow:0 0 0 3px var(--bg),0 0 0 5px var(--brand)}
@@ -860,3 +868,19 @@ a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-de
 .blk-table.data-table td.cell-actions .row{flex-wrap:wrap}
 .table-wrap table.blk-table{min-width:0}
 }
+
+/* Review viewer (UI.reviewViewer, ORCH-172): one tile of a Review card, large. Uses most of the window; a picture fits the
+   width and a tall one scrolls so it can be read in full; words come in short lines. */
+dialog.review-viewer{width:min(1600px,calc(100vw - 32px));height:calc(100dvh - 32px);max-width:none;max-height:none;padding:0;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--bg);color:var(--text);overflow:hidden}
+dialog.review-viewer[open]{display:flex;flex-direction:column}
+dialog.review-viewer::backdrop{background:rgb(0 0 0 / .8)}
+dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var(--s4);margin:0;z-index:2}
+.review-viewer-head{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;padding:var(--s3) 120px var(--s3) var(--s4);border-bottom:1px solid var(--border)}
+.review-viewer-names{flex:1;min-width:0;display:grid;gap:2px}
+.review-viewer-names h2{margin:0;font-size:16px;line-height:24px;overflow-wrap:anywhere}.review-viewer-names p{margin:0}
+.review-viewer-body{flex:1;min-height:0;overflow:auto;padding:var(--s4)}
+.review-viewer-body>img{display:block;max-width:100%;height:auto;margin:0 auto;background:var(--paper);border-radius:var(--radius)}
+.review-viewer-body>iframe{display:block;width:100%;height:100%;min-height:480px;border:0;background:var(--paper);border-radius:var(--radius)}
+.review-viewer-body>.doc{max-width:75ch;margin:0 auto;font-size:16px;line-height:24px;overflow-wrap:anywhere}
+.review-viewer-body>.doc h3{margin:0 0 var(--s3);font-size:20px;line-height:28px}.review-viewer-body>.doc p{margin:0 0 var(--s3)}
+@media (max-width:599px){dialog.review-viewer{width:100vw;height:100dvh;border:0;border-radius:0}.review-viewer-body{padding:var(--s2)}}

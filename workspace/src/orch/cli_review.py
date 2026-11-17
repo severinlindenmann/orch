@@ -286,6 +286,8 @@ def _answered(root: Path) -> list[dict]:
                     "id": f"core:q:{t['id']}:{q['id']}",
                     "ticket": t["id"],
                     "ticket_key": t.get("key"),
+                    "ticket_title": t.get("title") or "",
+                    "text": q.get("text") or "",
                     "key": q["id"],
                     "by": q.get("answered_by"),
                     "via": q.get("via"),
