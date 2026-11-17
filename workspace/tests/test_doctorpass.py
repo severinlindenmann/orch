@@ -264,7 +264,7 @@ def repo(tmp_path):
         _age(copies / name, 5)
     build = copies / "dirty" / "target"
     build.mkdir()
-    (build / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55")
+    (build / "CACHEDIR.TAG").write_text("cache tag")
     _age(copies / "dirty", 30)
     return main, copies
 
@@ -427,7 +427,7 @@ def test_build_output_behind_a_link_is_never_removed(repo, tmp_path, monkeypatch
     main, copies = repo
     outside = tmp_path / "elsewhere"
     (outside / "target").mkdir(parents=True)
-    (outside / "target" / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55")
+    (outside / "target" / "CACHEDIR.TAG").write_text("cache tag")
     (copies / "dirty" / "relay").symlink_to(outside, target_is_directory=True)
     _age(copies / "dirty", 30)
     monkeypatch.setattr(doctorpass, "process_dirs", lambda: [])

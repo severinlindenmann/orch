@@ -352,13 +352,17 @@ def untouched(path: Path, hours: float, depth: int = 2, now: float | None = None
     return True
 
 
-def _git(args: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], capture_output=True, text=True, timeout=timeout)
+def _git(cwd: Path, args: list[str], timeout: int = 60, read_only: bool = True) -> tuple[int, str]:
+    """git through orch.safegit (no repository hooks, filters or network). (exit code, output)."""
+    from orch import safegit
+
+    rc, out, _ = safegit.run(args, cwd, timeout, read_only=read_only)
+    return rc, out
 
 
 def worktrees(repo: Path) -> list[Path]:
-    r = _git(["-C", str(repo), "worktree", "list", "--porcelain"])
-    return [Path(line[9:]) for line in r.stdout.splitlines() if line.startswith("worktree ")]
+    rc, out = _git(repo, ["worktree", "list", "--porcelain"])
+    return [Path(line[9:]) for line in out.splitlines() if line.startswith("worktree ")] if rc == 0 else []
 
 
 def _du(path: Path) -> int:
@@ -420,9 +424,7 @@ def clean(cfg: dict, apply: bool, now: float | None = None) -> list[str]:
         repo = Path(repo_s)
         if not (repo / ".git").exists() or not roots:
             continue
-        remote, _, branch = c["base"].partition("/")
-        try:
-            _git(["-C", str(repo), "fetch", "-q", remote, branch], timeout=120)
+        try:  # no fetch (orch's git has no network): the base is as new as the last fetch of this clone
             listed = worktrees(repo)
         except (OSError, subprocess.TimeoutExpired):
             continue
@@ -430,10 +432,9 @@ def clean(cfg: dict, apply: bool, now: float | None = None) -> list[str]:
             try:
                 if wt.resolve().parent not in roots or not wt.is_dir() or wt.is_symlink():
                     continue
-                unclean = bool(_git(["-C", str(wt), "status", "--porcelain"]).stdout.strip())
-                merged = (
-                    _git(["-C", str(wt), "merge-base", "--is-ancestor", "HEAD", c["base"]]).returncode == 0
-                )
+                rc, out = _git(wt, ["status", "--porcelain"])
+                unclean = rc != 0 or bool(out.strip())  # a status that could not be read counts as changed
+                merged = _git(wt, ["merge-base", "--is-ancestor", "HEAD", c["base"]])[0] == 0
                 if (
                     merged
                     and not unclean
@@ -445,10 +446,8 @@ def clean(cfg: dict, apply: bool, now: float | None = None) -> list[str]:
                     if not apply:
                         done.append(f"would remove finished copy {wt} ({size} MB)")
                         continue
-                    r = _git(["-C", str(repo), "worktree", "remove", str(wt)], timeout=300)
-                    done.append(
-                        f"removed finished copy {wt} ({size} MB)" if r.returncode == 0 else f"git kept {wt}"
-                    )
+                    rc, _ = _git(repo, ["worktree", "remove", str(wt)], timeout=300, read_only=False)
+                    done.append(f"removed finished copy {wt} ({size} MB)" if rc == 0 else f"git kept {wt}")
                     continue
                 if untouched(
                     wt, c["build_idle_h"], now=now
