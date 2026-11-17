@@ -858,7 +858,8 @@ function taskRows(t) {
       reason.value = taskMenus.get(menuKey) || '';
       const form = h('form', {className:'stack', hidden:!isOpen, 'data-key':formKey},
         window.DashHelpers.resolved(task) ? null : reason,
-        h('button', {type:'submit', className:'btn outline sm'}, window.DashHelpers.resolved(task) ? 'Open again' : "Won't do"));
+        h('button', {type:'submit', className:'btn outline sm'}, window.DashHelpers.resolved(task) ? 'Open again' : "Won't do"),
+        taskEditRow(t, task, i));
       const closeMenu = () => { taskMenus.delete(menuKey); locks.delete(formKey); form.hidden = true; more.setAttribute('aria-expanded', 'false'); more.focus(); };
       reason.addEventListener('input', () => taskMenus.set(menuKey, reason.value));
       form.addEventListener('focusin', () => locks.add(formKey));
@@ -893,6 +894,36 @@ function taskRows(t) {
         taskProofChips(t, task)), h('span', {className:'meta task-word'}, taskWord(task)), menu);
   });
 }
+// ORCH-236: a task can be renamed, moved up or down and removed from its "..." menu (orch check edit / move / remove;
+// a removed task stays in the history).
+async function taskAct(op, args) {
+  const result = await act(op, args);
+  if (!result.ok) window.orch.toast(changeError(result), 'error');
+  render();
+  return result;
+}
+function taskRename(t, task) {
+  const {d, actions} = dialog('Rename task');
+  const input = h('input', {className:'input', 'aria-label':'Task', maxlength:500, 'data-key':'task-rename-input'});
+  input.value = task.text || '';
+  const save = ticketButton('Save', 'primary', async () => {
+    const text = input.value.trim(); if (!text || save.disabled) { input.focus(); return; }
+    if (text === task.text) { window.orch.close(d); return; }
+    save.disabled = true;
+    const result = await act('check.edit', {ticket:t.id, check:task.id, text, was:task.text});
+    if (result.ok) window.orch.close(d); else { save.disabled = false; window.orch.toast(changeError(result), 'error'); }
+  });
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } };
+  actions.append(save); d.append(input, actions); window.orch.open(d); input.focus();
+}
+function taskEditRow(t, task, i) {
+  const list = array(t.checklist), before = list[i - 1], after = list[i + 1];
+  return h('div', {className:'row wrap', 'data-key':'task-edit-' + task.id},
+    ticketButton('Rename', 'ghost sm', () => taskRename(t, task), {'data-key':'task-rename-' + task.id}),
+    before?.id ? ticketButton('Move up', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:before.id, after:task.id}), {'data-key':'task-up-' + task.id}) : null,
+    after?.id ? ticketButton('Move down', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:task.id, after:after.id}), {'data-key':'task-down-' + task.id}) : null,
+    ticketButton('Remove', 'ghost sm', () => { taskMenus.delete(t.id + ':' + task.id); locks.delete('task-menu-' + task.id); taskAct('check.remove', {ticket:t.id, check:task.id}).then(r => { if (r.ok) window.orch.toast('Removed. It stays in the Activity.', 'ok'); }); }, {'data-key':'task-remove-' + task.id}));
+}
 // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
 function addTaskRow(t, scope) {
   if (snapshot) return null;
@@ -910,7 +941,8 @@ function addTaskRow(t, scope) {
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const text = input.value.trim();
-    if (!text || send.disabled) return;
+    if (send.disabled) return;
+    if (!text) { window.orch.toast('Type the task first.', 'error'); input.focus(); return; }
     send.disabled = true;
     const result = await act('check.add', {ticket:t.id, text});
     send.disabled = false;
@@ -1158,7 +1190,7 @@ function ticketCardShown(t, q, card) {
 // A step is named by its title only; the ticket key is a quiet line under Properties.
 const partName = p => clean(p.title);
 function ticketAddStep(t) {
-  const ask = t.epic ? 'What needs doing in this ticket?' : 'What is this step about?';  // an epic holds tickets (ORCH-14)
+  const ask = t.release ? 'What ships in this release?' : t.epic ? 'What needs doing in this ticket?' : 'What is this step about?';  // an epic (ORCH-14) or a release (ORCH-37) holds tickets
   const {d, actions} = dialog(ask);
   const input = h('input', {className:'input', 'aria-label':ask, maxlength:200});
   // ORCH-156: or a ticket that already exists moves in (its "Part of" changes). Not this ticket, not one it is
@@ -1182,10 +1214,12 @@ function ticketAddStep(t) {
   actions.append(send); d.append(h('div', {className:'stack'}, input, pick), actions); window.orch.open(d); input.focus();
 }
 function ticketParts(t, children) {
-  const add = snapshot ? null : ticketButton(t.epic ? '+ Add a ticket' : '+ Add a step', 'ghost add-row', () => ticketAddStep(t));
+  const holds = t.epic || t.release, add = snapshot ? null : ticketButton(holds ? '+ Add a ticket' : '+ Add a step', 'ghost add-row', () => ticketAddStep(t));
   // No steps yet: only the add button, so a top-level ticket can get its first step (a step itself gets none).
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
-  return card('parts', t.epic ? 'Tickets in this epic' : 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  // ORCH-37: in a release, an epic's row says how far its own tickets are ("Epic · 2 of 4 done").
+  const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, 'Epic · ' + kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' done'); };
+  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
@@ -1466,13 +1500,13 @@ function ticketAnswerNodes(t, plainRow) {
     .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
 }
-const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
+const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
 function ticketProperties(t, parent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)),
+    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)),
       ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Helper strength', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
@@ -1604,7 +1638,7 @@ function detail(t) {
     addonRows(t), ticketLinks(t),
     answered.length ? h('section', {className:'card answered', 'data-key':'answered'}, h('h2', {}, 'Earlier answers'), answered) : null];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
-    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + partName(parent)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + partName(parent)) : null,
     ticketStrip(t, run, fresh, planQ, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))), selected),
@@ -1618,6 +1652,7 @@ function detail(t) {
 }
 
 const MULTILINE = ['note', 'done_when'];
+const FIELD_LABEL = {title:'title', owner:'owner', due:'due date', note:'what you asked', done_when:'what done looks like'};
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 // The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
@@ -1633,13 +1668,28 @@ function partOfField(t, parent) {
   const was = parent ? parent.id : '';
   const select = h('select', {'aria-label':'Part of', 'data-key':'part-of-' + t.id},
     h('option', {value:''}, 'Not part of another ticket'),
-    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.epic ? ' (epic)' : ''))));
+    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.release ? ' (release)' : p.epic ? ' (epic)' : ''))));
   select.value = was;
   select.onchange = async () => {
     const result = await act('ticket.edit', {ticket:t.id, parent:select.value || null, if_revision:(ticketOf(t.id) || t).revision});
     if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
   };
   return select;
+}
+// ORCH-37 (owner picked B): a release is a ticket of its own; the epics and tickets that ship together sit under it.
+// One switch marks this ticket as a release or takes the mark off; its tickets stay where they are.
+function releaseField(t) {
+  const on = !!t.release;
+  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, its tickets ship together' : 'No');
+  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'This ticket is a release', title:on ? 'Its tickets ship together' : 'Mark it as a release', 'data-key':'release-' + t.id});
+  sw.onclick = async () => {
+    if (sw.disabled) return;
+    sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
+    const result = await act('ticket.edit', {ticket:t.id, release:!on, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); sw.setAttribute('aria-checked', String(on)); }
+    sw.disabled = false;
+  };
+  return sw;
 }
 function modelField(t) {
   const m = modelChoice(t);
@@ -1664,7 +1714,8 @@ function inlineField(t, field) {
   const plain = field !== 'title', setDue = field === 'due' && !shown;
   const node = el('button', 'ed' + (plain ? ' ed-plain' : '') + (setDue ? ' ed-link' : shown ? '' : ' empty-v') + (MULTILINE.includes(field) ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), setDue ? 'Set a due date' : shown || FIELD_HINT[field]);
   if (plain && !setDue) node.append(iconEl('pencil'));
-  Object.assign(node, {type:'button', title:'Click to change'});
+  Object.assign(node, {type:'button', title:MULTILINE.includes(field) ? 'Click to change · Enter saves, Shift+Enter new line' : 'Click to change'});
+  node.setAttribute('aria-label', 'Change ' + FIELD_LABEL[field]);
   Object.assign(node.dataset, {action:'inline', field, ticket:t.id});
   host.append(node);
   return host;
@@ -1692,6 +1743,17 @@ function startInline(control) {
   locks.add(key);
   host.replaceChildren(input, el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'));
   input.focus();
+  if (MULTILINE.includes(field)) {
+    // Small by default (3 rows, from the top); "Show all" opens the whole note, "Show less" goes back.
+    let open = false;
+    const fit = () => { input.style.height = open ? 'auto' : ''; if (open) input.style.height = Math.min(input.scrollHeight + 2, window.innerHeight * 0.6) + 'px'; };
+    const more = button('Show all', 'ghost xs', () => { open = !open; more.textContent = open ? 'Show less' : 'Show all'; fit(); input.scrollTop = 0; input.focus(); });
+    more.type = 'button';
+    more.addEventListener('mousedown', event => event.preventDefault());  // keep the box focused, so it does not save
+    input.setSelectionRange(0, 0); input.scrollTop = 0;
+    if (input.scrollHeight > input.clientHeight + 2) host.append(more);
+    input.addEventListener('input', () => { if (open) fit(); });
+  }
   let done = false;
   const finish = async save => {
     if (done) return;
@@ -1883,6 +1945,10 @@ function shippedFrame(e) {
   if (!frame || !frame.contentWindow || e.source !== frame.contentWindow) return null;
   return {frame, addon:r.id};
 }
+// A bridge action (idea, ask, Looks good, send) runs only right after a real click or key press of the person: the
+// browser counts one inside the add-on frame for this page too, and no script can make one up (ORCH-186 review M2).
+const personClicked = () => !!globalThis.navigator?.userActivation?.isActive;
+const NO_CLICK = 'Click the button again to do this.';
 function embedQuestionRequest(e) {
   const data = e && e.data;
   if (!data || typeof data !== 'object' || data.type !== 'orch.question') return null;
@@ -1935,11 +2001,12 @@ function embedIdeaRequest(e) {
   if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id) || typeof data.text !== 'string') return null;
   const text = data.text.replace(IDEA_HIDDEN, ' ').replace(/\s+/g, ' ').trim().replace(/^-+\s*/, '');
   if (!text) return null;
-  return {...shown, id:data.id, text};
+  return {...shown, id:data.id, text, clicked:personClicked()};
 }
 let embedIdeaBusy = false;  // one idea at a time: a second click while saving is dropped
 async function fileEmbedIdea(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.idea.failed', error:NO_CLICK});
   if (req.text.length > IDEA_MAX) return reply({type:'orch.idea.failed', error:'An idea here has at most ' + IDEA_MAX + ' characters.'});
   if (embedIdeaBusy) return;
   embedIdeaBusy = true;
@@ -1967,11 +2034,12 @@ function embedLooksGoodRequest(e) {
   if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
   if (!Array.isArray(data.tickets) || !data.tickets.length || data.tickets.length > EMBED_BATCH_MAX) return null;
   if (!data.tickets.every(x => typeof x === 'string' && EMBED_TICKET.test(x))) return null;
-  return {...shown, id:data.id, tickets:[...new Set(data.tickets)]};
+  return {...shown, id:data.id, tickets:[...new Set(data.tickets)], clicked:personClicked()};
 }
 let embedLooksGoodBusy = false;  // one batch at a time
 async function looksGoodAll(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.looksgood.failed', error:NO_CLICK});
   if (embedLooksGoodBusy) return;
   embedLooksGoodBusy = true;
   try {
@@ -1979,7 +2047,10 @@ async function looksGoodAll(req) {
       const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
       if (res.ok) { mutation++; accept(await res.json()); }
     } catch (_) { /* Fall back to what the page already has. */ }
-    const waiting = req.tickets.map(ticketOf).filter(t => t && t.status === 'review');
+    // only results of this add-on (tickets that carry its data), as with sending: never another page's tickets
+    const listed = req.tickets.map(ticketOf);
+    if (listed.some(t => t && (!t.ext || typeof t.ext !== 'object' || !t.ext[req.addon]))) return reply({type:'orch.looksgood.failed', error:'Only this page\u2019s own results can get Looks good here.'});
+    const waiting = listed.filter(t => t && t.status === 'review');
     if (!waiting.length) return reply({type:'orch.looksgood.failed', error:'Nothing here is waiting for your Looks good any more.'});
     await Promise.all(waiting.map(t => {
       const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
@@ -2009,11 +2080,12 @@ function embedAskRequest(e) {
   const shown = shippedFrame(e);
   if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
   if (typeof data.target !== 'string' || !EMBED_ASK_TARGET.test(data.target)) return null;
-  return {...shown, id:data.id, target:data.target};
+  return {...shown, id:data.id, target:data.target, clicked:personClicked()};
 }
 let embedAskBusy = false;  // one ask at a time: a second click while sending is dropped
 async function fileEmbedAsk(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.ask.failed', error:NO_CLICK});
   if (embedAskBusy) return;
   embedAskBusy = true;
   try {
@@ -2042,11 +2114,12 @@ function embedSendRequest(e) {
   if (!t || t.id !== data.ticket || !t.ext || typeof t.ext !== 'object' || !t.ext[shown.addon]) return null;  // only its own tickets
   const text = data.text.replace(IDEA_HIDDEN, m => m === '\n' ? '\n' : ' ').trim();
   if (!text) return null;
-  return {...shown, id:data.id, ticket:data.ticket, text};
+  return {...shown, id:data.id, ticket:data.ticket, text, clicked:personClicked()};
 }
 let embedSendBusy = false;  // one message at a time: a second click while sending is dropped
 async function sendEmbedMessage(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.send.failed', error:NO_CLICK});  // sending and starting a helper: a click
   if (req.text.length > EMBED_SEND_MAX) return reply({type:'orch.send.failed', error:'That is too long (at most ' + EMBED_SEND_MAX + ' characters).'});
   if (embedSendBusy) return;
   embedSendBusy = true;

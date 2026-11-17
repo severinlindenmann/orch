@@ -57,6 +57,25 @@ class GitHub:
             return False
         return any(isinstance(r, dict) and r.get("bucket") == "fail" for r in rows)
 
+    def checks(self, url: str) -> dict | None:
+        """{state, isDraft, isCrossRepository, headRefOid, statusCheckRollup} of the pull request (one read), or None when GitHub
+        did not answer. Used by the failed-checks part (checks.py)."""
+        v = self._json(
+            "pr", "view", url, "--json", "state,isDraft,isCrossRepository,headRefOid,statusCheckRollup"
+        )
+        return v if isinstance(v, dict) and isinstance(v.get("headRefOid"), str) else None
+
+    def rerun_job(self, repo: str, job: int) -> bool:
+        """Run one GitHub Actions job again (a write: the caller takes a slot of the write limit first)."""
+        return self._run("run", "rerun", "--job", str(int(job)), "--repo", repo).returncode == 0
+
+    def job_log(self, repo: str, job: int) -> str:
+        """The log of one GitHub Actions job (failed steps only when gh can tell them), '' when unreadable."""
+        got = self._run("run", "view", "--job", str(int(job)), "--repo", repo, "--log-failed", timeout=90)
+        if got.returncode != 0 or not (got.stdout or "").strip():
+            got = self._run("run", "view", "--job", str(int(job)), "--repo", repo, "--log", timeout=90)
+        return (got.stdout or "") if got.returncode == 0 else ""
+
     def create_pr(self, repo: str, base: str, branch: str, title: str, body: str) -> str | None:
         got = self._run(
             "pr", "create", "--repo", repo, "--base", base, "--head", branch, "--title", title, "--body", body

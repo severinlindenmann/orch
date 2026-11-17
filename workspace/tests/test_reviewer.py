@@ -357,10 +357,48 @@ def test_work_in_other_words_is_accepted_with_a_could_not_match_note(proj, run, 
     assert tickets.load(proj, tid)["status"] == "done"
 
 
-def test_the_question_wording_is_kept_for_a_part_with_no_work(proj, run, new_ticket, facts, on):
+def test_a_part_with_no_task_is_left_for_the_owner_no_helper(proj, run, new_ticket, facts, on, no_starts):
+    """ORCH-220: a Done when part no task covers is a question for the owner, not work for a helper."""
     tid = _real(proj, run, new_ticket, "unbuilt")
-    assert reviewer.run(proj)["actions"][0]["verdict"] == "back"
-    assert "The Reviewer has a question:" in tickets.load(proj, tid)["checklist"][-1]["text"]
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "leave", res
+    t = tickets.load(proj, tid)
+    assert t["status"] == "review" and no_starts == []
+    assert not runs.undelivered(proj, tid)  # no message for a helper
+    assert [c["text"] for c in t["checklist"]] == ["Fix the stale record"]  # no new task added
+    assert _lines(proj, tid)[-1] == (
+        "Left for you by the Reviewer: Done when part 'The weekly export is sent to the owner by email.' has "
+        "no task (looked for: weekly, export, sent, owner, email); send it back if that work is missing."
+    )
+
+
+def test_a_part_with_no_task_is_decided_once(proj, run, new_ticket, facts, on, no_starts):
+    tid = _real(proj, run, new_ticket, "unbuilt")
+    reviewer.run(proj)
+    before = len(_lines(proj, tid))
+    assert reviewer.run(proj)["actions"] == []  # quiet ticket: no second line, still no helper
+    assert len(_lines(proj, tid)) == before and no_starts == []
+
+
+def test_missing_work_goes_back_even_with_a_part_with_no_task(proj, run, new_ticket, facts, on, no_starts):
+    facts["facts"]["state"] = "OPEN"
+    tid = _real(proj, run, new_ticket, "unbuilt")
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "back" and no_starts == [tid]
+    assert "pull request #12 is not merged yet" in res["why"] and "Done when part" not in res["why"]
+
+
+def test_two_parts_with_no_task_are_counted_in_one_line(proj, run, new_ticket, facts, on):
+    tid = new_ticket("Two parts")
+    assert run("ticket", "tidy", tid, "Two parts", "--description", "d", "--done-when",
+               "The weekly export is sent by email. The invoices are archived yearly.",
+               "--by", "human:tester")[0] == 0  # fmt: skip
+    assert run("check", "add", tid, "Fix the stale record", "--by", "human:tester")[0] == 0
+    assert run("check", "done", tid, "c1", "--pr", PR, "--by", "human:tester")[0] == 0
+    tickets.set_status(proj, tid, "review", "human:tester")
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "leave", res
+    assert "(and 1 more); send it back if that work is missing." in res["why"]
 
 
 def test_proves_links_a_part_to_a_finished_task_and_no_note_is_left(proj, run, new_ticket, facts, on):
@@ -387,10 +425,3 @@ def test_proves_counts_only_with_a_finished_task(proj, run, new_ticket):
     assert tickets.proof_state(tickets.load(proj, tid))["uncovered"] == ["It works."]
     run("check", "done", tid, "c1", "--note", "ok", "--proves", "It works.", "--by", "human:tester")
     assert tickets.proof_state(tickets.load(proj, tid))["uncovered"] == []
-
-
-def test_a_part_with_no_work_at_all_is_still_refused_and_names_its_words(proj, run, new_ticket, facts, on):
-    _real(proj, run, new_ticket, "unbuilt")
-    res = reviewer.run(proj)["actions"][0]
-    assert res["verdict"] == "back"
-    assert "looked for: weekly, export, sent, owner, email" in res["why"] and "--proves" in res["why"]

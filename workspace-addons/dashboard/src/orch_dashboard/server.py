@@ -357,7 +357,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(421, b"misdirected request", "text/plain")
         return self._send(
             401,
-            self._refused_text(SIGNIN_MSG).encode(),
+            SIGNIN_MSG.encode(),  # always the plain words: no sign-in, no hint about the session (review L5)
             "text/plain; charset=utf-8",
             {"WWW-Authenticate": 'OrchPage realm="orch"', "Cache-Control": "no-store"},
         )
@@ -411,7 +411,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         passes = getattr(getattr(self, "server", None), "frame_passes", None)
         hit = None
-        if passes is not None and self.headers.get("Origin") in (None, "null"):
+        session = getattr(self, "session", None)
+        if passes is not None and session is not None and getattr(session, "revoked", False):
+            passes.clear()  # a revoked sign-in drops every pass (review L2)
+        # the pass comes from a sandboxed page's fetch, which always says Origin "null" (a script outside a browser
+        # that has a pass still needs it); a picture or file address with the file pass sends no Origin (review M1)
+        origin_ok = (
+            self.headers.get("Origin") == "null"
+            if header is not None
+            else self.headers.get("Origin") in (None, "null")
+        )
+        if passes is not None and origin_ok:
             hit = passes.check(
                 header if header is not None else file,
                 self._pass_tag(),
@@ -582,7 +592,16 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.rfile.read(n)
             except (ValueError, OSError):
                 return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
-            up.update({"Origin": f"http://127.0.0.1:{port}", "Content-Type": "application/json"})
+            # The dashboard's own fence (or the add-on page's frame pass) already passed: it speaks for the request
+            # to the add-on as its own page would, with the add-on's origin and a same-origin fetch. An add-on that
+            # refuses a POST without Sec-Fetch-Site (Insights) would otherwise refuse every action from the dashboard.
+            up.update(
+                {
+                    "Origin": f"http://127.0.0.1:{port}",
+                    "Content-Type": "application/json",
+                    "Sec-Fetch-Site": "same-origin",
+                }
+            )
         for attempt in (0, 1):
             try:
                 conn = HTTPConnection("127.0.0.1", port, timeout=20)
@@ -1092,6 +1111,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        if (
+            self._frame is not None
+        ):  # an add-on page's pass: only that add-on's own list of actions (review M1)
+            why = framepass.op_refusal(self._frame[0], body)
+            if why:
+                return self._send(403, why.encode(), "text/plain; charset=utf-8")
         op_name = re.sub(r"[^A-Za-z0-9_.-]", "?", str(body.get("op"))[:40])
         self._act = (op_name, time.monotonic())
         from . import update as _update
