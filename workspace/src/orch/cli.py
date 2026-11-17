@@ -343,7 +343,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "triage"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -437,9 +437,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     x = sub.add_parser("usage", parents=[common], help="tokens per model and per ticket (read-only)")
     x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
-    x = sub.add_parser(
-        "triage", parents=[common], help="list every open ticket that needs a look (read-only)"
-    )
+    x = sub.add_parser("triage", parents=[common], help="list the tickets that need a look (read-only)")
     x.add_argument(
         "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
     )

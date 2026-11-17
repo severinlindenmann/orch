@@ -17,7 +17,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import devexpert, runs, tickets
+from orch import devexpert, history, runs, tickets
 from orch import text as textmod
 from orch.errors import Refused
 
@@ -87,9 +87,9 @@ RANK = {"wait_passed": 0, "parent_closed": 1, "steps_done": 2, "stale": 3, "wait
         "unclear": 9}  # fmt: skip
 
 
-def _last_work(t: dict) -> str | None:
-    """When someone last worked on the ticket: the newest history line not written by sync."""
-    for h in reversed(t.get("history") or []):
+def _last_work(root: Path, t: dict) -> str | None:
+    """When someone last worked on the ticket: the newest history line (as shown) not written by sync."""
+    for h in reversed(history.lines(root, t)):
         if isinstance(h, dict) and h.get("at") and not str(h.get("by") or "").startswith(QUIET_BY):
             return h["at"]
     return t.get("created_at")
@@ -187,7 +187,7 @@ def collect(root: Path, at: datetime | None = None, lanes: tuple[str, ...] = DEF
                 "title": _flat(t.get("title")),
                 "status": t.get("status"),
                 "lane": lane,
-                "idle_days": _days(_last_work(t), at),
+                "idle_days": _days(_last_work(root, t), at),
                 "age_days": _days(t.get("created_at"), at),
                 "steps": [done, total],
                 "parent": _name(parent) if parent else None,
