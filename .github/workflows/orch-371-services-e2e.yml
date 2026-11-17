@@ -1,0 +1,41 @@
+name: orch-371 services e2e (throwaway)
+on:
+  push:
+    branches: [test/orch-371-linux-e2e]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [sealed, own-home]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Playwright
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: User service manager
+        run: |
+          sudo loginctl enable-linger "$USER"
+          for i in $(seq 1 30); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 1; done
+          XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user show-environment > /dev/null
+      - name: Walk
+        env:
+          PW: /tmp/pw/node_modules/playwright
+        run: bash .github/orch-371-e2e/e2e-linux.sh "${{ github.sha }}" "${{ matrix.mode }}" "$RUNNER_TEMP/out" 2>&1 | tee "$RUNNER_TEMP/walk.log"
+      - name: Keep the results
+        if: always()
+        run: mkdir -p "$RUNNER_TEMP/out" && cp "$RUNNER_TEMP/walk.log" "$RUNNER_TEMP/out/"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: services-e2e-${{ matrix.mode }}
+          path: ${{ runner.temp }}/out
