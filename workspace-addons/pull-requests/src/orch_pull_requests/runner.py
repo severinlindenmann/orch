@@ -4,11 +4,13 @@ One runner per workspace (lock folder `runner.lock`). It first checks which GitH
 setting `[pull_requests] login` it runs only as that login, and it only takes entries added by its own login.
 While pull requests wait, it takes up to MAX_GROUP of one repository and base branch, in line order:
 
-- one pull request: the core waiter merges it on green (orch.prwait.run_one);
+- one pull request: the core waiter merges it on green (orch.prwait.run_one). When the base branch changed
+  files of it since it took the base in, the queue never takes the base into its branch and runs it again:
+  it is checked once on top of the base branch as a group of one (below);
 - several: one group commit (group.py) on a branch `orch-queue/<base>-<time>`, one pull request for it, the
   core waiter merges that on green with a merge commit. GitHub then marks every included pull request merged.
 - a red group is closed and split in halves; each half runs again (a half of one runs alone). So a bad pull
-  request costs about log2(n) extra runs and the good ones still merge.
+  request costs about log2(n) extra runs and the good ones still merge. A red group of one leaves the queue.
 - a pull request from a fork always runs alone: its code never lands on a branch of the repository unchecked.
 
 Every member is looked at again before its group is built, just before the group pull request is opened and
@@ -22,8 +24,9 @@ tries an entry leaves with the reason. A runner that died leaves entries 'runnin
 back in line first. Every group branch is written down before its push (store.groups) and stays there until
 its pull request is closed and the branch deleted; each round and each start finish what is left.
 
-Every GitHub write takes a slot of this computer's write limit (orch.ghlimit). The verdict of each pull request
-goes on its ticket when it has one.
+Every GitHub write takes a slot of this computer's write limit (orch.ghlimit), except the merge itself: the
+queue merges one group per run of the checks, so its merges are counted but never wait for the hourly merge
+count. The verdict of each pull request goes on its ticket when it has one.
 """
 
 from __future__ import annotations
@@ -58,7 +61,7 @@ class Runner:
         self.root, self.gh, self.make_git, self.log = root, gh, make_git, log
         self.clock, self.sleep = clock, sleep
         self.waiter = waiter or (
-            lambda url, before_merge: prwait.run_one(url, True, before_merge=before_merge)
+            lambda url, before_merge: prwait.run_one(url, True, before_merge=before_merge, queue=True)
         )
         self.take = take or ghlimit.take
         self.me: str | None = None
@@ -305,6 +308,8 @@ class Runner:
         unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
         if o.ok and o.status == "merged":
             self.finish(e, MERGED, line, o.status)
+        elif o.status == "behind":  # the base changed its files: checked once on top of it, never taken in
+            self.on_base(e, o.line)
         elif o.status == "held":
             if self.check_members([dict(e, head=None)], base):  # held for another reason: a counted try
                 self.retry([e], o.line)
@@ -317,21 +322,36 @@ class Runner:
         else:
             self.finish(e, OUT, line, o.status)
 
+    def on_base(self, e: dict, why: str) -> None:
+        """One pull request whose base branch changed files of it since it took the base in: checked once on top
+        of the base branch as a group of one, instead of taking the base into the helper's branch and running
+        its checks again. A conflict, a fork or a red run leaves the queue with what to do."""
+        base = e.get("base") or ""
+        fix = f"take {base} in, push, then add it again"
+        if e.get("fork"):  # a fork's code never lands on a branch of the repository unchecked
+            self.finish(e, OUT, f"{why} A pull request from a fork is merged alone: {fix}.", "behind")
+            return
+        for r in self.group([e], alone=True):  # returned only when its run on top of the base was red
+            line = f"Checks of {r['url']} on top of {base} failed (its group of one was red): fix it, add it again."
+            self.finish(r, OUT, line, "checks failed")
+
     # -- a group -----------------------------------------------------------------------------------------
-    def group(self, batch: list[dict]) -> list[dict]:
+    def group(self, batch: list[dict], alone: bool = False) -> list[dict]:
         """Check and merge batch as one group; every entry is finished or back in line, except those of a red
-        group, which are returned (still running) so the caller checks them in smaller groups."""
+        group, which are returned (still running) so the caller checks them in smaller groups. alone: a group
+        of one (on_base): built on top of the base branch even for one pull request, never sent to single."""
+        least = 1 if alone else 2
         forks = [e for e in batch if e.get("fork")]
         batch = [e for e in batch if not e.get("fork")]
         for e in forks:  # a fork's code runs alone, as GitHub runs it for a fork pull request
             self.single(e, "a pull request from a fork is merged alone")
-        if len(batch) < 2:
+        if len(batch) < least:
             for e in batch:
                 self.single(e)
             return []
         repo, base = batch[0]["repo"], batch[0]["base"]
         batch = self.check_members(batch, base)
-        if len(batch) < 2:
+        if len(batch) < least:
             for e in batch:
                 self.single(e)
             return []
@@ -345,7 +365,7 @@ class Runner:
         moved = [e for e in batch if e.get("head") and heads.get(str(e["number"])) != e["head"]]
         if moved:  # pushed to since it was looked at: looked at again next round
             store.back_to_front(self.root, [e["url"] for e in moved], "it got a new commit; waits again")
-            return self.group([e for e in batch if e not in moved])
+            return self.group([e for e in batch if e not in moved], alone)
         try:
             sha, included, conflicted = git.build(heads["base"], [(n, heads[str(n)]) for n in nums])
         except Refused as e:
@@ -354,18 +374,22 @@ class Runner:
         inside = [e for e in batch if e["number"] in included]
         apart = [e for e in batch if e["number"] in conflicted]
         red = []
-        if len(inside) < 2:
+        if len(inside) < least:
             for e in inside:
                 self.single(e)
         else:
-            red = self._check_group(repo, base, sha, inside)
-        for (
-            e
-        ) in apart:  # conflicts with the group: alone, after it (the waiter takes the base in or says why)
-            self.single(e, "it conflicted with other pull requests in the merge queue")
+            red = self._check_group(repo, base, sha, inside, alone)
+        for e in apart:
+            if alone:  # it conflicts with the base branch itself
+                line = f"{e['url']} conflicts with {base}: merge {base} into the branch by hand, push, add it again."
+                self.finish(e, OUT, line, "conflict")
+            else:  # conflicts with the group: alone, after it (checked on top of the base when it is behind)
+                self.single(e, "it conflicted with other pull requests in the merge queue")
         return red
 
-    def _check_group(self, repo: str, base: str, sha: str, inside: list[dict]) -> list[dict]:
+    def _check_group(
+        self, repo: str, base: str, sha: str, inside: list[dict], alone: bool = False
+    ) -> list[dict]:
         # the workspace's own mark: two workspaces on one repository never share a group branch
         mark = hashlib.sha256(str(self.root.resolve()).encode("utf-8")).hexdigest()[:6]
         branch = f"orch-queue/{base}-{int(self.clock())}-{mark}"
@@ -384,7 +408,7 @@ class Runner:
             return []
         good = self.check_members(inside, base)  # just before the group pull request is opened
         if len(good) < len(inside):  # someone changed: this branch is not used (tidy deletes it)
-            return self.group(good)
+            return self.group(good, alone)
         title, body = _group_text(inside)
         if not self.take("pr", f"{repo} group {branch}"):
             self.retry(inside, NO_ROOM, count=False)
@@ -617,8 +641,13 @@ def _safe_title(title: str) -> str:
 
 def _group_text(inside: list[dict]) -> tuple[str, str]:
     nums = ", ".join(f"#{e['number']}" for e in inside)
+    lead = (
+        "orch merge queue: these pull requests are merged together after one run of the checks."
+        if len(inside) > 1
+        else "orch merge queue: this pull request is checked once on top of its base branch, then merged."
+    )
     lines = [
-        "orch merge queue: these pull requests are merged together after one run of the checks.",
+        lead,
         "",
         *(f"- #{e['number']} {_safe_title(e.get('title') or '')}".rstrip() for e in inside),
     ]

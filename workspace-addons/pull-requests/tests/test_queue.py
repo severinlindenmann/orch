@@ -182,7 +182,9 @@ class FakeGit:
         self.pushed.append(branch)
 
 
-def make(ws, gh, git, bad=(), log=None):
+def make(ws, gh, git, bad=(), log=None, behind=(), red_on_base=()):
+    """bad: red wherever it runs; behind: alone, the base changed its files (the core waiter in queue mode
+    says behind); red_on_base: red once checked on top of the base (in a group)."""
     calls = []
     t = [1000.0]
 
@@ -192,8 +194,10 @@ def make(ws, gh, git, bad=(), log=None):
     def waiter(u, before_merge=None):
         calls.append(u)
         members = gh.groups.get(u) or [int(u.rsplit("/", 1)[1])]
-        if any(m in bad for m in members):
+        if any(m in bad for m in members) or (u in gh.groups and any(m in red_on_base for m in members)):
             return Outcome(u, False, "checks failed", f"Checks of {u}: NOT green")
+        if u not in gh.groups and members[0] in behind:
+            return Outcome(u, False, "behind", f"develop changed files of {u}; not merged alone.")
         held = before_merge and before_merge(gh.pr(u)["headRefOid"])
         if held:
             return Outcome(u, False, "held", f"not merged: {held}")
@@ -267,6 +271,55 @@ def test_a_conflicting_pull_request_runs_alone_after_the_group(ws):
     assert gh.groups[calls[0]] == [1, 3] and calls[1] == url(2)
     assert states(ws) == {1: "merged", 2: "merged", 3: "merged"}
     assert "conflicted" in {x["number"]: x for x in store.read(ws)}[2]["why"]
+
+
+def test_a_pull_request_behind_its_base_is_checked_once_on_top_of_it_not_taken_in(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh, git = FakeGitHub({1: {}}), FakeGit()
+    r, calls = make(ws, gh, git, behind={1})
+    r.run()
+    assert calls[0] == url(1) and gh.groups[calls[1]] == [1] and len(calls) == 2  # one run on top of develop
+    assert states(ws) == {1: "merged"} and len(git.pushed) == 1
+    assert "checked once on top of its base branch" in gh.bodies[0] and "Closes #101" in gh.bodies[0]
+
+
+def test_a_pull_request_red_on_top_of_its_base_leaves_the_queue(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {}})
+    r, calls = make(ws, gh, FakeGit(), behind={1}, red_on_base={1})
+    r.run()
+    row = store.read(ws)[0]
+    assert states(ws) == {1: "out"} and len(calls) == 2 and "group of one was red" in row["why"]
+    assert gh.closed == [calls[1]]  # its group pull request is closed, the branch deleted
+
+
+def test_a_pull_request_behind_that_conflicts_with_its_base_leaves_with_what_to_do(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {}})
+    r, calls = make(ws, gh, FakeGit(conflicts={1}), behind={1})
+    r.run()
+    row = store.read(ws)[0]
+    assert states(ws) == {1: "out"} and calls == [url(1)] and not gh.groups
+    assert "conflicts with develop" in row["why"] and "by hand" in row["why"]
+
+
+def test_a_fork_behind_its_base_is_never_built_on_a_branch(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh, git = FakeGitHub({1: {"fork": True}}), FakeGit()
+    r, calls = make(ws, gh, git, behind={1})
+    r.run()
+    assert states(ws) == {1: "out"} and calls == [url(1)] and not git.pushed
+    assert "fork" in store.read(ws)[0]["why"]
+
+
+def test_the_queue_calls_the_core_waiter_in_queue_mode(ws, monkeypatch):
+    from orch import prwait
+
+    seen = []
+    monkeypatch.setattr(prwait, "run_one", lambda u, merge, **kw: seen.append((merge, kw.get("queue"))))
+    r = runner.Runner(ws, FakeGitHub({1: {}}), lambda repo: FakeGit())
+    r.waiter(url(1), None)
+    assert seen == [(True, True)]
 
 
 def test_a_group_that_cannot_be_pushed_is_retried_then_leaves(ws):
