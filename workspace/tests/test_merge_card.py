@@ -33,7 +33,7 @@ class FakeGh:
         self.envs.append({k: env[k] for k in ghmerge.TOKEN_VARS if k in env})
         if args[:2] == ["api", "user"]:
             return subprocess.CompletedProcess(argv, self.user_rc, self.login + "\n", "")
-        if args[:2] == ["pr", "view"] and "title,baseRefName,commits,statusCheckRollup" in args:
+        if args[:2] == ["pr", "view"] and "title,baseRefName,headRefOid,commits,statusCheckRollup" in args:
             if self.summary is None:
                 return subprocess.CompletedProcess(argv, 1, "", "not found")
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.summary), "")
@@ -295,6 +295,7 @@ def test_a_release_card_shows_what_goes_out_and_the_checks(tk, run, gh):
     gh.summary = {
         "title": "Release 32",
         "baseRefName": "main",
+        "headRefOid": HEAD,
         "commits": [
             {"messageHeadline": "Merge pull request #7 from acme/feat/x", "messageBody": "Bigger pictures"},
             {"messageHeadline": "Fix a typo", "messageBody": ""},
@@ -309,12 +310,28 @@ def test_a_release_card_shows_what_goes_out_and_the_checks(tk, run, gh):
     pv = _q(root, tid)["card"]["preview"]
     assert pv["heading"] == "What goes to main"
     assert pv["steps"] == [
-        f"{tickets.load(root, other)['key']} Review on desktop (#7)",
+        f"Bigger pictures (#7, {tickets.load(root, other)['key']})",
         "Send back asks for words (#9)",
-    ]
+        "and 1 other commit",
+    ], "GitHub's own titles, the linked ticket after it, and the commits that are no pull request"
     assert pv["paras"][0].startswith("Checks at ") and pv["paras"][0].endswith(": all 2 passed.")
     assert pv["paras"][1] == f"Merges commit {HEAD[:7]} exactly."
     review.check_wire_card(review.wire_card(_q(root, tid)["card"], {}), 0)  # still a valid phone card
+
+
+def test_a_summary_of_another_commit_or_a_file_never_replaces_it(tk, run, gh, tmp_path):
+    root, tid = tk
+    gh.summary = {
+        "title": "Release 33",
+        "baseRefName": "main",
+        "headRefOid": "c" * 40,
+        "commits": [],
+        "statusCheckRollup": [],
+    }
+    assert _ask(run, tid)[0] == 0
+    assert _q(root, tid)["card"]["preview"]["paras"] == [f"Merges commit {HEAD[:7]} exactly."], (
+        "read for another commit: only the pinned one"
+    )
 
 
 def test_checks_in_plain_words():

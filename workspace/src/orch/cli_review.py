@@ -216,8 +216,8 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
                 "e.g. --open https://github.com/owner/repo/pull/12."
             )
         head = args.merge_head = ghmerge.head_of(args.open)  # the click merges exactly this commit
-        if not args.file:  # what the person decides on, not the address (that is the Open link)
-            card["preview"] = merge_preview(root, args.open, head, ghmerge.summary(args.open))
+        # what the person decides on, read for the pinned commit; never a helper's own file in its place
+        card["preview"] = merge_preview(root, args.open, head, ghmerge.summary(args.open, head))
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
         card.setdefault(
             "why",
@@ -235,17 +235,20 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     return card, options, args.suggest, title
 
 
-def _pr_tickets(root: Path, repo_url: str) -> dict[int, str]:
-    """{pull request number: "ORCH-12 Ticket title"} for this repository's pull requests the tickets link."""
-    out: dict[int, str] = {}
+def _pr_tickets(root: Path, repo_url: str) -> dict[int, list[str]]:
+    """{pull request number: [ticket keys]} for this repository's pull requests the tickets link (shown after
+    GitHub's own title, never in its place)."""
+    out: dict[int, list[str]] = {}
     for t in tickets.list_all(root):
-        name = " ".join(x for x in (t.get("key"), t.get("title")) if isinstance(x, str) and x.strip())
+        name = t.get("key") if isinstance(t.get("key"), str) else ""
         for r in t.get("refs") or []:
             url = r.get("url") if isinstance(r, dict) else None
             if isinstance(url, str) and url.startswith(repo_url + "/pull/") and name:
                 tail = url[len(repo_url) + 6 :]
                 if tail.isdigit():
-                    out.setdefault(int(tail), name)
+                    keys = out.setdefault(int(tail), [])
+                    if name not in keys:
+                        keys.append(name)
     return out
 
 
@@ -258,9 +261,17 @@ def merge_preview(root: Path, url: str, head: str, info: dict | None) -> dict:
         return {"type": "doc", "heading": "Pull request", "paras": [f"Merges commit {head[:7]} exactly."]}
     repo = url.rsplit("/pull/", 1)[0]
     names = _pr_tickets(root, repo)
-    steps = [f"{names.get(i['pr']) or i['title'] or 'Pull request'} (#{i['pr']})" for i in info["items"]]
+    steps = [
+        f"{i['title'] or 'Pull request'} (#{i['pr']}"
+        + "".join(f", {k}" for k in names.get(i["pr"], [])[:3])
+        + ")"
+        for i in info["items"]
+    ]
     if info.get("more"):
         steps.append(f"and {info['more']} more")
+    if steps and info.get("other"):
+        n = info["other"]
+        steps.append(f"and {n} other commit{'' if n == 1 else 's'}")
     base = info.get("base") or "the main branch"
     pv = {
         "type": "doc",

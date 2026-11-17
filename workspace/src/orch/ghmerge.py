@@ -185,27 +185,32 @@ def checks_words(rollup) -> str:
     return f"all {len(runs)} passed"
 
 
-def summary(url: str) -> dict | None:
+def summary(url: str, head: str) -> dict | None:
     """What a merge card shows (ORCH-183, owner 17 Nov: "the address is a link, not the content"), read
     once when the card is made, with whatever login this process has: {"title", "base", "checks" (plain
-    words), "items": [{"pr": n, "title"}]} where items are the pull requests this one brings in (merge commits
-    of a release). None when GitHub cannot be read: the card then shows what it showed before."""
+    words), "items": [{"pr": n, "title"}], "other": commits that are no pull request merge}. Items come from
+    merge commit headlines, which a commit author writes: GitHub's own titles, never a ticket alone, and the
+    count of other commits is always shown. None when GitHub cannot be read or the newest commit is no longer
+    `head` (the commit the click merges): the card then shows only that commit."""
     gh = shutil.which("gh")
     if gh is None or not is_pr_url(url):
         return None
     try:
-        v = _gh_plain(gh, ["pr", "view", url, "--json", "title,baseRefName,commits,statusCheckRollup"], 20)
+        v = _gh_plain(
+            gh, ["pr", "view", url, "--json", "title,baseRefName,headRefOid,commits,statusCheckRollup"], 20
+        )
         data = json.loads(v.stdout) if v.returncode == 0 else None
     except (Refused, ValueError):
         return None
-    if not isinstance(data, dict):
+    if not isinstance(data, dict) or data.get("headRefOid") != head:
         return None
-    items, seen = [], set()
+    items, seen, other = [], set(), 0
     for c in data.get("commits") or []:
         if not isinstance(c, dict):
             continue
         m = MERGE_COMMIT.match(str(c.get("messageHeadline") or ""))
         if not m or m[1] in seen:
+            other += 1
             continue
         seen.add(m[1])
         title = next((x.strip() for x in str(c.get("messageBody") or "").splitlines() if x.strip()), "")
@@ -216,6 +221,7 @@ def summary(url: str) -> dict | None:
         "checks": checks_words(data.get("statusCheckRollup")),
         "items": items[:MAX_ITEMS],
         "more": max(0, len(items) - MAX_ITEMS),
+        "other": other,
     }
 
 
