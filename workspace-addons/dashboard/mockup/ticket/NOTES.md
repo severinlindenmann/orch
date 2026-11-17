@@ -136,6 +136,12 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ## Owner feedback 14 Nov (lane owner-fb-v2)
 The current ticket header is the strip in `../sweep/d-ticket-states.html` (all five states) and `../proposals/f-ticket-check.html` (Check: Looks good / Send back, Result, What the helper did). The product matches them; the older pages here keep their 13 Nov look until they are replaced.
 
+## Working ticket header (ORCH-70, 17 Nov 2026)
+Owner accepted on 16 Nov (ORCH-64 card): while a helper works the header has no box, one line above the title (ticket
+number, state, helper, minutes), one Watch live, and Stop plus the two terminal commands in the ⋯ menu. No helper bar,
+no Live session card, no empty Owner row; the top bar shows only "Tickets › ORCH-n". Pages: `ticket-working.html`,
+the Working strip in `../sweep/d-ticket-states.html`; master: `.strip-plain`, `.strip-kicker` in widgets.css.
+
 ## Review stack (15 Nov 2026)
 
 ### ticket-answers.html
@@ -145,3 +151,24 @@ The current ticket header is the strip in `../sweep/d-ticket-states.html` (all f
 
 ## Report a problem (diagnostics D3, 15 Nov)
 `ticket-report.html` (`?s=page|form|busy|done|copied`): the "Report a problem" button in the top bar and its dialog (what happened, what you expected, a picture of the page, ticket text and helper conversation, Create report, Report ready with the checks, a line to paste, Ask a helper to investigate, Open folder). The button is in the top bar of every page; on a ticket page and in an add-on frame the dialog names that ticket or add-on. The form also takes "Anything else?", added pictures and files (pick, drop or paste, up to 10) and, only when the workspace is connected to a relay, the tick box "Send this report to the admin of <relay>"; Report ready then says "Sent to the admin of <relay>" (or "Not sent: <why>" with Try again; the report stays on this computer). The relay admin page that lists them (also called Report a problem) has no mockup: the relay admin portal is not part of this mockup set. The product's picture of the page is a snapshot of the page text with every typed value masked (no screenshot library).
+
+A feature wish (ORCH-81, owner pick A, 16 Nov; `&about=feature`): the button keeps "Report a problem"; the dialog starts with a switch "A problem" / "A feature wish". For a wish the words become "What do you want?" / "Why would it help?", the page picture and ticket text rows are hidden (off), and Report ready says "Your feature wish is saved on this computer." with only Close: a wish is sorted first, never handed to a helper from here. The relay admin page marks a shared wish with a "Feature wish" chip.
+
+- Properties: **Model** (ORCH-49). orch picks Sonnet or Opus before each start (shown as "Let orch decide (Opus)", the reason in the tooltip); a person picks Sonnet or Opus, or hands it back. Applies from the next start. Shown in `ticket-working.html`.
+- A question with a card (16 Nov, ORCH-65; `ticket-question.html#card-question`): the question text and the card's pictures together (Today first on a choice, the suggested option marked), "Look and answer" opens Review at that card; the top line names the agent that asked ("Manager asks: …", the agent's own name), "Helper" only when none is known.
+
+## Released or only merged (ORCH-87, 17 Nov)
+
+### ticket-done.html
+
+- A finished ticket with a merged pull request shows one line at the top: "In release 30 (installed here)" (green ✓),
+  "In release 31, not installed here yet" (amber !) or "Merged, not released yet" (grey –). orch works it out from the
+  merge commit and the installed release; no line when it cannot tell.
+
+## ORCH-185: what you asked, due day, activity (17 Nov)
+
+- What you asked: pictures and files the person attached when making the ticket are listed there (with a thumbnail), not under Result. A one-sentence wish stays in the note.
+- Due shows the day ("Fri 20 Nov", the year only when it is not this year), never a bare "Fri".
+- Activity: a note edit keeps its own row with "Was: … → Now: …" (at most 200 characters each).
+- Picture viewer (kit): a picture gets the tall window and a smaller header at 700 px and wider, so a 640 × 480 picture is shown whole.
+- `ticket-working.html` shows the attached picture (thumbnail, "attached by you") under What you asked and an Activity row with Was/Now. The picture viewer says "Attached by you" for such a file.

@@ -37,7 +37,16 @@ const head = slice(ssrc, '// The add-on\'s name, the same', 'const asList');
 test('an add-on has the same display name on or off (never the lower-case package name)', () => {
   const c = load(settingsCtx(), head);
   for (const n of ['factory', 'insights', 'sync', 'publish', 'relay']) assert.equal(c.rowLabel({name: n, active: false}), capitalise(n));
-  assert.equal(c.rowLabel({name: 'relay', active: true, dashboard: {label: 'Contacts'}}), 'Relay');
+  assert.equal(c.rowLabel({name: 'relay', active: true, dashboard: {label: 'Contacts'}}), 'Contacts');
+});
+
+// ORCH-141: the Settings list says the menu name (Shared links, Contacts), the same as the sidebar
+test('the Settings list row uses the menu name that the sidebar shows', () => {
+  const c = load(settingsCtx(), head);
+  assert.equal(c.rowLabel({name: 'publish', label: 'Shared links'}), 'Shared links');
+  assert.equal(c.rowLabel({name: 'relay', label: 'Contacts'}), 'Contacts');
+  assert.equal(c.rowLabel({name: 'relay', dashboard: {label: 'Contacts'}}), 'Contacts');
+  assert.equal(c.rowLabel({name: 'sync'}), 'Sync');
 });
 
 // 40: "Turning on…" next to the switch while it runs
@@ -130,7 +139,7 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
   });
   vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
   const removable = ctx.page({name: 'factory', active: false, description: 'd', removable: true});
-  assert.equal(text(find(removable, byKey('addon-detail-remove'))), 'Remove from this computer');
+  assert.equal(text(find(removable, byKey('addon-detail-remove'))), 'Uninstall');
   const core = ctx.page({name: 'relay', active: false, description: 'd', removable: false});
   assert.equal(find(core, byKey('addon-detail-remove')), null);
   assert.match(text(find(core, byKey('addon-detail-core'))), /Relay is part of orch\. You can turn it off, but not remove it\./);

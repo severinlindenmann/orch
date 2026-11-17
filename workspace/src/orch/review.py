@@ -88,7 +88,7 @@ _PV_KEYS = {
     "doc": {"type", "heading", "paras", "steps"},
     "table": {"type", "cols", "rows"},
     "compare": {"type", "note", "before", "after"},
-    "options": {"type", "options"},
+    "options": {"type", "options", "before"},
 }
 _OPT_KEYS = {"id", "title", "text", "preview"}
 
@@ -175,7 +175,14 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
             _text(o.get("text"), "option text", 500)
             if o.get("preview") is not None:
                 _walk_preview(o["preview"], f"{where}.options[{i}].preview", refs, depth + 1)
+        if pv.get("before") is not None:  # how it is today, shown beside the options (not one to pick)
+            _walk_preview(pv["before"], f"{where}.before", refs, depth + 1)
     return pv
+
+
+def is_plain_url(url) -> bool:
+    """A plain http(s) address (the same rule as a card's open)."""
+    return isinstance(url, str) and len(url) <= 500 and bool(_OPEN.fullmatch(url))
 
 
 def validate_card(card) -> dict:
@@ -351,7 +358,10 @@ def card_files_of(card: dict) -> list[str]:
     """The stored file references of a card (reviewed/<sha12>/<name>), each once, in the order they appear."""
     refs: list[tuple[dict, str]] = []
     if isinstance(card.get("preview"), dict):
-        _walk_preview(json.loads(json.dumps(card["preview"])), "preview", refs)
+        pv = json.loads(json.dumps(card["preview"]))
+        if pv.get("type") == "options":
+            pv.pop("before", None)  # not on the phone's card (wire_card)
+        _walk_preview(pv, "preview", refs)
     out: list[str] = []
     for d, k in refs:
         if d[k] not in out:
@@ -395,8 +405,8 @@ def wire_card(card: dict, refs: dict) -> dict:
     def pv(p):
         o = {}
         for k, v in p.items():
-            if v is None or v == "":
-                continue
+            if v is None or v == "" or (k == "before" and p.get("type") == "options"):
+                continue  # the phone shows a choice's options only (its card has no Today picture yet)
             if k == "src":
                 o[k] = src(v)
             elif k in ("before", "after"):
@@ -700,18 +710,80 @@ def _find(ticket: dict, qid: str) -> dict:
     return q
 
 
-def check_digest(ticket: dict) -> str:
+def check_digest(ticket: dict, root: Path | None = None) -> str:
     """What a person is shown of a Check result: exactly check_card(ticket) (title, steps with their done and
     won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
-    shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket)}
+    shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket, root)}
     return _sha(_canon(shown).encode())
 
 
-def check_card(ticket: dict) -> dict:
-    items = [
-        f"{'Done' if c.get('done') or c.get('wont_do') else 'Open'}: {c.get('text', '')}"
-        for c in ticket.get("checklist", [])
-    ]
+_PR_NUMBER = re.compile(r"/pull/(\d+)")
+
+
+def _step_evidence(c: dict) -> str:
+    """What a step's evidence says, in one plain line: the completion note, what was run, the pull request."""
+    bits: list[str] = []
+    for ev in c.get("evidence") or []:
+        if not isinstance(ev, dict):
+            continue
+        kind, ref = ev.get("type") or ev.get("kind"), str(ev.get("ref") or ev.get("text") or "").strip()
+        said = [str(ev.get("summary") or "").strip()]
+        if kind == "note":
+            said.append(ref)
+        elif kind == "command" and ref:
+            failed = isinstance(ev.get("exit"), int) and ev["exit"] != 0
+            said.append(f"Ran: {ref}" + (f" (failed, exit {ev['exit']})" if failed else ""))
+        elif kind == "pr":
+            m = _PR_NUMBER.search(ref)
+            said.append(f"PR #{m.group(1)}" if m else "Pull request")
+        bits += [x for x in said if x and x not in bits]
+    return " · ".join(bits)
+
+
+def _check_open(ticket: dict) -> str | None:
+    """The newest pull request in the steps' evidence: the card's Open button."""
+    for c in reversed(ticket.get("checklist") or []):
+        evs = c.get("evidence") if isinstance(c, dict) else None
+        for ev in reversed(evs if isinstance(evs, list) else []):
+            if not isinstance(ev, dict):
+                continue
+            ref = ev.get("ref")
+            if ev.get("type") == "pr" and isinstance(ref, str) and len(ref) <= 500 and _OPEN.fullmatch(ref):
+                return ref
+    return None
+
+
+def _parent_line(ticket: dict, root: Path | None) -> str:
+    """'Part of: ORCH-49 Factory follow-ups' for a sub-ticket (needs `root`); "" without a parent."""
+    pid = ticket.get("parent")
+    if root is None or not isinstance(pid, str) or not pid:
+        return ""
+    try:
+        parent = tickets.load(root, pid)
+    except (Refused, OSError, ValueError):
+        return ""
+    name = " ".join(x for x in (parent.get("key"), parent.get("title")) if isinstance(x, str) and x.strip())
+    return _clip(f"Part of: {name}", 300) if name else ""
+
+
+def check_card(ticket: dict, root: Path | None = None) -> dict:
+    """A Check result as a card: the summary, Done when, the parent ticket (with `root`), every step with its
+    evidence (note, what was run, pull request) and the parts of Done when no step covers. No preview when
+    there is nothing to show (an empty box)."""
+    steps = []
+    for c in ticket.get("checklist") or []:
+        if not isinstance(c, dict):
+            continue
+        state = "Won't do" if c.get("wont_do") else "Done" if c.get("done") else "Open"
+        said = _step_evidence(c)
+        steps.append(_clip(f"{state}: {c.get('text', '')}" + (f" — {said}" if said else ""), 1200))
+    summary_text = str(ticket.get("summary") or "").strip()
+    paras = [_clip(f"In short: {summary_text}", 1200)] if summary_text else []
+    done_when = str(ticket.get("done_when") or "").strip()
+    paras += [_clip(f"Done when: {done_when}", 1200)] if done_when else []
+    paras += [x for x in (_parent_line(ticket, root),) if x]
+    uncovered = tickets.proof_state(ticket)["uncovered"]
+    paras += [_clip(f"No task covers: “{p}”", 600) for p in uncovered[:10]]
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
@@ -719,8 +791,17 @@ def check_card(ticket: dict) -> dict:
         "then": "The ticket is done.",
         "ok_label": "Looks good",
     }
-    if items:
-        card["preview"] = {"type": "doc", "heading": "Steps", "steps": [_clip(i, 300) for i in items[:50]]}
+    if uncovered:
+        card["need"] = "Done when is not fully covered"
+    url = _check_open(ticket)
+    if url:
+        card["open"] = url
+    if steps or paras:
+        card["preview"] = {"type": "doc", "heading": "What was done"}
+        if paras:
+            card["preview"]["paras"] = paras
+        if steps:
+            card["preview"]["steps"] = steps[:50]
     return card
 
 
@@ -796,6 +877,93 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
         tickets.note_history(root, tid, by, line, via)
 
 
+def tend_releases(
+    root: Path, dry_run: bool = False, checks_of=None, merge_with=None, release_check=None
+) -> dict:
+    """One pass of the release keeper (`orch review tend-releases`): every unanswered release Merge card
+    (`orch ask ... --merge --release`) whose pull request is open, not a draft, still on the card's commit and
+    green on every check is merged with the gh login of this computer (the owner's: ghmerge drops helper
+    tokens) and recorded as answered by the release keeper. Only while the owner turned it on in Settings
+    (`workflow.release_merge`) and automation is not paused. Returns {"off", "paused", "actions": [{ticket,
+    key, question, url, verdict, why, done}]}; verdict is merge, wait or stale. dry_run only says it.
+    Only a real release merges: from a release/... branch into the default branch, changing nothing that is
+    not on develop already (ghmerge.release_problem), so a card a helper marks --release on other work never
+    merges by itself. Refused inside a helper (an agent tool in the environment), like the Merge click.
+    No AI call: a repeating automation script runs it."""
+    from orch import brake, config, ghmerge
+
+    checks_of = checks_of or ghmerge.checks
+    merge_with = merge_with or ghmerge.merge
+    release_check = release_check or ghmerge.release_problem
+    if tickets.agent_tool():
+        raise Refused("Releases merge from the automation on this computer, not inside a helper.")
+    if not config.release_merge_on(root):
+        return {"off": True, "paused": False, "actions": []}
+    if brake.paused(root) is not None:
+        return {"off": False, "paused": True, "actions": []}
+    actions = []
+    for t in tickets.list_all(root):
+        if t.get("status") in ("done", "dropped"):
+            continue
+        for q in t.get("questions") or []:
+            url = merge_url(q)
+            act = q.get("action") if isinstance(q.get("action"), dict) else {}
+            if url is None or act.get("release") is not True or q.get("answer") is not None:
+                continue
+            if tickets.taken_back_text(q):
+                continue
+            head = act.get("head")
+            row = {"ticket": t["id"], "key": t.get("key") or t["id"], "question": q["id"], "url": url,
+                   "done": False}  # fmt: skip
+            got = checks_of(url)
+            if got is None:
+                row.update(verdict="wait", why="GitHub could not be read")
+            elif got["state"] != "OPEN" or got["head"] != head:
+                row.update(verdict="stale", why="the pull request changed or closed; a new card is needed")
+            elif not got["green"]:
+                row.update(verdict="wait", why="not every check is green yet")
+            elif (why := release_check(url, head)) is not None:
+                row.update(verdict="wait", why=f"not a release that merges by itself: {why}")
+            else:
+                row.update(verdict="merge", why="every check is green")
+            if row["verdict"] != "merge" or dry_run:
+                actions.append(row)
+                continue
+            try:
+                done = merge_with(url, head)
+                d = _bare("approve", "Merge", [], _note(None))
+                d["summary"] = "Merged by itself: every check was green."
+                line = (f"merged already on GitHub ({done['login']}): {url}" if done.get("already")
+                        else f"merged on GitHub as {done['login']}: {url}")  # fmt: skip
+                tickets.merged_for_owner(root, t["id"], q["id"], url, head, line, d)
+                row["done"] = True
+            except Refused as e:  # GitHub said no, or the card changed: the owner's click still works
+                row.update(verdict="wait", why=str(e))
+            actions.append(row)
+    return {"off": False, "paused": False, "actions": actions}
+
+
+def tend_releases_text(result: dict, dry_run: bool = False) -> str:
+    if result.get("off"):
+        return (
+            "Releases merge only on your click here. "
+            "Turn it on: Settings, or orch config set workflow.release_merge on"
+        )
+    if result.get("paused"):
+        return "Automation is paused: no release merges by itself now."
+    rows = result.get("actions") or []
+    if not rows:
+        return "No release waits for a merge."
+    out = []
+    for r in rows:
+        if r["verdict"] == "merge":
+            word = "would merge" if dry_run else ("merged" if r["done"] else "not merged")
+        else:
+            word = "waits" if r["verdict"] == "wait" else "needs a new card"
+        out.append(f"{r['key']} {r['question']}: {word} ({r['why']}) {r['url']}")
+    return "\n".join(out)
+
+
 def _decide_check(
     root: Path,
     ticket: dict,
@@ -814,9 +982,9 @@ def _decide_check(
         raise Refused(f"verdict is one of {', '.join(VERDICTS)}.")
     if ticket.get("status") != "review":
         raise Refused("This ticket is not waiting for your review.")
-    if digest is not None and digest != check_digest(ticket):
+    if digest is not None and digest != check_digest(ticket, root):
         raise Refused("This result changed after it was shown. Look at it again, then answer.")
-    card = check_card(ticket)
+    card = check_card(ticket, root)
     n = _note_bv(note)
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
@@ -907,8 +1075,8 @@ def stack(root: Path) -> list[dict]:
         order[t["id"]] = {k: v[0] for k, v in tasks.items()}
         if t.get("status") not in needs.OPEN:
             for q in t.get("questions") or []:
-                if q.get("answer") is not None or q.get("kind") not in (None, "plain"):
-                    continue  # an add-on's own question is its business
+                if q.get("answer") is not None:
+                    continue  # every open question is a card, an add-on's own too (Factory's Start?, ORCH-63)
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
@@ -924,6 +1092,9 @@ def stack(root: Path) -> list[dict]:
                         "since": needs._asked_at(root, t, q["id"]),
                         "options": list(q.get("options") or []),
                         "recommended": q.get("recommended"),
+                        "text": q.get("text") or "",
+                        **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
+                        **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
                     }
                 )
         if t.get("status") == "review":
@@ -934,8 +1105,8 @@ def stack(root: Path) -> list[dict]:
                     "id": f"core:review:{t['id']}",
                     "key": "review",
                     "kind": "check",
-                    "card": check_card(t),
-                    "digest": check_digest(t),
+                    "card": check_card(t, root),
+                    "digest": check_digest(t, root),
                     "since": hist[-1]["at"] if hist else t.get("updated_at") or t.get("created_at"),
                     "options": [],
                     "recommended": None,

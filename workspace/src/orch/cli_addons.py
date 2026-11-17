@@ -25,7 +25,7 @@ def add_parsers(sub, common) -> None:
     x = a.add_parser("remove", parents=[common], help="turn an add-on off in this workspace")
     x.add_argument("name")
     x.add_argument("--purge", action="store_true", help="also delete its data folder and settings")
-    x = a.add_parser("uninstall", parents=[common], help="remove an add-on from this computer")
+    x = a.add_parser("uninstall", parents=[common], help="uninstall an add-on")
     x.add_argument("name")
     a.add_parser("list", parents=[common])
 
@@ -68,5 +68,5 @@ def dispatch(args, root: Path) -> bool:
     else:
         addons.tool_env_change_ok()
         addons.uninstall(root, args.name)
-        _out(args, {"ok": True}, f"{args.name} is removed from this computer.")
+        _out(args, {"ok": True}, f"{args.name} is uninstalled.")
     return True

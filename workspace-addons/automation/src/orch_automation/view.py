@@ -30,7 +30,11 @@ SCAN = 7 * 1440 + 1  # at most one run per minute for a week
 
 
 def clean(s: object, n: int = 80) -> str:
-    out = "".join(c for c in str(s) if c not in "<>").strip()[:n]
+    out = "".join(c for c in str(s) if c not in "<>").strip()
+    if len(out) > n:  # cut at a whole word and say so, never in the middle of one
+        cut = out[: n - 1]
+        head = cut if out[n - 1].isspace() or len(cut.split()) < 2 else cut.rsplit(None, 1)[0]
+        out = head.rstrip(" ,;:.-\u2013\u2014") + "\u2026"
     return out or "-"
 
 
@@ -40,9 +44,27 @@ def _name(t: dict) -> str:
     return clean(f"{key} · {t['title']}" if isinstance(key, str) and key else t["title"])
 
 
+def clip(s: str, n: int = 80) -> str:
+    """Shorten at a word end with an ellipsis (never mid-word, never longer than n)."""
+    if len(s) <= n:
+        return s
+    cut = s[: n - 1].rstrip()
+    if s[n - 1].isspace() or s[n - 1] in ",;:.":
+        pass  # the cut fell exactly on a word end
+    elif " " in cut:
+        cut = cut.rsplit(" ", 1)[0].rstrip(" ,;:.-")
+    return cut + "…"
+
+
 def _title(t: dict) -> str:
-    """A ticket by its title only (the week strip shows no ticket codes)."""
-    return clean(t["title"])
+    """A ticket by its title only (the week strip shows no ticket codes), cut at a word end with an ellipsis."""
+    return clip(clean(t["title"], 400))
+
+
+def _full(t: dict) -> dict:
+    """The whole title for the hover text, only when the shown one was cut."""
+    full = clean(t["title"], 400)
+    return {"full": full} if _title(t) != full else {}
 
 
 def _dows(field: str) -> set[int] | None:
@@ -194,7 +216,15 @@ def _day_items(
             at = max(until, now)
             if day_start <= at < day_end:
                 items.append(
-                    (at, {"time": at.astimezone().strftime("%H:%M"), "title": _title(t), "link": t["id"]})
+                    (
+                        at,
+                        {
+                            "time": at.astimezone().strftime("%H:%M"),
+                            "title": _title(t),
+                            "link": t["id"],
+                            **_full(t),
+                        },
+                    )
                 )
         cron = _repeats(t)
         if not cron:
@@ -219,12 +249,21 @@ def _day_items(
                         "title": _title(t),
                         "note": note,
                         "link": t["id"],
+                        **_full(t),
                     },
                 )
             )
         else:
             items += [
-                (x, {"time": x.astimezone().strftime("%H:%M"), "title": _title(t), "link": t["id"]})
+                (
+                    x,
+                    {
+                        "time": x.astimezone().strftime("%H:%M"),
+                        "title": _title(t),
+                        "link": t["id"],
+                        **_full(t),
+                    },
+                )
                 for x in left
             ]
     return [i for _, i in sorted(items, key=lambda e: e[0])][:20]
@@ -326,7 +365,7 @@ def _schedules(
     """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown.
     `waiting`: ids of schedules that arrived by sync and are not allowed on this computer yet: they offer
     "Allow on this computer" (the person signs it) instead of Start now. `scripts_waiting`: ids of repeats whose
-    script is set up here but not allowed yet: "Allow on this computer" shows its command first."""
+    script is set up here but not allowed yet: "Allow this script" shows its command first."""
     rows = []
     for t in tickets:
         if not scheduled(t) or not (cron := _repeats(t, True)):
@@ -370,7 +409,7 @@ def _schedules(
                         }
                         if t["id"] in waiting
                         else {  # a script nobody allowed here yet: the page shows its command before the click
-                            "label": "Allow on this computer",
+                            "label": "Allow this script",
                             "action": {
                                 "op": "addon.act",
                                 "args": {"verb": "allow-script", "target": t["id"], "review": True},
@@ -380,6 +419,30 @@ def _schedules(
                         else {"label": "Start now", "action": _act("run", t["id"])},
                         {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": t["id"]}}},
                     ],
+                },
+            )
+        )
+    # one-time wake-ups ("check again in 2 hours") sit in the same table, so every automation reads as
+    # either a repeat or a single run
+    for t in tickets:
+        w = t.get("waiting_on") or {}
+        until = parse(w.get("until")) if w.get("kind") == "time" else None
+        if not scheduled(t) or not until or _repeats(t, True):
+            continue
+        at = until.astimezone()
+        rows.append(
+            (
+                max(until, now),
+                {
+                    "cells": {
+                        "schedule": _name(t),
+                        "repeats": "Once",
+                        "next": "Paused" if not running else clean(at.strftime("%a %d %b, %H:%M"), 40),
+                        "last": "Not yet",
+                    },
+                    "link": t["id"],
+                    "subtitle": "One-time wake-up",
+                    "actions": [{"label": "Start now", "action": _act("run", t["id"])}],
                 },
             )
         )
@@ -468,7 +531,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
             "type": "table",
             "columns": [
                 {"key": "schedule", "label": "Ticket", "type": "text"},
-                {"key": "repeats", "label": "Repeats", "type": "text"},
+                {"key": "repeats", "label": "Plan", "type": "text"},
                 {"key": "next", "label": "Next time", "type": "text"},
                 {"key": "last", "label": "Last time", "type": "text"},
             ],
@@ -618,8 +681,9 @@ def build(root: Path, now: datetime | None = None) -> dict:
         }
     )
 
-    today = now.strftime("%Y-%m-%d")
-    ran = sum(r["at"].startswith(today) for r in runs)
+    # "today" is the person's day on this computer, not the UTC date (ORCH-89: 00:00-01:00 counted yesterday's runs)
+    today = now.astimezone().date()
+    ran = sum(parse(r["at"]).astimezone().date() == today for r in runs)
     view = {"schema": "orch.addon-view/1", "generated_at": fmt(now), "blocks": blocks}
     if pid:
         nxt = events[0][0] if events else None

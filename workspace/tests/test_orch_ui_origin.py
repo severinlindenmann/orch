@@ -32,12 +32,27 @@ def test_post_origin_must_match():
         "null",
         "http://evil.example",
         f"http://localhost:{P}",
-        f"https://{host}",
+        f"https://{host}.evil.example",
         f"http://{host}.evil.example",
         "",
     ]
     for origin in bad:
         assert not ok("POST", Host=host, Origin=origin), origin
+    assert ok("POST", Host=host, Origin=f"https://{host}")  # a TLS proxy in front keeps the same host
+
+
+def test_any_host_name_once_signed_in():
+    """Owner rule (16 Nov): after the sign-in nothing depends on where the browser is. A proxy's or another
+    computer's host name passes when the caller saw the session cookie; without it, it is refused."""
+    for host in ("dash.example.org", "dash.example.org:8791", "10.1.2.3:8420", "[fd00::1]:443", "develop"):
+        assert not ok("GET", Host=host, api=True), host
+        assert check_request("GET", {"Host": host}, P, api=True, signed_in=True) is None, host
+        h = {"Host": host, "Origin": f"https://{host}"}
+        assert check_request("POST", h, P, api=True, signed_in=True) is None, host
+        h = {"Host": host, "Origin": "https://evil.example"}
+        assert check_request("POST", h, P, api=True, signed_in=True) is not None, host
+    for host in ("evil example", "a..b:1", "x:0", "x:99999", "", "a/b:1", "user@x:1"):
+        assert check_request("GET", {"Host": host}, P, api=True, signed_in=True) is not None, host
 
 
 def test_post_without_origin_for_curl_but_not_cross_site_browsers():

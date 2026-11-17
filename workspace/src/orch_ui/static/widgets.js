@@ -10,8 +10,77 @@ const ST={
  needs:'<circle cx="12" cy="12" r="8" fill="currentColor"/><path d="M12 8v5" stroke="#101216" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1.2" fill="#101216"/>',
  check:'<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/>',
  done:'<circle cx="12" cy="12" r="8" fill="currentColor"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="#101216" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'};
+/* Helpers list (ORCH-61): one row per live helper, the same on dashboard Home and in Focus. The state comes from the core
+   (orch run status "helper": working | starting | you | waiting | idle | stuck); the page never words it itself.
+   UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 waits for you · 1 idle";
+   UI.helperList(rows, o) -> <section class="card helper-list"> with rows {key, title, href, state, word, meta, actions:[{label, run, key}]},
+   o.title (default "Helpers"), o.empty (shown when there are no rows), o.dataKey. */
+const HELPER_LOOK={working:['working','working'],starting:['working','working'],you:['needs','needs'],waiting:['','check'],idle:['','todo'],stuck:['failed','needs']};
+UI.helperPill=(state,word)=>{const [cls,icon]=HELPER_LOOK[state]||['','todo'];const p=el('span','pill helper-pill'+(cls?' '+cls:''));p.dataset.state=state||'';p.append(UI.statusIcon(icon),document.createTextNode(word||''));return p};
+const HELPER_COUNT=[['working','working'],['starting','starting'],['you','waits for you','wait for you'],['waiting','on hold'],['idle','idle'],['stuck','stuck']];
+UI.helperSummary=rows=>{const n={};(rows||[]).forEach(r=>{n[r.state]=(n[r.state]||0)+1});return HELPER_COUNT.filter(([k])=>n[k]).map(([k,one,many])=>n[k]+' '+(n[k]>1&&many?many:one)).join(' · ')};
+/* The meta line under a helper's title, the same words everywhere: "Step 3 of 4 · 52 min", "Since 3 h · your answer",
+   "Nothing running for 18 min". row: {state, detail, step:{n,of}, minutes, idle, finished} (minutes: since start, idle: quiet). */
+const helperSpan=m=>m==null?'':m<1?'just now':m<60?m+' min':m<1440?Math.round(m/60)+' h':Math.round(m/1440)+' days';
+UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
+ if(r.finished&&(r.state==='idle'||r.state==='stuck'))return 'Finished · '+(d||'session still open');
+ if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.toLowerCase()].filter(Boolean).join(' · ');
+ if(r.state==='waiting'||r.state==='idle'||r.state==='stuck')return d;
+ return [r.step?'Step '+r.step.n+' of '+r.step.of:'',helperSpan(r.minutes),d].filter(Boolean).join(' · ')};
+/* The ticket's one state (ORCH-71): the ticket page strip and Focus show the same pill and word for the same ticket.
+   t: {status, questions, bring_back}; helper: the core's helper state {state, word, detail} while a helper runs, else null.
+   UI.ticketState(t, helper) -> {pill, word, helper}; pill is a status icon name (todo, working, needs, check, done).
+   UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
+const TICKET_WORD={open:'To do',ready:'To do',active:'Working',waiting:'Needs you',review:'Check',done:'Done',dropped:'Dropped'};
+const HELPER_WORD={working:'Working',starting:'Starting',you:'Waits for you',waiting:'On hold',idle:'Idle',stuck:'Stuck'};
+const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs'};
+UI.ticketState=(t,helper)=>{t=t||{};
+ if(t.status==='done')return {pill:'done',word:'Done',helper:null};
+ if((t.questions||[]).some(q=>q&&q.answer==null))return {pill:'needs',word:'Needs you',helper:null};
+ if(t.status==='review')return {pill:'check',word:'Check',helper:null};
+ if(t.bring_back&&t.bring_back.state==='waiting')return {pill:'needs',word:'Needs you',helper:null};
+ if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:HELPER_WORD[helper.state],helper};
+ if(helper)return {pill:'working',word:'Working',helper:null};
+ return {pill:'todo',word:TICKET_WORD[t.status]||'To do',helper:null}};
+UI.ticketPill=s=>{s=s||{};if(s.helper)return UI.helperPill(s.helper.state,s.word);const p=el('span','pill'+(['working','needs','done'].includes(s.pill)?' '+s.pill:''));p.dataset.state=s.pill||'';p.append(UI.statusIcon(s.pill),document.createTextNode(s.word||''));return p};
+UI.helperList=(rows,o)=>{o=o||{};rows=rows||[];const box=el('section','card helper-list');if(o.dataKey)box.dataset.key=o.dataKey;
+ const head=el('header','card-h');head.append(el('h2','',o.title||'Helpers'));const sum=UI.helperSummary(rows);if(sum)head.append(el('span','meta helper-sum',sum));box.append(head);
+ if(!rows.length){box.append(el('p','card-row meta',o.empty||'No helper is running.'));return box}
+ rows.forEach(r=>{const row=el('div','card-row helper-row');row.dataset.state=r.state||'';if(r.dataKey)row.dataset.key=r.dataKey;
+  const main=el('div','grow helper-main'),title=el(r.href?'a':'span','helper-title');if(r.href)title.href=r.href;title.title=(r.key?r.key+' ':'')+(r.title||'');
+  if(r.key)title.append(el('span','helper-key',r.key),document.createTextNode(' '));title.append(document.createTextNode(r.title||''));main.append(title);
+  const meta=r.meta!=null?r.meta:UI.helperMeta(r);if(meta)main.append(el('p','meta',meta));
+  const side=el('div','helper-side');side.append(UI.helperPill(r.state,r.word));
+  (r.actions||[]).forEach(a=>{const b=el('button','btn outline sm',a.label);b.type='button';if(a.key)b.dataset.key=a.key;b.onclick=()=>a.run&&a.run(b);side.append(b)});
+  row.append(main,side);box.append(row)});
+ return box};
 /* Status icon: UI.statusIcon('needs') -> <svg class="st needs"> (todo | working | needs | check | done) */
 UI.statusIcon=name=>svg('st '+(ST[name]?name:'todo'),ST[name]||ST.todo);
+/* Phone bottom bar (ORCH-73): UI.tabbar(items) -> <nav class="tabbar">. items: {label, href | onClick, current, count,
+   countLabel, icon (an svg node or markup from icon()), testid}. A count shows only when it is above 0. A button item (no href) is a toggle:
+   o.expanded sets aria-expanded, o.controls its aria-controls. Same item keys update in place via UI.tabbar.update(nav, items). */
+const tabItem=it=>{const n=it.href!=null?el('a'):el('button');if(it.href!=null)n.href=it.href;else{n.type='button';if(it.controls)n.setAttribute('aria-controls',it.controls)}
+ n.dataset.tab=it.key||it.label;if(it.testid)n.dataset.testid=it.testid;fillTab(n,it);if(it.onClick)n.addEventListener('click',it.onClick);return n};
+const fillTab=(n,it)=>{const kids=[];if(it.icon){const i=el('span','tab-ic');i.setAttribute('aria-hidden','true');if(typeof it.icon==='string')i.innerHTML=it.icon;else i.append(it.icon);kids.push(i)}
+ kids.push(el('span','tab-label',it.label));const c=Number(it.count)||0;
+ if(c>0){const b=el('span','count',String(c));kids.push(b)}
+ n.replaceChildren(...kids);n.setAttribute('aria-label',c>0?it.label+', '+(it.countLabel||String(c)):it.label);
+ if(it.href!=null){if(it.current)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current')}
+ else n.setAttribute('aria-expanded',String(!!it.expanded))};
+UI.tabbar=(items,o)=>{o=o||{};const nav=el('nav','tabbar'+(o.sample?' tabbar-sample':''));nav.setAttribute('aria-label',o.label||'Main');if(o.id)nav.id=o.id;
+ (items||[]).forEach(it=>nav.append(tabItem(it)));return nav};
+UI.tabbar.update=(nav,items)=>{(items||[]).forEach(it=>{const n=[...nav.children].find(x=>x.dataset.tab===(it.key||it.label));if(n)fillTab(n,it)})};
+/* Short rows (ORCH-73): UI.shortGroup({title, icon:'needs'|'working'|..., count, folded, onToggle, rows, more, key}) -> <section class="card short-group">.
+   rows: {key (the ticket number), title, href, fact, side (a node: pill, chip or button), child}. more: {label, onClick}. */
+UI.shortRow=r=>{const row=el('div','short-row'+(r.child?' child':''));const g=el('span','grow');const t=r.href?el('a','short-title'):el('span','short-title');
+ if(r.href)t.href=r.href;if(r.key){const k=el('span','key',r.key);t.append(k,document.createTextNode(' '))}t.append(document.createTextNode(r.title||''));g.append(t);
+ if(r.fact)g.append(el('span','short-fact',r.fact));row.append(g);if(r.side){const s=el('span','short-side');s.append(r.side);row.append(s)}
+ if(r.dataKey)row.dataset.key=r.dataKey;return row};
+UI.shortGroup=o=>{o=o||{};const sec=el('section','card short-group');if(o.key)sec.dataset.key=o.key;const h=el('header','card-h');const b=el('button');b.type='button';
+ b.setAttribute('aria-expanded',String(!o.folded));if(o.icon)b.append(UI.statusIcon(o.icon));b.append(el('span','',o.title||''));
+ if(o.count!=null)b.append(el('span','count',String(o.count)));b.append(UI.chevron());if(o.onToggle)b.addEventListener('click',o.onToggle);h.append(b);sec.append(h);
+ if(!o.folded){(o.rows||[]).forEach(r=>sec.append(UI.shortRow(r)));if(o.more){const m=el('div','short-more');const mb=el('button','btn ghost sm',o.more.label);mb.type='button';if(o.more.onClick)mb.addEventListener('click',o.more.onClick);m.append(mb);sec.append(m)}}
+ return sec};
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
 /* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
@@ -37,11 +106,12 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
  thead.append(tr);table.append(thead,tbody);wrap.append(table);draw();return wrap};
 /* Swipe review deck (draft 15 Nov, revised after the Codex challenge): UI.swipeDeck(host, items, o)
    o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), onUndo(item), onChange()}
-   Moves: right = approve (button names the action: it.okLabel, "Use C"), left = Don't do / Send back / None of these,
-   down = comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
-   up = Later (stays unanswered, goes to the end). Buttons and keys (→ ← ↓ ↑, Space bigger, B before/after, O all, Z undo)
-   do the same. A swipe needs real distance (no flick-only approve); a drag from the phone's left edge is left to the
-   system back gesture; a second finger cancels. Every card says what happens when you approve (it.then).
+   Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
+   → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
+   ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
+   ↑ Later (stays unanswered, goes to the end); Space bigger, B before/after, O all, Z undo. A tap on an option picks
+   it, a tap on the picture opens it bigger. The answered card fades; nothing flies. Every card says what happens
+   when you approve (it.then). Item extras: text (the question), group, suggest ('ok'|'no'), links [{label,url}].
    verdicts: ok | no | talk | later. note: {picked, changes:{text, clips, pins:[{n,on,x,y,text}]}, about} */
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
  let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
@@ -57,7 +127,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* bottom: the three answers + Later */
  const acts=el('div','swipe-actions');
  const mk=(cls,icon,label,key,fn)=>{const r=el('span','ring');r.append(ic(icon,cls==='ok'?28:24));const l=el('span','act-label'),w=el('span','act-word',label);l.append(w);if(key)l.append(el('kbd','',key));const b=btn('swipe-act '+cls,[r,l]);b.onclick=fn;return b};
- const noBtn=mk('no','x',"Don't do",'←',()=>fly('no')),talkBtn=mk('talk','mic','Comment','↓',()=>fly('talk')),okBtn=mk('ok','check','Looks good','→',()=>fly('ok'));
+ const noBtn=mk('no','x',"Don't do",'←',()=>fly('no')),talkBtn=mk('talk',o.voice?'mic':'comment','Comment','↓',()=>fly('talk')),okBtn=mk('ok','check','Looks good','→',()=>fly('ok'));
  const laterBtn=btn('btn ghost sm swipe-later',['Later']);laterBtn.append(el('kbd','','↑'));laterBtn.onclick=()=>fly('later');
  acts.append(noBtn,talkBtn,okBtn);const laterRow=el('div','swipe-later-row');laterRow.append(laterBtn);
  host.replaceChildren(top,stage,acts,laterRow,live);
@@ -67,6 +137,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
  const ansWord=a=>!a?'':a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?'Sent back for changes':'Later';
  /* previews */
+ const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||(p.paras||[]).length||(p.steps||[]).length);return true};
  const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');fr.addEventListener('load',()=>fr.classList.remove('loading'),{once:true});return fr};
  const buildPreview=(it,big)=>{const p=it.preview||{},f=document.createDocumentFragment();
   if(p.type==='compare'){f.append(buildCompare(it,big));return f}
@@ -80,7 +151,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const buildCompare=(it,big)=>{const p=it.preview,w=el('div','swipe-compare');const views=big?[['slide','Slide'],['both','Side by side'],['before','Before'],['after','After']]:[['before','Before'],['after','After'],['both','Both']];
   const ctl=el('div','segmented swipe-cmp-ctl');ctl.setAttribute('role','group');ctl.setAttribute('aria-label','Before and after');
   const set=v=>{w.dataset.view=v;ctl.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)))};
-  const pane=side=>{const d=el('div','cmp-pane '+side);d.dataset.on=side;d.append(buildPreview({title:it.title+' '+side,preview:p[side]},big),el('span','cmp-tag',side==='before'?'Before':'After'));return d};
+  const pane=side=>{const d=el('div','cmp-pane '+side);d.dataset.on=side;d.append(buildPreview({title:it.title+' '+side,preview:p[side]},big),el('span','cmp-tag',side==='before'?'Before':'After'));
+   if(!big){const z=btn('btn icon sm cmp-zoom',[ic('expand',16)],side==='before'?'Make before bigger':'Make after bigger');z.dataset.side=side;z.addEventListener('pointerdown',e=>e.stopPropagation());z.onclick=e=>{e.stopPropagation();openViewer(side)};d.append(z)}return d};
   views.forEach(([v,l])=>{const b=btn('btn sm',[l]);b.dataset.v=v;b.onclick=e=>{e.stopPropagation();set(v)};ctl.append(b)});
   ctl.addEventListener('pointerdown',e=>e.stopPropagation());
   w.append(pane('before'),pane('after'),ctl);
@@ -90,39 +162,51 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     handle.addEventListener('pointermove',mv);handle.addEventListener('pointerup',()=>handle.removeEventListener('pointermove',mv),{once:true})});
    w.append(line,r);w.cut=cut}
   if(p.note)w.append(el('span','cmp-note',p.note));
-  w.cycle=()=>{const i=views.findIndex(([v])=>v===w.dataset.view);set(views[(i+1)%views.length][0])};
-  set(big?'slide':(mode==='phone'?'after':'both'));return w};
+  w.cycle=()=>{const i=views.findIndex(([v])=>v===w.dataset.view);set(views[(i+1)%views.length][0])};w.view=set;
+  set(big?'slide':(mode==='phone'||(host.clientWidth&&host.clientWidth<560)?'after':'both'));return w};
+ /* An option's letter chip only for a short id of its own (A, B, 2); a plain question's option has id = its text. */
+ const optLetter=op=>{const id=String(op&&op.id||'');return id&&id.length<=2&&id!==op.title?id:''};
+ /* Options with no picture at all (a plain orch ask --option question): plain rows, title and description, no frame. */
+ const plainOpts=it=>{const p=it&&it.preview;return !!(p&&p.type==='options'&&!p.before&&!(p.options||[]).some(op=>op.preview))};
  /* Options A / B / C: tap to pick (ring + Picked). On the card a drag that starts on a tile still swipes; a tap picks. */
- const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':''));w.style.setProperty('--n',String((p.options||[]).length));
-  (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label','Option '+op.id+': '+op.title+(op.suggested?' (suggested)':''));
-   const h=el('span','opt-h');h.append(el('b','opt-letter',op.id),el('span','opt-title',op.title));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
-   const th=el('span','opt-thumb');if(op.preview)th.append(buildPreview({title:op.title,preview:op.preview},big));
-   b.append(h,th);if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
+ const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':'')+(plainOpts(it)?' plain':''));w.style.setProperty('--n',String((p.options||[]).length+(p.before?1:0)));
+  if(p.before){const t=el('div','swipe-opt today');t.dataset.on='before';const h=el('span','opt-h');h.append(el('b','opt-letter',''),el('span','opt-title','Today'));h.firstChild.append(ic('clock',14));
+   const th=el('span','opt-thumb');th.append(buildPreview({title:'Today',preview:p.before},big));t.append(h,th);if(p.beforeText)t.append(el('span','opt-text',p.beforeText));w.append(t)}
+  (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
+   const h=el('span','opt-h');if(lt)h.append(el('b','opt-letter',lt));h.append(el('span','opt-title',op.title||op.id));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
+   b.append(h);if(op.preview){const th=el('span','opt-thumb');th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
+   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
    b.onclick=e=>{e.stopPropagation();if(b.closest('.swipe-card')&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */pick(it,picked[it.id]===op.id?null:op.id)};
    w.append(b)});
   return w};
  const pick=(it,id)=>{if(!it)return;if(id)picked[it.id]=id;else delete picked[it.id];
   host.querySelectorAll('.swipe-opt').forEach(b=>{if(b.closest('.swipe-card:not(.under):not(.under2),.swipe-viewer'))b.setAttribute('aria-pressed',String(b.dataset.opt===picked[it.id]))});
   syncWords();live.textContent=id?'Picked '+id:'Nothing picked'};
- const syncWords=()=>{const it=items[idx];if(!it)return;okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
+ const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
+ const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
   okBtn.classList.toggle('wait',okWord(it)==='Pick one');
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:''));c.setAttribute('aria-label',it.title);
-  const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
-  h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));h.append(el('h3','',it.title));if(it.why)h.append(el('p','',it.why));
-  const pv=el('div','swipe-preview');pv.append(buildPreview(it,false));
-  const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex);
-  (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));
+  const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.group)m.append(el('span','swipe-group',it.group));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
+  const sw=it.suggest==='ok'?okWord(it):it.suggest==='no'?noWord(it):isOpt(it)?(((it.preview.options||[]).find(x=>x.suggested)||{}).id):null;if(sw&&sw!=='Pick one')m.append(el('span','swipe-sug','Suggested: '+sw));
+  h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));const t0=String(it.title||'').replace(/[\s….]+$/,''),cut=!!(it.text&&t0&&it.text.startsWith(t0));/* the title is only a cut copy of the question: show the question once */
+  if(!cut)h.append(el('h3','',it.title));
+  if(it.text&&(cut||it.text!==it.title))h.append(el('p','swipe-text',it.text));/* the whole question; a long one scrolls inside the head */
+  if(it.why)h.append(el('p','swipe-why',it.why));
+  const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
+  if(pv){pv.append(buildPreview(it,false));
+  if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex)}
+  (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const ft=el('footer','swipe-foot');
   if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
+  (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   ft.append(row);
-  [['right',okWord(it)==='Pick one'?'Pick one first':okWord(it)],['left',noWord(it)],['down','Comment'],['up','Later']].forEach(([d,t])=>{c.append(el('div','swipe-edge '+d),el('div','swipe-stamp '+d,t))});
-  c.append(h,pv,ft);return c};
+  c.append(...[h,pv,ft].filter(Boolean));return c};
  /* order: waiting cards first (Later ones at the end), then answered */
  const waiting=()=>{const w=items.map((_,i)=>i).filter(i=>!ans[items[i].id]);return w.filter(i=>!later.has(items[i].id)).concat(w.filter(i=>later.has(items[i].id)))};
  const nextIdx=from=>{const w=waiting();const pos=w.indexOf(from);return w.length?(pos>=0?w[pos]:w.find(i=>i>from&&!later.has(items[i].id))??w[0]):items.length};
@@ -147,23 +231,19 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const wire=c=>{let sx=0,sy=0,t0=0,id=null,dx=0,dy=0,start=null;const pts=new Set();
   c.addEventListener('pointerdown',e=>{pts.add(e.pointerId);if(pts.size>1){id=null;c.classList.remove('dragging');reset(c);return}/* a second finger cancels */
    if(overlay||busy||e.button>0)return;const hb=host.getBoundingClientRect();if(mode==='phone'&&e.clientX-hb.left<16)return;/* leave the left edge to the system back gesture */
-   id=e.pointerId;sx=e.clientX;sy=e.clientY;t0=performance.now();dx=dy=0;start=e.target;c.setPointerCapture(id);c.classList.add('dragging')});
-  c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy;show(c,dx,dy)});
+   id=e.pointerId;sx=e.clientX;sy=e.clientY;t0=performance.now();dx=dy=0;start=e.target;c.setPointerCapture(id)});
+  c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy});/* the card does not move: answers are buttons and keys (owner 16 Nov) */
   const end=e=>{pts.delete(e.pointerId);if(e.pointerId!==id)return;id=null;c.classList.remove('dragging');const dt=performance.now()-t0,dist=Math.hypot(dx,dy);
    if(dist<8&&dt<400){reset(c);const opt=start&&start.closest&&start.closest('.swipe-opt');if(opt){pick(items[idx],picked[items[idx].id]===opt.dataset.opt?null:opt.dataset.opt);return}
-    if(start&&start.closest&&start.closest('.swipe-preview'))openViewer();return}
-   const w=stage.clientWidth,h=stage.clientHeight,dir=dirOf(dx,dy),v=dist/Math.max(dt,1);
-   /* real distance needed: 30 % of the width (or 22 % of the height), or a quick move of at least 20 % / 15 % */
-   const go=(dir==='down'||dir==='up')?(Math.abs(dy)>h*.22||(v>.6&&Math.abs(dy)>h*.15)):(Math.abs(dx)>w*.3||(v>.6&&Math.abs(dx)>w*.2));
-   if(!go)return reset(c);fly({right:'ok',left:'no',down:'talk',up:'later'}[dir],dx,dy)};
+    if(start&&start.closest&&start.closest('.swipe-preview:not(.plain)')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
+   reset(c)};
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(UI.toast&&!o.quiet)UI.toast(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
-  if(verdict==='talk'){show(c,dx||0,Math.max(dy||0,h*.12));return openComment()}
+  if(verdict==='talk')return openComment();
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
-  busy=true;const tx=verdict==='ok'?w*1.4:verdict==='no'?-w*1.4:0,ty=verdict==='later'?-h*1.2:(dy||0)+40;
-  show(c,dx||tx*.1,dy||0);requestAnimationFrame(()=>{c.classList.add('leaving');show(c,tx,ty)});
-  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},220)};
+  busy=true;c.classList.add('leaving');/* a short fade, no swipe */
+  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
  const defer=it=>{later.add(it.id);done.push({item:it,verdict:'later',idx,laterOnly:true});const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length;
   live.textContent='Later: '+it.title;render();if(UI.toast&&!o.quiet)UI.toast('Later: '+it.title+'. It stays at the end.',()=>undo())};
  const commit=(verdict,note)=>{const it=items[idx];done.push({item:it,verdict,note,idx,prev:ans[it.id],prevPick:ans[it.id]&&ans[it.id].note?ans[it.id].note.picked:undefined});ans[it.id]={verdict,note,item:it};later.delete(it.id);
@@ -182,20 +262,19 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const openOverview=()=>{if(overlay)closeOverlay();const v=el('div','swipe-viewer swipe-overview');v.setAttribute('role','dialog');v.setAttribute('aria-label','All cards');
   const b=el('div','swipe-viewer-bar'),x=btn('btn ghost icon sm',[ic('x',18)],'Close');x.onclick=()=>{closeOverlay();render()};
   const k=Object.keys(ans).length;b.append(x,el('strong','','All cards · '+(items.length-k)+' waiting'));
+  /* a short list: ticket, question, age, state; one click opens that card */
   const tile=i=>{const it=items[i],a=ans[it.id],t=btn('swipe-ov'+(i===idx?' current':'')+(a?' answered':''),[]);
-   const th=el('span','swipe-ov-thumb');const p=it.preview||{},pv=p.type==='compare'?p.after:p.type==='options'?(p.options[0]||{}).preview:p;th.append(buildPreview({title:it.title,preview:pv||{}},false));
-   const m=el('span','swipe-meta'),kd=el('span','swipe-kind');kd.append(ic(it.icon||'file',12),it.kindLabel||it.kind);m.append(kd);if(it.need&&!a)m.append(el('span','swipe-need',it.need));
    const st=el('span','swipe-ov-state '+(a?a.verdict:later.has(it.id)?'later':'wait'),a?ansWord(a):later.has(it.id)?'Later':i===idx?'Now':'Waiting');
-   t.append(th,m,el('span','swipe-ov-title',it.title),st);t.onclick=()=>jump(i);return t};
+   t.append(el('span','swipe-ov-key',it.ticket||''),el('span','swipe-ov-title',it.text||it.title),el('span','swipe-ov-age',it.when||''),st);t.onclick=()=>jump(i);return t};
   const order=waiting().concat(items.map((_,i)=>i).filter(i=>ans[items[i].id]));
   /* grouped by ticket (the round), then by task ("About: ..."); cards without a task come last under their ticket */
-  const tk=new Map();order.forEach(i=>{const it=items[i],key=it.ticketId||it.ticket||'';let t=tk.get(key);if(!t){t={title:it.ticketTitle,key:it.ticket,tasks:new Map(),plain:[]};tk.set(key,t)}
+  const tk=new Map();order.forEach(i=>{const it=items[i],key=it.group?'g:'+it.group:it.ticketId||it.ticket||'';let t=tk.get(key);if(!t){t={title:it.group||it.ticketTitle,key:it.group?'':it.ticket,tasks:new Map(),plain:[],rows:[]};tk.set(key,t)}t.rows.push(i);
    if(it.about){if(!t.tasks.has(it.task||it.about))t.tasks.set(it.task||it.about,{about:it.about,rows:[]});t.tasks.get(it.task||it.about).rows.push(i)}else t.plain.push(i)});
   const body=el('div','swipe-viewer-body');
   const head=(text,tag,cls)=>{const h=el(tag,cls,text);h.style.cssText='margin:0;padding:var(--s3) var(--s4) 0';body.append(h)};
   const grid=rows=>{const gr=el('div','swipe-ov-grid');rows.forEach(i=>gr.append(tile(i)));body.append(gr)};
   if(![...tk.values()].some(t=>t.title||t.tasks.size))grid(order);
-  else tk.forEach(t=>{head(t.title?(t.key&&t.key!==t.title?t.title+' · '+t.key:t.title):t.key,'h3');
+  else tk.forEach(t=>{const left=t.rows.filter(i=>!ans[items[i].id]).length;head((t.title?(t.key&&t.key!==t.title?t.title+' · '+t.key:t.title):t.key)+' · '+(left?left+' of '+t.rows.length+' waiting':'all '+t.rows.length+' answered'),'h3');
    t.tasks.forEach(k=>{head('About: '+k.about,'p','meta');grid(k.rows)});if(t.plain.length)grid(t.plain)});
   v.append(b,body);openOverlay(v,body.querySelector('.current')||x);return v};
  /* Comment sheet. The subject (which option) and the outcome are separate: the buttons say what happens.
@@ -227,7 +306,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):'The helper gets your words and makes a new version. Nothing is approved.'};
   ta.addEventListener('input',sync);
   const close=()=>{closeOverlay();reset(cur)};cancel.onclick=close;
-  const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');show(c,verdict==='ok'?stage.clientWidth*1.4:0,verdict==='ok'?0:stage.clientHeight*1.2);
+  const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');
    setTimeout(()=>{busy=false;delete drafts[it.id];commit(verdict,note)},220)};
   const words=()=>({text:ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice()});
   back.onclick=()=>leave('talk',{changes:words(),about:about?about.v:null});
@@ -241,7 +320,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(about)setAbout(picked[it.id]||'all');drawClips();sync();openOverlay(scr,o.state?null:ta);return {mic,start,stop,ta,send:back,use,setAbout,sync}};
  /* Viewer: bigger, zoom, Open, and spots (tap “Spot”, tap the place, say or type what to change; the spot remembers
     which option or side it is on). */
- const openViewer=()=>{const it=items[idx];if(!it)return null;const v=el('div','swipe-viewer');v.setAttribute('role','dialog');v.setAttribute('aria-label',it.title);
+ const openViewer=side=>{const it=items[idx];if(!it)return null;side=side==='before'||side==='after'?side:null;const v=el('div','swipe-viewer');v.setAttribute('role','dialog');v.setAttribute('aria-label',it.title);
   const barEl=el('div','swipe-viewer-bar'),close=btn('btn ghost icon sm',[ic('x',18)],'Close');close.onclick=()=>{closeOverlay();render()};
   let z=1;const zo=btn('btn icon sm',[ic('minus',16)],'Zoom out'),zi=btn('btn icon sm',[ic('plus',16)],'Zoom in');
   const pinBtn=btn('btn sm',[ic('pin',16),mode==='phone'?'Spot':'Mark a spot'],'Mark a spot and say what to change');pinBtn.setAttribute('aria-pressed','false');
@@ -268,14 +347,14 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    no.onclick=()=>{pop.remove();tmp.remove()};inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();add.click()}});
    if(o.voice)row.append(m);row.append(el('span','grow'),no,add);pop.append(inp,row);zm.append(pop);if(!o.state)inp.focus();return pop};
   (pins[it.id]||[]).forEach((pn,i)=>zm.append(pinEl(pn,i)));
-  foot.append(hint,list);drawList();v.append(barEl,body,foot);openOverlay(v,close);return {askPin,pinning,setZ,compare:zm.querySelector('.swipe-compare')}};
+  foot.append(hint,list);drawList();v.append(barEl,body,foot);openOverlay(v,close);const cw=zm.querySelector('.swipe-compare');if(side&&cw)cw.view(side);return {askPin,pinning,setZ,compare:zm.querySelector('.swipe-compare')}};
  /* keys: only when the deck itself or the card has focus (a focused button keeps its own Space / Enter) */
  host.addEventListener('keydown',e=>{if(e.key==='Tab')return;const t=e.target;
   if(overlay){if(e.key==='Escape'){e.preventDefault();const wasViewer=overlay.classList.contains('swipe-viewer');closeOverlay();wasViewer?render():reset(cur);return}
    if((e.key==='b'||e.key==='B')&&!t.closest('input,textarea')){const w=overlay.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}return}
   if(e.repeat)return;if(t!==host&&t.closest('button,a,input,textarea,select'))return;
   const k=e.key;if(k==='ArrowRight'){e.preventDefault();fly('ok')}else if(k==='ArrowLeft'){e.preventDefault();fly('no')}else if(k==='ArrowDown'){e.preventDefault();fly('talk')}else if(k==='ArrowUp'){e.preventDefault();fly('later')}
-  else if(k===' '){e.preventDefault();cur&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
+  else if(k===' '){e.preventDefault();cur&&hasPreview(items[idx])&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
   else if((k==='b'||k==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
  if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());

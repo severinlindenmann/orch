@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agentlib import adh_table, codex_home, run_agent, save_transcript, tokens_from
-from lib import Skip, check, http, scenario
+from lib import Skip, check, http, page_signin, scenario
 
 # the core v2 scenarios have the same module name (e2e/scenarios_v2.py): load that file under another name
 _spec = importlib.util.spec_from_file_location("v2core", Path(__file__).resolve().parent.parent / "scenarios_v2.py")
@@ -175,19 +175,18 @@ def _dashboard_start(e, sid: str, tmux: bool) -> str:
     if not cfg.exists():  # someone who uses Claude Code already: onboarding done, this folder never trusted
         cfg.write_text(json.dumps({"hasCompletedOnboarding": True, "theme": "dark"}))
     w.o("init", "--recommended", "--yes", by=None)
-    w.o("start", "--no-open", by=None)
+    started = w.j("start", "--print-launch-url", by=None)  # prints the sign-in link, opens no browser
     try:
-        return _dashboard_flow(e, w, tmux)
+        return _dashboard_flow(e, w, tmux, started)
     finally:
         w.sh(["orch", "stop"])  # free the dashboard's port before the next scenario starts its own
 
 
-def _dashboard_flow(e, w: W, tmux: bool) -> str:
-    rows = w.j("status", by=None)[0]["addons"]
-    base = next(r["url"] for r in rows if r["addon"] == "dashboard").rstrip("/")
+def _dashboard_flow(e, w: W, tmux: bool, started: dict) -> str:
+    base, auth = page_signin(started, "dashboard")  # the clicks are the person's: signed in, like a browser
 
     def act(op, args):
-        r = http("POST", base + "/api/act", {"Origin": base, "Sec-Fetch-Site": "same-origin"}, {"op": op, "args": args})
+        r = http("POST", base + "/api/act", auth, {"op": op, "args": args})
         check(r.status == 200, f"dashboard {op}: {r.status} {r.body[:300]!r}")
         return r.json()
 

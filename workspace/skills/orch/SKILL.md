@@ -1,8 +1,8 @@
 ---
 name: orch
-description: Track every piece of work as an orch ticket with a step list, proof for each step, questions for a person, waiting and sub-tickets. Use when you start or resume any task, need a decision, are blocked, want to wait for a time or an answer, or are about to say it is done. Not for sharing files or sending messages (other skills do that).
+description: Track every piece of work as an orch ticket with a step list, evidence for each step, questions for a person, waiting and sub-tickets. Use when you start or resume any task, need a decision, are blocked, want to wait for a time or an answer, or are about to say it is done. Not for sharing files or sending messages (other skills do that).
 ---
-# orch: tickets with proof
+# orch: tickets with evidence
 
 Chat helper exception: in Chat, propose a ticket with `--ref proposal:<short ticket title>` and let the person click Make ticket. Never run `orch ticket new` from Chat; the work recipes below apply outside Chat.
 
@@ -19,7 +19,7 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
 - Any request, even a small one: find or make its ticket first.
 - Ask a person only for what the ask list says (see "When to ask" below). Never ask "may I do this step". Every question has options and a recommended answer: `orch ask`, then keep working on what does not depend on the answer. For something they must see to decide (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question (`--choose`, `--draft`, see below) so it shows as a card.
 - You are blocked (a tool or permission is refused): `orch ask`, then go on with the other steps.
-- You are about to say "done": every step needs proof first.
+- You are about to say "done": every step needs evidence first.
 - The work is big: split it into sub-tickets.
 
 ## When to ask
@@ -42,9 +42,10 @@ ask; its list replaces the one above.
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
-    orch ticket tidy <id> "<short clear title>" [--owner <name>] [--due YYYY-MM-DD] [--done-when "<one line>"]
-                                        # a NEW ticket, first thing, no asking: fix typos, short clear title, and owner / due /
-                                        # done-when only where the person's text says them (their title stays in the history)
+    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" [--owner <name>] [--due YYYY-MM-DD]
+                                        # a NEW ticket, first thing, no asking: fix typos, short clear title, a description and a
+                                        # done-when line from the person's note (kept when they wrote one); owner / due only where
+                                        # their text says them (their title stays in the history)
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
     orch check start <id> <c>             # the step you work on now
@@ -54,6 +55,9 @@ Started by hand (not by orch)? Tell orch which ticket you work on so nobody star
 In a live session, when you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready`, run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
+Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, reminds a helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
+The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes stay in Review with one line why; `--dry-run` only says it. What it accepted: `orch review accepted [--since yesterday]`.
+Releases (for a script that repeats, only when the person turned on `workflow.release_merge` in Settings): a release Merge card made with `orch ask ... --merge --release` is merged for the person by `orch review tend-releases` once every check of its pull request is green; otherwise the person clicks Merge. `--dry-run` only says it.
 
 **Finish a step**
 
@@ -63,12 +67,13 @@ After you ran a check command (tests, a build, a linter), record it: `orch check
 (`--output <file in the project>` adds the last lines of its output). orch only writes it down and never runs it; the
 person then sees whether files changed since the check.
 
-Proof flags: `--command`, `--note`, `--pr`, `--commit`, `--file <path>`, `--url` (one or more). A file is copied
-into the ticket (files of the workspace or of your own working copy of this ticket, at most 25 MB; never another ticket's copy). Record what really happened. Never invent proof.
+Evidence flags: `--command`, `--note`, `--pr`, `--commit`, `--file <path>`, `--url` (one or more). A file is copied
+into the ticket (files of the workspace or of your own working copy of this ticket, at most 25 MB; never another ticket's copy). Record what really happened. Never invent evidence.
 Every finished step also gets `--summary "<what came out, one plain line>"` (at most 200 characters; no file names or
 sizes) and, when the step produced a file, a picture or a PR, that as `--file` / `--pr` with `--title "<short name>"`.
-The person reads the summary on the task and opens the proof from it. "Completed" says nothing.
-Record checks with orch check record, so the next run and the person can see whether they still pass. If a step's proof is changed or failed when you send the ticket to Review, the move still works and orch prints as the next step: run the checks again and record them with orch check record.
+The person reads the summary on the task and opens the evidence from it. "Completed" says nothing.
+Record checks with orch check record, so the next run and the person can see whether they still pass. If a step's evidence is changed or failed when you send the ticket to Review, the move still works and orch prints as the next step: run the checks again and record them with orch check record.
+A step that shows a part of Done when in other words than its title: add `--proves "<that part, quoted>"` to `orch check done`; the Reviewer then counts the part as covered.
 
     orch check done <id> c1 --summary "Connected as Dev Team; all 3 workspaces answered." --file out/check.md --title "Connection check"
 
@@ -87,7 +92,7 @@ Wait for the answer. If it is yes, the person marks it; do not try to tick or re
 
 Write reports, exports, drafts, pictures and other output files for a ticket into that folder, unless the person
 explicitly asks for a file in the project. Give each a plain name (`connection-check.md`, not `out2.tmp`): the
-Artifacts tab shows the name, a preview and an Open button. Proof can point at them:
+Artifacts tab shows the name, a preview and an Open button. Evidence can point at them:
 `orch check done <id> c1 --file <path>`.
 
 **A long text or files came with the ticket**
@@ -112,6 +117,20 @@ To keep a text file or picture with a ticket yourself: `orch ticket attach <id> 
     orch check reopen <id> <c>            # a done step that turned out wrong
     orch check stop <id> <c>              # stop working on it without finishing
 
+**The work needs a bigger model**
+
+orch starts most tickets on Sonnet and hard ones (design, security, a migration, a crash or
+flaky test, part of a bigger plan) on Opus. When your plan shows design, security or several parts, or you
+failed twice at the same problem, move the ticket up; one history line says why:
+
+    orch ticket model <id> up --why "<what makes it hard, a few plain words>"
+
+In a live session finish your reply: orch switches the same conversation to Opus and you go on. orch also moves
+a ticket up by itself after two failed check runs on one step. It never moves down by itself, and a person's
+choice of model always stays (ask them instead). Your own subagents follow the same rule: the small model for
+searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
+Tokens per model and per ticket, and how many tickets moved up: `orch usage` (Insights shows the same).
+
 **Need an answer or blocked**
 
     orch ask <id> "<question>" --option A --option B --recommend A
@@ -135,6 +154,12 @@ Write the question for a person who has not seen your work, in plain words:
     orch review link             # the address of the review page, to send the owner
 
 Other cards: `--draft`, `--plan`, `--link` (with `--open <address>`), `--before F --after F`. The answer may carry changes: do exactly those, nothing more.
+The question text is shown on the card in full: write the Now / Proposal there, keep `--why` to one line. Mark what you
+recommend: `--suggest <option>` on a choice, `--suggest ok` or `--suggest no` on another card. A choice can show how it
+is today beside the options: `--choose ... --before files/today.png`. Several cards that belong together (a design
+review): give each the same `--group "<short name>"`; the person sees them as one set with its own count.
+Links to look at beside the card (a mockup, an issue): `--ref "Mockup=http://…"` (up to 5). A line under one option of
+a choice: `--describe "A=Keeps the menu as it is"`.
 
 A GitHub pull request only the person may merge: `orch ask <id> "Merge release 3?" --link "Release 3" --open <pull request address> --merge --then "<what follows>"`. The person's Merge click merges it with their own GitHub login; never merge it yourself.
 
@@ -180,6 +205,7 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
     orch ref add <id> <https url> [--title "<name>"]   # PR, wiki page, design, video …
     orch ref list <id>   /   orch ref rm <id> <n>
     orch ref set <id> <n> --status <word>   # the state you last saw of a web reference: open, closed, merged
+    orch ref wait <id> [--merge]            # wait for its pull requests' checks (no AI call), note GREEN / NOT green
     orch ticket set <id> <addon>.<field> <value>   # an add-on field under Details
     orch ticket edit <id> --owner <name> --due YYYY-MM-DD --note "<text>"
     orch ext set <id> <addon> '<json object>'       # data an add-on keeps on the ticket
@@ -189,11 +215,21 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
 
     orch copy update <id>        # run it inside your copy, resolve any conflicts there, then commit
 
+**orch itself got in your way, or lacks something** (report it, then go on with your work)
+
+    orch report problem "<what happened>" --expected "<what you expected>" [--file <picture or log>] [--ticket <id>]
+    orch report feature "<what you want>" --why "<why it would help>" [--file <picture>]
+
+Report a problem when an orch command fails, refuses something it should allow, loses or mixes up work, or a page
+shows something wrong; report a feature wish when you or the person keep missing something in orch. One report per
+thing, in plain words, never a secret. It is saved here and, when this workspace is set up to share reports, sent on
+by itself. It is not your ticket's work: do not stop to wait for it, and do not report the person's own project bugs.
+
 **End of every run**
 
     orch ticket summary <id> "<what was done and what is left>"      # at most 200 characters
     orch ticket outcome <id> --changed "<what changed>" --why "<why>" [--not-included "<what was left out>"]   # each at most 300 characters; shown on the Notes page
-    orch ticket status <id> done                         # only when every step has proof
+    orch ticket status <id> done                         # only when every step has evidence
 
 When the ticket reaches Review, orch sends its summary and files to the person by itself: add no task for that and don't write that it was sent. Answering a person's message is still your job.
 
@@ -210,6 +246,10 @@ If work remains, leave it visible (open steps, a log line).
     orch look set --icon <id> --color <token>     # fit the folder name and what the work is about
 
 Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colours from the list, never invent an id. If a person already chose a field, orch refuses it: leave it. All of it is optional: if one is refused or fails, skip it; it is never a blocker for the work.
+
+**Screenshot a page or file** (never start a browser yourself: it can pop a keychain password window on the person's screen)
+
+    orch shot <address or html file> --width 1280,1920,390 --out <folder>    # one picture per width, prints the paths
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.

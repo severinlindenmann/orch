@@ -528,14 +528,14 @@ def test_the_edit_prompt_is_not_drawn_for_unsafe_arguments(tmp_path):
 
 @node
 def test_a_button_that_asks_for_a_review_carries_the_flag(tmp_path):
-    """Allow on this computer for a script: the page asks the add-on what to show before the click (data-review)."""
+    """Allow this script: the page asks the add-on what to show before the click (data-review)."""
     import copy
 
     view = copy.deepcopy(ACCORDION)
     item = view["blocks"][0]["items"][0]
     item["actions"] = [
         {
-            "label": "Allow on this computer",
+            "label": "Allow this script",
             "action": {
                 "op": "addon.act",
                 "args": {"verb": "allow-script", "target": "t_mec009", "review": True},
@@ -549,3 +549,17 @@ def test_a_button_that_asks_for_a_review_carries_the_flag(tmp_path):
         ("allow-script", "true"),
         ("run", None),
     ]
+
+
+def test_table_rows_become_cards_on_a_phone():
+    """ORCH-136: at phone width a table block row and a result file row are cards (no one-letter columns)."""
+    from pathlib import Path
+
+    addon = Path(__file__).resolve().parents[1]
+    js = (addon / "src/orch_dashboard/web/blocks.js").read_text()
+    assert "td.dataset.label = c.label" in js and "'cell-actions'" in js and "'cell-toggle'" in js
+    css = addon.parents[1] / "workspace/src/orch_ui/static"
+    widgets = (css / "widgets.css").read_text()
+    phone = widgets[widgets.index("ORCH-136") :]
+    assert "@media(max-width:720px)" in phone and "attr(data-label)" in phone and "display:block" in phone
+    assert ".file-row>.file-actions{flex:1 0 100%}" in (css / "components.css").read_text()

@@ -132,6 +132,9 @@ def test_exit_code_recipe_reads_nothing_the_command_prints(monkeypatch, code, wa
         ("T!", {"command": ["t"]}, False),
         ("t", {"command": ["t"], "label": "x\nInjected"}, False),
         ("t", {"command": ["t"], "works": "a.b"}, False),
+        ("wiki", {"command": ["t"], "kind": "connection"}, True),
+        ("pay", {"command": ["t"], "kind": "key"}, True),
+        ("t", {"command": ["t"], "kind": "secret"}, False),  # only login, connection or key
     ],
 )
 def test_workspace_recipe_shape(name, doc, ok):
@@ -167,7 +170,19 @@ def test_overview_names_the_tickets_that_stop_and_leaks_nothing(proj, run, new_t
     assert (r["state"], r["ends_at"], r["helper"]) == ("soon", "2026-11-17T21:24:57Z", "claude")
     assert [t["id"] for t in r["stops"]] == [tid] and other not in json.dumps(rows)
     assert r["stops"][0]["title"] == "Plan the newsletter"
-    assert set(r) == {"name", "label", "state", "ends_at", "helper", "chosen", "stops"}
+    assert set(r) == {
+        "name",
+        "label",
+        "kind",
+        "state",
+        "ends_at",
+        "helper",
+        "chosen",
+        "stops",
+        "renew",
+        "key",
+    }
+    assert r["renew"] is True and r["key"] is None  # orch can start the Claude Code sign-in (ORCH-46)
     assert HIDDEN not in json.dumps(rows)
 
 
@@ -219,7 +234,7 @@ def test_check_keeps_the_last_result(proj, tools):
     doc = health.check(proj, NOW)
     assert doc["checked_at"] == "2026-11-16T12:00:00Z"
     assert health.last(proj) == doc
-    assert HIDDEN not in (proj / ".orch" / "run" / "health.json").read_text(encoding="utf-8")
+    assert HIDDEN not in health._path(proj).read_text(encoding="utf-8")
 
 
 def test_command_text_and_json(proj, run, new_ticket, tools):
@@ -230,7 +245,7 @@ def test_command_text_and_json(proj, run, new_ticket, tools):
     assert code == 0, err
     label = adapters.load("claude")["label"]
     assert out.startswith(f"The {label} login no longer works. The helper cannot go on with 1 ticket: ")
-    assert "Plan the newsletter" in out and "orch logins again" in out + err
+    assert "Plan the newsletter" in out and "Renew or Replace on the dashboard warning" in out + err
     assert HIDDEN not in out + err
     code, out, err = run("logins", "--json")
     doc = json.loads(out)
@@ -247,6 +262,10 @@ def test_command_with_nothing_set(proj, run, monkeypatch):
     ("row", "want"),
     [
         ({"state": "works", "ends_at": None, "stops": [], "chosen": True}, "The Tool login works."),
+        (
+            {"state": "renew", "ends_at": None, "stops": [], "chosen": False, "kind": "connection"},
+            "The Tool connection no longer works. Renew it.",
+        ),
         (
             {"state": "unreachable", "ends_at": None, "stops": [], "chosen": True},
             "Tool did not answer, so orch cannot tell whether its login works.",
@@ -327,3 +346,9 @@ def test_a_failed_start_for_lack_of_a_login_checks_at_once(proj, monkeypatch):
     (proj / "start.log").write_text("Error: not logged in\n", encoding="utf-8")
     assert runs.start_failure_reason(proj, {"agent": "", "log": "start.log"}) == "no login"
     assert seen == [{"force": True}]
+
+
+def test_a_recipe_is_a_login_unless_it_says_otherwise():
+    assert health._recipe("t", {"command": ["t"]})["kind"] == "login"
+    assert health._recipe("t", {"command": ["t"], "kind": "key"})["kind"] == "key"
+    assert all(r["kind"] == "login" for r in health.helper_recipes())

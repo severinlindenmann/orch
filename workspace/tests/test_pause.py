@@ -116,3 +116,27 @@ def test_cap_is_per_ticket_and_rolls_over_after_24_hours(proj):
     data["starts"][a] = [time.time() - brake.WINDOW - 5] * brake.CAP_PER_DAY
     path.write_text(json.dumps(data), encoding="utf-8")
     brake.check_start(proj, a, "agent:automation")
+
+
+def test_pause_reason_is_kept_and_named_where_a_start_is_held_back(proj, run):
+    """ORCH-75: the system keeper pauses on a full disk; whoever meets the pause sees why."""
+    tid = _new(proj)
+    why = "Disk almost full:\n 8 GB free"
+    code, out, err = run("pause", "--json", "--by", "agent:system-keeper", "--reason", why)
+    assert code == 0, err
+    rec = json.loads(out)
+    assert rec["paused"] is True and rec["reason"] == "Disk almost full: 8 GB free"
+    held = r"paused in this workspace: Disk almost full: 8 GB free\. .*orch resume"
+    with pytest.raises(Refused, match=held):
+        runs.start(proj, tid, "agent:automation")
+    assert "Disk almost full: 8 GB free" in run("status")[1]
+    code, out, _ = run("pause", "--reason", "something else")  # pausing again keeps the first record
+    assert "Disk almost full" in out
+    assert brake.paused(proj)["reason"] == "Disk almost full: 8 GB free"
+
+
+def test_pause_reason_is_one_short_line():
+    assert brake.clean_reason("  a\n\tb  ") == "a b"
+    assert brake.clean_reason("   ") is None
+    assert len(brake.clean_reason("x" * 500)) == brake.REASON_MAX
+    assert brake.paused_words({"by": "human:t"}) == brake.PAUSED_REFUSAL

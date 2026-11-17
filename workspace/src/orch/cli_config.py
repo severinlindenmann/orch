@@ -14,7 +14,18 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, autoupdate, config, diag, history, nextstep, tickets
+from orch import (
+    adapters,
+    autoupdate,
+    config,
+    devexpert,
+    diag,
+    ghlimit,
+    history,
+    nextstep,
+    report_tickets,
+    tickets,
+)
 from orch.errors import Refused
 
 KEYS = (
@@ -27,13 +38,19 @@ KEYS = (
     "workspace.live_idle_minutes",
     "workspace.live_max",
     "workflow.agents_may_finish",
+    "workflow.reviewer",
+    "workflow.release_merge",
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
     "diag.enabled",
+    "diag.report_tickets",
     "focus.session_typing",
     "update.auto",
     *config.INSIGHTS_KEYS,
+    *ghlimit.SETTING_KEYS,
+    "github.dev_expert",
+    "github.dev_expert_repo",
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
@@ -59,6 +76,7 @@ def add_parsers(sub, common) -> None:
     s.add_argument(
         "--if-current", dest="if_current", metavar="OLD", help="insights.*: refuse unless it is OLD"
     )
+    c.add_parser("propose", parents=[common], help="a proposal for the workspace name, description and tags")
     a = c.add_parser("agent", parents=[common])
     a.add_argument("name_or_add", metavar="add|NAME")
     a.add_argument("name", nargs="?")
@@ -244,6 +262,19 @@ def _shown(v) -> str:
 
 
 def _config(args, root: Path) -> None:
+    if args.sub == "propose":  # read-only: the person accepts or edits it in Settings, then it is saved
+        from orch import profile_propose
+
+        p = profile_propose.propose(root)
+        lines = [
+            f"Name: {p['name']}",
+            f"Description: {p['description'] or '(none found)'}",
+            f"Tags: {', '.join(p['tags']) or '(none found)'}",
+            f"Icon: {p['icon'] or '(none found)'}",
+            "Nothing was saved. Save it with orch config set workspace.name|description|tags.",
+        ]
+        _out(args, p, "\n".join(lines))
+        return
     if args.sub == "get":
         getters = {
             "workspace.agent": lambda: config.agent_name(root),
@@ -255,16 +286,22 @@ def _config(args, root: Path) -> None:
             "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
             "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
+            "workflow.reviewer": lambda: config.reviewer_on(root),
+            "workflow.release_merge": lambda: config.release_merge_on(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
             "diag.enabled": lambda: config.diag_enabled(root),
+            "diag.report_tickets": lambda: report_tickets.enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
             "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
             "insights.keep_days": lambda: config.record_keep_days(root),
             "insights.max_mb": lambda: config.record_max_mb(root),
+            **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
+            "github.dev_expert": lambda: devexpert.role(root),
+            "github.dev_expert_repo": lambda: devexpert.repo(root),
         }
         if args.key:
             key = args.key
@@ -280,6 +317,24 @@ def _config(args, root: Path) -> None:
             )
     elif args.sub == "set" and args.key in config.INSIGHTS_KEYS:
         _insights_set(args, root)
+    elif args.sub == "set" and args.key in ghlimit.SETTING_KEYS:
+        kind = ghlimit.SETTING_KEYS[args.key]
+        v = ghlimit.set_limit(kind, args.value)
+        _out(args, {args.key: v}, f"Saved: at most {v} {ghlimit.WHAT[kind]} per hour on this computer.")
+    elif args.sub == "set" and args.key == "github.dev_expert":
+        v = devexpert.set_role(root, args.value)
+        _out(
+            args,
+            {args.key: v},
+            f"The Development expert writes to {v}." if v else "The Development expert is off.",
+        )
+    elif args.sub == "set" and args.key == "github.dev_expert_repo":
+        v = devexpert.set_repo(root, args.value)
+        _out(
+            args,
+            {args.key: v},
+            f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
+        )
     elif args.sub == "set" and args.if_current is not None:
         raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
@@ -287,6 +342,30 @@ def _config(args, root: Path) -> None:
             raise Refused("Choose on or off.")
         value = config.set_agents_may_finish(root, args.value == "on", _actor(args))
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
+    elif args.sub == "set" and args.key == "workflow.reviewer":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = config.set_reviewer(root, args.value == "on", _actor(args))
+        _out(
+            args,
+            {"workflow.reviewer": value},
+            f"The Reviewer accepts small finished work for you: {args.value}.",
+        )
+    elif args.sub == "set" and args.key == "workflow.release_merge":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # merges into main with the owner's login
+            raise Refused(
+                "Only the owner turns this on: in Settings, or orch config set in their own terminal."
+            )
+        value = config.set_release_merge(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.release_merge": value},
+            "Saved: a release merges "
+            + ("by itself once every check is green." if value else "only when you click Merge."),
+        )
     elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
         if args.key == "workflow.copies":
             v = config.set_copies_mode(root, args.value)
@@ -316,6 +395,24 @@ def _config(args, root: Path) -> None:
             {"update.auto": value},
             "Saved: orch updates by itself " + ("at a quiet moment." if value else "no more."),
         )
+    elif args.sub == "set" and args.key == "diag.report_tickets":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        got = report_tickets.set_enabled(root, args.value == "on")
+        if args.value == "on":
+            text = (
+                "Saved: new problem reports, made here or shared through the relay, "
+                "become tickets with a helper."
+                + (
+                    f" The {got['marked_seen']} report(s) already here stay as they are."
+                    if got["marked_seen"]
+                    else ""
+                )
+                + " It needs the automation add-on turned on."
+            )
+        else:
+            text = "Saved: problem reports no longer become tickets by themselves."
+        _out(args, got, text)
     elif args.sub == "set" and args.key == "diag.enabled":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")

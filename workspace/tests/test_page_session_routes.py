@@ -17,23 +17,24 @@ SERVERS = {
 # (enclosing method, gate) pairs: the complete list of places a server asks the session.
 EXPECTED = {
     "dashboard": {
-        ("do_GET", "authed"),  # /api/update-status
-        ("do_POST", "can_act"),  # /api/act (every op, update.start), proxied act
+        ("_can_act", "can_act"),  # /api/act (every op, update.start), update status, typing, report, vouching
+        ("_signed_in", "cookie_ok"),  # READS under a host name that is not this computer's (a proxy in front)
         ("_session_post", "launch"),
-        ("_term_keys", "can_act"),  # POST /api/term/keys: typing into the live helper session (person only)
-        ("_diag_post", "can_act"),  # POST /api/diag/report, /api/diag/open: a report holds ticket text
     },
     "focus": {
         ("_area_op", "can_act"),  # area.accept / area.remove
         ("do_POST", "can_act"),  # /api/act
+        ("_fence", "cookie_ok"),  # any host name once signed in
         ("_session_post", "launch"),
     },
     "insights": {
         ("_can_act", "can_act"),  # settings view flag and every /api/act click
+        ("_can_act", "vouched"),  # behind the dashboard: its word for the person
+        ("_fence", "cookie_ok"),  # any host name once signed in
         ("_session_post", "launch"),
     },
 }
-GUARDS = {"authed", "can_act", "launch"}
+GUARDS = {"authed", "can_act", "launch", "cookie_ok", "vouched"}
 
 
 def _gates(path: Path) -> tuple[set, list[str]]:

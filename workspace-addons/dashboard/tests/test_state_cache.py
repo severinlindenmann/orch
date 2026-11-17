@@ -151,18 +151,49 @@ def test_worker_exception_propagates(ws, monkeypatch):
         load_state(ws, with_settings=True)
 
 
-def test_changed_ticket_file_is_served_fresh_at_once(server, ws, counted):
-    """The page is told about a change and fetches once: that answer must already hold the change."""
+def test_changed_ticket_file_is_rebuilt_in_the_background(server, ws, counted):
+    """A changed file never makes the request wait for a build: the answer comes from the copy at once and one
+    background build follows (report r-1116-1940-ws: every answer was built in its request, 3 to 20 s)."""
     _get(server + "/api/state")
     n = len(counted)
-    from orch_dashboard import events
-
     tickets = ws / ".orch" / "tickets"
-    tickets.mkdir(parents=True, exist_ok=True)
     (tickets / "t_zzzzzz.json").write_text("{}")
     _get(server + "/api/state")
-    assert len(counted) == n + 1, "a changed file rebuilds the state before answering"
-    assert events.Revisions(ws).signature()  # sanity: the signature saw the file
+    deadline = time.monotonic() + 5
+    while len(counted) == n and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert len(counted) == n + 1, "one background build after the change"
+
+
+def test_pages_are_told_only_when_the_new_copy_is_ready(ws, monkeypatch):
+    """The event stream announces a change once the copy holds it, so the one fetch it causes gets the change."""
+    from orch_dashboard import events
+
+    revisions = events.Revisions(ws)
+    cache = state_cache.StateCache(ws, None, revisions)
+    cache.get()
+    told = []
+    real_publish = revisions.publish
+
+    def publish(rev):
+        told.append(any(t.get("title") == "Changed on disk" for t in cache.state["tickets"]))
+        real_publish(rev)
+
+    monkeypatch.setattr(revisions, "publish", publish)
+    assert revisions.join()
+    try:
+        f = ws / ".orch" / "tickets" / "t_7k3f9q.json"
+        t = json.loads(f.read_text())
+        t["title"] = "Changed on disk"
+        f.write_text(json.dumps(t))
+        deadline = time.monotonic() + 5
+        while not told and time.monotonic() < deadline:
+            time.sleep(0.02)
+    finally:
+        revisions.leave()
+        revisions.close()
+        cache.close()
+    assert told and all(told), "the stream spoke before the copy held the change"
 
 
 def test_fresh_flag_always_rebuilds(server, counted):

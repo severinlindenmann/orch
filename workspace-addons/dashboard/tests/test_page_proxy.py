@@ -41,6 +41,9 @@ class Up(BaseHTTPRequestHandler):
         self._reply(b"{}")
 
 
+LAST = {}  # the stack fixture's dashboard server and workspace (a test may give it a page session)
+
+
 @pytest.fixture
 def stack(ws, tmp_path):
     SEEN.clear()
@@ -70,6 +73,7 @@ else:
     script.chmod(0o755)
     srv = make_server(ws, 0, orch_bin=str(script))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    LAST["srv"], LAST["ws"] = srv, ws
     yield f"http://127.0.0.1:{srv.server_address[1]}", port
     srv.shutdown()
     srv.server_close()
@@ -242,6 +246,44 @@ def test_agent_test_op_argv_and_reply(act_orch, ws):
         srv.server_close()
 
 
+def test_workspace_propose_op_is_read_only_and_answers_the_proposal(act_orch, ws):
+    """Settings > Workspace profile > Suggest: no --by (nothing is saved), the answer comes back trimmed."""
+    import json as _json
+    import threading
+
+    from orch_dashboard import actions
+
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["config", "propose"]:\n    print(json.dumps({"name": "N" * 99, "description": "One line.", '
+        '"tags": ["a", 7, "b", "c", "d", "e"], "icon": "code", "from": ["x"]}))\n    sys.exit(0)\n'
+        'if a[:2] in (["addon", "list"]',
+        1,
+    )
+    act_orch.write_text(src)
+    assert actions.build_argv("workspace.propose", {}) == ["config", "propose", "--json"]
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("workspace.propose", {"x": 1})
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        h = {"Content-Type": "application/json", "Origin": base}
+        code, body, _ = call(
+            base + "/api/act", "POST", h, _json.dumps({"op": "workspace.propose", "args": {}}).encode()
+        )
+        assert code == 200
+        assert _json.loads(body)["proposal"] == {
+            "name": "N" * 60,
+            "description": "One line.",
+            "tags": ["a", "b", "c", "d"],
+            "icon": "code",
+        }
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_focus_page_files_load_cross_site_with_their_own_sandbox_csp(stack):
     """A sandboxed frame (opaque origin) loads its css/js cross-site: only Focus's GET /page/<ticket>/<file>."""
     base, _ = stack
@@ -404,3 +446,42 @@ def test_fb22_an_action_clears_every_remembered_port(stack):
     srvmod._PORTS[("x", "y")] = (0.0, 5, None)
     call(base + "/api/act", "POST", {"Content-Type": "application/json", "Origin": base}, b"{}")
     assert ("x", "y") not in srvmod._PORTS
+
+
+class _Person:
+    """A page session stand-in: the person when the page secret is sent (the real rule: PageSession.can_act)."""
+
+    revoked = False
+
+    def can_act(self, headers, port):
+        return headers.get("X-Orch-Page") == "secret"
+
+    def cookie_ok(self, headers, port):
+        return "orch_page" in (headers.get("Cookie") or "")
+
+
+def test_the_dashboard_vouches_for_a_signed_in_person_to_the_addon_page_from_any_computer(stack, monkeypatch):
+    """Owner rule (16 Nov): an add-on page behind the dashboard (Focus, Insights) works for the signed-in person
+    from any computer: the dashboard passes its word on (X-Orch-Person with the workspace's private key), never
+    for a request without the person's session, and never a key a browser sent."""
+    import functools
+
+    from orch import pagesession
+
+    base, _port = stack
+    srv = LAST["srv"]
+    srv.RequestHandlerClass = functools.partial(srv.RequestHandlerClass, session=_Person())
+    key = (
+        "workspace-vouch-key-" + "k" * 30
+    )  # the real one lives in the private key folder (test_vouch in core)
+    monkeypatch.setattr(pagesession, "vouch_key", lambda root, create=False: key)
+    remote = {"Host": "orch.team.example:8791", "X-Forwarded-For": "203.0.113.7", "Cookie": "orch_page_x=1"}
+    code, _, _ = call(base + "/addon/viewer/api/x", headers={**remote, "X-Orch-Page": "secret"})
+    assert code == 200 and SEEN[-1][2].get(pagesession.VOUCH_HEADER) == key
+    code, _, _ = call(base + "/addon/viewer/api/x", headers={**remote, pagesession.VOUCH_HEADER: key})
+    assert (
+        code == 200 and pagesession.VOUCH_HEADER not in SEEN[-1][2]
+    )  # no session: no word, and none passed on
+    j = {"Content-Type": "application/json", "Origin": "https://orch.team.example:8791"}
+    code, _, _ = call(base + "/addon/viewer/api/act", "POST", {**remote, **j, "X-Orch-Page": "secret"}, b"{}")
+    assert code == 200 and SEEN[-1][2].get(pagesession.VOUCH_HEADER) == key

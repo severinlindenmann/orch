@@ -16,7 +16,7 @@ def test_long_or_multiline_text_gets_a_placeholder_title_and_the_flag(proj):
     assert t["title"] == "Evaluate the AI inventory prompts" and t["title_auto"] is True
     assert tickets.load(proj, t["id"])["title_auto"] is True
     assert tickets.create_from_input(proj, "one\ntwo", "human:t")["title_auto"] is True
-    assert tickets.create_from_input(proj, "x" * 200, "human:t")["title"] == "x" * 80
+    assert tickets.create_from_input(proj, "x" * 200, "human:t")["title"] == "x" * 79 + "…"
     short = tickets.create_from_input(proj, "Fix the login page", "human:t")
     assert short["title"] == "Fix the login page" and "title_auto" not in short
     assert tickets.create_from_input(proj, "  \n ", "human:t")["title"] == "New ticket"
@@ -136,6 +136,31 @@ def test_start_prompt_tells_the_agent_to_tidy_a_new_ticket_without_asking(proj):
     assert "orch ticket tidy" not in runs.fresh_prompt(auto, [], proj)  # the title command covers it
 
 
+def test_tidy_writes_the_agents_description_once_never_into_the_note(proj):
+    t = tickets.create(proj, "fix login", "human:t", fields={"note": "login broken on phone"})
+    t = tickets.tidy(
+        proj, t["id"], "Fix the login page", "agent:claude", {"done_when": "Login works on the phone"},
+        "The login page fails on phones; people cannot sign in on the go.",
+    )  # fmt: skip
+    assert t["description"].startswith("The login page fails") and t["description_by"] == "agent:claude"
+    assert t["note"] == "login broken on phone" and t["done_when"] == "Login works on the phone"
+    assert any(h["text"] == "Description written by agent:claude" for h in t["history"])
+
+
+def test_tidy_keeps_an_existing_description(proj):
+    t = tickets.create_from_input(proj, LONG, "human:t")
+    t = tickets.set_auto_title(proj, t["id"], "Trip plan", "agent:claude", "First text.")
+    t = tickets.tidy(proj, t["id"], "Trip plan", "agent:codex", None, "Second text.")
+    assert t["description"] == "First text." and t["description_by"] == "agent:claude"
+
+
+def test_start_prompt_asks_for_a_description_and_a_done_when_line(proj):
+    t = tickets.create(proj, "fix login", "human:t", fields={"note": "login broken on phone"})
+    p = runs.fresh_prompt(t, [], proj)
+    assert '--description "<what and why>"' in p and '--done-when "<one plain line>"' in p
+    assert "so the person does not have to write it" in p
+
+
 def test_cli_ticket_tidy(proj, run):
     t = tickets.create(proj, "fix login", "human:t")
     code, out = run(
@@ -145,11 +170,14 @@ def test_cli_ticket_tidy(proj, run):
         "Fix the login page",
         "--due",
         "2026-12-01",
+        "--description",
+        "People cannot sign in.",
         "--json",
         "--by",
         "agent:claude",
     )[:2]
     assert code == 0 and json.loads(out)["title"] == "Fix the login page"
+    assert json.loads(out)["description"] == "People cannot sign in."
 
 
 def test_tidied_still_counts_when_its_history_line_shows_as_unverified(proj):
@@ -177,3 +205,18 @@ def test_long_note_on_an_add_on_ticket_gets_no_plan_line(proj):
     t["ext"] = {"factory": {"role": "order"}}
     prompt = runs.fresh_prompt(t, [], proj)
     assert "write a plan, split it into tasks" not in prompt and "word word word" in prompt
+
+
+def test_a_long_first_line_is_cut_at_a_whole_word_never_after_e_g(proj):
+    """ORCH-62: 'let me add like a "Release" Tag ... and then for e.g.' was the title: a cut at 80 characters
+    that ended on an abbreviation and read like a sentence.
+    Now: a whole word, no trailing small word, and "…"."""
+    text = (
+        'let me add like a "Release" Tag to the properties of a ticket and then for e.g. on the ticket page '
+        "group them also by release tags"
+    )
+    title = tickets.create_from_input(proj, text, "human:t")["title"]
+    assert title == 'let me add like a "Release" Tag to the properties of a ticket…'
+    assert len(tickets.cut_title("word " * 40)) <= tickets.PLACEHOLDER_TITLE
+    assert tickets.cut_title("Use short names, i.e. " + "y" * 90, 30).endswith("names…")
+    assert tickets.cut_title("Fix the login page") == "Fix the login page"

@@ -9,7 +9,7 @@
    "order": 10,
    "panel": "repeats"
   },
-  "description": "Starts agent runs at a set time, on a repeat, and when the phone or another workspace sends work.",
+  "description": "Starts helper runs at a set time, on a repeat, and when the phone or another workspace sends work.",
   "gitignore": [],
   "name": "automation",
   "needs": true,
@@ -88,7 +88,7 @@
    "label": "Factory",
    "order": 15
   },
-  "description": "Turn an idea into finished work: your agent proposes the run, you press Start.",
+  "description": "Turn an idea into finished work: your helper proposes the run, you press Start.",
   "gitignore": [],
   "name": "factory",
   "needs": true,
@@ -130,7 +130,7 @@
    "label": "Focus",
    "order": 20
   },
-  "description": "A live page for one ticket: watch the agent work, answer its questions, send it a message.",
+  "description": "A live page for one ticket: watch the helper work, answer its questions, send it a message.",
   "gitignore": [],
   "name": "focus",
   "needs": true,
@@ -218,6 +218,57 @@
   "ticket_view": [],
   "version": "0.1.0"
  },
+ "pull-requests": {
+  "acts": {},
+  "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
+  "background": true,
+  "description": "Merge queue: pull requests wait in line and are merged in groups after one run of the checks.",
+  "gitignore": [
+   ".orch/addons/pull-requests/"
+  ],
+  "name": "pull-requests",
+  "needs": false,
+  "orch_api": 1,
+  "recommended": false,
+  "requires": [],
+  "run": "orch_pull_requests",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-pull-requests",
+  "ticket_ext": "ext.schema.json",
+  "ticket_ext_inert": false,
+  "ticket_fields": {
+   "schema": "ext.schema.json",
+   "section": "Pull requests",
+   "show_on_card": []
+  },
+  "ticket_fields_section": {
+   "fields": [
+    {
+     "hidden": false,
+     "key": "merge_when_green",
+     "options": [
+      {
+       "label": "Off",
+       "value": "off"
+      },
+      {
+       "label": "On",
+       "value": "on"
+      }
+     ],
+     "read_only": false,
+     "title": "Merge when green",
+     "type": "choice"
+    }
+   ],
+   "section": "Pull requests",
+   "show_on_card": []
+  },
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.2.0"
+ },
  "sync": {
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
@@ -228,7 +279,7 @@
    "order": 50,
    "subtitle": "Keep another copy of tickets and their files."
   },
-  "description": "Keeps a copy of tickets and their files, never secrets or private files, on this computer or a remote. Off any time.",
+  "description": "Keeps a copy of tickets and files on this computer, another computer or your own storage. Never secrets.",
   "gitignore": [],
   "name": "sync",
   "needs": true,

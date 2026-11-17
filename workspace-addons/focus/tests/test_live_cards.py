@@ -58,9 +58,9 @@ def test_card_without_events_still_says_something():
         "events": [],
     }
     c = livecards.card(v)
-    assert (
-        c["now"] == "Getting started" and c["steps"] == [] and c["question"] is None and c["working"] is True
-    )
+    # ORCH-61: no made-up "Getting started"; the state word comes from the one helper state
+    assert c["now"] == "" and c["steps"] == [] and c["question"] is None and c["working"] is True
+    assert (c["state"], c["word"], c["step"]) == ("working", "Working", {"n": 2, "of": 2})
 
 
 def test_recommended_must_be_one_of_the_options():
@@ -124,7 +124,11 @@ def test_cards_read_the_views_side_by_side_in_list_order(monkeypatch):
     """ORCH-18: the start page waits for this answer; one view after the other took seconds with four helpers."""
     import threading
 
-    monkeypatch.setattr(livecards, "card", lambda v: {"ticket": v["id"], "question": v.get("q")})
+    monkeypatch.setattr(
+        livecards,
+        "card",
+        lambda v: {"ticket": v["id"], "question": v.get("q"), "state": "you" if v.get("q") else "working"},
+    )
     monkeypatch.setattr(livecards.areas, "label", lambda root, out: None)
     lock, now, most = threading.Lock(), [0], [0]
 
@@ -146,5 +150,65 @@ def test_cards_read_the_views_side_by_side_in_list_order(monkeypatch):
     out = livecards.cards(Tracker())
     assert most[0] > 1  # more than one view was read at a time
     assert len(out) == livecards.MAX_CARDS
-    # the first eight running tickets of the list, the one that waits for you first
-    assert [c["ticket"] for c in out] == ["t_000005"] + [f"t_{i:06d}" for i in (2, 4, 7, 8, 10, 11, 13)]
+    # the first eight running tickets of the list, in the Helpers order (working first, then the one that waits for you)
+    assert [c["ticket"] for c in out] == [f"t_{i:06d}" for i in (2, 4, 7, 8, 10, 11, 13)] + ["t_000005"]
+
+
+def test_card_carries_the_core_helper_state_step_and_minutes():
+    """ORCH-61: Focus shows the same state word, step and minutes as the Helpers list on Home."""
+    t = ticket(
+        checklist=[
+            {"id": "c1", "text": "a", "done": True},
+            {"id": "c2", "text": "b", "state": "doing"},
+            {"id": "c3", "text": "c"},
+        ]
+    )
+    run = {"label": "Helper", "running": True, "age_seconds": 3125, "idle_seconds": None,
+           "helper": {"state": "waiting", "word": "x", "detail": "Waits on pr-green.sh (running 6 min)"}}  # fmt: skip
+    c = livecards.card({"ticket": t, "run": run, "board": {"step": ""}, "state": "waiting", "events": []})
+    assert (c["state"], c["word"], c["detail"]) == (
+        "waiting",
+        "On hold",
+        "Waits on pr-green.sh (running 6 min)",
+    )
+    assert c["step"] == {"n": 2, "of": 3} and c["age_minutes"] == 52 and c["idle_minutes"] is None
+    assert c["finished"] is False and c["now"] == "Waits on pr-green.sh (running 6 min)"
+
+
+def test_card_without_the_core_field_uses_the_same_words():
+    t = ticket(questions=[{"id": "q1", "text": "?", "answer": None}])
+    c = livecards.card(
+        {"ticket": t, "run": {"running": True}, "board": {"step": ""}, "state": "needs", "events": []}
+    )
+    assert (c["word"], c["detail"]) == ("Waits for you", "Your answer")
+    c = livecards.card(
+        {
+            "ticket": ticket(),
+            "run": {"running": True},
+            "board": {"step": ""},
+            "state": "waiting",
+            "events": [],
+        }
+    )
+    assert c["word"] == "Idle"
+
+
+def test_a_finished_ticket_with_an_open_session_is_listed(tmp_path, monkeypatch):
+    monkeypatch.setattr(livecards.areas, "label", lambda root, out: None)
+    (tmp_path / ".orch" / "run" / "tickets").mkdir(parents=True)
+    (tmp_path / ".orch" / "run" / "tickets" / "t_000002.json").write_text("{}")
+
+    class Tracker:
+        root = tmp_path
+
+        def tickets_list(self):
+            return [{"id": "t_000001", "status": "done"}, {"id": "t_000002", "status": "review"}]
+
+        def view(self, tid):
+            return {"ticket": ticket(id=tid, status="review"), "run": {"running": True, "helper": {"state": "idle", "detail": "Nothing running for 3 min"}},
+                    "board": {"step": ""}, "state": "waiting", "events": []}  # fmt: skip
+
+    out = livecards.cards(Tracker())
+    assert (
+        [c["ticket"] for c in out] == ["t_000002"] and out[0]["finished"] is True and out[0]["word"] == "Idle"
+    )

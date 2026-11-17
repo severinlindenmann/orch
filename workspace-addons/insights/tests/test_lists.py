@@ -288,7 +288,7 @@ def test_inventory_only_rows_and_panel(answer):
     skill = rows(answer, "skills")["Invoice export"]
     panel = skill["panel"]
     assert panel["tickets"] == "3 done, 1 sent back, 1 open"
-    assert panel["note"] == "Errors are not proof that this is bad."
+    assert panel["note"] == "Errors alone do not mean this is bad."
     assert panel["first_seen"] == "2 Nov 2026" and panel["last_seen"] == "16 Nov 2026"
     assert panel["numbers"] == [
         "7 uses: 6 ok, 1 failed, 0 refused",

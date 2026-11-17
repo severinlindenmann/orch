@@ -21,6 +21,7 @@ from orch import (
     runs_live,
     runwatch,
     sharedfolder,
+    tend,
     term,
     tickets,
 )
@@ -43,6 +44,7 @@ SUBCOMMANDS = (
     "input",
     "list",
     "screen",
+    "tend",
     *cli_screen.SUBCOMMANDS,
 )
 
@@ -56,6 +58,9 @@ def add_parsers(sub, common) -> None:
         x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
         if name == "list":
             continue  # every run; no ticket
+        if name == "tend":  # every live run; no ticket
+            x.add_argument("--dry-run", action="store_true", help="only say what it would do")
+            continue
         x.add_argument(
             "ticket", nargs="?" if name in ("event", "done", "input") else "+" if name == "status" else None
         )
@@ -92,6 +97,12 @@ def add_parsers(sub, common) -> None:
         if name == "start":
             x.add_argument("--take-over", action="store_true", help="take over a claim nobody has written to")
             x.add_argument("--text", help="what to queue when the ticket is busy")
+            x.add_argument(
+                "--priority",
+                choices=runs_live.PRIORITIES,
+                default="normal",
+                help="when every slot is taken: where it waits in line (default normal)",
+            )
         if name == "screen":
             x.add_argument(
                 "--lines",
@@ -209,7 +220,7 @@ def _waiting_input(root: Path, tid: str) -> list[dict]:
 def _status(args, root: Path) -> None:
     ids = args.ticket if isinstance(args.ticket, list) else [args.ticket]
     if len(ids) == 1:  # the one-ticket answer is unchanged
-        data, text = _status_of(root, ids[0])
+        data, text = status_of(root, ids[0])
         _out(args, data, text)
         return
     # Several tickets in one process (the dashboard asks for all runs at once): the same answer per ticket,
@@ -218,14 +229,14 @@ def _status(args, root: Path) -> None:
     lines = []
     for tid in dict.fromkeys(ids):
         try:
-            out[tid], text = _status_of(root, tid)
+            out[tid], text = status_of(root, tid)
         except Refused as e:
             out[tid], text = {"ticket": tid, "error": str(e)}, str(e)
         lines.append(text)
-    _out(args, {"runs": out}, "\n".join(lines))
+    _out(args, {"runs": out}, "\n".join(lines))  # orch.reads.run_status: the same answer, in-process
 
 
-def _status_of(root: Path, tid: str) -> tuple[dict, str]:
+def status_of(root: Path, tid: str) -> tuple[dict, str]:
     tickets.load(root, tid)
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
     runs.check_start_timeout(root, tid)  # a start that never got an agent says why
@@ -394,6 +405,15 @@ def dispatch(args, root: Path) -> bool:
         rows = runwatch.list_runs(root)
         _out(args, {"runs": rows}, runwatch.list_text(rows))
         return True
+    if sub == "tend":  # the helper watcher's pass (ORCH-78): end, remind, start fresh, start the line
+        # the watcher first, so a session at the idle limit gets its history line (or its fresh start)
+        # before the plain cleanup closes it silently (ORCH-149)
+        res = tend.run(root, dry_run=args.dry_run)
+        if not args.dry_run:
+            with contextlib.suppress(Exception):
+                runs_live.cleanup(root)
+        _out(args, res, tend.text(res, args.dry_run))
+        return True
     if sub == "screen":  # read-only: nothing is typed into the session
         if not args.ticket:
             raise Refused("Say which ticket: orch run screen <ticket>")
@@ -492,6 +512,7 @@ def dispatch(args, root: Path) -> bool:
             mode=args.mode,
             text=args.text,
             agent=args.agent,
+            priority=args.priority,
         )
         for note in r["notes"]:
             print(note, file=sys.stderr)

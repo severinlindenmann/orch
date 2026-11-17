@@ -57,10 +57,10 @@ test('an agent already working gets the message without a second start', async (
 });
 
 test('a refused send (no page session: watch-only) starts nothing and tells the page why', async () => {
-  const {ctx, calls, frameWindow} = setup({results:{'run.send':{ok:false, status:403, text:'Open the dashboard from this computer to do this.'}}});
+  const {ctx, calls, frameWindow} = setup({results:{'run.send':{ok:false, status:403, text:'Sign in to do this: open the dashboard with a sign-in link from orch.'}}});
   await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
   assert.deepEqual(calls.acts.map(a => a[0]), ['run.send']);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.failed', error:'Open the dashboard from this computer to do this.', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, ORIGIN]]);
 });
 
 test('too long is refused before any act; a second click while sending sends once', async () => {

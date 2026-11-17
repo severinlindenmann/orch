@@ -35,7 +35,7 @@ TICKETS = [
     ], [{"id": "q1", "text": "Should the boat trip be on day 1 or day 2?", "answer": None,
          "options": ["Day 2", "Day 1"], "recommended": "Day 2"}]),
     ticket("t_pil2bbbb", "PIL-2", "Write the newsletter", [
-        {"id": "c1", "text": "Outline", "done": True, "evidence": [{"type": "note", "ref": "outline", "text": "Outline written"}, {"type": "command", "ref": "uv run pytest -q", "text": "12 passed", "at": "2026-11-13T10:00:00Z"}]},
+        {"id": "c1", "text": "Outline", "done": True, "evidence": [{"type": "note", "ref": "outline", "text": "Outline written"}, {"type": "command", "ref": "uv run pytest -q", "text": "12 passed", "title": "Link check", "summary": "All 12 links work", "at": "2026-11-13T10:00:00Z"}]},
         {"id": "c2", "text": "Write the intro", "done": False, "state": "doing", "evidence": []},
     ]),
 ]  # fmt: skip
@@ -120,7 +120,9 @@ elif a[:2] == ["ticket", "show"]:
     print((ws / (a[2] + ".json")).read_text())
 elif a[:2] == ["run", "status"]:
     print(json.dumps({{"running": True, "claim": {{"run": runs[a[2]], "agent": "codex" if a[2] == "t_pil2bbbb" else "claude", "mode": "oneshot",
-                                                  "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 18 * 60))}}}}))
+                                                  "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 18 * 60))}},
+                      "helper": {{"state": "you" if a[2] == "t_pil1aaaa" else "working", "detail": "Your answer" if a[2] == "t_pil1aaaa" else ""}},
+                      "age_seconds": 18 * 60, "idle_seconds": 2 * 60}}))  # ORCH-61/71: the core's helper state
 elif a[:2] == ["record", "tail"]:
     tid = [t for t, r in runs.items() if r == a[a.index("--run") + 1]][0]
     for line in json.loads((d / "events.json").read_text())[tid]:

@@ -77,6 +77,7 @@ def test_example_denominators_inventory_and_privacy(answer):
         "connections": 3,
         "keys": 2,
     }
+    assert view["tabs"]["connections"]["known"] is True
     row = build_list(answer, "skills")["rows"][0]
     assert row["name"] == "Invoice export"
     assert row["numbers"] == "5 of 23 runs"
@@ -437,3 +438,9 @@ def test_bundled_counts_contract_matches_repository():
     assert json.loads(PACKAGE.joinpath("answer.schema.json").read_text()) == expand(
         schema, "counts.schema.json"
     )
+
+
+def test_connections_without_their_list_are_not_measured(answer):
+    """No list of connected services in the counts: the page must say "Not measured yet", never a false 0 (ORCH-72)."""
+    answer["inventory"] = {**answer["inventory"], "connections": []}
+    assert build_overview(answer)["tabs"]["connections"]["known"] is False

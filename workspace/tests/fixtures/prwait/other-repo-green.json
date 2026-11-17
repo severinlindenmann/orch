@@ -1,0 +1,13 @@
+{
+  "note": "Another repo: all SUCCESS. Must be green.",
+  "repo": "severinlindenmann/orch-mobile",
+  "polls": [
+    [
+      {
+        "name": "a",
+        "state": "SUCCESS",
+        "bucket": "pass"
+      }
+    ]
+  ]
+}

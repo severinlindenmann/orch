@@ -23,7 +23,8 @@ anything gives the ticket a question (Try again / Leave it) instead of a retry.
 
     orch wait <id> --until 2026-11-05T08:00:00+01:00     # use the user's time zone offset
 
-At that time the wait is cleared and a run starts.
+At that time the wait is cleared and a run starts. Waiting a while? Say it in plain words:
+`orch automation repeat <id> "in 2 hours"` (or `in 3 days`, `in 30 minutes`, `tomorrow 09:00`): one wake-up, no repeat.
 
 **Repeat, in plain words**
 
@@ -44,11 +45,18 @@ slower) gives every run its own sub-ticket. If the computer was off, one catch-u
 
 The command is kept only in this computer's settings (never in the ticket, never synced) and runs without a shell in the
 workspace folder; one run per ticket at a time. It runs only after a person allowed it on this computer: one a person
-adds is allowed; one you add waits until the person presses Allow on this computer on the repeat in the dashboard's
+adds is allowed; one you add waits until the person presses Allow this script on the repeat in the dashboard's
 Automation tab (it shows the command in full first), or runs `script allow` with the key `script list` shows. Its output goes to `.orch/run/logs/<ticket>-script-*.log`; the run
 history shows Done or Stopped. A script that fails asks one question on the ticket (Try again / Leave it). Only add a
 script the person asked for.
 {{#relay}}
+
+**Problem reports become tickets** (a workspace setting, no script and no agent for the pick-up)
+
+    orch config set diag.report_tickets on   # new reports here or shared through the relay: a ticket and a helper
+    orch diag tickets --dry-run              # what one pass would open now
+
+Turn it on only when the person asked for it.
 
 **Start from outside**
 

@@ -10,7 +10,7 @@ group chat with it and share a file, as it would with a colleague's workspace.
 
 - Your own workspace, with orch installed and connected to your relay ([relay.md](relay.md)).
 - Admin access to the relay page.
-- Someone at the dev machine for one or two clicks, or screen sharing to it.
+- Someone at the dev machine for one click (the first task Demo gets), or screen sharing to it.
 
 ## Connect the demo
 
@@ -26,9 +26,7 @@ On the dev machine, the team saves that text as a file and runs one line:
 $ scripts/demo-workspace.sh setup --prompt-file demo-prompt.txt
 ```
 
-Connecting needs **one person's click on the dev machine's own screen**: Demo's dashboard opens there and asks you to
-press **Continue**. The team does this, or you do it over screen sharing. The script waits for the click and then
-prints:
+The script installs orch for Demo, connects it to the relay and then prints:
 
 - Demo's workspace id (`ws_…`);
 - Demo's dashboard address. It opens only on the dev machine's own screen; to watch Demo, use screen sharing.
@@ -48,7 +46,8 @@ What you should see: the message arrives at Demo. Demo's answer comes back to yo
 **b) Hand Demo a task.** `orch relay delegate <Demo's id> "Book a table for 8" --text "Friday 12:00, 8 people"`.
 What you should see: Demo's dashboard shows it under **Needs you**, with **Allow once**, **Always** and **Ignore**.
 
-The first time, someone presses **Always** on the dev machine's screen (the same click as above). From then on your
+The first time, someone presses **Always** on Demo's dashboard on the dev machine's screen (or over screen sharing).
+From then on your
 workspace may hand Demo tasks without asking again, and your workspace gets "permanent allow saved". Each task becomes a
 ticket on Demo; Demo's helper works on it, and the answer comes back to you as a message.
 

@@ -229,7 +229,8 @@ test('Home › Needs you: the three sync rows in the draft words, with "Needs yo
   assert.deepEqual(rows.map(r => text(all(r, n => n.tag === 'p')[1])), ['Sync', 'Sync', 'Sync']);
   assert.deepEqual(rows.map(r => all(r, n => n.attrs?.className === 'sig').map(text)), [['Needs your OK'], ['Needs your OK'], ['Needs your OK']]);
   assert.deepEqual(rows.map(r => all(r, n => n.tag === 'button').map(text)), [['Keep mine', 'Keep theirs'], ['Move', 'Not now'], ['Leave it out', 'View file']]);
-  assert.match(text(home), /Needs you · 3/);
+  // ORCH-63: the number counts ticket questions and results only (the Review cards); sync's rows stay listed here
+  assert.match(text(home), /Needs you Sync paused/); assert.doesNotMatch(text(home), /Needs you · /);
 });
 
 const KEEP_TARGET = 'sync:keep-theirs:' + 'e'.repeat(64);
@@ -397,4 +398,14 @@ test('fb18: a failed sync is one plain sentence and one button, never a raw erro
   const ok = syncPage({...BASE, ...INFO});
   assert.equal(byKey(ok.page, 'sync-error'), undefined);
   assert.equal(byKey(syncPage({...BASE, ...INFO, mode:'off', shown:'off'}).page, 'sync-where-info'), undefined);
+});
+
+test('ORCH-184: changing Sync in Settings drops the Sync page\'s saved view, so the page and Settings never disagree', async () => {
+  const {c} = context({answers:{set:{mode:'local'}, status:BASE}});
+  vm.runInContext("addonViews.sync = {state:'ok', view:{}}; addonViews.other = {state:'ok'};", c);
+  await vm.runInContext("syncAct('status', 'sync')", c);
+  assert.equal(vm.runInContext("!!addonViews.sync", c), true, 'reading the status keeps it');
+  await vm.runInContext("syncAct('set', 'local')", c);
+  assert.equal(vm.runInContext("addonViews.sync", c), undefined, 'a change drops it');
+  assert.equal(vm.runInContext("!!addonViews.other", c), true, 'other add-ons keep theirs');
 });

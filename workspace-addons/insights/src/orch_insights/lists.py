@@ -27,7 +27,7 @@ PLACES = {
 }
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 CANT_TELL = "Can't tell yet"
-NOT_PROOF = "Errors are not proof that this is bad."
+NOT_PROOF = "Errors alone do not mean this is bad."
 FILTERS = (("all", "All"), ("look", "Needs a look"), ("idle", "Not used"))
 
 

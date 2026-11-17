@@ -154,6 +154,13 @@ fn problem(key: &Key, r: &rusqlite::Row, with_summary: bool) -> rusqlite::Result
     for k in ["note", "expected", "more"] {
         o.insert(k.into(), d[k].as_str().unwrap_or("").into());
     }
+    // A feature wish says so; a problem shared before reports had a kind is a problem.
+    let about = if d["about"].as_str() == Some("feature") {
+        "feature"
+    } else {
+        "problem"
+    };
+    o.insert("about".into(), about.into());
     o.insert(
         "problems".into(),
         d["problems"].as_array().cloned().unwrap_or_default().into(),
@@ -217,6 +224,11 @@ async fn share(
         text(&v, "expected", 600)?,
         text(&v, "more", 4000)?,
     );
+    let about = match v["about"].as_str() {
+        None if v["about"].is_null() => "problem",
+        Some(a @ ("problem" | "feature")) => a,
+        _ => return Err(invalid("`about` must be problem or feature.")),
+    };
     let summary = text(&v, "summary", 20000)?;
     if summary.is_empty() {
         return Err(invalid("`summary` is needed."));
@@ -287,7 +299,7 @@ async fn share(
         return Err(problem_limited());
     }
     let id = rand_id("pb_", 16);
-    let data = json!({"scope": {"ticket": ticket, "addon": addon}, "note": note, "expected": expected, "more": more,
+    let data = json!({"scope": {"ticket": ticket, "addon": addon}, "about": about, "note": note, "expected": expected, "more": more,
         "problems": checks, "summary": summary, "orch_version": orch_version, "os": os});
     let sealed = crypto::seal(&app.key, &aad(&id), &serde_json::to_vec(&data).unwrap());
     let from_name = store::ws_name(&c, &me).unwrap_or_default();

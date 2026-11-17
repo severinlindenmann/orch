@@ -21,7 +21,8 @@ def test_new_with_parent(proj, run, validate):
     assert code == 0 and "step of: Quarter close" in out
     c = [t for t in tickets.list_all(proj) if t["title"] == "Q3 invoices"][0]
     validate(c)
-    assert c["parent"] == p and c["history"][0]["text"] == f"Created under {p}"
+    key = read(proj, p)["key"]
+    assert c["parent"] == p and c["history"][0]["text"] == f"Created under {key} Quarter close"
     assert "parent" not in read(proj, p)
 
 
@@ -38,7 +39,7 @@ def test_show_counts_and_part_of(proj, run):
     for k in kids[:2]:
         run("ticket", "status", k, "dropped")
     assert "Sub-tickets: 2 of 4 closed" in run("ticket", "show", p)[1]
-    assert f"Step of: Quarter close ({p})" in run("ticket", "show", kids[0])[1]
+    assert f"Sub-ticket of: Quarter close ({p})" in run("ticket", "show", kids[0])[1]
 
 
 def test_list_json_children_and_missing_parent(proj, run):
@@ -52,7 +53,7 @@ def test_list_json_children_and_missing_parent(proj, run):
     (proj / ".orch" / "tickets" / f"{p}.json").unlink()
     text = run("ticket", "list")[1]
     assert "B" in text and "parent missing" in text
-    assert f"Step of: {p} (parent missing)" in run("ticket", "show", tickets.list_all(proj)[0]["id"])[1]
+    assert f"Sub-ticket of: {p} (parent missing)" in run("ticket", "show", tickets.list_all(proj)[0]["id"])[1]
 
 
 def test_tree(proj, run):
@@ -99,3 +100,15 @@ def test_closing_parent_warns_but_saves(proj, run):
     run("ticket", "status", k2, "dropped")
     run("ticket", "status", p, "active")
     assert "Warning" not in run("ticket", "status", p, "done")[2]
+
+
+def test_history_lines_have_no_internal_words():
+    cl = [{"id": "c3", "text": "Build it"}]
+    for raw, want in [
+        ("Recorded a check run for c3 (exit 0)", "Ran a check: Build it (passed)"),
+        ("Recorded a check run for c3 (exit 1)", "Ran a check: Build it (failed)"),
+        ("Moved c3 after c4", "Moved a task: Build it"),
+        ("Created under t_q7pi62", "Created as a sub-ticket"),
+        ("Edited done_when, note", "Changed the Done when line and note"),
+    ]:
+        assert tickets.history_line(raw, cl) == want

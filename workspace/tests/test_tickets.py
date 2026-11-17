@@ -62,7 +62,7 @@ def test_check_done_needs_evidence(proj, run, new_ticket, validate):
     tid = new_ticket()
     assert run("check", "add", tid, "Implement")[0] == 0
     code, _, err = run("check", "done", tid, "c1")
-    assert code == 2 and "proof" in err
+    assert code == 2 and "evidence" in err
     code, _, err = run("check", "done", tid, "c1", "--evidence", '{"type":"bogus","ref":"x"}')
     assert code == 2
     assert read(proj, tid)["checklist"][0]["done"] is False
@@ -587,6 +587,44 @@ def test_an_agent_cannot_reopen_a_closed_ticket_a_person_can(proj, new_ticket, m
     assert tickets.check_add(proj, tid, "more work", "agent:claude")[1]["id"] == "c1"  # open again: allowed
 
 
+def test_an_active_addon_keeps_up_a_done_ticket_with_its_own_data(proj, new_ticket, monkeypatch):
+    """A repeat survives Done (#194): the add-on that owns a ticket's ext block (agent:<add-on>) still records
+    its last run, writes its history line and opens the ticket again for the next run. A helper, the add-on
+    from inside a helper run, an add-on that is off, a dropped ticket or a ticket without its data: no."""
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {"rep": {}})
+    msg = "This ticket is closed, so the agent can't change it."
+    rep = new_ticket()
+    tickets.ext_set(proj, rep, "rep", '{"every": "15 min"}', "human:t")
+    tickets.set_status(proj, rep, "done", "human:t")
+    tickets.ext_set(proj, rep, "rep", '{"last_run": "2026-11-16T19:30:00Z"}', "agent:rep")
+    tickets.log(proj, rep, "Opened again for the next run of this repeat.", "agent:rep")
+    assert tickets.load(proj, rep)["ext"]["rep"] == {"every": "15 min", "last_run": "2026-11-16T19:30:00Z"}
+    for actor in ("agent:claude", "agent:other"):  # a helper or another add-on still cannot touch it
+        with pytest.raises(Refused, match=msg):
+            tickets.ext_set(proj, rep, "rep", '{"last_run": "x"}', actor)
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # a helper run cannot pass for the add-on
+    with pytest.raises(Refused, match=msg):
+        tickets.set_status(proj, rep, "open", "agent:rep")
+    monkeypatch.delenv("ORCH_AGENT")
+    monkeypatch.setattr(addons, "active", lambda root: {})  # the add-on is off here
+    with pytest.raises(Refused, match=msg):
+        tickets.set_status(proj, rep, "open", "agent:rep")
+    monkeypatch.setattr(addons, "active", lambda root: {"rep": {}})
+    assert tickets.set_status(proj, rep, "open", "agent:rep")["status"] == "open"
+
+    plain = new_ticket()  # none of its data: closed stays closed for the add-on too
+    tickets.set_status(proj, plain, "done", "human:t")
+    with pytest.raises(Refused, match=msg):
+        tickets.set_status(proj, plain, "open", "agent:rep")
+    off = new_ticket()  # a dropped ticket is not planned any more
+    tickets.ext_set(proj, off, "rep", '{"every": "15 min"}', "human:t")
+    tickets.set_status(proj, off, "dropped", "human:t")
+    with pytest.raises(Refused, match=msg):
+        tickets.set_status(proj, off, "open", "agent:rep")
+
+
 def test_closed_without_a_live_run_or_from_inside_its_own_run_stops_nothing(
     proj, new_ticket, stopped, monkeypatch, outside_pid
 ):
@@ -747,3 +785,24 @@ def test_every_apply_op_call_names_its_actor():
             if name == "apply_op" and not any(k.arg == "by" for k in n.keywords):
                 missing.append(f"{f.relative_to(repo)}:{n.lineno}")
     assert not missing, f"apply_op without by=: {missing}"
+
+
+def test_proof_state_reworded_done_when_matches_task_text_loosely():
+    done_when = "With 20 queued tickets and no limit set, helpers start in steps. Usage belongs elsewhere."
+    c = _c("c1")
+    c["text"] = "Add a test: 20 queued tickets, no limit set, helpers start in steps"
+    ps = tickets.proof_state(_t([c], done_when=done_when))
+    assert ps["uncovered"] == ["Usage belongs elsewhere."]
+
+
+def test_orch185_note_edit_history_carries_old_and_new_text(proj, new_ticket):
+    """ORCH-185: Activity can show the old and new note; the label still says "Changed the note"."""
+    tid = new_ticket("Edit me")
+    tickets.edit(proj, tid, None, "human:t", {"note": "first words"})
+    tickets.edit(proj, tid, None, "human:t", {"note": "second words " * 30})
+    lines = [h["text"] for h in read(proj, tid)["history"] if h["text"].startswith("Edited note")]
+    assert lines[0] == "Edited note (was: (empty) | now: first words)"
+    assert lines[1].startswith("Edited note (was: first words | now: second words")
+    assert lines[1].endswith("…)") and len(lines[1]) < 500
+    assert tickets.history_line(lines[0]) == "Changed the note"
+    assert tickets.history_line("Edited note") == "Changed the note"

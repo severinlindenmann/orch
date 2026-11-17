@@ -1,0 +1,17 @@
+{
+  "note": "Required gate missing: only the rules workflow reported. Must be NOT green (waits for gate, then times out).",
+  "repo": "severinlindenmann/orch",
+  "isDraft": false,
+  "required": [
+    "gate"
+  ],
+  "polls": [
+    [
+      {
+        "name": "banned-words",
+        "state": "SUCCESS",
+        "bucket": "pass"
+      }
+    ]
+  ]
+}

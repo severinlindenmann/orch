@@ -574,3 +574,135 @@ async fn redeploy_writes_the_row_before_the_new_process_is_live() {
         200
     );
 }
+
+/// Same swap with a slow stop (as a container or unit that takes its time): while the old process stops,
+/// no request reaches it under the new access. Fails when the row is written while the old process is
+/// still routable (e.g. `put_app` then `stop(name)`).
+#[tokio::test]
+async fn redeploy_with_a_slow_stop_never_serves_old_process_under_new_access() {
+    let t = setup_private();
+    let ws = t.workspace("A", all_rights()).await;
+    let r = put_py(&t, &ws, "rs", "reach = \"private\"\nauth = false", "old").await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    t.st.runner
+        .set_stop_delay(std::time::Duration::from_millis(1500));
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (pub_r, flag) = (t.public.clone(), done.clone());
+    let poller = tokio::spawn(async move {
+        let mut seen = vec![];
+        while !flag.load(std::sync::atomic::Ordering::SeqCst) {
+            let g = call(&pub_r, "GET", "/a/rs/", &[], vec![]).await;
+            seen.push((g.status.as_u16(), g.text()));
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        seen
+    });
+    let r = put_py(&t, &ws, "rs", "reach = \"public\"\nauth = false", "new").await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    done.store(true, std::sync::atomic::Ordering::SeqCst);
+    let seen = poller.await.unwrap();
+    assert!(
+        !seen.iter().any(|(s, b)| *s == 200 && b == "old"),
+        "old process served under the new access"
+    );
+    // requests really ran while the old process was stopping: the new one already answered then
+    assert!(
+        seen.iter().any(|(s, b)| *s == 200 && b == "new"),
+        "no request ran during the slow stop"
+    );
+}
+
+/// The client goes away while the old process stops: the deploy still runs to the end, the old process
+/// is stopped and its version folder removed.
+#[tokio::test]
+async fn redeploy_finishes_when_the_client_goes_away() {
+    use orch_publish::db;
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    let open = "reach = \"public\"\nauth = false";
+    let r = put_py(&t, &ws, "rg", open, "old").await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let old = db::get_app(&t.st.db.lock().unwrap(), "rg")
+        .unwrap()
+        .unwrap();
+    let root = t.st.cfg.app_root("rg");
+    let old_v = std::path::Path::new(&old.code_dir)
+        .ancestors()
+        .find(|a| a.parent() == Some(root.as_path()))
+        .unwrap()
+        .to_path_buf();
+    assert!(old_v.is_dir());
+    t.st.runner
+        .set_stop_delay(std::time::Duration::from_millis(1500));
+    let (pub_r, toml) = (t.public.clone(), py_toml("rg", open));
+    let (wid, tok) = ws.clone();
+    let deploy = tokio::spawn(async move {
+        call(
+            &pub_r,
+            "PUT",
+            "/v1/apps/rg?days=7",
+            &[
+                ("x-orch-workspace", &wid),
+                ("authorization", &format!("Bearer {tok}")),
+            ],
+            bundle(&[("app.toml", &toml), ("main.py", &word_app("new"))]),
+        )
+        .await
+    });
+    // the new process took the name: the deploy is now waiting for the old one to stop
+    let t0 = std::time::Instant::now();
+    loop {
+        let g = call(&t.public, "GET", "/a/rg/", &[], vec![]).await;
+        if g.status == 200 && g.text() == "new" {
+            break;
+        }
+        if t0.elapsed().as_secs() > 30 {
+            let r = deploy.await.unwrap();
+            panic!(
+                "new version never answered: last {} {} / deploy {} {}",
+                g.status,
+                g.text(),
+                r.status,
+                r.text()
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    deploy.abort();
+    let t1 = std::time::Instant::now();
+    while old_v.exists() {
+        assert!(
+            t1.elapsed().as_secs() < 10,
+            "deploy stopped with the client: old version left behind"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let g = call(&t.public, "GET", "/a/rg/", &[], vec![]).await;
+    assert_eq!((g.status.as_u16(), g.text()), (200, "new".to_string()));
+}
+
+/// A request authorized just before a redeploy switched the stack (static <-> process) gets the
+/// try-again page, not the private-link page: its access did not change.
+#[tokio::test]
+async fn stack_change_alone_answers_try_again_not_private() {
+    use orch_publish::db;
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    put(&t, &ws, "sc", "").await;
+    let old = db::get_app(&t.st.db.lock().unwrap(), "sc")
+        .unwrap()
+        .unwrap();
+    let mut new = old.clone();
+    new.stack = if old.stack == "static" {
+        "python"
+    } else {
+        "static"
+    }
+    .into();
+    let r = orch_publish::apps::access_changed(&old, &new).unwrap();
+    assert_eq!(r.status(), 503);
+    // an access change together with the stack change still answers private
+    new.public = !old.public;
+    let r = orch_publish::apps::access_changed(&old, &new).unwrap();
+    assert_eq!(r.status(), 401);
+}

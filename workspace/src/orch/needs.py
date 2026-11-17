@@ -99,6 +99,7 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
                     "answer": {
                         "question": q["id"],
                         "options": list(q.get("options") or []),
+                        "labels": _option_labels(q),
                         "recommended": q.get("recommended"),
                         "digest": tickets.question_digest(q),  # the question as shown: bound into the proof
                     },
@@ -137,6 +138,9 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
     from orch import health
 
     health.soon(root)  # tool logins: a stale result is checked again in the background (ORCH-44)
+    from orch import doctorpass
+
+    doctorpass.soon(root)  # the machine's health checks, when set up here and due (ORCH-104)
     for r in services.workspace_rows(root):
         if not r["running"] and not r.get("idle"):
             rows.append(
@@ -257,6 +261,17 @@ def addon_rows(root: Path, name: str, m: dict) -> list[dict]:
             "stale": True,
         }
     ]
+
+
+def _option_labels(q: dict) -> list[str]:
+    """One short line per option: "A Title" when a card option has its own title."""
+    pv = (q.get("card") or {}).get("preview") or {}
+    titles = {o.get("id"): o.get("title") for o in pv.get("options") or [] if isinstance(o, dict)}
+    out = []
+    for o in q.get("options") or []:
+        t = titles.get(o)
+        out.append(f"{o} {_clip(t, 40)}" if t and t != o else str(o))
+    return out
 
 
 def needs(root: Path) -> list[dict]:

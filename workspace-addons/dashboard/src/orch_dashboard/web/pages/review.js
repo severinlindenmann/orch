@@ -5,12 +5,13 @@
 const REVIEW_ID = /^core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]{1,4})|review:(t_[a-z0-9]{6,16}))$/;
 function reviewCards() { return array(state?.review?.cards); }
 function reviewAnswered() { return array(state?.review?.answered); }
-// The one number of "things that wait on you" this page shows: the cards of the stack (the same questions and
-// results to check that Home counts; Home's own total is not changed by this page).
+// The cards of the stack: every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
 function reviewCount() { return reviewCards().length; }
+// The subtitle shows THE needs-you number (needsYouTotal: open questions plus results to check, exactly what this page
+// shows as cards; the Review menu entry and the top bar show the same one, ORCH-63).
 function reviewSubtitle() {
-  const n = reviewCount();
-  return n ? n + (n === 1 ? ' thing waits on you, most urgent first.' : ' things wait on you, most urgent first.') : 'Nothing waits for you.';
+  const n = typeof needsYouTotal === 'function' ? needsYouTotal() : reviewCount();
+  return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
 function reviewWord(answer) {
@@ -47,29 +48,107 @@ function reviewApi() {
     }
   };
 }
-// The deck list: one line per card, the one on screen in bold, answered ones quiet with their word.
+// The deck list: one section per set of cards (the helper's group, else the ticket) with its own count, one line
+// per card, the one on screen in bold, answered ones quiet with their word.
+function reviewGroupOf(it) { return it.group || it.ticketTitle || it.ticket || ''; }
 function reviewDrawSide(queue, deck) {
   if (!queue || !deck) return;
-  queue.replaceChildren(...deck.items.map((it, i) => {
-    const a = deck.answers[it.id], row = el('button', 'btn ghost sm review-queue-row' + (i === deck.index && !a ? ' is-now' : '') + (a ? ' is-done' : ''));
-    row.type = 'button'; row.setAttribute('role', 'listitem');
-    const icon = iconEl(it.icon);
-    row.append(icon, el('span', 'review-queue-title', it.title));
+  const groups = new Map();
+  deck.items.forEach((it, i) => {
+    const key = reviewGroupOf(it);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  });
+  const row = i => {
+    const it = deck.items[i], a = deck.answers[it.id], r = el('button', 'btn ghost sm review-queue-row' + (i === deck.index && !a ? ' is-now' : '') + (a ? ' is-done' : ''));
+    r.type = 'button'; r.setAttribute('role', 'listitem');
+    const title = el('span', 'review-queue-title', it.title); title.title = it.title;  // two lines, and the whole title on hover (F4: cut titles looked repeated)
+    r.append(iconEl(it.icon), title);
     const word = a ? reviewWord(a) : i === deck.index ? 'Now' : '';
-    if (word) row.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));
-    row.onclick = () => deck.jump(i);
-    return row;
+    if (word) r.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));
+    r.onclick = () => deck.jump(i);
+    return r;
+  };
+  const one = groups.size < 2;
+  queue.replaceChildren(...[...groups].map(([name, rows]) => {
+    const sec = el('div', 'review-group');
+    sec.setAttribute('role', 'list');
+    sec.setAttribute('aria-label', name || 'Cards');
+    if (!one || name) {
+      const left = rows.filter(i => !deck.answers[deck.items[i].id]).length;
+      const head = el('h3', 'review-group-head');
+      head.append(el('span', '', name || 'Cards'), el('span', 'meta', left ? left + ' of ' + rows.length + ' waiting' : 'All ' + rows.length + ' answered'));
+      sec.append(head);
+    }
+    sec.append(...rows.map(row));
+    return sec;
   }));
+}
+// "Accepted for you" (ORCH-77): what the Reviewer marked Done today; one tap sends a ticket back with a short note.
+// A phone width keeps this card (the "All cards" aside hides there), so it sits under the deck.
+const reviewSentBack = new Set();
+function reviewAccepted() { return array(state?.review?.accepted).filter(a => a && typeof a.ticket === 'string'); }
+async function reviewSendBack(a, note) {
+  const text = String(note || '').trim();
+  if (snapshot || !text) return false;
+  const r = await act('ticket.changes', {ticket:a.ticket, text});
+  window.orch.toast(r.ok ? 'Changes sent' : String(r.text || 'Could not send it back.').slice(0, 200), r.ok ? 'ok' : 'error');
+  if (r.ok) reviewSentBack.add(a.ticket);
+  return r.ok;
+}
+function reviewAcceptedRow(a) {
+  const key = 'review-accepted-' + a.ticket;
+  const host = h('div', {'data-key':key});
+  const sent = a.sent_back === true || reviewSentBack.has(a.ticket);
+  const open = sent || snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-send'}, 'Send back');
+  // The reason takes the full card width under the title; Send back sits on its own line below it (the side
+  // column is narrow at 1280).
+  const head = h('div', {className:'card-row'},
+    h('div', {className:'grow'},
+      h('a', {href:'#ticket/' + encodeURIComponent(a.ticket)}, clean([a.key, a.title].filter(Boolean).join(' · '))),
+      a.why ? h('p', {className:'meta'}, clean(a.why)) : null,
+      sent ? h('p', {className:'meta'}, 'Sent back') : open ? h('div', {}, open) : null));
+  host.append(head);
+  if (open) open.onclick = () => {
+    locks.add(key);
+    let busy = false;
+    const input = h('input', {type:'text', className:'input', placeholder:'What should change?', 'aria-label':'What should change?'});
+    const close = () => { if (busy) return; locks.delete(key); host.replaceChildren(head); open.focus(); };
+    const send = h('button', {type:'button', className:'btn primary sm', disabled:true}, 'Send back');
+    const cancel = h('button', {type:'button', className:'btn ghost icon', 'aria-label':'Cancel'}, iconEl('x'));
+    send.onclick = async () => {
+      if (!input.value.trim() || busy) return;
+      busy = true; send.disabled = input.disabled = cancel.disabled = true;
+      let ok = false;
+      try { ok = await reviewSendBack(a, input.value); } finally { busy = false; input.disabled = cancel.disabled = false; send.disabled = !input.value.trim(); }
+      if (ok) { locks.delete(key); render(); }
+    };
+    cancel.onclick = close;
+    input.oninput = () => { send.disabled = busy || !input.value.trim(); };
+    input.onkeydown = e => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send.click(); }
+    };
+    host.replaceChildren(head, h('div', {className:'ticket-ask-line'}, input, send, cancel));
+    input.focus();
+  };
+  return host;
+}
+function reviewAcceptedCard() {
+  const rows = reviewAccepted();
+  if (!rows.length) return null;
+  return card('review-accepted', 'Accepted for you', '', rows.map(reviewAcceptedRow));
 }
 function reviewPage() {
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':''},
     h('h2', {}, 'All cards'),
     h('p', {className:'meta'}, 'Click one to jump there.'),
-    h('div', {className:'review-queue', role:'list', 'aria-label':'All cards', 'data-review-queue':''}));
+    h('div', {className:'review-queue', 'aria-label':'All cards', 'data-review-queue':''}));
   return fragment(
     heading('Review', reviewSubtitle()),
     h('div', {className:'review-layout', 'data-key':'review-layout'},
-      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})), side));
+      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})),
+      h('div', {className:'stack', 'data-key':'review-rail'}, side, reviewAcceptedCard())));
 }
 // Mount the kit page once per host (render() calls this after every reconcile; the mounted host is left alone).
 function mountReview(main) {
@@ -77,7 +156,8 @@ function mountReview(main) {
   main.querySelectorAll('[data-review-host]').forEach(host => {
     if (mounts.has(host) || !window.UI?.reviewPage) return;
     const queue = main.querySelector('[data-review-queue]');
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, onChange:deck => reviewDrawSide(queue, deck)});
+    const want = /[?&]card=([^&]+)/.exec(typeof location === 'undefined' ? '' : location.hash || '');  // the ticket page's "Look and answer" opens this card
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => reviewDrawSide(queue, deck), ticketHref:id => '#ticket/' + encodeURIComponent(id)});
     mounts.set(host, {destroy() { page.destroy(); }, page});
   });
 }

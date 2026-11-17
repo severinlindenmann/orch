@@ -13,7 +13,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from orch import runs, runs_live, tickets
+from orch import modelpick, runs, runs_live, tickets
 
 SCREEN_LINES = 40
 SCREEN_MAX_LINES = 500
@@ -97,10 +97,16 @@ def _is_tool_shell(cmd: str) -> bool:
 def label(cmd: str) -> str:
     """A short, safe name for a command: the program's file name, or the script's when the program is an
     interpreter (`bash ~/x/pr-green.sh 12 repo` -> pr-green.sh). Arguments are never shown (they may carry
-    tokens)."""
+    tokens). `orch ref wait` / `orch github wait` is the wait for the pull request checks."""
     words = [w for w in cmd.split() if "=" not in w or w.startswith("-")]  # drops leading VAR=value
     if not words:
         return "a command"
+    if _base(words[0]) == "orch" and words[1:3] == ["github", "wait"]:
+        kind = next((w for w in words[3:] if not w.startswith("-")), "")
+        if kind in ("merge", "pr", "comment", "other"):  # waits for GitHub's write limit, not for checks
+            return f"the GitHub {'merge' if kind == 'merge' else kind} limit"
+    if _base(words[0]) == "orch" and words[1:3] in (["ref", "wait"], ["github", "wait"]):
+        return "the pull request checks"
     for (
         w
     ) in words:  # `uv run python -m pytest` -> pytest: interpreters, their flags and verbs are looked past
@@ -111,9 +117,29 @@ def label(cmd: str) -> str:
     return _base(words[0])[:60] or "a command"
 
 
+_CHECK_WAITS = {("ref", "wait"), ("github", "wait")}
+
+
+def is_check_wait(cmd: str) -> bool:
+    """True for orch's own waits on checks or the GitHub write limit (`orch ref wait`, `orch github wait`):
+    they only poll. Anything else (tests, builds, a script) is real work."""
+    words = cmd.split()
+    for i, w in enumerate(words):
+        if _base(w) in ("orch", "orch.exe"):
+            return tuple([x for x in words[i + 1 :] if not x.startswith("-")][:2]) in _CHECK_WAITS
+    return False
+
+
+def only_waits_for_checks(agent_pid: int | None, table: list | None = None) -> bool:
+    """The agent runs commands, and every one of them is a wait on checks (is_check_wait)."""
+    cmds = tool_commands(agent_pid, table)
+    return bool(cmds) and all(c["check_wait"] for c in cmds)
+
+
 def tool_commands(agent_pid: int | None, table: list | None = None) -> list[dict]:
     """The commands the agent runs right now through its shell tool (a test run, a CI watcher), oldest
-    first: [{"label", "seconds", "pid"}]. One entry per tool shell: the program under it, else the shell."""
+    first: [{"label", "seconds", "pid", "check_wait"}]. One entry per tool shell: the program under it, else
+    the shell."""
     if not isinstance(agent_pid, int) or agent_pid <= 0:
         return []
     rows = _table() if table is None else table
@@ -130,7 +156,14 @@ def tool_commands(agent_pid: int | None, table: list | None = None) -> list[dict
         if inner is None and under:
             inner = next(iter(sorted(kids.get(under[0][0], []))), None)
         name = label(inner[3]) if inner else "a shell command"
-        out.append({"label": name, "seconds": secs, "pid": pid})
+        out.append(
+            {
+                "label": name,
+                "seconds": secs,
+                "pid": pid,
+                "check_wait": bool(inner) and is_check_wait(inner[3]),
+            }
+        )
     out.sort(key=lambda d: -(d["seconds"] or 0))
     return out
 
@@ -170,7 +203,7 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
         out.append({"kind": "person", "what": "an answer from the person", "ref": open_q[0]})
     w = t.get("waiting_on") if t.get("status") == "waiting" else None
     if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "external"):
-        ref = str(w.get("ref") or "")
+        ref = str((w.get("until") if w["kind"] == "time" else None) or w.get("ref") or "")  # time: "until"
         if w["kind"] == "time":
             from orch import net
 
@@ -221,6 +254,70 @@ def signal(rec: dict | None, waits: list[dict]) -> str:
     return "waiting" if waits else "idle"
 
 
+STUCK_MINUTES = 20  # idle at its prompt this long with nothing to wait on: Stuck, not Idle
+HELPER_WORDS = {
+    "working": "Working",
+    "starting": "Starting",
+    "you": "Waits for you",
+    "waiting": "On hold",  # never a bare "Waiting": the owner's word for a waiting ticket is Needs you
+    "idle": "Idle",
+    "stuck": "Stuck",
+}
+
+
+def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict | None:
+    """The ONE state of a helper that every page shows (Home, the ticket page, Focus): a key, its word and a
+    plain detail line. None when no helper runs (signal none or ended)."""
+    if sig in ("none", "ended"):
+        return None
+    detail = ""
+    if sig == "stale":
+        key, detail = "stuck", "No update for a while"
+    elif sig == "idle":
+        idle = idle_seconds or 0
+        key = "stuck" if idle >= STUCK_MINUTES * 60 else "idle"
+        detail = f"Nothing running for {span(idle)}" if idle_seconds is not None else "Nothing running"
+    elif sig == "waiting":
+        person = [w for w in waits if w.get("kind") == "person"]
+        if person:
+            key = "you"
+            answer, ok = any(w.get("ref") for w in person), any(not w.get("ref") for w in person)
+            detail = {
+                (True, False): "Your answer",
+                (False, True): "Your OK on the screen",
+                (True, True): "Your answer and your OK on the screen",
+            }[(answer, ok)]
+        else:
+            key = "waiting"
+            parts = [
+                f"{w['label']} · {span(w.get('seconds'))}"
+                if w.get("kind") == "command" and w.get("label")
+                else w["what"]
+                for w in waits
+                if w.get("what")
+            ]
+            detail = "Waiting for " + ", ".join(parts)
+    elif sig == "starting":
+        key = "starting"
+    else:
+        key = "working"
+        cmds = [w["label"] for w in waits if w.get("kind") == "command" and w.get("label")]
+        if cmds:
+            detail = "Running " + ", ".join(cmds)
+    return {"state": key, "word": HELPER_WORDS[key], "detail": detail}
+
+
+def last_activity(root: Path, ticket: dict | None) -> dict | None:
+    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None."""
+    from orch import history
+
+    for h in reversed(history.lines(root, ticket)):
+        if isinstance(h, dict) and str(h.get("by") or "").startswith("agent:") and h.get("at"):
+            text = " ".join(str(h.get("text") or "").split())[:200]
+            return {"at": h["at"], "text": text, "seconds": _age(h["at"])}
+    return None
+
+
 def describe(root: Path, tid: str, rec: dict | None = None, table: list | None = None) -> dict:
     """The monitor fields of one ticket's run (orch run status and orch run list share them)."""
     rec = runs.read(root, tid) if rec is None else rec
@@ -229,8 +326,11 @@ def describe(root: Path, tid: str, rec: dict | None = None, table: list | None =
         ticket = tickets.load(root, tid)
     waits = waiting_on(root, rec, ticket, table)
     since = idle_since(rec)
+    sig = signal(rec, waits)
     return {
-        "signal": signal(rec, waits),
+        "signal": sig,
+        "helper": helper_state(sig, waits, _age(since)),
+        "last_activity": last_activity(root, ticket),
         "waiting_on": waits,
         "idle_since": since,
         "idle_seconds": _age(since),
@@ -261,12 +361,16 @@ def list_runs(root: Path) -> list[dict]:
         if tickets.is_general(root, tid):
             continue
         info = describe(root, tid, rec, table)
+        model = None
+        with contextlib.suppress(Exception):
+            model = (modelpick.chosen(tickets.load(root, tid)) or {}).get("name")
         out.append(
             {
                 "ticket": tid,
                 "key": runs_live.ref(root, tid),
                 "run": rec["run"],
                 "agent": rec.get("agent"),
+                "model": model,
                 "mode": rec.get("mode"),
                 "by": rec.get("by"),
                 "state": runs.state(rec),
@@ -282,11 +386,12 @@ def list_runs(root: Path) -> list[dict]:
 def list_text(rows: list[dict]) -> str:
     if not rows:
         return "No runs right now."
-    head = ("TICKET", "RUN", "AGE", "SIGNAL", "IDLE", "WAITING ON")
+    head = ("TICKET", "RUN", "MODEL", "AGE", "SIGNAL", "IDLE", "WAITING ON")
     body = [
         (
             r["key"],
             r["run"],
+            modelpick.LABELS.get(r.get("model") or "", "-"),
             span(r["age_seconds"]),
             r["signal"],
             span(r["idle_seconds"]) if r["idle_seconds"] is not None else "-",
@@ -313,13 +418,40 @@ def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:
         raise Refused(f"No live session on {name}.{why}")
     n = max(1, min(int(lines), SCREEN_MAX_LINES))
     r = runs_live.tmux(
-        root, "capture-pane", "-p", "-J", "-S", f"-{n + 50}", "-t", runs_live.target(tid), timeout=5
+        root, "capture-pane", "-e", "-p", "-J", "-S", f"-{n + 50}", "-t", runs_live.target(tid), timeout=5
     )
     if r.returncode != 0:
         raise Refused(f"Could not read the screen of {name}: {r.stderr.strip() or 'unknown error'}")
-    rows = runs_live.clean(_ANSI.sub("", r.stdout)).rstrip("\n").split("\n")
-    rows = [r.rstrip() for r in rows]
+    raw = r.stdout.rstrip("\n").split("\n")
+    rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
+    hint = _suggestion(raw, rows)
     while rows and not rows[-1].strip():
         rows.pop()
     rows = rows[-n:]
-    return {"ticket": tid, "key": name, "run": rec["run"], "lines": rows, **describe(root, tid, rec)}
+    out = {"ticket": tid, "key": name, "run": rec["run"], "lines": rows, **describe(root, tid, rec)}
+    if hint is not None:
+        out["suggestion"] = hint
+    return out
+
+
+_RAW_GLYPH = re.compile(r"^((?:\x1b\[[0-9;]*m)*)(\s*[>\u276f\u203a]\s?)")
+SUGGESTION = "(greyed-out suggestion from the tool, not typed: {text})"
+
+
+def _suggestion(raw: list[str], rows: list[str]) -> str | None:
+    """ORCH-190: a tool may show a greyed-out suggestion for the next message in its empty prompt box (for
+    example "go ahead", "check if the PR merged"). Without its colour it reads like a message typed but never
+    sent. When the last prompt row holds only such hint-styled text, that row is rewritten in place (rows) to
+    say so, and the suggestion is returned; None when there is none or any doubt."""
+    for i in range(len(raw) - 1, -1, -1):
+        m = _RAW_GLYPH.match(raw[i])
+        if not m:
+            continue
+        tail = raw[i][m.end() :]
+        text = runs_live.clean(_ANSI.sub("", tail)).strip()
+        if not text or runs_live._is_hint(tail) is not True:
+            return None
+        glyph = runs_live.clean(_ANSI.sub("", raw[i][: m.end()]))
+        rows[i] = glyph + SUGGESTION.format(text=text)
+        return text
+    return None

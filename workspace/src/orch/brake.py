@@ -16,6 +16,7 @@ CAP_PER_DAY = 20  # automatic starts per ticket in a rolling 24 hours (a default
 WINDOW = 24 * 3600
 
 PAUSED_REFUSAL = "Automation is paused in this workspace. Turn it back on with: orch resume."
+REASON_MAX = 200  # one short line: why it was paused (e.g. "Disk almost full: 8 GB free")
 
 
 def _dir(root: Path) -> Path:
@@ -49,12 +50,30 @@ def paused(root: Path) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
-def pause(root: Path, by: str) -> dict:
+def clean_reason(reason: str | None) -> str | None:
+    """One plain line of at most REASON_MAX characters, or None when nothing is left."""
+    text = " ".join((reason or "").split())[:REASON_MAX].strip()
+    return text or None
+
+
+def pause(root: Path, by: str, reason: str | None = None) -> dict:
+    """Pause automation. Pausing again keeps the first record (who paused it, when and why)."""
     rec = paused(root)
     if rec is None:
         rec = {"by": by, "at": datetime.now(UTC).isoformat(timespec="seconds")}
+        why = clean_reason(reason)
+        if why:
+            rec["reason"] = why
         _write(_paused_path(root), rec)
     return rec
+
+
+def paused_words(rec: dict) -> str:
+    """'Automation is paused in this workspace[: <reason>]. Turn it back on with: orch resume.'"""
+    why = clean_reason(rec.get("reason") if isinstance(rec.get("reason"), str) else None)
+    if not why:
+        return PAUSED_REFUSAL
+    return f"Automation is paused in this workspace: {why.rstrip('.')}. Turn it back on with: orch resume."
 
 
 def resume(root: Path) -> bool:
@@ -73,8 +92,9 @@ def check_start(root: Path, tid: str, by: str) -> None:
     cap; count an automatic start that goes ahead. A person's start passes untouched."""
     if is_person(by):
         return
-    if paused(root) is not None:
-        raise Refused(PAUSED_REFUSAL)
+    rec = paused(root)
+    if rec is not None:
+        raise Refused(paused_words(rec))
     now = time.time()
     data = _read(_starts_path(root))
     data = data if isinstance(data, dict) else {}

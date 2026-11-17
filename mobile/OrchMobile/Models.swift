@@ -224,6 +224,45 @@ struct TakenBack: Codable, Sendable, Equatable {
     let reason: String
 }
 
+/// A workspace warns that a tool login, connection or key runs out soon or stopped working (contracts/tool-alert.md).
+/// Only the tool's name, its state, the end date and ticket keys travel; never a secret.
+struct ToolAlert: Codable, Sendable, Equatable {
+    static let states: Set<String> = ["soon", "renew", "unreachable", "works"]
+    let name: String
+    let label: String
+    let kind: String
+    let state: String
+    var endsAt: String? = nil
+    var stops: [String] = []
+    var noNewWork: Bool = false
+    /// The contract's limits (message.schema.json `tool_alert`): a message that breaks one is not shown as a warning.
+    static let maxLabel = 60
+    static let maxStops = 20
+    private static func matches(_ s: String, _ pattern: String) -> Bool {
+        s.range(of: pattern, options: .regularExpression) != nil
+    }
+    /// Control, line-break, zero-width and bidi characters the label must not hold (the schema's label pattern).
+    private static func isHidden(_ u: Unicode.Scalar) -> Bool {
+        switch u.value {
+        case 0x00...0x1f, 0x7f...0x9f, 0x61c, 0x200b...0x200f, 0x2028...0x2029, 0x202a...0x202e,
+             0x2060...0x2064, 0x2066...0x2069, 0xfeff: return true
+        default: return false
+        }
+    }
+    var isValid: Bool {
+        guard Self.matches(name, "^[a-z][a-z0-9-]{0,31}\\z"),
+              !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              label.unicodeScalars.count <= Self.maxLabel,
+              label.unicodeScalars.allSatisfy({ !Self.isHidden($0) }),
+              Self.states.contains(state), ["login", "connection", "key"].contains(kind),
+              stops.count <= Self.maxStops, Set(stops).count == stops.count,
+              stops.allSatisfy({ Self.matches($0, "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}\\z") })
+        else { return false }
+        if let e = endsAt, !Self.matches(e, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\\z") { return false }
+        return true
+    }
+}
+
 /// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction).
 struct TextBody: Codable, Sendable, Equatable {
     var proposalResult: ProposalResult? = nil
@@ -234,8 +273,12 @@ struct TextBody: Codable, Sendable, Equatable {
     /// "Question taken back" (reply_to = the question): closes its card; never a bubble, never unread.
     var takenBack: TakenBack? = nil
     var isTakenBack: Bool { takenBack != nil }
+    /// A tool warning (contracts/tool-alert.md): a row on the workspace, never a bubble, never unread. nil when malformed.
+    var toolAlert: ToolAlert? = nil
+    /// The text carried a `tool_alert` at all (a malformed one is ignored, but still never a bubble).
+    var isToolAlert: Bool = false
     /// Workspace texts that only update a card and never show as a chat bubble.
-    var isSilentResult: Bool { isProposalResult || isReviewResult || isTakenBack }
+    var isSilentResult: Bool { isProposalResult || isReviewResult || isTakenBack || isToolAlert }
     /// Empty when the text only carries attachments, a voice memo, a location or feedback.
     var text: String = ""
     /// Work update about the message's ticket; nil on a plain text.
@@ -267,15 +310,16 @@ struct TextBody: Codable, Sendable, Equatable {
          attachments: [MessageAttachment] = [], voice: VoiceMemo? = nil, location: LocationShare? = nil, feedback: Feedback? = nil,
          ticketView: TicketSnapshot? = nil,
          group: GroupInfo? = nil, groupEvent: GroupEvent? = nil, by: String? = nil, via: String? = nil, phone: String? = nil,
-         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil, reviewResult: ReviewResult? = nil, takenBack: TakenBack? = nil) {
+         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil, reviewResult: ReviewResult? = nil, takenBack: TakenBack? = nil, toolAlert: ToolAlert? = nil) {
         self.proposalResult = proposalResult; self.reviewResult = reviewResult; self.takenBack = takenBack
+        self.toolAlert = toolAlert; self.isToolAlert = toolAlert != nil
         self.text = text; self.update = update; self.clientId = clientId; self.general = general; self.speak = speak
         self.attachments = attachments; self.voice = voice; self.location = location; self.feedback = feedback; self.ticketView = ticketView
         self.group = group; self.groupEvent = groupEvent; self.by = by; self.via = via; self.phone = phone
         self.origin = origin; self.echoOf = echoOf; self.toPerson = toPerson; self.task = task; self.sharedFiles = sharedFiles
     }
     private enum CodingKeys: String, CodingKey {
-        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult, reviewResult, takenBack
+        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult, reviewResult, takenBack, toolAlert
         case group, groupEvent, by, via, phone, day, origin, echoOf, toPerson, task, sharedFiles
     }
     init(from d: Decoder) throws {
@@ -286,6 +330,9 @@ struct TextBody: Codable, Sendable, Equatable {
         if let r = reviewResult, !ReviewResult.known.contains(r.result) { reviewResult = nil }
         takenBack = try? c.decodeIfPresent(TakenBack.self, forKey: .takenBack)
         if let t = takenBack, t.reason.isEmpty { takenBack = nil }
+        isToolAlert = c.contains(.toolAlert)
+        toolAlert = try? c.decodeIfPresent(ToolAlert.self, forKey: .toolAlert)
+        if let a = toolAlert, !a.isValid { toolAlert = nil }
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         update = try? c.decodeIfPresent(TextUpdate.self, forKey: .update)
         clientId = try? c.decodeIfPresent(String.self, forKey: .clientId)
@@ -313,6 +360,7 @@ struct TextBody: Codable, Sendable, Equatable {
         try c.encodeIfPresent(proposalResult, forKey: .proposalResult)
         try c.encodeIfPresent(reviewResult, forKey: .reviewResult)
         try c.encodeIfPresent(takenBack, forKey: .takenBack)
+        try c.encodeIfPresent(toolAlert, forKey: .toolAlert)
         if !text.isEmpty { try c.encode(text, forKey: .text) }
         try c.encodeIfPresent(update, forKey: .update); try c.encodeIfPresent(clientId, forKey: .clientId)
         try c.encodeIfPresent(general, forKey: .general); try c.encodeIfPresent(speak, forKey: .speak)

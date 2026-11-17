@@ -380,13 +380,13 @@ function liveLinkFor(t) {
   const id = typeof t.id === 'string' && /^[A-Za-z0-9_.-]+$/.test(t.id) && !t.id.includes('..') ? t.id : '';
   return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : id ? 't/' + id : a.page.path)};
 }
-// Live session: the main click opens the live screen; the two terminal commands stay behind one small "Copy command".
-// Watch cannot type; Take over can (the agent waits while you type).
+// Live session: the two terminal commands stay behind one small "Copy command". Watch live sits in the helper bar
+// (one Stop / Watch live pair); the card shows it only when the bar does not. Watch cannot type; Take over can.
 function liveSessionStrip(t) {
   const run = state.runs?.[t.id];
   if (snapshot || !run?.running || run.claim?.mode === 'oneshot') return null;
   const ref = typeof t.key === 'string' && t.key ? t.key : t.id;
-  const liveLink = liveLinkFor(t);
+  const liveLink = liveLinkFor(t), inBar = Boolean(liveLink && window.DashHelpers?.helperAlive?.(t, run));
   const copy = (label, command) => {
     const control = button('', 'menu-item', async () => {
       try { await navigator.clipboard.writeText(command); window.orch.toast('Copied', 'ok'); }
@@ -400,19 +400,26 @@ function liveSessionStrip(t) {
   const commands = h('details', {className:'menu', 'data-key':'live-commands'}, h('summary', {className:'btn ghost sm'}, 'Copy command'),
     h('div', {className:'menu-pop', role:'menu'}, copy('Watch (read only)', 'orch run attach ' + ref + ' --watch'), copy('Take over (you can type)', 'orch run attach ' + ref)));
   return h('section', {className:'card live-strip', 'data-key':'live-session'}, h('h2', {}, 'Live session'),
-    liveLink ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'live-open'}, 'Watch live') : null, commands);
+    liveLink && !inBar ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'live-open'}, 'Watch live') : null, commands);
 }
 function agentBar(t) {
   const liveLink = liveLinkFor(t), run = state.runs?.[t.id], alive = window.DashHelpers.helperAlive(t, run);
   const line = window.DashHelpers.agentLine(t, run, Date.now(), liveLink, state.settings);
   const session = array(t.sessions).slice().sort((a, b) => (Date.parse(b.last_used) || 0) - (Date.parse(a.last_used) || 0))[0];
   const step = array(t.checklist).find(task => !task.wont_do && task.state === 'doing');
+  // ORCH-61: the core's one state word, and when the helper last wrote to the ticket and what, so working and stuck
+  // differ without Watch live; Stop says when the helper sits idle.
+  const helper = window.DashHelpers.helperState(run, t), last = run?.last_activity;
+  const lastLine = helper && last?.at ? h('p', {className:'meta truncate', 'data-key':'agent-last'},
+    'Last activity ' + window.DashHelpers.ago(last.at, Date.now()) + (last.text ? ': ' + clean(window.DashHelpers.historyLine({text:last.text}, t.checklist)) : '')) : null;
+  const idle = helper && ['idle', 'stuck'].includes(helper.state);
   return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'},
     h('span', {className:'dot ' + (line.startFailed ? 'error' : run?.running ? 'working' : 'idle'), 'aria-hidden':'true'}),
     line.startFailed ? h('span', {className:'ab-text grow', 'data-key':'start-failed'}, clean(line.status))
-      : h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), line.startFailed ? null : ticketWarmth(t, run, session),
+      : h('div', {className:'grow'}, h('p', {className:'ab-text truncate'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), lastLine),
+    helper && window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : null, line.startFailed ? null : ticketWarmth(t, run, session),
     snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
-      alive ? ticketButton('Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
+      alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
 }
 
 // "X is also changing this folder": one quiet line from the core (orch run status), no banner. A hint, not a lock.
@@ -467,6 +474,27 @@ function loadArtifacts(t, selected) {
     artifactData.set(t.id, {at:Date.now(), data});
     if (JSON.stringify(data) !== before && route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) render();
   });
+}
+// A finished ticket with a merged pull request: is the change in the orch installed here? (ORCH-87) orch works it
+// out from the merge commit and the installed release (GET /api/release); no answer = no line.
+const releaseData = new Map();
+const RELEASE_MARK = {installed:['ok', '✓'], released:['warn', '!'], merged:['none', '–']};
+function loadRelease(t) {
+  if (snapshot || typeof fetch !== 'function' || !['review', 'done'].includes(t.status)) return;
+  const hit = releaseData.get(t.id);
+  if (hit?.busy || (hit && Date.now() - hit.at < 60000)) return;
+  releaseData.set(t.id, {...hit, busy:true});
+  fetch('/api/release?ticket=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    const before = JSON.stringify(releaseData.get(t.id)?.data);
+    releaseData.set(t.id, {at:Date.now(), data});
+    if (JSON.stringify(data) !== before && route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) render();
+  });
+}
+function ticketReleaseLine(t) {
+  const r = ['review', 'done'].includes(t.status) ? releaseData.get(t.id)?.data : null;
+  if (!r || typeof r.text !== 'string' || !RELEASE_MARK[r.state]) return null;
+  const [cls, glyph] = RELEASE_MARK[r.state];
+  return h('p', {className:'ticket-proof-line ticket-release', 'data-key':'ticket-release-' + t.id}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', h('span', {className:'grow'}, clean(r.text)));
 }
 const proofRows = t => array(t.checklist).flatMap(task => array(task.evidence).map(ev => ({task, ev})))
   .sort((a, b) => (Date.parse(b.ev.at) || 0) - (Date.parse(a.ev.at) || 0));
@@ -558,8 +586,15 @@ const evidenceFile = (t, ev) => {
 // One file = one entry: lists keep the first item per key; items without a key (notes) all stay.
 const uniqueBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
 const proofKey = (t, ev) => evidenceFile(t, ev)?.name ?? (ev.ref ? (ev.type || ev.kind) + ':' + ev.ref : null);
-const artifactFiles = t => uniqueBy(array(artifactData.get(t.id)?.data?.files), f => f.name);
-const reviewFile = t => t.status === 'review' ? artifactFiles(t)[0] : null;
+// ORCH-185: a file a person attached (their history line "Attached <name>" is by a human) is what they asked with, not a result.
+const attachedInput = t => new Set(array(t.history).filter(e => e && /^human:/.test(String(e.by || '')) && /^Attached /.test(String(e.text || ''))).map(e => String(e.text).slice(9)));
+const allArtifactFiles = t => uniqueBy(array(artifactData.get(t.id)?.data?.files), f => f.name);
+const inputFiles = t => { const own = attachedInput(t); return allArtifactFiles(t).filter(f => own.has(f.name)); };
+const artifactFiles = t => { const own = attachedInput(t); return allArtifactFiles(t).filter(f => !own.has(f.name)); };
+// Every file of the ticket the way the Files tab groups them (the results and the files its steps proved), so the
+// Overview cards and the Files tab never disagree about whether a result file exists (ORCH-184).
+const resultFiles = t => ticketFileGroups(t).flatMap(g => g.files.map(file => ({kind:g.kind, file})));
+const reviewFile = t => t.status === 'review' ? resultFiles(t)[0] || null : null;
 function ticketResultCard(t, ev, file = null, kind = 'evidence') {
   const helpers = window.DashHelpers;
   const name = file ? file.name.split('/').pop() : '';
@@ -632,7 +667,7 @@ function ticketFileEntries(t) {
 }
 function fileEntry(t, group, file) {
   const kind = viewerKind(file.name);
-  const role = group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
+  const role = attachedInput(t).has(file.name) ? 'Attached by you' : group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
   const at = file.mtime ? createdText(file.mtime) : '';
   return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, created:at,
     title:titleOf(file), named:!!oneLineTitle(file.title),
@@ -662,11 +697,13 @@ function ticketFileActions(t, kind, file) {
   return h('div', {className:'file-actions'},
     ticketButton('Open', 'ghost sm', () => previewFile(t.id, kind, file.name), {'data-key':'file-open-' + k}),
     h('a', {className:'btn ghost sm', href:fileUrl(t.id, kind, file.name, true), download:file.name.split('/').pop()}, 'Download'),
-    ticketButton('Copy local link', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k, title:'Works only on this computer'}));
+    ticketButton('Copy link for this computer', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}));
 }
+// ORCH-185: a picture shows itself in its row (the badge stays under it until it has loaded).
+const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name), alt:'', loading:'lazy'});
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
-    h('span', {className:'file-type' + (shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), shownThumb(t, kind, file)),
+    (picture => h('span', {className:'file-type' + (picture || shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), picture ? fileThumbImage(t, kind, file) : shownThumb(t, kind, file)))(viewerKind(file.name) === 'image' && !snapshot),
     h('div', {className:'grow'}, h('p', {className:'file-name'}, titleOf(file)), oneLineTitle(file.title) ? h('p', {className:'meta file-real-name'}, shortName(file)) : null, h('p', {className:'meta'}, fileMeta(file))),
     ticketFileActions(t, kind, file));
 }
@@ -762,7 +799,7 @@ function artifactsPanel(t) {
 }
 function ticketActor(by) {
   if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
-  return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(by);
+  return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(window.DashHelpers.personName(by, state));
 }
 function ticketTaskOutcome(task) {
   const ev = array(task.evidence).slice(-1)[0];
@@ -989,7 +1026,7 @@ function ticketChangesDialog(t) {
 function ticketBringBackRow(t) {
   const b = t.bring_back;
   if (b?.state !== 'waiting') return null;
-  const ask = !snapshot && b.reason_code === 'update' ? ticketButton('Ask the helper to update', 'ghost sm', async () => {
+  const ask = !snapshot && b.reason_code === 'update' ? ticketButton('Ask your helper to update', 'ghost sm', async () => {
     const r = await act('copies.ask-update', {ticket:t.id});
     window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
   }) : null;
@@ -1037,7 +1074,8 @@ function ticketHistoryPanel(t) {
     const day = ticketHistoryDay(entry.at);
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
+      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')),
+      (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
   const controls = snapshot ? null : h('div', {className:'ticket-history-filters', role:'group', 'aria-label':'Show'}, ['All', 'People', 'Helper'].map(label => ticketButton(label, 'outline sm', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label)})));
   return card('history', 'Activity', '', [controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow('No history yet.')]);
@@ -1069,6 +1107,8 @@ function ticketChangesEditor(t) {
   const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
   const done = ticketButton('Looks good', 'primary sm', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}), {'data-key':'ticket-button-Accept-' + (tip ? tip.slice(0, 20) : 'none')}); // keyed by the tip: a refresh never keeps a handler with a stale one
   const row = h('div', {className:'row ticket-review-actions'});
+  const open_parts = array(t.proof?.uncovered).length;
+  const uncovered = open_parts ? h('span', {className:'meta warn', 'data-key':'ticket-review-uncovered'}, '! ' + (open_parts === 1 ? '1 part' : open_parts + ' parts') + ' of “Done when” ' + (open_parts === 1 ? 'has' : 'have') + ' no task') : null;
   const shown = tip ? h('span', {className:'meta', 'data-key':'ticket-review-tip'}, 'Changes up to ', h('code', {}, tip.slice(0, 12))) : null;
   const open = ticketButton('Send back', 'outline sm', () => {
     locks.add(key);
@@ -1092,12 +1132,26 @@ function ticketChangesEditor(t) {
     };
     host.replaceChildren(h('label', {className:'ticket-ask-label'}, 'What should change?'), h('div', {className:'ticket-ask-line'}, input, send, cancel)); input.focus();
   });
-  row.append(...[done, open, shown].filter(Boolean)); host.append(row); return host;
+  row.append(...[done, open, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
+  const card = q.card && typeof q.card === 'object' ? q.card : null;
   return h('section', {className:next ? 'card next-step next-question' : 'ticket-question'},
-    h('div', {className:'meta ticket-eyeline'}, (next ? 'Next step · ' : '') + clean(q.title || 'Your answer'), ticketPhone(q)),
-    h('h2', {}, clean(q.text)), snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
+    h('div', {className:'meta ticket-eyeline'}, (next ? 'Next step · ' : '') + clean((card && card.title) || q.title || 'Your answer'), ticketPhone(q)),
+    h('h2', {}, clean(q.text)), card ? ticketCardShown(t, q, card) : snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
+}
+// A question with a card (orch ask --draft/--choose/...): the text and the card's pictures together, answered on the
+// card itself (Review opens at this card), so the answer keeps what was picked, the comment and the marked spots.
+function ticketCardShown(t, q, card) {
+  const api = typeof reviewApi === 'function' ? reviewApi() : null;
+  const pv = card.preview?.type === 'options'  // the suggested option is marked on its picture, as on the card
+    ? {...card.preview, options:array(card.preview.options).map(o => ({...o, suggested:o.id === q.recommended}))} : card.preview;
+  const tiles = window.UI?.cardShown ? window.UI.cardShown({card:{...card, preview:pv}, ticket:t.id}, {fileUrl:api ? api.fileUrl : () => ''}) : null;
+  const sug = q.recommended === 'ok' ? 'Suggested: ' + (card.ok_label || 'Looks good') : q.recommended === 'no' ? "Suggested: Don't do" : '';
+  const go = snapshot ? h('p', {className:'meta'}, 'Waiting for an answer')
+    : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + t.id + ':' + q.id), 'data-key':'card-go-' + q.id}, 'Look and answer');
+  return h('div', {className:'stack', 'data-key':'card-shown-' + q.id}, tiles, card.why ? h('p', {className:'meta'}, clean(card.why)) : null, h('div', {className:'row'}, go, sug ? h('span', {className:'swipe-sug'}, sug) : null,
+    array(q.links).filter(l => l && /^https?:\/\//i.test(String(l.url || ''))).slice(0, 5).map((l, i) => h('a', {className:'btn ghost sm', href:String(l.url), target:'_blank', rel:'noopener', 'data-key':'card-link-' + q.id + '-' + i}, iconEl('link'), clean(l.label)))));
 }
 // A step is named by its title only; the ticket key is a quiet line under Properties.
 const partName = p => clean(p.title);
@@ -1184,8 +1238,59 @@ function ticketOutcomeCard(t) {
 }
 // One honest line about the proof (computed by the core as t.proof): a mark, the line, and one plain row per task.
 const PROOF_MARK = {passed:['ok', '✓'], failed:['bad', '×'], changed:['warn', '!'], note:['none', 'i'], missing:['none', '–']};
-const PROOF_WORD = {passed:'Check passed', failed:'Check failed', changed:'Changed since the check', note:'Note only', missing:'No proof yet'};
+const PROOF_WORD = {passed:'Check passed', failed:'Check failed', changed:'Changed since the check', note:'Note only', missing:'No evidence yet'};
 const RECHECK_TEXT = 'Please run the checks again and record them with orch check record.';
+// "#123" in plain text links to that issue or pull request on GitHub. The address comes from the ticket's own GitHub
+// links (references, evidence) with that number, else the repository of any GitHub link of this ticket or of another
+// ticket here; with no GitHub link anywhere the text stays plain.
+const GH_LINK = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:issues|pull)\/(\d+)(?:[/?#]|$)/;
+const ghUrls = t => [...array(t?.refs).map(r => r && (r.url || r.ref)), ...array(t?.checklist).flatMap(c => array(c?.evidence).map(e => e && e.ref))]
+  .map(u => GH_LINK.exec(String(u || ''))).filter(Boolean);
+function ghRepo(t) {
+  const own = ghUrls(t)[0];
+  if (own) return own[1];
+  const others = typeof tickets === 'function' ? array(tickets()) : [];
+  for (const other of others) { const m = ghUrls(other)[0]; if (m) return m[1]; }
+  return null;
+}
+function linkRefs(t, value) {
+  const s = clean(value);
+  if (!/(^|[^\w&/])#\d/.test(s)) return s;
+  const repo = ghRepo(t);
+  if (!repo) return s;
+  const exact = new Map(ghUrls(t).map(m => [m[2], m[0].replace(/[/?#]$/, '')]));
+  const out = [];
+  let last = 0;
+  for (const m of s.matchAll(/(^|[^\w&/])#(\d{1,7})\b/g)) {
+    const at = m.index + m[1].length, n = m[2];
+    out.push(s.slice(last, at), h('a', {href:exact.get(n) || 'https://github.com/' + repo + '/issues/' + n, target:'_blank', rel:'noopener noreferrer'}, '#' + n));
+    last = at + 1 + n.length;
+  }
+  out.push(s.slice(last));
+  return out.filter(x => x !== '');
+}
+// What a finished step's evidence says, under its row while the ticket waits for a check: the completion note, what
+// was run (and a failed exit), and the pull request, web address or file it points at.
+function stepEvidence(t, task) {
+  const said = [], ran = [], links = [];
+  array(task.evidence).forEach(ev => {
+    if (!ev || typeof ev !== 'object') return;
+    const kind = ev.type || ev.kind, ref = String(ev.ref || ev.text || '').trim(), sum = String(ev.summary || '').trim();
+    const say = x => { if (x && !said.includes(x)) said.push(x); };
+    say(sum);
+    if (kind === 'note') say(ref);
+    else if (kind === 'command' && ref) ran.push(ref + (Number.isInteger(ev.exit) && ev.exit !== 0 ? ' (failed, exit ' + ev.exit + ')' : ''));
+    else if (['pr', 'url'].includes(kind) && /^https?:\/\/\S+$/i.test(ref)) {
+      const num = GH_LINK.exec(ref)?.[2];
+      links.push(h('a', {className:'chip proof-chip', href:ref, target:'_blank', rel:'noopener noreferrer'}, clean(ev.title || (num ? (kind === 'pr' ? 'PR #' : '#') + num : ref.replace(/^https?:\/\//i, '').slice(0, 60)))));
+    } else if (kind === 'file' && ref) links.push(h('span', {className:'chip proof-chip'}, clean(ev.title || ref.split(/[\\/]/).pop())));
+  });
+  if (!said.length && !ran.length && !links.length) return null;
+  return h('div', {className:'proof-evidence', 'data-key':'proof-evidence-' + task.id},
+    said.map(x => h('p', {className:'muted preserve-lines'}, linkRefs(t, x))),
+    ran.map(x => h('p', {className:'meta mono'}, 'Ran: ' + clean(x))),
+    links.length ? h('div', {className:'task-proofs row'}, links) : null);
+}
 function ticketProofLine(t) {
   const p = t.proof;
   if (!p || typeof p.line !== 'string' || !p.line) return null;
@@ -1193,11 +1298,12 @@ function ticketProofLine(t) {
   const level = ({ok:'ok', note:'none', warn:'warn', fail:'bad'})[p.level] || 'none';
   const mark = {ok:'✓', bad:'×', warn:'!', none:'–'}[level];
   const rows = array(t.checklist).map(task => { const [cls, glyph] = PROOF_MARK[per[task.id]] || PROOF_MARK.missing;
-    return h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', clean(task.text), ' ', h('span', {className:'meta'}, PROOF_WORD[per[task.id]] || PROOF_WORD.missing)); });
+    return h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', clean(task.text), ' ', h('span', {className:'meta'}, PROOF_WORD[per[task.id]] || PROOF_WORD.missing),
+      t.status === 'review' ? stepEvidence(t, task) : null); });
   return h('div', {className:'ticket-proof', 'data-key':'ticket-proof-' + t.id},
     h('p', {className:'ticket-proof-line'}, h('span', {className:'proof-mark proof-' + level}, mark), ' ', h('span', {className:'grow'}, p.line)),
-    Object.values(per).includes('changed') && t.status === 'review' && !snapshot ? ticketButton('Ask the helper to check again', 'outline sm', () => ticketSendChanges(t, RECHECK_TEXT), {'data-key':'ticket-recheck-' + t.id}) : null,
-    rows.length || array(p.uncovered).length ? h('ul', {className:'ticket-proof-rows'}, rows, array(p.uncovered).map(part => h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-warn'}, '!'), ' “' + clean(part) + '” ', h('span', {className:'meta'}, 'No task covers this')))) : null);
+    Object.values(per).includes('changed') && t.status === 'review' && !snapshot ? ticketButton('Ask your helper to check again', 'outline sm', () => ticketSendChanges(t, RECHECK_TEXT), {'data-key':'ticket-recheck-' + t.id}) : null,
+    rows.length || array(p.uncovered).length ? h('ul', {className:'ticket-proof-rows'}, rows, array(p.uncovered).map(part => h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-warn'}, '!'), ' “', linkRefs(t, part), '” ', h('span', {className:'meta'}, 'Nothing in the to-do list covers this yet')))) : null);
 }
 
 // Header line: only in review (the card shows it there) and done, only with tasks; never a warning on a finished ticket.
@@ -1213,8 +1319,8 @@ function ticketDoneEvent(t) {
 function ticketDoneLine(t) {
   if (t.status !== 'done') return null;
   const event = ticketDoneEvent(t);
-  const at = event?.at || t.done_at || t.updated_at;
-  return h('p', {className:'ticket-done'}, '✓ Finished' + (at ? ' ' + localStamp(at) : '') + (event?.by ? ' by ' + name(event.by) : ''));
+  const at = window.DashHelpers.doneAt(t);
+  return h('p', {className:'ticket-done'}, '✓ Finished' + (at ? ' ' + localStamp(at) : '') + (event?.by ? ' by ' + ticketActor(event.by) : ''));
 }
 // One local format for every time on the ticket page (master UI.stamp): "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32".
 function localStamp(at, withTime = true) {
@@ -1229,22 +1335,32 @@ function ticketPaused(t, run) {
 const openChanges = t => array(t.checklist).filter(c => !c.done && !c.wont_do && changeTask(c.text, c.origin));
 // One strip at the top of the ticket in every state: one status pill, one sentence, one main action (no stepper).
 // Pill names are the master's status icons: todo, working, needs, check, done. The helper is just "Helper".
+const stripHelperPill = helper => { const p = window.UI.helperPill(helper.state, helper.word); p.dataset.key = 'status-helper-' + helper.state; return p; };
 function ticketStripModel(t, run, fresh) {
-  const q = questions(t)[0], at = t.updated_at ? time(t.updated_at) : '';
+  const q = questions(t)[0], asked = window.DashHelpers.askedAt(t, typeof needsList === 'function' ? needsList() : []), at = asked ? time(asked) : '';
+  // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
+  const s = window.UI.ticketState(t, run?.running ? window.DashHelpers.helperState(run, t) : null);
+  const m = sentence => ({pill:s.pill, word:s.word, helper:s.helper || undefined, sentence});
   if (t.status === 'done') {
-    const ev = ticketDoneEvent(t), when = ev?.at || t.done_at || t.updated_at;
-    return {pill:'done', word:'Done', sentence:'Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + name(ev.by) : '') + '.'};
+    const ev = ticketDoneEvent(t), when = window.DashHelpers.doneAt(t);
+    return m('Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + ticketActor(ev.by) : '') + '.');
   }
   if (q) {
     const ask = clean(q.text || '').replace(/\s+/g, ' ').trim();
-    return {pill:'needs', word:'Needs you', sentence:'Helper asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask)};
+    // who asked: the agent on the ticket by its own name (as Home says it), "Helper" only when none is known
+    const asker = window.DashHelpers?.agentLabel ? window.DashHelpers.agentLabel(state?.settings, (run || state?.runs?.[t.id])?.claim) : 'Helper';
+    return m(asker + ' asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask));
   }
-  if (t.status === 'review') return {pill:'check', word:'Check', sentence:'Helper finished' + (at ? ' ' + at : '') + '.'};
-  if (t.bring_back?.state === 'waiting') return {pill:'needs', word:'Needs you', sentence:'Helper has changes waiting for you.'};
-  if (run?.running) return {pill:'working', word:'Working', sentence:openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.'};
-  if (fresh) return {pill:'todo', word:'To do', sentence:'Not started. Your helper begins when you press Start.'};
-  if (ticketPaused(t, run)) return {pill:'todo', word:'To do', sentence:'Paused' + (at ? ' ' + at : '') + '.'};
-  return {pill:'todo', word:window.DashHelpers.statusWord(t.status) || 'To do', sentence:at ? 'Updated ' + at + '.' : ''};
+  if (t.status === 'review') return m('Helper finished' + (at ? ' ' + at : '') + '.');
+  if (t.bring_back?.state === 'waiting') return m('Helper has changes waiting for you.');
+  if (run?.running) {
+    // the core's one helper state (ORCH-61): a helper that sits idle or is stuck never reads "Working" here
+    if (s.helper) return m((s.helper.detail || s.word) + '.');
+    return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
+  }
+  if (fresh) return m('Not started. Your helper begins when you press Start.');
+  if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
+  return m(at ? 'Updated ' + at + '.' : '');
 }
 const taskTitle = task => clean(changeTask(task.text, task.origin)?.title || task.text);
 const taskWord = task => task.wont_do ? 'Skipped' : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
@@ -1261,19 +1377,19 @@ function ticketProgress(t, run) {
   const current = run?.running ? list.find(c => !c.done && !c.wont_do && c.state === 'doing') : null;
   return h('section', {className:'card progress-card', 'data-key':'progress'}, h('div', {className:'section-head'}, h('h2', {}, 'Progress'), h('span', {className:'meta'}, ticketProgressCounts(t))),
     h('ol', {className:'task-list'}, list.map((c, i) => c === current
-      ? h('li', {className:'current-task', 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark working', 'aria-hidden':'true'}, '◉'), h('div', {className:'grow'}, h('h3', {}, taskTitle(c)), h('p', {className:'meta'}, 'Your helper is working on this task.')))
+      ? h('li', {className:'current-task', 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark working', 'aria-hidden':'true'}, '◉'), h('div', {className:'grow'}, h('h3', {}, taskTitle(c)), h('p', {className:'meta'}, (hs => ['working', 'starting'].includes(hs?.state) ? 'Your helper is working on this task.' : (hs?.state === 'waiting' && hs.detail ? hs.detail : 'Your helper is on this task.'))(window.DashHelpers.helperState(run, t)))))
       : h('li', {className:'task-row' + (c.wont_do ? ' skipped' : ''), 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark' + (c.done && !c.wont_do ? ' good' : ''), 'aria-hidden':'true'}, c.wont_do ? '–' : c.done ? '✓' : '○'),
         h('div', {className:'grow'}, h('p', {className:'task-title'}, taskTitle(c)), c.wont_do && c.reason ? h('p', {className:'task-note meta'}, clean(c.reason)) : null), h('span', {className:'meta'}, taskWord(c))))));
 }
 // The review card: "Result" = in short + the result preview (the verdict buttons live in the header strip).
 function ticketReviewCard(t) {
-  const file = reviewFile(t), count = artifactFiles(t).length;
+  const found = reviewFile(t), file = found?.file, count = ticketFileCount(t);
   return h('section', {className:'card attention decision review-card', 'data-key':'review-card-' + t.id},
     h('div', {className:'section-head'}, h('h2', {}, 'Result'), count ? h('span', {className:'meta'}, count + (count === 1 ? ' file' : ' files')) : null),
-    t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), clean(t.summary)) : null,
+    t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)) : null,
     t.verdict_needed ? h('p', {className:'meta', 'data-key':'ticket-verdict-needed'}, 'Marked done without your OK. Check the work, then click Looks good.') : null,
-    file ? ticketResultFrame(t, 'artifacts', file) : h('p', {className:'meta'}, 'No result file is attached. The list below shows what was done.'),
-    t.done_when ? h('p', {className:'review-check'}, 'Does this match “' + clean(t.done_when) + '”?') : null,
+    file ? ticketResultFrame(t, found.kind, file) : h('p', {className:'meta'}, array(t.checklist).length ? 'No result file is attached. Each step below shows what was done and how it was checked.' : 'No result file and no steps are attached.'),
+    t.done_when ? h('p', {className:'review-check'}, 'Is this what you asked for? “', linkRefs(t, t.done_when), '”') : null,
     ticketProofLine(t));
 }
 // "What the helper did": the finished tasks as a short plain list (Check and Done); the full list is on the Tasks tab.
@@ -1297,17 +1413,17 @@ function completionNotes(t) {
   notes.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
   return notes.slice(0, 3);
 }
-function ticketCompletionNote(n) {
+function ticketCompletionNote(n, t) {
   return h('article', {className:'completion-note', 'data-key':'completion-note'}, h('p', {className:'meta eyebrow'}, 'Completion note' + (n.at ? ' · ' + time(n.at) : '')),
-    h('h2', {}, n.head), n.body ? h('p', {className:'muted preserve-lines'}, n.body) : null);
+    h('h2', {}, linkRefs(t, n.head)), n.body ? h('p', {className:'muted preserve-lines'}, linkRefs(t, n.body)) : null);
 }
 function ticketResultsCard(t) {
-  const files = artifactFiles(t), notes = completionNotes(t);
+  const all = resultFiles(t), files = all.map(x => x.file), notes = completionNotes(t);
   if (!files.length && !notes.length) return null;
   const count = [notes.length ? notes.length + (notes.length === 1 ? ' note' : ' notes') : '', files.length ? files.length + (files.length === 1 ? ' file' : ' files') : ''].filter(Boolean).join(' · ');
   return h('section', {className:'card results', 'data-key':'results'}, h('div', {className:'section-head'}, h('h2', {}, 'Result'), h('span', {className:'meta'}, count)),
-    notes.map(ticketCompletionNote),
-    files.length ? (t.status === 'done' ? ticketResultFrame(t, 'artifacts', files[0]) : ticketFileRow(t, 'artifacts', files[0])) : null, files.slice(1, 4).map(f => ticketFileRow(t, 'artifacts', f)), files.length ? headerProof(t) : null);
+    notes.map(n => ticketCompletionNote(n, t)),
+    all.length ? (t.status === 'done' ? ticketResultFrame(t, all[0].kind, all[0].file) : ticketFileRow(t, all[0].kind, all[0].file)) : null, all.slice(1, 4).map(x => ticketFileRow(t, x.kind, x.file)), files.length ? headerProof(t) : null);
 }
 // A change you asked for: what you asked, and that new changes wait for your approval.
 function ticketRequestCard(t) {
@@ -1326,13 +1442,13 @@ function ticketSelectedTab(t) {
 // shape of the kit's answer record. They show under the ticket's questions, not on a tab of their own.
 function ticketReviewAnswers(t) {
   return array(t.questions).filter(q => q.answer != null && q.decision && typeof q.decision === 'object')
-    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
+    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
 // "What applies now" on top (when a card answer exists), then each card answer as a record; plain answers stay rows.
 function ticketAnswerNodes(t, plainRow) {
   const list = ticketReviewAnswers(t), api = typeof reviewApi === 'function' ? reviewApi() : null;
-  const o = {fileUrl:api ? api.fileUrl : () => '', now:new Date()}, byId = new Map(list.map(e => [e.key, e]));
+  const o = {fileUrl:api ? api.fileUrl : () => '', now:new Date(), showTicket:false}, byId = new Map(list.map(e => [e.key, e]));
   const rows = array(t.questions).filter(q => q.answer != null).slice().reverse()
     .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
@@ -1340,11 +1456,11 @@ function ticketAnswerNodes(t, plainRow) {
 const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
 function ticketProperties(t, parent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
-  const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = ev?.at || t.done_at || t.updated_at;
+  const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, parent ? field('Step of', h('a', {href:href(parent.id)}, partName(parent))) : null,
-      field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t),
+    h('dl', {className:'ticket-details ed-list'}, parent ? field('Sub-ticket of', h('a', {href:href(parent.id)}, partName(parent))) : null,
+      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Helper strength', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
     linksCard(t),
@@ -1388,12 +1504,50 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     if (menu) actions.push(menu);
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
+  if (ticketHelperLive(t, run)) return ticketWorkingStrip(t, run, m, quiet, menu, tabs);
   return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
-      h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence)),
+      m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
+      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
+}
+// ORCH-70 (owner 16 Nov, as drawn): while a helper runs the header holds it all. One line above the title (key, the
+// ORCH-61 state word, the helper, minutes), one Watch live, Stop and the terminal commands in the ⋯ menu. No helper
+// bar and no Live session card below it; the box goes, so the page reads calmer.
+const ticketHelperLive = (t, run) => !snapshot && window.DashHelpers.helperAlive(t, run) && run?.claim?.mode !== 'oneshot' && !questions(t).length;
+function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
+  const helper = window.DashHelpers.helperState(run, t) || {state:'working', word:'Working', detail:''};
+  const agent = window.DashHelpers.agentLine(t, run, Date.now(), null, state.settings).agent;
+  const minutes = Number.isFinite(run?.age_seconds) ? Math.max(1, Math.floor(run.age_seconds / 60)) + ' min' : '';
+  const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
+  const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
+  const parts = [key ? h('span', {className:'key'}, key) : null, pill, agent ? name(agent) : null, minutes].filter(Boolean);
+  const kicker = h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
+  // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "No news since"
+  const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
+  const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
+  const live = liveLinkFor(t);
+  const actions = [live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null, menu].filter(Boolean);
+  return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
+    h('div', {className:'strip-h'},
+      h('div', {className:'grow ticket-strip-text'}, kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
+        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null),
+      actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
+    tabs);
+}
+// The ⋯ menu items for a running helper: Stop first, then the two terminal commands (Watch is read only, Take over types).
+function ticketHelperMenuItems(t, run) {
+  if (!ticketHelperLive(t, run)) return null;
+  const helper = window.DashHelpers.helperState(run, t), idle = helper && ['idle', 'stuck'].includes(helper.state);
+  const ref = typeof t.key === 'string' && t.key ? t.key : t.id;
+  const copy = (label, command, k) => ticketButton([iconEl('copy'), label], 'menu-item', async () => {
+    try { await navigator.clipboard.writeText(command); window.orch.toast('Copied', 'ok'); }
+    catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
+  }, {role:'menuitem', title:command, 'data-key':'live-copy-' + k});
+  return [ticketButton(idle ? 'Stop idle helper' : 'Stop', 'menu-item', () => act('run.stop', {ticket:t.id}), {role:'menuitem', 'data-key':'ticket-stop'}),
+    run?.claim?.mode === 'oneshot' ? null : copy('Copy watch command', 'orch run attach ' + ref + ' --watch', 'watch'),
+    run?.claim?.mode === 'oneshot' ? null : copy('Copy take-over command', 'orch run attach ' + ref, 'take')];
 }
 function detail(t) {
   if (!t) return missingTicket(route().id);
@@ -1402,16 +1556,17 @@ function detail(t) {
   const run = state.runs?.[t.id], sessions = array(t.sessions);
   const parent = window.DashHelpers.parentOf(tickets(), t), children = window.DashHelpers.childrenOf(tickets(), t);
   loadArtifacts(t, selected === 'files');
+  loadRelease(t);
   const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
-  const working = !fresh && !planQ && !['done', 'review'].includes(t.status);
+  const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const answeredRow = q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
     h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
   const answered = ticketAnswerNodes(t, answeredRow);
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
   const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
-    h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? null : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
+    h('div', {className:'menu-pop', role:'menu'}, ticketHelperMenuItems(t, run), t.status === 'done' ? null : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
   const tabs = ticketTabList(t);
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
@@ -1420,12 +1575,14 @@ function detail(t) {
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
+    ticketReleaseLine(t),
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
-    working ? agentBar(t) : null, working ? sharedFolderLine(t) : null, working ? liveSessionStrip(t) : null,
-    t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, clean(t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
-    t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ' + clean(t.summary)) : null,
-    note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note) : null,
+    working && !helperLive ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,
+    t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
+    t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
+    note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
+    working && helperLive ? sharedFolderLine(t) : null,
     t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
@@ -1434,7 +1591,7 @@ function detail(t) {
     addonRows(t), ticketLinks(t),
     answered.length ? h('section', {className:'card answered', 'data-key':'answered'}, h('h2', {}, 'Earlier answers'), answered) : null];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
-    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.epic ? 'Part of the epic ' : 'Step of ') + partName(parent)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + partName(parent)) : null,
     ticketStrip(t, run, fresh, planQ, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))), selected),
@@ -1450,6 +1607,27 @@ function detail(t) {
 const MULTILINE = ['note', 'done_when'];
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
+// The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
+// chooses one here; "Let orch decide" hands it back. Applies from the next start.
+const MODEL_NAMES = {sonnet:'Sonnet', opus:'Opus'};
+function modelChoice(t) {
+  const m = t.model && MODEL_NAMES[t.model.name] ? t.model : null;
+  return m ? {name:m.name, auto:m.by === 'orch', why:m.why ? clean(String(m.why)) : ''} : null;
+}
+function modelField(t) {
+  const m = modelChoice(t);
+  const said = m ? MODEL_NAMES[m.name] + (m.auto ? ' (picked by orch' + (m.why ? ': ' + m.why : '') + ')' : '') : 'orch picks it when work starts';
+  if (snapshot) return el('span', 'ed-ro', said);
+  const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id, title:said},
+    h('option', {value:'auto'}, m && m.auto ? 'Let orch decide (' + MODEL_NAMES[m.name] + ')' : 'Let orch decide'),
+    h('option', {value:'sonnet'}, 'Faster (Sonnet)'), h('option', {value:'opus'}, 'Stronger (Opus)'));
+  select.value = m && !m.auto ? m.name : 'auto';
+  select.onchange = async () => {
+    const result = await act('ticket.model', {ticket:t.id, model:select.value});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = m && !m.auto ? m.name : 'auto'; }
+  };
+  return select;
+}
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);
   const shown = field === 'due' ? dueText(t) : field === 'owner' ? name(raw) : clean(raw);
@@ -1492,7 +1670,8 @@ function startInline(control) {
     if (done) return;
     done = true;
     const value = MULTILINE.includes(field) ? input.value : input.value.trim();
-    if (save && value !== before && !(field === 'title' && !value)) await saveField(t, field, value);
+    if (save && field === 'title' && !value && before) window.orch.toast('A ticket needs a title. The old one is kept.', 'error');  // ORCH-185: never restore it silently
+    else if (save && value !== before) await saveField(t, field, value);
     locks.delete(key);
     render();
   };

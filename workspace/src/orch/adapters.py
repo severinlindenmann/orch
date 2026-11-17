@@ -7,6 +7,7 @@ adapter turns any command line into an agent. Callers ask for argv and capabilit
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import functools
 import json
@@ -69,6 +70,8 @@ _warned: set[str] = set()
 # hooks and MCP folders and its instruction files. Bringing back work that touches one needs a person's
 # review (worktrees._control_paths); the tool names live here, not in the copies code.
 AGENT_CONTROL_NAMES = frozenset({".claude", ".codex", "claude.md", "claude.local.md"})
+# The guide files agents read in a project, in the order a profile proposal reads them (profile_propose.py).
+GUIDE_FILES = ("AGENTS.md", "CLAUDE.md")
 
 
 def builtin_names() -> list[str]:
@@ -193,6 +196,8 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
 
     out = [fill(i) for i in items]
     extra: list[str] = permission_args(name, root, v.get("permissions"), v.get("person"))
+    if v.get("model") and a.get("model_args") and not user:  # the ticket's model (Sonnet or Opus)
+        extra += [x.replace("{model}", str(v["model"])) for x in a["model_args"]]
     if mode == "oneshot":
         if v.get("stream") and sect.get("stream_args"):
             extra += sect["stream_args"]
@@ -212,6 +217,40 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
             out.append("--")
         out.append(str(v["prompt"]))
     return out
+
+
+def find_binary(binary: str | None) -> str | None:
+    """Where an agent's program is: the PATH first, then the usual install folders of a tool that npm, nvm,
+    Homebrew or the user's own bin folder put in. A helper started with a clean PATH still finds it.
+    None when it is nowhere (the caller then says so plainly)."""
+    if not binary:
+        return None
+    found = shutil.which(binary)
+    if found or os.path.basename(binary) != binary:
+        return found
+    home = Path.home()
+    folders = [home / ".local" / "bin", home / ".npm-global" / "bin", home / ".bun" / "bin"]
+    nvm = Path(os.environ.get("NVM_DIR") or home / ".nvm") / "versions" / "node"
+    with contextlib.suppress(OSError):
+        folders += [d / "bin" for d in sorted(nvm.iterdir(), reverse=True) if d.is_dir()]
+    if os.name != "nt":
+        folders += [Path("/opt/homebrew/bin"), Path("/usr/local/bin")]
+    for d in folders:
+        cand = d / binary
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    return None
+
+
+def with_binary_dir(env: dict, argv: list[str]) -> dict:
+    """env for a program found by find_binary: its folder goes on the PATH (a script such as codex starts
+    `node` from the same folder)."""
+    exe = argv[0] if argv else ""
+    if not os.path.isabs(exe):
+        return env
+    folder = os.path.dirname(exe)
+    parts = (env.get("PATH") or "").split(os.pathsep)
+    return env if folder in parts else {**env, "PATH": os.pathsep.join([folder, *[p for p in parts if p]])}
 
 
 @functools.cache
@@ -251,7 +290,7 @@ def permission_args(
         return []  # never lift a stricter personal setting
     if "if_help_has" in entry:
         binary = (a.get("detect") or {}).get("binary")
-        path = shutil.which(binary) if binary else None
+        path = find_binary(binary)
         if not (path and entry["if_help_has"] in _help_text(path)):
             return list(entry.get("else") or [])
     return list(entry["args"]) + ([] if st["approval"] else list(entry.get("approval_args") or []))
@@ -668,6 +707,19 @@ def transcript_exists(
     resuming it would only fail with "no conversation found"."""
     if not valid_session_id(sid):
         return False  # an id orch would never record or resume: never "trust" it
+    f = transcript_path(name, sid, root, environ, folder)
+    if f is None or not f.parent.is_dir():
+        return None
+    return f.is_file()
+
+
+def transcript_path(
+    name: str, sid: str, root: Path, environ: Mapping[str, str] | None = None, folder: Path | None = None
+) -> Path | None:
+    """Where the tool saves the conversation of session `sid` (adapter session.transcript), or None when the
+    adapter declares nothing or the id is not one orch would record."""
+    if not valid_session_id(sid):
+        return None
     t = (load(name, root).get("session") or {}).get("transcript")
     if not t:
         return None
@@ -677,10 +729,7 @@ def transcript_exists(
     # workspace's
     folder = re.sub(r"[^A-Za-z0-9]", "-", str((folder or root).resolve()))
     parts = [folder if k == "{folder}" else k.replace("{session}", sid) for k in t["path"]]
-    f = base.joinpath(*parts)
-    if not f.parent.is_dir():
-        return None
-    return f.is_file()
+    return base.joinpath(*parts)
 
 
 def session_missing(name: str, output: str, root: Path | None = None) -> bool:
@@ -733,7 +782,7 @@ def detect() -> list[dict]:
         binary = d.get("binary")
         if not binary:
             continue
-        path = shutil.which(binary)
+        path = find_binary(binary)
         out.append(
             {
                 "name": name,

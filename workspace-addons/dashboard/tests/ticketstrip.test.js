@@ -13,7 +13,7 @@ const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:ch
 const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
 const text = n => !n ? '' : typeof n === 'string' ? n : (n.children || []).map(text).join('');
 function ctx(extra = {}) {
-  const c = {window:{DashHelpers:helpers, orch:{}, UI:{...kit.UI, statusIcon:name => h('svg', {className:'st ' + name})}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
+  const c = {window:{DashHelpers:helpers, orch:{}, UI:{...kit.UI, ...require('./kit_state.js'), statusIcon:name => h('svg', {className:'st ' + name})}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
     el:(tag, cls, t) => h(tag, {className:cls}, t), fragment:(...children) => h('fragment', {}, children),
     card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:t => h('p', {}, t),
@@ -27,7 +27,7 @@ function ctx(extra = {}) {
 const base = {id:'t_one', title:'Update the opening hours', owner:'human:Anna', created_at:'2026-11-02T08:15:00Z', updated_at:'2026-11-14T10:32:00Z', questions:[]};
 const STATES = [
   ['todo', {status:'open'}, {}, /Not started/],
-  ['working', {status:'active', sessions:[{id:'s'}]}, {runs:{t_one:{running:true}}}, /Helper is working/],
+  ['working', {status:'active', sessions:[{id:'s'}]}, {runs:{t_one:{running:true}}}, /Working/],
   ['needs', {status:'waiting', questions:[{id:'q1', text:'Which opening time on Saturday?'}]}, {}, /Helper asks: Which opening time on Saturday\?/],
   ['check', {status:'review'}, {}, /Helper finished/],
   ['done', {status:'done', done_at:'2026-11-14T11:05:00Z', history:[{at:'2026-11-14T11:05:00Z', by:'human:Severin', text:'Status review -> done'}], checklist:[{id:'c1', text:'Read the page', done:true}, {id:'c2', text:'Changed 3 lines', done:true}, {id:'c3', text:'Skipped bit', wont_do:true}]}, {}, /Done .*checked by Severin/],
@@ -88,4 +88,12 @@ test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', ()
   const sentence = nodes(tree).find(n => n.attrs?.['data-key'] === 'ticket-sentence');
   assert.match(text(sentence), /^No news since .+\.$/);
   assert.doesNotMatch(text(sentence), /Updated/);
+});
+
+test('Needs you: the strip names the agent that asked (as Home does), not always "Helper" (ORCH-65)', () => {
+  const c = ctx({state:{runs:{t_one:{claim:{agent:'manager', label:'Manager'}}}}});
+  const tree = c.detail({...base, status:'waiting', questions:[{id:'q1', text:'Build the new card look?'}]});
+  const strip = nodes(tree).find(n => /(^| )strip( |$)/.test(n.attrs.className || ''));
+  assert.match(text(strip), /Manager asks: Build the new card look\?/);
+  assert.doesNotMatch(text(strip), /Helper asks/);
 });

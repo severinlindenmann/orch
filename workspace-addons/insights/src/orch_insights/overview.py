@@ -250,6 +250,9 @@ def build_overview(counts) -> dict:
     counts, entries, rows = ready["counts"], ready["entries"], ready["rows"]
     # Rows live in the lists (/api/list/<tab>); the overview keeps the tab counts and the cards.
     tabs = {tab: {"count": sum(key[0] == kind for key in rows)} for kind, tab in TABS.items()}
+    # The connected services are measured only when the counts carry their list. Without it the count holds only
+    # the services a helper happened to use, and the page says "Not measured yet" instead of a false 0 (ORCH-72).
+    tabs["connections"]["known"] = bool(counts["inventory"]["connections"])
     cards = _cards(entries, rows)
     sharing = counts["sharing"]["counts"] == "on"
     return {

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 
 import pytest
@@ -623,10 +624,10 @@ def test_start_text_shows_what_matters(ws, run):
     order, _ = started(ws, run, data=json.dumps(p).encode())
     text = core(ws, "ticket", "show", order)["questions"][0]["text"]
     for part in (
-        "Stops: build, ship",
-        "Crew: manager claude, builder codex, reviewer claude",
-        "Cap: 2 h 30 min active",
-        "Ship: Merges the reviewed page into develop. (undo: A revert task.)",
+        "I will pause at: build, ship",
+        "Who works on it: manager claude, builder codex, reviewer claude",
+        "Time limit: 2 h 30 min active",
+        "What goes live: Merges the reviewed page into develop. (undo: A revert task.)",
         "Handover: photos → ws_design0001",
         "Unsure: Bookings go to Anna's calendar",
     ):
@@ -886,14 +887,16 @@ def test_cant_undo_is_derived_from_a_fixed_action_list_not_only_the_agents_tag(w
         autopilot.check(entry, "Continue", [], None)
 
 
-def test_crew_tickets_carry_cores_start_gate_on_the_persons_start(ws, run):
-    """#681: every crew ticket is made with --start-requires <order>:<start question>=Start, so core itself refuses a
-    direct `orch run start` on it until the person's Start is there (not only Factory's own crew start)."""
-    order, q = started(ws, run)
-    run("crew", "add", order, "booking-form")
+def test_crew_tickets_are_plain_sub_tickets_factory_still_finds(ws, run):
+    """ORCH-29: the person's Start only tells the manager agent to go; core holds no start check on crew tickets.
+    `crew add` makes a plain sub-ticket, and Factory finds it again by order, parent and task (a second add reuses it)."""
+    order, _q = started(ws, run)
+    first = run("crew", "add", order, "booking-form")
     calls = [json.loads(x) for x in (ws / "calls.jsonl").read_text().splitlines()]
     new = [c["args"] for c in calls if c["args"][:2] == ["ticket", "new"] and "--parent" in c["args"]]
-    assert new and f"--start-requires={order}:{q}=Start" in new[-1]
+    assert new and not any(a.startswith("--start-requires") for a in new[-1])
+    again = run("crew", "add", order, "booking-form")
+    assert first["created"] is True and again == {**first, "created": False}
 
 
 def test_used_time_is_measured_from_cores_record_and_waiting_never_counts(ws, run):
@@ -928,25 +931,10 @@ def test_used_time_is_measured_from_cores_record_and_waiting_never_counts(ws, ru
     assert core(ws, "ticket", "show", order)["ext"]["factory"]["budget"]["active_min_used"] == 10  # kept
 
 
-def test_a_sub_ticket_without_cores_gate_is_no_crew_and_unmeasured_budget_refuses(ws, run):
-    """#681 review: a sub-ticket an agent made with Factory's crew data but no core start gate is ignored (no crew);
-    crew start refuses when the record can't be measured (the synced cache never decides)."""
+def test_unmeasured_budget_refuses_crew_start(ws, run):
+    """#681 review: crew start refuses when the record can't be measured (the synced cache never decides)."""
     order, _ = started(ws, run)
     run("next", order)
-    rogue = core(ws, "ticket", "new", "Booking form", "--parent", order)
-    core(
-        ws,
-        "ext",
-        "set",
-        rogue["id"],
-        "factory",
-        json.dumps({"role": "crew", "order": order, "task": "booking-form"}),
-        "--if-revision",
-        "1",
-    )
-    assert (
-        run("crew", "start", order, "booking-form", code=2)["code"] == "invalid"
-    )  # "add the crew ticket first"
     run("crew", "add", order, "booking-form")
     (ws / "fail-record").write_text("")
     refused = run("crew", "start", order, "booking-form", code=2)
@@ -1053,3 +1041,17 @@ def test_stop_item_preview_address(ws, run):
         assert refused["code"] == "invalid", bad
     ok = {**base, "preview": "http://127.0.0.1:5173/"}
     assert run("stop", order, "--file", "-", data=stop_file("build", ok))["question"]
+
+
+def test_start_text_keeps_the_shape_the_home_card_reads():
+    """Dashboard Home shows a Factory start question as title, goal, time and cap (ORCH-60) by reading this text
+    (DashHelpers.factoryStart in dashboard/web/helpers.js uses these same patterns): keep both in step."""
+    from orch_factory import render
+
+    p = json.loads((CONTRACTS / "examples/factory-proposal/valid-run.json").read_text())
+    text = render.start_text(p, 1)
+    m = re.match(r"^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: ", text, re.DOTALL)
+    assert m, text[:200]
+    assert m.group(1) == render.clean(p["title"])
+    assert m.group(3) == render.clean(p["goal"]).rstrip(". ")
+    assert re.search(r"\. Time limit: (.+?) active\. ", text)

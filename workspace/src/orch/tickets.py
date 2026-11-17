@@ -480,6 +480,21 @@ def _agent_actor(by: str) -> bool:
     return by.startswith("agent:") or (by.startswith("human:") and bool(agent_tool()))
 
 
+def _addon_keeps_its_ticket(root: Path, ticket: dict, by: str) -> bool:
+    """An add-on's work can go on after its ticket is Done (a repeat survives Done, #194): an ACTIVE add-on,
+    writing as agent:<its name>, still keeps up a done ticket that carries its own ext block (its record, a
+    history line, opening it again for the next run). Never from inside an agent run (a run sets ORCH_AGENT),
+    never on a dropped ticket, never on a ticket the add-on has no data on."""
+    name = by.removeprefix("agent:")
+    if by == name or ticket.get("status") != "done" or agent_tool():
+        return False
+    if not isinstance((ticket.get("ext") or {}).get(name), dict):
+        return False
+    from orch import addons  # addons is a leaf here; imported late like the other helpers
+
+    return name in addons.active(root)
+
+
 def _refuse_closed_agent(root: Path, tid: str, by: str) -> None:
     """The closed-ticket guard for a write that happens outside apply_op (a file copy): same rule, checked
     under the caller's ticket lock BEFORE anything is written."""
@@ -545,7 +560,7 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         ticket = _load_raw(root, tid)
         eff_status = ticket.get("status")
         info.update(status=eff_status, revision=revision(ticket))
-        if eff_status in CLOSED and _agent_actor(by):
+        if eff_status in CLOSED and _agent_actor(by) and not _addon_keeps_its_ticket(root, ticket, by):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
@@ -693,7 +708,7 @@ _FIELD_WORDS = {
     "owner": "owner",
     "due": "due date",
     "note": "note",
-    "done_when": "done criteria",
+    "done_when": "Done when line",
     "summary": "summary",
     "status": "status",
     "waiting_on": "wait",
@@ -706,6 +721,13 @@ def _fields_text(raw: str) -> str | None:
         return None  # free text someone logged by hand: shown as written
     words = [_FIELD_WORDS[k] for k in keys]
     return "the " + (", ".join(words[:-1]) + " and " + words[-1] if len(words) > 1 else words[0])
+
+
+def _parent_words(parent: dict) -> str:
+    """The parent in a "Created under ..." line: its key and title (never its internal id)."""
+    title = " ".join(str(parent.get("title") or "").split())
+    title = title[:77] + "..." if len(title) > 80 else title
+    return f"{parent.get('key') or parent['id']}" + (f" {title}" if title else "")
 
 
 def history_line(text: str, checklist: list[dict] | None = None) -> str:
@@ -721,13 +743,20 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     def addon(key: str) -> str:
         return key.replace("-", " ").capitalize()
 
+    if re.fullmatch(r"Created under t_\w+", t):
+        return "Created as a sub-ticket"  # an older line: it holds only the internal id
+    if m := re.fullmatch(r"Recorded a check run for (c\d+)(?: \(exit (\d+)\))?", t):
+        result = "" if m.group(2) is None else " (passed)" if m.group(2) == "0" else " (failed)"
+        return "Ran a check" + task(m.group(1)) + result
+    if m := re.fullmatch(r"Moved (c\d+) after c\d+", t):
+        return "Moved a task" + task(m.group(1))
     if re.fullmatch(r"Asked q\d+, waiting", t):
         return "Asked a question"
     if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
         return f"Answered a question: {m.group(1)}"
     if m := re.fullmatch(r"Status (\w+) -> (\w+)", t):
         return f"Moved to {STATUS_WORDS.get(m.group(2), m.group(2))}"
-    if m := re.fullmatch(r"Edited ([a-z_, ]+)", t):
+    if m := re.fullmatch(r"Edited ([a-z_, ]+)(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
         if (f := _fields_text(m.group(1))) is not None:
             return "Changed " + f
     if m := re.fullmatch(r"Patched ([a-z_, ]+?)(?: \(status \w+ -> (\w+)\))?", t):
@@ -801,41 +830,6 @@ def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
     return out
 
 
-START_REQUIRES = re.compile(r"(t_[a-z0-9]{6,16}):(q[A-Za-z0-9_-]{0,31})=([^\x00-\x1f\x7f]{1,60})")
-
-
-def parse_start_requires(root: Path, value: str) -> dict:
-    """Parse "<ticket>:<question>=<answer>" into {"ticket", "question", "answer"}; the ticket and its question
-    must exist."""
-    m = START_REQUIRES.fullmatch(value or "")
-    if not m:
-        raise Refused(
-            "--start-requires looks like t_abc123:q1=Start (a ticket, its question and the answer)."
-        )
-    other = load(root, m[1])
-    if not any(q.get("id") == m[2] for q in other.get("questions", [])):
-        raise Refused(f"{m[1]} has no question {m[2]}.")
-    return {"ticket": m[1], "question": m[2], "answer": m[3]}
-
-
-def start_blocked(root: Path, ticket: dict) -> str | None:
-    """Why no run may start on this ticket yet, or None. A ticket made with start_requires starts only once a
-    PERSON (answered_by human:, which core accepts only with the person's proof) answered that question with
-    that answer. Generic: core knows nothing about who set it (Factory sets it on crew tickets)."""
-    req = ticket.get("start_requires")
-    if not req:
-        return None
-    why = f'This ticket starts only after a person answers "{req.get("answer")}" on {req.get("ticket")}.'
-    try:  # shown: a synced answer core cannot prove here is not a person's (history.shown_ticket)
-        other = history.shown_ticket(root, load(root, str(req.get("ticket"))))
-    except Refused:
-        return why
-    q = next((q for q in other.get("questions", []) if q.get("id") == req.get("question")), None)
-    if q and q.get("answer") == req.get("answer") and history.is_person_line({"by": q.get("answered_by")}):
-        return None
-    return why
-
-
 def create(
     root: Path,
     title: str,
@@ -848,11 +842,8 @@ def create(
     title_auto: bool = False,
     plan_first: bool = False,
     epic: bool = False,
-    start_requires: str | None = None,
 ) -> dict:
-    """`start_requires` ("<ticket>:<question>=<answer>", set at creation only): no run starts on this ticket
-    until a person answered that question with that answer (see start_blocked).
-    `title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
+    """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
     tid lets callers persist a reserved id before this write."""
     if tid is not None:
@@ -860,8 +851,10 @@ def create(
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
+    parent_ticket = None
     if parent is not None:
-        load(root, parent)  # the parent must exist (cycles are impossible: it is set only here)
+        # the parent must exist (cycles are impossible: it is set only here)
+        parent_ticket = load(root, parent)
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
@@ -879,7 +872,8 @@ def create(
         "questions": [],
         "history": [],
     }
-    add_history(ticket, by, "Created" + (f" under {parent}" if parent else ""), at=t)
+    under = f" under {_parent_words(parent_ticket)}" if parent_ticket else ""
+    add_history(ticket, by, "Created" + under, at=t)
     if parent is not None:
         ticket["parent"] = parent
     if title_auto:
@@ -888,10 +882,6 @@ def create(
         ticket["plan_first"] = True
     if epic:  # several tickets made at once: its sub-tickets are the work, one run goes through them in order
         ticket["epic"] = True
-    if (
-        start_requires is not None
-    ):  # a gate an add-on sets (Factory: a crew task waits for the person's Start)
-        ticket["start_requires"] = parse_start_requires(root, start_requires)
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -950,6 +940,15 @@ def _covered(part: str, cover: str) -> bool:
     return len(short) >= 3 and f" {short} " in f" {long_} "
 
 
+def _loosely_named(part: str, texts: list[str]) -> bool:
+    """A task text names a Done when part by meaning, not link: at least 70% of the part's words (3+ letters,
+    at least 3 of them) are in that one task's text. Lets a reworded Done when keep its finished tasks."""
+    words = {w for w in _norm_words(part).split() if len(w) >= 3}
+    if len(words) < 3:
+        return False
+    return any(len(words & set(_norm_words(t).split())) * 10 >= len(words) * 7 for t in texts)
+
+
 def done_when_parts(done_when: str) -> list[str]:
     """done_when split into its parts: one per line, ';' or sentence end. Plain and cheap on purpose."""
     parts = []
@@ -968,7 +967,8 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
     (a stored flag is never trusted). The current signature is computed at most once per call, only when a
     recorded signature exists; `cache` reuses it for a few seconds (polled pages).
     uncovered: the parts of done_when that no task `covers` (a part is covered when a task's covers text
-    and the part contain one another, ignoring case and punctuation); one hint when done_when cannot be
+    and the part contain one another, ignoring case and punctuation, or when one task's own text holds
+    70% of the part's words); one hint when done_when cannot be
     split and nothing is linked. level: ok | note | warn | fail, so views never parse `line`."""
     from orch import filesig
 
@@ -998,11 +998,18 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
             per[c["id"]] = "note" if evs else "missing"
     done_when = ticket.get("done_when")
     covers = [_norm_words(c["covers"]) for c in items if isinstance(c.get("covers"), str)]
+    # a finished task with evidence that the helper linked to a part proves it, in any words
+    for c in items:
+        if c.get("done") and c.get("evidence") and isinstance(c.get("proves"), list):
+            covers += [_norm_words(q) for q in c["proves"] if isinstance(q, str)]
     covers = [c for c in covers if c]
     uncovered: list[str] = []
     if isinstance(done_when, str) and done_when.strip():
         parts = done_when_parts(done_when)
-        uncovered = [p for p in parts if not any(_covered(p, c) for c in covers)]
+        texts = [c["text"] for c in items if isinstance(c.get("text"), str) and not c.get("wont_do")]
+        uncovered = [
+            p for p in parts if not any(_covered(p, c) for c in covers) and not _loosely_named(p, texts)
+        ]
         if not parts and not covers:
             uncovered = ["Done when isn't linked to tasks"]
     n = {k: list(per.values()).count(k) for k in ("passed", "failed", "changed", "note")}
@@ -1122,6 +1129,85 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
     return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away (worktrees.on_closed)
 
 
+REVIEWER = "agent:reviewer"  # the Reviewer role (reviewer.py): acts for the owner, never as a person
+REVIEWER_VIA = "reviewer"
+ACCEPTED_LINE = "Accepted for you by the Reviewer: "
+SENT_BACK_LINE = "Sent back by the Reviewer: "
+
+
+def accepted_by_reviewer(root: Path, ticket: dict) -> bool:
+    """Done, and the line that made it Done is the Reviewer's (the owner may still send it back)."""
+    if ticket.get("status") != "done":
+        return False
+    for h in reversed(history.lines(root, ticket)):
+        if isinstance(h, dict) and re.fullmatch(r"Status \w+ -> done", str(h.get("text", ""))):
+            return h.get("by") == REVIEWER
+    return False
+
+
+def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
+    """The Reviewer accepts a ticket in Review for the owner (Review -> Done), only while the owner turned it
+    on (`workflow.reviewer`), every task is done with evidence and no question waits. The history says who did
+    it and why: a role acting for the owner, not a second approver (R4.1). The owner can send it back."""
+    if not config.reviewer_on(root):
+        raise Refused("The Reviewer is off here. Turn it on: orch config set workflow.reviewer on")
+    why = _one_line(reasons)
+
+    def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused(GENERAL_REFUSAL)
+        if ticket["status"] != "review":
+            raise Refused("This ticket is not in Review.")
+        _check_can_finish(ticket)
+        if _open_questions(ticket):
+            raise Refused("A question on this ticket still waits for an answer.")
+        ticket["status"] = "done"
+        ticket["waiting_on"] = None
+        add_history(ticket, REVIEWER, "Status review -> done", REVIEWER_VIA)
+        add_history(ticket, REVIEWER, ACCEPTED_LINE + why, REVIEWER_VIA)
+
+    return apply_op(root, tid, op, by=REVIEWER)[0]
+
+
+RELEASE_KEEPER = "agent:release-keeper"  # merges a green release for the owner (review.tend_releases)
+RELEASE_VIA = "release-keeper"
+RELEASE_MERGED_LINE = "Merged for you (Settings: merge releases without my click): "
+
+
+def merged_for_owner(root: Path, tid: str, qid: str, url: str, head: str, line: str, decision: dict) -> dict:
+    """A release Merge card that review.tend_releases merged on GitHub for the owner: record it as answered
+    (Merge) by the release keeper, only while the owner turned it on (`workflow.release_merge`) and only for a
+    card made with `orch ask ... --merge --release` on exactly this pull request and commit. The history says
+    who did it and why; the owner's own Merge click stays the default (R4.1: a role acting for the owner)."""
+    if not config.release_merge_on(root):
+        raise Refused("Releases merge only on your click here. Turn it on in Settings.")
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        act = q.get("action")
+        if not (isinstance(act, dict) and act.get("release") is True and act.get("merge") == url
+                and act.get("head") == head):  # fmt: skip
+            raise Refused(f"{qid} is not this release's Merge card.")
+        q["answer"], q["answered_by"], q["via"] = "Merge", RELEASE_KEEPER, RELEASE_VIA
+        q["answered_at"] = q["at"] = now()
+        q["decision"] = dict(decision)
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, RELEASE_KEEPER, RELEASE_MERGED_LINE + _one_line(line), RELEASE_VIA)
+        history.created("answers", q)
+        return q
+
+    return apply_op(root, tid, op, by=RELEASE_KEEPER)[0]
+
+
+def _one_line(text: str, limit: int = 300) -> str:
+    return " ".join(str(text or "").split())[:limit]
+
+
 def ask_for_changes(
     root: Path,
     tid: str,
@@ -1134,8 +1220,11 @@ def ask_for_changes(
 ) -> dict:
     """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
     Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
-    automation host starts exactly one run for it (a person's pending input is what starts runs; #287)."""
-    if not by.startswith("human:") or agent_tool():
+    automation host starts exactly one run for it (a person's pending input is what starts runs; #287).
+    A ticket the Reviewer accepted for the person (Done) can be sent back the same way.
+    The Reviewer itself (by REVIEWER) sends a Review ticket back once when work is missing (reviewer.py)."""
+    role = by == REVIEWER
+    if not role and (not by.startswith("human:") or agent_tool()):
         raise Refused("Only a person can ask for changes.")
     note = (text or "").strip()
     if not note:
@@ -1143,27 +1232,35 @@ def ask_for_changes(
     if len(note) > 2000:
         raise Refused("A note for changes is at most 2000 characters.")
 
+    def may_send_back(ticket) -> bool:
+        return ticket["status"] == "review" or (not role and accepted_by_reviewer(root, ticket))
+
     def op(ticket):
-        if ticket["status"] != "review":
+        if not may_send_back(ticket):
             raise Refused("This ticket is not waiting for your review.")
-        ticket["checklist"].append(
-            {
-                "id": _next_id(ticket["checklist"], "c"),
-                "text": note,
-                "origin": "change_request",  # structured: the dashboard shows "You asked: <note>"
-                "done": False,
-                "evidence": [],
-            }
-        )
+        item = {"id": _next_id(ticket["checklist"], "c"), "text": note, "done": False, "evidence": []}
+        if not role:
+            item["origin"] = "change_request"  # structured: the dashboard shows "You asked: <note>"
+        ticket["checklist"].append(item)
         ticket["status"] = "ready"  # any wait the ticket has is not this review's: left as it is
-        add_history(ticket, by, "Asked for changes: " + note[:200], via)
+        line = SENT_BACK_LINE if role else "Asked for changes: "
+        add_history(ticket, by, line + note[:200], REVIEWER_VIA if role else via)
 
     from orch import runs  # runs imports tickets
 
-    if load(root, tid)["status"] != "review":
+    if not may_send_back(load(root, tid)):
         raise Refused("This ticket is not waiting for your review.")
     # Queue the note first, then commit the ticket: a failure of either leaves nothing half done.
-    item = runs.pending_add(root, tid, by, "message", note, via or _env_via(), pid, phone=phone)
+    item = runs.pending_add(
+        root,
+        tid,
+        by,
+        "event" if role else "message",
+        note,
+        REVIEWER_VIA if role else via or _env_via(),
+        pid,
+        phone=phone,
+    )
     try:
         return apply_op(root, tid, op, by=SYSTEM)[0]
     except BaseException:
@@ -1299,7 +1396,7 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by")
+PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by", "model")
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1406,9 +1503,16 @@ def clean_field(key: str, value):
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
     if key == "note" and len(v) > 2000:
-        raise Refused("A note is at most 2000 characters.")
+        raise Refused(
+            f"A note is at most 2000 characters; this one has {len(v)}. Nothing was changed. "
+            "Shorten it, or keep the full text as a file on the ticket: "
+            "orch ticket attach <ticket> --name note.md < note.md"
+        )
     if key == "done_when" and len(v) > 2000:
-        raise Refused("The done criteria are at most 2000 characters.")
+        raise Refused(
+            f"The done criteria are at most 2000 characters; these have {len(v)}. Nothing was changed. "
+            "Shorten them to one plain line and keep the details in the note."
+        )
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
@@ -1422,6 +1526,14 @@ def _set_field(ticket: dict, key: str, value) -> None:
         ticket.pop(key, None)
     else:
         ticket[key] = v
+
+
+def _edit_snip(value, limit: int = 200) -> str:
+    """The old or new text of an edited field in one short line for the Activity (ORCH-185)."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return "(empty)"
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def edit(
@@ -1447,10 +1559,15 @@ def edit(
                 ticket.pop("title_auto", None)  # a person's (or anyone's) own title is final
             ticket["title"] = title
             add_history(ticket, by, "Title changed")
+        was = {k: ticket.get(k) for k in fields}
         for k, v in fields.items():
             _set_field(ticket, k, v)
         if fields:
-            add_history(ticket, by, "Edited " + ", ".join(sorted(fields)))
+            text = "Edited " + ", ".join(sorted(fields))
+            if len(fields) == 1 and next(iter(fields)) in ("note", "done_when"):
+                k = next(iter(fields))
+                text += f" (was: {_edit_snip(was[k])} | now: {_edit_snip(ticket.get(k))})"  # ORCH-185
+            add_history(ticket, by, text)
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
@@ -1461,10 +1578,40 @@ LONG_NOTE = (
 PLACEHOLDER_TITLE = 80  # characters of a person's text kept as the title until the agent writes one
 
 
+_TITLE_ABBR = re.compile(
+    r"(?:^|\s)(?:e\.\s?g\.|i\.\s?e\.|etc\.|z\.\s?B\.|d\.\s?h\.|u\.\s?a\.|bzw\.|vs\.|ca\.|approx\.)$", re.I
+)
+
+
+_TITLE_TAIL = re.compile(  # a cut never ends on a small word
+    r"\s(?:and|or|but|then|for|to|of|the|a|an|with|in|on|at|by|like|und|oder|dann|für|mit|der|die|das|zu)$",
+    re.I,
+)
+
+
+def cut_title(line: str, limit: int = PLACEHOLDER_TITLE) -> str:
+    """ORCH-62: a line longer than `limit` is cut at a whole word, never right after an abbreviation such as
+    "e.g." (it read like the end of a sentence), and ends with "…" so it reads as cut. The dashboard's New
+    ticket dialog cuts the same way (ticketTextTitle)."""
+    if len(line) <= limit:
+        return line
+    cut = line[: limit - 1]
+    space = cut.rfind(" ")
+    if line[limit - 1] != " " and space > limit / 2:
+        cut = cut[:space]
+    prev = None
+    while prev != cut:
+        prev = cut
+        cut = re.sub(r"[\s,;:.\-–—(]+$", "", _TITLE_ABBR.sub("", cut))
+        if len(cut) > limit / 2:
+            cut = _TITLE_TAIL.sub("", cut)
+    return (cut or line[: limit - 1].strip()) + "…"
+
+
 def placeholder_title(text: str) -> str:
     """The first words of what a person wrote, on one line: the title until the agent writes the real one."""
     first = next((x for x in clean_untrusted(str(text), 4000).splitlines() if x.strip()), "")
-    return " ".join(first.split())[:PLACEHOLDER_TITLE].strip() or "New ticket"
+    return cut_title(" ".join(first.split())).strip() or "New ticket"
 
 
 def needs_agent_title(text: str) -> bool:
@@ -1530,13 +1677,19 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
-def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) -> dict:
+def tidy(
+    root: Path, tid: str, title: str, by: str, fields: dict | None = None, description: str | None = None
+) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
-    filled only where still empty. Once."""
+    filled only where still empty, and the agent's description (what and why, its own field, never the
+    person's note) when there is none yet. Once."""
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
+    description = (description or "").strip() or None
+    if description is not None:
+        clean_field("note", description)  # the same plain-text rules and 2000 characters
     fields = {k: v for k, v in (fields or {}).items() if k in ("owner", "due", "done_when") and v}
     for k, v in fields.items():
         clean_field(k, v)
@@ -1558,10 +1711,113 @@ def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) 
             _set_field(ticket, k, fields[k])
         if filled:
             add_history(ticket, by, "Details filled in: " + ", ".join(filled))
-        if (title == old or edited) and not filled:
+        wrote = bool(description and not ticket.get("description"))
+        if wrote:
+            ticket["description"] = description
+            ticket["description_by"] = by[:100]
+            add_history(ticket, by, f"Description written by {by[:100]}")
+        if (title == old or edited) and not filled and not wrote:
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]
+
+
+def set_model(root: Path, tid: str, name: str, by: str) -> dict:
+    """A person's model for this ticket's helper (sonnet or opus), or auto: orch picks again next start."""
+    from orch import modelpick
+
+    name = (name or "").strip().lower()
+    if name not in (*modelpick.MODELS, "auto"):
+        raise Refused("Pick sonnet, opus or auto.")
+    if not _is_person(by):
+        raise Refused(
+            f'Only a person picks the model. Ask instead: orch ask {tid} "Run this ticket on Opus?" '
+            "--option yes --option no"
+        )
+
+    def op(ticket):
+        if name == "auto":
+            ticket.pop("model", None)
+            add_history(ticket, by, "Model: orch picks it again on the next start")
+        else:
+            ticket["model"] = {"name": name, "by": by[:100]}
+            add_history(ticket, by, f"Model set to {modelpick.LABELS[name]}")
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
+def pick_model(root: Path, tid: str, by: str) -> str:
+    """Before a start: keep a person's choice, else let orch pick from the ticket as it is now (a history line
+    only when the pick changes). Returns the model name."""
+    from orch import modelpick
+
+    out: dict = {}
+
+    def keep(ticket) -> str | None:
+        """The model that stays as it is: a person's choice, or Opus once a helper ran on it (never down by
+        itself: a ticket picked or moved up to Opus does not drop to Sonnet in the middle of its work)."""
+        cur = modelpick.chosen(ticket)
+        if not cur:
+            return None
+        if modelpick.by_person(ticket) or cur["name"] == modelpick.pick(ticket)[0]:
+            return cur["name"]
+        if cur["name"] == "opus" and (cur.get("up") or ticket.get("sessions")):
+            return "opus"
+        return None
+
+    def op(ticket):
+        kept = keep(ticket)
+        if kept:
+            out["name"] = kept
+            return
+        name, why = modelpick.pick(ticket)
+        out["name"] = name
+        ticket["model"] = {"name": name, "by": modelpick.BY_ORCH, "why": why[:200]}
+        add_history(ticket, by, f"Model picked: {modelpick.LABELS[name]} ({why[:200]})")
+
+    kept = keep(load(root, tid))
+    if kept:
+        return kept  # nothing to write
+    apply_op(root, tid, op, by=by)
+    return out["name"]
+
+
+def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
+    """Move a ticket orch put on Sonnet up to Opus (the helper when its plan shows design, security or
+    several parts; orch after two failed checks on one step). One history line says why. A person's choice
+    is never changed. Returns (ticket, moved): moved False when it already runs on Opus."""
+    from orch import modelpick
+
+    why = " ".join(clean_untrusted(why or "", 200).split())
+    if len(why) < 3:
+        raise Refused('Say why in a few words, e.g. --why "the plan needs a new design".')
+    out = {"moved": False}
+
+    def op(ticket):
+        cur = modelpick.chosen(ticket)
+        if cur and modelpick.by_person(ticket):
+            if cur["name"] == "opus":
+                return
+            raise Refused(
+                f"A person chose {modelpick.LABELS[cur['name']]} for this ticket. Ask instead: "
+                f'orch ask {tid} "Move this ticket up to Opus? {why[:80]}" --option yes --option no'
+            )
+        if cur and cur["name"] == "opus":
+            return
+        ticket["model"] = {
+            "name": "opus",
+            "by": modelpick.BY_ORCH,
+            "why": why,
+            "up": {"from": (cur or {}).get("name") or "sonnet", "at": now(), "by": by[:100]},
+        }
+        add_history(ticket, by, f"{modelpick.UP_PREFIX}: {why}")
+        out["moved"] = True
+
+    t = load(root, tid)
+    if (modelpick.chosen(t) or {}).get("name") == "opus":
+        return t, False  # already on Opus: nothing to write
+    t = apply_op(root, tid, op, by=by)[0]
+    return t, out["moved"]
 
 
 def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
@@ -1688,14 +1944,14 @@ def parse_evidence(raw: str) -> dict:
     if not isinstance(ev.get("ref"), str) or not ev["ref"].strip():
         raise Refused("Evidence needs a ref (PR, commit, file, URL, command or note text).")
     if "role" in ev and ev["role"] not in ROLES:
-        raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
+        raise Refused(f"An evidence role is one of: {', '.join(ROLES)}.")
     if "text" in ev and not isinstance(ev["text"], str):
         raise Refused("Evidence text must be a string.")
     if "summary" in ev:
         raw = ev["summary"]
         line = " ".join(raw.split()) if isinstance(raw, str) else ""
         if not 1 <= len(line) <= 200 or not line.isprintable():
-            raise Refused("A proof summary is one line of 1 to 200 printable characters.")
+            raise Refused("An evidence summary is one line of 1 to 200 printable characters.")
         ev["summary"] = line
     _check_record_fields(ev)
     return ev
@@ -1810,11 +2066,15 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
         secretscan.refuse_if_secret_in(root, body, "evidence", verb="saved")
 
 
-def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> tuple[dict, dict]:
+def check_done(
+    root: Path, tid: str, cid: str, evidence: list[str], by: str, proves: list[str] | None = None
+) -> tuple[dict, dict]:
+    """`proves`: quoted parts of Done when this finished task shows; the evidence decides, not the wording."""
+    proved = [q for q in (_clean_covers(p) for p in proves or []) if q]
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
         raise Refused(
-            "A check is done only with proof. Say what shows it, for example "
+            "A check is done only with evidence. Say what shows it, for example "
             f'`orch check done {tid} {cid} --command "pytest -q"` or `--note "what you saw"` '
             "(also --pr, --commit, --file, --url)."
         )
@@ -1830,6 +2090,8 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
             ev.setdefault("at", now())
         add_evidence(item, evs)
         item["done"] = True
+        if proved:
+            item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
         add_history(t, by, f"Check {cid} done")
         return item
@@ -1938,7 +2200,34 @@ def check_record(
         )
         return item
 
-    return apply_op(root, tid, op, by=by)
+    t, item = apply_op(root, tid, op, by=by)
+    if exit_code and _failed_twice(item):
+        _up_after_failures(root, tid, item)
+    return t, item
+
+
+def _failed_twice(item: dict) -> bool:
+    """The step's last two recorded check runs both failed (a non-zero exit)."""
+    runs_ = [e for e in item.get("evidence") or [] if e.get("type") == "command" and "exit" in e]
+    return len(runs_) >= 2 and all(e.get("exit") not in (0, None) for e in runs_[-2:])
+
+
+def _up_after_failures(root: Path, tid: str, item: dict) -> None:
+    """Two failed checks on one step: a ticket orch put on Sonnet moves up to Opus by itself. Never fails
+    the record (a person's choice stays; a live session switches at its next turn end)."""
+    from orch import modelpick, runs_live
+
+    t = load(root, tid)
+    cur = modelpick.chosen(t)
+    if not cur or cur["name"] != "sonnet" or modelpick.by_person(t):
+        return
+    step = " ".join(str(item.get("text") or "").split())[:80]
+    why = f'two checks failed on the step "{step}"' if step else "two checks failed on one step"
+    with contextlib.suppress(Refused):
+        t, moved = move_up(root, tid, why, "orch")
+        if moved:
+            with contextlib.suppress(Exception):
+                runs_live.switch_model(root, tid, "opus", "orch")
 
 
 def check_exists(root: Path, tid: str, cid: str) -> None:
@@ -2003,7 +2292,9 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
         add_history(
-            t, by, f"Removed step {cid} '{item['text']}' ({state}" + (f"; proof: {proof})" if proof else ")")
+            t,
+            by,
+            f"Removed step {cid} '{item['text']}' ({state}" + (f"; evidence: {proof})" if proof else ")"),
         )
         return item
 
@@ -2028,7 +2319,7 @@ def check_reopen(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         item["done"] = False
         item["evidence"] = []
         _clear_doing(item)
-        add_history(t, by, f"Reopened {cid}" + (f" (old proof: {proof})" if proof else ""))
+        add_history(t, by, f"Reopened {cid}" + (f" (old evidence: {proof})" if proof else ""))
         return item
 
     return apply_op(root, tid, op, by=by)
@@ -2453,10 +2744,19 @@ def ask(
     check: str | None = None,
     card: dict | None = None,
     shown: dict | None = None,
+    group: str | None = None,
+    links: list[dict] | None = None,
 ) -> tuple[dict, dict]:
-    """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here)."""
+    """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
+    group: a short name for cards that belong together (one set on Review); only with a card."""
     if not text.strip():
         raise Refused("A question needs text.")
+    if group is not None:
+        group = " ".join(group.split())
+        if card is None or not group or len(group) > GROUP_MAX or any(ord(ch) < 32 for ch in group):
+            raise Refused(f"A group is a short name (at most {GROUP_MAX} characters) on a card.")
+    if links is not None and card is None:
+        raise Refused("Links go with a card.")
     if recommended is not None and options and recommended not in options:
         raise Refused("The recommended answer must be one of the options.")
     if kind is not None and not KIND_RE.fullmatch(kind):
@@ -2514,6 +2814,10 @@ def ask(
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
+            if group:
+                q["group"] = group
+            if links:  # part of what the person is shown: in the digest (question_digest)
+                q["links"] = [dict(x) for x in links]
         ticket["questions"].append(q)
         ticket["status"] = "waiting"
         ticket["waiting_on"] = {"kind": "question", "ref": q["id"]}
@@ -2523,6 +2827,7 @@ def ask(
     return apply_op(root, tid, op, by=by)
 
 
+GROUP_MAX = 80
 QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
 
 
@@ -2532,7 +2837,11 @@ def question_digest(q) -> str:
     if not isinstance(q, dict):
         return QUESTION_UNENCODABLE
     shown = {k: q.get(k) for k in ("id", "text", "options", "kind", "action", "recommended")}
-    for k in ("card", "shown"):  # RULE A: only when present, so a question without a card keeps its digest
+    for k in (
+        "card",
+        "shown",
+        "links",
+    ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]
     try:
@@ -2995,7 +3304,7 @@ def _size_text(n: int) -> str:
 
 
 def _too_big(name: str) -> str:
-    return f"{name} is too big. A proof file can be at most 25 MB. Use --url or --note."
+    return f"{name} is too big. An evidence file can be at most 25 MB. Use --url or --note."
 
 
 def attach_file(
@@ -3037,9 +3346,9 @@ def _attach_file(
     Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
     load(root, tid)
     if role is not None and role not in ROLES:
-        raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
+        raise Refused(f"An evidence role is one of: {', '.join(ROLES)}.")
     if title is not None and not 1 <= len(title.strip()) <= 120:
-        raise Refused("A proof title needs 1 to 120 characters.")
+        raise Refused("An evidence title needs 1 to 120 characters.")
     refuse_secret_in_evidence(
         root,
         [{"type": "file", "ref": os.path.basename(path), "title": title or "", "summary": summary or ""}],
@@ -3065,14 +3374,14 @@ def _attach_file(
                     break
                 except ValueError:
                     continue
-    inside = Refused("proof files must be inside this workspace or this ticket's own working copy.")
+    inside = Refused("evidence files must be inside this workspace or this ticket's own working copy.")
     if rel is None or ".." in rel.parts:
         raise inside
     cur = src_base
     for part in rel.parts:
         cur = cur / part
         if cur.is_symlink():
-            raise Refused("proof files cannot be refs. Give the real file.")
+            raise Refused("evidence files cannot be refs. Give the real file.")
     low = tuple(x.lower() for x in rel.parts)
     if low[:2] == (".orch", "secrets") or ".git" in low:
         raise inside
@@ -3084,21 +3393,22 @@ def _attach_file(
     size = cur_src.stat().st_size
     if size > MAX_PROOF_BYTES:
         raise Refused(
-            f"{cur_src.name} is {_size_text(size)}. A proof file can be at most 25 MB. Use --url or --note."
+            f"{cur_src.name} is {_size_text(size)}. "
+            "An evidence file can be at most 25 MB. Use --url or --note."
         )
     dest_dir = base / ".orch" / "tickets" / tid / "evidence"
     cur = base
     for part in (".orch", "tickets", tid, "evidence"):
         cur = cur / part
         if cur.is_symlink():
-            raise Refused("The proof folder of this ticket is a link. orch will not copy into it.")
+            raise Refused("The evidence folder of this ticket is a link. orch will not copy into it.")
         if cur.exists() and not cur.is_dir():
-            raise Refused("The proof folder of this ticket is blocked by a file. Move that file away.")
+            raise Refused("The evidence folder of this ticket is blocked by a file. Move that file away.")
         if not cur.exists():
             cur.mkdir()
     real_dir = Path(os.path.realpath(dest_dir))
     if real_dir != dest_dir or not str(real_dir).startswith(str(base / ".orch" / "tickets") + os.sep):
-        raise Refused("The proof folder of this ticket is not inside this workspace.")
+        raise Refused("The evidence folder of this ticket is not inside this workspace.")
     name = _proof_name(cur_src.name)
     dest, n = dest_dir / name, 1
     while True:
@@ -3114,7 +3424,7 @@ def _attach_file(
     except OSError:
         os.close(fd)
         os.unlink(dest)
-        raise Refused("proof files cannot be refs. Give the real file.") from None
+        raise Refused("evidence files cannot be refs. Give the real file.") from None
     try:
         with os.fdopen(src_fd, "rb") as src, os.fdopen(fd, "wb") as out:
             if os.fstat(src.fileno()).st_size > MAX_PROOF_BYTES:

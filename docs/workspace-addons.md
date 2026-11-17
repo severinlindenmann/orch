@@ -36,7 +36,7 @@ installs (if needed) and turns the add-on on in this workspace.
 | `orch addon add ./my-addon` | Same for a local folder, labelled "local (not checked by orch)". Change anything in the folder later and it is off until you add it again (`orch update` tells you: "changed on disk") |
 | `orch addon list [--json]` | What is installed and what is on here |
 | `orch addon remove scheduler [--purge]` | Off in this workspace: stops its process, removes its skill and AGENTS.md entry, tab and ticket rows. Ticket data (`ext.scheduler`) stays in the files, hidden; `--purge` also deletes `.orch/addons/scheduler/` and the `[scheduler]` settings |
-| `orch addon uninstall scheduler` | Removes it from this computer (only when it is off here; not for publish/relay, which are part of orch) |
+| `orch addon uninstall scheduler` | Uninstalls it (only when it is off here; not for publish/relay, which are part of orch) |
 
 Built-in add-ons install from where orch itself came from (the repo and branch of the install, e.g. `ORCH_REF=develop`), so orch and its add-ons always match.
 

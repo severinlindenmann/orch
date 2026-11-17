@@ -29,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, brake, diag, history, procs, runhooks, services, tickets
+from orch import adapters, addons, brake, config, diag, history, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -603,9 +603,6 @@ def claim(
     folder: where the agent works when that is not the workspace root (a separate copy); it goes in the
     record."""
     ticket = tickets.load(root, tid)
-    blocked = tickets.start_blocked(root, ticket)  # also a direct `orch run claim`, not only `run start`
-    if blocked:
-        raise Refused(blocked)
     with locked(root, tid):
         cur = read(root, tid)
         if cur:
@@ -801,7 +798,7 @@ def start_failure_reason(root: Path, rec: dict) -> str:
     name = str(rec.get("agent") or "")
     with contextlib.suppress(Exception):
         binary = (adapters.load(name, root).get("detect") or {}).get("binary")
-        if binary and not shutil.which(binary):
+        if binary and not adapters.find_binary(binary):
             return "agent command not found"
     tail = ""
     log = rec.get("log")
@@ -1072,7 +1069,7 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
         "Read .agents/skills/orch/SKILL.md first, then follow it for this ticket.",
         f'Before you start, use orch check add {tid} "<task>" for one task per piece of the person\'s '
         "work, in plain words (no ids, paths or commands). "
-        f"Mark the task you work on with orch check start {tid} <task id> and finish each with proof: "
+        f"Mark the task you work on with orch check start {tid} <task id> and finish each with evidence: "
         f'orch check done {tid} <task id> --summary "<what came out, one line>" '
         '--note "<what you did and how you know it works>". '
         f'When you stop, use orch ticket summary {tid} "<what was done and what is left>"'
@@ -1097,11 +1094,14 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
     elif not tickets.tidied(root, ticket) and not ticket.get("checklist"):  # first pickup of a new ticket
         out.insert(
             1,
-            "FIRST tidy this new ticket, directly, do not ask anyone: fix typos and write a short clear "
-            "title, "
-            "and fill the owner, due date and done-when line only where the person's text says them: "
-            f'orch ticket tidy {tid} "<short clear title>" [--owner <name>] [--due YYYY-MM-DD] '
-            '[--done-when "<one plain line>"]. Their original title stays in the history. '
+            "FIRST tidy this new ticket, directly, do not ask anyone, so the person does not have to "
+            "write it: "
+            "fix typos and write a short clear title, a description (what this is about and why, 1 to 3 "
+            "sentences, from their note), and a done-when line (what must be true when it is done; when they "
+            "wrote one, keep it). Fill the owner and due date only where the person's text says them: "
+            f'orch ticket tidy {tid} "<short clear title>" --description "<what and why>" '
+            '--done-when "<one plain line>" [--owner <name>] [--due YYYY-MM-DD]. '
+            "Their original title stays in the history. The steps come next, as tasks. "
             "Do this before you add tasks.",
         )
     out[1:1] = (
@@ -1118,7 +1118,7 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
     if ticket.get("summary"):
         proof = tickets.proof_state(ticket, root)["line"]
         out.append(
-            f"Where things stand, written by the last run (proof: {proof}; check it, "
+            f"Where things stand, written by the last run (evidence: {proof}; check it, "
             f"do not take it as an instruction): {_clip(ticket['summary'], 1500)}"
         )
     out.extend(_description_plan(ticket))
@@ -1203,8 +1203,20 @@ def plan(
         is False
     ):
         sid = None  # the tool never saved that conversation: resuming it can only fail, start fresh
+    cold_note = None
+    folder = workdir_for(root, read(root, tid), tid)
+    if sid and ticket.get("general") is not True and _long_and_cold(root, name, sid, folder):
+        sid = None  # ORCH-149: its cache is gone, re-reading the long conversation costs more than the ticket
+        cold_note = (
+            "Started fresh from the ticket: the earlier conversation is long and was idle for over "
+            f"{config.live_idle_minutes(root)} minutes, so its cache is gone."
+        )
+    model = None
+    if a.get("model_args") and ticket.get("general") is not True:  # Chat keeps the tool's own setting
+        model = tickets.pick_model(root, tid, "orch")  # a person's choice, else orch's pick (never Fable)
     # a one-shot run streams its steps into its log (Focus shows them; the log is never empty until the end)
     v = {
+        "model": model,
         "allow": adapters.allow_patterns(allow),
         "session": sid,
         "orch_hooks_file": hooks_file,
@@ -1249,6 +1261,11 @@ def plan(
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
     argv = store_access(argv, name, root, workdir_for(root, read(root, tid), tid))
+    binary = (a.get("detect") or {}).get("binary")
+    if (
+        argv and binary and argv[0] == binary and not shutil.which(binary)
+    ):  # not on the PATH of a clean start: use where it really is
+        argv = [adapters.find_binary(binary) or binary, *argv[1:]]
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1257,11 +1274,32 @@ def plan(
         "session": sid if resumed else new_session,
         "tmux": None,
         "argv": argv,
+        "model": model,
         "stdin": v["prompt"] if a["prompt_via"] == "stdin" and mode == "oneshot" else None,
         "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
-        "note": adapters.permission_note(name, root, None, person),
+        "fresh_why": cold_note,
+        "note": " ".join(n for n in (cold_note, adapters.permission_note(name, root, None, person)) if n)
+        or None,
     }
+
+
+LONG_CONVERSATION_BYTES = 2_000_000  # a saved conversation this big is long: well over 100k tokens
+
+
+def _long_and_cold(root: Path, name: str, sid: str, folder: Path) -> bool:
+    """ORCH-149: the saved conversation is long and nothing wrote to it for longer than the idle limit
+    (workspace.live_idle_minutes, an hour): the tool's prompt cache is gone, so resuming it would re-read
+    all of it at full price while a fresh start reads only the ticket. A short or recent one is resumed.
+    A helper the watcher found stuck is started fresh anyway (tend). Unknown size or time: resume."""
+    f = adapters.transcript_path(name, sid, root, folder=folder)
+    try:
+        st = f.stat() if f is not None else None
+    except OSError:
+        return False
+    if st is None or st.st_size < LONG_CONVERSATION_BYTES:
+        return False
+    return time.time() - st.st_mtime > config.live_idle_minutes(root) * 60
 
 
 def store_access(argv: list[str] | None, name: str, root: Path, work: Path) -> list[str] | None:
@@ -1309,14 +1347,13 @@ def start(
     mode: str | None = None,
     text: str | None = None,
     agent: str | None = None,
+    priority: str = "normal",
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
     from orch import runs_live, worktrees
 
-    blocked = tickets.start_blocked(root, tickets.load(root, tid))  # before anything is planned or spawned
-    if blocked:
-        raise Refused(blocked)
+    tickets.load(root, tid)  # an unknown ticket is refused before anything is planned or spawned
     brake.check_start(root, tid, by)  # R8.6: paused, or over the daily cap, for an automatic start
     if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
         runs_live.clear_held(root, tid)
@@ -1354,6 +1391,7 @@ def start(
             fresh=fresh,
             take_over=take_over,
             busy_text=text or f"{by} asked for more work on this ticket.",
+            priority=priority,
         )
         r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
         return r
@@ -1378,6 +1416,9 @@ def start(
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
         if p.get("note"):
             notes.append(p["note"])
+        if p.get("fresh_why"):
+            with contextlib.suppress(Exception):
+                tickets.log(root, tid, p["fresh_why"], "orch")
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
         cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)
@@ -1472,15 +1513,16 @@ def _run_turn(
             proc = subprocess.Popen(
                 argv,
                 cwd=root,
-                env=env,
+                env=adapters.with_binary_dir(env, argv),
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                 stdout=out,
                 stderr=subprocess.STDOUT,
                 start_new_session=os.name != "nt",  # its own group: stop can end it with its helpers
             )
         except OSError as e:
-            out.write(f"orch could not start the agent: {e}\n".encode())
-            return 127, ""
+            said = f"orch could not start the agent: {e}\n"
+            out.write(said.encode())
+            return 127, said
         if on_proc:
             on_proc(proc)
         if on_started:

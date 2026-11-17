@@ -119,8 +119,10 @@
       };
     }
     w.document.addEventListener('click', e => {
-      const b = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
-      if (b) tracker.push('ui.action', {id: String(b.dataset.action).slice(0, 60), route: fold(w.top && w.top.location ? w.top.location.hash : '')});
+      const b = e.target && e.target.closest ? e.target.closest('[data-action],[data-addon-act],[data-sync-allow]') : null;
+      // an add-on button has no data-action: its id is "addon-<verb>" (the verb only, never the ticket), so a report shows the click arrived
+      const id = b && (b.dataset.action || (b.dataset.addonAct ? 'addon-' + String(b.dataset.verb || 'act') : 'sync-allow'));
+      if (b) tracker.push('ui.action', {id: String(id).slice(0, 60), route: fold(w.top && w.top.location ? w.top.location.hash : '')});
     }, true);
   }
 

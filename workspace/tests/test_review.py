@@ -280,6 +280,31 @@ def test_stack_lists_cards_checks_and_plain_questions(tk):
     assert {i["id"] for i in review.stack(root)} == ids - {f"core:q:{other}:q1"}
 
 
+def test_stack_lists_add_on_questions_like_home(tk):
+    """ORCH-63: a Factory start question (an add-on's own kind) is on Home (orch needs) AND a Review card, and
+    picking Start there records the plain answer Factory reads (answer "Start", by a person)."""
+    from orch import needs
+
+    root, tid = tk
+    tickets.ask(
+        root,
+        tid,
+        "Start 'Services'?",
+        ["Start", "Edit", "Not now"],
+        "Start",
+        "agent:claude",
+        kind="factory:start",
+    )
+    card_ids = {i["id"] for i in review.stack(root)}
+    home_ids = {r["id"] for r in needs.core_rows(root) if r.get("answer")}
+    assert card_ids == home_ids == {f"core:q:{tid}:q1"}
+    item = review.stack(root)[0]
+    assert item["options"] == ["Start", "Edit", "Not now"] and item["card"]["kind"] == "choice"
+    q = review.decide(root, tid, "q1", "ok", "Start", by=ME, via="dashboard", digest=item["digest"])
+    assert q["answer"] == "Start" and q["kind"] == "factory:start" and q["answered_by"] == ME
+    assert review.stack(root) == []
+
+
 def test_stack_groups_by_ticket_then_task_and_says_about(tk, monkeypatch):
     root, tid = tk  # "Home layout"
     other = tickets.create(root, "Round two", ME)["id"]

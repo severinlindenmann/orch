@@ -5,7 +5,7 @@ const path = require('node:path');
 const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web', f), 'utf8');
 const settings = web('pages/settings.js'), blocks = web('blocks.js');
 
-// "Allow on this computer" for a script (an add-on button with review: true): the page asks the add-on what the
+// "Allow this script" (an add-on button with review: true): the page asks the add-on what the
 // button does, shows it in full, and sends back only the key of what it showed.
 test('a review button asks first, shows the answer in full and sends back only the shown key', () => {
   const i = settings.indexOf('async function addonReview(');

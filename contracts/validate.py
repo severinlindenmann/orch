@@ -4,7 +4,7 @@ crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json)
 phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (vectors/chat-groups/*.json against message.schema.json,
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
-Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
+Run: uv run --python ">=3.11" --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
 With kinds (review-card, activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal, diag) only those draft-02 checks run.
 """
 import base64
@@ -13,7 +13,11 @@ import json
 import re
 import struct
 import sys
-import tomllib
+
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    sys.exit("contracts/validate.py needs Python 3.11 or newer. Run it with the uv line at the top of this file.")
 import types
 import unicodedata
 import urllib.parse
@@ -80,6 +84,7 @@ V = {
     "automation-ext": validator("addons/automation/ext"),
     "focus-ext": validator("addons/focus/ext"),
     "factory-ext": validator("addons/factory/ext"),
+    "pull-requests-ext": validator("addons/pull-requests/ext"),
     "factory-proposal": validator("addons/factory/proposal"),
     "lessons-list": validator("addons/lessons/list"),
 }
@@ -93,7 +98,12 @@ V["agent-config"] = Draft202012Validator(
 CORE_CLEAN = ["ticket", "run", "run-pending", "needs", "agent-adapter"]
 TOOL_NAMES = re.compile(r"scheduler|automation|focus|relay|dashboard|publish|claude|codex", re.I)
 # Add-on ext schemas, keyed by ext name. A ticket's ext.<name> is checked with it (as the CLI does for installed add-ons).
-EXT = {"automation": V["automation-ext"], "focus": V["focus-ext"], "factory": V["factory-ext"]}
+EXT = {
+    "automation": V["automation-ext"],
+    "focus": V["focus-ext"],
+    "factory": V["factory-ext"],
+    "pull-requests": V["pull-requests-ext"],
+}
 
 
 SESSION_ARG = re.compile(r"^(\{session\}|--[a-z][a-z0-9-]*=\{session\})$")
@@ -1746,6 +1756,26 @@ def kind_review_card():
                 fails.append(f"review-question verdict_cases {c['name']}: result not valid: {e}")
 
 
+def kind_tool_alert():
+    """Tool warning on the phone (tool-alert.md, vectors/tool-alert-v1.json): every valid / invalid message, and every
+    body the workspace sends, against message.schema.json."""
+    vm = _w("message")
+    vec = _vec("tool-alert-v1.json")
+    for c in vec["valid"]:
+        _expect(f"tool-alert valid {c['name']}", _msgs(vm, c["message"]), [])
+    for c in vec["invalid"]:
+        _expect(f"tool-alert invalid {c['name']} is refused", bool(_msgs(vm, c["message"])), True)
+    for c in vec["workspace"]:
+        for n, body in enumerate(c["send"]):
+            m = {"schema": "orch.msg/1", "id": f"m_alertws{n:09d}", "from": vec["workspace_id"], "to": "phones",
+                 "type": "text", "created_at": vec["now"], "body": body}
+            _expect(f"tool-alert workspace {c['name']} send {n}", _msgs(vm, m), [])
+    for c in vec["phone"]:
+        for item in c["messages"]:
+            if "tool_alert" in item["message"]["body"] and c["name"] != "malformed-ignored":
+                _expect(f"tool-alert phone {c['name']} {item['message']['id']}", _msgs(vm, item["message"]), [])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "review-card": kind_review_card,
@@ -1761,6 +1791,7 @@ KINDS = {
     "human": kind_human,
     "proposal": kind_proposal,
     "diag": kind_diag,
+    "tool-alert": kind_tool_alert,
 }
 
 

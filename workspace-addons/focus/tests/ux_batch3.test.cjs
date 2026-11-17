@@ -187,18 +187,18 @@ test('UX B: the picker says its list is on Home too, and row actions are 32 px m
   assert.match(src, /They are on Home too\./);
   assert.match(src, /\['review', 'Sent back to you', 'Check result'\]/);
 });
-test('UX B2: Focus opens on the next ticket that needs you (oldest question, then oldest result); nothing waiting -> start page', () => {
+test('UX B2 / ORCH-61: Focus opens on its start page (the Helpers list); the next ticket that needs you is one button', () => {
   const H = require('../src/orch_focus/web/helpers.js');
-  const rows = [{id:'a', status:'review', updated_at:'2026-11-01T00:00:00Z'}, {id:'b', status:'waiting', updated_at:'2026-11-05T00:00:00Z'},
-    {id:'c', status:'waiting', updated_at:'2026-11-03T00:00:00Z'}, {id:'d', status:'active'}, {id:'e', status:'review', updated_at:'2026-11-02T00:00:00Z'}];
+  const rows = [{id:'a', status:'review', updated_at:'2026-11-01T00:00:00Z'}, {id:'b', status:'waiting', question_count:1, updated_at:'2026-11-05T00:00:00Z'},
+    {id:'c', status:'waiting', question_count:1, updated_at:'2026-11-03T00:00:00Z'}, {id:'d', status:'active'}, {id:'e', status:'review', updated_at:'2026-11-02T00:00:00Z'}];
   assert.deepEqual([H.nextNeeding(rows).ticket.id, H.nextNeeding(rows).hash], ['c', '']);
   assert.deepEqual([H.nextNeeding(rows.filter(t => t.status !== 'waiting')).ticket.id, H.nextNeeding(rows.filter(t => t.status !== 'waiting')).hash], ['a', '#results']);
   assert.equal(H.nextNeeding(rows.filter(t => t.status === 'active')), null);
   assert.equal(H.nextNeeding([]), null);
   const src = web('ticket.js');
   assert.match(src, /INAPP \? window\.FocusHelpers\.nextNeeding\(list\) : null/);
-  assert.match(src, /location\.replace\(P \+ '\/t\/'/);
-  assert.match(src, /all=1/); assert.match(src, /See everything on Home/);
+  assert.doesNotMatch(src, /location\.replace\(P \+ '\/t\/'/);
+  assert.match(src, /Open the next ticket that needs you/); assert.match(src, /See everything on Home/);
   assert.match(src, /INAPP && \(status === 'waiting' \|\| status === 'review'\)/);
 });
 
@@ -206,4 +206,12 @@ test('Tickets in focus lists running tickets first, then the most recently updat
   const rows = [{id: 'old', status: 'open', updated_at: '2026-11-01T10:00:00Z'}, {id: 'new', status: 'review', updated_at: '2026-11-14T10:00:00Z'},
     {id: 'run-old', status: 'active', updated_at: '2026-11-02T10:00:00Z'}, {id: 'run-new', status: 'active', updated_at: '2026-11-10T10:00:00Z'}];
   assert.deepEqual(H.listOrder(rows).map(t => t.id), ['run-new', 'run-old', 'new', 'old']);
+});
+
+test('ORCH-184: a ticket with an open question is in Needs you only, so the To do count matches the Tickets page', () => {
+  const list = [{id: 'a', status: 'open', question_count: 0}, {id: 'b', status: 'open', question_count: 1}, {id: 'c', status: 'review', question_count: 2}, {id: 'd', status: 'done', question_count: 0}];
+  assert.deepEqual(H.groupRows(list, 'open').map(t => t.id), ['a']);
+  assert.deepEqual(H.groupRows(list, 'waiting').map(t => t.id), ['b', 'c']);
+  assert.deepEqual(H.groupRows(list, 'review'), []);
+  assert.match(web('ticket.js'), /FocusHelpers\.groupRows\(list, status\)/);
 });

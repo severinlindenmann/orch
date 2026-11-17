@@ -42,7 +42,8 @@ function h(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
     if (value == null) continue;
-    if (key === 'href' && !/^(#|https?:)/i.test(String(value))) continue;
+    // a route (#), a web address, or a path on this site (/x; never //x or /\x, which leave the site)
+    if (key === 'href' && !/^(#|https?:|\/(?![\/\\]))/i.test(String(value))) continue;
     if (key.startsWith('data-')) node.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = String(value);
     else if (['className', 'hidden', 'disabled'].includes(key)) node[key] = value;
     else node.setAttribute(key, String(value));
@@ -89,7 +90,13 @@ const href = id => '#ticket/' + encodeURIComponent(id);
 const questions = t => array(t.questions).filter(q => q.answer == null);
 const activeTicket = t => !['done', 'dropped'].includes(t.status);
 const overdue = t => window.DashHelpers.dueLate(t.due, t.status, now());
-const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.due ? date(t.due) : '');  // "Due 18:30" / "Late since 18:30", else the day
+// ORCH-185: a day-only due says which day: "Fri 20 Nov" (the year only when it is not this year), never a bare "Fri".
+const dueDay = value => {
+  const d = parse(value); if (!d) return '';
+  if (String(value).slice(0, 10) === today()) return 'today';
+  return d.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short', ...(d.getFullYear() !== now().getFullYear() ? {year:'numeric'} : {})}).replace(',', '');
+};
+const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.due ? dueDay(t.due) : '');  // "Due 18:30" / "Late since 18:30", else the day
 const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
 const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
 const statusWord = t => window.DashHelpers.statusWord(t.status, t.started);
@@ -105,6 +112,12 @@ function activityInfo(t) {
   const run = state.runs?.[t.id], live = run?.claim?.live;
   const agent = window.DashHelpers.agentLabel(state.settings, run?.claim);
   const getting = starting.has(t.id) || live?.state === 'starting';
+  // a running helper shows the core's one state word (ORCH-61), the same as Home and the live page
+  const helper = window.DashHelpers.helperState(run, t);
+  if (helper && !starting.has(t.id)) {
+    const busy = ['working', 'starting'].includes(helper.state);
+    return {run, live, agent, busy, helper, text:helper.word};
+  }
   const busy = getting || (run?.running && !['idle', 'attention'].includes(live?.state));
   const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Needs you' : t.status === 'review' ? window.DashHelpers.statusWord('review') : busy ? agent + ' is working' : '';
   return {run, live, agent, busy, text};
@@ -114,20 +127,21 @@ const needsList = () => window.DashHelpers.uniqueNeeds(state?.needs);
 const questionLine = t => { const q = snapshot || window.DashHelpers.inNeeds(needsList(), t.id) ? '' : window.DashHelpers.questionPreview(t); return q ? h('p', {className:'meta question-line'}, clean(q)) : null; };
 // "why · just now" under a ticket row's title; board and tree rows keep it under the chip
 function activityNote(t) {
-  const {live, agent, text} = activityInfo(t);
+  const {live, agent, helper, text} = activityInfo(t);
+  if (helper && helper.state !== 'working') return helper.detail || '';
   const seconds = live?.since ? Math.max(0, Math.floor((Date.now() - Date.parse(live.since)) / 1000)) : null;
   const why = window.DashHelpers.plainWhy(live?.why, agent);
   return !text ? '' : [why, Number.isFinite(seconds) ? window.DashHelpers.ago(live.since, Date.now()) : ''].filter(Boolean).join(' · ');
 }
 function activity(t, where = '') {
   if (snapshot) return null;
-  const {live, busy, text: full} = activityInfo(t);
+  const {live, busy, helper, text: full} = activityInfo(t);
   if (!full || (where === 'head' && questions(t).length)) return null;  // the banner is the one place for an open question
   if (full === window.DashHelpers.statusWord('review') && ['head', 'board'].includes(where)) return null;  // the status chip / column already says it: one chip
   const text = full;
   const note = where === 'row' ? '' : activityNote(t);  // in a row the chip sits on the Move to line, the note goes under the title
   const open = live?.state === 'attention' ? liveLinkFor(t) : null;
-  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === window.DashHelpers.statusWord('review') ? {title:'Ready for you to check'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
+  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(helper ? (window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : chip(text, busy ? 'active' : '')) : chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === window.DashHelpers.statusWord('review') ? {title:'Ready for you to check'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
     note ? h('p', {className:'meta'}, note) : null,
     open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
 }
@@ -176,6 +190,7 @@ function notFoundPage() {
 const NAV_ICON = {
   home:'<path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/>',
   tickets:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/>',
+  review:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m8 12 3 3 5-6"/>',
   notes:'<path d="M5 3h14v18H5zM8 8h8m-8 4h8m-8 4h5"/>',
   chat:'<path d="M4 4h16v12H9l-5 4z"/><path d="M8 8h8m-8 4h5"/>',
   addons:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
@@ -266,8 +281,8 @@ function route() {
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|agent|phone|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
-  if (settingsHash && !snapshot && state?.settings) { const [tab, addon] = (settingsHash[1] || 'general').split('/'); return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
+  const settingsHash = /^#settings(?:\/(general|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
@@ -275,8 +290,10 @@ function route() {
     // One address per add-on page: #addon/<name>[/<path>]. The old #open/<name>/<path> forwards to it.
     const open = /^#open\/([a-z][a-z0-9-]{1,31})\/([A-Za-z0-9_./-]*)$/.exec(hash);
     if (open && !open[2].startsWith('/') && !open[2].includes('..') && addons().some(a => a.name === open[1] && a.page)) return {kind:'page', id:open[1], path:open[2], hash:'#addon/' + open[1] + (open[2] ? '/' + open[2] : '')};
-    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?$/.exec(hash);
-    if (own && !(own[2] || '').startsWith('/') && !(own[2] || '').includes('..') && addons().some(a => a.name === own[1] && a.page)) return {kind:'page', id:own[1], path:own[2] || '', hash};
+    // An add-on page's own place can follow a second # (#addon/factory/#/order/<id>/proposal, Home's link to a
+    // proposal): it goes to the frame as the page's own hash.
+    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?(?:#(\/[A-Za-z0-9_/-]*))?$/.exec(hash);
+    if (own && !(own[2] || '').startsWith('/') && !(own[2] || '').includes('..') && addons().some(a => a.name === own[1] && a.page)) return {kind:'page', id:own[1], path:own[2] || '', ...(own[3] ? {inner:own[3]} : {}), hash};
     if (hash.startsWith('#addon/')) {
       const id = decodeURIComponent(hash.slice(7));
       if (addons().some(a => a.name === id && a.dashboard)) return {kind:'addon', id, hash};
@@ -286,6 +303,21 @@ function route() {
   const kind = {'#home':'home', '#tickets':'tickets', '#review':'review', '#settings':'home', '#chat':'home', '#general':'home'}[hash] || (hash.startsWith('#chat/') ? 'home' : '');
   return kind ? {kind, hash:full} : {kind:'notfound', hash:full};
 }
+// THE needs-you number goes to the shown add-on page orch ships (same origin, that frame only), so a page that shows it says the same
+// number as the top bar (ORCH-63). Sent on every header paint and when the page asks ({orch:'needs-count'}).
+function needsCountFrame() {
+  const r = route(), frame = document.querySelector('iframe.embed[data-key="embed"]');
+  if (snapshot || r.kind !== 'page' || !state?.addons?.find?.(a => a.name === r.id)?.shipped) return null;
+  return frame?.contentWindow || null;
+}
+function postNeedsCount(n) {
+  const win = needsCountFrame();
+  try { win?.postMessage({type:'orch.needs.count', count:n}, location.origin); } catch (_) { /* the page was left */ }
+}
+globalThis.addEventListener?.('message', e => {
+  if (e.origin !== location.origin || e.data?.orch !== 'needs-count' || !state) return;
+  if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
+});
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
@@ -302,7 +334,10 @@ function render(arrived = new Set()) {
   if (r.kind === 'ticket') {
     const tk = ticketOf(r.id);
     title = clean(tk?.title) || 'Ticket';
-    crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' › ', title);
+    // ORCH-70: the ticket number alone (the page's own title says the rest), so the top bar stays one row
+    const key = window.DashHelpers.ticketKey(tk);
+    crumb.replaceChildren(...[h('a', {href:'#tickets'}, 'Tickets'), ' › ', key ? h('span', {className:'key', title}, key) : title]);
+    if (window.DashHelpers.ticketKey(tk)) title = window.DashHelpers.ticketKey(tk) + ' ' + title;
   } else if (r.kind === 'page') {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
     title = clean(tk?.title) || last || pageName;
@@ -313,24 +348,33 @@ function render(arrived = new Set()) {
   // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
   const needCount = needsYouTotal(), menuToggle = document.getElementById('menu-toggle');
   menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
+  postNeedsCount(needCount);
   menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
   const wait = document.getElementById('topbar-wait');
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
     const ages = array(state.tickets).filter(t => t.status !== 'done' && questions(t).length).map(t => Date.parse(t.updated_at)).filter(Number.isFinite);
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
+    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · longest wait ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
   }
-  // On Review the decision is the one primary action: New ticket steps back to an outline
-  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn ' + (r.kind === 'review' ? 'outline' : 'primary') + ' sm';
+  // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
+  const buildMark = document.getElementById('topbar-build');
+  if (buildMark) buildMark.hidden = state.build !== 'development';
+  // New ticket is always an outline (design guide, UX checklist B2): every page keeps its own one filled button, Home's
+  // Review all included (report r-1116-1748, ORCH-61)
+  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn outline sm';
   if (newTicket && newTicket.className !== newCls) newTicket.className = newCls;
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
   const needsWords = window.DashHelpers.needsYou(needCount), contactsAddon = addons().find(a => a.dashboard?.panel === 'phone' && a.dashboard);
-  reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
+  // The needs-you number sits on Review (the page that lists exactly those questions and results), not on Home (ORCH-63)
+  reconcile(nav, fragment(navLink('#home', 'Home', 'home'), navLink('#tickets', 'Tickets', 'tickets'),
+    snapshot ? null : navLink('#review', 'Review', 'review', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null),
+    state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
     // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
+  paintTabbar(here, needCount, needsWords);
   const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
@@ -413,7 +457,7 @@ async function addonSet(name, on, tries = 20, pause = 1500) {
   }
   return result;
 }
-// Remove an add-on from this computer (`orch addon uninstall`, refused while it is on: turn it off first). The
+// Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The
 // services restart like for the switch, so a lost answer is checked by reading the state again.
 async function addonUninstall(name, tries = 20, pause = 1500) {
   const still = rows => array(rows).some(a => a && a.name === name);
@@ -436,8 +480,30 @@ async function addonUninstall(name, tries = 20, pause = 1500) {
   }
   return result;
 }
+// The button a person just pressed shows the kit's busy state at once (aria-busy + aria-disabled), before the
+// answer comes, and until it came (ORCH-102: a click showed nothing for seconds while helpers ran).
+let pressed = null;
+document.addEventListener('click', event => {
+  const control = event.target.closest?.('button, .btn');
+  pressed = control ? {control, at:Date.now()} : null;
+}, true);
+function busyOn() {
+  const p = pressed;
+  pressed = null;
+  if (!p || Date.now() - p.at > 1500 || !p.control.isConnected || p.control.getAttribute('aria-busy') === 'true') return null;
+  const was = p.control.getAttribute('aria-disabled');
+  p.control.setAttribute('aria-busy', 'true');
+  p.control.setAttribute('aria-disabled', 'true');
+  return {control:p.control, was};
+}
+function busyOff(busy) {
+  if (!busy) return;
+  busy.control.removeAttribute('aria-busy');
+  if (busy.was === null) busy.control.removeAttribute('aria-disabled'); else busy.control.setAttribute('aria-disabled', busy.was);
+}
 async function act(op, args) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
+  const busy = busyOn();
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
   let succeeded = false;
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
@@ -454,6 +520,7 @@ async function act(op, args) {
     return {ok:true, status:200, state:next};
   } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.'}; }
   finally {
+    busyOff(busy);
     writing--;
     if (!writing && refreshAgain) refresh();  // a change notice that came during the write
     if (before) {
@@ -516,23 +583,56 @@ function dialog(title, cls = 'dialog', lock = '') {
 }
 document.getElementById('new-ticket').hidden = snapshot;
 document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
+// Keyboard shortcuts (persona test F6): "/" goes to the ticket search, "n" opens New ticket. Never while typing or with a window open.
+function shortcutFor(e, typing, windowOpen) {
+  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || typing || windowOpen) return '';
+  return e.key === '/' ? 'search' : e.key === 'n' ? 'new' : '';
+}
+document.addEventListener('keydown', e => {
+  const t = e.target, typing = !!(t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || '')));
+  const what = shortcutFor(e, typing, !!document.querySelector('dialog[open]'));
+  if (!what || snapshot) return;
+  e.preventDefault();
+  if (what === 'new') { ticketForm(); return; }
+  const focusSearch = () => document.querySelector('[data-key="ticket-search"]')?.focus();
+  if (route().kind !== 'tickets') { location.hash = '#tickets'; setTimeout(focusSearch, 0); } else focusSearch();
+});
 document.getElementById('open-agent').hidden = snapshot;
 document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
 document.getElementById('report-problem').hidden = snapshot;
 document.getElementById('report-problem').addEventListener('click', () => reportOpen());
 const toggle = document.getElementById('menu-toggle');
-toggle.addEventListener('click', () => {
-  const open = toggle.getAttribute('aria-expanded') !== 'true';
+// The side menu opens from the top-bar Menu button (tablet) or from More in the phone bottom bar (ORCH-73).
+function setMenu(open) {
   toggle.setAttribute('aria-expanded', String(open));
   document.querySelector('.sidebar').dataset.open = String(open);
-});
+  const more = document.querySelector('#tabbar [data-tab="more"]');
+  if (more) more.setAttribute('aria-expanded', String(open));
+  if (open && more) window.scrollTo(0, 0);
+}
+toggle.addEventListener('click', () => setMenu(toggle.getAttribute('aria-expanded') !== 'true'));
 document.querySelector('.sidebar').addEventListener('click', event => {
   const helper = event.target.closest('[data-nav="open-agent"]');
   if (!event.target.closest('a') && !helper) return;
-  toggle.setAttribute('aria-expanded', 'false');
-  document.querySelector('.sidebar').dataset.open = 'false';
+  setMenu(false);
   if (helper) chatOpenAgent();
 });
+// Phone bottom bar (ORCH-73, master UI.tabbar): Home, Tickets, Review with the one needs-you number, More = the side menu.
+// Shown only up to 720 px (master CSS); the top bar comes back while the side menu is open.
+function paintTabbar(here, needCount, needsWords) {
+  if (!window.UI?.tabbar) return;
+  const open = document.querySelector('.sidebar')?.dataset.open === 'true';
+  const items = [{key:'home', label:'Home', href:'#home', current:here === '#home'}, {key:'tickets', label:'Tickets', href:'#tickets', current:here === '#tickets'},
+    snapshot ? null : {key:'review', label:'Review', href:'#review', current:here === '#review', count:needCount, countLabel:needsWords},
+    {key:'more', label:'More', expanded:open, controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
+  let bar = document.getElementById('tabbar');
+  if (!bar || bar.children.length !== items.length) {
+    bar?.remove();
+    bar = window.UI.tabbar(items, {id:'tabbar', label:'Main'});
+    bar.dataset.testid = 'tabbar';
+    document.body.append(bar);
+  } else window.UI.tabbar.update(bar, items);
+}
 let dragging = '';
 const columnOf = event => event.target.closest?.('.kanban-col');
 main.addEventListener('dragstart', event => {
@@ -655,6 +755,8 @@ main.addEventListener('click', async event => {
   // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
+  if (action === 'reviewer-set') { await reviewerSwitch(); return; }
+  if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
@@ -734,6 +836,7 @@ main.addEventListener('click', async event => {
   if (action === 'view') {
     ticketView = control.dataset.view === 'board' ? 'board' : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
+    writeTicketAddress();
     render(); return;
   }
   if (action === 'board-more') { if (boardMore.has('done')) boardMore.delete('done'); else boardMore.add('done'); render(); return; }
@@ -819,15 +922,48 @@ else {
   const cadence = up => { clearInterval(poll); poll = setInterval(whenShown(refresh), up ? 20000 : 3000); };
   document.addEventListener('visibilitychange', whenShown(refresh));
   if (typeof EventSource !== 'undefined') {
+    const onRev = () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); };
+    sharedEvents(window, onRev, cadence);
+  }
+}
+// One event stream per browser, not one per tab (ORCH-102): a browser opens at most 6 connections to this server,
+// and every open tab held one for good, so a new tab or a cold load waited behind them. The tab that holds the
+// lock opens the stream and tells the other tabs; when it closes, the next tab takes the lock and the stream.
+// Without locks or BroadcastChannel (an old browser) each tab keeps its own stream, as before.
+function sharedEvents(win, onRev, onUp) {
+  const own = () => {
     let stream;
     const connect = () => {
-      stream = new EventSource('/api/events');
-      stream.onopen = () => cadence(true);
-      stream.onerror = () => cadence(false);
-      stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); });
+      stream = new win.EventSource('/api/events');
+      stream.onopen = () => onUp(true);
+      stream.onerror = () => onUp(false);
+      stream.addEventListener('rev', onRev);
     };
     connect();
-    window.addEventListener('pagehide', () => { stream.close(); cadence(false); });
-    window.addEventListener('pageshow', event => { if (event.persisted) connect(); });
-  }
+    win.addEventListener('pagehide', () => { stream.close(); onUp(false); });
+    win.addEventListener('pageshow', event => { if (event.persisted) connect(); });
+  };
+  if (!win.navigator?.locks || typeof win.BroadcastChannel === 'undefined') return own();
+  const channel = new win.BroadcastChannel('orch-events');
+  let up = false, leading = null;
+  const say = what => { try { channel.postMessage(what); } catch (_) { /* the other tabs poll */ } };
+  channel.onmessage = event => {
+    if (event.data === 'rev') onRev();
+    else if (event.data === 'up' || event.data === 'down') onUp(event.data === 'up');
+    else if (event.data === 'hello' && leading) say(up ? 'up' : 'down');  // a new tab asks how the stream is
+  };
+  const lead = () => win.navigator.locks.request('orch-events', () => new Promise(release => {
+    const stream = new win.EventSource('/api/events');
+    leading = {stream, release};
+    stream.onopen = () => { up = true; onUp(true); say('up'); };
+    stream.onerror = () => { up = false; onUp(false); say('down'); };
+    stream.addEventListener('rev', () => { onRev(); say('rev'); });
+  })).catch(() => {});
+  win.addEventListener('pagehide', () => {
+    if (leading) { leading.stream.close(); leading.release(); leading = null; say('down'); }
+    onUp(false);
+  });
+  win.addEventListener('pageshow', event => { if (event.persisted) lead(); });
+  lead();
+  say('hello');
 }

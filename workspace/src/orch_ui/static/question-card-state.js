@@ -99,10 +99,20 @@
     return {init, choose, undo, reset, getState: () => state, subscribe: f => { subs.push(f); return () => subs.splice(subs.indexOf(f), 1); }};
   }
 
-  /* "Yes · Marco · dashboard" */
-  function otherLine(other) {
-    return [other && other.text, other && other.who, other && other.via].filter(Boolean).join(' · ');
+  /* Who and where in plain words: "Marco" (never "human:marco"), and "terminal" for the stored word "cli". */
+  function whoWord(who) {
+    const w = String(who || '').replace(/^(?:human|agent):/, '').trim();
+    return w ? w.charAt(0).toUpperCase() + w.slice(1) : '';
+  }
+  function viaWord(via) {
+    const v = String(via || '').trim();
+    return v === 'cli' ? 'terminal' : v;
   }
 
-  return {create, otherLine, MAX_LEN, UNDO_MS};
+  /* "Yes · Marco · dashboard" */
+  function otherLine(other) {
+    return [other && other.text, whoWord(other && other.who), viaWord(other && other.via)].filter(Boolean).join(' · ');
+  }
+
+  return {create, otherLine, whoWord, viaWord, MAX_LEN, UNDO_MS};
 });

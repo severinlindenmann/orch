@@ -84,7 +84,6 @@ SHOWN = {
     ("workspace/src/orch/cli_review.py", "_wait"): "history.shown_ticket(root, tickets.load(...)) each poll",
     ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
-    ("workspace/src/orch/tickets.py", "start_blocked"): "other = history.shown_ticket(...) first",
     (
         "workspace/src/orch/review.py",
         "applies_now_block",

@@ -392,4 +392,4 @@ last-minute counts). `expect.group_text` = whether a phone text joins the group 
 | `invalid-left-member-text`, `invalid-too-many-members` | F12, limits |
 | `invalid-phones-copy-loud` | push set |
 
-Run: `uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py`.
+Run: `uv run --python ">=3.11" --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py`.

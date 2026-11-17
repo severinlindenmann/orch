@@ -144,7 +144,8 @@ def answer(handler) -> bool:
     True = answered (the caller returns)."""
     if not changed():
         return False
-    if not restart(handler.server.server_address[1], getattr(handler, "root", None)):
+    port = getattr(handler.server, "page_port", None) or handler.server.server_address[1]  # the loopback port
+    if not restart(port, getattr(handler, "root", None)):
         return False
     handler._send(200, PAGE, "text/html; charset=utf-8")
     return True

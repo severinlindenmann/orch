@@ -4,7 +4,7 @@ description: "{{description}}"
 ---
 # orch dashboard
 
-The dashboard shows your work on one page: tickets (active, waiting, open, done) with steps, proof and questions, and
+The dashboard shows your work on one page: tickets (active, waiting, open, done) with steps, evidence and questions, and
 one tab for every add-on that is turned on and has a page. It follows changes by itself.
 
 - "Needs you" is the inbox. A person answers there or with `orch answer <ticket> <q> <answer>`; the answer shows as
@@ -19,7 +19,7 @@ one tab for every add-on that is turned on and has a page. It follows changes by
 - Evidence is marked "You" (the person checked it) or "Helper says"; a missing file reads "on another computer".
 
 ## When to use
-- The user wants to see the tickets, progress or proof in a browser, or asks for "the dashboard" or "the link".
+- The user wants to see the tickets, progress or evidence in a browser, or asks for "the dashboard" or "the link".
 - The user wants a read-only copy to send to someone.
 - Not for changing tickets: use the `orch` commands (see the orch skill).
 
@@ -47,5 +47,5 @@ A snapshot contains ticket titles, steps and history, never settings or the fold
 the user asked. Settings changes are logged to `.orch/run/dashboard/actions.log`.
 
 ## Rules
-- Keep tickets clear: short title, steps with proof, questions with options. The dashboard shows exactly that.
+- Keep tickets clear: short title, steps with evidence, questions with options. The dashboard shows exactly that.
 - Never click for a person: answers and approvals in the page are theirs.

@@ -508,3 +508,45 @@ async fn purge_after_90_days_removes_row_and_blob() {
         .unwrap();
     assert_eq!(n, 0);
 }
+
+#[tokio::test]
+async fn a_shared_report_keeps_its_kind() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    readers(&t, &[&b]).await;
+    // no `about` (an orch from before kinds): a problem
+    let (s, v) = share(&t, &a, "r-1116-1000-old").await;
+    assert_eq!(s, 201, "{v}");
+    let old = v["id"].as_str().unwrap().to_string();
+    // a feature wish says so, in the list, in one problem and on the admin page
+    let blob = upload(&t, &a, TAR).await;
+    let mut wish = body("r-1116-1001-wish", &blob);
+    wish["about"] = json!("feature");
+    let (s, v) = t.call(&a, "POST", "/v1/problems", Some(wish)).await;
+    assert_eq!(s, 201, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (_, one) = t.call(&b, "GET", &format!("/v1/problems/{id}"), None).await;
+    assert_eq!(one["about"], "feature");
+    let (_, one) = t
+        .call(&b, "GET", &format!("/v1/problems/{old}"), None)
+        .await;
+    assert_eq!(one["about"], "problem");
+    let (_, l) = t.call(&b, "GET", "/v1/problems", None).await;
+    let kinds: Vec<&str> = l["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["about"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, vec!["feature", "problem"]);
+    let (_, l) = t.admin_json("GET", "/admin/api/problems", None).await;
+    assert_eq!(l["items"][0]["about"], "feature");
+    // anything else is refused
+    for bad in [json!("bug"), json!(1), json!(["feature"])] {
+        let blob = upload(&t, &a, TAR).await;
+        let mut b2 = body("r-1116-1002-bad", &blob);
+        b2["about"] = bad.clone();
+        let (s, _) = t.call(&a, "POST", "/v1/problems", Some(b2)).await;
+        assert_eq!(s, 422, "{bad}");
+    }
+}

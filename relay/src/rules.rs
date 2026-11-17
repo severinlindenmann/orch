@@ -508,7 +508,7 @@ fn bad_reason_char(ch: char) -> bool {
 }
 
 /// A workspace's `body.taken_back` text (relay-api.md "Question taken back"): body only {text, taken_back:{reason}},
-/// text exactly `Taken back: <reason>`, `to` exactly `phones`, `reply_to` a plain `q<n>` question of THIS sender (404
+/// text exactly `Taken back: <reason>`, `to` exactly `phones`, `reply_to` a plain `q<n>` question or a `review-<n>` round of THIS sender (404
 /// for any other id, so no id is confirmed), the question's ticket, no phone answer stored yet, at most one per question.
 /// The caller holds the one database lock from the duplicate check to the insert, so the one-take-back rule cannot race.
 fn check_taken_back(c: &Connection, key: &Key, sender: &str, msg: &Value) -> Res<()> {
@@ -556,12 +556,15 @@ fn check_taken_back(c: &Connection, key: &Key, sender: &str, msg: &Value) -> Res
         ));
     }
     let (qbody, qextra) = open_payload(key, &q);
-    let plain = qbody["question_id"].as_str().is_some_and(|id| {
-        id.strip_prefix('q')
-            .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
-    });
-    if !plain || qbody.get("proposal").is_some() || qbody.get("review").is_some() {
-        return Err(not_allowed("Only an ordinary question can be taken back."));
+    let digits = |d: &str| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit());
+    let qid = qbody["question_id"].as_str().unwrap_or("");
+    let plain = qid.strip_prefix('q').is_some_and(digits) && qbody.get("review").is_none();
+    // A review round (review-<n>, body.review true) closes too: the ticket left Review on the workspace.
+    let round = qid.strip_prefix("review-").is_some_and(digits) && qbody["review"] == true;
+    if !(plain || round) || qbody.get("proposal").is_some() {
+        return Err(not_allowed(
+            "Only an ordinary question or a review round can be taken back.",
+        ));
     }
     if msg.get("ticket").and_then(Value::as_str) != q.ticket.as_deref() {
         return Err(invalid("The ticket must be the question's ticket."));

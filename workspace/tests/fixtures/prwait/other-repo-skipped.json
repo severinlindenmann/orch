@@ -1,0 +1,18 @@
+{
+  "note": "Another repo (no gate rule): one check SKIPPED. Must be NOT green.",
+  "repo": "severinlindenmann/orch-mobile",
+  "polls": [
+    [
+      {
+        "name": "a",
+        "state": "SUCCESS",
+        "bucket": "pass"
+      },
+      {
+        "name": "b",
+        "state": "SKIPPED",
+        "bucket": "skipping"
+      }
+    ]
+  ]
+}

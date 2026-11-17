@@ -79,4 +79,4 @@ def line(others: list[dict]) -> str | None:
         return None
     if len(others) == 1:
         return f'"{others[0]["title"]}" is also changing this folder.'
-    return f"{len(others)} other agents are also changing this folder."
+    return f"{len(others)} other helpers are also changing this folder."

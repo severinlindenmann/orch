@@ -48,6 +48,8 @@ pub struct Taken(Proc);
 #[derive(Default)]
 pub struct Runner {
     procs: Mutex<HashMap<String, Proc>>,
+    /// tests only: every stop waits this long first (a slow systemd/container stop); 0 in production
+    stop_delay_ms: std::sync::atomic::AtomicU64,
 }
 
 fn env_list(
@@ -1058,8 +1060,26 @@ impl Runner {
         Ok(())
     }
 
+    /// Tests: make every stop slow, like a container or unit that takes its time to go. A stop by name
+    /// waits while the process is still in the table (and routable); `stop_taken` waits after `take`.
+    pub fn set_stop_delay(&self, d: Duration) {
+        self.stop_delay_ms
+            .store(d.as_millis() as u64, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    async fn stop_wait(&self) {
+        let ms = self.stop_delay_ms.load(std::sync::atomic::Ordering::SeqCst);
+        if ms > 0 {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+        }
+    }
+
     /// Kill the process (if any). Returns when it is gone.
     pub async fn stop(&self, name: &str) {
+        if !self.procs.lock().unwrap().contains_key(name) {
+            return;
+        }
+        self.stop_wait().await;
         if let Some(p) = self.take(name) {
             self.stop_taken(p).await;
         }
@@ -1073,6 +1093,7 @@ impl Runner {
 
     /// Stops a process taken with `take` (its own container/unit name), returns when it is gone.
     pub async fn stop_taken(&self, Taken(mut p): Taken) {
+        self.stop_wait().await;
         if sandboxed() {
             let _ = Command::new("systemctl")
                 .args(["stop", &p.unit])

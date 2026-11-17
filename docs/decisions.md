@@ -3,6 +3,8 @@
 One line per decision, newest first. Agents never reopen a decision without the owner (AGENTS.md R9.5).
 Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 
+- 2026-11-16 (ORCH-29): No core start check on tickets: `start_requires` (#777) is removed. The person's Factory Start
+  only tells the manager agent to go; an agent can start a crew ticket itself.
 - 2026-11-16: `orch uninstall` has no option to delete tickets: it always keeps `.orch/tickets`, `.orch/config.toml`
   and `.orch/secrets`.
 - 2026-11-16: The person's own "when to ask" list is the file `.orch/ask-when.md`.
@@ -41,3 +43,8 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-16 (ORCH-34): A problem report can be shared with the relay, only by an explicit tick in Report a problem
   (or `orch relay problem share`). New relay admin page "Report a problem" (owner: the same name as the button). Only workspaces
   the admin ticks there may pick problems up. Replaces "problem reports never go via the relay".
+- 2026-11-16 (ORCH-99): Hand-made scripts are a first step only (R4.6). Each gets a ticket that moves its job into orch
+  (core or add-on) with tests, then the script is deleted. No AI call for work a program can do.
+- 2026-11-17 (ORCH-191): A phone card settled in orch (answered in orch, review ended, ticket dropped/done/removed) is
+  closed with the existing taken-back text and a fixed reason, never the answer; the relay takes back review rounds too.
+  Subscribers get a taken-back text as a `closed` event (with `question_id`, `reason`) instead of a plain `text` event.

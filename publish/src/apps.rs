@@ -270,7 +270,24 @@ async fn start_and_check(
     Err(util::tail(&log, 4000))
 }
 
+/// Deploys in a task of its own: when the client goes away mid-deploy (the request future is dropped),
+/// the deploy still finishes or cleans up, and the old process is always stopped (its container or unit
+/// would otherwise keep running unrouted).
 pub async fn deploy(
+    st: &State,
+    w: &Workspace,
+    name: &str,
+    bytes: Bytes,
+    expires_at: Option<String>,
+    new_token: bool,
+) -> ApiResult<Value> {
+    let (st, w, name) = (st.clone(), w.clone(), name.to_string());
+    tokio::spawn(async move { deploy_now(&st, &w, &name, bytes, expires_at, new_token).await })
+        .await
+        .map_err(ApiError::internal)?
+}
+
+async fn deploy_now(
     st: &State,
     w: &Workspace,
     name: &str,
@@ -1352,9 +1369,13 @@ pub fn access_changed(old: &AppRow, new: &AppRow) -> Option<Response> {
     if new.workspace != old.workspace
         || new.public != old.public
         || new.view_token_hash != old.view_token_hash
-        || new.stack != old.stack
     {
         return Some(private_page());
+    }
+    // same access, other stack (a redeploy switched static <-> process meanwhile): the caller's row
+    // says how to serve, so this request is not served; it may simply try again
+    if new.stack != old.stack {
+        return Some(offline_page());
     }
     None
 }

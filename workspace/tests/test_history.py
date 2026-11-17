@@ -124,7 +124,7 @@ def test_evidence_by_is_proven_by_its_own_digest(synced):
     evs = t["checklist"][0]["evidence"]
     assert evs[0]["by"] == "human:tester" and evs[1]["by"] == history.SYNC_BY
     text = cli._show(_raw(root, tid), root)
-    assert "done by me   ● You" in text and "forged   ○ Agent says" in text
+    assert "done by me   ● You" in text and "forged   ○ Helper says" in text
 
 
 @pytest.mark.parametrize("by", [None, "agent:claude", "", 7, "human:"])
@@ -143,7 +143,7 @@ def test_synced_evidence_without_a_person_by_gets_no_author_either(synced, by):
     assert history.evidence_author(t, c, c["evidence"][0]) == "person"
     assert history.evidence_author(t, c, c["evidence"][1]) == "agent"
     assert history.shown_ticket(root, t) == t  # idempotent
-    assert "planted   ○ Agent says" in cli._show(_raw(root, tid), root)
+    assert "planted   ○ Helper says" in cli._show(_raw(root, tid), root)
     raw = _raw(root, tid)
     assert raw["checklist"][0]["evidence"][1] == planted  # the stored bytes never change
     demoted = history._all_demoted(raw)["checklist"][0]["evidence"]  # the fail-closed path too

@@ -239,6 +239,52 @@ def test_gallery_and_design_rules_are_served(server):
     assert b"the one master" in urllib.request.urlopen(f"{server}/kit/DESIGN.md").read()
 
 
+def test_style_guide_has_its_own_address(server):
+    """ORCH-67: /styleguide is the gallery (its files next to it under /styleguide/); kit/gallery.html still works."""
+    import http.client
+    import urllib.error
+    import urllib.request
+
+    host = server.split("//", 1)[1]
+    c = http.client.HTTPConnection(host)
+    c.request("GET", "/styleguide")
+    r = c.getresponse()
+    assert (r.status, r.getheader("Location")) == (302, "/styleguide/")
+    r.read()
+    c.close()
+    r = urllib.request.urlopen(f"{server}/styleguide")  # follows to /styleguide/
+    page = r.read().decode()
+    assert r.geturl().endswith("/styleguide/") and r.status == 200
+    assert page == urllib.request.urlopen(f"{server}/kit/gallery.html").read().decode()
+    assert "style-src 'self' 'unsafe-inline'" in r.headers["Content-Security-Policy"]
+    for link in set(re.findall(r'(?:href|src|poster)="([a-z0-9][a-z0-9./-]*\.[a-z0-9]+)"', page)):
+        assert urllib.request.urlopen(f"{server}/styleguide/{link}").status == 200, link
+    for bad in (
+        "/styleguide/../server.py",
+        "/styleguide/demo.html",
+        "/styleguide/nothing.css",
+        "/styleguidex",
+    ):
+        try:
+            code = urllib.request.urlopen(f"{server}{bad}").status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        assert code == 404, bad
+
+
+def test_gallery_has_no_dead_links():
+    """Every link of the style guide opens something: a file of the kit or a section of the page itself."""
+    from orch_dashboard.server import kit_dir
+
+    page = (kit_dir() / "gallery.html").read_text()
+    ids = set(re.findall(r'\bid="([^"]+)"', page))
+    for link in set(re.findall(r'(?:href|src|poster)="([^"]+)"', page)):
+        if link.startswith("#"):
+            assert link == "#" or link[1:] in ids, link
+        elif not re.match(r"https?:", link):
+            assert (kit_dir() / link.split("?")[0]).is_file(), link
+
+
 def test_page_has_no_inline_code_and_loads_the_kit():
     html = (WEBDIR / "index.html").read_text()
     assert " style=" not in html and "<style" not in html and "onclick=" not in html
@@ -512,7 +558,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "'Let the helper do everything?'",
         "' is now the default helper.'",
         "ticketButton('Start helper'",
-        "'Ask the helper to check again'",
+        "'Ask your helper to check again'",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
         "plainWhy(question, 'The helper')",
@@ -573,7 +619,12 @@ def test_v1_home_and_ticket_controls():
     assert "function connectionNotice(connectionEl, hadState)" in home
     assert "connectionNotice(connection, !!state)" in js
     assert "main.replaceChildren(skeletonFor(hashKind(location.hash)))" in js
-    assert "[t.title, t.key, t.owner, t.note]" in tickets and "startsWith('agent:')" in tickets
+    # ORCH-58: a number (58, ORCH-58) matches the key exactly; words search title, key, owner and note
+    assert (
+        "keyMatch(t, needle)" in tickets
+        and "t.key, t.owner, t.note]" in tickets
+        and "startsWith('agent:')" in tickets
+    )
     assert "'data-key':'ticket-search'" in tickets and "aria-pressed" in tickets
     # The shell's unused old delegation and shared CSS are outside this lane's edit scope.
     for old in ("Jump to", "status-jumps", "board-jump", "boardCol"):

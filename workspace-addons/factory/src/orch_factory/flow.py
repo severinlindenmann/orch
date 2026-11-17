@@ -197,13 +197,12 @@ def derive(root, store, ticket, tickets=None):
         for e in ents
         if e["row"]["kind"] == "factory:change" and authority.human(e["q"]) and e["q"]["answer"] == "Accept"
     ]
-    # each task remembers the person's answer that approved it: core's start gate on its crew ticket (#681)
-    tasks = {t["slug"]: {**t, "approved_by": f"{tid}:{start['q']['id']}=Start"} for t in p["tasks"]}
+    tasks = {t["slug"]: dict(t) for t in p["tasks"]}
     cap = p["budget"]["active_min_cap"]
     for e in accepted:
         cap += e["data"]["adds_min"]
         for t in e["data"].get("adds_tasks", []):
-            tasks.setdefault(t["slug"], {**t, "approved_by": f"{tid}:{e['q']['id']}=Accept"})
+            tasks.setdefault(t["slug"], dict(t))
     d.update(proposal=p, tasks=tasks, cap=cap)
     agents = {c["role"]: c["agent"] for c in p["crew"]}
     for t in tasks.values():
@@ -216,8 +215,6 @@ def derive(root, store, ticket, tickets=None):
             and x.get("order") == tid
             and t.get("parent") == tid
             and x.get("task") in tasks
-            and _gate(t)
-            == tasks[x["task"]]["approved_by"]  # only a ticket core itself holds to the person's answer
         ):
             crew[x["task"]] = t
     d["crew"] = crew
@@ -486,12 +483,6 @@ def started_state(root, store, ticket, tickets=None):
     return d
 
 
-def _gate(ticket):
-    """A crew ticket's core start gate as "<ticket>:<question>=<answer>" (a sub-ticket made without one is no crew)."""
-    g = ticket.get("start_requires")
-    return f"{g.get('ticket')}:{g.get('question')}={g.get('answer')}" if isinstance(g, dict) else None
-
-
 def crew_add(root, order, task):
     store = Store(root)
     with store.locked():
@@ -505,17 +496,7 @@ def crew_add(root, order, task):
             raise Refused("That task needs a crew role the proposal does not have.", "not_allowed")
         if task in d["crew"]:
             return {"order": d["tid"], "task": task, "ticket": d["crew"][task]["id"], "created": False}
-        # core refuses any run on it (also a direct `orch run start`) until the person's Start / Accept is there
-        new = orchcli.call(
-            root,
-            "ticket",
-            "new",
-            t["title"],
-            "--parent",
-            d["tid"],
-            f"--start-requires={t['approved_by']}",
-            write=True,
-        )
+        new = orchcli.call(root, "ticket", "new", t["title"], "--parent", d["tid"], write=True)
         orchcli.set_ext(
             root, new, role="crew", order=d["tid"], task=task, crew_role=t["role"], agent=t["agent"]
         )

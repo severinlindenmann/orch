@@ -9,7 +9,8 @@ own hooks call `orch run event --kind idle`, a generic agent calls
 `orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
 once (workspace.live_max) sets a limit; then a start waits in line for a slot. A session idle (or
 waiting for a person) for an hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review,
-Done or Dropped, and such a session does not count toward the limit), or on a ticket Done for that long,
+Done or Dropped, and such a session does not count toward the limit, nor does one idle while it only waits for
+pull request checks), or on a ticket Done for that long,
 is closed on the next `orch run` call (there is no daemon); its session id stays on the ticket, so the next
 start continues it.
 Nothing here reads the screen to decide anything, with one exception: a run still "starting" (no hook has
@@ -33,13 +34,16 @@ import time
 import unicodedata
 from pathlib import Path
 
-from orch import adapters, brake, diag, history, procs, runhooks, runs, tickets
+from orch import adapters, brake, diag, history, modelpick, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
 CROWDED_AT = 4  # with no limit set: this many open sessions make idle ones on finished tickets close early
 IDLE_SECONDS = 60 * 60
 FINISHED_IDLE_SECONDS = 10 * 60  # a session on a ticket in Review, Done or Dropped closes after this
-HARD_EXTRA = 4  # most sessions over a set limit that finished tickets may keep open
+LOAD_STOP = 30.0  # no new helper while the 1-minute load average is above this (also with no limit set)
+DISK_STOP_GB = 5.0  # ... or while less than this much disk is free
+PACE_SECONDS = 30  # with no limit set: at most one new helper in this time, the rest wait in line
+HARD_EXTRA = 4  # most sessions over a set limit that finished tickets or check waiters may keep open
 WHERE_TO_CHANGE = "Settings > Helper > Helpers at once"
 FINISHED = ("review", "done", "dropped")
 PASTE_DELAY = 0.3
@@ -136,14 +140,30 @@ def live_all(root: Path) -> list[dict]:
     ]
 
 
+def _only_waits_for_checks(rec: dict) -> bool:
+    """Idle at its prompt and every command it still runs is a wait on pull request checks (orch ref wait,
+    orch github wait): it uses no machine to speak of, so it does not hold a slot (ORCH-148)."""
+    if (rec.get("live") or {}).get("state") != "idle":
+        return False
+    from orch import runwatch  # runwatch imports this module
+
+    with contextlib.suppress(Exception):
+        return runwatch.only_waits_for_checks(rec.get("agent_pid"))
+    return False
+
+
 def live_alive(root: Path) -> list[dict]:
     """Live runs that count against the limit. A session that is idle or waiting for a person on a ticket in
-    Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS); a working or starting
-    one does."""
+    Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS), nor does one idle
+    while it only waits for pull request checks; a working or starting one does. Both stay under the
+    hard ceiling in _full (the limit plus HARD_EXTRA)."""
     return [
         r
         for r in live_all(root)
-        if not ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
+        if not (
+            ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
+            or _only_waits_for_checks(r)
+        )
     ]
 
 
@@ -160,8 +180,8 @@ def _crowded(root: Path) -> bool:
 
 
 def _full(root: Path) -> int | None:
-    """The limit that was hit (a set limit, or that plus HARD_EXTRA for sessions on finished tickets), else
-    None."""
+    """The limit that was hit (a set limit, or that plus HARD_EXTRA for sessions on finished tickets or that
+    only wait for checks), else None."""
     n = max_live(root)
     if n is None:
         return None
@@ -170,6 +190,44 @@ def _full(root: Path) -> int | None:
     if len(live_all(root)) >= n + HARD_EXTRA:
         return n + HARD_EXTRA
     return None
+
+
+def _pressure(root: Path) -> str | None:
+    """Plain reason the machine cannot take another helper now (load or disk), else None."""
+    with contextlib.suppress(OSError, AttributeError):
+        if os.getloadavg()[0] > LOAD_STOP:
+            return "the computer is very busy"
+    with contextlib.suppress(OSError):
+        if shutil.disk_usage(root).free / 2**30 < DISK_STOP_GB:
+            return "the disk is almost full"
+    return None
+
+
+def _too_soon(root: Path) -> bool:
+    """No limit set: a helper that started a moment ago holds the next one back (one new helper per pass)."""
+    if max_live(root) is not None:
+        return False
+    from datetime import datetime
+
+    now = time.time()
+    for r in live_all(root):
+        since = (r.get("live") or {}).get("since")
+        with contextlib.suppress(ValueError, TypeError, AttributeError):
+            t = datetime.fromisoformat(since.replace("Z", "+00:00")).timestamp()
+            if 0 <= now - t < PACE_SECONDS:
+                return True
+    return False
+
+
+def _held(root: Path, by: str = "agent:tend") -> str | None:
+    """Why a new helper must wait in line right now, although no limit was reached; None = go ahead.
+    A person's own start is not paced (R8.6), but a machine that is out of load or disk holds every start."""
+    why = _pressure(root)
+    if why:
+        return why
+    if by.startswith("human:"):
+        return None
+    return "other helpers are just starting" if _too_soon(root) else None
 
 
 def busy_words(n: int, ticket: str) -> str:
@@ -182,19 +240,55 @@ def busy_words(n: int, ticket: str) -> str:
 # ---------------------------------------------------------------- start
 
 
-def _queue_for_slot(root: Path, tid: str, by: str, text: str) -> None:
+PRIORITIES = ("high", "normal", "low")  # the order tickets waiting in line start in (then oldest first)
+
+
+def _queue_for_slot(root: Path, tid: str, by: str, text: str, priority: str = "normal") -> None:
+    """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority."""
     with runs.locked(root, tid):
-        runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
+        items = runs._pending_read(root, tid)
+        mine = [i for i in items if i.get("via") == "slots" and not i.get("delivered_at")]
+        want = PRIORITIES.index(priority)
+        if mine:
+            want = min([_rank(i) for i in mine] + [want])  # queued again: never lower
+        else:
+            item = runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
+            items = runs._pending_read(root, tid)
+            mine = [i for i in items if i["id"] == item["id"]]
+        if any(_rank(i) != want or (want != 1 and "priority" not in i) for i in mine):
+            for i in mine:
+                i["priority"] = PRIORITIES[want]
+            runs._pending_write(root, tid, items)
+
+
+def _rank(item: dict) -> int:
+    p = item.get("priority")
+    return PRIORITIES.index(p) if p in PRIORITIES else PRIORITIES.index("normal")
 
 
 def start_live(
-    root: Path, tid: str, by: str, name: str, *, fresh: bool, take_over: bool, busy_text: str
+    root: Path,
+    tid: str,
+    by: str,
+    name: str,
+    *,
+    fresh: bool,
+    take_over: bool,
+    busy_text: str,
+    priority: str = "normal",
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
     hit = None if mine else _full(root)
+    held = None if (mine or hit) else _held(root, by)
+    if held:
+        _queue_for_slot(root, tid, by, busy_text, priority)
+        raise runs.Busy(
+            f"{ref(root, tid)} waits in line: {held}. It starts by itself when that passes.",
+            {"pending": True, "held": held},
+        )
     if hit:
-        _queue_for_slot(root, tid, by, busy_text)
+        _queue_for_slot(root, tid, by, busy_text, priority)
         extra = {"pending": True, "limit": hit, "change": WHERE_TO_CHANGE}
         raise runs.Busy(busy_words(hit, ref(root, tid)), extra)
     if not mine and session_exists(root, tid):
@@ -559,6 +653,7 @@ def deliver(root: Path, tid: str, stop=None) -> int:
                 runs._write(root, rec)
             return 0
         line = notice_line(tid, any(i.get("via") == "start" for i in items))
+        switch = _model_line(rec, root)
         why = _hold_reason(root, tid, _dialog_rule(rec["agent"], root), _prompt_box(rec["agent"], root))
         _note_hold(root, tid, rec, why)
         if why:
@@ -573,6 +668,13 @@ def deliver(root: Path, tid: str, stop=None) -> int:
             )
         if not runhooks.gate(root=root, tid=tid, run=rec["run"]):
             return 0
+        if switch:  # the ticket moved up: the same conversation goes on on the new model (a fixed line)
+            if not _type_line(root, tid, switch, QUICK):
+                return 0
+            time.sleep(MODEL_SWITCH_DELAY)
+            rec = runs.read(root, tid) or rec
+            rec["model"] = rec.pop("model_switch", {}).get("to")
+            runs._write(root, rec)
         if not _type_line(root, tid, line, QUICK):
             return 0
         rec = runs.read(root, tid) or rec
@@ -588,6 +690,37 @@ def deliver(root: Path, tid: str, stop=None) -> int:
         }
         runs._write(root, rec)
         return len(items)
+
+
+MODEL_SWITCH_DELAY = 1.0  # the tool redraws after a model change: the notice waits this long
+
+
+def _model_line(rec: dict, root: Path) -> str | None:
+    """The fixed line that switches a live session's model (adapter live.model_line), when a switch waits."""
+    to = (rec.get("model_switch") or {}).get("to")
+    tmpl = adapters.load(rec["agent"], root).get("live", {}).get("model_line")
+    if to not in modelpick.MODELS or not tmpl:
+        return None
+    return tmpl.replace("{model}", to)
+
+
+def switch_model(root: Path, tid: str, model: str, by: str) -> bool:
+    """The ticket moved up while a live session runs: at its next turn end orch types the adapter's fixed
+    model line, then the notice for one fixed message saying so (the reason stays in the history only: no
+    caller's words go into the session). True when a live session will switch; False when none runs or its
+    tool cannot switch (then the next start uses the new model)."""
+    if model not in modelpick.MODELS:
+        return False
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec.get("mode") != "live" or runs.state(rec) != "alive":
+            return False
+        if not adapters.load(rec["agent"], root).get("live", {}).get("model_line"):
+            return False
+        rec["model_switch"] = {"to": model, "at": tickets.now()}
+        runs._write(root, rec)
+    send(root, tid, by, f"Model moved up to {modelpick.LABELS[model]}. Go on with the ticket.")
+    return True
 
 
 def read_input(root: Path, tid: str, run: str | None, agent: bool) -> tuple[str, int]:
@@ -931,6 +1064,8 @@ def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen, guard=N
                 with guard if guard is not None else contextlib.nullcontext():
                     if not (stop is not None and stop.is_set()):
                         retry_deliver(root, tid, run, memo, end=proc.terminate, stop=stop)
+                    if not (stop is not None and stop.is_set()):
+                        check_attention(root, tid, run, memo, stop=stop)
         except Exception:  # never take the wrapper down
             continue
 
@@ -946,7 +1081,57 @@ def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
         rec["renewed_at"] = tickets.now()
         rec.pop("maybe_stale_since", None)
         runs._write(root, rec)
+    diag.log("run.live_state", "info", root=root, ticket=tid, run=run, state=state)
     runhooks.fire("run_state", root=root, tid=tid, run=run, state=state)  # after the lock is released
+    return True
+
+
+ATTENTION_CLEAR_SECONDS = 3.0  # the dialog must stay gone this long before a person's OK no longer counts
+
+
+def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | None = None, stop=None) -> bool:
+    """The tool asked for a person's OK on the screen after it was up (attention, no first-run screen) and the
+    dialog went away without a Stop or a new prompt: the tool took a decision by itself (it blocked the call
+    after a while) or a person answered in the session, and it went on working. When the pane shows no dialog
+    for ATTENTION_CLEAR_SECONDS the run counts as working again, so `orch run list` and Needs you stop asking
+    for an OK nobody can give (report r-1116-1738-ws). An unreadable or scrolled pane changes nothing.
+    memo: the caller's state between polls. True when the state was changed."""
+    t = time.time() if now is None else now
+    rec = runs.read(root, tid)
+    live = (rec or {}).get("live") or {}
+    if (
+        not rec
+        or rec["run"] != run
+        or live.get("state") != "attention"
+        or live.get("why")
+        or not rec.get("up")
+    ):
+        memo.pop("attention_gone", None)
+        return False
+    if (stop is not None and stop.is_set()) or not session_exists(root, tid):
+        return False
+    why = _hold_reason(root, tid, _dialog_rule(rec["agent"], root), _prompt_box(rec["agent"], root))
+    if why in ("dialog", "unreadable", "scrolled"):
+        memo.pop("attention_gone", None)
+        return False
+    since, first = memo.get("attention_gone") or (None, None)
+    if since != live.get("since"):
+        memo["attention_gone"] = (live.get("since"), t)
+        return False
+    if t - first < ATTENTION_CLEAR_SECONDS:
+        return False
+    memo.pop("attention_gone", None)
+    with runs.locked(root, tid):
+        cur = runs.read(root, tid)
+        lv = (cur or {}).get("live") or {}
+        if not cur or cur["run"] != run or lv.get("state") != "attention" or lv.get("since") != since:
+            return False  # a hook wrote a newer state in the meantime: it wins
+        cur["live"] = {"state": "working", "since": tickets.now()}
+        cur["renewed_at"] = tickets.now()
+        cur.pop("maybe_stale_since", None)
+        runs._write(root, cur)
+    diag.log("run.live_state", "info", root=root, ticket=tid, run=run, state="working", why="dialog_gone")
+    runhooks.fire("run_state", root=root, tid=tid, run=run, state="working")
     return True
 
 
@@ -1500,10 +1685,9 @@ def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
     return result
 
 
-def start_waiting(root: Path) -> None:
-    """A slot opened: start the oldest ticket whose live start was queued for lack of one."""
-    if _full(root):
-        return
+def waiting_line(root: Path) -> list[tuple[str, str]]:
+    """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
+    low), then the oldest first. [(ticket id, priority)]"""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -1512,10 +1696,25 @@ def start_waiting(root: Path) -> None:
             continue
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
         if items:
-            waiting.append((items[0]["at"], tid, items[0]["by"]))
-    for _, tid, by in sorted(waiting)[:1]:
+            rank = min(_rank(i) for i in items)
+            with contextlib.suppress(OSError):
+                waiting.append((rank, items[0]["at"], f.stat().st_mtime_ns, tid))
+    return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
+
+
+def start_waiting(root: Path) -> list[str]:
+    """Slots opened: start the tickets waiting in line, in priority order, while slots are free."""
+    started: list[str] = []
+    for tid, _ in waiting_line(root):
+        if _full(root) or _held(root):
+            break
+        items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
+        if not items or runs.read(root, tid):
+            continue
         with contextlib.suppress(Exception):
-            runs.start(root, tid, by, mode="live")
+            runs.start(root, tid, items[0]["by"], mode="live")
+            started.append(tid)
+    return started
 
 
 def hold_text(rec: dict) -> str | None:

@@ -26,6 +26,10 @@ test('an add-on without a page keeps its own tab; path tricks fall back', () => 
   assert.equal(route('#open/focus/../x', [FOCUS]).kind, 'notfound');
   assert.equal(route('#open/nothing/', [FOCUS]).kind, 'notfound');
 });
+test('an add-on page opens at its own place after a second # (Home links to a Factory proposal, ORCH-60)', () => {
+  assert.deepEqual({...route('#addon/focus/#/order/t_abc12345/proposal', [FOCUS])}, {kind:'page', id:'focus', path:'', inner:'/order/t_abc12345/proposal', hash:'#addon/focus/#/order/t_abc12345/proposal'});
+  for (const hash of ['#addon/focus/#/a/../b', '#addon/focus/#x', '#addon/focus/#/a#/b']) assert.equal(route(hash, [FOCUS]).kind, 'notfound', hash);
+});
 test('unknown addresses are Page not found; empty and #home stay Home; a query keeps its route', () => {
   for (const hash of ['#nope', '#tickets/x', '#ticketsx', '#addon/missing']) assert.equal(route(hash, [FOCUS]).kind, 'notfound', hash);
   assert.equal(route('', []).kind, 'home');
@@ -65,12 +69,13 @@ test('skeletonFor draws the page shape, busy, with one status text and hidden sh
   assert.equal(ctx.hashKind('#notes'), 'home');
   assert.equal(ctx.hashKind('#note/t_1'), 'home');
 });
-test('the sidebar: Home has the needs badge, Settings is last in the foot', () => {
+test('the sidebar: Review has the needs badge, Settings is last in the foot', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/index.html'), 'utf8');
   const foot = html.slice(html.indexOf('<div class="side-foot">'));
   assert.ok(foot.indexOf('id="mm-toggle"') < foot.indexOf('id="side-settings"'));
   assert.ok(html.indexOf('id="side-settings"') > html.indexOf('id="side-nav"') && html.indexOf('id="side-settings"') > html.indexOf('id="side-addons"'));
-  assert.match(source, /navLink\('#home', 'Home', 'home', needCount \? h\('span', \{className:'count'/);
+  // ORCH-63: the needs-you number sits on the Review entry, right after Tickets; Home has no badge
+  assert.match(source, /navLink\('#home', 'Home', 'home'\), navLink\('#tickets', 'Tickets', 'tickets'\),\n\s*snapshot \? null : navLink\('#review', 'Review', 'review', needCount \? h\('span', \{className:'count'/);
   assert.doesNotMatch(source, /nav-helper/);
 });
 test('one needs-you count: every reader calls needsYouTotal', () => {
@@ -93,10 +98,12 @@ test('#settings is General; #settings/<tab> opens that tab on the same Settings 
   assert.deepEqual({...route('#settings', [])}, {kind:'settings', hash:'#settings', tab:'general', addon:null});
   for (const tab of ['general', 'agent', 'phone', 'addons']) assert.deepEqual({...route('#settings/' + tab, [])}, {kind:'settings', hash:'#settings', tab, addon:null});
   assert.deepEqual({...route('#settings/addons/publish', [])}, {kind:'settings', hash:'#settings', tab:'addons', addon:'publish'});  // one add-on's own settings page
+  // the address names the tab like its label; the old names still open the same tab
+  for (const [name, tab] of [['helper', 'agent'], ['contacts', 'phone']]) assert.deepEqual({...route('#settings/' + name, [])}, {kind:'settings', hash:'#settings', tab, addon:null});
   assert.equal(route('#settings/phone/publish', []).kind, 'notfound');
   assert.equal(route('#settings/nope', []).kind, 'notfound');  // an unknown tab is an unknown address: Page not found
 });
-test('the phone tab is role=tab and choosing it keeps Settings open at #settings/phone', () => {
+test('the phone tab is role=tab and choosing it keeps Settings open at #settings/contacts and adds a history entry', () => {
   const settingsSrc = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const nav = settingsSrc.slice(settingsSrc.indexOf("role:'tablist'"), settingsSrc.indexOf("h('div', {className:'settings-content'}"));
   assert.match(nav, /\['phone', phoneAddon\.dashboard\.label\]/);
@@ -105,10 +112,11 @@ test('the phone tab is role=tab and choosing it keeps Settings open at #settings
   const go = settingsSrc.slice(settingsSrc.indexOf('function settingsGo('), settingsSrc.indexOf('}', settingsSrc.indexOf('function settingsGo(')) + 1);
   const calls = [];
   const ctx = {settingsTab:'general', settingsReview:'x', location:{hash:'#settings'}, render:() => calls.push('render'),
-    history:{replaceState:(_s, _t, url) => { ctx.location.hash = url; calls.push('replace'); }}};
-  vm.createContext(ctx); vm.runInContext(go + '; settingsGo("phone");', ctx);
-  assert.equal(ctx.location.hash, '#settings/phone');
+    history:{pushState:(_s, _t, url) => { ctx.location.hash = url; calls.push('push'); }}};
+  const map = settingsSrc.slice(settingsSrc.indexOf('const SETTINGS_TAB_ADDRESS'), settingsSrc.indexOf('\n', settingsSrc.indexOf('const SETTINGS_TAB_ADDRESS')));
+  vm.createContext(ctx); vm.runInContext(map + '\n' + go + '; settingsGo("phone");', ctx);
+  assert.equal(ctx.location.hash, '#settings/contacts');
   assert.equal(ctx.settingsTab, 'phone');
-  assert.deepEqual(calls, ['replace', 'render']);
+  assert.deepEqual(calls, ['push', 'render']);
   assert.equal(route(ctx.location.hash, []).kind, 'settings');
 });

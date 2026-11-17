@@ -26,6 +26,7 @@ from .data import (
     load_links,
     load_services,
     load_state,
+    patch_ticket,
 )
 from .events import Revisions
 from .state_cache import StateCache
@@ -41,7 +42,9 @@ MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = (
     140 * 1024 * 1024
 )  # a new ticket with files: at most 100 MB of files (newticket.js) as base64, plus the text
-LEAN_OPS = ("chat.send_ws", "chat.sync_ws")
+LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose")
+# ops that name a ticket but change more than it (settings, add-ons, the workspace): answered with a full build
+WIDE_OPS = ("addon.act", "addon.set", "addon.uninstall", "addon.start", "update.start")
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -195,7 +198,9 @@ def _link_msg(session, name: str) -> bytes:
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
 RESTARTING_OPS = ("addon.set", "addon.uninstall")
-REOPEN_EVERY = 30  # seconds between two "open the dashboard again" windows
+# What a browser that has not signed in may load under a host name that is not this computer's (a proxy in front):
+# the page shell only, no data. Everything else there needs the session cookie of that host name.
+_PRIVATE_PREFIXES = ("/api/", "/view/", "/addon/", "/page/", "/ready", "/styleguide")
 
 
 def _arm_resume(root: Path, session) -> None:
@@ -203,7 +208,7 @@ def _arm_resume(root: Path, session) -> None:
     open tabs keep working after the add-on change restarts it. Written only for a click with a page session."""
     import contextlib
 
-    with contextlib.suppress(Exception):  # without it the tab shows "orch restarted. Reload ..." as before
+    with contextlib.suppress(Exception):  # without it the restarted server falls back to the kept session
         from orch import pagelaunch
 
         pagelaunch.write_resume_cookie(root, session.server, session.cookie, session.secret)
@@ -231,23 +236,18 @@ class Handler(BaseHTTPRequestHandler):
             "dashboard.request",
             "debug",
             method=getattr(self, "command", ""),
-            path=self.path.split("?", 1)[0][:200],
+            path="/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200],
         )
 
     def log_message(self, *a):  # quiet
         pass
 
     def _refused_text(self, text: str) -> str:
-        """The words of a 403 for a missing page session: a sign-in link that was used twice, a tab whose
-        session the restarted server does not know (after an update), or the plain default."""
-        from orch.pagesession import RESTARTED_MSG, REVOKED_MSG
+        """The words of a 403 for a missing page session: a sign-in link that was used twice, else sign in."""
+        from orch.pagesession import REVOKED_MSG
 
-        if self.session is None:
-            return text
-        if self.session.revoked:
+        if self.session is not None and self.session.revoked:
             return REVOKED_MSG
-        if self.session.stale(self.headers, self.server.server_address[1]):
-            return RESTARTED_MSG
         return text
 
     def _act_log(self, text: str) -> None:
@@ -280,10 +280,60 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _host_ok(self) -> bool:
-        host = (self.headers.get("Host") or "").strip().lower()
-        host = host.rsplit("]", 1)[0] + "]" if host.startswith("[") else host.split(":", 1)[0]
-        return host in ("127.0.0.1", "localhost", "[::1]")
+    def _host_ok(self, path: str = "/") -> bool:
+        """DNS-rebinding guard. This computer's names always pass. Any other well-formed name (a proxy in front,
+        another computer) passes with this server's session cookie, or for the page shell alone (no data):
+        after the sign-in it does not matter where the browser is."""
+        raw = (self.headers.get("Host") or "").strip().lower()
+        host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
+        if host in ("127.0.0.1", "localhost", "[::1]") and not self._remote():
+            return True
+        try:
+            from orch_ui.origin import any_host_ok
+        except ImportError:
+            return False
+        if not any_host_ok(raw):
+            return False
+        if self._signed_in():
+            return True
+        # a sandboxed ticket page's own files: its origin is opaque, so the browser sends no cookie with them
+        # (a cross-site load an attacker's page can show but never read); the page document itself needs one
+        px = PROXY.fullmatch(path)
+        if px and PAGE_PATH.fullmatch(px.group(2) or ""):  # an unguessable key in the address
+            return True
+        if (
+            not self._remote()  # browser headers anyone can forge prove nothing on the port for other computers
+            and path.startswith("/view/")
+            and self.headers.get("Sec-Fetch-Site") in ("same-site", "cross-site")
+            and self.headers.get("Sec-Fetch-Dest") in ticketfiles.PAGE_SUBRESOURCE_DEST
+            and not path.lower().endswith((".html", ".htm"))
+        ):
+            return True
+        return path == "/" or (
+            not path.startswith(_PRIVATE_PREFIXES) and path.lower().endswith((*STATIC_EXT, ".html"))
+        )
+
+    def _remote(self) -> bool:
+        """This request came in on the port for other computers (remote listening, opt-in). There a name of
+        this computer in Host proves nothing (any computer can send it), so nothing is trusted for it."""
+        return bool(getattr(getattr(self, "server", None), "remote", False))
+
+    def _page_port(self) -> int:
+        """The port the session belongs to (cookie name, kept session): the loopback port, also for a request
+        on the port for other computers, so one sign-in counts on both."""
+        return getattr(self.server, "page_port", None) or self.server.server_address[1]
+
+    def _signed_in(self) -> bool:
+        """This server's session cookie (no page secret needed): enough to READ under any host name."""
+        if getattr(self, "session", None) is None:  # a server without a page session: nobody signs in
+            return False
+        return self.session.cookie_ok(self.headers, self._page_port())
+
+    def _can_act(self) -> bool:
+        """The person's session (cookie + page secret), wherever the browser is."""
+        if getattr(self, "session", None) is None:
+            return False
+        return self.session.can_act(self.headers, self._page_port())
 
     def _shipped(self, name: str) -> bool:
         """True only for an add-on `orch addon list` says is shipped with orch; anything else, or unknown, is not."""
@@ -321,6 +371,12 @@ class Handler(BaseHTTPRequestHandler):
         if port is None or ".." in rest or "//" in rest:
             return self._send(404, b"not found", "text/plain")
         up = {"Host": f"127.0.0.1:{port}", "X-Forwarded-Prefix": f"/addon/{name}"}
+        if self._can_act():  # the person signed in here: vouch for them to the add-on's own page server
+            from orch.pagesession import VOUCH_HEADER, vouch_key
+
+            key = vouch_key(self.root, create=True)
+            if key:
+                up[VOUCH_HEADER] = key
         body = None
         if method == "POST":
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
@@ -376,13 +432,15 @@ class Handler(BaseHTTPRequestHandler):
         if origin is None:
             return True
         host = (self.headers.get("Host") or "").strip().lower()
-        return origin.lower() in (f"http://{host}",)
+        return origin.lower() in (f"http://{host}", f"https://{host}")
 
     def do_GET(self):
         self._trace()
-        if not self._host_ok():  # DNS rebinding guard
-            return self._send(421, b"misdirected request", "text/plain")
         path, _, query = self.path.partition("?")
+        if path.startswith("/go/"):
+            return self._standing_link(path[len("/go/") :])
+        if not self._host_ok(path):  # DNS rebinding guard
+            return self._send(421, b"misdirected request", "text/plain")
         if path == "/" and selfupdate.answer(self):
             return
         px = PROXY.fullmatch(path)
@@ -427,11 +485,17 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if path == "/api/release":  # a finished ticket: is its merged change in the installed release?
+            from . import update
+
+            tid = (parse_qs(query).get("ticket") or [""])[0]
+            return self._send(
+                200, json.dumps(update.ticket_release(self.root, tid)).encode(), "application/json"
+            )
         if path == "/api/update-status":  # only a page with a session (a finished result is read once)
             from . import update
 
-            ok = self.session is not None and self.session.authed(self.headers, self.server.server_address[1])
-            st = update.update_status(self.root) if ok else None
+            st = update.update_status(self.root) if self._can_act() else None
             return self._send(200, json.dumps(st or {}).encode(), "application/json")
         if path == "/api/term":  # the live helper session's screen (read only; typing is POST /api/term/keys)
             if not self._same_origin():
@@ -560,6 +624,11 @@ class Handler(BaseHTTPRequestHandler):
             if not any(a["name"] == name and a["dashboard"] for a in load_addons(self.root, self.orch_bin)):
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, json.dumps(self.puller.pull(name)).encode(), "application/json")
+        # the style guide's own address; its files sit next to it under /styleguide/
+        if path == "/styleguide":
+            return self._send(302, b"", "text/plain", {"Location": "/styleguide/"})
+        if path.startswith("/styleguide/"):  # the same master kit as kit/, with the gallery as its front page
+            path = "/kit/" + (path[len("/styleguide/") :] or "gallery.html")
         name = {"/": "index.html"}.get(path, path.lstrip("/"))
         if name.startswith("kit/"):  # the master kit, served from orch_ui (no copy next to the page)
             got = kit_file(name[4:])
@@ -568,7 +637,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/review\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -629,18 +698,29 @@ class Handler(BaseHTTPRequestHandler):
 
     do_PUT = do_DELETE = do_PATCH = _refuse
 
-    def _fence(self) -> str | None:
+    def _fence(self, at_login: bool = False) -> str | None:
         """Host + Origin check of orch_ui.origin on every POST. A missing Origin is refused too: the
-        dashboard page always sends one, so only a script outside the browser lacks it."""
+        dashboard page always sends one, so only a script outside the browser lacks it. Any host name passes
+        with the session cookie (or for the sign-in itself, whose one-time token is the proof)."""
         try:
             from orch_ui.origin import check_request
         except ImportError:
             return "Actions are not available in this install."
         if self.headers.get("Origin") is None:
             return "This request was refused (no origin)."
+        if self._remote() and not (at_login or self._signed_in()):
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._refused_text(SIGNIN_MSG)
         if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
             return "This request came from another website and was refused."
-        return check_request("POST", self.headers, self.server.server_address[1], api=True)
+        return check_request(
+            "POST",
+            self.headers,
+            self._page_port(),
+            api=True,
+            signed_in=at_login or self._signed_in(),
+        )
 
     def _diag_post(self, path: str):
         """The page's action trail (any page of this app, a fence only) and Report a problem (the person's own
@@ -649,12 +729,10 @@ class Handler(BaseHTTPRequestHandler):
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         report = path != "/api/diag"
-        if report and not (
-            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
-        ):
-            return self._send(
-                403, b"Open the dashboard from this computer to do this.", "text/plain; charset=utf-8"
-            )
+        if report and not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return self._send(415, b"send JSON", "text/plain")
         limit = diagapi.MAX_REPORT if path == "/api/diag/report" else diagapi.MAX_TRAIL
@@ -681,17 +759,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, json.dumps(out).encode(), "application/json")
 
     def _term_keys(self):
-        """Type into the live helper session: the person's own dashboard session only (cookie + page secret, loopback
-        Host, no proxy headers: the same rule as a human-only action). A script or an agent has none of it."""
+        """Type into the live helper session: the person's own dashboard session only (cookie + page secret: the
+        same rule as a human-only action, from any computer). A script or an agent has none of it."""
         why = self._fence()
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        if not (
-            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
-        ):
-            return self._send(
-                403, b"Open the dashboard from this computer to type here.", "text/plain; charset=utf-8"
-            )
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return self._send(415, b"send JSON", "text/plain")
         try:
@@ -710,19 +786,35 @@ class Handler(BaseHTTPRequestHandler):
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
-    def _session_post(self):
-        """POST /session: the page hands over the one-time launch token it got in the URL fragment; the server
-        spends it and sets the session cookie (H1). Same fence as an action; loopback Host, no proxy headers."""
-        why = self._fence()
-        if why:
-            return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        from orch.pagesession import forwarded, host_ok
-
+    def _standing_link(self, sent: str):
+        """GET /go/<secret>: the person's standing sign-in link (a bookmark, see pagelaunch). Right secret: a
+        redirect to a fresh one-time launch link, which the page spends as with any sign-in link. Anything else
+        is 404, the same answer as an address that does not exist."""
+        try:
+            from orch import pagelaunch
+            from orch_ui.origin import any_host_ok
+        except ImportError:
+            return self._send(404, b"not found", "text/plain")
         if (
             self.session is None
-            or forwarded(self.headers)
-            or not host_ok(self.headers, self.server.server_address[1])
+            or not any_host_ok((self.headers.get("Host") or "").strip())
+            or not pagelaunch.standing_link_ok(self.root, sent)
         ):
+            return self._send(404, b"not found", "text/plain")
+        token = pagelaunch.write_launch_token(self.root, "dashboard")
+        if not token:
+            return self._send(503, b"Try again in a moment.", "text/plain")
+        self._send(
+            302, b"", "text/plain", {"Location": "/#launch=" + token, "Referrer-Policy": "no-referrer"}
+        )
+
+    def _session_post(self):
+        """POST /session: the page hands over the one-time sign-in token it got in the URL fragment; the server
+        spends it and sets the session cookie (H1). Same fence as an action, from any computer."""
+        why = self._fence(at_login=True)
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if self.session is None:
             return self._send(403, b"forbidden", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
@@ -732,44 +824,12 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "dashboard"), "text/plain; charset=utf-8")
-        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its sessionStorage
+        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its localStorage
         self._send(
             200,
             json.dumps({"secret": self.session.secret}).encode(),
             "application/json",
-            {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)},
-        )
-
-    def _session_reopen(self):
-        """POST /session/reopen: a tab whose session this (restarted) server does not know asks for a new one. The
-        supported way, as `orch start` does it: a fresh launch link opened in the person's own browser by the OS;
-        the token never goes into this answer. Only a page that presents a stale session, same fence as an action,
-        at most once per 30 s."""
-        why = self._fence()
-        if why:
-            return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        from orch import pagelaunch
-        from orch.pagesession import forwarded, host_ok
-
-        port = self.server.server_address[1]
-        if (
-            self.session is None
-            or forwarded(self.headers)
-            or not host_ok(self.headers, port)
-            or not self.session.stale(self.headers, port)
-        ):
-            return self._send(403, b"forbidden", "text/plain")
-        now = time.monotonic()
-        if now - getattr(self.server, "reopened_at", -1e9) < REOPEN_EVERY:
-            return self._send(429, b"A new window was opened a moment ago.", "text/plain; charset=utf-8")
-        self.server.reopened_at = now
-        url = pagelaunch.launch_url(self.root, self.session.server, f"http://127.0.0.1:{port}/")
-        if "#launch=" not in url or not pagelaunch.open_browser(url):
-            return self._send(503, b"Open the dashboard again from orch.", "text/plain; charset=utf-8")
-        self._send(
-            202,
-            b"The dashboard opened again in a new window. Keep working there.",
-            "text/plain; charset=utf-8",
+            {"Set-Cookie": self.session.set_cookie(self._page_port(), cookie)},
         )
 
     def do_POST(self):
@@ -777,8 +837,6 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/session":
             return self._session_post()
-        if path == "/session/reopen":
-            return self._session_reopen()
         if path == "/api/term/keys":
             return self._term_keys()
         if path in ("/api/diag", "/api/diag/report", "/api/diag/open", "/api/diag/share"):
@@ -817,9 +875,7 @@ class Handler(BaseHTTPRequestHandler):
         self._act = (op_name, time.monotonic())
         from . import update as _update
 
-        session = bool(
-            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
-        )
+        session = self._can_act()
         with _update.click():  # no automatic update starts during a person's click (or right after it)
             return self._act_run(body, op_name, session)
 
@@ -830,12 +886,17 @@ class Handler(BaseHTTPRequestHandler):
                 from . import update
 
                 if not session:
-                    raise actions.NeedsPerson("Open the dashboard from this computer to do this.")
+                    raise actions.NeedsPerson(actions.SIGNIN)
+                args = body.get("args") or {}
+                to = args.get("to") if isinstance(args, dict) else None
+                if to is not None and to not in update.BUILDS:
+                    raise actions.BadRequest("Choose release or development build.")
                 code, text = update.start_update(
                     self.root,
                     self.orch_bin,
                     actions.human_env(self.root, self.orch_bin),
                     session=self.session,
+                    to=to,
                 )
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
             if body.get("op") in RESTARTING_OPS and session:
@@ -853,15 +914,46 @@ class Handler(BaseHTTPRequestHandler):
         if code != 200:
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
-        if body.get("op") in LEAN_OPS:
+        tid = (body.get("args") or {}).get("ticket") if isinstance(body.get("args"), dict) else None
+        if isinstance(extra, dict) and body.get("op") in ("ticket.new", "ticket.paste"):
+            tid = extra.get("id")  # the new ticket
+        state = None
+        renew = _renew_answer(extra) if str(body.get("op")).startswith("logins.") else None
+        if renew is not None and renew["state"] not in RENEWED:
+            state = dict(
+                self.server.state_cache.get()[0]
+            )  # polled while the sign-in runs: nothing else changed
+        if state is None and body.get("op") in LEAN_OPS:
             # A workspace text changes no ticket: answer with the cached state at once (a full rebuild took 10 s on a
             # big workspace and kept "Sending…" on screen), never as the new cache.
             state = dict(self.server.state_cache.get()[0])
-        else:
+        elif (
+            state is None
+            and isinstance(tid, str)
+            and actions.TID.fullmatch(tid)
+            and body.get("op") not in WIDE_OPS
+        ):
+            # A click on one ticket (accept, answer, save, a task ...): the cached state with that ticket read again,
+            # at once; the full build runs in the background (ORCH-102: a click waited seconds for it).
+            state = patch_ticket(self.root, self.orch_bin, self.server.state_cache.get()[0], tid)
+            if state is not None:
+                self.server.state_cache.quick(state)  # before the reply's own keys are added
+        if state is None:
             state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
             self.server.state_cache.invalidate(state)  # before the reply's own keys are added
+        if renew is not None:  # the Renew window's answer (ORCH-46): a few plain facts, never a code or a key
+            state["renew_result"] = renew
         if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
             state["chat_dm_result"] = extra
+        if body.get("op") == "workspace.propose" and isinstance(extra, dict):
+            # a proposal only, shown in the edit fields; the page saves it with workspace.set after the person's Save
+            tags = extra.get("tags") if isinstance(extra.get("tags"), list) else []
+            state["proposal"] = {
+                "name": str(extra.get("name") or "")[:60],
+                "description": str(extra.get("description") or "")[:280],
+                "tags": [str(t)[:24] for t in tags if isinstance(t, str)][:4],
+                "icon": str(extra["icon"])[:32] if isinstance(extra.get("icon"), str) else None,
+            }
         if body.get("op") == "config.agent.test" and isinstance(
             extra, dict
         ):  # the answer of the try, plain words only
@@ -896,6 +988,27 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("op") == "ticket.new" and isinstance(extra, dict) and isinstance(extra.get("id"), str):
             # the new ticket's id: the New ticket window opens it by id, never by guessing from the title
             state["created"] = {"id": extra["id"][:40]}
+        steps = extra.get("steps") if body.get("op") == "ticket.new" and isinstance(extra, dict) else None
+        if isinstance(steps, dict):  # ORCH-185: the tickets of an epic made in the same request, by position
+            made, failed = steps.get("made"), steps.get("failed")
+            state["steps"] = {
+                "made": [
+                    {
+                        "index": m["index"],
+                        "id": str(m.get("id"))[:40],
+                        "attached": {
+                            "failed": [str(x)[:100] for x in (m.get("attached") or {}).get("failed", [])[:10]]
+                        },
+                    }
+                    for m in (made if isinstance(made, list) else [])[:50]
+                    if isinstance(m, dict) and type(m.get("index")) is int
+                ],
+                "failed": [
+                    {"index": f["index"], "message": str(f.get("message"))[:300]}
+                    for f in (failed if isinstance(failed, list) else [])[:50]
+                    if isinstance(f, dict) and type(f.get("index")) is int
+                ],
+            }
         if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
             att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
             state["attached"] = {
@@ -906,8 +1019,50 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, json.dumps(state).encode(), "application/json")
 
 
+RENEWED = (
+    "done",
+    "works",
+    "soon",
+)  # the login works again: the page reads the whole state (the warning goes)
+_RENEW_STATES = (
+    "none",
+    "starting",
+    "link",
+    "checking",
+    "done",
+    "failed",
+    "stopped",
+    "works",
+    "soon",
+    "renew",
+)
+
+
+def _renew_answer(extra) -> dict | None:
+    """`orch logins renew|replace --json` reduced to what the Renew window shows."""
+    if not isinstance(extra, dict):
+        return None
+    st = extra.get("state")
+    out: dict = {"state": st if st in _RENEW_STATES else "failed"}
+    link = extra.get("link")
+    if isinstance(link, str) and link.startswith("https://") and len(link) <= 2048:
+        out["link"] = link
+    if isinstance(extra.get("name"), str):
+        out["name"] = extra["name"][:32]
+    if extra.get("again") is True:  # the tool did not take the last code and waits for it once more
+        out["again"] = True
+    if isinstance(extra.get("ends_at"), str):
+        out["ends_at"] = extra["ends_at"][:20]
+    went = extra.get("went_on")
+    out["went_on"] = [str(x)[:40] for x in went[:20]] if isinstance(went, list) else []
+    return out
+
+
 class _Server(ThreadingHTTPServer):
     def server_close(self):
+        other = getattr(self, "remote_server", None)
+        if other is not None:
+            other.server_close()
         if hasattr(self, "revisions"):
             self.revisions.close()
         if hasattr(self, "state_cache"):
@@ -919,7 +1074,23 @@ class _Server(ThreadingHTTPServer):
     )
 
 
-def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
+class _RemoteServer(ThreadingHTTPServer):
+    """The second socket of remote listening: same handler, session, state cache and change feed as the
+    loopback server (which owns and closes them). `remote` makes the handler trust no name of this computer."""
+
+    remote = True
+    request_queue_size = 128
+
+
+def make_server(
+    root: Path,
+    port: int = DEFAULT_PORT,
+    orch_bin: str | None = None,
+    remote: tuple[str, int] | None = None,
+) -> ThreadingHTTPServer:
+    """`remote`: (address, port) to listen on for other computers as well (the [dashboard] setting, see
+    remote.py). It shares this server's sign-in; a port that cannot be had leaves the dashboard local only
+    (`remote_error` says why) instead of not starting at all."""
     # No ORCH_BIN from the environment (H1): the real server passes SELF (`sys.executable -I -m orch`); only a
     # test harness passes a fake path. None = standalone, reads files only.
     handler = partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin), session=None)
@@ -931,12 +1102,23 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
         from orch.pagesession import PageSession
 
         try:
-            handler.keywords["session"] = PageSession(root, "dashboard")
+            handler.keywords["session"] = PageSession(root, "dashboard", srv.server_address[1])
         except BaseException:
             srv.server_close()
             raise
+    srv.page_port = srv.server_address[1]
     srv.revisions = Revisions(root)
     srv.state_cache = StateCache(root, orch_bin, srv.revisions)
+    srv.remote_server, srv.remote_error = None, None
+    if remote is not None:
+        try:
+            other = _RemoteServer(remote, handler)
+        except OSError as e:
+            srv.remote_error = f"could not listen on {remote[0]} port {remote[1]} ({e.strerror or e})"
+        else:
+            other.page_port = srv.page_port
+            other.revisions, other.state_cache = srv.revisions, srv.state_cache
+            srv.remote_server = other
     if orch_bin == actions.SELF:  # the real server: the automatic update looks once a minute (off by default)
         from . import update
 
