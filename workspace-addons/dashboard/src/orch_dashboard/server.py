@@ -292,7 +292,9 @@ class Handler(BaseHTTPRequestHandler):
             ms = int((time.monotonic() - act[1]) * 1000)
             self._act_log(f"{act[0]} end status={code} ms={ms}")
             if diag:  # a click that did nothing shows in a problem report (ORCH-341): op, ticket, status, never the arguments
-                diag.log("dashboard.act", "info", root=self.root, op=act[0], ticket=act[2], status=code, ms=ms)
+                diag.log(
+                    "dashboard.act", "info", root=self.root, op=act[0], ticket=act[2], status=code, ms=ms
+                )
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -1138,7 +1140,11 @@ class Handler(BaseHTTPRequestHandler):
         op_name = re.sub(r"[^A-Za-z0-9_.-]", "?", str(body.get("op"))[:40])
         args = body.get("args")
         tid0 = args.get("ticket") if isinstance(args, dict) else None
-        self._act = (op_name, time.monotonic(), tid0 if isinstance(tid0, str) and actions.TID.fullmatch(tid0) else None)
+        self._act = (
+            op_name,
+            time.monotonic(),
+            tid0 if isinstance(tid0, str) and actions.TID.fullmatch(tid0) else None,
+        )
         from . import update as _update
 
         session = self._can_act()
