@@ -29,6 +29,7 @@ class SubscriptionUse:
     windows: dict[str, Window] = field(default_factory=dict)  # "5h", "week"
     fetched_at: str | None = None
     status: str = "ok"
+    disabled: bool = False  # turned off in the switcher itself: never a target
 
 
 @dataclass

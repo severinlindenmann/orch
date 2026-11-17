@@ -28,7 +28,9 @@ from .readers import SubscriptionUse, cswap
 EVERY_SECONDS = 30
 AHEAD_MINUTES = 10
 PACE_MINUTES = 10  # samples older than this do not count for the pace
-MIN_SPAN_SECONDS = 300  # the pace needs samples this far apart: the switcher refreshes its numbers only every few
+MIN_SPAN_SECONDS = (
+    300  # the pace needs samples this far apart: the switcher refreshes its numbers only every few
+)
 # minutes, so a shorter look reads one refresh as a burst of use (ORCH-93 finding 8)
 TRUST_SPAN_SECONDS = 300  # a lower pace replaces a higher remembered one only when measured over this long
 PACE_FORGET_MINUTES = 30  # a remembered pace older than this is dropped
@@ -216,12 +218,16 @@ def _limits(a: dict) -> list[tuple[str, float]]:
 
 def judge(a: dict, use: SubscriptionUse, pace: dict[str, float], ahead: float) -> Candidate:
     under, good, why = True, True, ""
+    if use.disabled:
+        return Candidate(a, use, False, False, "turned off in the account switcher")
     if not any(w.pct is not None for w in use.windows.values()):
         return Candidate(a, use, False, False, "use unknown")
     for window, limit in _limits(a):
         w = use.windows.get(window)
         word = store.PERIOD_WORDS[window]
-        if w is None or w.pct is None:
+        if w is None:
+            continue  # the switcher reports no such window for this account (read fine): nothing to reach
+        if w.pct is None:
             if window in {
                 WINDOW_OF[x["period"]] for x in a["rule"]["limits"] if x.get("period") in WINDOW_OF
             }:

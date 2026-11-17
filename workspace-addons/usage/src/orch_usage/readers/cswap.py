@@ -84,6 +84,7 @@ def parse(data) -> list[SubscriptionUse]:
                 windows=windows,
                 fetched_at=row.get("usageFetchedAt") if isinstance(row.get("usageFetchedAt"), str) else None,
                 status=str(row.get("usageStatus") or "ok")[:20],
+                disabled=row.get("disabled") is True,
             )
         )
     return out

@@ -11,6 +11,7 @@ import pytest
 from conftest import jrun, switcher_data
 
 from orch_usage import service, store, switching
+from orch_usage.readers import SubscriptionUse
 
 T0 = datetime(2026, 11, 16, 18, 0, 0, tzinfo=UTC)
 
@@ -368,3 +369,68 @@ def test_start_status_stop(ws, cli):
         time.sleep(0.1)
     assert jrun(cli, "status")[0] == 1
     assert service.stop(ws) == "not running"
+
+
+def _acc(label, order, h5=92, week=100):
+    return {
+        "id": f"a_{label}",
+        "label": label,
+        "type": "subscription",
+        "on": True,
+        "order": order,
+        "source": {"reader": "cswap", "key": f"k_{label}"},
+        "rule": {
+            "limits": [
+                {"value": h5, "unit": "%", "period": "5h"},
+                {"value": week, "unit": "%", "period": "week"},
+            ],
+            "for": [],
+            "ends": None,
+        },
+    }
+
+
+def test_a_window_the_switcher_does_not_report_is_not_a_reached_limit():
+    """Real switcher after a reset (ORCH-93 finding 9): no fiveHour block at all, week read fine."""
+    from orch_usage.readers import Window
+
+    use = SubscriptionUse(key="k_main", label="main", slot=2, active=True, windows={"week": Window(13.0)})
+    c = switching.judge(_acc("main", 1), use, {}, 30)
+    assert c.under and c.good, c.why
+    ch = switching.choose([_acc("main", 1)], [use], {}, 30)
+    assert ch.target is not None and ch.target.account["label"] == "main"
+    assert not ch.all_at_limit
+
+
+def test_a_window_reported_without_a_number_still_counts_as_reached():
+    from orch_usage.readers import Window
+
+    use = SubscriptionUse(
+        key="k_main", label="main", slot=2, windows={"5h": Window(None), "week": Window(13.0)}
+    )
+    c = switching.judge(_acc("main", 1), use, {}, 30)
+    assert not c.under and c.why == "5 hours use unknown"
+
+
+def test_an_account_turned_off_in_the_switcher_is_never_a_target():
+    from orch_usage.readers import Window
+
+    off = SubscriptionUse(
+        key="k_off", label="off", slot=3, disabled=True, windows={"5h": Window(0.0), "week": Window(10.0)}
+    )
+    main = SubscriptionUse(
+        key="k_main", label="main", slot=2, active=True, windows={"5h": Window(96.0), "week": Window(50.0)}
+    )
+    ch = switching.choose([_acc("off", 1), _acc("main", 2)], [off, main], {}, 30)
+    assert ch.target is None or ch.target.account["label"] != "off"
+    assert switching.judge(_acc("off", 1), off, {}, 30).why == "turned off in the account switcher"
+
+
+def test_reader_keeps_the_switchers_disabled_flag():
+    from conftest import switcher_data
+
+    from orch_usage.readers import cswap
+
+    data = switcher_data()
+    data["accounts"][1]["disabled"] = True
+    assert [r.disabled for r in cswap.parse(data)] == [False, True, False]
