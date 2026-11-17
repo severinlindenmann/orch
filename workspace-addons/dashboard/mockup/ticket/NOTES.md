@@ -186,3 +186,15 @@ It is the ticket page's own box, separate from Focus (owner answer on ORCH-238).
 - Activity names the task (never "c1") and shows "Was: … → Now: …" for title, owner, due and task renames.
 - Owner box suggests the workspace's people and warns on a new name; a past due day shows a hint;
   "Due Mon 16 Nov, 18:30" within a week.
+
+## ORCH-235 (17 Nov): one word per ticket state
+
+### ticket-waiting.html
+
+- A ticket that waits for a date or the outside says Waiting (never Needs you), with its date and what it waits for:
+  "Waits until Mon 09:00 · The price list from the supplier". Needs you stays for a helper's open question.
+- The product's ⋯ menu offers every board lane except Needs you (Backlog, To do, Working, Waiting, Check, Done,
+  Won't do, Superseded); Waiting asks for the date and, optionally, what it waits for.
+- Check after a move by a person reads "Moved to Check by Anna 14:23", never "Helper finished".
+- An epic whose sub-tickets are all done says so and offers Mark Done; Done with open sub-tickets asks first
+  ("Mark Done anyway" or Cancel).

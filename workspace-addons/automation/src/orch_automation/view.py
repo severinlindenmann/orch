@@ -400,6 +400,7 @@ def _schedules(
                     "toggle": {
                         "on": not paused,
                         "label": clean(t["title"], 40) + " on or off",
+                        "text": "Repeats",
                         "action": _act("toggle", t["id"]),
                     },
                     "actions": [
