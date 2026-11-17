@@ -196,7 +196,10 @@ const OrchBlocks = (() => {
       return actionAttrs(b, a.action, a.label) ? b : null;
     }).filter(Boolean);
     const expandable = arr(it.detail).length || arr(it.tickets).length || buttons.length;
-    const finish = () => { if (sendBtn) li.append(sendBtn); if (sw) li.append(sw); return li; };
+    // A switch says what it turns on: the add-on's short words sit beside it (bug hunt 17 Nov: a bare On/Off).
+    const swText = sw && it.toggle.text ? el('span', 'switch-text', it.toggle.text) : null;
+    if (swText) swText.setAttribute('aria-hidden', 'true');
+    const finish = () => { if (sendBtn) li.append(sendBtn); if (swText) li.append(swText); if (sw) li.append(sw); return li; };
     const main = el('span', 'li-main'); main.append(el('span', 'li-title', it.title));
     if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
     if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
@@ -349,9 +352,12 @@ const OrchBlocks = (() => {
       const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table'), cols = arr(b.columns);
       const hr = el('tr');
       const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
+      // The switch column is named by what it turns on (the add-on's `text`, e.g. Repeats); at phone width the same
+      // words sit beside each switch on its card.
+      const toggleText = String((rowsList.find(r => r.toggle && r.toggle.text) || {toggle:{}}).toggle.text || 'On');
       for (const c of cols) { const th = el('th', c.type === 'number' || c.type === 'duration' ? 'num' : '', c.label); th.scope = 'col'; hr.append(th); }
       if (hasActions) { const th = el('th', '', 'Actions'); th.scope = 'col'; hr.append(th); }
-      if (hasToggle) { const th = el('th', '', 'On'); th.scope = 'col'; hr.append(th); }
+      if (hasToggle) { const th = el('th', '', toggleText); th.scope = 'col'; hr.append(th); }
       const thead = el('thead'); thead.append(hr); t.append(thead);
       const tb = el('tbody');
       for (const r of arr(b.rows)) {
@@ -369,7 +375,11 @@ const OrchBlocks = (() => {
           for (const a of arr(r.actions)) { const btn = rowButton(a); if (btn) box.append(...openFirst(btn)); }
           td.append(box); tr.append(td);
         }
-        if (hasToggle) { const td = el('td', 'cell-toggle'), sw = r.toggle ? toggleEl(r.toggle) : null; if (sw) td.append(sw); tr.append(td); }
+        if (hasToggle) {
+          const td = el('td', 'cell-toggle'), sw = r.toggle ? toggleEl(r.toggle) : null;
+          if (sw) { td.dataset.label = toggleText; td.append(sw); }
+          tr.append(td);
+        }
         tb.append(tr);
       }
       t.append(tb); wrap.append(t); s.append(wrap);
