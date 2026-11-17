@@ -1980,13 +1980,13 @@ def tidy(
 
 
 def set_model(root: Path, tid: str, name: str, by: str) -> dict:
-    """A person's model for this ticket's helper (sonnet, opus or fable), or auto: orch picks again next
-    start."""
+    """A person's model for this ticket's helper (haiku, sonnet, opus or fable), or auto: orch picks again
+    next start. Haiku and Fable come only from here: orch never picks them (owner 17 Nov, ORCH-257)."""
     from orch import modelpick
 
     name = (name or "").strip().lower()
     if name not in (*modelpick.MODELS, "auto"):
-        raise Refused("Pick sonnet, opus, fable or auto.")
+        raise Refused("Pick haiku, sonnet, opus, fable or auto.")
     if not _is_person(by):
         raise Refused(
             f'Only a person picks the model. Ask instead: orch ask {tid} "Run this ticket on Opus?" '
@@ -2477,7 +2477,7 @@ def _up_after_failures(root: Path, tid: str, item: dict) -> None:
 
     t = load(root, tid)
     cur = modelpick.chosen(t)
-    if not cur or cur["name"] != "sonnet" or modelpick.by_person(t):
+    if not cur or cur["name"] not in modelpick.SMALL or modelpick.by_person(t):
         return
     step = " ".join(str(item.get("text") or "").split())[:80]
     why = f'two checks failed on the step "{step}"' if step else "two checks failed on one step"

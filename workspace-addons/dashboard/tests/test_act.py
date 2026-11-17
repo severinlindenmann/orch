@@ -1404,11 +1404,11 @@ def test_check_wont_do_refuses_bad_args(extra):
 
 def test_ticket_model_argv_and_refusals():
     common = ["--by", actions.actor(), "--json"]
-    for m in ("sonnet", "opus", "fable", "auto"):
+    for m in ("haiku", "sonnet", "opus", "fable", "auto"):
         assert actions.build_argv("ticket.model", {"ticket": "t_abcdef", "model": m}) == [
             "ticket", "model", "t_abcdef", m, *common,
         ]  # fmt: skip
-    for bad in ({"model": "haiku"}, {"model": "--x"}, {"model": None}, {"model": "opus", "extra": 1}):
+    for bad in ({"model": "gpt"}, {"model": "--x"}, {"model": None}, {"model": "opus", "extra": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("ticket.model", {"ticket": "t_abcdef", **bad})
     assert actions.needs_session("ticket.model")  # a person's choice: never from a script

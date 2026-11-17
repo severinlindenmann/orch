@@ -565,11 +565,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser(
         "model",
         parents=[common],
-        help="the model of this ticket's helper: sonnet, opus, fable or auto (a person); "
+        help="the model of this ticket's helper: haiku, sonnet, opus, fable or auto (a person); "
         "up --why (the helper)",
     )
     x.add_argument("id")
-    x.add_argument("name", choices=("sonnet", "opus", "fable", "auto", "up"))
+    x.add_argument("name", choices=("haiku", "sonnet", "opus", "fable", "auto", "up"))
     x.add_argument("--why", help="with up: why the work needs Opus, in a few plain words")
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
