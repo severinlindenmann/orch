@@ -81,14 +81,14 @@ def _actions(result):
     return [(a["key"], a["action"]) for a in result["actions"] if a["action"] != "forget"]
 
 
-def test_a_finished_ticket_session_ends_after_ten_quiet_minutes(proj, new_ticket, child):
+def test_a_done_ticket_session_ends_after_ten_quiet_minutes(proj, new_ticket, child):
     tid = new_ticket()
-    _status(proj, tid, "review")
+    _status(proj, tid, "done")
     _live(proj, tid, child(), idle_for=11 * 60)
     res = tend.run(proj)
     assert [a["action"] for a in res["actions"]] == ["end"]
     assert runs.read(proj, tid) is None  # the claim is gone; the conversation stays on the ticket
-    assert "the ticket is finished" in _history(proj, tid)[0]
+    assert "the ticket is finished" in res["actions"][0]["text"]  # a Done ticket takes no history line
 
 
 def test_a_finished_ticket_session_quiet_for_a_short_time_stays(proj, new_ticket, child):
@@ -99,10 +99,44 @@ def test_a_finished_ticket_session_quiet_for_a_short_time_stays(proj, new_ticket
     assert runs.read(proj, tid) is not None
 
 
-def test_a_session_waiting_on_a_persons_answer_ends_and_says_it_continues(proj, run, new_ticket, child):
+def test_a_review_ticket_session_stays_warm_for_the_hour(proj, new_ticket, child):
+    """ORCH-149: Continue on a Review ticket keeps its session and its cache."""
+    tid = new_ticket()
+    _status(proj, tid, "review")
+    _live(proj, tid, child(), idle_for=11 * 60)
+    assert tend.run(proj)["actions"] == []
+    _live(proj, tid, child(), idle_for=61 * 60)
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["end"]
+
+
+def test_a_review_ticket_session_makes_room_when_the_sessions_are_full(proj, new_ticket, child, monkeypatch):
+    monkeypatch.setattr(runs_live, "_crowded", lambda root: True)
+    tid = new_ticket()
+    _status(proj, tid, "review")
+    _live(proj, tid, child(), idle_for=11 * 60)
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["end"]
+
+
+def test_a_session_waiting_on_an_answer_stays_warm_for_the_hour(proj, run, new_ticket, child):
+    tid = new_ticket()
+    assert run("ask", tid, "Which colour?", "--option", "red", "--option", "blue")[0] == 0
+    _live(proj, tid, child(), idle_for=30 * 60)
+    assert tend.run(proj)["actions"] == []
+    assert runs.read(proj, tid) is not None
+
+
+def test_a_waiting_session_ends_early_when_the_sessions_are_full(proj, run, new_ticket, child, monkeypatch):
+    monkeypatch.setattr(runs_live, "_crowded", lambda root: True)
     tid = new_ticket()
     assert run("ask", tid, "Which colour?", "--option", "red", "--option", "blue")[0] == 0
     _live(proj, tid, child(), idle_for=6 * 60)
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["end"]
+
+
+def test_a_session_waiting_on_a_persons_answer_ends_and_says_it_continues(proj, run, new_ticket, child):
+    tid = new_ticket()
+    assert run("ask", tid, "Which colour?", "--option", "red", "--option", "blue")[0] == 0
+    _live(proj, tid, child(), idle_for=61 * 60)
     res = tend.run(proj)
     assert [a["action"] for a in res["actions"]] == ["end"]
     assert runs.read(proj, tid) is None
@@ -185,10 +219,10 @@ def _later(minutes):
     return time.time() + minutes * 60 + 1
 
 
-def test_still_idle_ten_minutes_after_the_reminder_starts_fresh(proj, new_ticket, child, starts):
+def test_still_idle_after_the_reminder_for_the_hour_starts_fresh(proj, new_ticket, child, starts):
     tid = new_ticket()
     _status(proj, tid, "active")
-    _live(proj, tid, child(), idle_for=31 * 60)
+    _live(proj, tid, child(), idle_for=61 * 60)
     _nudged(proj, tid)
     res = tend.run(proj, now=_later(11))
     assert [a["action"] for a in res["actions"]] == ["restart"]
@@ -201,9 +235,19 @@ def test_still_idle_ten_minutes_after_the_reminder_starts_fresh(proj, new_ticket
 def test_no_fresh_start_before_ten_minutes(proj, new_ticket, child, starts):
     tid = new_ticket()
     _status(proj, tid, "active")
-    _live(proj, tid, child(), idle_for=30 * 60)
+    _live(proj, tid, child(), idle_for=61 * 60)
     _nudged(proj, tid)
     assert tend.run(proj, now=_later(5))["actions"] == []
+    assert starts == []
+
+
+def test_no_fresh_start_before_the_hour_keeps_the_cache(proj, new_ticket, child, starts):
+    """ORCH-149: a reminded helper idle 31 minutes keeps its session (its cache is still warm)."""
+    tid = new_ticket()
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=31 * 60)
+    _nudged(proj, tid)
+    assert tend.run(proj, now=_later(11))["actions"] == []
     assert starts == []
 
 
@@ -222,7 +266,7 @@ def test_no_fresh_start_when_the_helper_moved_after_the_reminder(proj, new_ticke
 def test_a_second_fresh_start_within_six_hours_is_left_for_a_person(proj, new_ticket, child, starts):
     tid = new_ticket()
     _status(proj, tid, "active")
-    _live(proj, tid, child(), idle_for=31 * 60, run="r_second001")
+    _live(proj, tid, child(), idle_for=61 * 60, run="r_second001")
     _nudged(proj, tid, run="r_second001", restarted_at=_since(3600))
     assert [a["action"] for a in tend.run(proj, now=_later(11))["actions"]] == ["leave"]
     assert starts == []

@@ -406,10 +406,12 @@ def dispatch(args, root: Path) -> bool:
         _out(args, {"runs": rows}, runwatch.list_text(rows))
         return True
     if sub == "tend":  # the helper watcher's pass (ORCH-78): end, remind, start fresh, start the line
+        # the watcher first, so a session at the idle limit gets its history line (or its fresh start)
+        # before the plain cleanup closes it silently (ORCH-149)
+        res = tend.run(root, dry_run=args.dry_run)
         if not args.dry_run:
             with contextlib.suppress(Exception):
                 runs_live.cleanup(root)
-        res = tend.run(root, dry_run=args.dry_run)
         _out(args, res, tend.text(res, args.dry_run))
         return True
     if sub == "screen":  # read-only: nothing is typed into the session
