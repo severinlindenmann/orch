@@ -45,3 +45,8 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   the admin ticks there may pick problems up. Replaces "problem reports never go via the relay".
 - 2026-11-16 (ORCH-99): Hand-made scripts are a first step only (R4.6). Each gets a ticket that moves its job into orch
   (core or add-on) with tests, then the script is deleted. No AI call for work a program can do.
+- 2026-11-17 (ORCH-186): Add-on pages orch ships run sandboxed in the dashboard and act only with a frame pass for
+  their own add-on (15 minutes, bound to the sign-in, host name and port; a fixed list of actions per add-on). Their
+  program files (`/addon/<shipped>/kit|web/*.js|css|svg|png|woff…`) load without sign-in, also on the port for other
+  computers: a sandboxed page sends no cookie, and these files are open-source code with no workspace data. They show
+  which shipped add-ons run; accepted.
