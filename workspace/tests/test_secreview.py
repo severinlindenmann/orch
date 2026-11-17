@@ -1,4 +1,4 @@
-"""The release keeper's security gate (ORCH-317): pull requests that touch the servers, sign-in, secrets or
+"""The release keeper's security check (ORCH-317): pull requests that touch the servers, sign-in, secrets or
 what leaves this computer get a security review by themselves, and no release is cut without every OK."""
 
 import json
@@ -6,7 +6,7 @@ import json
 import pytest
 
 from orch import releasekeeper as rk
-from orch import secgate
+from orch import secreview
 from orch.errors import Refused
 
 DEV, MAIN = "d" * 40, "m" * 40
@@ -82,7 +82,7 @@ def entry(n=2, sha="h2", **kw):
     ],
 )
 def test_the_hand_reviewed_files_of_17_nov_need_a_review(path):
-    assert secgate.matched([path], secgate.DEFAULT_PATHS) == [path]
+    assert secreview.matched([path], secreview.DEFAULT_PATHS) == [path]
 
 
 @pytest.mark.parametrize(
@@ -98,22 +98,22 @@ def test_the_hand_reviewed_files_of_17_nov_need_a_review(path):
     ],
 )
 def test_tests_docs_and_other_code_need_none(path):
-    assert secgate.matched([path], secgate.DEFAULT_PATHS) == []
+    assert secreview.matched([path], secreview.DEFAULT_PATHS) == []
 
 
 def test_own_paths_replace_the_defaults():
-    pats = secgate.patterns("billing/*, *token*")
-    assert secgate.matched(["billing/a.py", "relay/x.rs", "src/token_store.py"], pats) == [
+    pats = secreview.patterns("billing/*, *token*")
+    assert secreview.matched(["billing/a.py", "relay/x.rs", "src/token_store.py"], pats) == [
         "billing/a.py",
         "src/token_store.py",
     ]
-    assert secgate.patterns(None) == secgate.DEFAULT_PATHS
+    assert secreview.patterns(None) == secreview.DEFAULT_PATHS
 
 
 def test_the_paths_setting_refuses_nonsense():
-    assert secgate.check_patterns(" relay/* , *secret* ") == "relay/*,*secret*"
+    assert secreview.check_patterns(" relay/* , *secret* ") == "relay/*,*secret*"
     with pytest.raises(Refused):
-        secgate.check_patterns("relay/*;rm -rf /")
+        secreview.check_patterns("relay/*;rm -rf /")
 
 
 # ---------------------------------------------------------------- the keeper's pass
@@ -243,13 +243,13 @@ def test_a_rename_out_of_a_matched_path_still_counts(tmp_path):
 
 
 def test_an_open_pull_request_with_a_cut_file_list_counts_as_matched(tmp_path):
-    many = pr(9, [f"docs/p{i}.md" for i in range(secgate.TRUNCATED)])
+    many = pr(9, [f"docs/p{i}.md" for i in range(secreview.TRUNCATED)])
     out = go(tmp_path, heads={"develop": DEV, "main": MAIN, "unreleased": []}, changes=[], open_prs=[many])
     assert out["did"] == ["security-review:#9"]
 
 
 def test_ci_workflow_tests_are_never_left_out():
-    assert secgate.matched([".github/workflows/tests/run.yml"], secgate.DEFAULT_PATHS) != []
+    assert secreview.matched([".github/workflows/tests/run.yml"], secreview.DEFAULT_PATHS) != []
 
 
 def test_a_review_that_ended_twice_without_a_verdict_holds_and_says_so(tmp_path):
@@ -261,7 +261,7 @@ def test_a_review_that_ended_twice_without_a_verdict_holds_and_says_so(tmp_path)
 
 
 def test_the_daily_cap_holds_instead_of_starting(tmp_path):
-    out = go(tmp_path, state={"security": {"prs": {}, "starts": {secgate._day(): secgate.PER_DAY}}})
+    out = go(tmp_path, state={"security": {"prs": {}, "starts": {secreview._day(): secreview.PER_DAY}}})
     assert out["did"] == []
     assert out["lines"][-1] == "waits for every security OK: #2 (security review not started yet)"
 
@@ -308,10 +308,10 @@ def test_a_person_records_a_verdict_for_the_reviewed_head(tmp_path, monkeypatch)
     monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: None)
     monkeypatch.setattr(tickets, "log", lambda *a, **k: {})
     with pytest.raises(Refused, match="Give the commit you reviewed"):
-        secgate.verdict(root, 2, "ok", "fine", "human:owner", "abcdef0")
-    res = secgate.verdict(root, 2, "ok", "  nothing High or Medium;  one Low  ", "human:owner", "a2b2c2d")
+        secreview.verdict(root, 2, "ok", "fine", "human:owner", "abcdef0")
+    res = secreview.verdict(root, 2, "ok", "  nothing High or Medium;  one Low  ", "human:owner", "a2b2c2d")
     assert res["sha"].startswith("a2b2c2d") and res["line"] == "nothing High or Medium; one Low"
-    assert secgate.read_verdicts(root)["2"]["verdict"] == "ok"
+    assert secreview.read_verdicts(root)["2"]["verdict"] == "ok"
 
 
 def test_only_the_review_helper_of_that_pull_request_records_it(tmp_path, monkeypatch):
@@ -322,11 +322,11 @@ def test_only_the_review_helper_of_that_pull_request_records_it(tmp_path, monkey
     _keeper_state(root, entry())
     monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_other")
     with pytest.raises(Refused, match="Only the security review helper"):
-        secgate.verdict(root, 2, "ok", "fine", "agent:claude", "h2")
+        secreview.verdict(root, 2, "ok", "fine", "agent:claude", "h2")
     with pytest.raises(Refused, match="not waiting for a security review"):
-        secgate.verdict(root, 5, "ok", "fine", "human:owner", "h2")
+        secreview.verdict(root, 5, "ok", "fine", "human:owner", "h2")
     with pytest.raises(Refused, match="one line"):
-        secgate.verdict(root, 2, "ok", "   ", "human:owner", "h2")
+        secreview.verdict(root, 2, "ok", "   ", "human:owner", "h2")
 
 
 # ---------------------------------------------------------------- reading the release from git

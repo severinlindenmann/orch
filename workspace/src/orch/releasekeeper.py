@@ -23,7 +23,7 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            settings and data changes listed) and a deploy card asked (production: the owner's go; on "Deploy
            now" a helper ticket gets the prepared program), the highlights as a short note on the role ticket,
            the release worktree removed -> idle.
-Every pass also runs the security gate (secgate.py, ORCH-317): pull requests that touch the servers, sign-in,
+Every pass also runs the security check (secreview.py, ORCH-317): pull requests that touch the servers, sign-in,
 secrets or what leaves this computer get a security review helper by themselves, and the idle phase cuts
 nothing until each of them in the release has an OK.
 A release pull request the keeper did not cut is only watched. `orch github release-hold "<why>"` stops
@@ -50,7 +50,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import brake, config, runs, secgate, tickets
+from orch import brake, config, runs, secreview, tickets
 from orch.errors import Refused
 
 BY = "agent:release-keeper"
@@ -158,7 +158,7 @@ def set_setting(root: Path, key: str, value: str) -> str | None:
     elif name == "release_deploy_script":
         v = _path_ok(v)
     elif name == "release_security_paths":
-        v = secgate.check_patterns(v)
+        v = secreview.check_patterns(v)
     config.set_key(root, "github", name, v)
     return v
 
@@ -436,13 +436,13 @@ class World:
             ]
         )
 
-    _PR_FIELDS = "number,title,url,headRefOid,isDraft,files"  # open pull requests (security gate)
+    _PR_FIELDS = "number,title,url,headRefOid,isDraft,files"  # open pull requests (security check)
 
     def changes(self) -> list[dict]:
         """Every first-parent change on develop since main (after heads() fetched): {sha, files, pr, head,
         title, url}. files is git's full list with renames as both names; pr and head come from GitHub's merge
         line ("Merge pull request #N from ...", head = the second parent), else None. Only a hint: the
-        security gate confirms them with GitHub (pr_for_commit)."""
+        security check confirms them with GitHub (pr_for_commit)."""
         if self.sim is not None:
             return list(self.sim.get("changes") or [])
         lg = self._git("log", "--first-parent", "--format=%H%x1f%P%x1f%s", "origin/main..origin/develop")
@@ -488,7 +488,7 @@ class World:
         return {}
 
     def open_prs(self) -> list[dict]:
-        """The open pull requests into develop, with their files (security gate)."""
+        """The open pull requests into develop, with their files (security check)."""
         if self.sim is not None:
             return list(self.sim.get("open_prs") or [])
         args = ["pr", "list", "--repo", self.cfg.repo, "--state", "open", "--base", "develop"]
@@ -497,7 +497,7 @@ class World:
     def security_verdicts(self) -> dict:
         if self.sim is not None:
             return dict(self.sim.get("security_verdicts") or {})
-        return secgate.read_verdicts(self.root)
+        return secreview.read_verdicts(self.root)
 
     def required(self, branch: str) -> list[str] | None:
         """The required checks of `branch`'s rules ([] when it has none), None when GitHub did not say."""
@@ -1163,7 +1163,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     out: list[str] = []
     h = w.heads()
     try:  # every pass, so a review starts while a pull request is still open
-        sec_lines, sec_holds = secgate.tend(w, st, role)
+        sec_lines, sec_holds = secreview.tend(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
         sec_lines, sec_holds = [f"security check could not run: {e}"], ["the security check could not run"]
     out += sec_lines

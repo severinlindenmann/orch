@@ -566,10 +566,10 @@ def _verdict(args, root: Path) -> None:
 
 
 def _security(args, root: Path) -> None:
-    from orch import secgate
+    from orch import secreview
 
     res = _guard(
-        secgate.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by), args.sha
+        secreview.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by), args.sha
     )
     words = "OK: the release may include it" if res["verdict"] == "ok" else "problems: releases wait"
     _out(args, res, f"Pull request #{res['pr']}: security review {words}. {res['line']}")

@@ -1,4 +1,4 @@
-"""The security gate of the release keeper (ORCH-317): a pull request that touches the servers, sign-in,
+"""The security check of the release keeper (ORCH-317): a pull request that touches the servers, sign-in,
 secrets or what leaves this computer gets a security review by itself, and no release is cut until every
 such pull request since the last release has an OK.
 
@@ -12,7 +12,7 @@ Each keeper pass (no AI call while nothing is new):
            kept in its own file (security-verdicts.json), so the keeper never writes over it.
   card     a "problems" verdict puts one card on the role ticket: keep waiting for the fix (recommended) or
            release anyway. Only a person's answer counts.
-  gate     before a cut: every matched pull request in the release needs an OK (or the owner's "Release
+  hold     before a cut: every matched pull request in the release needs an OK (or the owner's "Release
            anyway") for the head that was merged. Anything else holds the release with one line why. A
            failed GitHub read stops the pass (the keeper never cuts on a read it could not make).
 """
