@@ -314,6 +314,7 @@
   "acts": {},
   "agents_block": "skills/orch-services/AGENTS-block.md",
   "background": false,
+  "before_start": false,
   "dashboard": {
    "icon": "box",
    "label": "Services",

@@ -351,7 +351,7 @@ function followAddress(hash) {
 }
 function render(arrived = new Set()) {
   if (!state) return;
-  const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
+  const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash, first = !renderedRoute, was = renderedRoute;
   if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
   if ((r.kind === 'page' || r.kind === 'live') && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
@@ -416,7 +416,13 @@ function render(arrived = new Set()) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
+  // Preview on: a page that cannot be drawn softly loads once the normal way (pages/soft.js)
+  try {
   reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  } catch (err) {
+    if (changed && typeof SoftNav === 'object' && SoftNav.fallBack(r.hash)) return;
+    throw err;
+  }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
@@ -442,7 +448,9 @@ function render(arrived = new Set()) {
   if (!active?.isConnected && activeKey && !document.querySelector('dialog[open]')) {
     [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
   }
-  window.scrollTo(...(changed ? [0, 0] : scroll));
+  const soft = typeof SoftNav === 'object' ? SoftNav : null;
+  window.scrollTo(...(changed ? (soft ? soft.scrollAfterChange() : [0, 0]) : scroll));
+  if (soft) { soft.hold(false); if (changed || first) soft.said(first ? '' : was, r.hash, r.kind); }
   warmAddons();
 }
 // Pointing at an add-on in the menu starts fetching its view, so the click finds it ready.
@@ -964,7 +972,10 @@ main.addEventListener('click', async event => {
 });
 window.addEventListener('hashchange', async () => {
   if (document.querySelector('.sidebar')?.dataset.open === 'true') setMenu(false);
-  for (const d of document.querySelectorAll('dialog[open]')) await window.orch.close(d);
+  // Preview on: a dialog in the keep place (the layer) stays open across the page change (pages/soft.js)
+  const soft = typeof SoftNav === 'object' ? SoftNav : null;
+  soft?.hold(true);
+  for (const d of soft ? soft.dialogsToClose() : document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
 });
 document.getElementById('side-nav')?.addEventListener('toggle', event => {

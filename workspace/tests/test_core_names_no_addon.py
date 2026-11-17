@@ -35,13 +35,13 @@ ALLOW = {
     "orch/collect_execjson.py": {"usage": _TOKENS},
     "orch/record.py": {"usage": _TOKENS},
     "orch/usage.py": {"usage": _TOKENS},
-    "orch/doctorpass.py": {
-        "usage": "the account switcher's JSON key for an account's use, not the Usage add-on",
-        "services": _KEY,
-    },
     "orch/cli_look.py": {"services": _KEY},
     "orch/diag_collect.py": {"services": _KEY},
     "orch/diag_report.py": {"services": _KEY},
+    "orch/doctorpass.py": {
+        "services": _KEY,
+        "usage": "the account switcher's JSON key for an account's use, not the Usage add-on",
+    },
     "orch/look.py": {"services": _KEY},
     "orch/winfinish.py": {"services": _KEY},
 }

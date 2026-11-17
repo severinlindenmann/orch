@@ -109,11 +109,17 @@ def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[di
         for m in rx.finditer(text):
             found[(line_of(m.start()), kind)] = None
     flagged = {ln for ln, _ in found}
+    # A line's verdict depends only on its own text: each distinct line is checked once (a big file of
+    # repeated lines took minutes; ORCH-260).
+    scrubbed: dict[str, bool] = {}
     for n, raw in enumerate(text.split("\n"), 1):
         if n in flagged:
             continue
-        forms = (raw, phone_view._clean_full(raw), unicodedata.normalize("NFKC", raw))
-        if any(phone_view._scrub_text(f) != f for f in dict.fromkeys(forms)):
+        hit = scrubbed.get(raw)
+        if hit is None:
+            forms = (raw, phone_view._clean_full(raw), unicodedata.normalize("NFKC", raw))
+            hit = scrubbed[raw] = any(phone_view._scrub_text(f) != f for f in dict.fromkeys(forms))
+        if hit:
             found[(n, "secret-value")] = None
     if root is not None:
         from orch import phone_results
@@ -126,8 +132,13 @@ def find(text: str, root: Path | None = None, *, strict: bool = True) -> list[di
                 note_skipped(root)
         else:
             try:
+                hidden: dict[str, bool] = {}
                 for n, raw in enumerate(text.split("\n"), 1):
-                    if h.hide_text(raw) != raw or h.hide_text(raw.replace("\r", "")) != raw.replace("\r", ""):
+                    hit = hidden.get(raw)
+                    if hit is None:
+                        bare = raw.replace("\r", "")
+                        hit = hidden[raw] = h.hide_text(raw) != raw or h.hide_text(bare) != bare
+                    if hit:
                         found[(n, "stored-key")] = None
                 if not any(k == "stored-key" for _, k in found) and h.hide_text(text) != text:
                     found[(1, "stored-key")] = None  # a value that spans lines
