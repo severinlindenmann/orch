@@ -430,7 +430,8 @@ def _stage_plan(d, stage):
         for t in d["tasks"].values()
         if t["stage"] == stage and d["crew"].get(t["slug"], {}).get("status") != "done"
     ]
-    started = {r.get("why") for r in d["rows"] if r["type"] == "crew-started"}
+    # a sent-back stage's reopened tasks count as not started again, so another stage's running crew never hides them
+    started = set() if sent_back else {r.get("why") for r in d["rows"] if r["type"] == "crew-started"}
     unstarted = [
         t
         for t in todo

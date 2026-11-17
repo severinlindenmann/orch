@@ -1132,3 +1132,16 @@ def test_a_stage_can_only_wait_for_earlier_stages(ws, run):
     bad["line"][0]["after"] = ["docs"]
     refused = run("propose", order, "--file", "-", data=json.dumps(bad).encode(), code=2)
     assert "only wait for stages before it" in refused["error"]
+
+
+def test_a_sent_back_stage_is_not_hidden_by_another_running_stage(ws, run):
+    order, _ = started(ws, run, data=parallel_proposal())
+    run("next", order)
+    form = finish_crew(ws, run, order, "booking-form")
+    q = ask_stop(ws, run, order, "build")
+    run("crew", "add", order, "help-text")
+    run("crew", "start", order, "help-text")  # docs runs
+    core(ws, "answer", order, q, "Send back", "--by", "human:anna")
+    edit(ws, form, lambda t: t.update(status="open"))  # the manager reopened the form for the rework
+    step = run("next", order)
+    assert step["step"] == "start-crew" and step["stage"] == "build" and step["comments"]
