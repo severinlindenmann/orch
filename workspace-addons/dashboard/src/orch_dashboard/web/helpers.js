@@ -591,8 +591,6 @@
       : s === 'renew' ? {word:'Needs renewing', tone:'error'} : {word:'Cannot be reached', tone:'error'};
   }
   const needStopsWord = n => n ? 'Stops ' + n + (n === 1 ? ' ticket' : ' tickets') : '';
-  /* What the person does to renew when orch cannot start it (ORCH-48): the check's own plain step; none when a Renew
-     or Replace button is there or it works. */
   /* Terminal commands a helper wrote in backticks in a question (ORCH-218: "Sign in again with `az login`"): at most two,
      each a tool name and at least one more word in plain characters, so a quoted name or `c1` is never one. */
   const questionCommands = text => [...new Set([...String(text || '').matchAll(/`([^`\n]{3,120})`/g)].map(m => m[1].trim())
@@ -602,6 +600,8 @@
   const needOwnStep = item => item && item.state !== 'works' && !item.renew && !item.key;
   /* The terminal command that signs in again (ORCH-218: 'az login'), shown with a Copy button under the words. */
   const needSignIn = item => needOwnStep(item) && typeof item.sign_in === 'string' && /^[A-Za-z0-9][A-Za-z0-9 ._:=\/@,'"+-]{0,119}$/.test(item.sign_in) ? item.sign_in : '';
+  /* What the person does to renew when orch cannot start it (ORCH-48): the check's own plain step, else the lead line of
+     its sign-in command; none when a Renew or Replace button is there or it works. */
   const needHow = item => !needOwnStep(item) ? '' : typeof item.how === 'string' && item.how ? item.how : needSignIn(item) ? 'Open a terminal on this computer and run:' : '';
   /* The rows of the last check, cleaned: [{name, label, kind, state, ends_at, chosen, stops:[{id, key, title}]}]. */
   function needItems(logins) {
