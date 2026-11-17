@@ -241,15 +241,23 @@ def _git(*a, cwd):
     subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True)
 
 
+# Windows CPython has no lutimes: follow_symlinks=False raises NotImplementedError there, so a link's own
+# time is left alone and its target gets the age (the target is aged anyway when it sits inside the copy).
+_NOFOLLOW = {"follow_symlinks": False} if os.utime in os.supports_follow_symlinks else {}
+
+
 def _age(path: Path, hours: float):
     t = time.time() - hours * 3600
     for p in [path, *path.rglob("*")]:
-        os.utime(p, (t, t), follow_symlinks=False)
+        os.utime(p, (t, t), **_NOFOLLOW)
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, monkeypatch):
     """A repository with an origin/develop and three copies: merged and idle, changed, and merged but busy."""
+    # Windows: safegit trusts the running python as `true` only outside the current folder, and the test
+    # python sits in the project's .venv. Run from the temp folder (orch itself never runs from its venv).
+    monkeypatch.chdir(tmp_path)
     origin = tmp_path / "origin.git"
     _git("init", "-q", "--bare", "-b", "develop", str(origin), cwd=tmp_path)
     main = tmp_path / "main"
@@ -295,6 +303,13 @@ def test_clean_keeps_a_copy_a_process_works_in(repo, monkeypatch):
     assert (copies / "done").is_dir()
 
 
+def test_in_use_matches_the_folder_and_below_only():
+    base = os.path.join(os.sep, "w", "copies", "done")
+    assert doctorpass._in_use(Path(base), [base, os.path.join(os.sep, "other")])
+    assert doctorpass._in_use(Path(base), [os.path.join(base, "sub", "deep")])
+    assert not doctorpass._in_use(Path(base), [base + "-2", os.path.join(os.sep, "w", "copies")])
+
+
 def test_clean_keeps_everything_when_process_folders_are_unknown(repo, monkeypatch):
     main, copies = repo
     monkeypatch.setattr(doctorpass, "process_dirs", lambda: None)
@@ -315,6 +330,28 @@ def test_clean_removes_old_mktemp_test_folders_only(tmp_path):
     cfg = doctorpass.clean_setup({"clean": {"test_roots": [str(root)]}})
     doctorpass.clean(cfg, apply=True)
     assert not old.exists() and new.is_dir() and named.is_dir() and gitty.is_dir()
+
+
+def test_clean_works_without_the_du_program(tmp_path, monkeypatch):
+    """Windows has no `du`: the size falls back to a walk and the clean-up still removes (ORCH-253)."""
+    root = tmp_path / "tests"
+    old = root / "o104.AbC1"
+    (old / "deep").mkdir(parents=True)
+    (old / "deep" / "f.bin").write_bytes(b"x" * 5000)
+    _age(old, 30)
+    assert doctorpass._du(old) >= 5000
+    real = subprocess.run
+
+    def no_du(args, *a, **k):
+        if args[0] == "du":
+            raise FileNotFoundError(2, "The system cannot find the file specified")
+        return real(args, *a, **k)
+
+    monkeypatch.setattr(doctorpass.subprocess, "run", no_du)
+    assert doctorpass._du(old) == 5000
+    cfg = doctorpass.clean_setup({"clean": {"test_roots": [str(root)]}})
+    assert doctorpass.clean(cfg, apply=True) == [f"removed test folder {old} (0 MB)"]
+    assert not old.exists()
 
 
 # ------------------------------------------------------------------ by hand: temp folders and processes

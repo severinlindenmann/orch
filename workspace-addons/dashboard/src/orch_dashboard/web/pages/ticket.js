@@ -858,7 +858,8 @@ function taskRows(t) {
       reason.value = taskMenus.get(menuKey) || '';
       const form = h('form', {className:'stack', hidden:!isOpen, 'data-key':formKey},
         window.DashHelpers.resolved(task) ? null : reason,
-        h('button', {type:'submit', className:'btn outline sm'}, window.DashHelpers.resolved(task) ? 'Open again' : "Won't do"));
+        h('button', {type:'submit', className:'btn outline sm'}, window.DashHelpers.resolved(task) ? 'Open again' : "Won't do"),
+        taskEditRow(t, task, i));
       const closeMenu = () => { taskMenus.delete(menuKey); locks.delete(formKey); form.hidden = true; more.setAttribute('aria-expanded', 'false'); more.focus(); };
       reason.addEventListener('input', () => taskMenus.set(menuKey, reason.value));
       form.addEventListener('focusin', () => locks.add(formKey));
@@ -893,6 +894,36 @@ function taskRows(t) {
         taskProofChips(t, task)), h('span', {className:'meta task-word'}, taskWord(task)), menu);
   });
 }
+// ORCH-236: a task can be renamed, moved up or down and removed from its "..." menu (orch check edit / move / remove;
+// a removed task stays in the history).
+async function taskAct(op, args) {
+  const result = await act(op, args);
+  if (!result.ok) window.orch.toast(changeError(result), 'error');
+  render();
+  return result;
+}
+function taskRename(t, task) {
+  const {d, actions} = dialog('Rename task');
+  const input = h('input', {className:'input', 'aria-label':'Task', maxlength:500, 'data-key':'task-rename-input'});
+  input.value = task.text || '';
+  const save = ticketButton('Save', 'primary', async () => {
+    const text = input.value.trim(); if (!text || save.disabled) { input.focus(); return; }
+    if (text === task.text) { window.orch.close(d); return; }
+    save.disabled = true;
+    const result = await act('check.edit', {ticket:t.id, check:task.id, text, was:task.text});
+    if (result.ok) window.orch.close(d); else { save.disabled = false; window.orch.toast(changeError(result), 'error'); }
+  });
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } };
+  actions.append(save); d.append(input, actions); window.orch.open(d); input.focus();
+}
+function taskEditRow(t, task, i) {
+  const list = array(t.checklist), before = list[i - 1], after = list[i + 1];
+  return h('div', {className:'row wrap', 'data-key':'task-edit-' + task.id},
+    ticketButton('Rename', 'ghost sm', () => taskRename(t, task), {'data-key':'task-rename-' + task.id}),
+    before?.id ? ticketButton('Move up', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:before.id, after:task.id}), {'data-key':'task-up-' + task.id}) : null,
+    after?.id ? ticketButton('Move down', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:task.id, after:after.id}), {'data-key':'task-down-' + task.id}) : null,
+    ticketButton('Remove', 'ghost sm', () => { taskMenus.delete(t.id + ':' + task.id); locks.delete('task-menu-' + task.id); taskAct('check.remove', {ticket:t.id, check:task.id}).then(r => { if (r.ok) window.orch.toast('Removed. It stays in the Activity.', 'ok'); }); }, {'data-key':'task-remove-' + task.id}));
+}
 // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
 function addTaskRow(t, scope) {
   if (snapshot) return null;
@@ -910,7 +941,8 @@ function addTaskRow(t, scope) {
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const text = input.value.trim();
-    if (!text || send.disabled) return;
+    if (send.disabled) return;
+    if (!text) { window.orch.toast('Type the task first.', 'error'); input.focus(); return; }
     send.disabled = true;
     const result = await act('check.add', {ticket:t.id, text});
     send.disabled = false;
@@ -1468,7 +1500,7 @@ function ticketAnswerNodes(t, plainRow) {
     .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
 }
-const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
+const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
 function ticketProperties(t, parent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);

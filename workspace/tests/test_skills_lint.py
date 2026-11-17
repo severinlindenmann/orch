@@ -22,6 +22,7 @@ HUMAN_ONLY = {
     "look shared-pages",  # a person's switch in the dashboard (agents are refused)
     "review answer",  # a person decides a card (agents are refused: needs_person)
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
+    "run history",  # a person reads or continues an earlier chat (Focus; agents are refused to continue)
     "run take-back",  # a person takes back a waiting message (agents are refused)
     "ref merge",  # a person's Merge on a pull request a helper left open (agents are refused)
     "check wont-do",  # a person decides a step will not be done (agents ask with orch ask)
