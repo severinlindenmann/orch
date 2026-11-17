@@ -295,7 +295,7 @@ const OrchBlocks = (() => {
         for (const it of arr(day.items)) {
           if (!it.every) continue;
           const last = bands.find(x => x.link === it.link && x.every === it.every && x.to === i);
-          if (last) last.to = i + 1; else bands.push({link: it.link, every: it.every, title: it.title, tone: it.tone, from: i, to: i + 1});
+          if (last) last.to = i + 1; else bands.push({link: it.link, every: it.every, title: it.title, full: it.full, tone: it.tone, from: i, to: i + 1});
         }
       });
       const banded = it => it.every && bands.some(x => x.link === it.link && x.every === it.every);
@@ -303,6 +303,7 @@ const OrchBlocks = (() => {
         const row = el('div', 'week-bands');
         for (const x of bands) {
           const a = linked('run band t-' + tone(x.tone), x.link, [el('time', 'every', x.every), el('span', '', x.title)]);
+          if (x.full) a.title = x.full;
           a.style.gridColumn = (x.from + 1) + ' / ' + (x.to + 1);
           row.append(a);
         }
@@ -317,7 +318,9 @@ const OrchBlocks = (() => {
         for (const it of items) {
           const parts = [el('time', '', it.time || ''), el('span', '', it.title)];
           if (it.note) parts.push(el('small', 'run-note', it.note));
-          li.append(linked('run t-' + tone(it.tone), it.link, parts));
+          const a = linked('run t-' + tone(it.tone), it.link, parts);
+          if (it.full) a.title = it.full;
+          li.append(a);
         }
         strip.append(li);
       }
