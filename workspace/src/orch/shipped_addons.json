@@ -295,6 +295,34 @@
   "ticket_view": [],
   "version": "0.2.0"
  },
+ "services": {
+  "acts": {},
+  "agents_block": "skills/orch-services/AGENTS-block.md",
+  "background": false,
+  "dashboard": {
+   "icon": "box",
+   "label": "Services",
+   "order": 50
+  },
+  "description": "Keep this workspace's background services running and see their state and log.",
+  "gitignore": [
+   ".orch/addons/services/"
+  ],
+  "name": "services",
+  "needs": false,
+  "orch_api": 1,
+  "recommended": false,
+  "requires": [],
+  "run": "orch_services",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-services",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "sync": {
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
