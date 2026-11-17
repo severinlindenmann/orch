@@ -240,7 +240,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
-    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
+    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
   vm.createContext(ctx); vm.runInContext(source,ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
@@ -433,7 +433,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
-    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
+    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
   vm.createContext(ctx); vm.runInContext(source,ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
@@ -661,4 +661,22 @@ test('the ticket keeps saying that the plan was asked for first (ORCH-248)', () 
   assert.equal(c.ticketPlanFirstLine({id:'t_1', status:'done', plan_first:true}, false), null);
   assert.match(say(c.ticketPlanFirstLine({id:'t_1', status:'active', plan_first:true, questions:[]}, false)), /asked to see the plan first.*waits for your OK/);
   assert.match(say(c.ticketPlanFirstLine({id:'t_1', status:'active', plan_first:true, questions:[{text:'Plan ready: steps', answer:'Yes'}]}, false)), /You have approved it/);
+});
+test('Answer in the header opens the answer window like the ticket list; without one it brings the card into view (ORCH-234)', () => {
+  const opened = [], trigger = {};
+  const needs = [{ticket:'t_other', kind:'question'}, {ticket:'t_one', kind:'stopped'}, {ticket:'t_one', kind:'question'}];
+  const DashHelpers = {...helpers, needAction:n => ({kind:n.kind === 'question' ? 'answer' : 'run'})};
+  const c = context({needsList:() => needs, openNeed:(row, t) => opened.push([row, t]), main:{querySelector:() => null}});
+  c.window.DashHelpers = DashHelpers;
+  assert.equal(c.focusTicketAnswer('t_one', trigger), 'window');
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][0], needs[2], 'the question of this ticket, never a stopped-helper row (that would restart it)');
+  assert.equal(opened[0][1], trigger);
+  const focused = [], log = [];
+  const card = {scrollIntoView:o => log.push('scroll ' + o.block), querySelector:() => ({focus:o => focused.push(o)})};
+  const lone = context({needsList:() => [], openNeed:() => assert.fail('no window without a need'), main:{querySelector:sel => sel === '.next-question' ? card : null}});
+  assert.equal(lone.focusTicketAnswer('t_one', trigger), 'card');
+  assert.deepEqual(log, ['scroll center']);
+  assert.equal(focused.length, 1);
+  assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
 });
