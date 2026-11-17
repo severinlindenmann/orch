@@ -26,7 +26,7 @@ def test_not_listening_when_relay_is_not_set_up(ws):
 def test_long_poll_keeps_cursor_and_wakes_on_new_item(ws):
     relay_on(ws)
     ev = threading.Event()
-    lst = Listener(ws, ev)
+    lst = Listener(ws, ev, clock=waited())
     (ws / "since.json").write_text(json.dumps({"next": 4, "items": [{"seq": 4, "id": "m_1", "seen": True}]}))
     assert lst.step() == 0 and not ev.is_set()
     assert listen.read(ws)["cursor"] == 4 and listen.read(ws)["listening"] is True
@@ -35,6 +35,29 @@ def test_long_poll_keeps_cursor_and_wakes_on_new_item(ws):
     assert ev.is_set()
     polls = [c["args"] for c in calls(ws) if "--since" in c["args"]]
     assert polls[0][2:4] == ["--since", "0"] and polls[1][2:4] == ["--since", "4"] and "--wait" in polls[1]
+
+
+def waited(step=30.0):
+    """A clock where every long poll took its full wait."""
+    t = [0.0]
+
+    def clock():
+        t[0] += step / 2
+        return t[0]
+
+    return clock
+
+
+def test_a_long_poll_that_answers_at_once_backs_off(ws):
+    """ORCH-266: a relay that answers a 30 s wait at once must not become a stream of `orch relay inbox`."""
+    relay_on(ws)
+    (ws / "since.json").write_text(json.dumps({"next": 4, "items": []}))
+    lst = Listener(ws, threading.Event(), clock=lambda: 0.0)
+    assert [lst.step() for _ in range(6)] == [2.0, 4.0, 8.0, 16.0, 30.0, 30.0]
+    lst.clock = waited()
+    assert lst.step() == 0  # a poll that waited again: no pause, and the back-off starts over
+    lst.clock = lambda: 0.0
+    assert lst.step() == 2.0
 
 
 def test_wake_forces_an_inbox_pass_between_intervals(ws):
