@@ -667,7 +667,7 @@ function ticketFileEntries(t) {
 }
 function fileEntry(t, group, file) {
   const kind = viewerKind(file.name);
-  const role = group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
+  const role = attachedInput(t).has(file.name) ? 'Attached by you' : group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
   const at = file.mtime ? createdText(file.mtime) : '';
   return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, created:at,
     title:titleOf(file), named:!!oneLineTitle(file.title),
@@ -699,9 +699,11 @@ function ticketFileActions(t, kind, file) {
     h('a', {className:'btn ghost sm', href:fileUrl(t.id, kind, file.name, true), download:file.name.split('/').pop()}, 'Download'),
     ticketButton('Copy link for this computer', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}));
 }
+// ORCH-185: a picture shows itself in its row (the badge stays under it until it has loaded).
+const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name), alt:'', loading:'lazy'});
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
-    h('span', {className:'file-type' + (shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), shownThumb(t, kind, file)),
+    (picture => h('span', {className:'file-type' + (picture || shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), picture ? fileThumbImage(t, kind, file) : shownThumb(t, kind, file)))(viewerKind(file.name) === 'image' && !snapshot),
     h('div', {className:'grow'}, h('p', {className:'file-name'}, titleOf(file)), oneLineTitle(file.title) ? h('p', {className:'meta file-real-name'}, shortName(file)) : null, h('p', {className:'meta'}, fileMeta(file))),
     ticketFileActions(t, kind, file));
 }
@@ -1440,13 +1442,13 @@ function ticketSelectedTab(t) {
 // shape of the kit's answer record. They show under the ticket's questions, not on a tab of their own.
 function ticketReviewAnswers(t) {
   return array(t.questions).filter(q => q.answer != null && q.decision && typeof q.decision === 'object')
-    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
+    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
 // "What applies now" on top (when a card answer exists), then each card answer as a record; plain answers stay rows.
 function ticketAnswerNodes(t, plainRow) {
   const list = ticketReviewAnswers(t), api = typeof reviewApi === 'function' ? reviewApi() : null;
-  const o = {fileUrl:api ? api.fileUrl : () => '', now:new Date()}, byId = new Map(list.map(e => [e.key, e]));
+  const o = {fileUrl:api ? api.fileUrl : () => '', now:new Date(), showTicket:false}, byId = new Map(list.map(e => [e.key, e]));
   const rows = array(t.questions).filter(q => q.answer != null).slice().reverse()
     .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
