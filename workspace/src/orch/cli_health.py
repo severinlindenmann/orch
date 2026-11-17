@@ -128,7 +128,9 @@ def dispatch(args, root: Path) -> bool:
         doc = {"label": args.label, "command": command, "works": args.works, "ends": args.ends}
         doc |= {"kind": args.kind, "key": args.key, "how": args.how}
         r = health.add_recipe(root, args.name, doc)
-        _out(args, {"added": r["name"], "label": r["label"]}, f"orch now checks {r['label']} with the others.")
+        _out(
+            args, {"added": r["name"], "label": r["label"]}, f"orch now checks {r['label']} with the others."
+        )
         return True
     if action == "remove":
         gone = health.remove_recipe(root, args.name)

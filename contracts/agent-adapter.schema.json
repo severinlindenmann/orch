@@ -125,7 +125,7 @@
           "description": "Optional, built-in adapters only (ORCH-48). How orch asks the tool whether each outside connection set in this workspace answers: the tool's own list command, run in the workspace folder, printing one line per connection as '<name>: <where> - <mark> <state>'. orch reads only the state word (connected, needs authentication, failed) of the connections the inventory names and nothing else of the output.",
           "properties": {
             "list": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Arguments after the detect binary. Fixed words only." },
-            "sign_in": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional. What the person does when a connection needs signing in again; {name} = the connection's name." }
+            "sign_in": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional. What the person does when a connection needs a new sign-in; {name} = the connection's name." }
           }
         },
         "mcp_settings": {

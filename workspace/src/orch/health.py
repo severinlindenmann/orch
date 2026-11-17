@@ -14,7 +14,8 @@ A recipe says which command to run and how to read its answer:
     run by themselves:
     {"checks": {name: {"label", "command", "works"?, "ends"?, "kind"?, "key"?, "how"?}}} (`orch logins add`).
     Without "works" the exit code alone answers: 0 = works, anything else = needs renewing; "works" and
-    "ends" may be a short path ('profiles.*.valid': every item must be true). "kind" says what it is for the person:
+    "ends" may be a short path ('profiles.*.valid': every item must be true).
+    "kind" says what it is for the person:
     login (the default), connection or key; a helper tool is always a login. "key" names the key (keystore)
     this check tests: when it fails, the person replaces that key from the warning (renew.replace_key).
     "how" is the one plain step the person takes to renew when orch cannot start it (shown on the warning).
@@ -228,13 +229,15 @@ def _set_here(doc: dict) -> bool:
         return True
     for f in doc.get("set_if") or ():
         where = Path(f.format(**places))
-        if where.is_absolute() and where.is_file():  # an unset place ({appdata} off Windows) is never relative
+        if (
+            where.is_absolute() and where.is_file()
+        ):  # an unset place ({appdata} off Windows) is never relative
             return True
     return False
 
 
 def known_recipes() -> list[dict]:
-    """Other tools a helper often needs (src/orch/known_checks.json: GitHub, Databricks, ...), each only when it
+    """Other tools a helper often needs (known_checks.json: GitHub, Databricks, ...), each only when it
     is installed and set up on this computer, so a tool nobody uses here never warns."""
     try:
         doc = json.loads(Path(__file__).with_name("known_checks.json").read_text(encoding="utf-8"))
