@@ -47,7 +47,7 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
         adapter.pop("connection_check", None)  # ORCH-48
         if adapter is not merged["adapters"]["claude"]:
             adapter.pop("login", None)  # ORCH-48: Codex has one too
-    for key in ("reminder_hooks", "record_hooks", "reminder", "login"):
+    for key in ("reminder_hooks", "step_hooks", "record_hooks", "reminder", "login"):
         merged["adapters"]["claude"].pop(key)
     merged["adapters"]["claude"]["oneshot"].pop("settings_args")
     merged["adapters"]["claude"]["oneshot"].pop("events")
