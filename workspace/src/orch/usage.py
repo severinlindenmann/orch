@@ -17,7 +17,7 @@ from orch import adapters, modelpick, tickets
 from orch.session_ids import valid_session_id
 
 SCHEMA = "orch.usage/1"
-FAMILIES = ("opus", "sonnet", "haiku")
+FAMILIES = ("opus", "sonnet", "haiku", "fable")
 CACHE_NAME = "usage-cache.json"
 
 
