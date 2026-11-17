@@ -1113,7 +1113,9 @@ function ticketChangesEditor(t) {
   const open = ticketButton('Send back', 'outline sm', () => {
     locks.add(key);
     let sending = false;
-    const input = h('input', {type:'text', className:'input', placeholder:'What should change?', 'aria-label':'What should change?'});
+    // A real text box (ORCH-183): a few lines, its label above it (not repeated inside), Ctrl/Cmd+Enter sends.
+    const fid = 'ticket-changes-text-' + t.id;
+    const input = h('textarea', {className:'input', id:fid, rows:3});
     const close = () => { if (sending) return; locks.delete(key); host.replaceChildren(row); open.focus(); };
     const send = ticketButton('Send back', 'primary sm', async () => {
       if (!input.value.trim() || sending) return;
@@ -1128,9 +1130,9 @@ function ticketChangesEditor(t) {
     input.oninput = () => { send.disabled = sending || !input.value.trim(); };
     input.onkeydown = e => {
       if (e.key === 'Escape') { e.preventDefault(); close(); }
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send.click(); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); send.click(); }
     };
-    host.replaceChildren(h('label', {className:'ticket-ask-label'}, 'What should change?'), h('div', {className:'ticket-ask-line'}, input, send, cancel)); input.focus();
+    host.replaceChildren(h('div', {className:'stack-sm'}, h('label', {className:'ticket-ask-label', for:fid}, 'What should change?'), input, h('div', {className:'row'}, send, cancel))); input.focus();
   });
   row.append(...[done, open, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
@@ -1860,7 +1862,9 @@ async function openNeed(row, trigger) {
 const EMBED_TICKET = /^t_[a-z0-9]{6,16}$/, EMBED_QUESTION = /^q[A-Za-z0-9_-]{0,31}$/;
 // The frame of the shown page of an add-on shipped with orch, when this message came from it (same origin); else null.
 function shippedFrame(e) {
-  if (e.origin !== location.origin || snapshot) return null;  // a shared read-only copy acts on nothing
+  // the shipped add-on page is sandboxed (origin "null"); the frame check below is what counts
+  const chan = e.origin === 'null' && !!e.data?.chan && e.data.chan === globalThis.orchFrameChan?.();  // its per-frame code
+  if ((e.origin !== location.origin && !chan) || snapshot) return null;  // a shared read-only copy acts on nothing
   const r = route();
   if (r.kind !== 'page' || !addons().find(a => a.name === r.id)?.shipped) return null;
   const frame = document.querySelector('iframe.embed[data-key="embed"]');
@@ -1900,7 +1904,7 @@ async function openEmbedQuestion(req) {
   }
   const host = el('div');
   d.append(host, actions);
-  const done = () => { try { req.frame.contentWindow?.postMessage({type:'orch.question.done', ticket:req.ticket, question:req.question}, location.origin); } catch (_) { /* The page was left. */ } };
+  const done = () => { try { req.frame.contentWindow?.postMessage({type:'orch.question.done', ticket:req.ticket, question:req.question}, '*'); } catch (_) { /* The page was left. */ } };
   mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, digest:q.digest, title:q.text, text:'', kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))}, {dialog:d, lock:'needs-you', onAnswered:done});
   window.orch.open(d);
 }
@@ -1923,7 +1927,7 @@ function embedIdeaRequest(e) {
 }
 let embedIdeaBusy = false;  // one idea at a time: a second click while saving is dropped
 async function fileEmbedIdea(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (req.text.length > IDEA_MAX) return reply({type:'orch.idea.failed', error:'An idea here has at most ' + IDEA_MAX + ' characters.'});
   if (embedIdeaBusy) return;
   embedIdeaBusy = true;
@@ -1955,7 +1959,7 @@ function embedLooksGoodRequest(e) {
 }
 let embedLooksGoodBusy = false;  // one batch at a time
 async function looksGoodAll(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (embedLooksGoodBusy) return;
   embedLooksGoodBusy = true;
   try {
@@ -1997,7 +2001,7 @@ function embedAskRequest(e) {
 }
 let embedAskBusy = false;  // one ask at a time: a second click while sending is dropped
 async function fileEmbedAsk(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (embedAskBusy) return;
   embedAskBusy = true;
   try {
@@ -2030,7 +2034,7 @@ function embedSendRequest(e) {
 }
 let embedSendBusy = false;  // one message at a time: a second click while sending is dropped
 async function sendEmbedMessage(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (req.text.length > EMBED_SEND_MAX) return reply({type:'orch.send.failed', error:'That is too long (at most ' + EMBED_SEND_MAX + ' characters).'});
   if (embedSendBusy) return;
   embedSendBusy = true;

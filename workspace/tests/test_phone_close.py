@@ -238,6 +238,38 @@ def test_a_busy_or_failing_relay_is_tried_again_later(proj, run, conn, monkeypat
     assert len(relay.sync_closed(proj, now=1000.0 + relay.CLOSE_RETRY + 1)) == 1
 
 
+def test_a_retry_after_an_unclear_failure_sends_the_same_message(proj, run, conn, monkeypatch):  # noqa: F811
+    """The first post may have been stored although the answer was a 5xx: the retry must be the very same
+    message (id, time, reason), so the relay answers "duplicate", not a 409 for a new id."""
+    tid = _new_ticket(run)
+    _ask(run, tid)
+    assert run("answer", tid, "q1", "CSV", "--by", "human:me")[0] == 0
+    real = relay._post_message
+    raws = []
+
+    def stored_then_500(root, raw):
+        if "taken_back" not in json.loads(raw)["body"]:
+            return real(root, raw)
+        raws.append(json.loads(raw))
+        if len(raws) == 1:
+            e = relay.Refused("Server error.")
+            e.status = 500
+            raise e
+        return {"id": raws[-1]["id"], "duplicate": True}
+
+    monkeypatch.setattr(relay, "_unreachable", lambda e: False)
+    monkeypatch.setattr(relay, "_post_message", stored_then_500)
+    assert relay.sync_closed(proj, now=1000.0) == []
+    _status(run, tid, "done")  # the reason worked out now differs; the retry still sends the first one
+    assert len(relay.sync_closed(proj, now=1000.0 + relay.CLOSE_RETRY + 1)) == 1
+    assert len(raws) == 2
+    first, again = raws
+    assert again == first  # the relay hashes the whole message
+    assert first["body"]["taken_back"]["reason"] == "Answered in orch"
+    assert relay.sync_closed(proj, now=1000.0 + 2 * relay.CLOSE_RETRY + 2) == []
+    assert len(raws) == 2
+
+
 def test_any_other_refusal_is_final(proj, run, conn, monkeypatch):  # noqa: F811
     tid = _new_ticket(run)
     _ask(run, tid)
