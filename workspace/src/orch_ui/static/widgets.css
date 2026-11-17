@@ -864,3 +864,22 @@ a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-de
 .blk-table.data-table td.cell-actions .row{flex-wrap:wrap}
 .table-wrap table.blk-table{min-width:0}
 }
+/* Review behaviour (ORCH-183, persona test 17 Nov): the answers stay on screen at 1440x900 and on a phone (the card
+   gives up height instead), a "What was done" box as tall as its words, the result's own files as tiles that open
+   them, the three answer words on one line, and the undo toast above the phone's tab bar. */
+.review-layout #deck,.review-layout .swipe{--swipe-card-h:clamp(320px,calc(100dvh - 420px),1000px)}
+@media(max-width:720px){.review-layout #deck,.review-layout .swipe{--swipe-card-h:clamp(300px,calc(100dvh - 430px),720px)}}
+.swipe-preview:has(>.doc){flex:0 1 auto;overflow:auto}
+.swipe-card:has(.swipe-preview>.doc) .swipe-head{flex-shrink:0}/* the words box gives up room, never the question */
+.swipe-foot{margin-top:auto}
+.swipe-actions{align-items:flex-end}
+.swipe-files{display:flex;gap:var(--s2);padding:var(--s3) var(--s4) 0;overflow-x:auto;flex:none}
+.swipe-file{display:grid;gap:4px;width:160px;flex:none;color:var(--text);text-decoration:none;font-size:13px;line-height:18px}
+.swipe-file-thumb{position:relative;display:grid;place-items:center;height:100px;border:1px solid var(--border);border-radius:var(--radius);background:var(--ink);overflow:hidden;color:var(--text-muted)}
+.swipe-file-thumb>img{width:100%;height:100%;object-fit:cover}
+.swipe-file-thumb>iframe{position:absolute;top:0;left:0;width:200%;height:200%;transform:scale(.5);transform-origin:0 0;border:0;pointer-events:none;background:var(--paper)}
+.swipe-file:hover .swipe-file-thumb{border-color:var(--border-strong)}
+.swipe-file:focus-visible{outline:none}.swipe-file:focus-visible .swipe-file-thumb{box-shadow:var(--focus-ring)}
+.swipe-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:720px){.swipe-file{width:112px}.swipe-file-thumb{height:64px}}
+@media(max-width:720px){body:has(>.tabbar) .ui-toasts{bottom:calc(var(--touch) + var(--s4) + env(safe-area-inset-bottom))}body:has(>.tabbar):has(.swipe-actions:not([hidden])) .ui-toasts{bottom:calc(var(--touch) + 136px + env(safe-area-inset-bottom))}}

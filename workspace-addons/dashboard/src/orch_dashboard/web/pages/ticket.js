@@ -1103,7 +1103,9 @@ function ticketChangesEditor(t) {
   const open = ticketButton('Send back', 'outline sm', () => {
     locks.add(key);
     let sending = false;
-    const input = h('input', {type:'text', className:'input', placeholder:'What should change?', 'aria-label':'What should change?'});
+    // A real text box (ORCH-183): a few lines, its label above it (not repeated inside), Ctrl/Cmd+Enter sends.
+    const fid = 'ticket-changes-text-' + t.id;
+    const input = h('textarea', {className:'input', id:fid, rows:3});
     const close = () => { if (sending) return; locks.delete(key); host.replaceChildren(row); open.focus(); };
     const send = ticketButton('Send back', 'primary sm', async () => {
       if (!input.value.trim() || sending) return;
@@ -1118,9 +1120,9 @@ function ticketChangesEditor(t) {
     input.oninput = () => { send.disabled = sending || !input.value.trim(); };
     input.onkeydown = e => {
       if (e.key === 'Escape') { e.preventDefault(); close(); }
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send.click(); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); send.click(); }
     };
-    host.replaceChildren(h('label', {className:'ticket-ask-label'}, 'What should change?'), h('div', {className:'ticket-ask-line'}, input, send, cancel)); input.focus();
+    host.replaceChildren(h('div', {className:'stack-sm'}, h('label', {className:'ticket-ask-label', for:fid}, 'What should change?'), input, h('div', {className:'row'}, send, cancel))); input.focus();
   });
   row.append(...[done, open, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }

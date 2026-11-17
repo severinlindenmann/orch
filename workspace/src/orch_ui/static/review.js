@@ -6,7 +6,8 @@
            meta (element whose text becomes "Review · <workspace>" once api.workspace is known),
            poll (ms, default 5000, 0 = off), now (Date, tests),
            onChange (deck: called when the deck is built and after every move or answer; the dashboard's "All cards" list),
-           startId (open at this card first, e.g. core:q:t_x:q2)}
+           startId (open at this card first, e.g. core:q:t_x:q2),
+           hold (ms an answer waits before it is saved, default 6000, a little longer than the Undo toast: Undo takes it back for real until then, ORCH-183)}
    UI.cardShown(card, o)       the pictures of a card as small tiles (the ticket page shows them with the question). o: {fileUrl}
    UI.answerRecord(entry, o)   one answer record (under the ticket questions and the Answered list). o: {fileUrl, now}
    UI.appliesNow(entries, o)   the "What applies now" block (null when nothing was answered yet)
@@ -18,6 +19,7 @@
      stack()    -> Promise<[card]>      card = one row of `orch review list --json`:
                   {id, ticket, key, card:{kind,title,why,need,then,ok_label,open,preview}, digest, since,
                    text (the question, shown on the card), group (cards that belong together), recommended}
+                  card.files: [{name, type:'img'|'page'|'file', ref}] the result's own files (a Check card); api.fileUrl gives their URL
                   preview refs are "reviewed/<sha12>/<name>" files; the page asks api.fileUrl for them
      answered() -> Promise<[entry]>     entry = {id, ticket, key, card, shown:{digest,copy,files}, at, by, via,
                   decision:{action:approve|use|use_with_changes|send_back|dont|none_of_these, picked, allows,
@@ -46,11 +48,13 @@ const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};cons
  if(q.type==='compare'){q.before=mapPreview(p.before,c,api);q.after=mapPreview(p.after,c,api)}
  if(q.type==='options'){q.options=(p.options||[]).map(op=>Object.assign({},op,{preview:op.preview?mapPreview(op.preview,c,api):undefined,suggested:!!(op.suggested||(c&&c.recommended&&c.recommended===op.id))}));if(p.before)q.before=mapPreview(p.before,c,api)}
  return q};
+const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==='string'&&typeof f.name==='string'&&f.name).slice(0,6)
+ .map(f=>({label:f.name.slice(0,80),type:f.type==='img'||f.type==='page'?f.type:'file',src:api.fileUrl(c,f.ref)||''})).filter(f=>f.src);
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
   why:k.why,okLabel:k.ok_label,then:k.then,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
-  text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
+  text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
 
 /* ---------- Answers: words, pill, record ---------- */
 const verdictWord=e=>{const d=e.decision||{},k=e.card||{},n=(d.changes||[]).length;
@@ -134,6 +138,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const bWait=mkBtn('Waiting','deck'),bAns=mkBtn('Answered','answered'),nav=el('nav','segmented');nav.setAttribute('aria-label','Show');nav.append(bWait,bAns);
  if(o.nav)o.nav.append(nav);else host.append(nav);host.append(deckEl,ansEl);
  let deck=null,view='deck',timer=null,alive=true,dirty=false,loading=false;const gone=new Set();/* id@digest answered here */
+ const holdMs=o.hold==null?6000:o.hold,held=new Map();/* id -> {body, it, t}: answers not saved yet */
  const sig=it=>it.id+'@'+it.digest;
  const waitCount=n=>{bWait.lastChild.textContent=n?String(n):'';bWait.setAttribute('aria-pressed',String(view==='deck'))};
  const setView=v=>{view=v;bWait.setAttribute('aria-pressed',String(v==='deck'));bAns.setAttribute('aria-pressed',String(v==='answered'));deckEl.hidden=v!=='deck';ansEl.hidden=v!=='answered';if(v==='answered')drawAnswered();else if(deck)deckEl.focus({preventScroll:true})};
@@ -146,6 +151,13 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   if(note&&note.picked)body.picked=note.picked;else if(note&&note.about&&note.about!=='all')body.picked=note.about;
   const w=note&&note.changes;if(w&&(w.text||(w.pins||[]).length))body.note={text:w.text||'',pins:(w.pins||[]).map((p,i)=>({n:p.n||i+1,on:p.on||'',x:p.x,y:p.y,text:p.text}))};
   gone.add(sig(it));
+  /* held for o.hold ms first: Undo in that time takes the answer back for real (nothing was saved); leaving the page
+     or a newer answer saves it at once */
+  const k=it.id;if(held.has(k))flushOne(k);held.set(k,{body,it,t:setTimeout(()=>flushOne(k),holdMs)})};
+ const flushOne=k=>{const h=held.get(k);if(!h)return;held.delete(k);clearTimeout(h.t);post(h.it,h.body);if(deck&&deck.syncUndo)deck.syncUndo()};
+ const flushAll=()=>[...held.keys()].forEach(flushOne);
+ const unhold=it=>{const h=held.get(it.id);if(!h)return false;held.delete(it.id);clearTimeout(h.t);gone.delete(sig(h.it));return true};
+ const post=(it,body)=>{
   Promise.resolve().then(()=>api.answer(body)).catch(()=>({ok:false,error:{code:'error',message:'Could not reach orch.'}})).then(res=>{
    if(res&&res.ok){if(view==='answered')drawAnswered();return}
    gone.delete(sig(it));const code=res&&res.error&&res.error.code;
@@ -154,7 +166,8 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    else UI.toast((res&&res.error&&res.error.message)||'Could not save your answer. It is waiting again.',null,'error');
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{deckEl.replaceChildren();
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  flushAll();/* a new deck has no Undo for the old one's answers: save them now */
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus({preventScroll:true})};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
@@ -176,7 +189,9 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  deckEl.replaceChildren(UI.state({kind:'loading'}));waitCount(0);setView('deck');
  const tick=()=>{if(typeof document!=='undefined'&&document.visibilityState==='hidden')return;load(dirty);if(view==='answered')drawAnswered()};
  load(false);if(pollMs>0)timer=setInterval(tick,pollMs);
- return {reload:()=>load(true),show:setView,destroy:()=>{alive=false;clearInterval(timer)},get deck(){return deck},tick};
+ const onHide=()=>{if(document.visibilityState==='hidden')flushAll()};
+ if(typeof window.addEventListener==='function'){window.addEventListener('pagehide',flushAll);window.addEventListener('visibilitychange',onHide)}
+ return {reload:()=>load(true),show:setView,destroy:()=>{flushAll();alive=false;clearInterval(timer);if(typeof window.removeEventListener==='function'){window.removeEventListener('pagehide',flushAll);window.removeEventListener('visibilitychange',onHide)}},get deck(){return deck},tick,get held(){return held.size}};
 };
 UI.review={mapCard,verdictWord,fmtTime,mapPreview};
 })();

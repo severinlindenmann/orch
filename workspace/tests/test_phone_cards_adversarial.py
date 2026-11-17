@@ -316,6 +316,7 @@ def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
         "In short: Merged in PR 12 on green CI.",
         "Done when: Tests pass; the phone shows it",
         "No task covers: “the phone shows it”",
+        "What to do: send it back and say which part is missing, or approve it if that part does not matter.",
     ]
     assert card["open"] == "https://github.com/o/r/pull/12" and card["need"]
     review.check_wire_card(review.wire_card(card, {}), 0)  # still a valid phone card
@@ -342,3 +343,48 @@ def test_check_card_of_a_sub_ticket_without_steps_names_done_when_and_parent(pro
     ]
     assert paras[2].startswith("Part of: ") and paras[2].endswith("Factory follow-ups")
     assert review.check_digest(t, proj) != review.check_digest(t)  # the digest covers what is shown
+
+
+def test_check_card_names_the_results_pictures_pages_and_pdfs(proj, new_ticket, run):
+    """ORCH-183 A3: a Check result with a cover photo or a result page shows them on its card."""
+    tid = new_ticket("Spring catalogue")
+    ev_dir = proj / ".orch" / "tickets" / tid / "evidence"
+    art = proj / ".orch" / "tickets" / tid / "artifacts"
+    ev_dir.mkdir(parents=True)
+    art.mkdir(parents=True)
+    for name in ("shop-photo.png", "result.html", "orders.csv", "catalogue.pdf"):
+        (ev_dir / name).write_bytes(b"x")
+    (art / "poster.jpg").write_bytes(b"x")
+    (art / "notes.md").write_bytes(b"x")
+    ev = [
+        {
+            "type": "file",
+            "ref": f".orch/tickets/{tid}/evidence/shop-photo.png",
+            "text": "20 KB",
+            "title": "Cover photo",
+        },
+        {"type": "file", "ref": f".orch/tickets/{tid}/evidence/result.html", "text": "1 KB"},
+        {"type": "file", "ref": f".orch/tickets/{tid}/evidence/orders.csv", "title": "Orders"},
+        {"type": "file", "ref": f".orch/tickets/{tid}/evidence/catalogue.pdf", "title": "Catalogue"},
+        {"type": "file", "ref": ".orch/tickets/t_other1/evidence/x.png", "title": "Not this ticket"},
+        {"type": "file", "ref": f".orch/tickets/{tid}/evidence/../../t_other1/x.png", "title": "Climbs out"},
+    ]
+    t = {
+        "id": tid,
+        "title": "T",
+        "status": "review",
+        "checklist": [{"id": "c1", "text": "Make it", "done": True, "evidence": ev}],
+    }
+    card = review.check_card(t, proj)
+    assert [(f["name"], f["type"], f["ref"]) for f in card["files"]] == [
+        ("Cover photo", "img", "evidence/shop-photo.png"),
+        ("result.html", "page", "evidence/result.html"),
+        ("Catalogue", "file", "evidence/catalogue.pdf"),
+        ("poster.jpg", "img", "artifacts/poster.jpg"),
+    ]
+    before = review.check_digest(t, proj)
+    (art / "poster.jpg").write_bytes(b"a new poster")
+    assert review.check_digest(t, proj) != before, "a changed file is a changed card"
+    assert "files" not in review.wire_card(card, {}), "the phone card stays as the relay expects"
+    review.check_wire_card(review.wire_card(card, {}), 0)
+    assert "files" not in review.check_card({"id": "t_y", "title": "T", "status": "review", "checklist": []})

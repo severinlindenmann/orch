@@ -38,8 +38,26 @@ test('one card and none: plain words', () => {
 test('fileUrl serves only reviewed/<sha12>/<name> through /api/file', () => {
   const f = ctx({}).reviewApi().fileUrl;
   assert.equal(f(CARD, 'reviewed/0123456789ab/after.png'), '/api/file?t=t_abcdef&k=reviewed&n=0123456789ab%2Fafter.png');
-  for (const bad of ['reviewed/0123456789ab/../x.png', 'reviewed/0123456789ab/a/b.png', 'artifacts/x.png', 'reviewed/XYZ/x.png', '', null, 'https://evil/x.png']) assert.equal(f(CARD, bad), '', String(bad));
+  for (const bad of ['reviewed/0123456789ab/../x.png', 'reviewed/0123456789ab/a/b.png', 'reviewed/XYZ/x.png', '', null, 'https://evil/x.png', 'artifacts/../x.png', 'evidence/a/../../x.png', 'evidence/.orch/x.png', 'secrets/x.png', 'evidence/a\\b.png']) assert.equal(f(CARD, bad), '', String(bad));
   assert.equal(f({}, 'reviewed/0123456789ab/after.png'), '');
+});
+test('a Check result opens its own files: pictures and PDFs through /api/file, a page only in its /view frame (ORCH-183)', () => {
+  const f = ctx({}).reviewApi().fileUrl;
+  assert.equal(f(CARD, 'evidence/shop photo.png'), '/api/file?t=t_abcdef&k=evidence&n=shop%20photo.png');
+  assert.equal(f(CARD, 'artifacts/out/poster.pdf'), '/api/file?t=t_abcdef&k=artifacts&n=out%2Fposter.pdf');
+  assert.equal(f(CARD, 'evidence/result.html'), '/view/t_abcdef/evidence/result.html');
+  assert.equal(f(CARD, 'artifacts/site/index.HTM'), '/view/t_abcdef/artifacts/site/index.HTM');
+});
+test('a Factory proposal on Review reads like Home: its title as the question, goal and time in short lines (ORCH-183)', async () => {
+  const text = "Start 'Loyalty card for regular customers'? ~1 h 30 min · you're needed for ~10 min. Goal: Regular customers collect stamps. Done means: The card design is ready. Stops: ship. Cap: 2 h active. Crew: manager claude.";
+  const plain = {...CARD, id:'core:q:t_abcdef:q4', key:'q4', text, card:{kind:'choice', title:text, preview:{type:'options', options:[{id:'Start', title:'Start'}]}}};
+  const [fac, other] = await ctx({review:{cards:[plain, CARD]}}).reviewApi().stack();
+  assert.equal(fac.card.title, "Start 'Loyalty card for regular customers'?");
+  assert.match(fac.text, /^Regular customers collect stamps\.\nRuns about 1 h 30 min · needs you for about 10 min · up to 2 h of helper time$/);
+  assert.doesNotMatch(fac.text, /Crew|Stops/);
+  assert.deepEqual(fac.card.preview, plain.card.preview, 'the answers stay the same');
+  assert.equal(fac.digest, plain.digest, 'the answer still names what was asked');
+  assert.equal(other, CARD, 'any other card as it is');
 });
 test('an answer is one review.answer click: question card, check card, picked and note', async () => {
   const c = ctx({});

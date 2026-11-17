@@ -3,7 +3,14 @@
 // "All cards" list beside it on a wide screen. The cards and the decisions come with the state (state.review, from
 // `orch review list`); an answer is a plain click (op review.answer).
 const REVIEW_ID = /^core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]{1,4})|review:(t_[a-z0-9]{6,16}))$/;
-function reviewCards() { return array(state?.review?.cards); }
+function reviewCards() { return array(state?.review?.cards).map(reviewPlainCard); }
+// A Factory proposal reads like Home's card (ORCH-183): its title as the question, the goal and the time in two short
+// lines, not the whole frozen proposal (that stays on the ticket). Any other card is left as it is.
+function reviewPlainCard(c) {
+  const p = c && typeof c.text === 'string' ? window.DashHelpers?.factoryStart?.(c.text) : null;
+  if (!p) return c;
+  return {...c, text:p.goal + (p.meta ? '\n' + p.meta : ''), card:{...(c.card || {}), title:"Start '" + p.title + "'?"}};
+}
 function reviewAnswered() { return array(state?.review?.answered); }
 // The cards of the stack: every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
 function reviewCount() { return reviewCards().length; }
@@ -27,9 +34,15 @@ function reviewApi() {
     stack: async () => reviewCards(),
     answered: async () => reviewAnswered(),
     fileUrl: (c, ref) => {
+      if (typeof c?.ticket !== 'string') return '';
       const m = /^reviewed\/([0-9a-f]{12})\/([^/]+)$/.exec(String(ref || ''));
-      return m && typeof c?.ticket === 'string'
-        ? '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=reviewed&n=' + encodeURIComponent(m[1] + '/' + m[2]) : '';
+      if (m) return '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=reviewed&n=' + encodeURIComponent(m[1] + '/' + m[2]);
+      // a Check result's own files (ORCH-183): a picture or PDF through /api/file, a web page in its sandboxed /view frame
+      const f = /^(evidence|artifacts)\/((?:[^/\\]+\/){0,3}[^/\\]+)$/.exec(String(ref || ''));
+      if (!f || f[2].split('/').some(p => p === '..' || p === '.' || p.startsWith('.'))) return '';
+      return /\.html?$/i.test(f[2])
+        ? '/view/' + encodeURIComponent(c.ticket) + '/' + f[1] + '/' + f[2].split('/').map(encodeURIComponent).join('/')
+        : '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=' + f[1] + '&n=' + encodeURIComponent(f[2]);
     },
     answer: async ({id, digest, verdict, picked, note}) => {
       const m = REVIEW_ID.exec(String(id || ''));
