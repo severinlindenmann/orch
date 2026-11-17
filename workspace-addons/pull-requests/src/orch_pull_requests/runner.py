@@ -69,9 +69,9 @@ class Runner:
         if not self.sign_in():
             return 0
         self.recover()
-        rounds, silent = 0, 0
+        rounds, silent, idle = 0, 0, False
         while True:
-            if rounds:  # the login is checked again before every round
+            if rounds or idle:  # the login is checked again before every round
                 now = self.gh.login()
                 if now is None:  # GitHub does not answer: wait, the entries keep their tries
                     silent += PAUSE_SECS
@@ -92,6 +92,7 @@ class Runner:
             batch = self.next_batch()
             if batch is None:
                 return rounds
+            idle = not batch
             if not batch:
                 rest = self.mine()
                 later = [float(r.get("not_before") or 0) for r in rest]
@@ -226,9 +227,11 @@ class Runner:
             self.finish(e, MERGED, line, status)
         elif kind == LEAVE:
             self.finish(e, OUT, line, status)
-        elif kind == AGAIN:
+        elif kind == AGAIN:  # a pause, so the members that did not change go on without it
             if _state(self.root, e["url"]) == RUNNING:
-                store.back_to_front(self.root, [e["url"]], f"{line}; waits again")
+                store.back_to_front(
+                    self.root, [e["url"]], f"{line}; waits again", not_before=self.clock() + PAUSE_SECS
+                )
         else:
             self.retry([e], line)
 
@@ -457,10 +460,14 @@ class Runner:
                 v = self.gh.pr(url)
                 if v is None:
                     continue
-                still_open = v.get("state") == "OPEN"
-                if still_open and (not self.take("other", f"{url} close") or not self.gh.close(url)):
-                    continue
-                store.change_group(self.root, repo, branch, closed=True)
+                if v.get("state") == "OPEN":
+                    if not self.take("other", f"{url} close"):
+                        continue  # no room: next round
+                    if self.gh.close(url):
+                        store.change_group(self.root, repo, branch, closed=True)
+                    # a close GitHub refused: deleting the branch below closes the pull request too
+                else:
+                    store.change_group(self.root, repo, branch, closed=True)
             if not self.take("other", f"{repo} delete {branch}"):
                 continue
             if self.gh.delete_branch(repo, branch):

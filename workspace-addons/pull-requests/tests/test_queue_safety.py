@@ -473,8 +473,7 @@ def test_github_never_showing_it_ends_after_the_tries(ws, world):
 
 def test_a_github_outage_uses_up_no_tries(ws, world):
     add(ws, 1, 2)
-    for what in (f"view {url(1)}", f"view {url(2)}", "login"):
-        world.hiccups[what] = 5  # nothing answers for five rounds, more than MAX_TRIES
+    world.down = 15  # after the start, the next 15 calls to GitHub get no answer: more than MAX_TRIES rounds
     make(ws, world).run()
     assert states(ws) == {1: "merged", 2: "merged"}
 
@@ -566,6 +565,44 @@ def test_two_workspaces_never_share_a_group_branch(tmp_path, world):
         make(root, world).run()
     branches = [g["branch"] for g in world.groups.values()]
     assert len(branches) == 2 and len(set(branches)) == 2
+
+
+def test_signed_out_before_the_first_round_stops_after_30_minutes(ws, world):
+    add(ws, 1)
+    r = make(ws, world)
+    assert r.sign_in()
+    world.down = 10**6  # signed out right after the start
+    logs: list[str] = []
+    r.log = logs.append
+    r.sign_in = lambda: True  # the start check already ran
+    r.run()
+    assert states(ws) == {1: "waiting"} and any("for 30 minutes" in x for x in logs)
+
+
+def test_a_close_github_refuses_still_ends_with_the_branch_deleted(ws, world):
+    add(ws, 1, 2)
+    world.bad = {1, 2}
+    world.close = lambda u: False  # e.g. no right to close: deleting the head branch closes it
+    make(ws, world).run()
+    assert states(ws) == {1: "out", 2: "out"}
+    assert world.queue_branches() == [] and store.groups(ws) == []
+
+
+def test_a_member_pushed_to_during_its_group_does_not_hold_the_others_back(ws, world):
+    add(ws, 1, 2, 3)
+
+    def on_wait(u):
+        if u in world.groups and len(world.groups) == 1:  # #1 gets a new commit while the group is checked
+            old = world.head(1)
+            tree = out(world.bare, "rev-parse", f"{old}^{{tree}}")
+            new = out(world.bare, "commit-tree", tree, "-p", old, "-m", "fix")
+            out(world.bare, "update-ref", "refs/pull/1/head", new)
+
+    world.on_wait = on_wait
+    make(ws, world).run()
+    assert [g["members"] for g in world.groups.values()][:2] == [[1, 2, 3], [2, 3]]
+    assert states(ws) == {1: "merged", 2: "merged", 3: "merged"} and world.landed(1)
+    nothing_left_behind(ws, world)
 
 
 def test_a_real_red_member_still_leaves(ws, world):
