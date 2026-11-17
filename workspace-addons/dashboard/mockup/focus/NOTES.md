@@ -178,3 +178,6 @@ Final component validation: the requested `node base/scripts/qa-components.cjs 1
 - UX round item 4 (owner: focus-one-ticket): when something needs the person, Focus opens on the next ticket that needs them (oldest question, then oldest result), with "See everything on Home" and "Live now and areas" beside it. The start page (Live now, areas, jobs) shows when nothing waits.
 
 - Fix wave b6 (15 Nov): "Watch live" on a running ticket (agent bar and the ticket's "Live session" card) opens Focus on that ticket (`#addon/focus/t/<ticket>`, Live tab is the default). The card's terminal commands sit behind one small "Copy command" menu. "Tickets in focus" lists tickets a helper is working on first, then the most recently updated. Home: the phone-mode "ended" notice is one toast (then marked seen); the sidebar shows "Pick your name" (opens the person menu) until a person is chosen.
+
+## Focus v2 draft (ORCH-251, 17 Nov)
+focus-v2.html: eight numbered features the owner can mark Keep / Maybe / Drop (open ticket in Focus, reopen or fresh session, chat or tmux terminal, sessions without a ticket, drawer right/bottom, true full screen, several tickets with status, visual results). Scenes: drawer right, bottom, full screen, sessions menu, closed. Draft only; nothing here is in the product yet.
