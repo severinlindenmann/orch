@@ -93,3 +93,16 @@ def test_the_answer_the_page_reads_holds_a_few_facts():
         "went_on": [],
     }
     assert server._renew_answer(None) is None
+
+
+def test_every_script_the_page_loads_is_served(server):
+    """A page file missing from the server's list loads as a 404 and its functions are missing (renew.js)."""
+    import re
+    import urllib.request
+
+    index = urllib.request.urlopen(server + "/").read().decode()
+    srcs = [s for s in re.findall(r'<script src="([^"]+)"', index) if not s.startswith(("http", "kit/"))]
+    assert "pages/renew.js" in srcs
+    for src in srcs:
+        with urllib.request.urlopen(f"{server}/{src}") as r:
+            assert r.status == 200, src
