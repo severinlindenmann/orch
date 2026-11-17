@@ -302,7 +302,8 @@ class Handler(BaseHTTPRequestHandler):
         if px and PAGE_PATH.fullmatch(px.group(2) or ""):  # an unguessable key in the address
             return True
         if (
-            path.startswith("/view/")
+            not self._remote()  # browser headers anyone can forge prove nothing on the port for other computers
+            and path.startswith("/view/")
             and self.headers.get("Sec-Fetch-Site") in ("same-site", "cross-site")
             and self.headers.get("Sec-Fetch-Dest") in ticketfiles.PAGE_SUBRESOURCE_DEST
             and not path.lower().endswith((".html", ".htm"))

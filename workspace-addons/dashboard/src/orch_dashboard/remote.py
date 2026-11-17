@@ -88,6 +88,10 @@ def turn_on(root: Path, listen: str, port: object, name: str | None) -> dict:
     if config is None:
         raise Invalid("This dashboard runs without orch; other computers cannot be let in from here.")
 
+    from orch import pagelaunch, tickets
+
+    if tickets.agent_tool() is not None and not pagelaunch.is_test_workspace(root):
+        raise Invalid("Only a person can let other computers in. Run this in your own terminal.")
     s = {"listen": _address(listen), "port": _port(port), "name": _name(name) if name else None}
     if s["listen"].startswith("127."):
         raise Invalid("That address is this computer only; other computers cannot reach it.")

@@ -128,6 +128,8 @@ def test_nothing_is_trusted_on_the_remote_port_before_sign_in(live, host):
     h = outside(rport, host=f"{host}:{rport}")
     assert req(rport, "GET", "/api/state", h)[0] == 421
     assert req(rport, "GET", "/view/t_abc123/x.png", h)[0] == 421
+    forged = {**h, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"}
+    assert req(rport, "GET", "/view/t_abc123/artifacts/x.png", forged)[0] == 421
     assert req(rport, "GET", "/", h)[0] == 200  # the page shell (no data), so the sign-in can run
     st, _, body = req(rport, "POST", "/api/act", h, {"op": "answer", "args": ANS})
     assert st == 403 and body.decode().startswith("Sign in to ")
@@ -213,3 +215,14 @@ def test_a_broken_file_setting_keeps_the_dashboard_local(ws):
     listen, why = cli._listen(ws)
     assert listen is None and "port" in why
     assert pagelaunch.remote_base(ws, "dashboard") is None
+
+
+def test_only_a_person_lets_other_computers_in(ws, monkeypatch):
+    from orch import tickets
+
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda root: False)
+    assert cli.main(["--dir", str(ws), "remote", "on", "--port", "8791"]) == 2
+    assert remote.settings(ws) is None
+    monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda root: True)  # a test folder may (e2e lane)
+    assert cli.main(["--dir", str(ws), "remote", "on", "--port", "8791"]) == 0
