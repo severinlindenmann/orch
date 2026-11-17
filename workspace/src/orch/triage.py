@@ -65,7 +65,7 @@ def _steps(t: dict) -> tuple[int, int]:
     return sum(1 for x in c if x.get("done") or x.get("wont_do")), len(c)
 
 
-QUIET_BY = ("agent:sync",)  # a copy written by sync is no sign of work on the ticket
+QUIET_BY = ("agent:sync",)  # a copy written by sync does not count as work on the ticket
 RANK = {"wait_passed": 0, "parent_closed": 1, "steps_done": 2, "stale": 3, "wait_cycle": 4, "look_alike": 5,
         "unclear": 9}  # fmt: skip
 
