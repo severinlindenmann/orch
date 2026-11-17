@@ -28,7 +28,7 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
  if(r.state==='waiting'||r.state==='idle'||r.state==='stuck')return d;
  return [r.step?'Step '+r.step.n+' of '+r.step.of:'',helperSpan(r.minutes),d].filter(Boolean).join(' · ')};
 /* The ticket's one state (ORCH-71): the ticket page strip and Focus show the same pill and word for the same ticket.
-   t: {status, questions, bring_back}; helper: the core's helper state {state, word, detail} while a helper runs, else null.
+   t: {status, questions, bring_back, waiting_on}; helper: the core's helper state {state, word, detail} while a helper runs, else null.
    UI.ticketState(t, helper) -> {pill, word, helper}; pill is a status icon name (todo, working, needs, check, done).
    UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
 const TICKET_WORD={open:'Backlog',ready:'To do',active:'Working',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
@@ -39,6 +39,8 @@ UI.ticketState=(t,helper)=>{t=t||{};
  if((t.questions||[]).some(q=>q&&q.answer==null))return {pill:'needs',word:'Needs you',helper:null};
  if(t.status==='review')return {pill:'check',word:'Check',helper:null};
  if(t.bring_back&&t.bring_back.state==='waiting')return {pill:'needs',word:'Needs you',helper:null};
+ // a wait for a date, another ticket or the outside (no open question) is Waiting, as the board's lane says (ORCH-235)
+ if(t.status==='waiting'&&!(t.waiting_on&&t.waiting_on.kind==='question'))return {pill:'todo',word:'Waiting',helper:null};
  if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:HELPER_WORD[helper.state],helper};
  if(helper)return {pill:'working',word:'Working',helper:null};
  return {pill:'todo',word:TICKET_WORD[t.status]||'To do',helper:null}};
@@ -105,7 +107,7 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
  cols.forEach(c=>{const th=el('th','',c.label);th.scope='col';if(c.sort){th.setAttribute('aria-sort','none');th.tabIndex=0;th.append(UI.chevron());const go=()=>{dir=sortKey===c.key?-dir:1;sortKey=c.key;draw()};th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}}}tr.append(th)});
  thead.append(tr);table.append(thead,tbody);wrap.append(table);draw();return wrap};
 /* Swipe review deck (draft 15 Nov, revised after the Codex challenge): UI.swipeDeck(host, items, o)
-   o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), onUndo(item), onChange(),
+   o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), onNote(item, text)->Promise<{ok,error?}> (adds "Add note" to the Comment sheet: words saved, card stays, no verdict), onUndo(item), onChange(),
        canUndo(item) (false once the answer is saved for good: Undo is then not offered, ORCH-183)}
    item.files: [{label, type:'img'|'page'|'file', src}] the result's own files (a Check card), as tiles that open them
    item.answers: [{label, picked}] the card's own answer buttons in place of the three (a Factory start: Not now, Change it,
@@ -122,11 +124,21 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    (title, a ticket key chip, the number on the right) and a small footer. Text only via textContent. */
 UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
  if(st&&st.text){const tone=st.tone==='failed'?'failed':st.tone==='working'?'working':'done',s=el('p','pill doc-status '+tone);s.append(UI.statusIcon(tone==='failed'?'needs':tone),el('span','',st.text));d.append(s)}
+ if(p.headline)d.append(el('p','doc-headline',p.headline));
+ if(p.progress&&p.progress.total>0){const g=el('div','doc-progress'),b=el('div','progress'),f=el('span');f.style.width=Math.round(p.progress.done/p.progress.total*100)+'%';b.append(f);g.append(b,el('span','meta',p.progress.done+' of '+p.progress.total+' steps done'));d.append(g)}
+ if(Array.isArray(p.chips)&&p.chips.length){const r=el('div','doc-chips');const T={ok:'success',warn:'warning',bad:'danger',info:'info'};p.chips.forEach(c=>r.append(el('span','chip '+(T[c.tone]||'info'),c.text)));d.append(r)}
+ if(Array.isArray(p.flow)&&p.flow.length){const r=el('div','doc-flow');p.flow.forEach((t,i)=>{if(i)r.append(el('span','doc-arrow','→'));r.append(el('span','doc-box',t))});d.append(r)}
+ if(p.chart&&Array.isArray(p.chart.bars)){const max=Math.max(...p.chart.bars.map(b=>Math.abs(b.value)),1),r=el('div','doc-chart');r.setAttribute('role','img');r.setAttribute('aria-label',p.chart.bars.map(b=>b.label+' '+b.value+(p.chart.unit||'')).join(', '));
+   p.chart.bars.forEach(b=>{const row=el('div','doc-bar'),t=el('div','progress'),f=el('span');f.style.width=Math.round(Math.abs(b.value)/max*100)+'%';t.append(f);row.append(el('span','',b.label),t,el('b','',b.value+(p.chart.unit||'')));r.append(row)});d.append(r)}
+ if(Array.isArray(p.diff)&&p.diff.length){const r=el('div','doc-diff');p.diff.forEach(l=>r.append(el('div','doc-line '+(l.op==='+'?'add':'del'),l.op+' '+l.text)));d.append(r)}
  if(p.heading)d.append(el(hTag||'h4','',p.heading));(p.paras||[]).forEach(x=>d.append(el('p','',x)));
  if(Array.isArray(p.rows)&&p.rows.length){const ul=el('ul','doc-rows');p.rows.forEach(r=>{if(!r||!r.title)return;const li=el('li','doc-row');li.append(el('span','doc-row-title',r.title));
    if(r.key)li.append(el('span','chip doc-row-key',r.key));if(r.n)li.append(el('span','doc-row-n','#'+r.n));ul.append(li)});d.append(ul)}
  if(p.steps){const ol=el('ol');p.steps.forEach(x=>ol.append(el('li','',x)));d.append(ol)}
- if(p.foot)d.append(el('p','doc-foot',p.foot));return d};
+ if(p.foot)d.append(el('p','doc-foot',p.foot));
+ if(Array.isArray(p.details)&&p.details.length){const dt=el('details','doc-details');dt.append(el('summary','','Details'));p.details.forEach(x=>dt.append(el('p','',x)));
+   dt.addEventListener('pointerdown',e=>e.stopPropagation());d.append(dt)}
+ return d};
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
  let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
  Object.assign(pins,o.pins);Object.entries(o.answered||{}).forEach(([id,a])=>{const it=items.find(x=>x.id===id);if(it)ans[id]={verdict:a.verdict,note:a.note||null,item:it}});
@@ -157,7 +169,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
  const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
  /* previews */
- const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||(p.paras||[]).length||(p.steps||[]).length);return true};
+ const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||p.headline||p.chart||p.flow||p.diff||(p.chips||[]).length||p.progress||(p.paras||[]).length||(p.steps||[]).length);return true};
  const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');fr.addEventListener('load',()=>fr.classList.remove('loading'),{once:true});return fr};
  const buildPreview=(it,big)=>{const p=it.preview||{},f=document.createDocumentFragment();
   if(p.type==='compare'){f.append(buildCompare(it,big));return f}
@@ -328,12 +340,12 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   let about=null;const hint=el('p','meta');hint.style.margin='0';
   if(isOpt(it)){about=el('div','segmented');about.setAttribute('role','group');about.setAttribute('aria-label','About');
    about.append(el('span','meta about-label','About'));[...(it.preview.options||[]).map(x=>[x.id,x.id]),['all','All']].forEach(([v,l])=>{const b=btn('btn sm',[l],v==='all'?'About all options':'About option '+v);b.dataset.v=v;b.onclick=()=>setAbout(v);about.append(b)})}
-  const foot=el('div','swipe-sheet-foot'),cancel=btn('btn',['Cancel']),back=btn('btn',[it.kind==='choice'?'Send my answer':'Send back for changes']),use=btn('btn primary',['']);
+  const foot=el('div','swipe-sheet-foot'),cancel=btn('btn',['Cancel']),back=btn('btn',[it.kind==='choice'?'Send my answer':'Send back for changes']),use=btn('btn primary',['']),note=o.onNote&&it.kind!=='choice'?btn('btn',['Add note'],'Add note, the card stays and the work goes on'):null;
   const setAbout=v=>{about.v=v;about.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)));sync()};
-  const sync=()=>{const has=!!ta.value.trim()||(o.voice&&dr.clips.length);dr.text=ta.value;back.disabled=use.disabled=!has;
+  const sync=()=>{const has=!!ta.value.trim()||(o.voice&&dr.clips.length);dr.text=ta.value;back.disabled=use.disabled=!has;if(note)note.disabled=!has;
    const opt=about&&about.v!=='all'?about.v:null;use.hidden=!opt;if(opt)use.textContent='Use '+opt+' with these changes';
    back.className=opt?'btn':'btn primary';
-   hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):it.kind==='choice'?'The helper gets your words as the answer.':'The helper gets your words and makes a new version. Nothing is approved.'};
+   hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):it.kind==='choice'?'The helper gets your words as the answer.':'The helper gets your words and makes a new version. Nothing is approved.'+(note?' “Add note” only saves your words: the card stays and the work goes on.':'')};
   ta.addEventListener('input',sync);
   const close=()=>{closeOverlay();reset(cur)};cancel.onclick=close;
   const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');
@@ -341,7 +353,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const words=()=>({text:ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice()});
   back.onclick=()=>leave('talk',{changes:words(),about:about?about.v:null});
   use.onclick=()=>{picked[it.id]=about.v;leave('ok',{picked:about.v,changes:words()})};
-  foot.append(cancel,back,use);
+  if(note)note.onclick=async()=>{const text=ta.value.trim();if(!text||note.disabled)return;note.disabled=back.disabled=use.disabled=true;
+   let r;try{r=await o.onNote(it,text)}catch(e){r={ok:false}}
+   if(r&&r.ok){delete drafts[it.id];closeOverlay();reset(cur);if(UI.toast&&!o.quiet)UI.toast('Note added. The card stays; the work goes on.')}
+   else{hint.textContent=(r&&r.error&&r.error.message)||'Could not save the note. Your words are kept.';sync()}};
+  foot.append(cancel,...(note?[note]:[]),back,use);
   /* pull the handle down to close (the words stay) */
   grab.addEventListener('pointerdown',e=>{const y0=e.clientY;grab.setPointerCapture(e.pointerId);const mv=ev=>{sh.style.transform=`translateY(${Math.max(0,ev.clientY-y0)}px)`};
    grab.addEventListener('pointermove',mv);grab.addEventListener('pointerup',ev=>{grab.removeEventListener('pointermove',mv);if(ev.clientY-y0>80)close();else sh.style.transform=''},{once:true})});

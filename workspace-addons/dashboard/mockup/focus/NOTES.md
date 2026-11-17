@@ -182,3 +182,39 @@ Final component validation: the requested `node base/scripts/qa-components.cjs 1
 ## Focus draft D: the agreed Focus mockup (ORCH-251, ORCH-262, 17 Nov)
 focus-v4d.html (script focus-v4d.js) is the one Focus mockup the owner picked: the live wall of sessions (Needs you as a big card, working tiles, idle rows, zoom into one) with a bar under every dashboard page that opens into a layer (right, bottom, split or full screen), chat or terminal per session, the result widgets and the Features sheet. Demo data and a simulated terminal; picks stay in this browser. It is the visual source of truth for building the new Focus behind the Preview switch.
 The earlier drafts (v2, layer v3, v4 A/B/C) were removed once D was chosen; they live in the git history of PR 1262.
+
+## The Preview switch for the new Focus (ORCH-264, 17 Nov)
+
+focus-preview.html
+- What Focus shows while Settings > Add-ons > Focus > Preview is on: an empty shell with the Preview tag and a way back. The wall, bar and layer of draft D fill it in later tasks.
+
+../settings/addon-detail-focus.html
+- New row Preview: "Try the new Focus", off by default.
+
+## The layer, built (ORCH-338, 17 Nov)
+
+focus-v4d.html stays the source of truth for the layer; nothing in the draft changed. The dashboard now has it behind
+the Preview switch: one dock under every page (outside the page content, so it stays open when the page changes) with
+a panel at the bottom, on the right or full screen, minimise to the bar, close to the side. Place and size are kept per
+browser; the top edge of the bottom panel and the left edge of the right one resize it (drag or arrow keys). Esc goes
+one step back: an open menu, full screen, then the panel to the bar. One session for now; the pane says where the chat
+and terminal come. Master: `.live-*` in widgets.css (style guide: Live layer), icons dock-bottom, dock-right,
+dock-side, full-screen, full-exit.
+## The bar is built (ORCH-337, 17 Nov)
+
+- The bar of draft D is in the dashboard behind the Preview switch (`pages/livebar.js`), with its look in the kit
+  (`.lbar` in `widgets.css`, gallery section "Live bar"). Same groups, words and fold steps as `chipsHTML` here.
+- Two changes from this draft: an open list scrolls inside its box (here it runs past it), and when even symbols and
+  numbers do not fit, needs you stays and the rest becomes one More count (fold 4), so nothing is cut at 320 wide.
+- New, Open and Where Focus sits come with the layer; the bar keeps an empty `.lbar-end` slot for them.
+
+## The split, built (ORCH-339, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch the layer now holds
+1, 2 or 3 sessions side by side (stacked in the right panel), in the order of the bar's chips. One pane is selected
+(brand line on top); the title of another selects it. Every pane has pin, add beside (the next live session; off at
+three), place, full screen, minimise and close; closing a pane gives its room to the others and selects its neighbour.
+Narrow panes (three at 1280, more than one on the right, a phone) fold pin and place into More, as in the draft. A
+phone shows only the selected session and has no add beside. The split and the selection are kept per browser and
+stay while the page changes. Pins are kept in this browser (the bar's key) until the wall stores them in orch.
+Master: `.live-*` in widgets.css (style guide: Live layer); click-through step 12.

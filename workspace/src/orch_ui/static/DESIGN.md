@@ -6,7 +6,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 
 1. Build on the master. Use existing components and tokens; never write a page-local look, a copied kit file or a new "system" sheet.
 2. Need something missing? Add it here first: (a) the component in `widgets.css` / `widgets.js` (or the file it belongs to), (b) an entry in `gallery.html` / `gallery.js` with its states (default, loading, empty, error where they apply), (c) a test in `workspace/tests/test_orch_ui_kit.py` if it adds a file, then use it from the page.
-3. Mockup pages link these files by relative path (`../../../../workspace/src/orch_ui/static/...`); the mockup folder keeps no stylesheet of its own.
+3. Mockup pages link these files by relative path (`../../../../workspace/src/orch_ui/static/...`); the mockup folder keeps no stylesheet of its own One exception (owner 17 Nov, ORCH-267): a draft that needs new looks keeps them in one `draft.css` in its own draft folder (`mockup/<area>/draft-<ticket>/`), tokens only, every rule under the draft's own body class; product pages never link it. When the owner picks, the chosen looks move into the master (`widgets.css` plus a gallery entry) and every draft folder of that round is deleted in the same pull request. Never write draft rules into `mockup.css` or `widgets.css`.
 4. Owner wording rules: one click, no typed words; minimal plain words; no "Details" / "Technical details" toggles (show the detail plainly lower down); no "NetBird" (say "private network"). Old reference examples below that show a Details disclosure are legacy and must not be copied.
 5. Never change tokens in a page. Colour and size tokens come from `brand/tokens.json` via `brand/gen_tokens.py` (`tokens.css` is generated).
 
@@ -23,6 +23,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `motion.css`, `motion.js` | Motion tokens in use (see Motion contract). |
 | `icons.js` | One icon set, `icon('check', 16)`. |
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
+| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. |
 | `question-card*.js`, `composer.*` | Question card, chat composer. |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
@@ -218,7 +219,7 @@ Only Home carries an attention count. Do not give every destination a badge. A t
 
 **Contacts lives under Add-ons.** It manages devices and workspace access. The bottom sidebar switch “Send questions to my phone” is a quick control, not a navigation shortcut. Settings contains notification preferences and the timeout, saved in place. Never give Settings a tab that silently redirects. If a Settings section needs device management, show an explicit link “Manage devices in Contacts →” while leaving the Settings section open (BP-47–49).
 
-Topbar: current location and Ask the helper / New ticket. These are navigation actions. Inside a decision view, make the decision its sole prominent action and style global New ticket as outline. Breadcrumbs only for nested pages: Tickets › Customer survey; current location is not a link (BP-24, BP-51). Demo new-ticket links use `../board/board.html?new=1`; area authors should wire that query to their composer. The shell intentionally has no active route until it is adopted by an area.
+Topbar: current location and Chat / New ticket. These are navigation actions. The topbar Chat opens the same page as the sidebar Chat and carries the same name; never a second name for it such as "Ask the helper" (ORCH-299). Inside a decision view, make the decision its sole prominent action and style global New ticket as outline. Breadcrumbs only for nested pages: Tickets › Customer survey; current location is not a link (BP-24, BP-51). Demo new-ticket links use `../board/board.html?new=1`; area authors should wire that query to their composer. The shell intentionally has no active route until it is adopted by an area.
 
 **Phone (up to 720 px, ORCH-73, owner 16 Nov).** One bottom bar replaces the side menu and the top bar: Home, Tickets, Review (the one needs-you number), More (opens the side menu, which brings the top bar and its actions back). Lists are short rows, never a squeezed table: render the table with `.wide-only` and the `UI.shortGroup` list with `.phone-only`. Every page fits 390 px and 320 px without sideways scroll.
 
@@ -286,6 +287,22 @@ Every type gets a real, useful representation, not merely a filename. `.preview-
 Every preview uses **Open, Download, Copy link**, in that order, always visible and keyboard reachable; Share can follow when relevant. `file://` clipboard access varies, so Copy link announces a fallback if unavailable. In the app use stable share URLs rather than file URLs. A static single-file sheet demonstrates the frame; multi-file sheets must add previous/next buttons, Left/Right keys and a file position label, and preserve their state in the URL (BP-32, BP-54).
 
 Above a 10 MB browser-render budget, show a bounded first-page/first-rows preview with an explicit partial-preview sentence. Limits are defaults to validate per renderer, not claims that every type uses the same parser. Failure keeps the same frame and says “Can’t preview this file” with Download. Do not expose raw renderer errors. Never insert untrusted HTML into the main document.
+
+### Result widgets (ORCH-263)
+Use `UI.result` for anything a helper hands back, on Focus and on ticket pages alike; do not build a page-local card.
+Small (168 px high) is a glance and the whole card opens the overlay; big sits on a ticket page with Download and Open
+big in its head; the overlay shows one result large. A plain link is a row that opens in a new tab and never gets an
+overlay. States: empty says what is missing in one sentence, loading keeps the shape (skeleton, `aria-busy`), error
+says "Can't preview this file." with Try again and Download, too big says so and shows the first part
+(`item.shown`) or, for media, only the sentence. Text goes in with `textContent` only; a web page only in an
+`<iframe sandbox="">`.
+
+### Live bar (ORCH-337)
+`.lbar` is the one row under every dashboard page while the new Focus is in Preview (dashboard `pages/livebar.js`).
+Sessions that need you are orange chips, pinned ones are chips after them, everything else is a quiet count ("3
+working", "9 in line", "2 idle") that opens a list (`.lbar-pop`, search from 9 sessions). It never wraps: it folds
+(`data-fold` 0 to 4) into counts instead, and on a phone it shows symbols and numbers above the tab bar. Counts in
+words read right: "1 session", "2 sessions". The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
 
 ## Loading, errors and performance
 

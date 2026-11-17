@@ -114,6 +114,22 @@ def test_ids_and_text_are_checked(act_server, act_orch):
             {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "ticket", "ref": "x"}}, "if_revision": 1},
         ),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "time"}}, "if_revision": 1}),
+        (
+            "ticket.patch",
+            {
+                "ticket": "t_abcdef",
+                "data": {"waiting_on": {"kind": "time", "until": "x", "ref": 5}},
+                "if_revision": 1,
+            },
+        ),
+        (
+            "ticket.patch",
+            {
+                "ticket": "t_abcdef",
+                "data": {"waiting_on": {"kind": "time", "until": "x", "on": "y"}},
+                "if_revision": 1,
+            },
+        ),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": "--all"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": 5}, "if_revision": 1}),
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
@@ -201,6 +217,35 @@ def test_argv_snapshot_per_op(act_server, act_orch):
                 *common,
                 "--",
                 '{"status": "dropped", "superseded_by": "ORCH-7"}',
+            ],
+        ),
+        (  # ORCH-235: a wait from the board or the ticket page has a date and may say what it waits for
+            {
+                "op": "ticket.patch",
+                "args": {
+                    "ticket": "t_abcdef",
+                    "data": {
+                        "status": "waiting",
+                        "waiting_on": {
+                            "kind": "time",
+                            "until": "2030-01-01T08:00:00Z",
+                            "ref": "The price list",
+                        },
+                    },
+                    "if_revision": 3,
+                },
+            },
+            [
+                "ticket",
+                "patch",
+                "t_abcdef",
+                "--if-revision=3",
+                *common,
+                "--",
+                (
+                    '{"status": "waiting", "waiting_on": {"kind": "time", "until": "2030-01-01T08:00:00Z", '
+                    '"ref": "The price list"}}'
+                ),
             ],
         ),
         (
@@ -340,6 +385,22 @@ def test_refusal_comes_back_as_plain_text(act_server, act_orch):
     (act_orch.parent / "mode.txt").write_text("refuse")
     code, text, _ = post(act_server, {"op": "run.stop", "args": {"ticket": "t_abcdef"}})
     assert code == 422 and text == "Nope, not allowed."
+
+
+def test_every_click_leaves_one_act_event_in_the_debug_log(act_server, act_orch, monkeypatch):
+    """ORCH-341: a click that left the ticket where it was must show in a problem report: op, ticket and the
+    answer's status (no arguments)."""
+    from orch_dashboard import server
+
+    seen = []
+    monkeypatch.setattr(server.diag, "log", lambda ev, lvl="debug", **kv: seen.append((ev, kv)))
+    (act_orch.parent / "mode.txt").write_text("refuse")
+    code, _, _ = post(act_server, {"op": "run.stop", "args": {"ticket": "t_abcdef"}})
+    assert code == 422
+    acts_ = [kv for ev, kv in seen if ev == "dashboard.act"]
+    assert len(acts_) == 1
+    assert acts_[0]["op"] == "run.stop" and acts_[0]["ticket"] == "t_abcdef" and acts_[0]["status"] == 422
+    assert set(acts_[0]) <= {"root", "op", "ticket", "status", "ms"}
 
 
 def test_no_orch_command_is_a_plain_503(ws):

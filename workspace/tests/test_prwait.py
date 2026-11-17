@@ -217,6 +217,9 @@ def fake_gh(monkeypatch):
 
     monkeypatch.setattr(prwait, "Live", lambda url: pulls[url])
     monkeypatch.setattr(prwait, "_run", run)
+    from orch import ghmerge
+
+    monkeypatch.setattr(ghmerge, "workflow_check", lambda url, head: None)  # never the real GitHub
     return pulls, merges
 
 
@@ -488,3 +491,103 @@ def test_a_before_merge_check_that_breaks_never_lets_the_merge_through(monkeypat
 
     o = prwait.run_one(src.url, True, src=src, before_merge=broken)
     assert not o.ok and o.status == "held" and "TimeoutError" in o.line and merges == [] and back == ["merge"]
+
+
+def test_a_green_workflow_change_goes_to_the_owners_merge_card_and_is_not_merged_here(
+    proj, tk, run, fake_gh, monkeypatch
+):
+    """ORCH-305: GitHub holds it for the owner (CODEOWNERS): one Merge card, no merge, no hand push."""
+    from orch import cli_review, ghmerge
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"), changed=[".github/workflows/addons.yml"])
+    seen = []
+    monkeypatch.setattr(
+        ghmerge, "workflow_check", lambda url, head: seen.append((url, head)) or {"files": []}
+    )
+
+    def card(args, root, tid, by):
+        assert (
+            args.merge and args.open == PR and args.link == "CI workflow change" and by.startswith("agent:")
+        )
+        return {}, {"id": "q4"}
+
+    monkeypatch.setattr(cli_review, "ask_card", card)
+    code, out, _ = run("ref", "wait", tk, "--merge", "--by", "agent:x")
+    assert code == 1 and merges == [] and seen == [(PR, HEAD)]
+    lines = out.strip().splitlines()
+    assert "the owner merges it with the Merge card q4" in lines[-2]
+    assert lines[-1].startswith("Next: GREEN; it changes a CI workflow, so the owner merges it")
+    assert _ref_status(proj, tk, PR) == "owner merges"
+
+
+def test_without_a_workflow_file_the_merge_goes_on(proj, tk, run, fake_gh, monkeypatch):
+    from orch import ghmerge
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    monkeypatch.setattr(ghmerge, "workflow_check", lambda url, head: None)
+    code, _, _ = run("ref", "wait", tk, "--merge")
+    assert code == 0 and len(merges) == 1
+
+
+def _timed_out(retry_state):
+    bad = {"name": "lint", "state": "TIMED_OUT", "bucket": "fail"}
+    ok = {"name": "build", "state": "SUCCESS", "bucket": "pass"}
+    again = {"name": "lint", "state": retry_state, "bucket": "pass" if retry_state == "SUCCESS" else "fail"}
+    return {"repo": "acme/app", "isDraft": False, "required": [], "polls": [[ok, bad], [ok, again]]}
+
+
+def test_a_timed_out_check_is_run_once_more_and_counted():
+    src = prwait.Replay(_timed_out("SUCCESS"))
+    v = prwait.wait(src)
+    assert v.green and v.retried == ["lint"] and src.reran == ["lint"]
+    from orch import checkretry
+
+    s = checkretry.summary()
+    assert s["total"] == 1 and s["checks"][0]["check"] == "lint" and s["checks"][0]["timeout"] == 1
+
+
+def test_a_check_that_times_out_again_is_red_after_one_retry():
+    src = prwait.Replay(_timed_out("TIMED_OUT"))
+    v = prwait.wait(src)
+    assert not v.green and "lint TIMED_OUT" in v.why and "once more" in v.why
+    from orch import checkretry
+
+    assert checkretry.summary()["total"] == 1  # one retry, never a second
+
+
+def test_a_real_failure_is_never_retried():
+    src = prwait.Replay(_timed_out("SUCCESS"))
+    src.polls[0][1]["state"] = "FAILURE"
+    v = prwait.wait(src)
+    assert not v.green and not v.retried and not hasattr(src, "reran")
+
+
+def test_a_network_failure_named_by_the_source_is_retried():
+    case = _timed_out("SUCCESS")
+    case["polls"][0][1]["state"] = "FAILURE"
+    case["networkFailed"] = ["lint"]
+    v = prwait.wait(prwait.Replay(case))
+    assert v.green and v.retried == ["lint"]
+    from orch import checkretry
+
+    assert checkretry.summary()["checks"][0]["network"] == 1
+
+
+def test_a_timeout_and_a_real_failure_together_are_not_retried():
+    case = _timed_out("SUCCESS")
+    case["polls"][0].append({"name": "unit", "state": "FAILURE", "bucket": "fail"})
+    v = prwait.wait(prwait.Replay(case))
+    assert not v.green and not v.retried
+
+
+def test_retry_summary_keeps_only_the_window_and_orders_by_count():
+    from orch import checkretry
+
+    checkretry.record("a/b", "1", "old", "timeout", now=10_000_000.0 - 40 * 86400)
+    for _ in range(2):
+        checkretry.record("a/b", "2", "flaky", "network", now=10_000_000.0)
+    checkretry.record("a/b", "3", "other", "timeout", now=10_000_000.0)
+    s = checkretry.summary(30, now=10_000_100.0)
+    assert [c["check"] for c in s["checks"]] == ["flaky", "other"] and s["total"] == 3

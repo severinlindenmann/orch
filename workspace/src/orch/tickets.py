@@ -38,10 +38,23 @@ STATUS_WORDS = {
 }
 
 
+def changes_asked(t: dict) -> bool:
+    """True while a person's Send back is still open: the ticket is back on the list (Ready) and a task
+    made from their words (origin change_request) is neither done nor set aside. Derived, never stored:
+    Undo and finishing the task clear it by themselves."""
+    return t.get("status") == "ready" and any(
+        c.get("origin") == "change_request" and not c.get("done") and not c.get("wont_do")
+        for c in t.get("checklist") or []
+    )
+
+
 def status_word(t: dict) -> str:
-    """The word for a ticket's status; a dropped ticket another ticket replaces says Superseded."""
+    """The word for a ticket's status; a dropped ticket another ticket replaces says Superseded; a ticket
+    a person sent back and that is not yet worked says Changes asked."""
     if t.get("status") == "dropped" and t.get("superseded_by"):
         return "Superseded"
+    if changes_asked(t):
+        return "Changes asked"
     return STATUS_WORDS.get(t.get("status"), str(t.get("status")))
 
 
@@ -1434,10 +1447,15 @@ def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
             raise
 
 
-STOPPED_TEXT = "The agent stopped before the work was finished. Continue goes on where it left off."
+STOPPED_TEXT = "The helper stopped before the work was finished. Continue goes on where it left off."
+# ORCH-235: a ticket moved to Working by hand that no helper ever started is To do again,
+# without claiming one ran
+NOT_STARTED_TEXT = "No helper started on it, so it is back in To do. Press Start to begin."
 
 
-def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool = True) -> bool:
+def agent_stopped(
+    root: Path, tid: str, by: str, still_running=None, say: bool = True, text: str | None = None
+) -> bool:
     """No agent works on the ticket any more: a Working ticket is Ready again (Working is shown only while
     an agent runs). still_running() is asked under the ticket lock, so a run that started meanwhile wins.
     Returns True when the ticket was moved."""
@@ -1450,7 +1468,7 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
         ticket["status"] = "ready"
         ticket["waiting_on"] = None
         if say:
-            add_history(ticket, by, STOPPED_TEXT)
+            add_history(ticket, by, text or STOPPED_TEXT)
         return True
 
     try:
@@ -1706,7 +1724,7 @@ def stuck_why(ticket: dict, now: datetime | None = None) -> str | None:
     for q in ticket.get("questions") or []:
         if not isinstance(q, dict) or q.get("answer") is not None or q.get("taken_back"):
             continue
-        sent = _utc(q.get("sent_at") or q.get("at"))
+        sent = _utc(q.get("asked_at") or q.get("sent_at") or q.get("at"))
         if sent is not None and utc_now - sent > limit:
             return "question"
     since = quiet_since(ticket, utc_now)
@@ -3429,7 +3447,13 @@ def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -
     if kind == "time":
         if not until:
             raise Refused("Waiting for a time needs until.")
-        return {"kind": "time", "until": parse_time(until)}
+        w = {"kind": "time", "until": parse_time(until)}
+        if ref is not None:  # ORCH-235: what it waits for, as a person wrote it (optional)
+            if not isinstance(ref, str) or len(ref.strip()) > 200:
+                raise Refused("The reason of a wait has at most 200 characters.")
+            if ref.strip():
+                w["ref"] = ref.strip()
+        return w
     if not isinstance(ref, str) or not ref.strip() or len(ref.strip()) > 200:
         raise Refused(f"Waiting on {kind} needs a ref (1 to 200 characters).")
     return {"kind": kind, "ref": ref.strip()}

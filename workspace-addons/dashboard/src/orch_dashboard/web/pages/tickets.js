@@ -3,8 +3,8 @@
 const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false, ticketPerson = '', ticketGroup = '';
-// Saved views live on the address: #tickets?view=needs-you|this-week|stuck|working|done-week.
-const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['this-week', 'This week'], ['stuck', 'Stuck'], ['working', 'Working'], ['backlog', 'Backlog'], ['done-week', 'Done this week']];
+// Saved views live on the address: #tickets?view=needs-you|this-week|stuck|working|waiting|done-week.
+const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['this-week', 'This week'], ['stuck', 'Stuck'], ['working', 'Working'], ['waiting', 'Waiting'], ['backlog', 'Backlog'], ['done-week', 'Done this week']];
 // Views reached only by a link (Home's "All finished today"), with no chip of their own.
 const LINK_VIEWS = [['done-today', 'Finished today']];
 function savedView() {
@@ -54,6 +54,7 @@ function inView(t, view, nowMs = Date.now()) {
   if (view === 'working') return status === 'active';
   if (view === 'this-week') return window.DashHelpers.inThisWeek(t, status, nowMs);
   if (view === 'stuck') return isStuck(t);
+  if (view === 'waiting') return ticketWaitsOnly(t) || status === 'blocked';  // the Waiting lane: no question for a person, it waits for a time, a ticket or the outside
   if (view === 'backlog') return status === 'open';
   if (view === 'done-today') { const at = new Date(window.DashHelpers.doneAt(t)); return status === 'done' && at.toDateString() === new Date(nowMs).toDateString(); }
   if (view === 'done-week') { const at = Date.parse(window.DashHelpers.doneAt(t)); return status === 'done' && (!Number.isFinite(at) || nowMs - at <= 7 * 86400000); }
@@ -131,10 +132,7 @@ const blockedTitle = items => items.filter(ticketWaitsOnly).every(t => t.waiting
 // "Waits for ORCH-56" under a ticket that waits for another one; "Waits until 18:00" for a time.
 function waitsLine(t) {
   if (!ticketWaitsOnly(t)) return null;
-  const w = t.waiting_on || {};
-  let text = '';
-  if (w.kind === 'ticket' && w.ref) { const other = tickets().find(o => o.id === w.ref || (o.key && String(o.key).toLowerCase() === String(w.ref).toLowerCase())); text = 'Waits for ' + (other ? other.key || clean(other.title) : 'another ticket'); }
-  else if (w.until) text = 'Waits until ' + (window.UI?.stamp ? window.UI.stamp(w.until) : w.until);
+  const text = clean(window.DashHelpers.waitWords(t, tickets(), window.UI?.stamp));
   return text ? h('p', {className:'meta ticket-sub', 'data-key':'waits-' + t.id}, text) : null;
 }
 function boardParentLine(t) {
@@ -245,9 +243,9 @@ function dueCell(t) {
   if (!t.due) return h('span', {className:'meta'}, '–');
   const late = window.DashHelpers.columnOf(shown(t).status) !== 'done' && (t.stuck === 'overdue' || overdue(t));
   const today = !late && String(t.due).slice(0, 10) === new Date(now()).toLocaleDateString('sv');
-  return h('span', {className:late ? 'bad' : today ? 'warn' : ''}, dueText(t));
+  return h('span', {className:late ? 'bad' : today ? 'warn' : ''}, dueText(t).replace(/^Due /, ''));  // the column head says Due
 }
-function spendCell(t) { return h('span', {className:'meta'}, window.DashHelpers.spendWords(t.spend) || '–'); }
+function spendCell(t) { const words = window.DashHelpers.spendWords(t.spend); return h('span', {className:'meta', title:words ? undefined : 'Not recorded'}, words || '–'); }
 // One table row (a ticket or a part under its parent). `section` is the group it sits in.
 function treeBranch(rows, index, section) {
   const row = rows[index], t = row.ticket;
@@ -308,7 +306,7 @@ function boardCard(t, nested = false, column = '', here = null) {
 const COLUMN_EMPTY = {open:'New tickets land here', ready:'Nothing picked to do next', active:'No helper is working right now', waiting:'No questions for you. All clear',
   blocked:'Nothing waits for a date', review:'Nothing to check', done:'Finished tickets land here', dropped:'Nothing set aside', superseded:'Nothing replaced by another ticket'};
 // ORCH-152: the lanes a card can move to from its menu (Needs you comes only from a helper's question).
-const BOARD_MOVES = window.DashHelpers.LANES.filter(([lane]) => lane !== 'waiting');
+const BOARD_MOVES = window.DashHelpers.MOVE_CHOICES;
 const CAPPED_LANES = ['done', 'dropped', 'superseded'];  // long lanes at the end: 3 cards, then "Show N more"
 const boardLane = t => window.DashHelpers.laneOf(t, shown(t).status, questions(t).length > 0);
 function board() {
@@ -398,7 +396,13 @@ function waitChoices(now = new Date()) {
 const utcStamp = d => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
 function askWaitUntil(t, from) {
   const {d, actions} = dialog('Wait until when?');
-  const done = until => { window.orch.close(d); return moveTicket(t.id, 'waiting', false, {data:{waiting_on:{kind:'time', until:utcStamp(until)}}}); };
+  // ORCH-235: what it waits for (optional), shown on the ticket next to the date
+  const why = h('input', {className:'input', type:'text', maxLength:200, id:'wait-why-' + t.id, 'data-key':'wait-why', placeholder:'For example: the price list from the supplier'});
+  const done = until => {
+    window.orch.close(d);
+    const reason = why.value.trim(), wait = {kind:'time', until:utcStamp(until), ...(reason ? {ref:reason} : {})};
+    return moveTicket(t.id, 'waiting', false, {data:{waiting_on:wait}});
+  };
   const input = h('input', {className:'input', type:'datetime-local', id:'wait-until-' + t.id, 'data-key':'wait-until'});
   const error = h('p', {className:'meta bad', role:'alert', hidden:true});
   const quick = h('div', {className:'row wrap'}, waitChoices().map(([label, at]) => { const when = window.UI?.stamp ? window.UI.stamp(at) : ''; return button(when ? when.charAt(0).toUpperCase() + when.slice(1) : label, 'outline sm', () => done(at)); }));
@@ -408,7 +412,8 @@ function askWaitUntil(t, from) {
     done(at);
   });
   actions.append(save);
-  d.append(h('div', {className:'stack'}, h('p', {className:'meta'}, clean(t.title)), quick,
+  d.append(h('div', {className:'stack'}, h('p', {className:'meta'}, clean(t.title)),
+    h('label', {className:'field', for:why.id}, 'What does it wait for?', why), quick,
     h('label', {className:'field', for:input.id}, 'Or pick a day and time', input), error,
     h('p', {className:'meta'}, 'On that day it shows on Home again.')), actions);
   d.showModal();
@@ -435,7 +440,37 @@ function askReplacedBy(t, from) {
 const movePending = new Map();
 // Optimistic: the card moves and the notice (with Undo) shows at once; a failed save puts the card back.
 // `extra`: more arguments of the change (Accept on a ticket in Review sends the review tip it showed).
+function offerStart(id) {
+  const toast = window.orch.toast('No helper is working on it yet.', 'ok');
+  if (!toast?.querySelector) return;
+  const start = h('button', {type:'button', className:'btn ghost sm', 'data-action':'offer-start'}, 'Start helper');
+  start.addEventListener('click', async () => {
+    toast.remove();
+    const result = await act('run.start', {ticket:id});
+    if (!result.ok) window.orch.toast(changeError(result), 'error');
+  });
+  toast.querySelector('button[aria-label="Dismiss notification"]')?.before(start);
+}
+/* ORCH-235: Done on a ticket whose sub-tickets are not all finished asks once (no typed word): "Mark Done anyway"
+   or Cancel. Resolves true to go on. */
+function confirmOpenKids(t, open) {
+  return new Promise(resolve => {
+    const {d, actions} = dialog('Mark Done with open sub-tickets?');
+    let yes = false;
+    d.addEventListener('close', () => resolve(yes));
+    const names = open.slice(0, 3).map(k => k.key || clean(k.title)).join(', ') + (open.length > 3 ? ' and ' + (open.length - 3) + ' more' : '');
+    actions.append(button('Mark Done anyway', 'primary', () => { yes = true; window.orch.close(d); }));
+    d.append(h('div', {className:'stack'}, h('p', {className:'meta'}, clean(t.title)),
+      h('p', {}, (open.length === 1 ? '1 sub-ticket is' : open.length + ' sub-tickets are') + ' not done yet: ' + names + '.')), actions);
+    d.showModal();
+  });
+}
 function moveTicket(id, status, undoing = false, extra = {}) {
+  if (status === 'done' && !undoing && extra.quiet !== true && !extra.kids_ok) {
+    const t = ticketOf(id), open = t && t.status !== 'done' && window.DashHelpers?.childrenOf ? window.DashHelpers.childrenOf(tickets(), t).filter(activeTicket) : [];
+    if (open.length && !snapshot) return confirmOpenKids(t, open).then(yes => yes ? moveTicket(id, status, false, {...extra, kids_ok:true}) : undefined);
+  }
+  if ('kids_ok' in extra) { extra = {...extra}; delete extra.kids_ok; }
   const quiet = extra.quiet === true;  // the caller shows one toast for a whole batch
   if ('quiet' in extra) { extra = {...extra}; delete extra.quiet; }
   if (status === 'done' && !extra.review_tip) extra = {...extra, review_tip:'none'}; // this view showed no review tip
@@ -470,6 +505,8 @@ function moveTicket(id, status, undoing = false, extra = {}) {
     if (!result.ok) { set(previous, before); toast?.remove?.(); window.orch.toast(changeError(result), 'error'); }
     unfade();
     render();
+    // ORCH-248 (owner 17 Nov): a move to Working by hand starts no helper; offer Start instead of the silent fall back to To do.
+    if (result.ok && status === 'active' && !undoing && !quiet && state.runs?.[id]?.running !== true) offerStart(id);
   })();
   movePending.set(id, run);
   run.finally(() => { if (movePending.get(id) === run) movePending.delete(id); });

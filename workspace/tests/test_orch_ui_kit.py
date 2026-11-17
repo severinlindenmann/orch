@@ -18,6 +18,7 @@ def test_every_kit_file_a_page_links_exists_in_the_master():
         "focus": (ADDONS / "focus/src/orch_focus/web/index.html", "__P__/kit/"),
         "insights": (ADDONS / "insights/src/orch_insights/web/index.html", "__P__/kit/"),
         "factory": (ADDONS / "factory/src/orch_factory/web/index.html", "__P__/kit/"),
+        "usage": (ADDONS / "usage/src/orch_usage/web/index.html", "__P__/kit/"),
     }
     for name, (path, prefix) in pages.items():
         links = _links(path.read_text(encoding="utf-8"), prefix)
@@ -27,7 +28,12 @@ def test_every_kit_file_a_page_links_exists_in_the_master():
 
 
 def test_add_on_servers_serve_what_their_pages_link():
-    for name, mod in (("focus", "orch_focus"), ("insights", "orch_insights"), ("factory", "orch_factory")):
+    for name, mod in (
+        ("focus", "orch_focus"),
+        ("insights", "orch_insights"),
+        ("factory", "orch_factory"),
+        ("usage", "orch_usage"),
+    ):
         server = (ADDONS / name / "src" / mod / "server.py").read_text(encoding="utf-8")
         table = server.split("KIT_FILES", 1)[1].split(")", 1)[0]
         listed = set(re.findall(r'"([a-z0-9-]+\.(?:css|js))"', table))
@@ -50,7 +56,16 @@ def test_gallery_links_exist_and_use_only_the_master():
     assert "<style" not in html.lower()
     # no inline handlers: the page's Content-Security-Policy blocks them (ORCH-67, the column picker)
     assert not re.search(r"\son[a-z]+=", html), "inline event handler in gallery.html"
-    for sect in ("kit", "foundations", "controls", "results", "states", "overlays", "motion"):
+    for sect in (
+        "kit",
+        "foundations",
+        "controls",
+        "results",
+        "result-widgets",
+        "states",
+        "overlays",
+        "motion",
+    ):
         assert f'id="{sect}"' in html, sect
     # loading, empty and error each have an example
     for word in ("Loaded", "Loading", "Empty", "Error"):

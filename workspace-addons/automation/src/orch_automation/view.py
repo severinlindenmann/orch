@@ -308,13 +308,39 @@ _STATUS = {
 }
 
 
-def _script_waits(root: Path, sched: dict) -> bool:
+def _what_runs(t: dict, sched: dict) -> str:
+    """What a repeat runs, in a few words: a script, a group of scripts or a helper, and when it waits for a change."""
+    from .loop import change_of, group_of
+
+    group = group_of(t)
+    what = (
+        f"Runs {len(group)} scripts, each on its own plan"
+        if group
+        else f"Runs {sched['script']}"
+        if sched.get("script")
+        else sched.get("agent") or "Your helper"
+    )
+    spec = change_of(t)
+    return f"{what}, only when {spec.split('@')[1]} changed" if spec else what
+
+
+def waiting_script(root: Path, t: dict) -> str | None:
+    """The first script of this repeat (its script or one of its group) set up here but not allowed yet."""
+    from .loop import group_of
+
+    sched = (t.get("ext") or {}).get("automation") or {}
+    names = sorted(group_of(t)) or [sched.get("script")]
+    for name in names:
+        if isinstance(name, str) and scripts.NAME_RE.match(name):
+            argv = scripts.load(root).get(name)
+            if argv and not scripts.approved(root, name, argv):
+                return name
+    return None
+
+
+def _script_waits(root: Path, t: dict) -> bool:
     """The repeat names a script that is set up here but not allowed on this computer yet."""
-    name = sched.get("script")
-    if not isinstance(name, str) or not scripts.NAME_RE.match(name):
-        return False
-    argv = scripts.load(root).get(name)
-    return bool(argv) and not scripts.approved(root, name, argv)
+    return waiting_script(root, t) is not None
 
 
 def _act(verb: str, tid: str) -> dict:
@@ -391,15 +417,11 @@ def _schedules(
                         or (f"Started \u00b7 {last.astimezone():%a %H:%M}" if last else "Not yet"),
                     },
                     "link": t["id"],
-                    "subtitle": clean(
-                        f"Runs {sched['script']}"
-                        if sched.get("script")
-                        else sched.get("agent") or "Your helper",
-                        60,
-                    ),
+                    "subtitle": clean(_what_runs(t, sched), 80),
                     "toggle": {
                         "on": not paused,
                         "label": clean(t["title"], 40) + " on or off",
+                        "text": "Repeats",
                         "action": _act("toggle", t["id"]),
                     },
                     "actions": [
@@ -520,11 +542,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
     blocks: list[dict] = []
 
     waiting = frozenset(t["id"] for t in tickets if scheduled(t) and not allowed(root, t))
-    scripts_waiting = frozenset(
-        t["id"]
-        for t in tickets
-        if scheduled(t) and _script_waits(root, (t.get("ext") or {}).get("automation") or {})
-    )
+    scripts_waiting = frozenset(t["id"] for t in tickets if scheduled(t) and _script_waits(root, t))
     sched_rows = _schedules(tickets, now, bool(pid), runs, waiting, scripts_waiting)
     if sched_rows:
         table = {

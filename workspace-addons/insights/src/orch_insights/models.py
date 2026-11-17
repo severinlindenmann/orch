@@ -1,4 +1,4 @@
-"""Tokens per model, how many tickets moved up to Opus, and the tickets with the most tokens (`orch usage`)."""
+"""Tokens per model, how many tickets moved up to Opus, and the tickets with the most tokens (`orch tokens`)."""
 
 from .overview import ERROR
 
@@ -40,6 +40,9 @@ def _parts(models):
     return parts
 
 
+NOT_RECORDED = "Not recorded: helper actions left no time or cost."
+
+
 def _seconds_words(seconds):
     m = round(_count(seconds) / 60)
     if not _count(seconds):
@@ -50,8 +53,9 @@ def _seconds_words(seconds):
 
 
 def _money(cost):
+    """Dollars at list price; "–" when nothing was recorded (never "$0.00", which reads as free)."""
     v = cost if isinstance(cost, int | float) and not isinstance(cost, bool) and cost >= 0 else 0
-    return f"${v:,.2f}"
+    return f"${v:,.2f}" if round(v, 2) > 0 else "–"
 
 
 def _person(owner):
@@ -93,6 +97,7 @@ def build_team(answer):
     return {
         "time": _seconds_words(seconds),
         "cost": _money(cost),
+        "note": "" if seconds or round(cost, 2) > 0 else NOT_RECORDED,
         "finished": finished,
         "each": each,
         "stuck": _count(answer.get("stuck")),

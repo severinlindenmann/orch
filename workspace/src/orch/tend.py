@@ -15,6 +15,9 @@
   asked "shall I go ahead?" in its own window, where nobody reads it, and the tool showed a greyed-out "go
   ahead" in the box) gets that message after EARLY_IDLE_MINUTES instead, and is started fresh when it still
   has not moved EARLY_RESTART_MINUTES after it: no person needed, no wait for the idle limit.
+- ORCH-318: a helper idle at its prompt with open steps (and no question, no wait, no running command) is sent
+  on after OPEN_STEPS_SECONDS, whenever it stopped. The second time on one ticket, the ticket also moves up to
+  Opus (a person's own model choice stays). This replaces the IDLE_MINUTES reminder for that case.
 - When it is still idle near the idle limit (BEFORE_LIMIT ahead of it; the cache is gone by then) and nothing
   happened on the ticket since that message, its session is ended and the helper is started fresh from the
   ticket (at most once per RESTART_EVERY per ticket; after that the idle row in `orch needs` is for a person).
@@ -43,6 +46,7 @@ VIA = "watcher"
 IDLE_MINUTES = 20  # idle with nothing running, ticket still Working: one message
 EARLY_TURN_SECONDS = 5 * 60  # the first turn ended this soon after the start: it stopped instead of working
 EARLY_IDLE_MINUTES = 3  # such a helper gets the message this soon
+OPEN_STEPS_SECONDS = 45  # ORCH-318: idle with open steps, no question, no wait: sent on this soon
 EARLY_RESTART_MINUTES = 5  # ... and is started fresh when nothing changed this long after it
 RESTART_MINUTES = 10  # at least this long after the message (and idle the full limit), nothing changed: fresh
 END_WAITING_MINUTES = 5  # quiet this long, waiting on a time or ticket (not a person), sessions full
@@ -152,6 +156,19 @@ def nudge_text(root: Path, t: dict, idle_secs: int | None, since: str | None, ea
     )
 
 
+def _move_up(root: Path, tid: str, n: int) -> str:
+    """The second early stop on one ticket: the small model is not carrying it, move it up to Opus."""
+    try:
+        t, moved = tickets.move_up(root, tid, f"the helper stopped with open tasks {n} times", BY)
+    except Exception:  # noqa: BLE001 - a person's model choice (or a broken ticket) stays as it is
+        return ""
+    if not moved:
+        return ""
+    with contextlib.suppress(Exception):
+        runs_live.switch_model(root, tid, "opus", BY)
+    return " The ticket moved up to Opus."
+
+
 def restart_text(t: dict) -> str:
     return (
         f"The helper watcher started you fresh: the earlier session sat idle at its prompt and did not move "
@@ -163,6 +180,10 @@ def _early(rec: dict, since: str | None) -> bool:
     """The run went idle within EARLY_TURN_SECONDS of its start: its first turn ended before any real work."""
     start, idle = _ts(rec.get("started_at")), _ts(since)
     return start is not None and idle is not None and 0 <= idle - start <= EARLY_TURN_SECONDS
+
+
+def _open_steps(t: dict) -> bool:
+    return any(not c.get("done") and not c.get("wont_do") for c in t.get("checklist") or [])
 
 
 def _waits(info: dict) -> list[dict]:
@@ -240,8 +261,11 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
         nudged = _ts(seen.get("nudged_at")) if seen.get("run") == rec["run"] else None
         if nudged is None:
             early = _early(rec, info.get("idle_since"))
-            if quiet >= (EARLY_IDLE_MINUTES if early else IDLE_MINUTES) * 60:
-                out.append({**row, "action": "nudge", "since": info.get("idle_since"), "early": early})
+            open_steps = _open_steps(t)
+            soon = OPEN_STEPS_SECONDS if open_steps else (EARLY_IDLE_MINUTES if early else IDLE_MINUTES) * 60
+            if quiet >= soon:
+                since = info.get("idle_since")
+                out.append({**row, "action": "nudge", "since": since, "early": early, "open": open_steps})
             continue
         helper = f"agent:{rec.get('agent')}"
         moved = any(
@@ -403,12 +427,20 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
             state.pop(tid, None)
         elif action == "nudge":
             early = bool(row.get("early"))
+            up = ""
+            if row.get("open"):
+                n = int((state.get(f"stops:{tid}") or {}).get("n") or 0) + 1
+                state[f"stops:{tid}"] = {"n": n}
+                if n >= 2:
+                    up = _move_up(root, tid, n)
             text = nudge_text(root, row["t"], row["idle_seconds"], row.get("since"), early)
             runs_live.send(root, tid, BY, text)
             state[tid] = {"run": row["run"], "nudged_at": _iso(now), **({"early": True} if early else {})}
             line = f"Reminded the helper: idle for {quiet} with nothing running" + (
                 ", right after its start." if early else "."
             )
+            if row.get("open"):
+                line = f"Sent the helper on: it stopped with open tasks (idle for {quiet}, stop {n})." + up
         elif action == "forget":
             state.pop(tid, None)
         elif action == "wake":

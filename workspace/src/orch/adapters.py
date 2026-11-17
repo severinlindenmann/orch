@@ -460,7 +460,10 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     passes it inline (oneshot.settings_args), live merges it into the per-run hooks file (hooks_doc): one
     --settings either way, so no second config can override this one. The data names the orch command; the
     command written is the ABSOLUTE one (reminder_settings: python -I, never `orch` found through a run's
-    PATH). Record hooks only make sense inside a run (ORCH_RUN/ORCH_TICKET), the only place this goes.
+    PATH). The step hooks (`step_hooks`, the same work-check command after every tool call) tell a one-step
+    run that a person's input waits (#1268); only here, never in the workspace's own settings file, so a
+    hand-started session does not pay for them. Record hooks only make sense inside a run
+    (ORCH_RUN/ORCH_TICKET), the only place this goes.
     On Windows (`_is_windows`) the record hooks are left out: the hook proves its caller by process ancestry
     and there is no Windows reader yet, so each tool call would only start two processes that conclude
     not_provable (#547); the reminder hooks stay."""
@@ -487,6 +490,8 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     hooks: dict[str, list] = {event: [group(reminder)] for event in rh}
     for event in rec:  # every tool ("*"); its own group next to any other on the same event
         hooks.setdefault(event, []).append(group(recorder, "*"))
+    for event in a.get("step_hooks") or {}:  # after each tool step: a one-step run hears of waiting input
+        hooks.setdefault(event, []).append(group(reminder, "*"))
     return {"hooks": hooks}
 
 

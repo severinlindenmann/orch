@@ -101,7 +101,7 @@ const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.d
 const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
 const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
 // A ticket that only waits (a date, another ticket, the outside) says Waiting, not Needs you; Superseded says so.
-const statusWord = t => { const lane = window.DashHelpers.laneOf(t, t.status, questions(t).length > 0); return lane === 'blocked' ? 'Waiting' : lane === 'superseded' ? 'Superseded' : window.DashHelpers.statusWord(t.status, t.started); };
+const statusWord = t => { const lane = window.DashHelpers.laneOf(t, t.status, questions(t).length > 0); return lane === 'blocked' ? 'Waiting' : lane === 'superseded' ? 'Superseded' : window.DashHelpers.changesAsked(t) ? 'Changes asked' : window.DashHelpers.statusWord(t.status, t.started); };
 const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
 const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
 const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };
@@ -292,6 +292,11 @@ function accept(next) {
   render(first ? new Set() : arrived);
 }
 function route() {
+  const r = pageRoute();
+  // The Preview switch (the live-session add-on's settings): on, its addresses show the new live page (pages/live.js)
+  return r.kind === 'page' && typeof livePreviewOn === 'function' && livePreviewOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
+}
+function pageRoute() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   // The Notes page is gone: its "What changed" is on Home, and old note links land there.
@@ -346,13 +351,13 @@ function followAddress(hash) {
 }
 function render(arrived = new Set()) {
   if (!state) return;
-  const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
+  const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash, first = !renderedRoute, was = renderedRoute;
   if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
-  if (r.kind === 'page' && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
+  if ((r.kind === 'page' || r.kind === 'live') && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -391,7 +396,7 @@ function render(arrived = new Set()) {
   if (newTicket && newTicket.className !== newCls) newTicket.className = newCls;
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
-  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
+  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' || r.kind === 'live' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
   const needsWords = window.DashHelpers.needsYou(needCount), contactsAddon = addons().find(a => a.dashboard?.panel === 'phone' && a.dashboard);
   // The needs-you number sits on Review (the page that lists exactly those questions and results), not on Home (ORCH-63)
@@ -411,8 +416,15 @@ function render(arrived = new Set()) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  // Preview on: a page that cannot be drawn softly loads once the normal way (pages/soft.js)
+  try {
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  } catch (err) {
+    if (changed && typeof SoftNav === 'object' && SoftNav.fallBack(r.hash)) return;
+    throw err;
+  }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
+  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
   main.querySelectorAll('[data-question]').forEach(host => {
@@ -432,11 +444,14 @@ function render(arrived = new Set()) {
     main.querySelectorAll('[data-need-row]').forEach(row => { if (arrived.has(row.dataset.needRow)) window.orch.needsIn(row); });
   }
   if (changed) window.orch.enter(main);
+  window.paintLiveBar?.();  // the live bar under every page while the Preview switch is on (pages/livebar.js)
   renderedRoute = r.hash;
   if (!active?.isConnected && activeKey && !document.querySelector('dialog[open]')) {
     [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
   }
-  window.scrollTo(...(changed ? [0, 0] : scroll));
+  const soft = typeof SoftNav === 'object' ? SoftNav : null;
+  window.scrollTo(...(changed ? (soft ? soft.scrollAfterChange() : [0, 0]) : scroll));
+  if (soft) { soft.hold(false); if (changed || first) soft.said(first ? '' : was, r.hash, r.kind); }
   warmAddons();
 }
 // Pointing at an add-on in the menu starts fetching its view, so the click finds it ready.
@@ -812,6 +827,13 @@ main.addEventListener('click', async event => {
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
+  if (action === 'live-preview') {
+    if (settingsBusy.has('live-preview')) return;
+    const on = state.settings?.focus_preview_on !== true;
+    const result = await settingsSend('focus_preview.set', {on}, 'live-preview'), label = addonLabel(addons().find(a => a.page?.live_session === true));
+    if (result.ok) window.orch.toast(on ? label + ' now shows the new ' + label + ' (Preview).' : label + ' is back to today\u2019s ' + label + '.', 'ok');
+    return;
+  }
   if (action === 'session-typing') {
     if (settingsBusy.has('session-typing')) return;
     const on = state.settings?.typing_on !== true;
@@ -951,8 +973,12 @@ main.addEventListener('click', async event => {
 });
 window.addEventListener('hashchange', async () => {
   if (document.querySelector('.sidebar')?.dataset.open === 'true') setMenu(false);
-  for (const d of document.querySelectorAll('dialog[open]')) await window.orch.close(d);
+  // Preview on: a dialog in the keep place (the layer) stays open across the page change (pages/soft.js)
+  const soft = typeof SoftNav === 'object' ? SoftNav : null;
+  soft?.hold(true);
+  for (const d of soft ? soft.dialogsToClose() : document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
+  soft?.hold(false);  // render() returns early before the state arrives: scrolls must not stay unremembered (ORCH-340)
 });
 document.getElementById('side-nav')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;

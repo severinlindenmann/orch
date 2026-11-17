@@ -36,5 +36,7 @@ def test_web_has_no_inline_styles():
 
     assert 'style="' not in webjs.all_js() and " style=" not in web_file("index.html").decode()
     for p in webjs.PAGES:  # every page module and its stylesheet is packaged and listed in the page
-        assert web_file(f"pages/{p}.js") and (p == "review" or web_file(f"pages/{p}.css"))
+        assert web_file(f"pages/{p}.js") and (
+            p in ("review", "live", "live-layer") or web_file(f"pages/{p}.css")
+        )
         assert f'src="pages/{p}.js"' in web_file("index.html").decode()
