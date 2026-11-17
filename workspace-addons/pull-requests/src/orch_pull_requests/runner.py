@@ -69,8 +69,15 @@ class Runner:
         self.recover()
         rounds = 0
         while True:
-            if rounds and not self.sign_in():  # the login is checked again before every round
-                return rounds
+            if rounds:  # the login is checked again before every round
+                now = self.gh.login()
+                if now is None:  # GitHub does not answer: wait, the entries keep their tries
+                    self.sleep(PAUSE_SECS)
+                    continue
+                if not settings.same_login(now, self.me):
+                    self.log(f"gh now uses the login {now}, not {self.me}; the merge queue stops.")
+                    self.me = None
+                    return rounds
             batch = self.next_batch()
             if batch is None:
                 return rounds
@@ -122,6 +129,9 @@ class Runner:
     def next_batch(self) -> list[dict] | None:
         """Up to MAX_GROUP waiting pull requests of the first one's repository and base, marked running.
         None when nothing waits; [] when this round only cleared entries or everything is paused."""
+        for r in store.waiting(self.root):  # added before entries kept their login: nobody would take it
+            if not r.get("login"):
+                self.finish(r, OUT, f"{r['url']} was queued without a login; add it again.", "")
         now = self.clock()
         mine = self.mine()
         rows = [r for r in mine if float(r.get("not_before") or 0) <= now]
@@ -192,7 +202,7 @@ class Runner:
             return v, LEAVE, line, ""
         if base and b != base:
             return v, AGAIN, f"{u} now goes into {b}", ""
-        review = BAD_REVIEW.get(str(v.get("reviewDecision") or ""))
+        review = review_problem(v)
         if review:
             return v, LEAVE, f"{u}: {review}; it left the merge queue. Add it again when that is done.", ""
         if e.get("head") and v.get("headRefOid") != e["head"]:
@@ -231,6 +241,8 @@ class Runner:
     def why_not(self, entries: list[dict], base: str) -> str | None:
         """For the waiter, right before the merge: the first reason one of the entries must not be merged now,
         or None. Changes nothing (the caller settles the entries after)."""
+        if not settings.same_login(self.gh.login(), self.me):
+            return "gh no longer uses the login that added these pull requests"
         cards = merge_cards(self.root)
         if cards is None:
             return "the tickets could not be read"
@@ -451,6 +463,8 @@ class Runner:
     def retry(self, entries: list[dict], why: str, count: bool = True) -> None:
         """Back to the front of the line after a pause; after MAX_TRIES counted tries, out with the reason.
         A waiting entry keeps its place and only gets the pause."""
+        if count and self.gh.login() is None:  # GitHub does not answer at all: an outage uses up no tries
+            count = False
         rows = {r["url"]: r for r in store.read(self.root) if r.get("state") in (RUNNING, WAITING)}
         back = []
         for e in entries:
@@ -506,7 +520,7 @@ def admit(root: Path, gh, url: str) -> dict:
         raise Refused(
             f"{url} goes into {b or '(unknown)'}; the merge queue merges only into {', '.join(bases) or '-'}."
         )
-    review = BAD_REVIEW.get(str(v.get("reviewDecision") or ""))
+    review = review_problem(v)
     if review:
         raise Refused(f"{url}: {review}; not queued.")
     me, want = gh.login(), settings.login(root)
@@ -515,6 +529,16 @@ def admit(root: Path, gh, url: str) -> dict:
     if want and not settings.same_login(me, want):
         raise Refused(f"gh uses the login {me} here, but this merge queue merges only as {want}; not queued.")
     return {"base": b, "login": me}
+
+
+def review_problem(v: dict) -> str | None:
+    """Why the reviews stop a merge, or None. reviewDecision is set only when the base branch's rules require
+    reviews, so each reviewer's latest review counts too."""
+    bad = BAD_REVIEW.get(str(v.get("reviewDecision") or ""))
+    latest = v.get("latestReviews") or []
+    if bad is None and any(isinstance(r, dict) and r.get("state") == "CHANGES_REQUESTED" for r in latest):
+        bad = BAD_REVIEW["CHANGES_REQUESTED"]
+    return bad
 
 
 def _state(root: Path, url: str) -> str | None:

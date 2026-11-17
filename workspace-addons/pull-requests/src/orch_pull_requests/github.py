@@ -8,7 +8,10 @@ from urllib.parse import quote
 
 from .store import Refused
 
-VIEW = "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,reviewDecision"
+VIEW = (
+    "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,"
+    "reviewDecision,latestReviews"
+)
 GONE = ("reference does not exist", "not found", "http 404")
 
 

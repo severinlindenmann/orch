@@ -473,3 +473,18 @@ def test_a_pull_request_moved_to_another_base_while_waiting_is_not_merged(monkey
                                                "baseRefName": next(seen, "main")})  # fmt: skip
     o = prwait.run_one(src.url, True, src=src)
     assert not o.ok and o.status == "changed" and "another base branch" in o.line and merges == []
+
+
+def test_a_before_merge_check_that_breaks_never_lets_the_merge_through(monkeypatch):
+    merges, back = [], []
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, t=30: merges.append(argv) or subprocess.CompletedProcess(argv, 0)
+    )
+    monkeypatch.setattr(prwait.ghlimit, "give_back", lambda kind, what: back.append(kind))
+    src = _Green()
+
+    def broken(head):
+        raise TimeoutError("lock")
+
+    o = prwait.run_one(src.url, True, src=src, before_merge=broken)
+    assert not o.ok and o.status == "held" and "TimeoutError" in o.line and merges == [] and back == ["merge"]

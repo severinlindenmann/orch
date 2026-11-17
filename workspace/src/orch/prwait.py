@@ -452,7 +452,10 @@ def run_one(
             return Outcome(url, False, "checks failed", line, verdict)
     if not src.take("merge", url):
         return Outcome(url, False, "checks passed", _no_room(url, "merge"), verdict)
-    held = before_merge(head) if before_merge is not None else None  # after the wait for room, not before
+    try:  # after the wait for room, not before
+        held = before_merge(head) if before_merge is not None else None
+    except Exception as e:  # noqa: BLE001 - a check that broke never lets the merge through
+        held = f"the last check before the merge failed ({e.__class__.__name__})"
     if held:
         ghlimit.give_back("merge", url)  # no merge happened: the place goes back
         return Outcome(url, False, "held", f"Checks of {url} passed; not merged: {held}", verdict)

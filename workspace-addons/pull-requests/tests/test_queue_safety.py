@@ -50,6 +50,9 @@ class World:
         self.hiccups: dict[str, int] = {}  # what -> how many times GitHub does not answer
 
     def hiccup(self, what: str) -> bool:
+        if getattr(self, "down", 0) > 0:  # GitHub is down: every call fails until the outage ends
+            self.down -= 1
+            return True
         if self.hiccups.get(what, 0) > 0:
             self.hiccups[what] -= 1
             return True
@@ -102,7 +105,7 @@ class World:
         n = int(u.rsplit("/", 1)[1])
         p = self.prs[n]
         return {"state": p["state"], "isDraft": p["isDraft"], "baseRefName": p["base"],
-                "reviewDecision": p["review"], "headRefOid": self.head(n), "number": n,
+                "reviewDecision": p["review"], "latestReviews": p.get("latest", []), "headRefOid": self.head(n), "number": n,
                 "title": f"Change {n}", "isCrossRepository": False}  # fmt: skip
 
     def own_checks_failed(self, u):
@@ -234,7 +237,9 @@ CHANGES = {
     "closed": lambda w, ws, cards: w.prs[1].update(state="CLOSED"),
     "draft": lambda w, ws, cards: w.prs[1].update(isDraft=True),
     "retargeted": lambda w, ws, cards: w.prs[1].update(base="release"),
-    "changes requested": lambda w, ws, cards: w.prs[1].update(review="CHANGES_REQUESTED"),
+    # develop's rules require no reviews: GitHub leaves reviewDecision empty, only the review itself says it
+    "changes requested": lambda w, ws, cards: w.prs[1].update(latest=[{"state": "CHANGES_REQUESTED"}]),
+    "review required": lambda w, ws, cards: w.prs[1].update(review="CHANGES_REQUESTED"),
     "merge card": lambda w, ws, cards: cards.update({runner.pr_key(url(1)): "ORCH-7"}),
 }
 
@@ -324,6 +329,9 @@ def test_the_queue_add_command_refuses_main_and_requested_changes(ws, world, mon
     world.prs[1]["base"] = "main"
     world.prs[2]["review"] = "CHANGES_REQUESTED"
     world.prs[3]["review"] = "REVIEW_REQUIRED"
+    world.prs[4]["latest"] = [{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}]
+    assert cli.main(["queue", "add", url(4)]) == 2
+    world.prs[4]["latest"] = [{"state": "APPROVED"}]
     assert cli.main(["queue", "add", url(1)]) == 2
     assert cli.main(["queue", "add", url(2)]) == 2
     assert cli.main(["queue", "add", url(3)]) == 2
@@ -478,6 +486,38 @@ def test_a_group_moved_to_another_base_is_never_merged_there(ws, world):
     assert states(ws) == {1: "merged", 2: "merged"}  # merged into develop by the next group
     assert out(world.bare, "for-each-ref", "refs/heads/main") == ""
     nothing_left_behind(ws, world)
+
+
+def test_an_outage_after_the_first_round_keeps_the_runner_and_the_tries(ws, world):
+    add(ws, 1)
+    world.on_wait = lambda u: add(ws, 2) if u == url(1) else None  # queued while #1 runs
+    real = world.merge
+
+    def merge(u, head):
+        done = real(u, head)
+        if done and u == url(1):  # then GitHub goes away for a while: nothing answers
+            world.down = 12  # the next 12 calls to GitHub (views and logins) get no answer
+        return done
+
+    world.merge = merge
+    make(ws, world).run()
+    assert states(ws) == {1: "merged", 2: "merged"}, why(ws, 2)
+
+
+def test_a_login_switch_during_the_wait_stops_the_merge(ws, world):
+    add(ws, 1, 2)
+    world.on_wait = lambda u: setattr(world, "me", "owner") if u in world.groups else None
+    make(ws, world).run()
+    assert not world.landed(1) and not world.landed(2)
+    assert states(ws) == {1: "waiting", 2: "waiting"}
+    nothing_left_behind(ws, world)
+
+
+def test_an_entry_without_a_login_leaves_with_the_reason(ws, world):
+    store.add(ws, url(1), None, "agent:t")
+    add(ws, 2)
+    make(ws, world).run()
+    assert states(ws) == {1: "out", 2: "merged"} and "without a login" in why(ws, 1)
 
 
 def test_a_real_red_member_still_leaves(ws, world):
