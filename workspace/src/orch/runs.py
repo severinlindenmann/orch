@@ -798,7 +798,7 @@ def start_failure_reason(root: Path, rec: dict) -> str:
     name = str(rec.get("agent") or "")
     with contextlib.suppress(Exception):
         binary = (adapters.load(name, root).get("detect") or {}).get("binary")
-        if binary and not shutil.which(binary):
+        if binary and not adapters.find_binary(binary):
             return "agent command not found"
     tail = ""
     log = rec.get("log")
@@ -1253,6 +1253,11 @@ def plan(
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
     argv = store_access(argv, name, root, workdir_for(root, read(root, tid), tid))
+    binary = (a.get("detect") or {}).get("binary")
+    if (
+        argv and binary and argv[0] == binary and not shutil.which(binary)
+    ):  # not on the PATH of a clean start: use where it really is
+        argv = [adapters.find_binary(binary) or binary, *argv[1:]]
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1477,15 +1482,16 @@ def _run_turn(
             proc = subprocess.Popen(
                 argv,
                 cwd=root,
-                env=env,
+                env=adapters.with_binary_dir(env, argv),
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                 stdout=out,
                 stderr=subprocess.STDOUT,
                 start_new_session=os.name != "nt",  # its own group: stop can end it with its helpers
             )
         except OSError as e:
-            out.write(f"orch could not start the agent: {e}\n".encode())
-            return 127, ""
+            said = f"orch could not start the agent: {e}\n"
+            out.write(said.encode())
+            return 127, said
         if on_proc:
             on_proc(proc)
         if on_started:

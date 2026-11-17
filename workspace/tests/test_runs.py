@@ -190,7 +190,9 @@ def test_argv_resumes_only_this_agent_on_this_host(proj, new_ticket, run):
     assert tickets.sessions_for(proj, tid, t, "claude", runs.host()) == "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     _choose(proj, "codex")
     j = json.loads(run("run", "argv", tid, "--json")[1])
-    assert j["argv"][:5] == ["codex", "exec", "resume", "--json", "01a1ac76-7c05-70d2-824d-4854e0c9c3f8"]
+    assert j["argv"][:6] == [
+        "codex", "exec", "resume", "--skip-git-repo-check", "--json", "01a1ac76-7c05-70d2-824d-4854e0c9c3f8",
+    ]  # fmt: skip
 
 
 def test_argv_on_another_host_starts_fresh(proj, new_ticket, run, monkeypatch):
@@ -658,3 +660,11 @@ def test_epic_prompt_lists_its_open_tickets_in_order(proj):
 def test_epic_prompt_with_every_ticket_finished_says_finish_the_epic(proj):
     epic = tickets.create(proj, "Dashboard fixes", "human:me", epic=True)
     assert "none is left open" in runs.fresh_prompt(epic, [], proj)
+
+
+def test_a_program_that_cannot_start_returns_its_reason(tmp_path):
+    log = tmp_path / "run.log"
+    rc, out = runs._run_turn(["/no/such/agent-orch153"], tmp_path, None, log, {"PATH": "/usr/bin"})
+    assert rc == 127
+    assert "could not start the agent" in out
+    assert runs.failure_text(rc, out).startswith("orch could not start the agent")
