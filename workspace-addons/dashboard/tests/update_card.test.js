@@ -52,7 +52,7 @@ test('up to date: no button; unknown newest says so plainly', async () => {
   ({c} = context({installed:{label:'orch main f093f5c5', sha:'f093f5c5'.padEnd(40, '0'), release:null}, newest:null, update_available:false, changes:[], ref:'main'}));
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   const branch = text(c.aboutPanel());
-  assert.match(branch, /build from the \u201cmain\u201d branch/); assert.doesNotMatch(branch, /Could not/);
+  assert.match(branch, /This is a development build, so there is no release/); assert.doesNotMatch(branch.replace('orch main f093f5c5', ''), /branch|\bmain\b|\bdevelop\b/i); assert.doesNotMatch(branch, /Could not/);
 });
 
 test('click posts update.start once, then steps, restart and "Updated 15 → 16"', async () => {
