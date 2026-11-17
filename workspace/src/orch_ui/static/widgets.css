@@ -706,7 +706,7 @@ dialog.report-dialog .actions{margin-top:12px}
 .sw-menu .eyebrow{padding:4px 8px}
 .sw-item{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;color:var(--text);text-decoration:none}
 a.sw-item:hover{background:var(--surface-2)}.sw-item.off{color:var(--text-muted)}
-.ws-item-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sw-tick{color:var(--brand)}.sw-hint{padding:6px 8px 2px}
+.ws-item-name{overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}.sw-tick{color:var(--brand)}.sw-hint{padding:6px 8px 2px}
 
 /* v3-pages: switcher + mobile mode */
 .workspace.ws-switch{min-height:44px}
@@ -721,7 +721,7 @@ a.sw-item:hover{background:var(--surface-2)}.sw-item.off{color:var(--text-muted)
 .sw-item-details{min-width:0;display:grid;gap:2px}
 .sw-item-status{display:grid;gap:2px;justify-items:end;flex:none;font-size:12px}
 .sw-current,.sw-needs{color:var(--text)}
-.sw-item-status .meta{font-size:12px}
+.sw-item-status .meta,.sw-item-details .meta{font-size:12px}
 
 /* Session dock (the helper's screen: strip, panel, Screen tab), command blocks, queued instruction, hand-off line, result card
    (Focus #692). All six are in the gallery (#focus-screen). The dock is live in Focus; the rest follow in later #692 PRs. */
