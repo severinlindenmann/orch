@@ -136,7 +136,8 @@ async function layer(page, dash, width) {
   await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
   await page.reload();
   await mainHasText(page);
-  await page.waitForSelector('#live-dock[data-mode="bar"] [data-key="live-bar"]', { timeout: 10000 });
+  // the bar: the bar task's #live-bar when it is there, else the layer's own minimal bar
+  await page.waitForSelector('#live-dock[data-mode="bar"] :is(#live-bar, [data-key="live-bar"])', { timeout: 10000 });
   if (await page.$('[data-key="live-panel"]')) throw new Error('the layer opened by itself');
   // open from the bar: at the bottom, the page stays usable behind it
   await page.click('[data-key="live-open"]');
@@ -181,7 +182,7 @@ async function layer(page, dash, width) {
   await page.click('[data-key="live-place"]');
   await page.click('[data-key="live-place-menu"] [data-mode="side"]');
   await page.waitForSelector('#live-dock[data-mode="side"] [data-key="live-edge"]', { timeout: 5000 });
-  if (await page.$('[data-key="live-bar"]')) throw new Error('the bar still shows with the layer closed to the side');
+  if (await page.isVisible('#live-dock :is(#live-bar, [data-key="live-bar"])')) throw new Error('the bar still shows with the layer closed to the side');
   await page.click('[data-key="live-edge"]');
   await page.waitForSelector(panel(docked), { timeout: 5000 });
   // size by keyboard, then a reload: same place, same size
