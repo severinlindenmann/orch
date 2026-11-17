@@ -31,8 +31,9 @@ list only shrinks: the check fails for a listed feature that has a click-through
 
 Needs Node, uv and Playwright with Chromium (`PW_DIR=<folder with node_modules/playwright>` if it is not global).
 Everything runs in a throw-away home under `~/.orch-test` with `env -i`; the orch of this computer is never touched.
-No real agent can run: the workspace helper is a stand-in script, and programs named `claude` and `codex` are
-stand-ins first on PATH, so a Start, a Test or a ticket pinned to Claude runs a stand-in. `server.py` refuses to
+No real agent can run: the workspace helper is a stand-in script, and programs named like the built-in agent
+tools (read from orch's adapter list) are stand-ins first on PATH, so a Start, a Test or a ticket pinned to a
+built-in tool runs a stand-in. `server.py` refuses to
 start otherwise. A click-through that needs a helper's own move (a chat reply, a proposal) uses `orch(...)`.
 
 ## Write one

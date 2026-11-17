@@ -1,6 +1,6 @@
 // Helper logins: a check of this workspace's own (a harmless command that fails, set up here in the throw-away
 // home) shows on Home as something that needs renewing. The person presses "Check again" and the page asks orch
-// to run every check once more and says what came out. The real helper sign-ins (Renew) are never opened here.
+// to run every check once more and says what came out. The real helper logins (Renew) are never opened here.
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -14,7 +14,7 @@ module.exports = {
     const home = path.dirname(ws), repo = path.resolve(__dirname, '..', '..', '..', '..');
     const orch = (...a) => execFileSync('env', ['-i', 'PATH=' + process.env.PATH, 'HOME=' + home, 'USERPROFILE=' + home, 'ORCH_HOME=' + home + '/orch', 'ORCH_HOME_STRICT=1',
       'UV_CACHE_DIR=' + (process.env.UV_CACHE_DIR || path.join(require('node:os').homedir(), '.cache', 'uv')), 'uv', 'run', '-q', '--project', repo + '/workspace', 'python', '-I', '-m', 'orch', ...a], { cwd: ws, encoding: 'utf8' });
-    orch('logins', 'add', 'portal', '--command', 'false', '--label', 'Team portal', '--how', 'Sign in to the team portal in your browser.', '--by', 'lume');
+    orch('logins', 'add', 'portal', '--command', 'false', '--label', 'Team portal', '--how', 'Log in to the team portal in your browser.');
     orch('logins');   // keeps the result the page shows
     const cfg = path.join(ws, '.orch', 'config.toml'), now = new Date();
     require('node:fs').utimesSync(cfg, now, now);   // the page only re-reads settings when a settings file changes

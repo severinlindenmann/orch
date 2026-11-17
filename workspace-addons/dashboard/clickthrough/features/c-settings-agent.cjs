@@ -1,6 +1,6 @@
 // Settings > Helper: add your own helper with a harmless command (echo), it becomes the default, Test it (answers),
 // change what a helper may do and how many work at once. Each is reloaded; the two choices are put back after.
-// Never tests Claude or Codex (the page would run the real tool). Full ("never asks") is not chosen.
+// Never tests a built-in agent tool (the page would run the real program). Full ("never asks") is not chosen.
 module.exports = {
   name: 'Settings Helper: add, test, permissions, helpers at once',
   covers: ['page:settings/agent', 'config.agent.add', 'config.agent', 'config.agent.test', 'config.permissions', 'live.set'],
@@ -22,7 +22,7 @@ module.exports = {
     await act('config.agent.test', () => k('settings-test-echo-helper').click());
     await page.getByText(/answered in/).first().waitFor({ timeout: 30000 });
 
-    // choosing a helper by hand (config.agent): the page only offers Claude and Codex as radios besides it, and
+    // choosing a helper by hand (config.agent): the page only offers the built-in agent tools as radios besides it, and
     // picking those would make Start run the real tool, so the add above (which sends config.agent) is the click.
 
     // what a helper may do: pick "Asks for risky things", reload, back to what it was

@@ -34,7 +34,7 @@ WS = D / "Pilatus"
 WS.mkdir(parents=True, exist_ok=True)
 
 # No real agent tool may ever run here: stand-ins named like the built-in agent programs come first on PATH for
-# this server and everything it starts (a helper run, a Test click, a ticket pinned to Claude). Each writes one log
+# this server and everything it starts (a helper run, a Test click, a ticket pinned to a built-in tool). Each writes one log
 # line, waits a little (so Stop has something to stop) and ends.
 STUB = (
     "#!/bin/sh\n"
@@ -43,7 +43,15 @@ STUB = (
 )  # a version or help question is answered at once (orch asks it to list the agents); only a session waits
 BIN = D / "bin"
 BIN.mkdir(exist_ok=True)
-for name in ("claude", "codex"):
+from orch import adapters
+
+# the program of every built-in agent, from orch's own adapter list (this file never names a tool)
+PROGRAMS = sorted(
+    {b for n in adapters.builtin_names() if (b := (adapters.load(n).get("detect") or {}).get("binary"))}
+)
+if not PROGRAMS:
+    sys.exit("no built-in agent programs found in orch's adapter list: refusing to start")
+for name in PROGRAMS:
     (BIN / name).write_text(STUB)
     (BIN / name).chmod(0o755)
 os.environ["PATH"] = f"{BIN}{os.pathsep}{os.environ.get('PATH', '')}"
@@ -86,7 +94,7 @@ def seed() -> dict:
     cfg.write_text(text + f'\n[agents.standin]\nadapter = "generic"\ncommand = "sh {fake} {{prompt}}"\n')
     # A settings command runs only once this computer allowed it; unallowed, orch would fall back to the first agent
     # tool found on PATH (a real one). Allow the stand-in, and refuse to serve unless it is the helper that runs.
-    from orch import adapters, config
+    from orch import config
 
     key = next(p["key"] for p in config.pending_agents(WS) if p["name"] == "standin")
     config.allow_agent(WS, "standin", key)
@@ -94,7 +102,7 @@ def seed() -> dict:
         sys.exit(
             "the stand-in helper is not the one that would run: refusing to start (a real agent could run)"
         )
-    for name in ("claude", "codex"):
+    for name in PROGRAMS:
         if adapters.find_binary(name) != str(BIN / name):
             sys.exit(f"{name} would not be the stand-in here: refusing to start (a real agent could run)")
     ids = {}

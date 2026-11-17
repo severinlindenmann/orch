@@ -1,6 +1,6 @@
 // The stand-in helper: Start helper on a seeded ticket, Stop it again, and write a message to the helper on another.
 // The seed makes sure only stand-ins can run here (server.py): the workspace helper is a script, and programs named
-// claude and codex are stand-ins too, first on PATH. A Start never runs a real agent.
+// named like the built-in agent tools are stand-ins too, first on PATH. A Start never runs a real agent.
 module.exports = {
   name: 'Helper: start, stop and send a message',
   covers: ['run.start', 'run.stop', 'run.send'],
@@ -18,7 +18,7 @@ module.exports = {
     await act('run.stop', () => stop.click());
     await reload();
     const log = await activity();
-    must(/helper/i.test(log), 'the ticket shows no sign that a helper ran after a reload');
+    must(/helper/i.test(log), 'the ticket does not show that a helper ran, after a reload');
     must(!(await stop.count()), 'the helper still shows Stop after Stop and a reload');
 
     // write to the helper (nothing runs on this ticket: the message is saved and a helper starts)
