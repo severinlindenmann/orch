@@ -38,11 +38,11 @@ A person pressed "Report a problem" (or `orch diag report` ran). The report is a
 Write four parts, short and plain:
 - Cause: one or two sentences.
 - Evidence: report line references (`timeline.jsonl:212`, `errors.json` fingerprint, a check name).
-- Fix proposal: what to change and where, as a ticket for a person to approve.
+- Fix: what to change and where. When it is small (one area, a few files, one pull request), make it in the same ticket (own worktree, tests, merged on green). Only a big change becomes a new ticket for a person to approve.
 - Check that would have caught it: a test, fixture or health check to add.
 
 ## Rules
-- Read-only: do not edit or re-run anything to "see if it helps". Delete saved reports or notes (`orch diag delete reports`, `orch diag delete notes`) only when a person asks.
+- Investigating is read-only: do not edit or re-run anything in the report's workspace to "see if it helps". Fixing is done in the orch code, in your own worktree. Delete saved reports or notes (`orch diag delete reports`, `orch diag delete notes`) only when a person asks.
 - Never print or copy secrets. Values the log holds are already hidden; if you still see one, say so and stop.
 - Say what you could not check (the report's gaps) instead of guessing.
 - Do not share a report outside this computer. A person does that.

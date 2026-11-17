@@ -192,3 +192,35 @@ def test_live_pull_takes_from_the_shared_limit(monkeypatch):
     monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
     live = prwait.Live("https://github.com/o/r/pull/1")
     assert live.take("merge", "u") and got == [("merge", "u")]
+
+
+def test_waiting_for_room_counts_nothing_and_a_merge_that_did_not_happen_gives_its_place_back():
+    c = Clock()
+    for _ in range(3):  # many waits for room: nothing is used
+        assert ghlimit.wait_room("merge", sleep=c.sleep, clock=c)
+    assert next(r for r in ghlimit.status(clock=c) if r["kind"] == "merge")["used"] == 0
+    assert _take(c)
+    assert next(r for r in ghlimit.status(clock=c) if r["kind"] == "merge")["used"] == 1
+    assert ghlimit.give_back("merge", "o/r#1", clock=c)
+    assert next(r for r in ghlimit.status(clock=c) if r["kind"] == "merge")["used"] == 0
+    assert not ghlimit.give_back("merge", "o/r#1", clock=c)
+
+
+def test_wait_room_waits_when_the_hour_is_full():
+    c = Clock()
+    ghlimit.set_limit("merge", 1)
+    assert _take(c)
+    assert ghlimit.wait_room("merge", wait=10, sleep=c.sleep, clock=c) is False
+
+
+def test_a_merge_github_refused_gives_its_place_back(monkeypatch):
+    pull = _Pull(room=True)
+    pull.take = lambda kind, what: ghlimit.take(kind, what)
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, t=30: subprocess.CompletedProcess(argv, 1, "", "not mergeable")
+    )
+    used = lambda: next(r for r in ghlimit.status() if r["kind"] == "merge")["used"]  # noqa: E731
+    o = prwait.run_one(pull.url, True, src=pull)
+    assert not o.ok and used() == 0
+    monkeypatch.setattr(prwait, "_run", lambda argv, t=30: subprocess.CompletedProcess(argv, 0, "", ""))
+    assert prwait.run_one(pull.url, True, src=pull).ok and used() == 1

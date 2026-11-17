@@ -10,7 +10,7 @@ const middleShort = (value, max = 48) => {
   return text.slice(0, head) + '…' + text.slice(-tail);
 };
 // The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
-const rowLabel = a => capitalise(a?.name || 'add-on');
+const rowLabel = a => capitalise(a?.label || a?.dashboard?.label || a?.name || 'add-on');
 // "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
 const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, a.active ? 'Turning off…' : 'Turning on…') : null;
 // A change of the add-ons restarts this page's server: nothing asks it (or an add-on's page) until it is back.
