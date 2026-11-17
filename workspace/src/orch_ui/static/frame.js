@@ -16,15 +16,23 @@
   var m = /^#orch-frame=([A-Za-z0-9_-]{20,64})&orch-file=([A-Za-z0-9_-]{20,64})&orch-chan=([0-9a-f]{32})(?:&(.*))?$/.exec(location.hash || '');
   var kept = null;
   try { kept = history.state && history.state.orchFrame; } catch (e) { kept = null; }  // this same page, reloaded
-  var pass = m ? m[1] : (kept && kept.pass) || '', file = m ? m[2] : (kept && kept.file) || '', chan = m ? m[3] : (kept && kept.chan) || null;
+  // Only the message code is kept for a reload of this same page (history.state may be written to disk): the
+  // passes stay in memory, a reload asks the dashboard for new ones.
+  var pass = m ? m[1] : '', file = m ? m[2] : '', chan = m ? m[3] : (kept && /^[0-9a-f]{32}$/.test(kept.chan || '') ? kept.chan : null);
   if (m) {
-    var state = {orchFrame: {pass: pass, file: file, chan: chan}};
+    var state = {orchFrame: {chan: chan}};
     try { history.replaceState(state, '', location.pathname + location.search + (m[4] ? '#' + m[4] : '')); }
     catch (e) { location.replace('#' + (m[4] || '')); }
   }
   var own = location.pathname.split('/').slice(0, 3).join('/') + '/';  // /addon/<name>/: this add-on's places
   function same(u) {
     try { var x = new URL(u, location.href); return x.protocol + '//' + x.host === here; } catch (e) { return false; }
+  }
+  var ROOT_CALLS = ['/api/act', '/api/events', '/api/term', '/api/term/keys'];  // the server decides which add-on may
+  function mine(u) {
+    if (!same(u)) return false;
+    var p = new URL(u, location.href).pathname;
+    return p.indexOf(own) === 0 || ROOT_CALLS.indexOf(p) >= 0;
   }
   function tell(msg) {
     if (chan) msg.chan = chan;
@@ -44,14 +52,14 @@
   var realFetch = window.fetch;
   window.fetch = function (input, init) {
     var url = (typeof Request !== 'undefined' && input instanceof Request) ? input.url : String(input);
-    if (pass && same(url)) {
-      init = Object.assign({}, init || {});
+    if (pass && mine(url)) {  // only this add-on's own calls (and the dashboard calls a page makes); never redirected
+      init = Object.assign({redirect: 'error'}, init || {});
       var h = new Headers(init.headers || (typeof input !== 'string' && input ? input.headers : undefined) || {});
       h.set(HEADER, pass);
       init.headers = h;
     }
     return realFetch.call(this, input, init).then(function (r) {
-      if (r.status === 401 && same(url)) renew();
+      if (r.status === 401 && mine(url)) renew();
       return r;
     });
   };
@@ -111,7 +119,10 @@
     if (!a || a.hasAttribute('download')) return;
     var target = (a.getAttribute('target') || '').toLowerCase(), u;
     try { u = new URL(a.getAttribute('href'), location.href); } catch (err) { return; }
-    if (!same(u.href)) return;
+    if (!same(u.href)) {  // another site opens in a new tab, never in this frame
+      if (!target || target === '_self' || target === '_top' || target === '_parent') e.preventDefault();
+      return;
+    }
     if (target === '_top' || target === '_parent') {
       if (u.pathname === '/' && !u.search) { e.preventDefault(); tell({orch: 'frame-top', hash: u.hash.slice(1)}); }
       return;

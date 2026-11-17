@@ -45,21 +45,27 @@ function frameEnv(hash, state = null) {
 }
 const P1 = 'p'.repeat(43), F1 = 'f'.repeat(43), C1 = 'ab'.repeat(16);
 
-test('frame.js takes the passes out of the address and keeps them for a reload of the same page', () => {
+test('frame.js takes the passes out of the address and keeps only its code for a reload of the same page', () => {
   const {win, replaced} = frameEnv('#orch-frame=' + P1 + '&orch-file=' + F1 + '&orch-chan=' + C1 + '&results');
   assert.deepEqual(replaced, ['/addon/focus/t/t_abcdef#results']);
   assert.equal(win.OrchFrame.on, true); assert.equal(win.OrchFrame.chan, C1);
-  assert.deepEqual(win.history.state.orchFrame, {pass:P1, file:F1, chan:C1});
+  assert.deepEqual(win.history.state.orchFrame, {chan:C1});  // the passes stay in memory only
   const again = frameEnv('#results', win.history.state);
-  assert.equal(again.win.OrchFrame.chan, C1); assert.equal(again.posts.length, 0);  // no new passes needed
+  assert.equal(again.win.OrchFrame.chan, C1);
+  assert.deepEqual(again.posts, [[{orch:'frame-go', path:'/addon/focus/t/t_abcdef', hash:'results', fresh:true, chan:C1}, 'http://127.0.0.1:8420']]);
 });
 
 test('frame.js sends the pass only as a header to this server, the file pass only in its own addresses', async () => {
   const {win, fetched} = frameEnv('#orch-frame=' + P1 + '&orch-file=' + F1 + '&orch-chan=' + C1);
   await win.fetch('/addon/focus/api/t/t_abcdef');
   await win.fetch('https://example.com/x');
+  await win.fetch('/addon/viewer/api/x');
+  await win.fetch('/api/act');
   assert.equal(fetched[0][1].headers.get('X-Orch-Frame'), P1);
+  assert.equal(fetched[0][1].redirect, 'error');  // a call that carries the pass is never redirected
   assert.equal(fetched[1][1], undefined);  // another site: nothing added
+  assert.equal(fetched[2][1], undefined);  // another add-on's address: nothing added
+  assert.equal(fetched[3][1].headers.get('X-Orch-Frame'), P1);  // a dashboard call a page makes (the server decides)
   assert.equal(win.OrchFrame.url('/addon/focus/api/file?t=t_abcdef&m=view'), '/addon/focus/api/file?t=t_abcdef&m=view&orch-frame=' + F1);
   assert.equal(win.OrchFrame.url('/api/act'), '/api/act');  // not this add-on's address: no pass
   assert.equal(win.OrchFrame.url('https://example.com/x.png'), 'https://example.com/x.png');
@@ -76,5 +82,5 @@ test('frame.js asks for new passes when it has none, and its messages carry the 
   const before = posts.length;
   assert.equal(click('/addon/viewer/x?a=1'), true);  // another add-on's page: never opened in this frame
   assert.equal(posts.length, before);
-  assert.equal(click('https://example.com/'), false);  // another site: the link's own target decides
+  assert.equal(click('https://example.com/'), true);  // another site never opens inside this frame
 });

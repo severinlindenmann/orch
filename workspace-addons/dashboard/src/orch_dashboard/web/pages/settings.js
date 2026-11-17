@@ -958,7 +958,7 @@ globalThis.orchFrameChan = () => { const r = route(); return r.kind === 'page' ?
 // Passes go only to the add-on's own page (its start page and its own places such as t/<id>), never to one of
 // its files, pictures, answers or ticket pages (api/, page/, kit/, web/, or any name with a dot): those can carry
 // content an agent made (ORCH-186 review H1).
-const frameEntry = path => /^[A-Za-z0-9_\/-]{0,300}$/.test(path) && !/^(api|page|kit|web)(\/|$)/.test(path) && !path.includes('//');
+const frameEntry = path => /^[A-Za-z0-9_\/-]{0,300}$/.test(path) && !/^(api|page|kit|web)(\/|$)/i.test(path) && !path.includes('//');
 function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
@@ -984,7 +984,7 @@ globalThis.addEventListener?.('message', e => {
   if (d.orch === 'frame-top') { if (hash && d.chan && d.chan === globalThis.orchFrameChan()) location.hash = '#' + hash; return; }
   const prefix = '/addon/' + r.id + '/', rel = typeof d.path === 'string' && d.path.startsWith(prefix) ? d.path.slice(prefix.length) : null;
   if (rel === null || rel.startsWith('/') || !frameEntry(rel)) return;  // only the add-on's own page gets opened with a pass
-  if (d.fresh) {
+  if (d.fresh && d.chan && d.chan === globalThis.orchFrameChan()) {  // new passes only for the page that had the code
     if (Date.now() - (frameFresh.get(r.id) || 0) < 5000) return;
     frameFresh.set(r.id, Date.now()); framePasses.delete(r.id);
   }

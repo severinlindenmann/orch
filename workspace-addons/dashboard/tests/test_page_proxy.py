@@ -702,12 +702,18 @@ def test_the_file_pass_only_reads_its_own_addon_and_the_pass_never_rides_in_an_a
     _with_person(monkeypatch)
     got = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])
     img = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"}
-    assert call(base + f"/addon/focus/api/x?orch-frame={got['file']}", headers=img)[0] == 200
+    assert call(base + f"/addon/focus/api/file?t=t_abcdef&orch-frame={got['file']}", headers=img)[0] == 200
     assert pagesession.VOUCH_HEADER not in SEEN[-1][2]  # read-only: no word for the person
+    assert (
+        call(base + f"/addon/focus/api/order/o1/file/a.png?orch-frame={got['file']}", headers=img)[0] == 200
+    )
     n = len(SEEN)
     assert (
-        call(base + f"/addon/focus/api/x?orch-frame={got['pass']}", headers=img)[0] == 401
-    )  # the pass: header only
+        call(base + f"/addon/focus/api/tickets?orch-frame={got['file']}", headers=img)[0] == 401
+    )  # files only
+    assert (
+        call(base + f"/addon/focus/api/file?orch-frame={got['pass']}", headers=img)[0] == 401
+    )  # header only
     assert (
         call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": got["file"]})[0] == 401
     )  # file: query only
@@ -746,8 +752,10 @@ def test_the_file_pass_is_taken_off_however_its_name_is_written(stack, monkeypat
     _with_person(monkeypatch)
     f = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["file"]
     img = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"}
-    assert call(base + f"/addon/focus/api/x?a=1&orch%2Dframe={f}&b=2", headers=img)[0] == 200
-    assert SEEN[-1][1] == "/api/x?a=1&b=2"
+    assert call(base + f"/addon/focus/api/file?a=1&orch%2Dframe={f}&b=2", headers=img)[0] == 200
+    assert SEEN[-1][1] == "/api/file?a=1&b=2"
+    # a value that only mentions the name is no pass (review I3)
+    assert call(base + "/addon/focus/api/x?q=orch-frame", headers={"Sec-Fetch-Site": "same-origin"})[0] == 200
 
 
 def test_only_focus_makes_dashboard_calls_from_its_frame():

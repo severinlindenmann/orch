@@ -31,6 +31,8 @@ FRAME_PARAM = "orch-frame"
 FRAME_ROOT = {"focus": ("/api/act", "/api/events", "/api/term", "/api/term/keys")}
 ALL_ROOT_PATHS = frozenset(p for paths in FRAME_ROOT.values() for p in paths)
 PASS_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
+# the addresses a file pass may read: an add-on's file and picture answers (Focus /api/file, Factory order files)
+FILE_PATH = re.compile(r"/api/(?:file|order/[A-Za-z0-9_-]{1,64}/file/[A-Za-z0-9_./%-]{1,300})")
 LIFE = 3600
 MAX = 128
 KINDS = ("header", "file")

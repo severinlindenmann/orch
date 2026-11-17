@@ -385,8 +385,8 @@ class Handler(BaseHTTPRequestHandler):
         self._frame, self._frame_cors, self._frame_bad = None, False, False
         header = self.headers.get(framepass.FRAME_HEADER)
         file = None
-        if header is None and query and framepass.FRAME_PARAM in unquote_plus(query):
-            file = (parse_qs(query).get(framepass.FRAME_PARAM) or [None])[0]
+        if header is None and query and framepass.FRAME_PARAM in parse_qs(query, keep_blank_values=True):
+            file = (parse_qs(query, keep_blank_values=True).get(framepass.FRAME_PARAM) or [None])[0]
             if getattr(self, "command", "") != "GET" or file is None:
                 self._frame_bad = True
                 return
@@ -402,7 +402,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         px = PROXY.fullmatch(path)
         if hit and px and px.group(1) == hit[0]:
-            ok = True
+            # the file pass reads only file and picture addresses (review L9), the pass all of its add-on
+            ok = header is not None or bool(framepass.FILE_PATH.fullmatch(px.group(2) or ""))
         elif hit and not px and header is not None:
             ok = path in framepass.FRAME_ROOT.get(hit[0], ())
         else:
@@ -598,7 +599,7 @@ class Handler(BaseHTTPRequestHandler):
         # /api/act or hand-off confirm (the fence refuses an origin of "null"; SameSite withholds the cookie). One
         # orch ships: sandboxed as well, it acts only with the frame pass for that add-on (ORCH-186).
         csp = PROXY_CSP + ("; " + SHIPPED_SANDBOX if self._shipped(name) else "; sandbox allow-scripts")
-        if self._shipped(name) and rest.startswith(("/api/", "/page/")):
+        if self._shipped(name) and rest.lower().startswith(("/api/", "/page/")):
             # a file, picture or answer of a shipped add-on is never a page that runs: whatever its content (an
             # agent's SVG or HTML), no script runs in it, so nothing in it can use a pass (ORCH-186 review H1)
             csp = FILE_CSP
