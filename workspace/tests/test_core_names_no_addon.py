@@ -33,6 +33,10 @@ ALLOW = {
     "orch/collect_claude.py": {"usage": _TOKENS},
     "orch/collect_execjson.py": {"usage": _TOKENS},
     "orch/record.py": {"usage": _TOKENS},
+    "orch/usage.py": {"usage": _TOKENS},
+    "orch/doctorpass.py": {
+        "usage": "the account switcher's JSON key for an account's use, not the Usage add-on"
+    },
 }
 
 

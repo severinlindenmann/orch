@@ -1,4 +1,4 @@
-"""Tokens per model, how many tickets moved up to Opus, and the tickets with the most tokens (`orch usage`)."""
+"""Tokens per model, how many tickets moved up to Opus, and the tickets with the most tokens (`orch tokens`)."""
 
 from .overview import ERROR
 
