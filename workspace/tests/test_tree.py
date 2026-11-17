@@ -21,7 +21,8 @@ def test_new_with_parent(proj, run, validate):
     assert code == 0 and "step of: Quarter close" in out
     c = [t for t in tickets.list_all(proj) if t["title"] == "Q3 invoices"][0]
     validate(c)
-    assert c["parent"] == p and c["history"][0]["text"] == f"Created under {read(proj, p)['key']} Quarter close"
+    key = read(proj, p)["key"]
+    assert c["parent"] == p and c["history"][0]["text"] == f"Created under {key} Quarter close"
     assert "parent" not in read(proj, p)
 
 

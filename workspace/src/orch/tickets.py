@@ -853,7 +853,8 @@ def create(
         raise Refused("A title needs 1 to 200 characters.")
     parent_ticket = None
     if parent is not None:
-        parent_ticket = load(root, parent)  # the parent must exist (cycles are impossible: it is set only here)
+        # the parent must exist (cycles are impossible: it is set only here)
+        parent_ticket = load(root, parent)
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
@@ -871,7 +872,8 @@ def create(
         "questions": [],
         "history": [],
     }
-    add_history(ticket, by, "Created" + (f" under {_parent_words(parent_ticket)}" if parent_ticket else ""), at=t)
+    under = f" under {_parent_words(parent_ticket)}" if parent_ticket else ""
+    add_history(ticket, by, "Created" + under, at=t)
     if parent is not None:
         ticket["parent"] = parent
     if title_auto:
