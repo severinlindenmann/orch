@@ -226,7 +226,6 @@
   function show(on) {
     byId('settings').hidden = !on;
     byId('main-view').hidden = on;
-    byId('range').hidden = on;
     byId('settings-link').hidden = on;
     byId('health').hidden = on || byId('overview').hidden;
     byId('page-title').textContent = on ? 'Insights settings' : 'Insights';

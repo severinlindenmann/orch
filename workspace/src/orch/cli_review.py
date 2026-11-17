@@ -13,7 +13,7 @@ from pathlib import Path
 from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict")
 CARD_KINDS = ("draft", "link", "plan", "choose")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
@@ -66,6 +66,17 @@ def add_parsers(sub, common) -> None:
         help="merge green release cards for the owner when Settings allow it (workflow.release_merge)",
     )
     x.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    x = s.add_parser(
+        "verdict",
+        parents=[common],
+        help="the Reviewer's second look decides one ticket (accept, back, leave)",
+    )
+    x.add_argument("ticket")
+    x.add_argument("word", choices=("accept", "back", "leave"), help="accept, back or leave")
+    x.add_argument("why", help="one line why")
+    x.add_argument(
+        "--point", action="append", default=[], metavar="TEXT", help="one point and what you saw (repeat)"
+    )
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -506,6 +517,14 @@ def _accepted(args, root: Path) -> None:
     _out(args, data, text)
 
 
+def _verdict(args, root: Path) -> None:
+    from orch import lookreview
+
+    tid = _ticket(root, args)["id"]
+    res = _guard(lookreview.verdict, root, tid, args.word, args.why, args.point)
+    _out(args, res, f"{res['key']}: {lookreview.VERDICT_TEXT[res['verdict']]}: {res['why']}")
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "review":
         return False
@@ -522,5 +541,6 @@ def dispatch(args, root: Path) -> bool:
         "tend": _tend,
         "tend-releases": _tend_releases,
         "accepted": _accepted,
+        "verdict": _verdict,
     }[args.sub](args, root)
     return True
