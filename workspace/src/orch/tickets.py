@@ -923,6 +923,15 @@ def _covered(part: str, cover: str) -> bool:
     return len(short) >= 3 and f" {short} " in f" {long_} "
 
 
+def _loosely_named(part: str, texts: list[str]) -> bool:
+    """A task text names a Done when part by meaning, not link: at least 70% of the part's words (3+ letters,
+    at least 3 of them) are in that one task's text. Lets a reworded Done when keep its finished tasks."""
+    words = {w for w in _norm_words(part).split() if len(w) >= 3}
+    if len(words) < 3:
+        return False
+    return any(len(words & set(_norm_words(t).split())) * 10 >= len(words) * 7 for t in texts)
+
+
 def done_when_parts(done_when: str) -> list[str]:
     """done_when split into its parts: one per line, ';' or sentence end. Plain and cheap on purpose."""
     parts = []
@@ -941,7 +950,8 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
     (a stored flag is never trusted). The current signature is computed at most once per call, only when a
     recorded signature exists; `cache` reuses it for a few seconds (polled pages).
     uncovered: the parts of done_when that no task `covers` (a part is covered when a task's covers text
-    and the part contain one another, ignoring case and punctuation); one hint when done_when cannot be
+    and the part contain one another, ignoring case and punctuation, or when one task's own text holds
+    70% of the part's words); one hint when done_when cannot be
     split and nothing is linked. level: ok | note | warn | fail, so views never parse `line`."""
     from orch import filesig
 
@@ -975,7 +985,10 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
     uncovered: list[str] = []
     if isinstance(done_when, str) and done_when.strip():
         parts = done_when_parts(done_when)
-        uncovered = [p for p in parts if not any(_covered(p, c) for c in covers)]
+        texts = [c["text"] for c in items if isinstance(c.get("text"), str) and not c.get("wont_do")]
+        uncovered = [
+            p for p in parts if not any(_covered(p, c) for c in covers) and not _loosely_named(p, texts)
+        ]
         if not parts and not covers:
             uncovered = ["Done when isn't linked to tasks"]
     n = {k: list(per.values()).count(k) for k in ("passed", "failed", "changed", "note")}
