@@ -26,3 +26,13 @@ def ws(tmp_path, monkeypatch):
 
 
 from prpage_util import prws  # noqa: F401  (the Pull requests page tests' workspace)
+
+
+@pytest.fixture(autouse=True)
+def woke(monkeypatch):
+    """No test ever starts a real helper: the queue's wake only records (ticket, text)."""
+    from orch_pull_requests import runner
+
+    seen: list = []
+    monkeypatch.setattr(runner, "_wake", lambda root, tid, text: (seen.append((tid, text)), "woken")[1])
+    return seen

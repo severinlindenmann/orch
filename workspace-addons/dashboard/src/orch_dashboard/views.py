@@ -18,7 +18,7 @@ from .data import _argv0, _child_env
 TIMEOUT = 10.0  # a view that starts other orch commands (Focus with live sessions) needs more than 2 s on a busy machine
 MAX_BYTES = 256 * 1024
 TONES = ("neutral", "good", "warn", "needs-you", "bad")
-BLOCKS = ("stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio")
+BLOCKS = ("stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split")
 # Same pattern as `link` in contracts/addon-view.schema.json (tests/test_views.py compares them).
 _LINK = re.compile(
     r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2})$"""
@@ -177,6 +177,116 @@ def _item_ok(it, required, extra):
     )
 
 
+_SPLIT_ID = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,63}$")
+
+
+def _lines_ok(v, lo, hi):
+    return isinstance(v, list) and lo <= len(v) <= hi and all(_text(x) for x in v)
+
+
+def _split_button_ok(b):
+    return (
+        _keys_only(b, ("label", "action", "link", "primary"))
+        and _text(b.get("label"), 30)
+        and _opt(b, "action", _action)
+        and _opt(b, "link", _link)
+        and _opt(b, "primary", lambda v: isinstance(v, bool))
+    )
+
+
+def _buttons_ok(v, lo, hi):
+    return isinstance(v, list) and lo <= len(v) <= hi and all(map(_split_button_ok, v))
+
+
+def _fact_ok(f):
+    return (
+        _keys_only(f, ("label", "value", "tone", "link", "switch"))
+        and _text(f.get("label"), 30)
+        and _opt(f, "value", _text)
+        and _opt(f, "tone", _tone)
+        and _opt(f, "link", _link)
+        and _opt(f, "switch", _toggle_ok)
+    )
+
+
+def _panel_ok(p):
+    log, danger = p.get("log"), p.get("danger")
+    conf = danger.get("confirm") if isinstance(danger, dict) else None
+    return (
+        _keys_only(p, ("text", "buttons", "facts", "note", "log", "danger"))
+        and _opt(p, "text", _text)
+        and _opt(p, "buttons", lambda v: _buttons_ok(v, 0, 4))
+        and _opt(p, "facts", lambda v: isinstance(v, list) and len(v) <= 12 and all(map(_fact_ok, v)))
+        and _opt(p, "note", _text)
+        and (
+            log is None
+            or (
+                _keys_only(log, ("title", "lines", "empty"))
+                and _lines_ok(log.get("lines"), 0, 20)
+                and _opt(log, "title", lambda v: _text(v, 40))
+                and _opt(log, "empty", _text)
+            )
+        )
+        and (
+            danger is None
+            or (
+                _keys_only(danger, ("label", "note", "action", "confirm"))
+                and _text(danger.get("label"), 30)
+                and _opt(danger, "note", _text)
+                and _action(danger.get("action"))
+                and _keys_only(conf, ("title", "lines", "keep"))
+                and _text(conf.get("title"), 80)
+                and _lines_ok(conf.get("lines"), 1, 5)
+                and _opt(conf, "keep", lambda v: _text(v, 30))
+            )
+        )
+    )
+
+
+def _split_item_ok(it):
+    q = it.get("question") if isinstance(it, dict) else None
+    return (
+        _keys_only(it, ("id", "title", "state", "action", "question", "panel"))
+        and isinstance(it.get("id"), str)
+        and bool(_SPLIT_ID.match(it["id"]))
+        and _text(it.get("title"), 80)
+        and _chip(it.get("state"))
+        and _opt(it, "action", _split_button_ok)
+        and (
+            q is None
+            or (
+                _keys_only(q, ("title", "text", "buttons"))
+                and _text(q.get("title"), 80)
+                and _opt(q, "text", _text)
+                and _buttons_ok(q.get("buttons"), 1, 3)
+            )
+        )
+        and isinstance(it.get("panel"), dict)
+        and _panel_ok(it["panel"])
+    )
+
+
+def _split_ok(b):
+    groups = b.get("groups")
+    return (
+        _keys_only(b, ("type", "title", "param", "empty", "groups"))
+        and _opt(b, "title", lambda v: _text(v, 60))
+        and _opt(b, "param", lambda v: isinstance(v, str) and bool(re.match(r"^[a-z]{1,12}$", v)))
+        and _opt(b, "empty", _empty)
+        and isinstance(groups, list)
+        and len(groups) <= 4
+        and all(
+            _keys_only(g, ("title", "meta", "items"))
+            and _text(g.get("title"), 60)
+            and _meta(g)
+            and isinstance(g.get("items"), list)
+            and len(g["items"]) <= 50
+            and all(map(_split_item_ok, g["items"]))
+            for g in groups
+        )
+    )
+
+
 def _block_ok(b) -> bool:
     t = b.get("type") if isinstance(b, dict) else None
     if t == "stat":
@@ -324,6 +434,8 @@ def _block_ok(b) -> bool:
                 for r in rows
             )
         )
+    if t == "split":
+        return _split_ok(b)
     if t == "radio":
         opts = b.get("options")
         return (

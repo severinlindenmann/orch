@@ -2505,9 +2505,60 @@ def check_done(
 
 
 WONT_DO_AGENT = (
-    "Only a person marks a step as won't do. Ask them: orch ask {tid} \"Mark step {cid} as won't do?\" "
-    "--option yes --option no --check {cid}"
+    "Only a person marks a step as won't do. Ask them, and say where the step would run if they say no: "
+    'orch ask {tid} "Mark step {cid} as won\'t do?" --option yes '
+    '--option "No, run it in CI" --check {cid}'
 )
+
+_WONT_DO_Q_RE = re.compile(r"\bwon'?t do\b|\bskip\b", re.IGNORECASE)
+_TEST_WORD_RE = re.compile(
+    r"\b(test|tests|tested|testing|pytest|try[- ]?out|trial|experiment)\b", re.IGNORECASE
+)
+
+
+def _guard_question(
+    root: Path, text: str, options: list[str], recommended: str | None, check: str | None
+) -> None:
+    """Two plain refusals (ORCH-332). A question never offers a protected (production) machine for a test.
+    A question that asks whether to skip a step must name where it would run if the answer is no (a bare
+    yes/no was once read as "run it now, on production")."""
+    parts = [text, *options, *([recommended] if recommended else [])]
+    machines = config.protected_machines(root)
+    if machines:
+        from orch import protected
+
+        names = protected.expand(machines)
+
+        def find(blob: str) -> str | None:
+            blob = blob.lower()
+            return next(
+                (
+                    n
+                    for n in sorted(names)
+                    if re.search(rf"(?<![a-z0-9.-]){re.escape(n)}(?![a-z0-9.-])", blob)
+                ),
+                None,
+            )
+
+        offered = find(" ".join(parts[1:]))  # an option or the recommended answer
+        mentioned = find(text) if _TEST_WORD_RE.search(text) else None
+        deploy = re.search(r"\b(release|deploy|deployment|ship)\b", text, re.IGNORECASE)
+        hit = mentioned or (offered if not deploy else None)
+        if hit:
+            raise Refused(
+                f"{hit} is a protected machine (production): a question never offers it for a test or as a "
+                "place to run something. Offer the CI job or a throwaway server, or skip the step."
+            )
+    if (
+        check is not None
+        and _WONT_DO_Q_RE.search(text)
+        and options
+        and all(o.strip().lower() in {"yes", "no", "y", "n"} for o in options)
+    ):
+        raise Refused(
+            "A question about skipping a step must say where it would run if the answer is no. "
+            'Use options such as yes and "No, run it in CI", not a bare yes and no.'
+        )
 
 
 def _refuse_if_wont_do(item: dict, tid: str, cid: str) -> None:
@@ -2533,22 +2584,43 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
         raise Refused("The reason is one line of at most 200 characters.")
 
     def op(t):
-        item = _item(t, cid)
-        if item.get("done"):
-            raise Refused(f"{cid} is already done. Open it again first.")
-        item["evidence"] = []
-        _clear_doing(item)
-        item["wont_do"] = True
-        if why:
-            item["reason"] = why
-        else:
-            item.pop("reason", None)
-        item.update({"by": by, "at": now(), "wont_by": by, "wont_at": now()})
-        history.created("steps", item)  # the step mark is core's own (like check_start)
-        add_history(t, by, f"Marked {cid} as won't do")
-        return item
+        return _mark_wont_do(t, cid, by, why)
 
     return apply_op(root, tid, op, by=by)
+
+
+def _mark_wont_do(t: dict, cid: str, by: str, why: str = "") -> dict:
+    """Inside an apply_op: mark step `cid` won't do for the person `by` (check_wont_do, or their yes to a
+    "won't do?" question tied to the step)."""
+    item = _item(t, cid)
+    if item.get("done"):
+        raise Refused(f"{cid} is already done. Open it again first.")
+    item["evidence"] = []
+    _clear_doing(item)
+    item["wont_do"] = True
+    if why:
+        item["reason"] = why
+    else:
+        item.pop("reason", None)
+    item.update({"by": by, "at": now(), "wont_by": by, "wont_at": now()})
+    history.created("steps", item)  # the step mark is core's own (like check_start)
+    add_history(t, by, f"Marked {cid} as won't do")
+    return item
+
+
+_YES = "yes"
+
+
+def _wont_do_yes(q: dict, ans: str) -> bool:
+    """A person's yes to exactly the question WONT_DO_AGENT tells helpers to ask ("Mark step c2 as won't do?",
+    tied to that step, with a yes option). ORCH-267: the yes marks the step; no second click. Only that exact
+    wording counts, so a helper cannot word another question so that its yes also drops a step."""
+    cid, text = q.get("check"), q.get("text")
+    if not isinstance(cid, str) or not isinstance(text, str):
+        return False
+    canon = re.compile(rf"Mark step {re.escape(cid)} as won['\u2019]t do\??", re.IGNORECASE)
+    options = [o.casefold() for o in q.get("options") or [] if isinstance(o, str)]
+    return bool(canon.fullmatch(text.strip())) and _YES in options and ans.strip().casefold() == _YES
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
@@ -3181,6 +3253,7 @@ def ask(
                 "A merge goes with a link card: orch ask --link TITLE --open <pull request> --merge."
             )
 
+    _guard_question(root, text, options, recommended, check)
     for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
         if _asks_for_secret(part):
             with contextlib.suppress(Exception):  # the attempt stays visible in the history
@@ -3329,6 +3402,53 @@ def take_back(root: Path, tid: str, qid: str, reason: str, by: str) -> tuple[dic
     return t, q, True
 
 
+IN_CONVERSATION = "Answered in the conversation: "
+IN_CONVERSATION_VIA = "conversation"
+
+
+def answered_in_conversation(root: Path, tid: str, qid: str, words: str, by: str) -> dict:
+    """The person answered the helper in its own window instead of on the open card (owner, ORCH-267): the
+    helper writes their words on the card and it closes. It is shown as theirs only through the helper: the
+    answer reads "Answered in the conversation: <words>", answered_by stays the helper, via is "conversation".
+    A card that does something on its answer (merge, start a run, release) is refused: the person answers that
+    one on the card. Returns the question."""
+    words = " ".join(str(words or "").split())
+    if not words:
+        raise Refused(
+            'Write down what the person said: orch ask <ticket> --in-conversation q3 "<their words>".'
+        )
+    if len(words) > MAX_TAKE_BACK_REASON:
+        raise Refused(f"Keep it to one short line (at most {MAX_TAKE_BACK_REASON} characters).")
+
+    if str(by).startswith("human:"):
+        raise Refused(
+            "Only the helper writes down an answer from the conversation; a person answers on the card."
+        )
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}. See the open ones: orch needs.")
+        refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        if q.get("action") or q.get("kind") not in (None, "plain"):
+            raise Refused(f"{qid} does something when it is answered: the person answers it on the card.")
+        at = now()
+        q["in_conversation"] = {"at": at, "by": by}
+        q["answer"], q["answered_by"], q["via"], q["answered_at"] = (
+            IN_CONVERSATION + words,
+            by,
+            IN_CONVERSATION_VIA,
+            at,
+        )
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, by, f"{qid} answered in the conversation: {words}")
+        return q
+
+    return apply_op(root, tid, op, by=by)[1]
+
+
 def answer(
     root: Path,
     tid: str,
@@ -3379,6 +3499,10 @@ def answer(
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
+        if _is_person(by) and _wont_do_yes(q, ans):
+            item = _item(ticket, q["check"])
+            if not item.get("done") and not item.get("wont_do"):
+                _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
     return apply_op(root, tid, op, by=by)

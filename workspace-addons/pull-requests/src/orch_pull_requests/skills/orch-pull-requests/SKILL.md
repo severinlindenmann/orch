@@ -17,14 +17,19 @@ get merged. No AI call: a program does the waiting and merging.
 
 **1. Merge on green through the queue** (replaces `orch ref wait <ticket> --merge`)
 
-    orch pull-requests queue add <pull request url> --ticket <ticket> --wait
+    orch pull-requests queue add <pull request url> --ticket <ticket>
 
-Run it bare, not through a pipe. Exit 0 = merged (alone or with its group); exit 1 = it left the queue, the last line
-says why (checks failed, a draft, closed, changes requested, conflicts with the base branch, GitHub did not answer
-three times). Exit 2 = not queued, the line says why (a draft, a base branch the queue does not merge into, changes
-requested, another GitHub login). The verdict also goes on the ticket. Fix what it says, push, and add it again. The
-pull request must be ready (not a draft) and go into an allowed base branch (develop unless the workspace says
-otherwise; never main).
+Mark the pull request ready first (after your last push), then add it and finish your ticket: do not wait for its
+checks. Exit 0 = in line; exit 2 = not queued, the line says why (a draft, a base branch the queue does not merge
+into, changes requested, another GitHub login): fix it and add it again. The verdict goes on the ticket: the pull
+request link shows `merged`, or a history line says why it left the queue (checks failed, a draft, closed, changes
+requested, conflicts with the base branch, GitHub did not answer three times) and the ticket's helper is woken
+with that reason: fix it, push and add it again. The pull request must go into an allowed base branch (develop unless the workspace
+says otherwise; never main). Do not take the base branch in by hand to get it merged: a pull request that fell
+behind is checked once on top of the base branch by the queue.
+
+Only when a person asks you to stay until it is merged: add `--wait` and run it bare, not through a pipe. Exit 0 =
+merged (alone or with its group); exit 1 = it left the queue, the last line says why.
 
 **2. Or let the ticket's switch do it** (Merge when green)
 

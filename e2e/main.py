@@ -261,6 +261,11 @@ def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
     return results
 
 
+# The short set that runs on every pull request (e2e-smoke.yml, under 5 minutes): the core CLI and ticket flow, add-ons and
+# the v2 workspace scenarios. No relay/publish server and no agent, so no cargo build; those have their own PR jobs.
+SMOKE = ["W0", "W3", "W4", "W5", "W5T", "A0", "A4", "A7", "A8", "A9", "A10", "V2-C1", "V2-T1"]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("what")
@@ -272,7 +277,9 @@ def main() -> int:
     a = ap.parse_args()
     import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons  # noqa: F401,E401
 
-    if a.what == "all":
+    if a.what == "smoke":
+        ids = list(SMOKE)
+    elif a.what == "all":
         ids = [k for k in REGISTRY if k != "V3-SIM"]  # V3-SIM is a long-lived harness, only by name
     else:  # comma list; a single letter (W, A, P, R, M, F) selects the group
         ids = []
@@ -366,23 +373,13 @@ def main() -> int:
 
 
 def leaked_servers(tmp: Path) -> list[int]:
-    """Add-on servers (orch_dashboard, orch_focus ...) whose folder is under this run's temp root; they are ended here."""
-    out = subprocess.run(["ps", "-axo", "pid,command"], capture_output=True, text=True).stdout
+    """Add-on servers (orch_dashboard, orch_focus, orch_factory ...) whose folder is under this run's temp root or under
+    a folder a scenario made outside it (lib.EXTRA_ROOTS); they are ended here and the run fails (LEAK)."""
     found = []
-    for ln in out.splitlines():
-        pid_s, _, cmd = ln.strip().partition(" ")
-        if " -m orch_" not in cmd or not pid_s.isdigit():
-            continue
-        lsof = subprocess.run([shutil.which("lsof") or "/usr/sbin/lsof", "-a", "-d", "cwd", "-p", pid_s, "-Fn"], capture_output=True, text=True).stdout
-        cwd = next((x[1:] for x in lsof.splitlines() if x.startswith("n")), "")
-        if cwd and (cwd == str(tmp) or cwd.startswith(str(tmp) + os.sep)):
-            found.append(int(pid_s))
-            print(f"LEAK pid {pid_s}: {cmd[:160]}")
-    for pid in found:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
+    for pid, cmd in lib.orch_processes_under([tmp, *lib.EXTRA_ROOTS]):
+        found.append(pid)
+        print(f"LEAK pid {pid}: {cmd[:160]}")
+    lib.end_processes(found)
     return found
 
 

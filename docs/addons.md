@@ -118,13 +118,19 @@ good ones still get merged. A program does the waiting and merging; it needs `gh
 
 ```sh
 $ orch addon add pull-requests --yes
-$ orch pull-requests queue add <pull request url> --ticket <id> --wait   # exit 0 = merged
+$ orch pull-requests queue add <pull request url> --ticket <id>          # in line; the verdict goes on the ticket
+$ orch pull-requests queue add <pull request url> --ticket <id> --wait   # the same, and wait: exit 0 = merged
 $ orch pull-requests queue list
 $ orch pull-requests queue remove <pull request url>
 ```
 
-`queue add` starts the runner in the background; it stops when the queue is empty. Every GitHub write counts toward
-this computer's write limit (`orch github writes`). A pull request a person merges with a Merge card is never queued.
+`queue add` starts the runner in the background; it stops when the queue is empty. A helper does not wait: it puts
+its ready pull request in line and finishes; the verdict (merged, or why it left the queue) goes on the ticket, and
+when it left the queue the ticket's helper is woken with the reason. A
+pull request whose files changed on the base branch since it took the base in is checked once on top of the base
+branch; the queue never merges the base into it and runs its checks again. Every GitHub write counts toward this
+computer's write limit (`orch github writes`); the queue's own merges are counted but never wait for the hourly
+merge count, since it merges one group per run of the checks. A pull request a person merges with a Merge card is never queued.
 Files: `.orch/addons/pull-requests/` (gitignored).
 
 **Merge when green.** A switch on each ticket (Details, Pull requests; off until you turn it on). When it is on, the

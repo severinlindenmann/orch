@@ -196,15 +196,32 @@ def delete(root: Path, sid: str) -> None:
             pass
 
 
+def read_state(root: Path, sid: str) -> dict:
+    """The state file of a service ({} when there is none or it cannot be read)."""
+    p = state_path(root, sid)
+    if p.is_symlink():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def update_state(root: Path, sid: str, **fields) -> None:
+    """Change some fields of the state file and keep the others (new file + rename)."""
+    check_id(sid)
+    d = read_state(root, sid)
+    d.update(fields)
+    write_json(state_path(root, sid), d)
+
+
 def mark(root: Path, sid: str, running: bool) -> None:
-    """Remember when the service last changed state (the `since` of a stopped service)."""
-    write_json(state_path(root, sid), {"running": running, "since": now()})
+    """Remember when the service last changed state (the `since` of a stopped service) and what the person wants."""
+    update_state(root, sid, running=running, since=now())
 
 
 def last_change(root: Path, sid: str) -> str | None:
-    try:
-        d = json.loads(state_path(root, sid).read_text(encoding="utf-8"))
-    except (OSError, ValueError, UnicodeDecodeError):
-        return None
-    s = d.get("since") if isinstance(d, dict) else None
+    d = read_state(root, sid)
+    s = d.get("since")
     return s if isinstance(s, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", s) else None

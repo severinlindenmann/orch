@@ -37,6 +37,9 @@ class FakeDriver:
         self.entries: dict[str, dict] = {}
         self.calls: list[tuple[str, str]] = []
         self.unavailable: str | None = None
+        self.run_counts: dict[
+            str, int
+        ] = {}  # sid -> starts so far (launchd `runs`); none = the tool cannot say
 
     def check(self):
         from orch_services.drivers import Unavailable
@@ -76,6 +79,9 @@ class FakeDriver:
         e = self.entries.get(spec.sid)
         on = bool(e and e["running"])
         return Status(running=on, pid=4242 if on else None, since="2026-11-17T10:00:00Z" if on else None)
+
+    def runs(self, spec):
+        return self.run_counts.get(spec.sid)
 
     def uninstall(self, spec):
         self.calls.append(("uninstall", spec.sid))
