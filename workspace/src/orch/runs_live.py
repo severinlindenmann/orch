@@ -242,6 +242,11 @@ def _held(root: Path, by: str = "agent:tend") -> str | None:
         return why
     if by.startswith("human:"):
         return None
+    from orch import limitstop
+
+    limit = limitstop.held_words(root)  # ORCH-179: it would only stop on the limit again
+    if limit:
+        return limit
     return "other helpers are just starting" if _too_soon(root) else None
 
 

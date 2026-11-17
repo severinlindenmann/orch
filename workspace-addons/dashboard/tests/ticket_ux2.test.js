@@ -193,7 +193,7 @@ test('ORCH-157: a Group choice lists the tickets that have parts, and picking on
   assert.deepEqual(c.filterTickets(rows, '', false, '', '', '', 'e').map(t => t.id), ['e', 'p1']);
   assert.equal(c.filterTickets(rows, '', false).length, 3);
 });
-test('ORCH-157: the To do view keeps only backlog tickets', () => {
+test('ORCH-157: the Backlog view keeps only backlog tickets', () => {
   const c = listCtx();
   assert.deepEqual(c.filterTickets([{id:'a', status:'open'}, {id:'b', status:'active'}], '', false, '', '', 'backlog').map(t => t.id), ['a']);
 });
