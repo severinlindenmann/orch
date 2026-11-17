@@ -40,9 +40,27 @@ def _name(t: dict) -> str:
     return clean(f"{key} · {t['title']}" if isinstance(key, str) and key else t["title"])
 
 
+def clip(s: str, n: int = 80) -> str:
+    """Shorten at a word end with an ellipsis (never mid-word, never longer than n)."""
+    if len(s) <= n:
+        return s
+    cut = s[: n - 1].rstrip()
+    if s[n - 1].isspace() or s[n - 1] in ",;:.":
+        pass  # the cut fell exactly on a word end
+    elif " " in cut:
+        cut = cut.rsplit(" ", 1)[0].rstrip(" ,;:.-")
+    return cut + "…"
+
+
 def _title(t: dict) -> str:
-    """A ticket by its title only (the week strip shows no ticket codes)."""
-    return clean(t["title"])
+    """A ticket by its title only (the week strip shows no ticket codes), cut at a word end with an ellipsis."""
+    return clip(clean(t["title"], 400))
+
+
+def _full(t: dict) -> dict:
+    """The whole title for the hover text, only when the shown one was cut."""
+    full = clean(t["title"], 400)
+    return {"full": full} if _title(t) != full else {}
 
 
 def _dows(field: str) -> set[int] | None:
@@ -194,7 +212,15 @@ def _day_items(
             at = max(until, now)
             if day_start <= at < day_end:
                 items.append(
-                    (at, {"time": at.astimezone().strftime("%H:%M"), "title": _title(t), "link": t["id"]})
+                    (
+                        at,
+                        {
+                            "time": at.astimezone().strftime("%H:%M"),
+                            "title": _title(t),
+                            "link": t["id"],
+                            **_full(t),
+                        },
+                    )
                 )
         cron = _repeats(t)
         if not cron:
@@ -219,12 +245,21 @@ def _day_items(
                         "title": _title(t),
                         "note": note,
                         "link": t["id"],
+                        **_full(t),
                     },
                 )
             )
         else:
             items += [
-                (x, {"time": x.astimezone().strftime("%H:%M"), "title": _title(t), "link": t["id"]})
+                (
+                    x,
+                    {
+                        "time": x.astimezone().strftime("%H:%M"),
+                        "title": _title(t),
+                        "link": t["id"],
+                        **_full(t),
+                    },
+                )
                 for x in left
             ]
     return [i for _, i in sorted(items, key=lambda e: e[0])][:20]
