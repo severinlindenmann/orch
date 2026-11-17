@@ -306,7 +306,7 @@ def test_two_human_items_are_two_ids_for_the_host_but_one_ticket(proj, run, new_
 
 
 def test_changes_asked_shows_after_send_back_and_clears_when_worked(proj, new_ticket):
-    """ORCH-295: after Send back the ticket says Changes asked; finishing the task (or a task set aside) clears it."""
+    """ORCH-295: Send back makes the ticket say Changes asked; finishing the task clears it."""
     tid = new_ticket()
     tickets.set_status(proj, tid, "review", "human:lume")
     assert tickets.status_word(tickets.load(proj, tid)) == "Review"
