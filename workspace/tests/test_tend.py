@@ -340,6 +340,18 @@ def test_free_slots_start_the_line_in_order_until_full(proj, new_ticket, monkeyp
     assert started == [b, c]
 
 
+def test_a_done_ticket_is_never_started_from_the_line(proj, new_ticket, monkeypatch):
+    a, b = new_ticket("a"), new_ticket("b")
+    _queue(proj, a)
+    _queue(proj, b)
+    tickets.set_status(proj, a, "done", "test")
+    started = []
+    monkeypatch.setattr(runs_live, "_full", lambda root: None)
+    monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
+    assert runs_live.start_waiting(proj) == [b]
+    assert started == [b]
+
+
 def test_start_priority_queues_when_every_slot_is_taken(proj, run, new_ticket, monkeypatch):
     tid = new_ticket()
     monkeypatch.setattr(runs_live, "_full", lambda root: 2)

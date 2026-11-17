@@ -125,6 +125,13 @@ def records(root: Path) -> list[dict]:
     return out
 
 
+def _status(root: Path, tid: str) -> str | None:
+    try:
+        return tickets.load(root, tid).get("status")
+    except Exception:  # noqa: BLE001 - a ticket that cannot be read is not held back
+        return None
+
+
 def _finished(root: Path, tid: str) -> bool:
     """True when the ticket is in Review, Done or Dropped: its session no longer needs a slot."""
     with contextlib.suppress(Exception):
@@ -1737,6 +1744,8 @@ def start_waiting(root: Path) -> list[str]:
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
         if not items or runs.read(root, tid):
             continue
+        if _status(root, tid) in ("done", "dropped"):
+            continue  # a Done ticket never gets a run by itself (ORCH-247); the person starts it by hand
         with contextlib.suppress(Exception):
             runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)
