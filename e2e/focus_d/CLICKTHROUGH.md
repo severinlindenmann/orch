@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 2 ready (the script clicks them), 23 pending (not built yet).
+25 steps: 3 ready (the script clicks them), 22 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -43,7 +43,7 @@ Must be seen:
 ## 3. Turn the new Focus on with the Preview switch
 
 - Part: start
-- State: pending, waits for: Preview switch for the new Focus (ORCH-264)
+- State: ready, clicked by the script
 - Pictures: `fd-03-preview-on-1280.png`, `fd-03-preview-on-1920.png`, `fd-03-preview-on-390.png`
 
 Do:
@@ -53,7 +53,7 @@ Do:
 
 Must be seen:
 
-- Focus opens as the wall of sessions (step 4).
+- Focus opens as the new Focus, marked Preview (the wall of step 4 fills it).
 - The switch is marked Preview.
 - Turning it off again brings back today's Focus.
 

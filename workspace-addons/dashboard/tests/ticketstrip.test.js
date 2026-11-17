@@ -150,3 +150,17 @@ test('waitWords: a date with a reason, another ticket, the outside, nothing', ()
   assert.equal(w({kind:'external', ref:'the supplier'}), 'Waits: the supplier');
   assert.equal(w(null), '');
 });
+test('ORCH-255: Continue is on the ticket page in every state while no helper runs', () => {
+  const label = (patch, st) => { const cc = st ? ctx({state:st}) : ctx(); const strip = nodes(cc.detail({...base, ...patch})).find(n => /(^| )strip( |$)/.test(n.attrs.className || '')); return nodes(strip).filter(n => n.tag === 'button').map(text); };
+  assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Continue'), 'Needs you');
+  assert.ok(label({status:'review'}).includes('Continue'), 'Check');
+  assert.ok(label({status:'done'}).includes('Continue'), 'Done');
+  assert.ok(label({status:'active', sessions:[{id:'s'}]}).includes('Continue'), 'active, helper not running');
+  const todo = label({status:'open'});
+  assert.ok(todo.includes('Start helper') && !todo.includes('Continue'), 'To do keeps Start helper only');
+  assert.ok(!label({status:'active', sessions:[{id:'s'}]}, {runs:{t_one:{running:true}}}).includes('Continue'), 'no Continue while a helper runs');
+});
+test('ORCH-255: a passed wake time on Home has a Continue button, not a command', () => {
+  assert.deepEqual(helpers.needAction({kind:'overdue-wait', ticket:'t_one', tone:'warn'}), {label:'Continue', kind:'run'});
+  assert.equal(helpers.needAction({kind:'overdue-wait'}).label, 'Open');
+});
