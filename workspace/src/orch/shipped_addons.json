@@ -218,6 +218,29 @@
   "ticket_view": [],
   "version": "0.1.0"
  },
+ "pull-requests": {
+  "acts": {},
+  "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
+  "background": false,
+  "description": "Merge queue: pull requests wait in line and are merged in groups after one run of the checks.",
+  "gitignore": [
+   ".orch/addons/pull-requests/"
+  ],
+  "name": "pull-requests",
+  "needs": false,
+  "orch_api": 1,
+  "recommended": false,
+  "requires": [],
+  "run": "orch_pull_requests",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-pull-requests",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "sync": {
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
