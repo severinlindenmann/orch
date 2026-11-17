@@ -3,7 +3,7 @@
 A recipe says which command to run and how to read its answer:
   - a helper tool (built-in adapter with a `login` part, agents/login.json): the tool's own status
     command, which prints one JSON object. orch keeps exactly two facts from it: works or not, and the
-    end time (re-written as a UTC time); without `logged_in` the exit code alone answers (Codex). The
+    end time (re-written as a UTC time); without `logged_in` the exit code alone answers. The
     helpers it stops are the live runs on that tool.
   - a known tool (known_checks.json: GitHub, Databricks, ...): the same entry as a workspace recipe, used
     only when the tool is installed and set up on this computer.
