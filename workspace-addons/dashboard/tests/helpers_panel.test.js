@@ -77,9 +77,9 @@ test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row but
   const UI = kit();
   let pressed = '';
   const box = UI.helperList([{key:'ORCH-32', title:'Make the suite pass', href:'#t', state:'idle', word:'Idle', detail:'Nothing running for 18 min',
-    actions:[{label:'Nudge', key:'k-nudge', run:() => { pressed = 'nudge'; }}]}], {dataKey:'helpers'});
+    actions:[{label:'Remind', key:'k-nudge', run:() => { pressed = 'nudge'; }}]}], {dataKey:'helpers'});
   const words = texts(box).join(' | ');
-  assert.match(words, /Helpers \| 1 idle \| ORCH-32 \| Make the suite pass \| Nothing running for 18 min \| Idle \| Nudge/);
+  assert.match(words, /Helpers \| 1 idle \| ORCH-32 \| Make the suite pass \| Nothing running for 18 min \| Idle \| Remind/);
   const row = box.children[1], button = row.children[1].children[1];
   assert.equal(row.dataset.state, 'idle'); assert.equal(button.dataset.key, 'k-nudge');
   button.onclick(); assert.equal(pressed, 'nudge');
@@ -87,7 +87,7 @@ test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row but
   assert.match(UI.helperPill('stuck', 'Stuck').className, /pill helper-pill failed/);
 });
 
-test('Home: the Helpers side card replaces Working now, with Nudge on idle rows and Stop on finished idle ones', () => {
+test('Home: the Helpers side card replaces Working now, with Remind on idle rows and Stop on finished idle ones', () => {
   const items = [
     {id:'w', key:'ORCH-56', title:'Fix flaky test', status:'active', checklist:[{state:'doing'}]},
     {id:'i', key:'ORCH-32', title:'Windows suite', status:'active'},
@@ -109,7 +109,7 @@ test('Home: the Helpers side card replaces Working now, with Nudge on idle rows 
   assert.match(text, /"data-key":"helpers"/); assert.doesNotMatch(text, /Working now/);
   assert.deepEqual(seen.map(r => [r.key, r.word, r.meta, r.actions.map(a => a.label).join()]), [
     ['ORCH-56', 'Working', 'Step 1 of 1 · 10 min', ''],
-    ['ORCH-32', 'Idle', 'Nothing running for 8 min', 'Nudge'],
+    ['ORCH-32', 'Idle', 'Nothing running for 8 min', 'Remind'],
     ['ORCH-40', 'Idle', 'Finished · Nothing running for 3 min', 'Stop'],
   ]);
 });

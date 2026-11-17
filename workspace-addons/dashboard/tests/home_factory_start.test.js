@@ -17,7 +17,7 @@ const words = n => nodes(n).flatMap(x => x.children || []).filter(x => typeof x 
 const TEXT = "Start 'Services: see and manage background jobs'? ~10 h · target $4 · you're needed for ~15 min. " +
   "Goal: See the workspace's background jobs in the dashboard and start, stop or restart each with one click. " +
   "Done means: The owner has seen the mockup; The Services tab lists the five examples. I will pause at: mockup, ship. " +
-  "Steps: Mockup of the Services tab (designer); The add-on with its commands (builder). Who works on it: designer claude, builder claude. " +
+  "Tasks: Mockup of the Services tab (designer); The add-on with its commands (builder). Who works on it: designer claude, builder claude. " +
   "Time limit: 13 h active. What goes live: Merges into the develop line on green checks (undo: Turn the add-on off). (Proposal 1)";
 
 function ctx(question, extra = {}) {
@@ -49,10 +49,10 @@ test('the proposal text reads as title, goal and one line of time and cost', () 
 test('the Home card is a few lines and links to the whole proposal on the Factory page', () => {
   const c = ctx(factoryQ), row = c.needRow(c.row, 'n1'), text = words(row);
   assert.ok('data-factory-start' in row.attrs);
-  assert.match(text, /Factory proposal/);
+  assert.match(text, /Proposed project/);
   assert.match(text, /Start “Services: see and manage background jobs”\?/);
   assert.match(text, /Runs about 10 h · needs you for about 15 min/);
-  assert.doesNotMatch(text, /Done means|Crew|Steps|Ship/, 'never the whole proposal');
+  assert.doesNotMatch(text, /Done means|Crew|Tasks|Ship/, 'never the whole proposal');
   const link = nodes(row).find(n => n.tag === 'a' && n.children.includes('Read the whole proposal'));
   assert.equal(link.attrs.href, '#addon/factory/#/order/t_abc1234/proposal');
 });

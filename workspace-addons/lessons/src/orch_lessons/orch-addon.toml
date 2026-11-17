@@ -11,6 +11,6 @@ agents_block = "skills/orch-lessons/AGENTS-block.md"
 gitignore = [".orch/addons/lessons/"]
 
 [dashboard]
-label = "Lessons"
+label = "What helpers learned"
 icon = "book"
 place = "settings"

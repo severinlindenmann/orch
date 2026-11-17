@@ -43,7 +43,7 @@ test('an add-on has the same display name on or off (never the lower-case packag
 // ORCH-141: the Settings list says the menu name (Shared links, Contacts), the same as the sidebar
 test('the Settings list row uses the menu name that the sidebar shows', () => {
   const c = load(settingsCtx(), head);
-  assert.equal(c.rowLabel({name: 'publish', label: 'Shared links'}), 'Shared links');
+  assert.equal(c.rowLabel({name: 'publish', label: 'Shared with others'}), 'Shared with others');
   assert.equal(c.rowLabel({name: 'relay', label: 'Contacts'}), 'Contacts');
   assert.equal(c.rowLabel({name: 'relay', dashboard: {label: 'Contacts'}}), 'Contacts');
   assert.equal(c.rowLabel({name: 'sync'}), 'Sync');
@@ -137,7 +137,7 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
   const ctx = settingsCtx({
     addons: () => [], state: {look: null}, heading: (t) => el('h1', {}, t),
   });
-  vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+  vm.runInContext(head + '\n' + slice(ssrc, 'const moreOpen', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
   const removable = ctx.page({name: 'factory', active: false, description: 'd', removable: true});
   assert.equal(text(find(removable, byKey('addon-detail-remove'))), 'Uninstall');
   const core = ctx.page({name: 'relay', active: false, description: 'd', removable: false});
@@ -149,7 +149,7 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
 test('the live-session add-on page shows the Preview switch, off by default, only there', () => {
   const mk = (settings) => {
     const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
-    vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+    vm.runInContext(head + '\n' + slice(ssrc, 'const moreOpen', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
     return ctx;
   };
   const focus = {name: 'focus', label: 'Focus', page: {live_session: true}, active: true, description: 'd', removable: true};
@@ -162,6 +162,8 @@ test('the live-session add-on page shows the Preview switch, off by default, onl
   assert.equal(find(mk({focus_preview_on: false}).page({...focus, active: false}), byKey('addon-detail-live-preview')), null);
   assert.equal(find(mk({focus_preview_on: false}).page({name: 'sync', active: true, description: 'd'}), byKey('addon-detail-live-preview')), null);
   assert.equal(find(mk({}).page(focus), byKey('addon-detail-live-preview')), null, 'no setting in the state (an old server): no switch');
+  // ORCH-300 item 14: Preview is technical, so it sits in the "More settings" fold
+  assert.ok(find(find(mk({focus_preview_on: false}).page(focus), byKey('settings-more-addon-focus')), byKey('addon-detail-live-preview')));
 });
 
 // 19: the Update button keeps the version before, so the end says "Updated orch 23 → 24."
@@ -174,7 +176,7 @@ test('the Update button keeps the installed version for the finished banner', ()
 test('the Focus add-on page shows the typing switch with one plain line, only when Focus is on', () => {
   const mk = (settings) => {
     const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
-    vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+    vm.runInContext(head + '\n' + slice(ssrc, 'const moreOpen', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
     return ctx;
   };
   const on = mk({typing_on: false}).page({name: 'focus', page: {live_session: true}, active: true, description: 'd', removable: true});

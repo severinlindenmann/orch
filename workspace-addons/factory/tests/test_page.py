@@ -692,7 +692,7 @@ def test_manifest_has_the_page():
     import orch_factory
 
     m = tomllib.loads((Path(orch_factory.__file__).parent / "orch-addon.toml").read_text())
-    assert m["page"] == {"path": "/", "label": "Open Factory"} and m["background"] is True
+    assert m["page"] == {"path": "/", "label": "Open Projects from ideas"} and m["background"] is True
 
 
 def test_threads_do_not_block_each_other(ws, run, srv):
@@ -742,7 +742,7 @@ def test_page_has_no_frame_header_and_an_idea_box_with_the_ask_switch(srv):
     assert b'id="navigation"' not in html and b"New idea in Chat" not in html
     assert b"/kit/widgets.css" in html
     js = get(srv, "/web/factory.js")[1].decode()
-    assert "Start with this idea" in js and "Ask me at every stop" in js
+    assert "Start with this idea" in js and "Ask me at every pause" in js
     assert "setting-row" in js and "'switch'" in js
     assert "Open Chat" not in js
 
@@ -1109,7 +1109,7 @@ def test_the_page_words_why_nothing_works():
     js = _page_js()
     assert "function waitWords(order)" in js
     assert "card(o.title, stages(o), ...waitNote(o), ...startingNote(o)" in js  # Factory home
-    assert "card('The line', stages(order), ...waitNote(order)" in js  # the order page
+    assert "card('The stages', stages(order), ...waitNote(order)" in js  # the order page
     assert "(waitWords(order) ? 'Waiting' : 'Running')" in js
     for words in (
         "Nothing moves on until you answer",

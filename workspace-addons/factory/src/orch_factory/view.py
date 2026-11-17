@@ -77,9 +77,9 @@ def view(root):
     blocks.append(
         {
             "type": "list",
-            "title": "Stops waiting for you",
+            "title": "Pauses waiting for you",
             "items": [
-                {"title": plain(t["title"]), "link": t["order"], "subtitle": "stop at " + plain(stage)}
+                {"title": plain(t["title"]), "link": t["order"], "subtitle": "pause at " + plain(stage)}
                 for t, stage in stops[:50]
             ],
             "more": max(0, len(stops) - 50),
@@ -91,7 +91,7 @@ def view(root):
                 "type": "list",
                 "title": "Factory page",
                 "items": [
-                    {"title": "Open Factory", "subtitle": "Orders, stops and autopilot", "link": "addon:"}
+                    {"title": "Open Factory", "subtitle": "Orders, pauses and autopilot", "link": "addon:"}
                 ],
             }
         )

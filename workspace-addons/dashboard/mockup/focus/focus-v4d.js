@@ -471,13 +471,13 @@
     if (full) return h + popHTML(mode) + '<span class="meta mw-hint">Esc to leave</span>' + btn('btn icon sm ghost', 'full', I.exit, { 'aria-label': 'Leave full screen' }) + '</div>';
     h += btn('btn sm ghost', 'menu', I.plus + (tiny ? '' : '<span>New</span>'), { 'data-m': 'new', 'aria-expanded': String(st.menu === 'new'), 'aria-label': tiny ? 'New' : null, title: 'New session without a ticket' });
     if (zoomed()) return h + popHTML(mode) + '</div>';
-    if (mode === 'bar') h += btn('btn sm ghost', 'mode', I.up + (tiny ? '' : '<span>Open</span>'), { 'data-m': phone() ? 'bottom' : st.last, 'aria-label': tiny ? 'Open' : null, title: 'Open Focus where it was last' }) + btn('btn icon sm ghost mw-pos', 'menu', I[st.last === 'right' ? 'right' : 'bottom'], { 'data-m': 'pos', 'aria-expanded': String(st.menu === 'pos'), 'aria-label': 'Place' , title: 'Where Focus sits' });
+    if (mode === 'bar') h += btn('btn sm ghost', 'mode', I.up + (tiny ? '' : '<span>Open</span>'), { 'data-m': phone() ? 'bottom' : st.last, 'aria-label': tiny ? 'Open' : null, title: 'Open Watch work live where it was last' }) + btn('btn icon sm ghost mw-pos', 'menu', I[st.last === 'right' ? 'right' : 'bottom'], { 'data-m': 'pos', 'aria-expanded': String(st.menu === 'pos'), 'aria-label': 'Place' , title: 'Where Focus sits' });
     else { var pl = mode === 'right' ? 'Right' : 'Bottom'; h += btn('btn sm ghost mw-pos', 'menu', I[mode === 'right' ? 'right' : 'bottom'] + (tiny ? '' : '<span>' + pl + '</span>') + I.up, { 'data-m': 'pos', 'aria-expanded': String(st.menu === 'pos'), 'aria-label': tiny ? pl : null, title: 'Where Focus sits' }); }
     return h + popHTML(mode) + '</div>';
   }
   function layerHTML() {
     var mode = eff(), w = S.filter(function (x) { return x.s === 'wait'; }).length;
-    if (mode === 'side') return btn('mw-edge', 'mode', '<span class="mw-edget">Focus</span>' + (w ? '<span class="mw-cnt" data-s="wait"><span aria-hidden="true">◆</span> ' + w + '</span>' : ''), { 'data-m': st.last, 'aria-label': 'Open Focus again. ' + (w ? w + ' waiting for you' : 'Nothing is waiting') });
+    if (mode === 'side') return btn('mw-edge', 'mode', '<span class="mw-edget">Focus</span>' + (w ? '<span class="mw-cnt" data-s="wait"><span aria-hidden="true">◆</span> ' + w + '</span>' : ''), { 'data-m': st.last, 'aria-label': 'Open Watch work live again. ' + (w ? w + ' waiting for you' : 'Nothing is waiting') });
     var panel = '', full = mode === 'full', n = st.panes.length;
     if (mode !== 'bar') panel = '<div class="mw-panel" data-mode="' + mode + '" data-n="' + n + '">' + st.panes.map(function (k, i) {
       var s = by(k), on = i === st.act, narrow = n > 1 && (mode === 'right' || phone() || (window.innerWidth - 240) / n < 480);

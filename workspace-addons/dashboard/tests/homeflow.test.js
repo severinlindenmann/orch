@@ -74,12 +74,12 @@ test('an answered question leaves at once, the count drops, the answer goes afte
   assert.equal(c.acts[0][1].answer, 'Blue');
 });
 
-test('G2: a quiet Working ticket is one "No news since" row on Home, never a need', () => {
+test('G2: a quiet Working ticket is one "Quiet since" row on Home, never a need', () => {
   const at = new Date(2026, 10, 15, 9, 20), t = {id:'q', title:'Order cups', status:'active', quiet_since:at.toISOString()};
   const c = ctx({now:() => new Date(2026, 10, 15, 20, 0), tickets:() => [t], ticketOf:() => t});
-  assert.match(text(c.quietRow(t)), /^No news since 09:20: Order cups$/);
+  assert.match(text(c.quietRow(t)), /^Quiet since 09:20: Order cups$/);
   const home = read('pages/home.js');
   assert.match(home, /card\('quiet-now'/);
   assert.ok(!/quiet/.test(home.slice(home.indexOf('function needsToday'), home.indexOf('function needsYouTotal'))), 'not counted as needing you');
-  for (const f of ['pages/tickets.js', 'pages/ticket.js']) assert.match(read(f), /quietWords\(t\.quiet_since/, f + ' shows No news since');
+  for (const f of ['pages/tickets.js', 'pages/ticket.js']) assert.match(read(f), /quietWords\(t\.quiet_since/, f + ' shows Quiet since');
 });

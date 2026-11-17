@@ -1,5 +1,5 @@
 'use strict';
-// Owner decision 16 Nov (fwd-home): "Clear old" dismisses the questions older than a week in one click, with Undo.
+// Owner decision 16 Nov (fwd-home): "Hide old questions" (was Clear old) dismisses the questions older than a week in one click, with Undo.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -35,6 +35,8 @@ test('the button shows only with at least one question older than a week, never 
   assert.equal(c.clearOldButton(), null);
   const b = make(rows()).clearOldButton();
   assert.match(b.attrs['aria-label'], /Dismiss the 2 questions older than a week/);
+  const src = read("pages/home.js");
+  assert.ok(src.includes("'Hide old questions'") && !src.includes("'Clear old'"), "the button says Hide old questions");
 });
 test('click hides the old rows with an Undo toast; Undo sends nothing', async () => {
   const c = make(rows());

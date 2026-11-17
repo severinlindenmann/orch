@@ -226,7 +226,7 @@ async function startLinkAdd(control) {
       return;
     }
     const input = el('input', 'input'); input.maxLength = 2000;
-    input.placeholder = label === 'Ticket' ? 'Search tickets by key or title' : label === 'File' ? 'Project-relative path' : 'https://…';
+    input.placeholder = label === 'Ticket' ? 'Search tickets by number or title' : label === 'File' ? 'Project-relative path' : 'https://…';
     input.setAttribute('aria-label', label);
     const bar = el('div', 'ref-bar'); bar.append(input); body.append(bar);
     if (label === 'Ticket') {
@@ -1340,8 +1340,8 @@ function ticketParts(t, children) {
   // No steps yet: only the add button, so a top-level ticket can get its first step (a step itself gets none).
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
   // ORCH-37: in a release, an epic's row says how far its own tickets are ("Epic · 2 of 4 done").
-  const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, 'Epic · ' + kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' done'); };
-  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' parts done'); };
+  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Parts of this ticket' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
@@ -1800,7 +1800,7 @@ function detail(t) {
     addonRows(t), ticketLinks(t),
     answered.length ? h('section', {className:'card answered', 'data-key':'answered'}, h('h2', {}, 'Earlier answers'), answered) : null];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
-    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + partName(parent)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of ' : 'Sub-ticket of ') + partName(parent)) : null,
     ticketStrip(t, run, fresh, planQ, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))), selected),
@@ -1836,7 +1836,7 @@ function partOfField(t, parent) {
   const was = parent ? parent.id : '';
   const select = h('select', {'aria-label':'Part of', 'data-key':'part-of-' + t.id},
     h('option', {value:''}, 'Not part of another ticket'),
-    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.release ? ' (release)' : p.epic ? ' (epic)' : ''))));
+    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.release ? ' (release)' : p.epic ? ' (has parts)' : ''))));
   select.value = was;
   select.onchange = async () => {
     const result = await act('ticket.edit', {ticket:t.id, parent:select.value || null, if_revision:(ticketOf(t.id) || t).revision});
@@ -1848,8 +1848,8 @@ function partOfField(t, parent) {
 // One switch marks this ticket as a release or takes the mark off; its tickets stay where they are.
 function releaseField(t) {
   const on = !!t.release;
-  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, its tickets ship together' : 'No');
-  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'This ticket is a release', title:on ? 'Its tickets ship together' : 'Mark it as a release', 'data-key':'release-' + t.id});
+  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, its tickets go live together' : 'No');
+  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'This ticket is a release', title:on ? 'Its tickets go live together' : 'Mark it as a release', 'data-key':'release-' + t.id});
   sw.onclick = async () => {
     if (sw.disabled) return;
     sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
@@ -1863,17 +1863,20 @@ function modelField(t) {
   const m = modelChoice(t);
   const said = m ? MODEL_NAMES[m.name] + (m.auto ? ' (picked by orch' + (m.why ? ': ' + m.why : '') + ')' : '') : 'orch picks it when work starts';
   if (snapshot) return el('span', 'ed-ro', said);
-  const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id, title:said},
-    h('option', {value:'auto'}, m && m.auto ? 'Let orch decide (' + MODEL_NAMES[m.name] + ')' : 'Let orch decide'),
-    h('option', {value:'haiku'}, 'Fastest (Haiku)'), h('option', {value:'sonnet'}, 'Faster (Sonnet)'),
-    h('option', {value:'opus'}, 'Stronger (Opus)'),
-    h('option', {value:'fable'}, 'Drafts to pick from (Fable)'));
+  // Plain choices; the model names sit behind "More" (ORCH-300, owner's word list item 31).
+  const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id},
+    h('option', {value:'auto'}, 'Let orch decide'),
+    h('option', {value:'haiku'}, 'Fastest'), h('option', {value:'sonnet'}, 'Faster'),
+    h('option', {value:'opus'}, 'Stronger'),
+    h('option', {value:'fable'}, 'Drafts to pick from'));
   select.value = m && !m.auto ? m.name : 'auto';
   select.onchange = async () => {
     const result = await act('ticket.model', {ticket:t.id, model:select.value});
     if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = m && !m.auto ? m.name : 'auto'; }
   };
-  return select;
+  const more = h('details', {className:'disclosure', 'data-key':'model-more-' + t.id}, h('summary', {}, 'More'),
+    el('p', 'meta', 'Model: ' + said + '. Fastest is Haiku, Faster is Sonnet, Stronger is Opus, Drafts to pick from is Fable.'));
+  return h('div', {className:'stack'}, select, more);
 }
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);

@@ -13,10 +13,10 @@ runs_agents = true                         # it starts the manager run (orch run
 
 [page]
 path = "/"
-label = "Open Factory"
+label = "Open Projects from ideas"
 
 [dashboard]
-label = "Factory"
+label = "Projects from ideas"
 icon = "hammer"
 order = 15
 

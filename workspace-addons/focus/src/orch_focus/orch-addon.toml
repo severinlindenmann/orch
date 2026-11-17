@@ -14,13 +14,13 @@ ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/ad
 needs = true                                # orch focus needs --json
 
 [dashboard]
-label = "Focus"
+label = "Watch work live"
 icon = "target"
 order = 20
 
 [page]
 path = "/"
-label = "Open Focus"
+label = "Open Watch work live"
 live_session = true
 
 [[ticket_view]]

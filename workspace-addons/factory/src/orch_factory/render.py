@@ -52,7 +52,7 @@ def start_text(p, n):
         "Goal: " + clean(p["goal"]),
         "Done means: " + lines(p["done_means"]),
         "I will pause at: " + ", ".join(clean(x["stage"], 40) for x in p["line"] if x["stop"]),
-        "Steps: "
+        "Tasks: "
         + "; ".join(f"{clean(t['title'])} ({clean(t['role'], 24)})" for t in p["tasks"][:MAX_TASKS]),
         "Who works on it: " + ", ".join(f"{clean(x['role'], 40)} {clean(x['agent'], 40)}" for x in p["crew"]),
         f"Time limit: {minutes(p['budget']['active_min_cap'])} active",

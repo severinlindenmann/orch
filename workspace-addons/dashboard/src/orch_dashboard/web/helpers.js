@@ -83,12 +83,12 @@
     const words = gap !== 0 && Math.abs(gap) < 7 ? DUE_DAYS[at.getDay()] + ' ' + at.getDate() + ' ' + DUE_MONTHS[at.getMonth()] + ', ' + dueClock(at) : whenWords(at, now);
     return (at < now && status !== 'done' && status !== 'dropped' ? 'Late since ' : 'Due ') + words;
   }
-  /* G2: "No news since 09:20" for a Working ticket quiet for 6 h. `since` is `quiet_since` (UTC ISO, computed once by
+  /* G2: "Quiet since 09:20" for a Working ticket quiet for 6 h. `since` is `quiet_since` (UTC ISO, computed once by
      orch.tickets.quiet_since); shown in local time. '' when the ticket is not quiet. The same words as
      orch.tickets.quiet_label (the CLI). */
   function quietWords(since, now) {
     const at = since ? new Date(since) : null;
-    return at && !isNaN(at) ? 'No news since ' + whenWords(at, now || new Date()) : '';
+    return at && !isNaN(at) ? 'Quiet since ' + whenWords(at, now || new Date()) : '';
   }
   /* Past its day (day-only) or its time (with a time), on a ticket that is not closed. */
   function dueLate(due, status, now) {
@@ -796,7 +796,7 @@
     }
     if (why === 'quiet') {
       const at = Date.parse(t.quiet_since || '');
-      return Number.isFinite(at) ? 'No news for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'No news for a day';
+      return Number.isFinite(at) ? 'Quiet for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'Quiet for a day';
     }
     if (why === 'overdue') return 'Past its due date';
     return '';

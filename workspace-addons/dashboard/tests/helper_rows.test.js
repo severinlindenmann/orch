@@ -1,5 +1,5 @@
 // Home › Needs you: work that stopped short (ORCH-26). A pull request left open after its checks passed (Merge /
-// Start helper) and a helper idle at its prompt (Nudge / Start fresh): two buttons, each one click.
+// Start helper) and a helper idle at its prompt (Remind / Start fresh): two buttons, each one click.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -69,19 +69,19 @@ test('pull request left open: Start helper tells the helper what is left, then s
   assert.deepEqual(toasts, [['Helper started', 'ok']]);
 });
 
-test('pull request left open with a helper idle on it: the second button is Nudge and starts nothing', async () => {
+test('pull request left open with a helper idle on it: the second button is Remind and starts nothing', async () => {
   const {c, calls} = context({runs:{[TID]:{running:true}}});
   const row = c.needRow({...UNMERGED, helper:'idle'}, null);
-  assert.deepEqual(buttons(row).map(text), ['Merge', 'Nudge']);
+  assert.deepEqual(buttons(row).map(text), ['Merge', 'Remind']);
   await click(buttons(row)[1]);
   assert.deepEqual(calls.map(x => x[0]), ['run.send']);
 });
 
-test('idle helper: Nudge sends one fixed message, Start fresh stops it and starts a new one', async () => {
+test('idle helper: Remind sends one fixed message, Start fresh stops it and starts a new one', async () => {
   const {c, calls, toasts} = context({runs:{[TID]:{running:true}}});
   const row = c.needRow(IDLE, null);
   assert.match(text(row), /idle for 14 min with nothing running/);
-  assert.deepEqual(buttons(row).map(text), ['Nudge', 'Start fresh']);
+  assert.deepEqual(buttons(row).map(text), ['Remind', 'Start fresh']);
   await click(buttons(row)[0]);
   assert.deepEqual(calls.map(x => x[0]), ['run.send']);
   assert.match(calls[0][1].text, /idle for a while/);

@@ -31,14 +31,14 @@
 </header>
 <div id="view-region" aria-busy="true">
 <div id="main-view" class="area-body">
-<section id="checkup" class="stack" aria-label="Check-up" hidden><p id="checkup-note" class="note" role="status" hidden></p></section>
+<section id="checkup" class="stack" aria-label="Health check" hidden><p id="checkup-note" class="note" role="status" hidden></p></section>
 <p id="lost-note" class="banner attn" role="status" hidden></p>
 <section id="team" class="stack" aria-label="Time and cost" hidden><div class="stat-row" id="team-stats"></div>
 <section class="card chart-card" id="people" hidden><div class="section-head roomy"><h2>By person</h2><span class="meta">Last 30 days</span></div>
 <div class="table-wrap"><table class="data-table"><caption class="sr-only">Tickets, helper time and cost by person</caption><thead><tr><th scope="col">Person</th><th scope="col" class="numeric">Finished</th><th scope="col" class="numeric">Open</th><th scope="col" class="numeric">Helper time</th><th scope="col" class="numeric">Cost</th></tr></thead><tbody id="people-rows"></tbody></table></div></section></section>
 <div id="loading" class="area-body loading-mask" inert aria-hidden="true">
 <div class="metric-grid"><article class="card metric"><p class="meta">Times helpers worked</p><strong>00</strong><small>Loading data</small></article><article class="card metric"><p class="meta">Connected services</p><strong>00</strong><small>Loading data</small></article></div>
-<div class="analysis-grid"><section class="card chart-card"><div class="section-head roomy"><h2>Work over time</h2><span class="meta">Last 30 days</span></div><div class="chart-stage"></div></section><section class="card chart-card"><div class="section-head roomy"><h2>Skill use</h2></div><p class="muted">Loading the skills your helpers used.</p><div class="bar-row"><span>Loading</span><div class="progress"><span></span></div></div></section></div>
+<div class="analysis-grid"><section class="card chart-card"><div class="section-head roomy"><h2>Work over time</h2><span class="meta">Last 30 days</span></div><div class="chart-stage"></div></section><section class="card chart-card"><div class="section-head roomy"><h2>Skills your helpers used</h2></div><p class="muted">Loading the skills your helpers used.</p><div class="bar-row"><span>Loading</span><div class="progress"><span></span></div></div></section></div>
 <section><div class="table-wrap"><table class="data-table"><tbody><tr><td>Loading the list of skills</td><td>Loading</td><td>Loading</td><td>0</td><td>Loading</td></tr><tr><td>Loading the list of skills</td><td>Loading</td><td>Loading</td><td>0</td><td>Loading</td></tr></tbody></table></div></section>
 </div>
 <div id="message" role="status" hidden></div>
@@ -46,12 +46,13 @@
 <section id="needs" class="needs" aria-label="Needs a look" hidden></section>
 <div class="metric-grid" id="metrics"></div>
 <div class="analysis-grid"><section class="card chart-card"><div class="section-head roomy"><h2>Work over time</h2><span class="meta" id="period">Last 30 days</span></div>
-<div class="chart-stage" role="img" id="trend" aria-label="Daily run trend unavailable."><div class="chart-message"><h3>Daily history isn’t available yet</h3><p class="muted" id="trend-text"></p><button id="trend-settings" class="btn ghost sm" type="button">Review recording settings →</button></div></div>
+<div class="chart-stage" role="img" id="trend" aria-label="Daily trend unavailable."><div class="chart-message"><h3>Daily history isn’t available yet</h3><p class="muted" id="trend-text"></p><button id="trend-settings" class="btn ghost sm" type="button">Review recording settings →</button></div></div>
 <div class="axis"><span id="axis-start">30 days ago</span><span>Today</span></div></section>
-<section class="card chart-card" id="skill-chart"><div class="section-head roomy"><h2>Skill use</h2><span class="meta">Last 30 days</span></div><p class="muted" id="skill-text"></p><div id="bars"></div></section></div>
-<section id="models" class="card chart-card" aria-label="Model" hidden><div class="section-head roomy"><h2>Model</h2><span class="meta" id="models-note">Last 30 days</span></div>
-<p class="muted" id="models-text"></p><div id="models-bars"></div>
-<div class="stack space-top" id="models-rows" role="list" aria-label="Tickets with the most tokens"></div></section>
+<section class="card chart-card" id="skill-chart"><div class="section-head roomy"><h2>Skills your helpers used</h2><span class="meta">Last 30 days</span></div><p class="muted" id="skill-text"></p><div id="bars"></div></section></div>
+<section id="models" class="card chart-card" aria-label="Helper strength" hidden><div class="section-head roomy"><h2>Helper strength</h2><span class="meta" id="models-note">Last 30 days</span></div>
+<p class="muted" id="models-text"></p>
+<details class="disclosure" id="models-more"><summary>More</summary><div id="models-bars"></div>
+<div class="stack space-top" id="models-rows" role="list" aria-label="Tickets with the most tokens"></div></details></section>
 <section id="breakdown"><div class="section-head roomy"><div id="tabs" role="tablist" aria-label="Usage breakdown"></div></div>
 <p class="meta" id="tab-help"></p>
 <div id="panel" class="table-wrap" role="tabpanel" tabindex="0"><table class="data-table"><caption class="sr-only" id="table-caption"></caption><thead id="thead"></thead><tbody id="rows"></tbody></table></div>
@@ -67,7 +68,7 @@
 </div>
 <dialog id="confirm" class="dialog" aria-labelledby="confirm-text">
 <p id="confirm-title" class="name"></p>
-<p id="confirm-text">Delete the full detail of this ticket's runs? The counts stay. This cannot be undone.</p>
+<p id="confirm-text">Delete the full detail of the work done on this ticket? The counts stay. This cannot be undone.</p>
 <div class="confirm-buttons"><button id="confirm-cancel" class="btn ghost" type="button">Cancel</button>
 <button id="confirm-delete" type="button" class="btn primary">Delete</button></div>
 </dialog>
