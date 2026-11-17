@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 
 from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
@@ -215,11 +216,8 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
                 "e.g. --open https://github.com/owner/repo/pull/12."
             )
         head = args.merge_head = ghmerge.head_of(args.open)  # the click merges exactly this commit
-        card["preview"] = {
-            "type": "doc",
-            "heading": "Pull request",
-            "paras": [args.open, f"Commit {head[:7]}"],
-        }
+        if not args.file:  # what the person decides on, not the address (that is the Open link)
+            card["preview"] = merge_preview(root, args.open, head, ghmerge.summary(args.open))
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
         card.setdefault(
             "why",
@@ -235,6 +233,43 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     if args.suggest is not None and kind != "choice" and args.suggest not in SUGGEST_VERDICTS:
         raise Refused("On this card --suggest is ok (approve) or no (don't do).")
     return card, options, args.suggest, title
+
+
+def _pr_tickets(root: Path, repo_url: str) -> dict[int, str]:
+    """{pull request number: "ORCH-12 Ticket title"} for this repository's pull requests the tickets link."""
+    out: dict[int, str] = {}
+    for t in tickets.list_all(root):
+        name = " ".join(x for x in (t.get("key"), t.get("title")) if isinstance(x, str) and x.strip())
+        for r in t.get("refs") or []:
+            url = r.get("url") if isinstance(r, dict) else None
+            if isinstance(url, str) and url.startswith(repo_url + "/pull/") and name:
+                tail = url[len(repo_url) + 6 :]
+                if tail.isdigit():
+                    out.setdefault(int(tail), name)
+    return out
+
+
+def merge_preview(root: Path, url: str, head: str, info: dict | None) -> dict:
+    """A merge card's box (ORCH-183, owner 17 Nov): what goes out, one line each (the ticket when one links
+    the pull request, else its title), the checks in plain words and the exact commit. The address itself is
+    the card's Open link, not its content. Without GitHub's answer only the commit."""
+    when = datetime.now().strftime("%H:%M")
+    if not info:
+        return {"type": "doc", "heading": "Pull request", "paras": [f"Merges commit {head[:7]} exactly."]}
+    repo = url.rsplit("/pull/", 1)[0]
+    names = _pr_tickets(root, repo)
+    steps = [f"{names.get(i['pr']) or i['title'] or 'Pull request'} (#{i['pr']})" for i in info["items"]]
+    if info.get("more"):
+        steps.append(f"and {info['more']} more")
+    base = info.get("base") or "the main branch"
+    pv = {
+        "type": "doc",
+        "heading": (f"What goes to {base}" if steps else info.get("title") or "Pull request")[:200],
+        "paras": [f"Checks at {when}: {info['checks']}.", f"Merges commit {head[:7]} exactly."],
+    }
+    if steps:
+        pv["steps"] = steps
+    return pv
 
 
 def has_card_flags(args) -> bool:

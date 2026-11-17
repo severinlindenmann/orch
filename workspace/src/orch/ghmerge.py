@@ -154,6 +154,71 @@ def checks(url: str) -> dict | None:
     return {"state": data["state"], "head": head, "green": green}
 
 
+MERGE_COMMIT = re.compile(r"Merge pull request #([0-9]{1,9}) from ")
+MAX_ITEMS = 40
+
+
+def checks_words(rollup) -> str:
+    """The checks of a pull request in plain words (ORCH-183): "all 18 passed", "3 of 18 still running",
+    "1 failed: gate". The newest run of each check counts, as in passed()."""
+    if not isinstance(rollup, list) or not rollup:
+        return "no checks ran"
+    runs = [c for c in _newest(rollup) if isinstance(c, dict)]
+    failed, running = [], 0
+    for c in runs:
+        if "state" in c and "status" not in c:
+            word = c.get("state")
+            if word == "PENDING":
+                running += 1
+                continue
+        elif c.get("status") != "COMPLETED":
+            running += 1
+            continue
+        else:
+            word = c.get("conclusion")
+        if word not in PASSED:
+            failed.append(str(c.get("name") or c.get("context") or "a check")[:60])
+    if failed:
+        return f"{len(failed)} failed: " + ", ".join(failed[:3]) + (" …" if len(failed) > 3 else "")
+    if running:
+        return f"{running} of {len(runs)} still running"
+    return f"all {len(runs)} passed"
+
+
+def summary(url: str) -> dict | None:
+    """What a merge card shows (ORCH-183, owner 17 Nov: "the address is a link, not the content"), read
+    once when the card is made, with whatever login this process has: {"title", "base", "checks" (plain
+    words), "items": [{"pr": n, "title"}]} where items are the pull requests this one brings in (merge commits
+    of a release). None when GitHub cannot be read: the card then shows what it showed before."""
+    gh = shutil.which("gh")
+    if gh is None or not is_pr_url(url):
+        return None
+    try:
+        v = _gh_plain(gh, ["pr", "view", url, "--json", "title,baseRefName,commits,statusCheckRollup"], 20)
+        data = json.loads(v.stdout) if v.returncode == 0 else None
+    except (Refused, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    items, seen = [], set()
+    for c in data.get("commits") or []:
+        if not isinstance(c, dict):
+            continue
+        m = MERGE_COMMIT.match(str(c.get("messageHeadline") or ""))
+        if not m or m[1] in seen:
+            continue
+        seen.add(m[1])
+        title = next((x.strip() for x in str(c.get("messageBody") or "").splitlines() if x.strip()), "")
+        items.append({"pr": int(m[1]), "title": title[:200]})
+    return {
+        "title": str(data.get("title") or "")[:200],
+        "base": str(data.get("baseRefName") or "")[:100],
+        "checks": checks_words(data.get("statusCheckRollup")),
+        "items": items[:MAX_ITEMS],
+        "more": max(0, len(items) - MAX_ITEMS),
+    }
+
+
 RELEASE_PREFIX = "release/"
 RELEASE_FROM = "develop"  # a release only carries what is on this branch already (reviewed there)
 

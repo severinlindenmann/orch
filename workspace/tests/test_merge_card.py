@@ -22,6 +22,9 @@ class FakeGh:
         self.calls, self.envs, self.review, self.head = [], [], "", HEAD
         self.state, self.merge_rc, self.merge_err = state, merge_rc, merge_err
         self.login, self.user_rc = login, user_rc
+        self.summary = (
+            None  # what `gh pr view --json title,...` answers when the card is made (None: refused)
+        )
 
     def __call__(self, argv, env=None, **kw):
         args = argv[1:]
@@ -30,6 +33,10 @@ class FakeGh:
         self.envs.append({k: env[k] for k in ghmerge.TOKEN_VARS if k in env})
         if args[:2] == ["api", "user"]:
             return subprocess.CompletedProcess(argv, self.user_rc, self.login + "\n", "")
+        if args[:2] == ["pr", "view"] and "title,baseRefName,commits,statusCheckRollup" in args:
+            if self.summary is None:
+                return subprocess.CompletedProcess(argv, 1, "", "not found")
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.summary), "")
         if args[:2] == ["pr", "view"]:
             return subprocess.CompletedProcess(argv, 0, f"{self.state}\t{self.review}\t{self.head}\n", "")
         if args[:3] == ["api", "-X", "POST"]:
@@ -267,7 +274,58 @@ def test_card_shows_and_pins_the_newest_commit(tk, run, gh):
     assert _ask(run, tid)[0] == 0
     q = _q(root, tid)
     assert q["action"] == {"merge": PR, "head": HEAD}
-    assert q["card"]["preview"]["paras"] == [PR, f"Commit {HEAD[:7]}"]
+    assert q["card"]["preview"]["paras"] == [f"Merges commit {HEAD[:7]} exactly."]
+    assert PR not in json.dumps(q["card"]["preview"]), "the address is the Open link, not the content"
+    assert q["card"]["open"] == PR
+
+
+def test_a_release_card_shows_what_goes_out_and_the_checks(tk, run, gh):
+    """ORCH-183, owner 17 Nov: a Merge card shows what the person decides on, not the address."""
+    root, tid = tk
+    code, out, _ = run("ticket", "new", "Review on desktop", "--json", "--by", "agent:x")
+    other = json.loads(out)["id"]
+    assert run("ref", "add", other, "https://github.com/acme/app/pull/7", "--by", "agent:x")[0] == 0
+    ok = {
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "workflowName": "ci",
+        "name": "gate",
+        "startedAt": "1",
+    }
+    gh.summary = {
+        "title": "Release 32",
+        "baseRefName": "main",
+        "commits": [
+            {"messageHeadline": "Merge pull request #7 from acme/feat/x", "messageBody": "Bigger pictures"},
+            {"messageHeadline": "Fix a typo", "messageBody": ""},
+            {
+                "messageHeadline": "Merge pull request #9 from acme/fix/y",
+                "messageBody": "Send back asks for words\n\nmore",
+            },
+        ],
+        "statusCheckRollup": [ok, {**ok, "name": "lint"}],
+    }
+    assert _ask(run, tid)[0] == 0
+    pv = _q(root, tid)["card"]["preview"]
+    assert pv["heading"] == "What goes to main"
+    assert pv["steps"] == [
+        f"{tickets.load(root, other)['key']} Review on desktop (#7)",
+        "Send back asks for words (#9)",
+    ]
+    assert pv["paras"][0].startswith("Checks at ") and pv["paras"][0].endswith(": all 2 passed.")
+    assert pv["paras"][1] == f"Merges commit {HEAD[:7]} exactly."
+    review.check_wire_card(review.wire_card(_q(root, tid)["card"], {}), 0)  # still a valid phone card
+
+
+def test_checks_in_plain_words():
+    run_ = {"status": "COMPLETED", "conclusion": "SUCCESS", "workflowName": "ci", "startedAt": "1"}
+    assert ghmerge.checks_words([]) == "no checks ran"
+    assert ghmerge.checks_words([{**run_, "name": "a"}, {**run_, "name": "b"}]) == "all 2 passed"
+    assert (
+        ghmerge.checks_words([{**run_, "name": "a"}, {"status": "IN_PROGRESS", "name": "b"}])
+        == "1 of 2 still running"
+    )
+    assert ghmerge.checks_words([{**run_, "name": "a", "conclusion": "FAILURE"}]) == "1 failed: a"
 
 
 def test_a_push_after_the_card_is_never_merged(tk, run, gh):
