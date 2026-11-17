@@ -181,3 +181,6 @@ Final component validation: the requested `node base/scripts/qa-components.cjs 1
 
 ## Focus v2 draft (ORCH-251, 17 Nov)
 focus-v2.html: eight numbered features the owner can mark Keep / Maybe / Drop (open ticket in Focus, reopen or fresh session, chat or tmux terminal, sessions without a ticket, drawer right/bottom, true full screen, several tickets with status, visual results). Scenes: drawer right, bottom, full screen, sessions menu, closed. Draft only; nothing here is in the product yet.
+
+## Focus layer draft v3 (ORCH-251, 17 Nov, after the owner's answer)
+focus-layer.html replaces the idea of a drawer inside a page: one always-open layer over every dashboard page (right, bottom, full screen, or a thin status strip), a Focus start page, session tabs, Chat or Terminal, results shelf, side by side. Nine numbered features with "Uses" and "To build" lines taken from what orch has (tmux session per ticket, run signal, saved session id, live slot limit). A second model's critique (slots, closed idle sessions, no chat transcript, terminal risk, page-swap options) is in the feature text. focus-v2.html stays as the first draft.
