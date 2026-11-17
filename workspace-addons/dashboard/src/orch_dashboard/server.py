@@ -483,7 +483,7 @@ class Handler(BaseHTTPRequestHandler):
         px = PROXY.fullmatch(path)
         asked = {
             h.strip().lower()
-            for h in (self.headers.get("Access-Control-Request-Headers") or "").split(",")
+            for h in (self.headers.get("access-control-request-headers") or "").split(",")
             if h.strip()
         }
         try:
@@ -492,7 +492,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._refuse()
         if (
             self.headers.get("Origin") != "null"
-            or self.headers.get("Access-Control-Request-Method") not in ("GET", "POST")
+            or self.headers.get("access-control-request-method") not in ("GET", "POST")
             or "x-orch-frame" not in asked
             or not asked <= {"x-orch-frame", "content-type", "x-orch-op"}
             or not any_host_ok((self.headers.get("Host") or "").strip())
