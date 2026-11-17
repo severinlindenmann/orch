@@ -97,3 +97,13 @@ test('Needs you: the strip names the agent that asked (as Home does), not always
   assert.match(text(strip), /Manager asks: Build the new card look\?/);
   assert.doesNotMatch(text(strip), /Helper asks/);
 });
+test('ORCH-255: Continue is on the ticket page in every state while no helper runs', () => {
+  const label = (patch, st) => { const cc = st ? ctx({state:st}) : ctx(); const strip = nodes(cc.detail({...base, ...patch})).find(n => /(^| )strip( |$)/.test(n.attrs.className || '')); return nodes(strip).filter(n => n.tag === 'button').map(text); };
+  assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Continue'), 'Needs you');
+  assert.ok(label({status:'review'}).includes('Continue'), 'Check');
+  assert.ok(label({status:'done'}).includes('Continue'), 'Done');
+  assert.ok(label({status:'active', sessions:[{id:'s'}]}).includes('Continue'), 'active, helper not running');
+  const todo = label({status:'open'});
+  assert.ok(todo.includes('Start helper') && !todo.includes('Continue'), 'To do keeps Start helper only');
+  assert.ok(!label({status:'active', sessions:[{id:'s'}]}, {runs:{t_one:{running:true}}}).includes('Continue'), 'no Continue while a helper runs');
+});
