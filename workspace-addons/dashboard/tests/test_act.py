@@ -101,6 +101,10 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("ticket.edit", {"ticket": "t_abcdef"}),
         ("ticket.edit", {"ticket": "t_abcdef", "parent": "--title=x"}),
         ("ticket.edit", {"ticket": "t_abcdef", "parent": 7}),
+        ("ticket.order", {"lane": "To do", "tickets": ["t_abcdef"]}),
+        ("ticket.order", {"lane": "todo", "tickets": []}),
+        ("ticket.order", {"lane": "todo", "tickets": ["--json"]}),
+        ("ticket.order", {"lane": "todo", "tickets": "t_abcdef"}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"title": "x"}}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"id": "t_other1"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "weird"}, "if_revision": 1}),
@@ -201,6 +205,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         (
             {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": ""}},
             ["ticket", "edit", "t_abcdef", "--due=", *common],
+        ),
+        (  # ORCH-156: a lane put in order, first to last
+            {"op": "ticket.order", "args": {"lane": "todo", "tickets": ["t_bbbbbb", "t_abcdef"]}},
+            ["ticket", "order", "todo", *common, "--", "t_bbbbbb", "t_abcdef"],
         ),
         (  # ORCH-156: "Part of" puts the ticket under an epic; null takes it out
             {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "parent": "t_epic01", "if_revision": 4}},

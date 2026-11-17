@@ -418,6 +418,22 @@ def _ticket_edit(a):
     return ["ticket", "edit", _tid(a.get("ticket"))], flags, []
 
 
+LANE = re.compile(r"[a-z][a-z_]{0,23}")
+
+
+def _ticket_order(a):
+    """ORCH-156: the person put the tickets of one board lane in order (drag inside the lane): the whole lane,
+    first to last, so every card keeps its place."""
+    _only(a, ("lane", "tickets"))
+    lane = a.get("lane")
+    if not isinstance(lane, str) or not LANE.fullmatch(lane):
+        raise BadRequest("That is not a lane.")
+    ids = a.get("tickets")
+    if not isinstance(ids, list) or not ids or len(ids) > 500:
+        raise BadRequest("Name the tickets of the lane, first to last.")
+    return ["ticket", "order", lane], [], [_tid(t) for t in ids]
+
+
 MODELS = ("sonnet", "opus", "auto")
 
 
@@ -1015,6 +1031,7 @@ OPS = {
     "ticket.patch": _ticket_patch,
     "ticket.changes": _ticket_changes,
     "ticket.edit": _ticket_edit,
+    "ticket.order": _ticket_order,
     "ticket.model": _ticket_model,
     "log": _log,
     "chat.say": _chat_say,

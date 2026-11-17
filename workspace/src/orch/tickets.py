@@ -1602,6 +1602,32 @@ def set_parent(root: Path, tid: str, parent: str | None, by: str, if_revision: i
     return t
 
 
+LANE_RE = re.compile(r"^[a-z][a-z_]{0,23}$")
+MAX_ORDER = 500
+
+
+def set_lane_order(root: Path, lane: str, ids: list[str], by: str) -> list[dict]:
+    """ORCH-156: the order of the tickets inside one board lane (To do, Backlog ...), first to last. Each
+    listed ticket keeps {lane, n}; the board uses it only while the ticket is still in that lane, so a ticket
+    that moves on needs no clean-up. Only tickets whose place changed are written (no history line: the order
+    is how the board shows them, not news about the work). Returns the tickets that changed."""
+    if not isinstance(lane, str) or not LANE_RE.match(lane):
+        raise Refused("A lane is a short name such as todo or backlog.")
+    if not ids:
+        raise Refused("Name the tickets of the lane, first to last.")
+    if len(ids) > MAX_ORDER:
+        raise Refused(f"At most {MAX_ORDER} tickets can be put in order at once.")
+    if len(set(ids)) != len(ids):
+        raise Refused("A ticket is named twice; name each ticket once.")
+    now_at = [load(root, tid).get("lane_order") for tid in ids]  # every ticket exists before any write
+    changed = []
+    for n, (tid, was) in enumerate(zip(ids, now_at, strict=True), start=1):
+        want = {"lane": lane, "n": n}
+        if was != want:
+            changed.append(apply_op(root, tid, lambda t, w=want: t.__setitem__("lane_order", w), by=by)[0])
+    return changed
+
+
 LONG_NOTE = (
     "The full text is attached as note.md. Read it, then give this ticket a short title and description."
 )

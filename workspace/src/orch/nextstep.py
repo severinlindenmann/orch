@@ -205,6 +205,7 @@ HINTS = {
     "ticket status": _status,
     "ticket edit": _on_ticket,
     "ticket set": _on_ticket,
+    "ticket order": "keep working: orch ticket list",
     "ticket summary": _on_ticket,
     "ticket outcome": _on_ticket,
     "ticket artifacts": _on_ticket,
