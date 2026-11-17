@@ -124,8 +124,8 @@ jobs:
           for i in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
           export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
           systemctl --user show-environment > /dev/null
-          ORCH_SERVICES_REAL=1 uv run pytest -q -rs tests/test_real_driver.py -k systemd | tee real.txt
-          grep -q "1 passed" real.txt
+          ORCH_SERVICES_REAL=1 uv run pytest -q -rs tests/test_real_driver.py -k "systemd or linux" | tee real.txt
+          grep -q "2 passed" real.txt
   pull-requests:
     runs-on: ubuntu-latest
     defaults:
