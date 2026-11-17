@@ -24,7 +24,8 @@ const finishedAt = t => parse(t.done_at || t.completed_at || t.updated_at);
 
 function ticketRow(t) {
   const at = finishedAt(t);
-  return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t, at ? h('span', {className:'meta'}, 'Finished ' + time(at)) : null));
+  // The time sits under the title (not beside it), so a title fits on one line in the narrow side card.
+  return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t), at ? h('p', {className:'meta'}, 'Finished ' + time(at)) : null);
 }
 // Answered on Home but not sent yet (the Undo window): the question is hidden and not counted.
 const pendingAnswers = new Map();
@@ -502,6 +503,16 @@ function whatChangedCard(list) {
       h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title)), h('p', {className:'muted preserve-lines'}, clean(words.head) + (words.detail ? ' ' + clean(words.detail) : ''))),
       h('span', {className:'meta'}, [typeof ticketDoneEvent === 'function' && typeof ticketActor === 'function' ? ticketActor(ticketDoneEvent(t)?.by) : '', time(doneAt(t))].filter(Boolean).join(' · ')))));
 }
+// "Finished" on Home: the 5 newest finished today, then one link to all of them in the Tickets list (report r-1116-2215-ws:
+// 60 rows made Home 8000 px tall).
+const FINISHED_SHOWN = 5;
+function finishedBody(finished, all) {
+  if (!finished.length) return emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
+  const newest = finished.slice().sort((a, b) => (finishedAt(b) || 0) - (finishedAt(a) || 0));
+  const more = newest.length > FINISHED_SHOWN ? h('div', {className:'card-row', 'data-key':'finished-all'},
+    h('a', {className:'btn ghost sm', href:'#tickets?view=done-today'}, 'All finished today (' + newest.length + ') →')) : null;
+  return [...newest.slice(0, FINISHED_SHOWN).map(ticketRow), more];
+}
 // The day the last finished ticket was closed, for the empty "Finished" card ("Last: “…”, Fri.").
 function lastFinished(all) {
   const t = all.filter(x => x.status === 'done' && finishedAt(x)).sort((a, b) => finishedAt(b) - finishedAt(a))[0];
@@ -530,21 +541,20 @@ function home() {
     return fragment(head, banner, h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
       h('p', {}, 'Questions and results to check will appear here.'), typeof newButton === 'function' ? newButton() : null),
       notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
-      card('finished-today', 'Finished', '', finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.')), changedCard);
+      card('finished-today', 'Finished', '', finishedBody(finished, all)), changedCard);
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
   const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
   const list = [first ? needRow(first.row, newest, first.count, first.same) : null, ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
     ...results.map(resultRow), ...changes.map(changeRow), ...notes];
-  const finishedBody = finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
       anyNeeds ? attentionCard('needs-you', needCount ? 'Needs you · ' + needCount : 'Needs you', 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', [clearOldButton(), reviewAllButton()]) : null),
     h('aside', {className:'stack', 'data-key':'right'},
       helpers.length && window.UI?.helperList ? helpersCard(helpers) : snapshot && working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
       quiet.length ? card('quiet-now', 'No news', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
-      card('finished-today', 'Finished', '', finishedBody))),
+      card('finished-today', 'Finished', '', finishedBody(finished, all)))),
     changedCard);
 }
 function connectionNotice(connectionEl, hadState) {

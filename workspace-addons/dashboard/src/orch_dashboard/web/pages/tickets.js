@@ -5,16 +5,19 @@ const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticke
 let ticketSearch = '', ticketMine = false, ticketPerson = '';
 // Saved views live on the address: #tickets?view=needs-you|working|done-week.
 const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['working', 'Working'], ['done-week', 'Done this week']];
+// Views reached only by a link (Home's "All finished today"), with no chip of their own.
+const LINK_VIEWS = [['done-today', 'Finished today']];
 function savedView() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?');
   const view = at < 0 ? '' : new URLSearchParams(full.slice(at + 1)).get('view') || '';
-  return TICKET_VIEWS.some(([id]) => id && id === view) ? view : '';
+  return [...TICKET_VIEWS, ...LINK_VIEWS].some(([id]) => id && id === view) ? view : '';
 }
 const changesPending = t => t?.bring_back?.state === 'waiting';
 function inView(t, view, nowMs = Date.now()) {
   const status = window.DashHelpers.columnOf(shown(t).status);
   if (view === 'needs-you') return (status !== 'done' && (questions(t).length > 0 || status === 'review')) || changesPending(t);
   if (view === 'working') return status === 'active';
+  if (view === 'done-today') { const at = new Date(t.done_at || t.completed_at || t.updated_at); return status === 'done' && at.toDateString() === new Date(nowMs).toDateString(); }
   if (view === 'done-week') { const at = Date.parse(t.done_at || t.updated_at); return status === 'done' && (!Number.isFinite(at) || nowMs - at <= 7 * 86400000); }
   return true;
 }
@@ -94,7 +97,7 @@ function viewChips() {
   const current = savedView(), filtered = !!(ticketSearch || ticketPerson);
   const chip = (label, active, attrs) => h('a', Object.assign({className:'chip view-chip' + (active ? ' active' : ''), 'aria-current':active ? 'true' : null}, attrs), label);
   const own = savedViews().map((v, i) => { const c = chip(v.label, false, {href:'#tickets', 'data-key':'saved-view-' + i}); c.addEventListener('click', e => { e.preventDefault(); applySaved(v); }); return c; });
-  const label = ticketSearch || (ticketPerson && (name(ticketPerson) || ticketPerson)) || (TICKET_VIEWS.find(([id]) => id === current) || [])[1] || '';
+  const label = ticketSearch || (ticketPerson && (name(ticketPerson) || ticketPerson)) || ([...TICKET_VIEWS, ...LINK_VIEWS].find(([id]) => id === current) || [])[1] || '';
   const save = h('button', {type:'button', className:'chip view-chip add', 'data-key':'save-view', disabled:filtered || current ? null : '', 'aria-label':'Save this view'}, '+ Save view');
   save.addEventListener('click', () => { if (!label) return; const list = savedViews().filter(v => v.label !== label); list.push({label, view:current, search:ticketSearch, person:ticketPerson}); writeSavedViews(list); render(); });
   return h('div', {className:'view-chips row', role:'group', 'aria-label':'Ticket views', 'data-key':'view-chips'},
