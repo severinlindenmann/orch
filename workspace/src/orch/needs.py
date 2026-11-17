@@ -109,7 +109,7 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
         until = w.get("until")
         if isinstance(until, str) and until < now:
             if w.get("kind") == "time":
-                text = f"Wake time passed; nothing started it. Start it: orch run start {t['id']}"
+                text = "Wake time passed and no helper started. Continue starts it."
                 cli = f"orch run start {t['id']}"
             else:
                 text = f"Waiting on {w.get('kind')} {w.get('ref', '')}".strip() + f", past {until}"

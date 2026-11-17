@@ -366,7 +366,8 @@ function attentionCard(key, badge, cls, body, meta = '', action = null) {
 // "Review all": the cards of the Review page (state.review) in one go. The number is the same set of questions and
 // results Home already counts, so it is never added to Home's own total.
 function reviewAllButton() {
-  const n = typeof reviewCount === 'function' ? reviewCount() : 0;
+  // the one number, not the length of the card list; the card count only when the page holds cards the number does not
+  const cards = typeof reviewCount === 'function' ? reviewCount() : 0, n = cards ? (typeof needsYouTotal === 'function' && needsYouTotal()) || cards : 0;
   return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all', h('span', {className:'count'}, String(n))) : null;
 }
 // "Clear old": the questions that have waited more than a week go in one click. Same path as a one-click answer:
@@ -411,7 +412,8 @@ function clearOldButton() {
 function attentionSummary(groups, failed, results, changes) {
   // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
   // (failed starts, notes without a question, changes to add) follows "also", so title, subtitle and rows agree (ORCH-184)
-  const questionsAsked = groups.filter(g => g.row.answer?.question).length, other = groups.length - questionsAsked + failed.length;
+  // questions = the one number minus the results (every open question counts, also a same-worded one on two tickets)
+  const questionsAsked = Math.max(0, needsYouTotal() - results), other = groups.filter(g => !g.row.answer?.question).length + failed.length;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
   const counted = [part(questionsAsked, 'question', 'questions'), part(results, 'result to check', 'results to check')].filter(Boolean).join(' · ');
   const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
@@ -602,7 +604,7 @@ function lineBanner() {
 // question, result to check and change to add (one button each); the notes that need no answer are one quiet line.
 function home() {
   const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, count:counted} = needsToday(), all = tickets();
-  const needCount = counted + logins.soon.length;
+  const needCount = counted;  // THE number: title, Needs you pill, Review all, Review badge and Tickets pill; a login is a row and a banner
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   const helpers = window.DashHelpers.helperRows(all, state.runs);
   const quiet = working.filter(t => t.quiet_since);
@@ -614,8 +616,8 @@ function home() {
   // changes to add and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
   // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
-  const shownCount = needCount + logins.stopped.length;
-  const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds ? 'Things to look at' : 'Nothing needs you';
+  const shownCount = needCount;
+  const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length);
   const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
