@@ -4,7 +4,7 @@ import json
 
 from test_overview import request
 
-from orch_insights.models import EMPTY, build_models
+from orch_insights.models import EMPTY, build_models, build_team
 from orch_insights.overview import ERROR
 
 
@@ -48,7 +48,7 @@ def test_projection():
 
 
 def test_empty_and_errors():
-    assert build_models(usage(totals={}, tickets=[])) == {"empty": True, "text": EMPTY}
+    assert build_models(usage(totals={}, tickets=[])) == {"empty": True, "text": EMPTY, "team": None}
     assert EMPTY == "No model use in the last 30 days."
     for bad in (None, [], {"schema": "other/1"}):
         assert build_models(bad) == {"error": ERROR}
@@ -89,3 +89,46 @@ def test_page_has_the_section():
     web = resources.files("orch_insights").joinpath("web")
     assert 'id="models"' in web.joinpath("index.html").read_text()
     assert "/api/models" in web.joinpath("insights.js").read_text()
+
+
+def test_team_time_cost_finished_stuck_and_people():
+    """ORCH-189: the manager view numbers, shown even when no model use is measured (a first day)."""
+    answer = usage(
+        seconds=14 * 3600 + 20 * 60,
+        cost=41.8,
+        finished=9,
+        stuck=2,
+        team=[
+            {"owner": "human:anna", "finished": 5, "open": 3, "seconds": 8 * 3600 + 600, "cost": 24.1},
+            {"owner": "", "finished": 4, "open": 2, "seconds": 59, "cost": 17.7},
+            {"owner": "agent:claude", "finished": 0, "open": 1, "seconds": 0, "cost": 0},
+            "bad row",
+        ],
+    )
+    team = build_models(answer)["team"]
+    assert team["time"] == "14 h 20 min" and team["cost"] == "$41.80"
+    assert team["finished"] == 9 and team["stuck"] == 2
+    assert team["each"] == "about $4.64 and 1 h 36 min each"
+    assert [p["name"] for p in team["people"]] == ["anna", "No owner", "A helper"]
+    assert team["people"][0] == {
+        "name": "anna",
+        "finished": 5,
+        "open": 3,
+        "time": "8 h 10 min",
+        "cost": "$24.10",
+    }
+    assert team["people"][1]["time"] == "1 min" and team["people"][2]["time"] == "–"
+    assert build_models(usage(totals={}, tickets=[], seconds=60, cost=0, finished=0))["team"]["each"] is None
+    assert build_team(usage()) is None, "an older orch without the numbers: no section"
+    assert build_team(usage(seconds="x", cost=True, finished=-1))["time"] == "–"
+
+
+def test_page_has_the_team_section():
+    from importlib import resources
+
+    web = resources.files("orch_insights").joinpath("web")
+    html, js = web.joinpath("index.html").read_text(), web.joinpath("insights.js").read_text()
+    for part in ('id="team"', 'id="team-stats"', ">By person<", 'id="people-rows"', 'id="lost-note"'):
+        assert part in html
+    for word in ("Helper time", "at list price", "Tickets finished", "Stuck now"):
+        assert word in js

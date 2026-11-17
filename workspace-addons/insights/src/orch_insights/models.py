@@ -40,6 +40,66 @@ def _parts(models):
     return parts
 
 
+def _seconds_words(seconds):
+    m = round(_count(seconds) / 60)
+    if not _count(seconds):
+        return "–"
+    if m < 1:
+        return "under 1 min"
+    return f"{m // 60} h {m % 60} min" if m >= 60 else f"{m} min"
+
+
+def _money(cost):
+    v = cost if isinstance(cost, int | float) and not isinstance(cost, bool) and cost >= 0 else 0
+    return f"${v:,.2f}"
+
+
+def _person(owner):
+    owner = owner if isinstance(owner, str) else ""
+    if not owner:
+        return "No owner"
+    kind, _, rest = owner.partition(":")
+    if kind == "agent":
+        return "A helper"
+    return rest if kind == "human" and rest else owner
+
+
+def build_team(answer):
+    """ORCH-189 manager view: helper time, money at list price, tickets finished (with the average), stuck now,
+    and one row per person. None when the answer carries none of it (an older orch)."""
+    if not isinstance(answer, dict) or "seconds" not in answer:
+        return None
+    seconds, cost, finished = (
+        _count(answer.get("seconds")),
+        answer.get("cost") or 0,
+        _count(answer.get("finished")),
+    )
+    each = None
+    if finished and (seconds or cost):
+        each = f"about {_money(cost / finished)} and {_seconds_words(seconds // finished)} each"
+    people = []
+    for row in answer.get("team") or []:
+        if not isinstance(row, dict):
+            continue
+        people.append(
+            {
+                "name": _person(row.get("owner")),
+                "finished": _count(row.get("finished")),
+                "open": _count(row.get("open")),
+                "time": _seconds_words(row.get("seconds")),
+                "cost": _money(row.get("cost")),
+            }
+        )
+    return {
+        "time": _seconds_words(seconds),
+        "cost": _money(cost),
+        "finished": finished,
+        "each": each,
+        "stuck": _count(answer.get("stuck")),
+        "people": people,
+    }
+
+
 def build_models(answer):
     """Fail closed: an unreadable answer is an error, never a row of zeros."""
     if not isinstance(answer, dict) or answer.get("schema") != "orch.usage/1":
@@ -53,11 +113,12 @@ def build_models(answer):
             if i + o:
                 models.append({"name": name, "label": LABELS[name], "tokens": i + o, "in": i, "out": o})
     if not models:
-        return {"empty": True, "text": EMPTY}
+        return {"empty": True, "text": EMPTY, "team": build_team(answer)}
     top = sorted(rows, key=lambda row: -_count(row.get("total")))[:TOP]
     moved, of = _count(answer.get("moved_up")), _count(answer.get("with_model"))
     return {
         "empty": False,
+        "team": build_team(answer),
         "models": models,
         "moved_up": moved,
         "of": of,

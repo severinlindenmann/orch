@@ -153,8 +153,41 @@ function renderModels(view) {
   }
 }
 
+// ORCH-189 manager view: four numbers and one row per person, from the helpers' conversations (not the record,
+// so it shows on a first day too). Cost is at list price.
+function statTile(label, value, small) {
+  const tile = node('article', undefined, 'stat-tile');
+  tile.append(node('span', label, 'stat-label'), node('span', value, 'stat-value'), node('span', small, 'stat-delta'));
+  return tile;
+}
+function renderTeam(team) {
+  const host = byId('team');
+  if (!team) { host.hidden = true; return; }
+  host.hidden = false;
+  byId('team-stats').replaceChildren(
+    statTile('Helper time', team.time, 'Last 30 days'),
+    statTile('Cost', team.cost, 'at list price'),
+    statTile('Tickets finished', String(team.finished), team.each || 'Last 30 days'),
+    statTile('Stuck now', String(team.stuck), team.stuck ? 'See Stuck on the Tickets page' : 'Nothing is stuck'));
+  const rows = byId('people-rows');
+  rows.replaceChildren(...team.people.map(p => {
+    const tr = node('tr');
+    tr.append(node('td', p.name), node('td', String(p.finished), 'numeric'), node('td', String(p.open), 'numeric'),
+      node('td', p.time, 'numeric'), node('td', p.cost, 'numeric'));
+    return tr;
+  }));
+  byId('people').hidden = !team.people.length;
+}
+function renderLost(view) {
+  const note = byId('lost-note');
+  note.hidden = !(view && view.lost);
+  note.textContent = view && view.lost ? view.lost.text : '';
+}
 async function loadModels() {
-  try { renderModels(await read('/api/models')); } catch { renderModels(null); }
+  let view = null;
+  try { view = await read('/api/models'); } catch { view = null; }
+  renderTeam(view && !view.error ? view.team : null);
+  renderModels(view);
 }
 
 function stateBadge(row) {
@@ -313,7 +346,9 @@ async function refresh() {
     const answer = await read('/api/overview');
     if (answer.error) { showMessage(answer.error); return; }
     overview = answer;
+    renderLost(overview);
     if (overview.first_day) {
+      loadModels();
       showView('empty');
       const grid = node('div', undefined, 'metric-grid');
       grid.append(...emptyTiles(overview));

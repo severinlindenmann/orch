@@ -35,6 +35,10 @@
 <div id="view-region" aria-busy="true">
 <div id="main-view" class="area-body">
 <section id="checkup" class="stack" aria-label="Check-up" hidden><p id="checkup-note" class="note" role="status" hidden></p></section>
+<p id="lost-note" class="note" role="status" hidden></p>
+<section id="team" class="stack" aria-label="Time and cost" hidden><div class="stat-row" id="team-stats"></div>
+<section class="card" id="people" hidden><div class="section-head roomy"><h2>By person</h2><span class="meta">Last 30 days</span></div>
+<div class="table-wrap"><table class="data-table"><caption class="sr-only">Tickets, helper time and cost by person</caption><thead><tr><th scope="col">Person</th><th scope="col" class="numeric">Finished</th><th scope="col" class="numeric">Open</th><th scope="col" class="numeric">Helper time</th><th scope="col" class="numeric">Cost</th></tr></thead><tbody id="people-rows"></tbody></table></div></section></section>
 <div id="loading" class="area-body loading-mask" inert aria-hidden="true">
 <div class="metric-grid"><article class="card metric"><p class="meta">Times helpers worked</p><strong>00</strong><small>Loading data</small></article><article class="card metric"><p class="meta">Connected services</p><strong>00</strong><small>Loading data</small></article></div>
 <div class="analysis-grid"><section class="card chart-card"><div class="section-head roomy"><h2>Work over time</h2><span class="meta">Last 30 days</span></div><div class="chart-stage"></div></section><section class="card chart-card"><div class="section-head roomy"><h2>Skill use</h2></div><p class="muted">Loading the skills your helpers used.</p><div class="bar-row"><span>Loading</span><div class="progress"><span></span></div></div></section></div>

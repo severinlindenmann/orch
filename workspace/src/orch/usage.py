@@ -289,6 +289,14 @@ def _moved_up(ticket: dict) -> bool:
     return modelpick.moved_up(ticket)
 
 
+def _who(owner: object) -> str:
+    return owner.strip() if isinstance(owner, str) else ""
+
+
+def _member() -> dict:
+    return {"finished": 0, "open": 0, "seconds": 0, "cost": 0.0}
+
+
 def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | None = None) -> dict:
     root = Path(root)
     cutoff = (datetime.now(UTC) - timedelta(days=max(days, 0))).isoformat()
@@ -297,7 +305,17 @@ def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | Non
     live: set = set()
     rows, totals, moved, with_model = [], {}, 0, 0
     cost, secs = 0.0, 0
+    team: dict = {}
+    finished = stuck = 0
     for t in tickets.list_all(root):
+        who = _who(t.get("owner"))
+        status = t.get("status")
+        if status not in ("done", "dropped"):
+            team.setdefault(who, _member())["open"] += 1
+            stuck += bool(tickets.stuck_why(t))
+        elif status == "done" and str(t.get("done_at") or t.get("updated_at") or "") >= cutoff:
+            team.setdefault(who, _member())["finished"] += 1
+            finished += 1
         if str(t.get("updated_at") or t.get("created_at") or "") < cutoff:
             continue
         m = t.get("model")
@@ -310,6 +328,9 @@ def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | Non
             continue
         cost += r["cost"]
         secs += r["seconds"]
+        member = team.setdefault(who, _member())
+        member["cost"] = round(member["cost"] + r["cost"], 4)
+        member["seconds"] += r["seconds"]
         up = _moved_up(t)
         moved += up
         _add(totals, use)
@@ -340,6 +361,12 @@ def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | Non
         "totals": totals,
         "cost": round(cost, 2),
         "seconds": secs,
+        "finished": finished,
+        "stuck": stuck,
+        # ORCH-189 manager view: per owner ("" = nobody), finished in the window, open now, helper time, money
+        "team": [
+            {"owner": k, **v} for k, v in sorted(team.items(), key=lambda kv: (-kv[1]["seconds"], kv[0]))
+        ],
         "moved_up": moved,
         "with_model": with_model,
     }

@@ -212,3 +212,26 @@ def test_session_folders_are_remembered_and_misses_retried_later(proj, env, monk
         dated("claude-haiku-5-5", "h", 1_000_000, 0, "2026-11-17T10:01:00Z"),
     )
     assert usage.spend(proj, [t], env)[t["id"]]["cost"] == pytest.approx(4.1), "new helper files still count"
+
+
+def test_team_finished_open_and_stuck(proj, env):
+    """ORCH-189: per owner finished (in the window), open, helper time and money; stuck counts the open ones."""
+    a = make(proj, "Anna works", [SID])
+    raw = tickets.load(proj, a["id"])
+    raw["owner"], raw["due"] = "anna", "2020-01-01"  # past due: stuck
+    tickets._write(proj, raw)
+    b = tickets.create(proj, "Ben done", "human:t")
+    raw = tickets.load(proj, b["id"])
+    raw["owner"], raw["status"] = "ben", "done"
+    tickets._write(proj, raw)
+    tickets.create(proj, "Nobody's", "human:t")
+    write(
+        projects(env) / "-x" / f"{SID}.jsonl",
+        dated("claude-opus-5-5", "m1", 1_000_000, 0, "2026-11-17T10:00:00Z"),
+    )
+    ws = usage.workspace_usage(proj, 30, env)
+    assert ws["finished"] == 1 and ws["stuck"] == 1
+    team = {row["owner"]: row for row in ws["team"]}
+    assert team["anna"] == {"owner": "anna", "finished": 0, "open": 1, "seconds": 0, "cost": 4.0}
+    assert team["ben"]["finished"] == 1 and team["ben"]["open"] == 0
+    assert team[""]["open"] == 1
