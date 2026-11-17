@@ -100,6 +100,9 @@
  "workspace-addons/sync/src/orch_sync/visibility.py": {
   "Agent": 1
  },
+ "workspace-addons/usage/src/orch_usage/store.py": {
+  "agent": 1
+ },
  "workspace/src/orch/adapters.py": {
   "agent": 6,
   "agents": 5
