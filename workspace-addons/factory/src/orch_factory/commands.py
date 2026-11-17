@@ -27,7 +27,8 @@ def idea(root, title, data, ticket_id=None):
             return _adopt(root, store, ticket_id, data)
         ticket = orchcli.call(root, "ticket", "new", title, write=True)
         path = f"drafts/{ticket['id']}/v1.md"
-        store.write(path, data, frozen=True)
+        # no draft text given: the title is v1, never an empty file (bug hunt 17 Nov: Read draft showed an empty box)
+        store.write(path, data if data.strip() else title.encode() + b"\n", frozen=True)
         orchcli.set_ext(root, ticket, role="order", kind="run", stage="draft", draft=1)
     return {"order": ticket["id"], "draft": str(store.path(path))}
 
@@ -99,7 +100,7 @@ def _adopt(root, store, ticket_id, data):
         raise Refused(
             "Only an open ticket (not in review, done or dropped) can become a Factory order.", "invalid"
         )
-    text = data or str(ticket.get("note") or ticket.get("title") or "").encode()
+    text = data if data and data.strip() else str(ticket.get("note") or ticket.get("title") or "").encode()
     path = f"drafts/{ticket['id']}/v1.md"
     store.write(path, text, frozen=True)
     orchcli.set_ext(root, ticket, role="order", kind="run", stage="draft", draft=1)
