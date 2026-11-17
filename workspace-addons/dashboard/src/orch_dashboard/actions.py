@@ -392,9 +392,12 @@ def _ticket_patch(a):
             and v is not None
             and not (
                 isinstance(v, dict)
-                and set(v) == {"kind", "until"}
+                and {"kind", "until"} <= set(v) <= {"kind", "until", "ref"}
                 and v["kind"] == "time"
                 and isinstance(v["until"], str)
+                and isinstance(
+                    v.get("ref", ""), str
+                )  # ORCH-235: what it waits for (optional; the core checks length)
             )
         ):
             raise BadRequest("A wait from the board is a time.")
