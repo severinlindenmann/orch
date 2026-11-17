@@ -24,7 +24,10 @@ import zlib
 
 SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_CHUNKS = 10000  # a bounded walk: more chunks than this = no proof
-MAX_PIXEL_BYTES = 1 << 30  # an IHDR that claims more than this = no proof
+MAX_PIXEL_BYTES = 1 << 28  # an IHDR that claims more than this = no proof
+# Bounded work (real screenshots up to 870 KB: at most 21 blocks and 180 000 table entries): more = no proof
+MAX_BLOCKS = 2048
+MAX_TABLE_WORK = 1 << 23
 # What a proven pixel run is replaced with in the text the label rules read: a line break in UTF-8, Latin-1
 # and in UTF-16 (both byte orders, both alignments), so no label can join across it.
 SEP = b"\n\x00\n\n\x00\n"
@@ -90,11 +93,24 @@ def _fixed() -> tuple:
 
 def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
     """Walk the raw deflate stream in `s` from byte `start` to its final block. (end byte, the bit ranges
-    [first, end) of its Huffman-coded blocks, pixel bytes it inflates to). Raises _Bad on any error and on a
-    stored block that holds bytes."""
+    [first, end) of the coded symbols of its Huffman blocks (block headers and code tables are not part of
+    them: they can hold any bytes), pixel bytes it inflates to). Raises _Bad on any error, on a stored block
+    that holds bytes and past MAX_BLOCKS / MAX_TABLE_WORK."""
     pos, b, n, out, L = start, 0, 0, 0, len(s)
     huff: list[tuple[int, int]] = []
+    blocks = work = 0
+
+    def table(lengths: list[int], single_ok: bool) -> tuple[list[int], int]:
+        nonlocal work
+        work += 1 << max(lengths)
+        if work > MAX_TABLE_WORK:
+            raise _Bad("too much work")
+        return _table(lengths, single_ok)
+
     while True:
+        blocks += 1
+        if blocks > MAX_BLOCKS:
+            raise _Bad("too many blocks")
         first = pos * 8 - n
         if n < 3:
             if pos >= L:
@@ -144,7 +160,7 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
                     cl[_CL_ORDER[i]] = b & 7
                     b >>= 3
                     n -= 3
-                ct, cm = _table(cl, False)
+                ct, cm = table(cl, False)
                 lens: list[int] = []
                 total = hlit + hdist
                 while len(lens) < total:
@@ -179,9 +195,10 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
                         n -= 7
                 if len(lens) > total or not lens[256]:
                     raise _Bad("lengths")
-                lt, lm = _table(lens[:hlit], True)
+                lt, lm = table(lens[:hlit], True)
                 dist = lens[hlit:]
-                dt, dm = _table(dist, True) if max(dist) else ([0, 0], 1)  # no distance code: any use fails
+                dt, dm = table(dist, True) if max(dist) else ([0, 0], 1)  # no distance code: any use fails
+            coded = pos * 8 - n  # the first bit of the block's coded symbols
             while True:  # the symbols of one block; at most 48 bits each
                 if n < 48:
                     k = (64 - n) >> 3
@@ -227,7 +244,8 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
                 b >>= x
                 n -= x
                 out += length
-            huff.append((first, pos * 8 - n))
+            if (coded + 7) // 8 < (pos * 8 - n) // 8:  # holds a whole byte
+                huff.append((coded, pos * 8 - n))
         if final:
             return pos - (n >> 3), huff, out
 
@@ -300,31 +318,35 @@ def _spans(data: bytes) -> list[tuple[int, int]]:
     cmf, flg = stream[0], stream[1]
     if cmf & 15 != 8 or cmf >> 4 > 7 or flg & 0x20 or (cmf << 8 | flg) % 31:
         return []  # not deflate, a window over 32 KB, a preset dictionary, a bad header check
-    end, huff, out = _walk(stream, 2)
-    if out != expected or end + 4 != len(stream):
-        return []  # more or fewer pixels than the IHDR says, data after the stream
-    d = zlib.decompressobj()  # the same stream through zlib: no error, the checksum, the same size and end
+    d = zlib.decompressobj()  # zlib first (fast, in C): no error, the checksum, the same size and end
     tail, size = stream, 0
-    while tail and not d.eof:
-        size += len(d.decompress(tail, 1 << 22))
+    while not d.eof and size <= expected:
+        got = len(d.decompress(tail, 1 << 22))
         tail = d.unconsumed_tail
+        size += got
+        if not got and not tail:
+            break  # input used up before the end of the stream
     if not d.eof or d.unused_data or tail or size != expected:
         return []
+    end, huff, out = _walk(stream, 2)  # then the block walk: the same size and end
+    if out != expected or end + 4 != len(stream):
+        return []  # more or fewer pixels than the IHDR says, data after the stream
     spans: list[tuple[int, int]] = []
-    starts, acc = [], 0  # stream offset of each piece
-    for _, n in pieces:
-        starts.append(acc)
-        acc += n
+    k, s0 = 0, 0  # one sweep: the blocks and the IDAT pieces are both in stream order
     for first, last in huff:
-        a, z = (first + 7) // 8, last // 8  # only whole bytes inside the block
-        for (off, n), s0 in zip(pieces, starts, strict=True):
-            lo, hi = max(a, s0), min(z, s0 + n)
-            if lo < hi:
-                lo, hi = off + lo - s0, off + hi - s0
-                if spans and spans[-1][1] == lo:
-                    spans[-1] = (spans[-1][0], hi)
-                else:
-                    spans.append((lo, hi))
+        a, z = (first + 7) // 8, last // 8  # only whole bytes inside the coded symbols
+        while a < z:
+            while s0 + pieces[k][1] <= a:
+                s0 += pieces[k][1]
+                k += 1
+            off, n = pieces[k]
+            hi = min(z, s0 + n)
+            lo, hi = off + a - s0, off + hi - s0
+            if spans and spans[-1][1] == lo:
+                spans[-1] = (spans[-1][0], hi)
+            else:
+                spans.append((lo, hi))
+            a = s0 + n if z > s0 + n else z
     return spans
 
 

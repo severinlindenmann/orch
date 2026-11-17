@@ -301,3 +301,110 @@ def test_broken_pictures_never_raise_and_spans_stay_in_the_pixel_data():
         for a, b in spans:
             assert 33 <= a < b <= len(pic) - 12
         assert pngpixels.label_view(bytes(pic)) is None or spans
+
+
+# ---------------------------------------------------------------- inputs from the review of the walker
+
+
+class _Bits:
+    """A deflate bit writer: fields LSB first, Huffman codes from their top bit."""
+
+    def __init__(self):
+        self.v, self.n = 0, 0
+
+    def put(self, value: int, width: int):
+        self.v |= value << self.n
+        self.n += width
+
+    def code(self, code: int, width: int):
+        self.put(int(format(code, f"0{width}b")[::-1], 2), width)
+
+    def fixed_literal(self, lit: int):
+        self.code(0x30 + lit, 8) if lit < 144 else self.code(0x190 + lit - 144, 9)
+
+    def done(self) -> bytes:
+        return self.v.to_bytes((self.n + 7) // 8, "little")
+
+
+def _canonical(lengths: list[int]) -> dict[int, tuple[int, int]]:
+    count = [0] * 16
+    for n in lengths:
+        count[n] += 1
+    count[0] = 0
+    code, nxt = 0, [0] * 16
+    for n in range(1, 16):
+        code = (code + count[n - 1]) << 1
+        nxt[n] = code
+    out = {}
+    for sym, n in enumerate(lengths):
+        if n:
+            out[sym] = (nxt[n], n)
+            nxt[n] += 1
+    return out
+
+
+def test_text_in_a_dynamic_code_table_is_not_exempt(tmp_path):
+    """The code tables of a dynamic block can carry any bytes: here `pw=x`. Only the coded symbols after the
+    table are exempt from the label rules."""
+    w = _Bits()
+    w.put(0b010, 3)  # not final, fixed codes: literals 0 and 144 (the 1x1 picture), end of block
+    w.fixed_literal(0)
+    w.fixed_literal(144)
+    w.code(0, 7)
+    for _ in range(2):  # two empty fixed blocks: the dynamic table starts on a byte boundary
+        w.put(0b010, 3)
+        w.code(0, 7)
+    w.put(0b101, 3)  # final, dynamic codes
+    w.put(0, 5)  # 257 literal/length codes
+    w.put(0, 5)  # one distance code
+    w.put(15, 4)  # all 19 code length codes
+    order = pngpixels._CL_ORDER
+    cl_in_order = [0, 6, 5, 3, 7, 2, 7, 1, 0, 7, 5, 6, 7, 0, 0, 0, 0, 0, 0]
+    for v in cl_in_order:
+        w.put(v, 3)
+    cl = [0] * 19
+    for sym, v in zip(order, cl_in_order, strict=True):
+        cl[sym] = v
+    codes = _canonical(cl)
+    lit = [8] * 255 + [9, 9]
+    for n in [*lit, 0]:
+        w.code(*codes[n])
+    w.code(*_canonical(lit)[256])  # end of block
+    pixels = b"\x00\x90"
+    stream = b"\x78\x01" + w.done() + zlib.adler32(pixels).to_bytes(4, "big")
+    assert zlib.decompress(stream) == pixels
+    pic = _png(stream, 1, 1, ihdr=_ihdr(1, 1, 8, 0))
+    assert b"pw=x" in pic
+    view = pngpixels.label_view(pic)
+    assert view is None or b"pw=x" in view
+    assert _refused(pic, tmp_path)
+
+
+def test_many_tiny_blocks_over_many_chunks_end_quickly():
+    w = _Bits()
+    w.put(0b010, 3)
+    w.fixed_literal(0)
+    w.fixed_literal(144)
+    w.code(0, 7)
+    for _ in range(100_000):
+        w.put(0b010, 3)
+        w.code(0, 7)
+    w.put(0b011, 3)
+    w.code(0, 7)
+    pixels = b"\x00\x90"
+    stream = b"\x78\x01" + w.done() + zlib.adler32(pixels).to_bytes(4, "big")
+    assert zlib.decompress(stream) == pixels
+    pic = _png(stream, 1, 1, split=14, ihdr=_ihdr(1, 1, 8, 0))
+    t = time.perf_counter()
+    assert pngpixels.pixel_spans(pic) == []  # past MAX_BLOCKS: no proof, every rule on every byte
+    assert time.perf_counter() - t < 3
+
+
+def test_the_work_caps_give_no_proof(monkeypatch):
+    pic = screenshot(SEED, 200, 100)
+    assert pngpixels.pixel_spans(pic)
+    monkeypatch.setattr(pngpixels, "MAX_TABLE_WORK", 100)
+    assert pngpixels.pixel_spans(pic) == []
+    monkeypatch.setattr(pngpixels, "MAX_TABLE_WORK", 1 << 23)
+    monkeypatch.setattr(pngpixels, "MAX_BLOCKS", 1)
+    assert pngpixels.pixel_spans(pic) == []
