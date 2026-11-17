@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, autoupdate, config, diag, ghlimit, history, nextstep, tickets
+from orch import adapters, autoupdate, config, diag, ghlimit, history, nextstep, report_tickets, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -32,6 +32,7 @@ KEYS = (
     "workflow.copies_max",
     "workflow.copy_setup",
     "diag.enabled",
+    "diag.report_tickets",
     "focus.session_typing",
     "update.auto",
     *config.INSIGHTS_KEYS,
@@ -276,6 +277,7 @@ def _config(args, root: Path) -> None:
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
             "diag.enabled": lambda: config.diag_enabled(root),
+            "diag.report_tickets": lambda: report_tickets.enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
             "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
@@ -347,6 +349,24 @@ def _config(args, root: Path) -> None:
             {"update.auto": value},
             "Saved: orch updates by itself " + ("at a quiet moment." if value else "no more."),
         )
+    elif args.sub == "set" and args.key == "diag.report_tickets":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        got = report_tickets.set_enabled(root, args.value == "on")
+        if args.value == "on":
+            text = (
+                "Saved: new problem reports, made here or shared through the relay, "
+                "become tickets with a helper."
+                + (
+                    f" The {got['marked_seen']} report(s) already here stay as they are."
+                    if got["marked_seen"]
+                    else ""
+                )
+                + " It needs the automation add-on turned on."
+            )
+        else:
+            text = "Saved: problem reports no longer become tickets by themselves."
+        _out(args, got, text)
     elif args.sub == "set" and args.key == "diag.enabled":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")

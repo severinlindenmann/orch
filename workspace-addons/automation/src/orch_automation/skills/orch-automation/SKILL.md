@@ -50,6 +50,13 @@ history shows Done or Stopped. A script that fails asks one question on the tick
 script the person asked for.
 {{#relay}}
 
+**Problem reports become tickets** (a workspace setting, no script and no agent for the pick-up)
+
+    orch config set diag.report_tickets on   # new reports here or shared through the relay: a ticket and a helper
+    orch diag tickets --dry-run              # what one pass would open now
+
+Turn it on only when the person asked for it.
+
 **Start from outside**
 
 If the relay is connected, an allowed `start` or `delegate` from another workspace or the owner's phone starts a run on

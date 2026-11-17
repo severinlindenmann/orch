@@ -178,6 +178,7 @@ HINTS = {
     "diag query": "orch diag report",
     "diag report": "share the report with whoever is helping you, then keep working: orch ticket list",
     "diag delete": "orch ticket list",
+    "diag tickets": "orch ticket list",
     "report problem": "carry on with your ticket: orch ticket list",
     "report feature": "carry on with your ticket: orch ticket list",
     "ticket new": _new,

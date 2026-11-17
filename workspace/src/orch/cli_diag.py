@@ -1,4 +1,5 @@
-"""`orch diag inspect | query | report`: what happened inside orch, read-only (contracts/diag.md).
+"""`orch diag inspect | query | report | tickets`: what happened inside orch, read-only (contracts/diag.md).
+`tickets` (report_tickets.py) is the one that writes tickets: new problem reports become tickets.
 
 `inspect` and `query` never write anything and never repair anything: they do not call `orch run status`'s
 orphan repair, they read files. `report` writes one folder under `.orch/diag/reports/` and nothing else.
@@ -56,6 +57,8 @@ def add_parsers(sub, common) -> None:
         help="include ticket text and helper excerpts (default)",
     )
     r.add_argument("--no-content", dest="content", action="store_false")
+    t = d.add_parser("tickets", parents=[common], help="turn new problem reports into tickets, once (no AI)")
+    t.add_argument("--dry-run", action="store_true", help="say what would happen, change nothing")
     x = d.add_parser("delete", parents=[common], help="delete saved reports or the saved debug notes")
     x.add_argument("what", choices=["reports", "notes"])
 
@@ -133,6 +136,11 @@ def dispatch(args, root: Path) -> bool:
                 print(f"more: --page {res['next']}")
             for g in res["unavailable"]:
                 print(f"not available: {g}")
+    elif args.sub == "tickets":
+        from orch import report_tickets
+
+        res = report_tickets.run_pass(root, dry_run=args.dry_run)
+        print(report_tickets.dumps(res) if args.json else report_tickets.text(res))
     elif args.sub == "delete":
         gone = diag_report.delete_all(root) if args.what == "reports" else diag.delete_notes(root)
         label = "report" if args.what == "reports" else "file of notes"

@@ -76,6 +76,14 @@ the key values the hider guards).
 `diag.enabled`, default **on**, per workspace on this computer: `orch config get|set diag.enabled on|off` and the settings answer
 of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until retention removes them.
 
+`diag.report_tickets`, default **off**, per workspace: `orch config set diag.report_tickets on|off`. On, the automation
+loop runs `orch diag tickets` every `[automation] reports_every` seconds (default 120; no AI): it takes new problems shared
+to the relay (at most every 14 minutes, when connected and allowed to pick up), opens one ticket per new report folder
+(`Investigate orch report <ref>`; a feature wish `Feature wish: ...` gets no helper), and marks a relay problem done when
+its ticket reaches Review or Done. A relay copy of a report shared from here opens no second ticket. Seen reports:
+`.orch/diag/report-tickets.json`; turning it on marks the reports already here as seen. The loop starts at most two
+helpers per pass on the new tickets.
+
 ## Event names (`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
 
 | `ev` | `kv` |
