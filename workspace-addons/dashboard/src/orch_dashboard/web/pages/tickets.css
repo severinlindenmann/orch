@@ -93,3 +93,5 @@
 .ticket-card>.row:first-child>details.menu{flex:none;margin:-4px -4px 0 0}
 .ticket-card .move-button{width:28px;min-width:28px;min-height:28px;height:28px}
 .board .ticket-card .menu-pop{min-width:180px}
+
+.ticket-table td:first-child a{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
