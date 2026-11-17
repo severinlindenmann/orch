@@ -289,9 +289,25 @@ def show(root, order):
 
 
 def listing(root):
+    """Every order; one that cannot be read is listed with its problem instead of hiding the others."""
     store = Store(root)
-    return [
-        describe(store, t)
-        for t in orchcli.tickets(root)
-        if t.get("ext", {}).get("factory", {}).get("role") == "order"
-    ]
+    result = []
+    for t in orchcli.tickets(root):
+        if t.get("ext", {}).get("factory", {}).get("role") != "order":
+            continue
+        try:
+            result.append(describe(store, t))
+        except Refused as error:
+            ext = t.get("ext", {}).get("factory", {})
+            result.append(
+                {
+                    "order": t["id"],
+                    "title": t.get("title"),
+                    "stage": ext.get("stage"),
+                    "proposal": ext.get("proposal", {}).get("n"),
+                    "questions": [],
+                    "started": False,
+                    "broken": " ".join(str(error).split()),
+                }
+            )
+    return result
