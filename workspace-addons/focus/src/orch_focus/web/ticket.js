@@ -114,8 +114,8 @@
       if (tid) location.href = P + '/t/' + tid;
       else { button.disabled = false; toast(r.message || 'The Manager could not start. Try again.', 'error'); }
     });
-    return h('section', {class: 'fx-pick-group fx-group-manager', 'aria-label': 'Manager'}, h('h2', {text: 'Manager'}),
-      h('div', {class: 'card'}, h('div', {class: 'fx-pick-row'}, h('strong', {class: 'grow', text: 'Manager'}), h('small', {text: line}), button)));
+    return h('section', {class: 'fx-pick-group fx-group-manager', 'aria-label': 'Manager'},
+      h('div', {class: 'card'}, h('div', {class: 'card-row'}, h('div', {class: 'grow'}, h('p', {class: 'title', text: 'Manager'}), h('p', {class: 'meta', text: line})), button)));  /* master card-row */
   }
 
   const LIVE_WAIT_MS = 4000;
