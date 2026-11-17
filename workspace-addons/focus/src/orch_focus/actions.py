@@ -54,7 +54,8 @@ except ImportError:  # no orch: nothing runs
 # (under the dashboard, no session of its own) keeps its started-run bookkeeping in Focus, so these three stay
 # open until that has a session path. Every other op acts as the person and needs the page session (watch-only
 # without one).
-FREE_OPS = frozenset({"check.add", "check.move", "run.start", "run.stop", "mobile.set", "manager.start"})
+# manager.start is NOT free: the Manager has a normal helper's full rights and Start fresh ends its conversation
+FREE_OPS = frozenset({"check.add", "check.move", "run.start", "run.stop", "mobile.set"})
 
 
 def needs_session(op) -> bool:

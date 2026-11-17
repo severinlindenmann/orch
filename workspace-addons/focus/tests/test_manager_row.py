@@ -17,7 +17,7 @@ def test_manager_start_argv():
     assert actions.build_argv("manager.start", {"fresh": True}) == [
         "manager", "start", "--fresh", "--by", "focus", "--json",
     ]  # fmt: skip
-    assert not actions.needs_session("manager.start")  # like run.start: a start is the page's
+    assert actions.needs_session("manager.start")  # full rights: only the signed-in person starts it
     with pytest.raises(actions.BadRequest):
         actions.build_argv("manager.start", {"ticket": "t_abcdef"})
 
