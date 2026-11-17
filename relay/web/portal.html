@@ -321,11 +321,11 @@ function subscriberCurl(link='<your link>',access='<your token>'){
  return el('div',{class:'sub-try-body'},tabs,code);
 }
 function subscriberDoc(){
- const base=location.origin+'/v1/sub/<TOKEN>',F='```',q=v=>"'"+v+"'";
+ const base='https://<RELAY_ADDRESS>/v1/sub/<TOKEN>',F='```',q=v=>"'"+v+"'";
  return ['# How to use an orch subscriber link','',
  'A subscriber link lets a script, chat bot or another tool read copies of workspace messages and, if allowed, answer questions.','',
- '- Base address: `'+base+'`',
- '- `<TOKEN>` is the secret part of the link shown once when the subscriber was created. Keep it secret. It can also be sent as the header `Authorization: Bearer <TOKEN>`; then use `-` in place of the token in the path.','',
+ '- Base address: `'+base+'` (`<RELAY_ADDRESS>` is the address of your relay, as in the link you were given).',
+ '- `<TOKEN>` is the secret part of the link shown once when the subscriber was created. Keep it secret. It can also be sent as a bearer token in the Authorization header; then use `-` in place of the token in the path.','',
  '## Read missed messages','',F+'sh','curl -s '+q(base+'/events?after=<LAST_ID>'),F,'',
  'Returns `{"items":[...],"next":"<id or null>"}`, up to 100 per call. While `next` is set, call again with `after=<next>`. Leave `after` empty to start from the beginning.','',
  '## Follow live (Server-Sent Events)','',F+'sh','curl -N '+q(base+'/stream'),F,'',
