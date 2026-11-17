@@ -178,6 +178,14 @@ A feature wish (ORCH-81, owner pick A, 16 Nov; `&about=feature`): the button kee
 read only) above the shared composer (`kit/composer.js`). A person writes what is new, pastes screenshots or adds
 files; one click puts the files on the ticket and tells the helper (starts one when none runs; Send back in Review).
 It is the ticket page's own box, separate from Focus (owner answer on ORCH-238).
+## ORCH-240 (17 Nov, owner's words)
+
+- The tab and card are "Tasks"; sub-tickets of a plain ticket are headed "Sub-tickets"; epic sub-tickets show
+  their ticket number.
+- Overview lists files by their real name with extension, newest first like the Files tab.
+- Activity names the task (never "c1") and shows "Was: … → Now: …" for title, owner, due and task renames.
+- Owner box suggests the workspace's people and warns on a new name; a past due day shows a hint;
+  "Due Mon 16 Nov, 18:30" within a week.
 
 ## ORCH-235 (17 Nov): one word per ticket state
 
