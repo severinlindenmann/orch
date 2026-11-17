@@ -235,6 +235,95 @@ def summary(url: str, head: str) -> dict | None:
     }
 
 
+# A pull request that changes a CI workflow (ORCH-305, owner 17 Nov, option A): the helper account may push
+# it, GitHub holds it until the owner approves (CODEOWNERS), and the owner's Merge card shows these checks of
+# the lines it adds. A finding is said, never a reason to refuse: the owner decides.
+WORKFLOW_DIR = ".github/workflows/"
+SECRET = re.compile(r"\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[|\))")
+PERMISSION = re.compile(r"^\s*permissions\s*:|:\s*write\b|\bwrite-all\b")
+USES = re.compile(r"^\s*(?:-\s*)?uses\s*:\s*['\"]?([^\s'\"#]+)")
+OWN_ACTIONS = ("./", "actions/", "github/")
+RISKY_TRIGGERS = ("pull_request_target", "workflow_run")
+MAX_FINDINGS = 6
+
+
+def is_workflow(path) -> bool:
+    return isinstance(path, str) and path.startswith(WORKFLOW_DIR) and path.endswith((".yml", ".yaml"))
+
+
+def check_workflows(files: list) -> dict | None:
+    """The check of a pull request's changed files as GitHub lists them ({filename, status, additions,
+    deletions, patch}): {"files": [{"name", "add", "del"}], "findings": [plain words]} for the CI workflow
+    files among them, None when it changes none. Only added lines count: a new secret, a permissions change,
+    an action from outside GitHub's own, a trigger that runs with more rights, a file without a patch."""
+    shown, found = [], []
+
+    def say(text: str) -> None:
+        if text not in found:
+            found.append(text)
+
+    for f in files if isinstance(files, list) else []:
+        if not isinstance(f, dict) or not (
+            is_workflow(f.get("filename")) or is_workflow(f.get("previous_filename"))
+        ):
+            continue
+        name = str(f.get("filename"))
+        shown.append({"name": name, "add": int(f.get("additions") or 0), "del": int(f.get("deletions") or 0)})
+        patch = f.get("patch")
+        if not isinstance(patch, str):
+            if f.get("status") != "removed":
+                say(f"{name.removeprefix(WORKFLOW_DIR)} is too big to check here: open it")
+            continue
+        for line in patch.splitlines():
+            if not line.startswith("+") or line.startswith("+++"):
+                continue
+            text = line[1:]  # comments too: a word too many is cheaper than one missed
+            for m in SECRET.finditer(text):
+                if m[1] != "GITHUB_TOKEN":
+                    say(f"reads a secret ({m[1] or 'all secrets'})")
+            if PERMISSION.search(text):
+                say("changes what a job may do on GitHub (permissions)")
+            u = USES.match(text)
+            if u and not u[1].startswith(OWN_ACTIONS):
+                say(f"uses an action from outside GitHub: {u[1][:80]}")
+            for trigger in RISKY_TRIGGERS:
+                if re.search(rf"\b{trigger}\b", text):
+                    say(f"runs on {trigger}, which has more rights than a pull request run")
+    if not shown:
+        return None
+    return {"files": shown, "findings": found[:MAX_FINDINGS], "more": max(0, len(found) - MAX_FINDINGS)}
+
+
+def workflow_check(url: str, head: str) -> dict | None:
+    """check_workflows() for exactly the commit `head` of the pull request at `url` (GitHub's compare of its
+    base branch with that commit), read-only with whatever login this process has. None when it changes no
+    CI workflow or GitHub cannot be read."""
+    gh = shutil.which("gh")
+    if gh is None or not is_pr_url(url) or not SHA.fullmatch(str(head or "")):
+        return None
+    repo, _ = _parts(url)
+    try:
+        v = _gh_plain(gh, ["pr", "view", url, "--json", "baseRefName"], 15)
+        base = (json.loads(v.stdout) if v.returncode == 0 else {}).get("baseRefName")
+        if not isinstance(base, str) or not base:
+            return None
+        c = _gh_plain(gh, ["api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".files"], 30)
+        files = json.loads(c.stdout) if c.returncode == 0 else None
+    except (Refused, ValueError, AttributeError):
+        return None
+    return check_workflows(files) if isinstance(files, list) else None
+
+
+def workflow_words(wf: dict) -> str:
+    """The one line a card shows for check_workflows()'s answer."""
+    found = list(wf.get("findings") or [])
+    if wf.get("more"):
+        found.append(f"and {wf['more']} more")
+    if not found:
+        return "Workflow check: no secrets, no permission changes, no outside actions, no risky triggers."
+    return "Workflow check, look at this: " + "; ".join(found) + "."
+
+
 RELEASE_PREFIX = "release/"
 RELEASE_FROM = "develop"  # a release only carries what is on this branch already (reviewed there)
 
