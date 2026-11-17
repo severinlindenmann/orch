@@ -36,7 +36,9 @@ ATTACH_FILE_BYTES = 8 * 1024 * 1024
 ATTACH_BYTES = 25 * 1024 * 1024
 INCIDENT_MAX = 20
 INCIDENT_BYTES = 50 * 1024 * 1024
-REPORT_BYTES = 100 * 1024 * 1024  # reports have their own room: they never count against the debug log's 200 MB
+REPORT_BYTES = (
+    100 * 1024 * 1024
+)  # own room: reports never count against the debug log
 TICKETS_STATE = "report-tickets.json"  # written by report_tickets.py: which reports became a ticket
 REPORTS = "reports"
 ABOUT = ("problem", "feature")  # what a report is about: something went wrong, or a feature wish
@@ -504,7 +506,7 @@ def delete_all(root: Path) -> int:
 
 
 def _ticketed(root: Path) -> set[str]:
-    """Report names the ticket pass has seen (a ticket was made, or the report was there when it was turned on)."""
+    """Report names the ticket pass has seen: a ticket was made, or it was here when the setting went on."""
     try:
         d = json.loads((root / ".orch" / "diag" / TICKETS_STATE).read_text())
         seen = d.get("seen") if isinstance(d, dict) else None
