@@ -18,7 +18,7 @@ function ticketTitle(t, tail = null) {
 }
 function parentLine(t) {
   const parent = ticketOf(t.parent || tickets().find(p => array(p.children).includes(t.id))?.id);
-  return parent ? h('p', {className:'meta'}, parent.epic ? 'Part of the epic ' : 'Step of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
+  return parent ? h('p', {className:'meta'}, parent.epic ? 'Part of the epic ' : 'Sub-ticket of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
 }
 const finishedAt = t => parse(t.done_at || t.completed_at || t.updated_at);
 

@@ -29,8 +29,8 @@ test('board parts span columns, accept keys, and ignore children summaries and a
     const card = c.boardCard(items[0]);
     assert.match(JSON.stringify(card), /Steps · 0 of 3 done/);
     assert.equal(nodes(card, n => n.attrs?.className === 'board-part').length, 3);
-    assert.match(JSON.stringify(c.boardCard(items[1])), /Step of Parent/);
-    assert.doesNotMatch(JSON.stringify(c.boardCard(items[3], true)), /Step of Parent/);
+    assert.match(JSON.stringify(c.boardCard(items[1])), /Sub-ticket of Parent/);
+    assert.doesNotMatch(JSON.stringify(c.boardCard(items[3], true)), /Sub-ticket of Parent/);
     const rows = helpers.treeRows(c.ticketParents(items.filter(t => t.status === 'waiting')));
     assert.equal(rows[1].depth, 1);
     const board = c.board();
@@ -99,7 +99,7 @@ test('ORCH-14: an epic says Epic on its board card; a ticket inside it says Part
   const c = context(items);
   assert.match(JSON.stringify(c.boardCard(items[0])), /Epic · 1 of 2 done/);
   assert.match(JSON.stringify(c.boardCard(items[2])), /Part of the epic Dashboard fixes/);
-  assert.doesNotMatch(JSON.stringify(c.boardCard(items[2])), /Step of/);
+  assert.doesNotMatch(JSON.stringify(c.boardCard(items[2])), /Sub-ticket of/);
 });
 test('parts on the real /api/state shape: each part sits in its OWN status group (ORCH-62), standing alone with its parent named', () => {
   const real = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/state-pilatus-parts.json'), 'utf8'));
@@ -114,7 +114,7 @@ test('parts on the real /api/state shape: each part sits in its OWN status group
   assert.ok(['PIL-10', 'PIL-11'].every(k => open.tickets.some(t => t.key === k)), 'To do parts sit in To do');
   const rows = helpers.treeRows(open.tickets).filter(r => /PIL-1[01]/.test(r.ticket.key));
   assert.equal(rows.map(r => r.depth).join(), '0,0');
-  assert.ok(rows.every(r => r.parentMissing), 'each names its parent on a Step of line');
+  assert.ok(rows.every(r => r.parentMissing), 'each names its parent on a Sub-ticket of line');
   for (const g of groups) assert.equal(g.tickets.filter(t => c.ticketGroupOf(t) !== g.status).length, 0, 'a group holds only its own status');
 });
 
