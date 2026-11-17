@@ -249,6 +249,7 @@ SAFE_ATTRIBUTE_VALUES = {
 ERROR_BOUNDARIES = {
     "_alert",
     "note_lost",
+    "lost_in",  # ORCH-189: counts the lost-hook alerts for Insights; never raises, like note_lost
     "_note",
     "read_run",
     "run_lines",

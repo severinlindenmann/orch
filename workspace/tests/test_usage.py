@@ -169,9 +169,7 @@ def test_price_rows_and_words():
     assert usage.price("claude-opus-5-5") == (4.0, 20.0, 0.20)
     assert usage.price("claude-opus-4-8") == (5.0, 25.0, 0.50)
     assert usage.price("claude-sonnet-4-6[1m]") == (3.0, 15.0, 0.30)
-    assert (
-        usage.price("claude-opus-6") == usage.PRICES["claude-opus-5-5"]
-    )  # unknown, known family: newest row
+    assert usage.price("claude-opus-6") == usage.PRICES["opus-5-5"]  # unknown, known family: newest row
     assert usage.price("gpt-x") is None
     assert usage.duration(0) == "–" and usage.duration(20) == "under 1 min"
     assert usage.duration(45 * 60) == "45 min" and usage.duration(125 * 60) == "2 h 5 min"

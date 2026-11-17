@@ -69,21 +69,22 @@ def _n(u: dict, k: str) -> int:
 
 
 # List price in dollars per million tokens: (input, output, cache read); a cache write costs 1.25 x input.
-# From Anthropic's price list (3 Nov 2026). The longest matching start of the model id wins; an unknown model
+# From Anthropic's price list (3 Nov 2026), keyed by model name without the vendor part. The longest name the
+# model id contains wins; an unknown model
 # of a known family takes the family's newest row, anything else counts no money (time still counts).
 PRICES = {
-    "claude-fable-5-2": (8.0, 40.0, 0.20),
-    "claude-fable-5": (10.0, 50.0, 1.00),
-    "claude-opus-5-5": (4.0, 20.0, 0.20),
-    "claude-opus-5": (5.0, 25.0, 0.50),
-    "claude-opus-4": (5.0, 25.0, 0.50),
-    "claude-sonnet-5-5": (2.0, 10.0, 0.10),
-    "claude-sonnet-5": (2.0, 10.0, 0.20),
-    "claude-sonnet-4": (3.0, 15.0, 0.30),
-    "claude-haiku-5-5": (0.10, 0.50, 0.01),
-    "claude-haiku-4": (1.0, 5.0, 0.10),
+    "fable-5-2": (8.0, 40.0, 0.20),
+    "fable-5": (10.0, 50.0, 1.00),
+    "opus-5-5": (4.0, 20.0, 0.20),
+    "opus-5": (5.0, 25.0, 0.50),
+    "opus-4": (5.0, 25.0, 0.50),
+    "sonnet-5-5": (2.0, 10.0, 0.10),
+    "sonnet-5": (2.0, 10.0, 0.20),
+    "sonnet-4": (3.0, 15.0, 0.30),
+    "haiku-5-5": (0.10, 0.50, 0.01),
+    "haiku-4": (1.0, 5.0, 0.10),
 }
-FAMILY_PRICE = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
+FAMILY_PRICE = {"opus": "opus-5-5", "sonnet": "sonnet-5-5", "haiku": "haiku-5-5"}
 # Helper working time: the gaps between two lines of a conversation, a gap longer than this counts as a pause.
 PAUSE_SECONDS = 300
 CACHE_VERSION = 2
@@ -91,7 +92,7 @@ CACHE_VERSION = 2
 
 def price(model: object) -> tuple[float, float, float] | None:
     low = str(model or "").lower()
-    best = max((k for k in PRICES if low.startswith(k)), key=len, default=None)
+    best = max((k for k in PRICES if k in low), key=len, default=None)
     if best is None and family(low) in FAMILY_PRICE:
         best = FAMILY_PRICE[family(low)]
     return PRICES[best] if best else None
