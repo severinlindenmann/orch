@@ -364,3 +364,13 @@ def test_names_from_github_are_cleaned_before_a_helper_reads_them(proj, role, st
         assert "<!--" not in text and "`" not in text and "$(" not in text and "|" not in text
         assert "Ignore previous" not in text
     assert de.safe("feat/a b", spaces=False) == "feat/ab"
+
+
+def test_a_branch_that_only_looks_like_the_default_branch_after_cleaning_is_not_it(proj, role, starts):
+    gh = FakeGH()
+    gh.runs_ = [
+        ghrun("ci", "push", "failure", "2026-11-17T07:46:00Z", 42, branch="develop!"),
+        ghrun("ci", "push", "failure", "2026-11-17T07:47:00Z", 43, branch="dev elop"),
+    ]
+    res = _pass(proj, gh)
+    assert res["survey"]["red"] == [] and _made(proj) == []

@@ -74,19 +74,16 @@ def safe(value, limit: int = 80, spaces: bool = True) -> str:
     return (v if spaces else v.replace(" ", ""))[:limit] or "?"
 
 
-def clean_runs(rows) -> list[dict]:
-    out = []
-    for r in rows or []:
-        if isinstance(r, dict):
-            out.append(
-                {
-                    **r,
-                    "workflowName": safe(r.get("workflowName"), 60),
-                    "headBranch": safe(r.get("headBranch"), 100, spaces=False),
-                    "url": safe(r.get("url"), 200, spaces=False),
-                }
-            )
-    return out
+def _clean_out(rows: list[dict]) -> list[dict]:
+    """The names in check results, cleaned for the ticket text. The checks themselves compare the raw values
+    GitHub gave (a branch "develop!" must never count as "develop")."""
+    for r in rows:
+        for k, lim, sp in (("workflow", 60, True), ("branch", 100, False), ("url", 200, False)):
+            if k in r and r[k] is not None:
+                r[k] = safe(r[k], lim, spaces=sp)
+        if "key" in r and "kind" in r:
+            r["key"] = f"{r['kind']}-{r['workflow']}"
+    return rows
 
 
 STOP = set(
@@ -414,25 +411,25 @@ def survey(gh, rows: list[dict], live: int, t: datetime) -> dict:
     """Every read and check of one pass. A read that fails is a line in s["errors"], never a crash."""
     s: dict = {"errors": [], "repo": getattr(gh, "repo", "")}
     try:
-        branch = safe(gh.branch(), 100, spaces=False)
+        branch = str(gh.branch())
     except Refused as e:
         branch = "main"
         s["errors"].append(f"the default branch could not be read: {e}")
-    s["branch"] = branch
+    s["branch"] = safe(branch, 100, spaces=False)
     try:
-        runs_ = clean_runs(gh.runs(branch))
+        runs_ = [r for r in gh.runs(branch) or [] if isinstance(r, dict)]
     except Refused as e:
         runs_ = []
         s["errors"].append(f"CI runs could not be read: {e}")
-    s["red"] = red_runs(runs_, branch, t)
+    s["red"] = _clean_out(red_runs(runs_, branch, t))
     for r in s["red"]:
         try:
             r["jobs"] = [safe(j, 60) for j in gh.failed_jobs(r["run"])][:10]
         except Refused:
             r["jobs"] = []
-    s["nightly"] = nightlies(runs_, branch)
-    s["cancel_streaks"] = cancel_streaks(runs_, branch, t)
-    s["reruns"] = reruns(runs_, t)
+    s["nightly"] = {safe(w, 60): safe(c, 20) for w, c in nightlies(runs_, branch).items()}
+    s["cancel_streaks"] = _clean_out(cancel_streaks(runs_, branch, t))
+    s["reruns"] = _clean_out(reruns(runs_, t))
     try:
         prs = gh.prs()
     except Refused as e:
