@@ -51,6 +51,7 @@
       },
       "reminder": { "settings_file": ".claude/settings.local.json", "settings_dir_env": "CLAUDE_CONFIG_DIR", "skip": [".claude", ".agents", "CLAUDE.local.md"], "input": { "event": "hook_event_name", "cwd": "cwd", "default_event": "UserPromptSubmit" }, "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } } },
       "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] } },
+      "connection_check": { "list": ["mcp", "list"], "sign_in": "Open Claude Code, type /mcp and sign in to {name} again." },
       "mcp_settings": [
         { "file": "{home}/.claude.json", "format": "json", "path": ["mcpServers"] },
         { "file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"] },
@@ -76,6 +77,7 @@
       "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id" },
+      "login": { "status": ["login", "status"], "how": "Open a terminal on this computer and run: codex login" },
       "mcp_settings": [
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],

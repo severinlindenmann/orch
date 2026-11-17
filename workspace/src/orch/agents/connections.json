@@ -1,6 +1,7 @@
 {
   "adapters": {
     "claude": {
+      "connection_check": {"list": ["mcp", "list"], "sign_in": "Open Claude Code, type /mcp and sign in to {name} again."},
       "mcp_settings": [
         {"file": "{home}/.claude.json", "format": "json", "path": ["mcpServers"]},
         {"file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"]},
