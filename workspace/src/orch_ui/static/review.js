@@ -64,7 +64,7 @@ const verdictWord=e=>{const d=e.decision||{},k=e.card||{},n=(d.changes||[]).leng
  switch(d.action){
   case 'use':return 'Use '+d.picked;
   case 'use_with_changes':return 'Use '+d.picked+' with '+n+(n===1?' change':' changes');
-  case 'send_back':return 'Sent back for changes';
+  case 'send_back':return k.kind==='choice'?'Answered in your words':'Sent back for changes';
   case 'none_of_these':return 'None of these';
   case 'dont':return k.kind==='check'?'Sent back':"Don't do";
   case 'approve':return d.allows||k.ok_label||'Looks good';

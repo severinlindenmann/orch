@@ -742,6 +742,9 @@ def _decision(q: dict, card: dict, verdict: str, picked, note) -> dict:
         "replaced_by": None,
     }
     d["summary"] = summary(d, card)
+    if action == "send_back" and card.get("kind") == "choice":
+        # own words on a question (as on Home's "Write your own"): the words are the answer
+        d["summary"] = _clip("; ".join(changes), 400)
     return d
 
 
