@@ -14,3 +14,4 @@ gitignore = [".orch/addons/services/"]
 [dashboard]
 label = "Services"
 icon = "box"
+subtitle = "What keeps running on this computer for this workspace."

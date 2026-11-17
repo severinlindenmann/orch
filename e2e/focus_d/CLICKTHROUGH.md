@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-26 steps: 8 ready (the script clicks them), 18 pending (not built yet).
+26 steps: 9 ready (the script clicks them), 17 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -95,20 +95,20 @@ Must be seen:
 ## 6. Focus button on a ticket and Open ticket on a session
 
 - Part: wall (draft D feature 3)
-- State: pending, waits for: The wall (crew task wall)
+- State: ready, clicked by the script
 - Pictures: `fd-06-focus-button-1280.png`, `fd-06-focus-button-1920.png`, `fd-06-focus-button-390.png`
 
 Do:
 
-1. Open a ticket page.
-2. Press its Focus button.
-3. In the session press Open ticket.
+1. Open Tickets and press the Focus button of a row.
+2. Open a ticket page and press its Focus button.
+3. In the session press Open ticket, also from full screen.
 
 Must be seen:
 
-- The button says Watch, Answer, Open or Start to fit the ticket.
-- The session opens in the layer.
-- Open ticket goes back to the same ticket page.
+- Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
+- The session opens in the layer and the page stays.
+- Open ticket goes back to the same ticket page; the session stays open.
 
 ## 7. Pin a session and give it your own name
 

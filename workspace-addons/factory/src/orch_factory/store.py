@@ -65,8 +65,12 @@ def validate(value, definition):
     schema["$ref"] = "#/$defs/" + definition
     schema.pop("oneOf")
     errors = list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(value))
-    if errors:
-        raise Refused("The Factory data does not match " + definition + ": " + errors[0].message, "invalid")
+    if errors:  # every problem at once (ORCH-267: one refusal per long line cost three rounds)
+        lines = [_where(e) + _what(e) for e in sorted(errors, key=lambda e: list(map(str, e.path)))]
+        head = "The Factory data does not match " + definition + ": "
+        if len(lines) > 1:
+            head += f"{len(lines)} problems, fix them all at once: "
+        raise Refused(head + "; ".join(lines[:20]), "invalid")
     if definition == "proposal":
         for h in value.get("handovers") or []:
             for f in (h.get("sends") or {}).get("files") or []:
@@ -76,6 +80,23 @@ def validate(value, definition):
                         "(relative, no dot folders, no '..', no extra spaces): rename the file or pick another.",
                         "invalid",
                     )
+
+
+def _what(error):
+    """The problem in plain words; a too-long text says its length and the real limit, not the whole text."""
+    if error.validator == "maxLength" and isinstance(error.instance, str):
+        return f"{len(error.instance)} characters, at most {error.validator_value}"
+    if error.validator == "minLength" and isinstance(error.instance, str):
+        return "empty"
+    return error.message[:160]
+
+
+def _where(error):
+    """Where a schema problem is, in the file's own words: "tasks[2].title: "; nothing for the whole file."""
+    out = ""
+    for part in error.path:
+        out += f"[{part}]" if isinstance(part, int) else ("." if out else "") + str(part)
+    return out + ": " if out else ""
 
 
 HANDOVER_FILE_CHARS = set(" _./()-")

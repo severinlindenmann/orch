@@ -84,7 +84,8 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
    `orch factory decide` under a valid autopilot grant.
 2. **Only questions about a frozen file count**: the question's `action` (stored by the core when it was asked) must name a
    file whose bytes still hash to `action.hash`, and the question text and options must equal what Factory renders from that
-   file. A `factory:*` question an agent added with other text or another file is ignored. The journal is bookkeeping
+   file, in today's words or an earlier wording Factory keeps (`render.EARLIER_START_LABELS`), so a release that changes
+   card words never disowns questions asked before it. A `factory:*` question an agent added with other text or another file is ignored. The journal is bookkeeping
    (idempotency, `consumed`, reconcile), never an authority source: it is a workspace file an agent could edit.
 3. **Derived every time**: start, stops, accepted changes and grants are computed from (1)+(2) on each command. `ext.factory`
    is a cache for the dashboard; when it disagrees, the add-on refuses and logs it.
