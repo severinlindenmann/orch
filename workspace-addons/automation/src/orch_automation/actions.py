@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import orchcli, scripts
-from .loop import record_last_run, script_of, start_script
+from .loop import group_of, record_last_run, script_of, start_group, start_script
 
 VERBS = ("on", "off", "toggle", "run", "delete", "repeat", "copy", "allow-script")
 KEY = re.compile(r"[0-9a-f]{64}")
@@ -59,7 +59,7 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         return {"ticket": new["id"], "text": "Copy created."}
     sched = (t.get("ext") or {}).get("automation") or {}
     if verb == "allow-script":
-        name = script_of(t)
+        name = _to_allow(root, t)
         if not name:
             raise Bad("This repeat runs no script.")
         if not isinstance(value, str) or not KEY.fullmatch(value):
@@ -70,8 +70,15 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
             raise Bad(str(e)) from None
         return {"ticket": target, "script": name, "allowed": True, "text": "Script allowed."}
     if verb == "run":
-        name = script_of(t)
-        r = start_script(root, t, name) if name else orchcli.run_start(root, target, by=by)
+        group = group_of(t)
+        name = script_of(t) or (", ".join(sorted(group)) if group else None)
+        r = (
+            start_group(root, t, sorted(group))
+            if group
+            else start_script(root, t, name)
+            if name
+            else orchcli.run_start(root, target, by=by)
+        )
         if r["result"] == "failed":
             raise Bad(r["reason"])
         if sched:  # a manual run counts as the last run (same writer as the schedule); re-read: the run bumped the revision
@@ -98,6 +105,13 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
     return {"ticket": target, "paused": paused, "text": "Switched off." if paused else "Switched on."}
 
 
+def _to_allow(root: Path, t: dict | None) -> str | None:
+    """The script an Allow click is about: the repeat's script, or the first script of its group not allowed yet."""
+    from .view import waiting_script
+
+    return (waiting_script(root, t) if group_of(t) else None) or script_of(t)
+
+
 def review(root: Path, verb: str, target: str) -> dict:
     """What the person reads before a confirming click (`act <verb> --proof-target -- <ticket>`; changes nothing).
     allow-script: the script's command in full and a target ending in the entry's key; the click sends that key back
@@ -107,7 +121,7 @@ def review(root: Path, verb: str, target: str) -> dict:
     if not isinstance(target, str) or not TID.fullmatch(target):
         raise Bad("That is not a ticket id.")
     t = next((x for x in orchcli.tickets(root) if x["id"] == target), None)
-    name = script_of(t)
+    name = _to_allow(root, t)
     argv = scripts.load(root).get(name) if name else None
     if not argv:
         raise Bad("This repeat runs no script that is set up on this computer.")

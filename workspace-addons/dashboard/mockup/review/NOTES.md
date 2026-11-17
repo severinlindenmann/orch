@@ -30,3 +30,4 @@
   to do; a Factory proposal shows its title, goal and time like Home.
 - 17 Nov (ORCH-183, owner choice B): a Factory start on Review has Home's buttons Not now, Change it, Start (Start last), all
   outlined, in place of the three answers; the arrow keys do not answer it.
+- 17 Nov (ORCH-294): picture tiles of a card (Home row, ticket page, Answered) fill the row: Before and After, or A and B, side by side, each at least 320 px wide and 216-360 px tall (kit `.decision-shown` / `.decision-shot`, no page CSS). A card alone on Home shows all its pictures; a set shows the proposal of each card. A long "why" line on the ticket page folds to three lines with Show more / Show less (kit `UI.moreText`). Click or Enter still opens a picture large; every row names its ticket key. UX checklist at 1280, 1920 and 390 run in the PR.
