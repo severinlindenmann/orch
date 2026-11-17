@@ -35,7 +35,13 @@ echo "== secret scan probe"
 E "$UVH/tools/orch-workspace/bin/python" -I -c 'from pathlib import Path
 from orch import secretscan
 print(secretscan.find("Web preview\npython3", Path.cwd()))
-print(secretscan.find("Web preview\npython3", Path.cwd(), strict=False))'
+print(secretscan.find("Web preview\\npython3", Path.cwd(), strict=False))
+from orch import keystore
+try:
+    print(keystore.all_needles(Path.cwd()))
+except Exception as e:
+    print("KEYSTORE", type(e).__name__, e)'
+ls -ld "$H" "$OH" "$(dirname "$OH")"; stat -c '%a %U %n' "$H" "$OH" 2>/dev/null
 
 o add "Web preview" --id web-preview --port 18741 --ticket SW-1 -- python3 -m http.server 18741
 ok "add leaves it stopped" '[ "$(state web-preview)" = stopped ]'
