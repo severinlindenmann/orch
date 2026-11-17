@@ -111,7 +111,7 @@ class Replay:
         return True  # a recorded case writes nothing to GitHub
 
     def retryable(self, names: list[str]) -> str:
-        """Why these failed checks may be run again ('timeout', 'network'), or '' when one is a real failure."""
+        """Why these failed checks may run again ('timeout', 'network'), or '' when one is a real failure."""
         states = {c.get("name"): c.get("state") for c in self.polls_last()}
         if names and all(states.get(n) == "TIMED_OUT" for n in names):
             return "timeout"
