@@ -463,6 +463,11 @@ ACT_ARGS = {
     "relay.reply": {"to": "peer", "message": "m_abcdefghijklmnop", "text": "ok"},
     "relay.topic": {"message": "m_abcdefghijklmnop", "title": "A topic"},
     "message.send": {"workspace": "peer", "text": "hi"},
+    "logins.renew": {"name": "claude"},
+    "logins.status": {"name": "claude"},
+    "logins.cancel": {"name": "claude"},
+    "logins.code": {"name": "claude", "value": "abc#def"},
+    "logins.replace": {"name": "payments", "value": "new-key-value"},
 }
 
 
