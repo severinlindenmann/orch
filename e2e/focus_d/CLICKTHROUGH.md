@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 7 ready (the script clicks them), 18 pending (not built yet).
+25 steps: 8 ready (the script clicks them), 17 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -261,18 +261,20 @@ Must be seen:
 ## 15. Sessions without a ticket
 
 - Part: sessions (draft D feature 6)
-- State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
+- State: ready, clicked by the script
 - Pictures: `fd-15-no-ticket-1280.png`, `fd-15-no-ticket-1920.png`, `fd-15-no-ticket-390.png`
 
 Do:
 
 1. Open the New menu in the bar.
 2. Start an Empty helper, a Chat helper, a Plain terminal and the Manager.
+3. Open Focus and press one of the four buttons at its top.
 
 Must be seen:
 
 - The four choices are at the top of Focus and in the New menu.
-- Each new session is pinned by itself.
+- Each new session opens in the layer and is pinned by itself.
+- One that is open already says "Already open: go to it" and is not started twice.
 
 ## 16. Tool, model and open time on every session
 

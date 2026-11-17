@@ -143,19 +143,24 @@ function liveLayerPage() {
 function liveLayerName() {
   return addonLabel(liveLayerPage());
 }
-// A session the layer can show: a ticket of this workspace, named by its key (ORCH-12), never its raw id (sessions without a ticket come with their own task).
+// A session the layer can show: a ticket of this workspace, named by its key (ORCH-12), never its raw id; or an open
+// session without a ticket (state.sessions: empty helper, chat helper, plain terminal, Manager), named by its title.
 function liveLayerSession(key) {
   const t = array(state?.tickets).find(x => x.id === key || x.key === key);
-  if (!t) return null;
+  if (!t) {
+    const x = array(state?.sessions).find(o => o && o.id === key && o.open === true);
+    return x ? {pill:null, key:'', id:x.id, title:clean(x.title) || 'Session', running:!!state.runs?.[x.id]?.running, kind:x.kind} : null;
+  }
   const run = state.runs?.[t.id], helper = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
   const pill = window.UI?.ticketState && window.UI?.ticketPill ? window.UI.ticketPill(window.UI.ticketState(t, helper)) : null;
   return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(t.title) || 'Untitled', running:!!state.runs?.[t.id]?.running};
 }
 // The live sessions in the bar's order (needs you, pinned, working, idle; pages/livebar.js), else the ticket order.
 function liveLayerLive() {
-  const live = array(state?.tickets).filter(x => state.runs?.[x.id]?.running).map(x => x.id);
+  const live = [...array(state?.tickets).filter(x => state.runs?.[x.id]?.running).map(x => x.id),
+    ...array(state?.sessions).filter(x => x && x.open === true).map(x => x.id)];
   if (typeof liveBarModel !== 'function' || !window.DashHelpers?.helperState) return live;
-  const order = liveBarModel(state.tickets, state.runs, liveLayerPins(), window.DashHelpers.helperState).map(o => o.id);
+  const order = liveBarModel(state.tickets, state.runs, liveLayerPins(), window.DashHelpers.helperState, state.sessions).map(o => o.id);
   return live.sort((a, b) => (order.indexOf(a) + 1 || 1e6) - (order.indexOf(b) + 1 || 1e6));
 }
 // What Open shows when nothing was open yet: the first working helper.
@@ -258,9 +263,10 @@ function livePane(key, where, s, o) {
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned) : null)),
     h('div', {className:'live-pb'},
-      h('p', {}, sess ? (sess.running ? 'The helper’s session shows here.' : 'No helper is working on this ticket right now.') : 'This session is no longer in the list.'),
-      sess ? h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket'}, 'Open ticket') : null,
-      h('p', {className:'meta'}, 'The chat and the terminal of ' + name + ' come here next.')));
+      h('p', {}, !sess ? 'This session is no longer in the list.' : sess.kind === 'terminal' ? 'A plain terminal in this workspace, no helper.'
+        : sess.running ? 'The helper’s session shows here.' : sess.kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.'),
+      sess && !sess.kind ? h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket'}, 'Open ticket') : null,
+      h('p', {className:'meta'}, sess?.kind === 'terminal' ? 'The terminal itself comes here next.' : 'The chat and the terminal of ' + name + ' come here next.')));
 }
 // The layer's part of the bar: Open (when only the bar shows), Place with its menu, and in full screen the way out.
 function liveBarEnd(where, s) {

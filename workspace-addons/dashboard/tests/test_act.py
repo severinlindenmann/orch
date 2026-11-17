@@ -134,6 +134,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": 5}, "if_revision": 1}),
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
         ("run.start", {"ticket": "t_abcdef", "agent": "x"}),
+        ("session.new", {"kind": "ticket"}),
+        ("session.new", {"kind": "empty", "ticket": "t_abcdef"}),
+        ("session.new", {}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -300,6 +303,8 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
+        ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
         (
             {
                 "op": "pull.merge",

@@ -795,6 +795,18 @@ def _run_start(a):
     return ["run", "start", _tid(a.get("ticket"))], flags, []
 
 
+SESSION_KINDS = ("empty", "chat", "terminal", "manager")  # core sessions.KINDS (ORCH-364)
+
+
+def _session_new(a):
+    """The New menu of the live bar: a session without a ticket (empty helper, chat helper, plain terminal,
+    Manager), through the core's one start path. A second New of the same kind goes to the one that is open."""
+    _only(a, ("kind",))
+    if a.get("kind") not in SESSION_KINDS:
+        raise BadRequest("Choose an empty helper, a chat helper, a plain terminal or the Manager.")
+    return ["session", "new", a["kind"]], [], []
+
+
 def _run_send(a):
     _only(a, ("ticket", "text"))
     return ["run", "send"], [], [_tid(a.get("ticket")), _text(a.get("text"), "message")]
@@ -1119,6 +1131,7 @@ OPS = {
     "check.remove": _check_remove,
     "check.move": _check_move,
     "run.start": _run_start,
+    "session.new": _session_new,
     "run.stop": _run_stop,
     "run.send": _run_send,
     "run.take_back": _run_take_back,
