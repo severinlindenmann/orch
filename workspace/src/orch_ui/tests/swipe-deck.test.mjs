@@ -140,3 +140,12 @@ test('a merge card box: the checks as a status pill, rows with key and number, a
   assert.equal(box.querySelector('.doc-foot').textContent, 'Exact version: 89984e4');
   assert.equal(box.children[0], st, 'the checks come first');
 });
+
+test('ORCH-246: on a question with options the words box sends my answer, not "Send back for changes"', () => {
+  const q = {id: 'q', kind: 'choice', kindLabel: 'Choice', title: 'Which layout?', preview: {type: 'options', options: [{id: 'A', title: 'One'}, {id: 'B', title: 'Two'}]}};
+  const {host, talkBtn} = deck([q]);
+  talkBtn.click();
+  const labels = host.querySelector('.swipe-sheet').querySelectorAll('button').map(b => b.textContent);
+  assert.ok(labels.includes('Send my answer'));
+  assert.ok(!labels.includes('Send back for changes'));
+});
