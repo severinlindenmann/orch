@@ -40,7 +40,12 @@
   // plain words. Nothing restarted: this is never an update notice (those come from update.js after a real update).
   function signInNotice(r) {
     r.clone().text().then(function (t) {
-      if (t.indexOf("Sign in to ") !== 0 || document.getElementById("orch-signin")) return;
+      if (t.indexOf("Sign in to ") === 0) showSignIn(t);
+    }).catch(function () {});
+  }
+  function showSignIn(t) {
+    {
+      if (document.getElementById("orch-signin")) return;
       // never under an open dialog (a modal sits above the page): close it so the notice can be read
       Array.prototype.forEach.call(document.querySelectorAll("dialog[open]"), function (d) { try { d.close(); } catch (e) { /* gone */ } });
       var b = document.createElement("div");
@@ -51,7 +56,7 @@
       x.onclick = function () { b.remove(); };
       b.appendChild(x);
       (document.body || document.documentElement).insertBefore(b, (document.body || document.documentElement).firstChild);
-    }).catch(function () {});
+    }
   }
   var m = /[#&]launch=([A-Za-z0-9_-]{20,64})/.exec(location.hash || "");
   if (!m) return;
@@ -64,7 +69,9 @@
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token: m[1] }),
   }).then(function (r) {
-    if (!r.ok) return;
+    if (!r.ok) {  // a used or ended link: say so (the stopped page would stay on empty boxes with no word why)
+      return r.text().then(function (t) { showSignIn(t || "This sign-in link did not work. Open the dashboard again from orch."); });
+    }
     return r.json().then(function (j) {
       try { localStorage.setItem(KEY, j.secret || ""); } catch (e) { /* no storage: the page stays watch-only */ }
       try { sessionStorage.removeItem(KEY); } catch (e) { /* none */ }

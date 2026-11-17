@@ -529,3 +529,65 @@ def test_without_a_workflow_file_the_merge_goes_on(proj, tk, run, fake_gh, monke
     monkeypatch.setattr(ghmerge, "workflow_check", lambda url, head: None)
     code, _, _ = run("ref", "wait", tk, "--merge")
     assert code == 0 and len(merges) == 1
+
+
+def _timed_out(retry_state):
+    bad = {"name": "lint", "state": "TIMED_OUT", "bucket": "fail"}
+    ok = {"name": "build", "state": "SUCCESS", "bucket": "pass"}
+    again = {"name": "lint", "state": retry_state, "bucket": "pass" if retry_state == "SUCCESS" else "fail"}
+    return {"repo": "acme/app", "isDraft": False, "required": [], "polls": [[ok, bad], [ok, again]]}
+
+
+def test_a_timed_out_check_is_run_once_more_and_counted():
+    src = prwait.Replay(_timed_out("SUCCESS"))
+    v = prwait.wait(src)
+    assert v.green and v.retried == ["lint"] and src.reran == ["lint"]
+    from orch import checkretry
+
+    s = checkretry.summary()
+    assert s["total"] == 1 and s["checks"][0]["check"] == "lint" and s["checks"][0]["timeout"] == 1
+
+
+def test_a_check_that_times_out_again_is_red_after_one_retry():
+    src = prwait.Replay(_timed_out("TIMED_OUT"))
+    v = prwait.wait(src)
+    assert not v.green and "lint TIMED_OUT" in v.why and "once more" in v.why
+    from orch import checkretry
+
+    assert checkretry.summary()["total"] == 1  # one retry, never a second
+
+
+def test_a_real_failure_is_never_retried():
+    src = prwait.Replay(_timed_out("SUCCESS"))
+    src.polls[0][1]["state"] = "FAILURE"
+    v = prwait.wait(src)
+    assert not v.green and not v.retried and not hasattr(src, "reran")
+
+
+def test_a_network_failure_named_by_the_source_is_retried():
+    case = _timed_out("SUCCESS")
+    case["polls"][0][1]["state"] = "FAILURE"
+    case["networkFailed"] = ["lint"]
+    v = prwait.wait(prwait.Replay(case))
+    assert v.green and v.retried == ["lint"]
+    from orch import checkretry
+
+    assert checkretry.summary()["checks"][0]["network"] == 1
+
+
+def test_a_timeout_and_a_real_failure_together_are_not_retried():
+    case = _timed_out("SUCCESS")
+    case["polls"][0].append({"name": "unit", "state": "FAILURE", "bucket": "fail"})
+    v = prwait.wait(prwait.Replay(case))
+    assert not v.green and not v.retried
+
+
+def test_retry_summary_keeps_only_the_window_and_orders_by_count():
+    from orch import checkretry
+
+    checkretry.record("a/b", "1", "old", "timeout", now=10_000_000.0 - 40 * 86400)
+    for _ in range(2):
+        checkretry.record("a/b", "2", "flaky", "network", now=10_000_000.0)
+    checkretry.record("a/b", "3", "other", "timeout", now=10_000_000.0)
+    s = checkretry.summary(30, now=10_000_100.0)
+    assert [c["check"] for c in s["checks"]] == ["flaky", "other"] and s["total"] == 3

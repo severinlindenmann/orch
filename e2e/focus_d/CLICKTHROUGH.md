@@ -181,6 +181,7 @@ Must be seen:
 - Each place works and the page stays usable behind it; on a phone there is no right.
 - The layer stays open while the page changes.
 - Esc goes back one step: full screen, then the panel, then the bar.
+- In full screen Tab stays in the layer.
 - Minimise leaves only the bar; to the side leaves a slim edge.
 - After the reload the layer opens where it was last, at the same size.
 

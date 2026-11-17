@@ -332,7 +332,23 @@ function liveLayerPaint() {
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...s.panes];
   }
   document.body.dataset.liveLayer = where;
+  liveLayerInert(where === 'full');
   liveLayerPad();
+}
+// Full screen covers the page: the page behind leaves the Tab order and the screen reader (inert), so the keyboard
+// cannot wander into what is not shown (ORCH-340). Dialogs and live regions stay usable; only what this set is undone.
+function liveLayerInert(on) {
+  const dock = document.getElementById('live-dock');
+  for (const el of document.querySelectorAll('body > *, .shell-body > *')) {
+    if (on) {
+      if (el.inert || (dock && el.contains(dock)) || el.matches('script, dialog, [aria-live], [role=status], [role=alert]')) continue;
+      el.inert = true;
+      el.dataset.liveInert = '';
+    } else if (el.hasAttribute('data-live-inert')) {
+      el.inert = false;
+      delete el.dataset.liveInert;
+    }
+  }
 }
 // Keeps the page usable behind the layer: room at the bottom for the bar (and the bottom panel), at the right for the
 // right panel; the phone's bottom tab bar stays visible under it.
@@ -347,6 +363,7 @@ function liveLayerPad() {
   document.body.style.setProperty('--live-padr', where === 'right' && panel ? panel.offsetWidth + 'px' : '0px');
 }
 function liveLayerOff() {
+  liveLayerInert(false);
   document.getElementById('live-dock')?.remove();
   delete document.body.dataset.liveLayer;
   document.body.style.removeProperty('--live-pad');
@@ -412,10 +429,10 @@ document.addEventListener('keydown', e => {
   if (!document.getElementById('live-dock')) return;
   const grip = e.target.closest?.('[data-live-grip]');
   if (grip && /^Arrow(Up|Down|Left|Right)$/.test(e.key)) {
-    e.preventDefault();
     const dim = grip.dataset.liveGrip, panel = grip.closest('.live-panel'), now = dim === 'width' ? panel.offsetWidth : panel.offsetHeight;
     const grow = dim === 'width' ? e.key === 'ArrowLeft' : e.key === 'ArrowUp', shrink = dim === 'width' ? e.key === 'ArrowRight' : e.key === 'ArrowDown';
     if (!grow && !shrink) return;
+    e.preventDefault();
     liveLayerDo({type:'size', dim, px:now + (grow ? 24 : -24), room:dim === 'width' ? window.innerWidth : window.innerHeight}, '[data-live-grip]');
     return;
   }
@@ -442,13 +459,25 @@ document.addEventListener('pointerdown', e => {
     host.style.setProperty(dim === 'width' ? '--live-w' : '--live-h', px + 'px');
     liveLayerPad();
   };
+  let done = false;
   const up = () => {
+    if (done) return;  // pointerup and lostpointercapture both come: keep the size once
+    done = true;
     grip.removeEventListener('pointermove', move);
     delete grip.dataset.drag;
     liveLayerDo({type:'size', dim, px, room:room()}, '[data-live-grip]');
   };
   grip.addEventListener('pointermove', move);
-  grip.addEventListener('pointerup', up, {once:true});
-  grip.addEventListener('pointercancel', up, {once:true});
+  for (const end of ['pointerup', 'pointercancel', 'lostpointercapture']) grip.addEventListener(end, up, {once:true});
 });
-window.addEventListener('resize', () => { if (document.getElementById('live-dock')) { liveLayerPainted = ''; liveLayerPaint(); } });
+{
+  let frame = 0, phone = null;
+  window.addEventListener('resize', () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      if (!document.getElementById('live-dock')) return;
+      const now = liveLayerPhone();
+      if (now !== phone) { phone = now; liveLayerPainted = ''; liveLayerPaint(); } else liveLayerPad();  // the keyboard place and the open menu stay
+    });
+  });
+}
