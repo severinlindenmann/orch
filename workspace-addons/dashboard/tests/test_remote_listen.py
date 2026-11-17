@@ -226,3 +226,54 @@ def test_only_a_person_lets_other_computers_in(ws, monkeypatch):
     assert remote.settings(ws) is None
     monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda root: True)  # a test folder may (e2e lane)
     assert cli.main(["--dir", str(ws), "remote", "on", "--port", "8791"]) == 0
+
+
+def _go(port, secret, host):
+    return req(port, "GET", f"/go/{secret}", {"Host": host})
+
+
+def test_the_sign_in_bookmark_signs_in_again_and_a_new_one_kills_the_old(live):
+    """The standing sign-in link (owner's /go bookmark, built in): each visit gives a fresh one-time link."""
+    root, port, rport = live
+    secret = pagelaunch.standing_link_secret(root)
+    assert pagelaunch.standing_link_secret(root) == secret  # stable until renewed
+    c = http.client.HTTPConnection("127.0.0.1", rport, timeout=10)
+    c.request("GET", f"/go/{secret}", headers={"Host": f"{NAME}:{rport}"})
+    r = c.getresponse()
+    loc = r.getheader("Location")
+    assert r.status == 302 and loc.startswith("/#launch=")
+    st, ck, body = req(rport, "POST", "/session", outside(rport), {"token": loc.split("=", 1)[1]})
+    assert st == 200, body
+    cookie = ck.split(";")[0]
+    assert req(rport, "GET", "/api/state", outside(rport, cookie))[0] == 200
+    new = pagelaunch.standing_link_secret(root, new=True)
+    assert new != secret
+    assert _go(rport, secret, f"{NAME}:{rport}")[0] == 404  # the old bookmark is dead
+    assert _go(rport, new, f"{NAME}:{rport}")[0] == 302
+    assert _go(port, new, f"127.0.0.1:{port}")[0] == 302  # the loopback port knows it too
+
+
+@pytest.mark.parametrize("sent", ["", "x", "a" * 43, "../../etc"])
+def test_a_wrong_or_missing_bookmark_is_a_plain_404(live, sent):
+    root, _port, rport = live
+    assert _go(rport, sent or "a" * 43, f"{NAME}:{rport}")[0] == 404  # no bookmark made yet
+    pagelaunch.standing_link_secret(root)
+    assert _go(rport, sent or "b" * 43, f"{NAME}:{rport}")[0] == 404
+    assert pagelaunch.remove_standing_link(root)
+    assert not pagelaunch.standing_link_ok(root, sent)
+
+
+def test_only_a_person_makes_the_bookmark(ws, monkeypatch, capsys):
+    from orch import tickets
+
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda root: False)
+    assert cli.main(["--dir", str(ws), "remote", "link"]) == 2
+    with pytest.raises(Exception, match="Only a person"):
+        pagelaunch.standing_link_secret(ws)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    assert cli.main(["--dir", str(ws), "remote", "on", "--port", "8791", "--name", NAME]) == 0
+    capsys.readouterr()
+    assert cli.main(["--dir", str(ws), "remote", "link", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["url"].startswith(f"http://{NAME}:8791/go/")
+    assert cli.main(["--dir", str(ws), "remote", "link", "--remove"]) == 0

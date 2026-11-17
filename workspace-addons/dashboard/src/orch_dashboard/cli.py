@@ -62,7 +62,9 @@ def main(argv: list[str] | None = None) -> int:
     ):
         sub.add_parser(name, help=text).add_argument("--json", action="store_true")
     rm = sub.add_parser("remote", help="let other computers open the dashboard (with a sign-in link)")
-    rm.add_argument("action", nargs="?", choices=("on", "off", "status"), default="status")
+    rm.add_argument("action", nargs="?", choices=("on", "off", "status", "link"), default="status")
+    rm.add_argument("--new", action="store_true", help="link: a new bookmark (the old one stops working)")
+    rm.add_argument("--remove", action="store_true", help="link: remove the bookmark")
     rm.add_argument("--listen", default="0.0.0.0", help="address to listen on (default 0.0.0.0: all)")
     rm.add_argument("--port", help="the fixed port other computers use")
     rm.add_argument("--name", help="the name other computers use for this computer")
@@ -129,6 +131,8 @@ def _remote(args, root: Path) -> int:
     def out(data: dict, text: str) -> None:
         print(json.dumps(data) if args.json else text)
 
+    if args.action == "link":
+        return _link(args, root, out)
     try:
         if args.action == "on":
             if not args.port:
@@ -156,6 +160,40 @@ def _remote(args, root: Path) -> int:
     if args.action != "status":
         text += " Restart the dashboard to apply it: orch stop, then orch start."
     out({"on": s is not None, **({"url": remote.url(s), **s} if s else {})}, text)
+    return 0
+
+
+def _link(args, root: Path, out) -> int:
+    """The standing sign-in link (a bookmark that signs this browser in again; a person only)."""
+    from orch import pagelaunch
+    from orch.errors import Refused
+
+    if args.remove:
+        gone = pagelaunch.remove_standing_link(root)
+        out(
+            {"removed": gone},
+            "The sign-in bookmark was removed." if gone else "There was no sign-in bookmark.",
+        )
+        return 0
+    try:
+        secret = pagelaunch.standing_link_secret(root, new=args.new)
+    except Refused as e:
+        print(
+            json.dumps({"error": str(e)}) if args.json else f"Refused: {e}",
+            file=None if args.json else sys.stderr,
+        )
+        return 2
+    try:
+        s = remote.settings(root)
+    except remote.Invalid:
+        s = None
+    base = (remote.url(s) if s else None) or "http://<address of the dashboard>"
+    link = f"{base}/go/{secret}"
+    out(
+        {"url": link},
+        f"Sign-in bookmark: {link}\nOpening it signs that browser in (30 days). Keep it private like a password;"
+        " a new one: orch dashboard remote link --new.",
+    )
     return 0
 
 

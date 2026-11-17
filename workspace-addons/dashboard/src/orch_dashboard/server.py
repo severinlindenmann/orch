@@ -437,6 +437,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self._trace()
         path, _, query = self.path.partition("?")
+        if path.startswith("/go/"):
+            return self._standing_link(path[len("/go/") :])
         if not self._host_ok(path):  # DNS rebinding guard
             return self._send(421, b"misdirected request", "text/plain")
         if path == "/" and selfupdate.answer(self):
@@ -776,6 +778,28 @@ class Handler(BaseHTTPRequestHandler):
 
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
+    def _standing_link(self, sent: str):
+        """GET /go/<secret>: the person's standing sign-in link (a bookmark, see pagelaunch). Right secret: a
+        redirect to a fresh one-time launch link, which the page spends as with any sign-in link. Anything else
+        is 404, the same answer as an address that does not exist."""
+        try:
+            from orch import pagelaunch
+            from orch_ui.origin import any_host_ok
+        except ImportError:
+            return self._send(404, b"not found", "text/plain")
+        if (
+            self.session is None
+            or not any_host_ok((self.headers.get("Host") or "").strip())
+            or not pagelaunch.standing_link_ok(self.root, sent)
+        ):
+            return self._send(404, b"not found", "text/plain")
+        token = pagelaunch.write_launch_token(self.root, "dashboard")
+        if not token:
+            return self._send(503, b"Try again in a moment.", "text/plain")
+        self._send(
+            302, b"", "text/plain", {"Location": "/#launch=" + token, "Referrer-Policy": "no-referrer"}
+        )
 
     def _session_post(self):
         """POST /session: the page hands over the one-time sign-in token it got in the URL fragment; the server
