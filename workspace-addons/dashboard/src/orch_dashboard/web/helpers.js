@@ -14,12 +14,14 @@
   const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'Backlog';
   const columnOf = status => status;
   const STATUS_CHOICES = STATUS_ORDER.map(s => [s, STATUS_WORD[s]]);
-  // "Move to" offers these places; Needs you and Waiting are decided by the agent (or the board's Waiting lane).
-  const MOVE_CHOICES = [...STATUS_CHOICES.filter(([s]) => s !== 'waiting'), ['dropped', STATUS_WORD.dropped]];
   /* The board's lanes, left to right. "blocked" = Waiting: waits for a date, another ticket or the outside, with no
      open question. "superseded" = Won't do because another ticket replaces it (superseded_by). */
   const LANES = [['open', 'Backlog'], ['ready', 'To do'], ['active', 'Working'], ['waiting', 'Needs you'], ['blocked', 'Waiting'],
     ['review', 'Check'], ['done', 'Done'], ['dropped', "Won't do"], ['superseded', 'Superseded']];
+  /* "Move to" (ticket page, list, board card) offers every lane but Needs you, which only a helper's question makes.
+     Waiting asks for its date and reason, Superseded for the ticket that replaces it (ORCH-235: the same places
+     everywhere). */
+  const MOVE_CHOICES = LANES.filter(([lane]) => lane !== 'waiting');
   /* The lane of a ticket. `status` is the status as shown (a live helper that needs the person shows as waiting);
      `asks` is true while the ticket has an open question. */
   function laneOf(t, status, asks) {
@@ -38,6 +40,18 @@
     if (lane === 'superseded') return x.by ? {status: 'dropped', superseded_by: x.by} : null;
     if (lane === 'dropped') return {status: 'dropped', superseded_by: null};
     return STATUS_WORD[lane] ? {status: lane} : null;
+  }
+  /* ORCH-235: what a Waiting ticket waits for, in one line: "Waits until Mon 09:00 · The price list",
+     "Waits for ORCH-12", "Waits: the supplier". `all` finds the other ticket, `stamp(at)` says a time. '' = nothing known. */
+  function waitWords(t, all, stamp) {
+    const w = (t && t.waiting_on) || {}, ref = typeof w.ref === 'string' ? w.ref.trim() : '';
+    if (w.kind === 'ticket' && ref) {
+      const other = arr(all).find(o => o && (o.id === ref || (o.key && String(o.key).toLowerCase() === ref.toLowerCase())));
+      return 'Waits for ' + (other ? other.key || other.title : 'another ticket');
+    }
+    if (w.kind === 'time' && w.until) return 'Waits until ' + (stamp ? stamp(w.until) : w.until) + (ref ? ' · ' + ref : '');
+    if (w.kind === 'external' && ref) return 'Waits: ' + ref;
+    return '';
   }
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status', done_when: 'the Done when line'};
@@ -284,6 +298,7 @@
     if (answerable && /^[a-z][a-z0-9-]*:/.test(String(r.kind || ''))) return {label: 'Review', kind: 'review'};
     if (answerable) return {label: 'Answer', kind: 'answer'};
     if (r.kind === 'addon:not-running' && !r.ticket) return {label: 'Start', kind: 'start'};  // a background add-on that stopped
+    if (r.kind === 'overdue-wait' && r.ticket) return {label: 'Continue', kind: 'run'};  // ORCH-255: a passed wake time with no helper
     if (r.tone === 'bad' && r.ticket) return {label: 'Run again', kind: 'run'};
     return {label: 'Open', kind: 'open'};
   }
@@ -335,8 +350,9 @@
     for (const t of arr(tickets)) {
       const run = runs && runs[t.id], st = helperState(run, t);
       if (!st) continue;
-      const tasks = arr(t.checklist).filter(c => c && !c.wont_do), at = tasks.findIndex(c => c.state === 'doing');
-      const n = at >= 0 ? at : tasks.findIndex(c => !c.done);
+      // every task counts, a skipped one too, so "Step 3 of 4" matches the "3/4" of the Tickets list and the ticket
+      const tasks = arr(t.checklist).filter(Boolean), at = tasks.findIndex(c => !c.wont_do && c.state === 'doing');
+      const n = at >= 0 ? at : tasks.findIndex(c => !c.done && !c.wont_do);
       out.push({ticket: t, ...st, step: tasks.length && n >= 0 ? {n: n + 1, of: tasks.length} : null,
         minutes: Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
         idle: Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null,
@@ -795,5 +811,5 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
-  return {historyChange, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  return {historyChange, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });

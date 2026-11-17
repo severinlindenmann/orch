@@ -217,6 +217,9 @@ def fake_gh(monkeypatch):
 
     monkeypatch.setattr(prwait, "Live", lambda url: pulls[url])
     monkeypatch.setattr(prwait, "_run", run)
+    from orch import ghmerge
+
+    monkeypatch.setattr(ghmerge, "workflow_check", lambda url, head: None)  # never the real GitHub
     return pulls, merges
 
 
@@ -488,3 +491,41 @@ def test_a_before_merge_check_that_breaks_never_lets_the_merge_through(monkeypat
 
     o = prwait.run_one(src.url, True, src=src, before_merge=broken)
     assert not o.ok and o.status == "held" and "TimeoutError" in o.line and merges == [] and back == ["merge"]
+
+
+def test_a_green_workflow_change_goes_to_the_owners_merge_card_and_is_not_merged_here(
+    proj, tk, run, fake_gh, monkeypatch
+):
+    """ORCH-305: GitHub holds it for the owner (CODEOWNERS): one Merge card, no merge, no hand push."""
+    from orch import cli_review, ghmerge
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"), changed=[".github/workflows/addons.yml"])
+    seen = []
+    monkeypatch.setattr(
+        ghmerge, "workflow_check", lambda url, head: seen.append((url, head)) or {"files": []}
+    )
+
+    def card(args, root, tid, by):
+        assert (
+            args.merge and args.open == PR and args.link == "CI workflow change" and by.startswith("agent:")
+        )
+        return {}, {"id": "q4"}
+
+    monkeypatch.setattr(cli_review, "ask_card", card)
+    code, out, _ = run("ref", "wait", tk, "--merge", "--by", "agent:x")
+    assert code == 1 and merges == [] and seen == [(PR, HEAD)]
+    lines = out.strip().splitlines()
+    assert "the owner merges it with the Merge card q4" in lines[-2]
+    assert lines[-1].startswith("Next: GREEN; it changes a CI workflow, so the owner merges it")
+    assert _ref_status(proj, tk, PR) == "owner merges"
+
+
+def test_without_a_workflow_file_the_merge_goes_on(proj, tk, run, fake_gh, monkeypatch):
+    from orch import ghmerge
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    monkeypatch.setattr(ghmerge, "workflow_check", lambda url, head: None)
+    code, _, _ = run("ref", "wait", tk, "--merge")
+    assert code == 0 and len(merges) == 1
