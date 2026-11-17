@@ -538,7 +538,9 @@
   function preview(order, label, value) {
     const figure = node('figure'); figure.append(node('figcaption', label));
     if (validId(order.id) && imageName(value)) {
-      const img = node('img'); img.alt = label + ' review image'; img.src = prefix + '/api/order/' + order.id + '/file/' + value.split('/').map(encodeURIComponent).join('/');
+      const src = prefix + '/api/order/' + order.id + '/file/' + value.split('/').map(encodeURIComponent).join('/');
+      // in the dashboard's sandboxed frame a picture address carries the frame pass (kit/frame.js, ORCH-186)
+      const img = node('img'); img.alt = label + ' review image'; img.src = window.OrchFrame ? window.OrchFrame.url(src) : src;
       img.addEventListener('error', () => img.replaceWith(meta(label + ' image unavailable.')), {once:true}); figure.append(img);
     } else figure.append(meta(value ? 'Picture unavailable.' : 'No picture for this one yet.'));
     return figure;

@@ -286,7 +286,7 @@ function route() {
     if (open && !open[2].startsWith('/') && !open[2].includes('..') && addons().some(a => a.name === open[1] && a.page)) return {kind:'page', id:open[1], path:open[2], hash:'#addon/' + open[1] + (open[2] ? '/' + open[2] : '')};
     // An add-on page's own place can follow a second # (#addon/factory/#/order/<id>/proposal, Home's link to a
     // proposal): it goes to the frame as the page's own hash.
-    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?(?:#(\/[A-Za-z0-9_/-]*))?$/.exec(hash);
+    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?(?:#([A-Za-z0-9_/-]*))?$/.exec(hash);
     if (own && !(own[2] || '').startsWith('/') && !(own[2] || '').includes('..') && addons().some(a => a.name === own[1] && a.page)) return {kind:'page', id:own[1], path:own[2] || '', ...(own[3] ? {inner:own[3]} : {}), hash};
     if (hash.startsWith('#addon/')) {
       const id = decodeURIComponent(hash.slice(7));
@@ -306,10 +306,10 @@ function needsCountFrame() {
 }
 function postNeedsCount(n) {
   const win = needsCountFrame();
-  try { win?.postMessage({type:'orch.needs.count', count:n}, location.origin); } catch (_) { /* the page was left */ }
+  try { win?.postMessage({type:'orch.needs.count', count:n}, '*'); } catch (_) { /* the page was left */ }  // the frame's origin is opaque (sandboxed)
 }
 globalThis.addEventListener?.('message', e => {
-  if (e.origin !== location.origin || e.data?.orch !== 'needs-count' || !state) return;
+  if ((e.origin !== location.origin && e.origin !== 'null') || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
 function render(arrived = new Set()) {

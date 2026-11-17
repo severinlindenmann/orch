@@ -27,7 +27,8 @@ test('only the shown shipped add-on frame of this origin may ask; anything else 
   assert.equal(ctx.embedIdeaRequest(msg(frameWindow)).text, 'A page with our opening hours');
   assert.equal(ctx.embedIdeaRequest(msg(frameWindow)).addon, 'factory');
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), origin:'https://evil.example'}), null);
-  assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), origin:'null'}), null);
+  assert.notEqual(ctx.embedIdeaRequest({...msg(frameWindow), origin:'null'}), null);  // ORCH-186: the shown shipped frame is sandboxed
+  assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), origin:'null', source:{}}), null);  // ...but only that frame
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), source:{}}), null);
   assert.equal(ctx.embedIdeaRequest({...msg(frameWindow), source:null}), null);
   for (const bad of [{type:'orch.say'}, {type:'orch.idea.done'}, {id:'x'}, {id:5}, {id:'ABCDEFGH'}, {text:5}, {text:'   '}, {text:'---'}]) assert.equal(ctx.embedIdeaRequest(msg(frameWindow, bad)), null);
@@ -45,14 +46,14 @@ test("the person's click files the idea through the dashboard's own act and tell
   const {ctx, calls, frameWindow} = setup();
   await ctx.fileEmbedIdea(ctx.embedIdeaRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.acts), [['addon.act', {addon:'factory', verb:'idea', target:'A page with our opening hours'}]]);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.done', order:'t_new123', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.done', order:'t_new123', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
   assert.equal(calls.toasts.length, 1);
 });
 
 test('a refused act (no page session: watch-only) tells the page why, so it offers the Chat fallback', async () => {
   const {ctx, calls, frameWindow} = setup({result:{ok:false, status:403, text:'Sign in to do this: open the dashboard with a sign-in link from orch.'}});
   await ctx.fileEmbedIdea(ctx.embedIdeaRequest(msg(frameWindow)));
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 
 test("an answer without an order, or another add-on's answer, is a failure; too long is refused before any act", async () => {

@@ -27,7 +27,8 @@ test('only the shown shipped add-on frame of this origin, for a ticket of its ow
   const {ctx, frameWindow} = setup();
   assert.equal(ctx.embedSendRequest(msg(frameWindow)).ticket, 't_order01');
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), origin:'https://evil.example'}), null);
-  assert.equal(ctx.embedSendRequest({...msg(frameWindow), origin:'null'}), null);
+  assert.notEqual(ctx.embedSendRequest({...msg(frameWindow), origin:'null'}), null);  // ORCH-186: the shown shipped frame is sandboxed
+  assert.equal(ctx.embedSendRequest({...msg(frameWindow), origin:'null', source:{}}), null);  // ...but only that frame
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), source:{}}), null);
   assert.equal(ctx.embedSendRequest({...msg(frameWindow), source:null}), null);
   for (const bad of [{type:'orch.idea'}, {type:'orch.send.done'}, {id:'x'}, {ticket:'t_other01'}, {ticket:'t_zzzzzz'}, {ticket:'../x'}, {text:5}, {text:'  \n '}]) assert.equal(ctx.embedSendRequest(msg(frameWindow, bad)), null);
@@ -46,7 +47,7 @@ test("the click sends the person's message with the dashboard's own run.send, th
   const {ctx, calls, frameWindow} = setup();
   await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.acts), [['run.send', {ticket:'t_order01', text:'Now plan the run.'}], ['run.start', {ticket:'t_order01'}]]);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.done', ticket:'t_order01', delivered:false, queued:true, started:true, id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.done', ticket:'t_order01', delivered:false, queued:true, started:true, id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 
 test('an agent already working gets the message without a second start', async () => {
@@ -60,7 +61,7 @@ test('a refused send (no page session: watch-only) starts nothing and tells the 
   const {ctx, calls, frameWindow} = setup({results:{'run.send':{ok:false, status:403, text:'Sign in to do this: open the dashboard with a sign-in link from orch.'}}});
   await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
   assert.deepEqual(calls.acts.map(a => a[0]), ['run.send']);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 
 test('too long is refused before any act; a second click while sending sends once', async () => {

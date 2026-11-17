@@ -31,7 +31,8 @@ test('a valid message from the embedded shipped add-on iframe is accepted', () =
 test('foreign origin, other frame or window, null source, wrong type, bad ids are ignored', () => {
   const {ctx, frameWindow} = setup();
   assert.equal(ctx.embedQuestionRequest({...good(frameWindow), origin:'https://evil.example'}), null);
-  assert.equal(ctx.embedQuestionRequest({...good(frameWindow), origin:'null'}), null);
+  assert.notEqual(ctx.embedQuestionRequest({...good(frameWindow), origin:'null'}), null);  // ORCH-186: the shown shipped frame is sandboxed
+  assert.equal(ctx.embedQuestionRequest({...good(frameWindow), origin:'null', source:{}}), null);  // ...but only that frame
   assert.equal(ctx.embedQuestionRequest({...good({}), source:{}}), null);
   assert.equal(ctx.embedQuestionRequest({...good(frameWindow), source:null}), null);
   assert.equal(ctx.embedQuestionRequest(good(frameWindow, {type:'orch.answer'})), null);
@@ -52,7 +53,7 @@ test('opening shows the dashboard-owned question, takes nothing from the message
   assert.equal(calls.acts.length, 0, 'nothing is answered until the person presses an option');
   assert.equal(calls.posts.length, 0);
   context.onAnswered();
-  assert.deepEqual(JSON.parse(JSON.stringify(calls.posts)), [[{type:'orch.question.done', ticket:'t_abcdef', question:'q1'}, 'http://127.0.0.1:8000']]);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.posts)), [[{type:'orch.question.done', ticket:'t_abcdef', question:'q1'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 test('an unknown or already answered question says so plainly and mounts no card', async () => {
   const {ctx, calls, frame} = setup();

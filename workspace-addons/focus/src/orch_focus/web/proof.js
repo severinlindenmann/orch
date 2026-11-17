@@ -42,7 +42,9 @@
     }
     /* a page by path (not ?n=): its relative CSS, scripts and pictures then load from the same folder */
     const pageUrl = ev => P + '/page/' + encodeURIComponent(TID) + '/' + pageKey + '/' + fileName(ev).split('/').map(encodeURIComponent).join('/');
-    const url = (ev, mode) => mode === 'page' ? pageUrl(ev) : P + '/api/file?t=' + encodeURIComponent(TID) + '&n=' + encodeURIComponent(fileName(ev)) + '&m=' + mode;
+    /* a picture or file address in the dashboard's sandboxed frame carries the frame pass (kit/frame.js) */
+    const framed = u => (window.OrchFrame ? window.OrchFrame.url(u) : u);
+    const url = (ev, mode) => mode === 'page' ? pageUrl(ev) : framed(P + '/api/file?t=' + encodeURIComponent(TID) + '&n=' + encodeURIComponent(fileName(ev)) + '&m=' + mode);
 
     function title(ev, kind) {
       if (ev.type === 'file') return window.FocusHelpers.plainFileName(ev.ref) || 'File';

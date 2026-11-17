@@ -14,8 +14,8 @@
     const thumb = h('span', {class: 'thumb', text: kind});
     if (r && typeof r.preview === 'string' && r.preview.startsWith('/api/file?')) {
       const src = P + r.preview;
-      if (r.kind === 'image') {
-        const img = h('img', {alt: '', loading: 'lazy'}); img.src = src; thumb.replaceChildren(img);
+      if (r.kind === 'image') {  // in the dashboard's sandboxed frame a picture address carries the frame pass
+        const img = h('img', {alt: '', loading: 'lazy'}); img.src = window.OrchFrame ? window.OrchFrame.url(src) : src; thumb.replaceChildren(img);
       } else {
         fetch(src).then(x => x.ok && (x.headers.get('Content-Type') || '').startsWith('text/plain') ? x.text() : null)
           .then(txt => { if (txt) thumb.replaceChildren(h('pre', {text: txt.slice(0, 600).split('\n').slice(0, 8).join('\n')})); }).catch(() => {});

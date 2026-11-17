@@ -602,7 +602,7 @@ async function chatDmLoad(force = false) {
 function chatSayRequest(e) {
   const data = e && e.data;
   if (!data || typeof data !== 'object' || data.type !== 'orch.say' || typeof data.text !== 'string') return null;
-  if (e.origin !== location.origin || snapshot) return null;
+  if ((e.origin !== location.origin && e.origin !== 'null') || snapshot) return null;  // sandboxed frame: "null"
   const r = route();
   if (r.kind !== 'page' || !state?.addons?.find?.(a => a.name === r.id)?.shipped) return null;
   const frame = document.querySelector('iframe.embed[data-key="embed"]');

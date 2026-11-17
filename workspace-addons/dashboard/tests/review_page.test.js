@@ -125,7 +125,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
 });
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
   const src = read('app.js');
-  assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, location\.origin\)/);
+  assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, '\*'\)/);  // to the sandboxed frame only
   assert.match(src, /menuToggle\.textContent = [^\n]+\n\s*postNeedsCount\(needCount\);/);
   assert.match(src, /e\.data\?\.orch !== 'needs-count'/);
   assert.match(src, /\.shipped\) return null;/, 'only an add-on orch ships gets the number');

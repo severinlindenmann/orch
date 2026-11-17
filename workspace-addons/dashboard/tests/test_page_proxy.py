@@ -109,8 +109,11 @@ def test_a_shipped_addon_page_keeps_its_origin_and_a_local_one_does_not(stack):
     base, _ = stack
     _c, _b, shipped = call(base + "/addon/focus/")
     _c, _b, local = call(base + "/addon/viewer/")
-    assert "sandbox" not in shipped["Content-Security-Policy"]
-    assert "sandbox allow-scripts" in local["Content-Security-Policy"]
+    # ORCH-186: a page orch ships is sandboxed too (an opaque origin, never allow-same-origin): it acts with a pass
+    assert "sandbox allow-scripts allow-forms" in shipped["Content-Security-Policy"]
+    assert "allow-same-origin" not in shipped["Content-Security-Policy"]
+    assert "allow-top-navigation" not in shipped["Content-Security-Policy"]
+    assert local["Content-Security-Policy"].endswith("; sandbox allow-scripts")
 
 
 def test_an_addon_not_listed_as_shipped_is_sandboxed_fail_closed(ws, tmp_path):
@@ -308,9 +311,10 @@ def test_focus_page_files_load_cross_site_with_their_own_sandbox_csp(stack):
     assert call(base + "/addon/viewer/page/t_abcdef/0123456789abcdef/x.css")[0] == 200
     # a same-site request to a non-page path keeps the dashboard's own CSP
     _, _, h2 = call(base + "/addon/focus/t/t_abcdef")
+    assert "script-src" not in h2["Content-Security-Policy"]
     assert (
-        "script-src" not in h2["Content-Security-Policy"] and "sandbox" not in h2["Content-Security-Policy"]
-    )
+        "allow-same-origin" not in h2["Content-Security-Policy"]
+    )  # sandboxed, its own origin opaque (ORCH-186)
 
 
 def test_cross_site_page_path_needs_the_key_segment(stack):
@@ -485,3 +489,187 @@ def test_the_dashboard_vouches_for_a_signed_in_person_to_the_addon_page_from_any
     j = {"Content-Type": "application/json", "Origin": "https://orch.team.example:8791"}
     code, _, _ = call(base + "/addon/viewer/api/act", "POST", {**remote, **j, "X-Orch-Page": "secret"}, b"{}")
     assert code == 200 and SEEN[-1][2].get(pagesession.VOUCH_HEADER) == key
+
+
+# ORCH-186: the page orch ships runs in a sandboxed frame and acts with a frame pass for its add-on only.
+REMOTE = {"Host": "orch.team.example:8791"}
+FRAME = {
+    "Origin": "null",
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
+}
+
+
+def _with_person(monkeypatch, secret="s1"):
+    import functools
+
+    from orch import pagesession
+
+    person = _Person()
+    person.secret = secret
+    srv = LAST["srv"]
+    srv.RequestHandlerClass = functools.partial(srv.RequestHandlerClass, session=person)
+    monkeypatch.setattr(
+        pagesession, "vouch_key", lambda root, create=False: "workspace-vouch-key-" + "k" * 30
+    )
+    return person
+
+
+def _mint(base, addon="focus", headers=None):
+    h = {
+        "Content-Type": "application/json",
+        "Origin": base,
+        "Sec-Fetch-Site": "same-origin",
+        **(headers or {}),
+    }
+    return call(base + "/api/frame-pass", "POST", h, json.dumps({"addon": addon}).encode())
+
+
+def test_the_dashboard_page_gets_a_pass_for_a_shipped_page_only(stack, monkeypatch):
+    base, _ = stack
+    _with_person(monkeypatch)
+    code, body, _ = _mint(base, headers={"X-Orch-Page": "secret"})
+    assert code == 200 and json.loads(body)["act"] is True and len(json.loads(body)["pass"]) >= 40
+    code, body, _ = _mint(base)  # no sign-in on this computer: a read-only pass (it could read anyway)
+    assert code == 200 and json.loads(body)["act"] is False
+    assert _mint(base, headers=REMOTE)[0] == 403  # another computer without sign-in: none
+    assert _mint(base, "viewer", {"X-Orch-Page": "secret"})[0] == 404  # not shipped: never a pass
+    assert _mint(base, "nopage", {"X-Orch-Page": "secret"})[0] == 404
+    assert _mint(base, headers={"X-Orch-Page": "secret", "Sec-Fetch-Site": "cross-site"})[0] == 403
+    assert _mint(base, headers={"X-Orch-Page": "secret", "Origin": "null"})[0] == 403
+    # a frame can never mint a pass, not even with its own valid one
+    p = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["pass"]
+    assert _mint(base, headers={"X-Orch-Page": "secret", "X-Orch-Frame": p})[0] == 403
+
+
+def test_a_pass_works_for_its_own_addon_from_any_computer_and_is_readable_by_the_frame(stack, monkeypatch):
+    from orch import pagesession
+
+    base, _ = stack
+    _with_person(monkeypatch)
+    p = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["pass"]
+    for extra in ({}, REMOTE):
+        code, _, h = call(base + "/addon/focus/api/x", headers={**FRAME, **extra, "X-Orch-Frame": p})
+        assert code == 200 and h["Access-Control-Allow-Origin"] == "null"
+        assert SEEN[-1][2].get(pagesession.VOUCH_HEADER)  # the dashboard vouches for the person
+        assert "X-Orch-Frame" not in SEEN[-1][2]  # the add-on never sees the pass
+    j = {**FRAME, "Content-Type": "application/json", "X-Orch-Frame": p}
+    code, _, _ = call(base + "/addon/focus/api/act", "POST", j, b"{}")
+    assert code == 200 and SEEN[-1][2].get(pagesession.VOUCH_HEADER)
+    # a picture or file address carries it as a query value; the add-on gets the address without it
+    code, _, _ = call(
+        base + f"/addon/focus/api/file?t=t_abcdef&orch-frame={p}&m=view",
+        headers={**REMOTE, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"},
+    )
+    assert code == 200 and SEEN[-1][1] == "/api/file?t=t_abcdef&m=view"
+
+
+def test_a_pass_is_refused_for_another_addon_another_call_or_another_sign_in(stack, monkeypatch):
+    base, _ = stack
+    person = _with_person(monkeypatch)
+    p = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["pass"]
+    n = len(SEEN)
+    code, _, h = call(base + "/addon/viewer/api/x", headers={**FRAME, "X-Orch-Frame": p})
+    assert (
+        code == 401 and h["Access-Control-Allow-Origin"] == "null"
+    )  # readable: the frame asks for a new pass
+    assert (
+        call(base + "/api/state", headers={**FRAME, "X-Orch-Frame": p})[0] == 401
+    )  # not a call a frame makes
+    assert call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": "x" * 43})[0] == 401
+    assert (
+        call(
+            base + "/addon/focus/api/x",
+            headers={**FRAME, "Origin": "https://evil.example", "X-Orch-Frame": p},
+        )[0]
+        == 401
+    )
+    assert call(base + "/addon/focus/api/x", headers=FRAME)[0] == 403  # no pass, cross-site: as before
+    person.secret = "s2"  # a new sign-in ends every pass
+    assert call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": p})[0] == 401
+    person.secret, person.revoked = "s1", True  # so does a revoked session
+    assert call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": p})[0] == 401
+    assert len(SEEN) == n  # nothing reached an add-on
+
+
+def test_a_read_only_pass_reads_but_never_acts_or_vouches(stack, monkeypatch):
+    from orch import pagesession
+
+    base, _ = stack
+    _with_person(monkeypatch)
+    p = json.loads(_mint(base)[1])["pass"]
+    assert call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": p})[0] == 200
+    assert pagesession.VOUCH_HEADER not in SEEN[-1][2]
+    j = {**FRAME, "Content-Type": "application/json", "X-Orch-Frame": p}
+    call(base + "/addon/focus/api/act", "POST", j, b"{}")
+    assert pagesession.VOUCH_HEADER not in SEEN[-1][2]
+    code, body, _ = call(
+        base + "/api/term/keys", "POST", j, json.dumps({"ticket": "t_abcdef", "items": []}).encode()
+    )
+    assert code == 403 and body.decode().startswith("Sign in to ")
+
+
+def test_a_shipped_pages_own_code_loads_in_its_sandboxed_frame_and_nothing_else_does(stack):
+    base, _ = stack
+    code_of = lambda path, dest="script", extra=None: call(
+        base + path,
+        headers={**REMOTE, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": dest, **(extra or {})},
+    )[0]
+    assert code_of("/addon/focus/kit/frame.js") == 200
+    assert code_of("/addon/focus/web/focus.css", "style") == 200
+    assert code_of("/addon/focus/logo.svg", "image") == 200
+    assert code_of("/addon/viewer/web/x.js") in (401, 403)  # not shipped
+    assert code_of("/addon/focus/api/x.js") in (401, 403)  # data, whatever its ending
+    assert code_of("/addon/focus/web/x.js", "document") in (401, 403)  # not a page's own code
+    assert code_of("/addon/focus/t/t_abcdef", "script") in (401, 403)  # not a code file
+
+
+def test_the_preflight_of_a_frame_call_is_answered_only_for_frame_calls(stack):
+    base, _ = stack
+    ask = {
+        "Origin": "null",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type,x-orch-frame",
+    }
+    code, _, h = call(base + "/addon/focus/api/act", "OPTIONS", ask)
+    assert code == 204 and h["Access-Control-Allow-Origin"] == "null"
+    assert "X-Orch-Frame" in h["Access-Control-Allow-Headers"]
+    assert call(base + "/api/act", "OPTIONS", ask)[0] == 204
+    assert call(base + "/api/state", "OPTIONS", ask)[0] == 405
+    assert call(base + "/addon/viewer/api/act", "OPTIONS", ask)[0] == 405
+    assert call(base + "/addon/focus/api/act", "OPTIONS", {**ask, "Origin": "https://evil.example"})[0] == 405
+    assert (
+        call(
+            base + "/addon/focus/api/act",
+            "OPTIONS",
+            {**ask, "Access-Control-Request-Headers": "x-orch-frame,x-orch-page"},
+        )[0]
+        == 405
+    )
+    assert (
+        call(
+            base + "/addon/focus/api/act",
+            "OPTIONS",
+            {**ask, "Access-Control-Request-Headers": "content-type"},
+        )[0]
+        == 405
+    )
+
+
+def test_frame_passes_end_expire_and_stay_few():
+    from orch_dashboard.framepass import FramePasses
+
+    passes = FramePasses(life=60, limit=3)
+    a = passes.mint("focus", True, "tag")
+    assert passes.check(a, "tag") == ("focus", True)
+    assert (
+        passes.check(a, "other") is None
+        and passes.check(None, "tag") is None
+        and passes.check("short", "tag") is None
+    )
+    for _ in range(3):
+        passes.mint("focus", False, "tag")
+    assert passes.check(a, "tag") is None  # the oldest went first
+    short = FramePasses(life=-1)
+    assert short.check(short.mint("focus", True, "tag"), "tag") is None  # expired

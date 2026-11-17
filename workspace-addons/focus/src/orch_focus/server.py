@@ -55,7 +55,7 @@ TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
 }  # fmt: skip
-KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
+KIT_FILES = ("frame.js", "tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js", "widgets.css", "widgets.js")  # fmt: skip
 WEB_FILES = (
     "index.html",

@@ -1836,7 +1836,8 @@ async function openNeed(row, trigger) {
 const EMBED_TICKET = /^t_[a-z0-9]{6,16}$/, EMBED_QUESTION = /^q[A-Za-z0-9_-]{0,31}$/;
 // The frame of the shown page of an add-on shipped with orch, when this message came from it (same origin); else null.
 function shippedFrame(e) {
-  if (e.origin !== location.origin || snapshot) return null;  // a shared read-only copy acts on nothing
+  // the shipped add-on page is sandboxed (origin "null"); the frame check below is what counts
+  if ((e.origin !== location.origin && e.origin !== 'null') || snapshot) return null;  // a shared read-only copy acts on nothing
   const r = route();
   if (r.kind !== 'page' || !addons().find(a => a.name === r.id)?.shipped) return null;
   const frame = document.querySelector('iframe.embed[data-key="embed"]');
@@ -1876,7 +1877,7 @@ async function openEmbedQuestion(req) {
   }
   const host = el('div');
   d.append(host, actions);
-  const done = () => { try { req.frame.contentWindow?.postMessage({type:'orch.question.done', ticket:req.ticket, question:req.question}, location.origin); } catch (_) { /* The page was left. */ } };
+  const done = () => { try { req.frame.contentWindow?.postMessage({type:'orch.question.done', ticket:req.ticket, question:req.question}, '*'); } catch (_) { /* The page was left. */ } };
   mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, digest:q.digest, title:q.text, text:'', kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))}, {dialog:d, lock:'needs-you', onAnswered:done});
   window.orch.open(d);
 }
@@ -1899,7 +1900,7 @@ function embedIdeaRequest(e) {
 }
 let embedIdeaBusy = false;  // one idea at a time: a second click while saving is dropped
 async function fileEmbedIdea(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (req.text.length > IDEA_MAX) return reply({type:'orch.idea.failed', error:'An idea here has at most ' + IDEA_MAX + ' characters.'});
   if (embedIdeaBusy) return;
   embedIdeaBusy = true;
@@ -1931,7 +1932,7 @@ function embedLooksGoodRequest(e) {
 }
 let embedLooksGoodBusy = false;  // one batch at a time
 async function looksGoodAll(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (embedLooksGoodBusy) return;
   embedLooksGoodBusy = true;
   try {
@@ -1973,7 +1974,7 @@ function embedAskRequest(e) {
 }
 let embedAskBusy = false;  // one ask at a time: a second click while sending is dropped
 async function fileEmbedAsk(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (embedAskBusy) return;
   embedAskBusy = true;
   try {
@@ -2006,7 +2007,7 @@ function embedSendRequest(e) {
 }
 let embedSendBusy = false;  // one message at a time: a second click while sending is dropped
 async function sendEmbedMessage(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (req.text.length > EMBED_SEND_MAX) return reply({type:'orch.send.failed', error:'That is too long (at most ' + EMBED_SEND_MAX + ' characters).'});
   if (embedSendBusy) return;
   embedSendBusy = true;

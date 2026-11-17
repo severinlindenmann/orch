@@ -28,7 +28,8 @@ test('an add-on without a page keeps its own tab; path tricks fall back', () => 
 });
 test('an add-on page opens at its own place after a second # (Home links to a Factory proposal, ORCH-60)', () => {
   assert.deepEqual({...route('#addon/focus/#/order/t_abc12345/proposal', [FOCUS])}, {kind:'page', id:'focus', path:'', inner:'/order/t_abc12345/proposal', hash:'#addon/focus/#/order/t_abc12345/proposal'});
-  for (const hash of ['#addon/focus/#/a/../b', '#addon/focus/#x', '#addon/focus/#/a#/b']) assert.equal(route(hash, [FOCUS]).kind, 'notfound', hash);
+  assert.equal(route('#addon/focus/t/x#results', [FOCUS]).inner, 'results');  // a place a Focus link names (ORCH-186)
+  for (const hash of ['#addon/focus/#/a/../b', '#addon/focus/#a.b', '#addon/focus/#/a#/b']) assert.equal(route(hash, [FOCUS]).kind, 'notfound', hash);
 });
 test('unknown addresses are Page not found; empty and #home stay Home; a query keeps its route', () => {
   for (const hash of ['#nope', '#tickets/x', '#ticketsx', '#addon/missing']) assert.equal(route(hash, [FOCUS]).kind, 'notfound', hash);

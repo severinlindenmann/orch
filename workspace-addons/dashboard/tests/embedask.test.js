@@ -39,13 +39,13 @@ test("the person's click runs the add-on's ask act and tells the page it went ou
   const {ctx, calls, frameWindow} = setup();
   await ctx.fileEmbedAsk(ctx.embedAskRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.acts), [['addon.act', {addon:'factory', verb:'ask', target:TARGET}]]);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.ask.done', state:'delivered', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.ask.done', state:'delivered', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 
 test('a refused act tells the page why; an answer that does not confirm is a failure', async () => {
   let s = setup({result:{ok:false, status:403, text:'You already asked Design about this stop.'}});
   await s.ctx.fileEmbedAsk(s.ctx.embedAskRequest(msg(s.frameWindow)));
-  assert.deepEqual(plain(s.calls.posts), [[{type:'orch.ask.failed', error:'You already asked Design about this stop.', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(s.calls.posts), [[{type:'orch.ask.failed', error:'You already asked Design about this stop.', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
   for (const state of [{}, {act_answer:{addon:'sync', answer:{state:'delivered'}}}, {act_answer:{addon:'factory', answer:{state:'sent'}}}]) {
     s = setup({result:{ok:true, status:200, state}});
     await s.ctx.fileEmbedAsk(s.ctx.embedAskRequest(msg(s.frameWindow)));
@@ -69,5 +69,5 @@ test('a second click while sending asks nothing twice', async () => {
 test('a partly sent ask is reported with what went out, never as "nothing was sent"', async () => {
   const {ctx, calls, frameWindow} = setup({result:{ok:true, status:200, state:{act_answer:{addon:'factory', answer:{state:'partial', said:'Only part of it went out: the card.'}}}}});
   await ctx.fileEmbedAsk(ctx.embedAskRequest(msg(frameWindow)));
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.ask.done', state:'partial', said:'Only part of it went out: the card.', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.ask.done', state:'partial', said:'Only part of it went out: the card.', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });

@@ -19,6 +19,7 @@ from .store import Refused
 
 BUDGET = 2.0  # seconds one API answer may take before the last good one is returned
 KIT_FILES = (
+    "frame.js",
     "tokens.css",
     "components.css",
     "interaction.css",
