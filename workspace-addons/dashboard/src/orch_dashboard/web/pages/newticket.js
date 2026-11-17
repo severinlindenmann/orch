@@ -61,6 +61,7 @@ function ticketPreview(file) {
 function ticketFileChip(file, remove, label = file.name) {
   const row = el('li', 'new-ticket-file');
   const body = button('', 'new-ticket-file-main', () => ticketPreview(file));
+  if (file.type === 'image' && file.url) { const thumb = el('img', 'new-ticket-thumb'); thumb.alt = ''; thumb.src = file.url; body.append(thumb); }  // ORCH-185: a picture shows itself
   body.append(el('span', '', label));
   if (label === file.name && typeof sizeText === 'function') body.append(el('span', 'meta', sizeText(file.size)));
   const x = button('Remove', 'btn ghost xs new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + (label === file.name ? file.name : 'pasted text'));
@@ -70,10 +71,18 @@ function ticketFileChip(file, remove, label = file.name) {
 // The agent may rewrite the title only when the person did not type one (it came from a paste or a file name, or the
 // typed first line was clipped: a sentence, not a title).
 // typed: all the text in the box (for the title); short: what stays in the box (the note); long: the text kept as note.md.
+// ORCH-185: what was typed in New ticket survives Cancel, Esc, the backdrop and Back; the next New ticket brings it
+// back (with a Discard link) until the ticket is made. Pictures and files are not kept, only the text.
+let ticketDraft = null;
+const TITLE_MAX = 200, TITLE_PLACEHOLDER = 80, WISH_MIN = 40;
 function ticketFromText(typed, short, longText, files) {
-  const title = ticketTextTitle(typed.trim() ? typed : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length ? 80 : 200);
-  const titleAuto = typed.trim() ? ticketTextTitle(typed, Infinity).length >= 80 : true;
-  const note = short.length <= 1500 && (/[\r\n]/.test(short) || short.trim() !== title) ? short : '';
+  // ORCH-185: a first line over 200 characters is never cut and dropped: it is a sentence, so the title is a short
+  // placeholder (the agent writes the real one) and every word stays in the note or in the long text.
+  const firstLine = ticketTextTitle(typed, Infinity), wordy = firstLine.length > TITLE_MAX;
+  const title = ticketTextTitle(typed.trim() ? typed : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length || wordy ? TITLE_PLACEHOLDER : TITLE_MAX);
+  const titleAuto = typed.trim() ? firstLine.length >= TITLE_PLACEHOLDER : true;
+  // A one-sentence wish stays under "What you asked" too, not only a title (a short label such as "Fix login" is just the title).
+  const note = short.length <= 1500 && (/[\r\n]/.test(short) || short.trim() !== title || short.trim().length > WISH_MIN) ? short : '';
   return {title, title_auto:titleAuto, ...(note ? {note} : {}), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:ticketSendFiles(files)} : {})};
 }
 // A ticket inside the epic: long text (over 1500 characters) is kept as note.md, like the main box; an empty one is skipped.
@@ -115,8 +124,14 @@ function ticketForm(t) {
     inputs.text.required = empty;
     inputs.text.setCustomValidity(empty ? EMPTY_TICKET : '');
   };
+  let sent = false;
   d.addEventListener('close', () => {
     closed = true;
+    if (!t) {
+      const draft = {text:inputs.text.value, pasted:pastedText, done:inputs.done_when?.value || '', steps:steps.map(step => step.input.value)};
+      const has = draft.text.trim() || draft.pasted || draft.done.trim() || draft.steps.some(x => x.trim());
+      ticketDraft = !sent && has ? draft : null;
+    }
     for (const file of [...files, ...steps.flatMap(step => step.files)]) if (file.url) URL.revokeObjectURL(file.url);
   });
   if (!t) {
@@ -237,6 +252,7 @@ function ticketForm(t) {
       steps.push(step); stepList.append(box); renumber(); text.focus();
       return step;
     };
+    d.newStep = newStep;
     const addStep = button('', 'new-ticket-attach new-ticket-add-step', newStep);
     fields.append(stepHelp, stepList, addStep); renumber();
     // Helper: only the helpers this workspace has. One helper is fixed text; none is a plain empty state.
@@ -383,6 +399,7 @@ function ticketForm(t) {
         if (failed.length) result = {ok:false, status:0, text:'The epic was created, but not every ticket in it. ' + failed.join(' ') + ' Press the button again to send the rest.'};
       }
       if (result.ok && created) {
+        sent = true;
         window.orch.toast(startAfter ? (epicMade ? 'Epic created' : 'Ticket created') : 'Saved. The ' + (epicMade ? 'epic' : 'ticket') + ' is open; start it when you are ready.', 'ok');
         window.orch.close(d);
         await startNow();
@@ -401,5 +418,16 @@ function ticketForm(t) {
     await window.orch.close(d);
     await startNow();
   });
+  if (!t && ticketDraft) {
+    const draft = ticketDraft;
+    inputs.text.value = draft.text; pastedText = draft.pasted; inputs.done_when.value = draft.done;
+    for (const text of draft.steps) { const step = d.newStep?.(); if (step) step.input.value = text; }
+    updateAttachments(); updateValidity(); grow();
+    const note = el('p', 'meta new-ticket-draft', 'Your unsent text from before is back. ');
+    note.append(button('Discard', 'new-ticket-link', () => {
+      ticketDraft = null; inputs.text.value = ''; inputs.done_when.value = ''; pastedText = ''; updateAttachments(); updateValidity(); grow(); note.remove();
+    }));
+    fields.prepend(note);
+  }
   window.orch.open(d);
 }

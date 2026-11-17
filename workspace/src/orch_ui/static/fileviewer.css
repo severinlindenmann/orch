@@ -3,10 +3,17 @@ dialog.fv{position:fixed;inset:0;margin:auto;width:min(1152px,calc(100vw - 48px)
 dialog.fv[open]{display:flex;flex-direction:column;animation:fv-in var(--dur-base) var(--ease-enter)}
 dialog.fv::backdrop{background:rgb(0 0 0 / .8)}
 dialog.fv[data-kind=page],dialog.fv[data-kind=pdf]{width:min(1600px,calc(100vw - 32px));height:calc(100dvh - 48px)}
+/* ORCH-185: a picture gets the tall window like a page, and a smaller header, so a 640x480 picture is not cropped */
+dialog.fv[data-kind=image]{height:calc(100dvh - 48px)}
 dialog.fv.fs,dialog.fv.fs[data-kind=page],dialog.fv.fs[data-kind=pdf]{width:100vw;height:100dvh;border:0;border-radius:0}
 .fv-fs{position:absolute;top:16px;right:128px;z-index:6;margin:0}
 .fv-head{padding-right:290px}
 .fv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:20px 24px 12px;flex-shrink:0}
+@media (min-width:700px){
+dialog.fv[data-kind=image] .fv-head{padding-top:14px;padding-bottom:8px}
+dialog.fv[data-kind=image] .fv-head h2{font-size:18px;line-height:24px;margin-bottom:2px}
+dialog.fv[data-kind=image] .fv-meta{line-height:1.4}
+}
 .fv-titles{min-width:0}
 .fv-eyebrow{margin:0 0 4px;font-size:12px;line-height:20px;color:var(--text-muted)}
 .fv-eyebrow:empty{display:none}
@@ -25,6 +32,7 @@ dialog.fv>.ui-overlay-close{position:absolute;top:16px;right:24px;margin:0;z-ind
 .fv-search:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 .fv-frame{display:block;flex:1;width:100%;min-height:360px;border:0;background:#fff}
 .fv-image{flex:1;min-height:0;overflow:auto;display:grid;place-items:center;padding:16px}
+.fv-image.fit{grid-template-rows:minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
 .fv-image img{display:block;max-width:none}
 .fv-image.fit img{max-width:100%;max-height:100%;object-fit:contain}
 .fv-strip{display:flex;gap:8px}

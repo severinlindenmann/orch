@@ -84,3 +84,11 @@ test('b4: a long ticket title wraps to two lines then an ellipsis; shared-link r
   assert.doesNotMatch(style, /\.compact-actions\{[^}]*opacity:0/, 'row actions are not hidden until hover');
   assert.doesNotMatch(style, /\.compact-row:hover \.compact-actions/);
 });
+test('ORCH-185: a picture a person attached is an input (What you asked), not a Result; a helper file stays a result', () => {
+  const c = ctx(), t = {id:'t_one', status:'active', history:[
+    {by:'human:lume', text:'Attached hero.png'}, {by:'agent:claude', text:'Attached report.md'}, {by:'human:lume', text:'Changed the note'}]};
+  vm.runInContext("artifactData.set('t_one', {at:Date.now(), data:{files:[{name:'hero.png', size:99}, {name:'report.md', size:5}]}})", c);
+  c.t = t;
+  assert.deepEqual(vm.runInContext('JSON.stringify(inputFiles(t).map(f => f.name))', c), '["hero.png"]');
+  assert.deepEqual(vm.runInContext('JSON.stringify(artifactFiles(t).map(f => f.name))', c), '["report.md"]');
+});

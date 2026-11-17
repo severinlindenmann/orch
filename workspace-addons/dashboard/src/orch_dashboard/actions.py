@@ -58,9 +58,6 @@ ATTACH_EXT = frozenset(
     }
 )
 ATTACH_MAX = 25 * 1024 * 1024
-LONG_NOTE = (
-    "The full text is attached as note.md. Read it, then give this ticket a short title and description."
-)
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
 SHA = re.compile(r"[0-9a-f]{40,64}")
@@ -292,8 +289,6 @@ def _ticket_new(a):
         _text(long_text, "text", limit=MAX_LONG)
     for k in ("owner", "due", "note", "done_when"):
         v = a.get(k)
-        if k == "note" and long_text is not None and not v:
-            v = LONG_NOTE
         if v:
             v = _text(v, k)
             if k == "due" and not DAY.fullmatch(v):

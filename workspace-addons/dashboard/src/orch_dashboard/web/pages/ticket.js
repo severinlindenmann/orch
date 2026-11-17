@@ -586,7 +586,11 @@ const evidenceFile = (t, ev) => {
 // One file = one entry: lists keep the first item per key; items without a key (notes) all stay.
 const uniqueBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
 const proofKey = (t, ev) => evidenceFile(t, ev)?.name ?? (ev.ref ? (ev.type || ev.kind) + ':' + ev.ref : null);
-const artifactFiles = t => uniqueBy(array(artifactData.get(t.id)?.data?.files), f => f.name);
+// ORCH-185: a file a person attached (their history line "Attached <name>" is by a human) is what they asked with, not a result.
+const attachedInput = t => new Set(array(t.history).filter(e => e && /^human:/.test(String(e.by || '')) && /^Attached /.test(String(e.text || ''))).map(e => String(e.text).slice(9)));
+const allArtifactFiles = t => uniqueBy(array(artifactData.get(t.id)?.data?.files), f => f.name);
+const inputFiles = t => { const own = attachedInput(t); return allArtifactFiles(t).filter(f => own.has(f.name)); };
+const artifactFiles = t => { const own = attachedInput(t); return allArtifactFiles(t).filter(f => !own.has(f.name)); };
 const reviewFile = t => t.status === 'review' ? artifactFiles(t)[0] : null;
 function ticketResultCard(t, ev, file = null, kind = 'evidence') {
   const helpers = window.DashHelpers;
@@ -1065,7 +1069,8 @@ function ticketHistoryPanel(t) {
     const day = ticketHistoryDay(entry.at);
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
+      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')),
+      (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
   const controls = snapshot ? null : h('div', {className:'ticket-history-filters', role:'group', 'aria-label':'Show'}, ['All', 'People', 'Helper'].map(label => ticketButton(label, 'outline sm', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label)})));
   return card('history', 'Activity', '', [controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow('No history yet.')]);
@@ -1571,7 +1576,7 @@ function detail(t) {
     working && !helperLive ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,
     t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
-    note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note) : null,
+    note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
     working && helperLive ? sharedFolderLine(t) : null,
     t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
@@ -1660,7 +1665,8 @@ function startInline(control) {
     if (done) return;
     done = true;
     const value = MULTILINE.includes(field) ? input.value : input.value.trim();
-    if (save && value !== before && !(field === 'title' && !value)) await saveField(t, field, value);
+    if (save && field === 'title' && !value && before) window.orch.toast('A ticket needs a title. The old one is kept.', 'error');  // ORCH-185: never restore it silently
+    else if (save && value !== before) await saveField(t, field, value);
     locks.delete(key);
     render();
   };

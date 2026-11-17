@@ -1125,7 +1125,9 @@ def test_big_body_is_allowed_only_for_a_new_ticket(act_server, act_orch):
     assert s == 200
     c = acts(act_orch)[-1]
     assert c[:2] == ["ticket", "new"] and not any(a.startswith("--note=") and len(a) > 2100 for a in c)
-    assert any(a.startswith("--note=The full text is attached as note.md") for a in c)
+    assert not any(
+        a.startswith("--note=") for a in c
+    )  # ORCH-185: no helper instruction under "What you asked"
     s, _, _ = _post_raw(act_server, {"op": "log", "args": {"ticket": "t_abcdef", "text": "x"}, "pad": big})
     assert s == 400
     s, _, _ = _post_raw(act_server, {"op": "log", "args": {"ticket": "t_abcdef", "text": big[:30000]}})
@@ -1154,7 +1156,7 @@ def test_paste_long_text_keeps_the_note_short():
     text = "First line\n" + "word " * 800
     _, flags, tail = actions.OPS["ticket.paste"]({"text": text})
     assert tail == ["First line"]
-    assert flags == ["--title-auto", "--note=" + actions.LONG_NOTE]
+    assert flags == ["--title-auto"]  # ORCH-185: the Note stays empty; the text is the note.md file
     assert [n for n, _ in actions.attachments("ticket.paste", {"text": text})] == ["note.md"]
     # a short paste is unchanged: no file, the text is the note
     short = "Short title\nand some more"

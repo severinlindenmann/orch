@@ -408,3 +408,34 @@ test('ORCH-14: empty ticket boxes make no epic; a plain ticket is sent as before
   assert.equal(s.calls[0].args.epic, undefined);
   assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'run.start']);
 });
+
+test('ORCH-185: a first line over 200 characters keeps every word; a one-sentence wish stays in the note', () => {
+  const c = setup().c;
+  const long = 'Please make the report page faster because the people in sales wait too long for it to open every morning ' + 'and again '.repeat(20) + 'THE-END';
+  const a = c.ticketFromText(long, long, '', []);
+  assert.ok(a.title.length <= 80 && a.title.endsWith('…') && a.title_auto === true);
+  assert.equal(a.note, long);  // nothing dropped
+  const wish = c.ticketFromText('Add a dark mode to the settings page for night work', 'Add a dark mode to the settings page for night work', '', []);
+  assert.equal(wish.note, 'Add a dark mode to the settings page for night work');
+  assert.equal(c.ticketFromText('Fix login', 'Fix login', '', []).note, undefined);  // a short label is only the title
+});
+test('ORCH-185: Cancel, Esc or Back keep the typed text; the next New ticket brings it back; a sent ticket clears it', async () => {
+  const s = setup(), {c} = s;
+  s.input.value = 'Draft that must not be lost'; await s.input.fire('input');
+  await c.window.orch.close(s.d);  // Cancel, Esc, backdrop and Back all end here
+  c.ticketForm();
+  const d2 = c.document.body.children.at(-1), input2 = walk(d2).find(n => n.name === 'text');
+  assert.equal(input2.value, 'Draft that must not be lost');
+  assert.ok(walk(d2).some(n => n.className.includes('new-ticket-draft')));
+  walk(d2).find(n => n.textContent === 'Discard').click();
+  assert.equal(input2.value, '');
+  await c.window.orch.close(d2);  // empty: nothing kept
+  c.ticketForm();
+  assert.equal(walk(c.document.body.children.at(-1)).find(n => n.name === 'text').value, '');
+});
+test('ORCH-185: an added picture shows a thumbnail in its chip; a text file does not', () => {
+  const c = setup().c;
+  const img = walk(c.ticketFileChip({name:'hero.png', type:'image', size:99, url:'blob:x'}, () => {}));
+  assert.ok(img.some(n => n.tag === 'img' && n.className === 'new-ticket-thumb' && n.src === 'blob:x'));
+  assert.ok(!walk(c.ticketFileChip({name:'a.txt', type:'text', size:1, text:'x'}, () => {})).some(n => n.tag === 'img'));
+});
