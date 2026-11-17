@@ -415,6 +415,7 @@ ACT_ARGS = {
     "check.set": {"ticket": TID, "check": "c1", "done": True},
     "check.wont_do": {"ticket": TID, "check": "c1"},
     "ticket.model": {"ticket": TID, "model": "opus"},
+    "ticket.order": {"lane": "ready", "tickets": [TID]},
     "check.reopen": {"ticket": TID, "check": "c1"},
     "check.edit": {"ticket": TID, "check": "c1", "text": "x"},
     "check.remove": {"ticket": TID, "check": "c1"},
