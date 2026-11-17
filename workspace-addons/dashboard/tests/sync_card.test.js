@@ -409,3 +409,15 @@ test('ORCH-184: changing Sync in Settings drops the Sync page\'s saved view, so 
   assert.equal(vm.runInContext("addonViews.sync", c), undefined, 'a change drops it');
   assert.equal(vm.runInContext("!!addonViews.other", c), true, 'other add-ons keep theirs');
 });
+
+test('before the sync status is read no choice is selected (not a false Off), then the real mode shows', () => {
+  const {c, ui} = context();
+  ui.card = null;
+  const before = c.syncCard(ON);
+  assert.deepEqual(all(before, n => n.attrs?.type === 'radio').map(n => [n.attrs.value, n.checked, n.attrs.disabled]), [['off', false, true], ['local', false, true], ['remote', false, true]]);
+  assert.match(text(byKey(before, 'sync-unread')), /Reading the sync setting/);
+  ui.card = {...BASE, mode:'local', remote:null};
+  const after = c.syncCard(ON);
+  assert.equal(byKey(after, 'sync-where-local').checked, true);
+  assert.equal(byKey(after, 'sync-unread'), undefined);
+});

@@ -408,7 +408,7 @@ function syncCard(settings) {
   const paused = card?.shown === 'paused', blocked = paused || !!card?.public;
   const radios = SYNC_WHERE.map(([value, label]) => {
     const radio = h('input', {type:'radio', name:'sync-where', value, 'data-sync-where':value, 'data-key':'sync-where-' + value, disabled:off});
-    radio.checked = cur.where === value;
+    radio.checked = !!card && cur.where === value;  // no choice is shown before the real status is read (ORCH-287)
     radio.addEventListener('change', () => { syncUi.draft = {...syncNow(), where:value}; render(); });
     return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio, h('span', {}, label));
   });
@@ -463,6 +463,7 @@ function syncCard(settings) {
     paused && card.mode !== 'off' ? syncPausedHelp(card) : null,
     warn,
     h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
+    card ? null : h('p', {className:'meta', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…'),
     remoteBox, review, details]);
 }
 async function syncSave() {
