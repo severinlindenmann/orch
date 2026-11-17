@@ -425,10 +425,14 @@ def _ticket_changes(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "parent", "if_revision"))
+    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "parent", "release", "if_revision"))
     flags = []
     if "parent" in a:  # ORCH-156: "Part of": put the ticket under an epic, or None to take it out
         flags.append(f"--parent={_tid(a['parent']) if a['parent'] else ''}")
+    if "release" in a:  # ORCH-37: the Release switch on the ticket page (true marks it, false takes it off)
+        if not isinstance(a["release"], bool):
+            raise BadRequest("release is true or false.")
+        flags.append(f"--release={'yes' if a['release'] else 'no'}")
     for k in ("title", "owner", "due", "note", "done_when"):
         if k in a:
             v = _text(a[k], k, empty=k != "title")

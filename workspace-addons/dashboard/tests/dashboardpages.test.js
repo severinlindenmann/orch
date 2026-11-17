@@ -545,8 +545,35 @@ test('shell: quiet footer, one phone control while on, Ask the helper', () => {
   const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
   assert.match(web('style.css'), /\.side-foot:has\(#workspace-mode:empty\)\{display:none\}/);
   assert.doesNotMatch(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/, 'the sidebar switch stays while on; the chip is in the top bar');
-  assert.match(web('index.html'), />Ask the helper<\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
+  assert.match(web('index.html'), /aria-label="Ask the helper"[^>]*>.*<span class="btn-word-wide">Ask the helper<\/span><\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
   assert.doesNotMatch(web('app.js'), /tk\?\.key/); // no ticket key in the breadcrumb
+});
+// Report r-1117-1256-ws-2: phone width (390, 320) and 150% zoom. The rules are checked here; e2e/dash_page_health.cjs
+// measures the real pages at those sizes.
+test('phone and zoom layout: nothing pushes the page sideways or hides a menu item', () => {
+  const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
+  const kit = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/components.css'), 'utf8');
+  const source = web('app.js');
+  const style = web('style.css'), phone = style.slice(style.indexOf('@media(max-width:720px){\n  .shell{display:flex'));
+  const phoneBlock = phone.slice(0, phone.indexOf('\n}'));
+  // the ticket's action row may shrink and wrap on a narrow screen (it was flex:none, 490 px wide on a 390 px phone)
+  assert.match(web('pages/ticket.css'), /@media\(max-width:760px\)\{[^\n]*\.ticket-strip \.ticket-strip-actions\{flex:0 1 auto;min-width:0\}/);
+  // the phone top bar wraps instead of overlapping; the phone chip stays in the menu; both helpers' buttons show as icons
+  assert.match(phoneBlock, /\.topbar\{flex-wrap:wrap;/);
+  assert.match(phoneBlock, /\.topbar>#mm-chip\{display:none\}/);
+  assert.doesNotMatch(style, /#open-agent\{display:none\}/);
+  assert.match(web('index.html'), /id="report-problem"[^>]*aria-label="Report a problem"/);
+  assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Ask the helper"/);
+  // the open phone menu is the whole screen, with room for the bottom bar after its last row; any page change closes it
+  assert.match(phoneBlock, /\.shell:has\(>\.sidebar\[data-open=true\]\)>div>\.page\{display:none\}/);
+  assert.match(phoneBlock, /\.shell>\.sidebar\[data-open=true\]\{padding-bottom:calc\(var\(--touch\)/);
+  assert.match(source, /addEventListener\('hashchange', async \(\) => \{\n  if \(document\.querySelector\('\.sidebar'\)\?\.dataset\.open === 'true'\) setMenu\(false\);/);
+  assert.match(source, /closest\?\.\('#tabbar a'\)\) setMenu\(false\)/);
+  // the one-row top bar (900 px and more) lets the waiting line give way, so New ticket stays on screen at 150% zoom
+  assert.match(style, /\.topbar>\.topbar-wait\{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis\}/);
+  // the icon rail scrolls its list only when it does not fit above the foot
+  assert.match(kit, /\.sidebar:has\(\.nav-label\) \.sidebar-scroll\.cramped\{overflow-x:hidden;overflow-y:auto\}/);
+  assert.match(source, /classList\.toggle\('cramped', sideScroll\.scrollHeight > sideScroll\.clientHeight \+ 1\)/);
 });
 test('ticket saved views filter by status and the board shows Changes to add', () => {
   const items = [{id:'w',title:'W',status:'active',owner:'anna'}, {id:'r',title:'R',status:'review',owner:'ben'},
