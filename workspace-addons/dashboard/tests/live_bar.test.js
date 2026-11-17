@@ -58,6 +58,7 @@ test('loaded before app.js, served as a page module, painted on every render, na
   const src = fs.readFileSync(path.join(WEB, 'pages/livebar.js'), 'utf8');
   assert.doesNotMatch(src.replace(/\.focus\(\)|focusKey/g, ''), /\b(focus|automation|factory|insights|relay)\b/i, 'found by its live_session capability, never by name');
   assert.match(src, /live_session === true/);
+  assert.match(src, /querySelector\('\.shell-body \[data-keep\]'\)/, 'the bar goes into the keep place of soft page changes when it exists');
   assert.match(src, /LiveBar = \{\s*\/\/[^\n]*\n\s*mount\(host\)/, 'another page can move the bar into its own mount point');
 });
 

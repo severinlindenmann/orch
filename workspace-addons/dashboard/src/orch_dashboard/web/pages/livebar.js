@@ -7,8 +7,9 @@
 // Data: the helpers of the state API (runs + tickets, the same one state word as Home). Pinning is not stored by orch
 // yet (the wall builds it): until then the pinned ids are read from this browser only (LIVEBAR_PINS).
 //
-// Mount: the bar is one element (#live-bar). It sits at the end of .shell-body by default; a page that keeps a layer
-// across page changes moves it with LiveBar.mount(host) and the bar stays the same element (its open list included).
+// Mount: the bar is one element (#live-bar). It goes into the dashboard's keep place ([data-keep], the mount point that
+// outlives page changes) when there is one, else at the end of .shell-body; LiveBar.mount(host) moves it anywhere else
+// and it stays the same element (its open list included).
 const LIVEBAR_PINS = 'orch.live.pins';
 const LIVEBAR_LISTS = {
   wait: {sym:'◆', word:'need you', head:'Needs you'},
@@ -129,7 +130,8 @@ if (typeof module === 'object' && module.exports) {
     }
     function paint(force) {
       const a = liveAddon(), on = typeof livePreviewOn === 'function' && livePreviewOn() && !!a;
-      const host = bar.host?.isConnected ? bar.host : document.querySelector('.shell-body');
+      // the place that outlives a page change when the dashboard has one ([data-keep]), else the end of .shell-body
+      const host = bar.host?.isConnected ? bar.host : document.querySelector('.shell-body [data-keep]') || document.querySelector('.shell-body');
       if (!on || !host) {
         if (bar.el) { bar.el.remove(); bar.el = null; bar.sig = ''; }
         delete document.body.dataset.liveBar;
