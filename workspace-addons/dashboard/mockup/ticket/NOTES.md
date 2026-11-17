@@ -164,3 +164,10 @@ A feature wish (ORCH-81, owner pick A, 16 Nov; `&about=feature`): the button kee
 - A finished ticket with a merged pull request shows one line at the top: "In release 30 (installed here)" (green ✓),
   "In release 31, not installed here yet" (amber !) or "Merged, not released yet" (grey –). orch works it out from the
   merge commit and the installed release; no line when it cannot tell.
+
+## ORCH-185: what you asked, due day, activity (17 Nov)
+
+- What you asked: pictures and files the person attached when making the ticket are listed there (with a thumbnail), not under Result. A one-sentence wish stays in the note.
+- Due shows the day ("Fri 20 Nov", the year only when it is not this year), never a bare "Fri".
+- Activity: a note edit keeps its own row with "Was: … → Now: …" (at most 200 characters each).
+- Picture viewer (kit): a picture gets the tall window and a smaller header at 700 px and wider, so a 640 × 480 picture is shown whole.

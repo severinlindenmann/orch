@@ -1,6 +1,6 @@
 [project]
 name = "orch-pull-requests"
-version = "0.1.0"
+version = "0.1.1"
 description = "Merge queue: pull requests wait in line and are merged in groups after one run of the checks."
 requires-python = ">=3.11"
 dependencies = []

@@ -93,3 +93,10 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 - `list.html`: up to 720 px the table gives way to grouped short rows (master `.short-group`): number and title, one fact, Answer where you are needed, else steps n/m or an Idle chip. The List/Board switch shows only on wide screens.
 - `list.html`, `../home/home.html`, `../review/review.html`, `../ticket/ticket-working.html`: the phone bottom bar (master `.tabbar`) Home, Tickets, Review with the one needs-you number, More opens the side menu.
+
+## ORCH-185: no lost input or silent cuts (17 Nov)
+
+- New ticket: text typed and then closed with Cancel, Esc or Back is kept and comes back the next time with "Your unsent text from before is back. Discard".
+- New ticket: an added picture shows a small thumbnail in its file row (kit `.thumbnail`).
+- Date picker (kit): today is marked with a ring and `aria-current="date"`.
+- Board: a sub-ticket that has its own card in the same column is no longer listed again inside its parent's card; sub-tickets in other columns still are.

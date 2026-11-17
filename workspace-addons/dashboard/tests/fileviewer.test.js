@@ -48,3 +48,10 @@ test('b4: the viewer copy button says it is local and says where it works', () =
   assert.doesNotMatch(source, /btn\('Copy link'/);
   assert.doesNotMatch(source, /Works only on this computer/);
 });
+
+test('ORCH-185: a picture gets the tall window and a small header so a 640x480 picture is not cropped', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/fileviewer.css'), 'utf8');
+  assert.match(css, /dialog\.fv\[data-kind=image\]\{height:calc\(100dvh - 48px\)\}/);
+  assert.match(css, /@media \(min-width:700px\)\{\s*dialog\.fv\[data-kind=image\] \.fv-head\{padding-top:14px/);
+  assert.match(css, /\.fv-image\.fit\{grid-template-rows:minmax\(0,1fr\)/);
+});
