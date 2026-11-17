@@ -29,6 +29,7 @@
                   changes:[str], words:{text, voice:[{text,secs}]}, pins:[{n,on,x,y,text}], summary, replaces, replaced_by}}
      answer({id, digest, verdict:'ok'|'no'|'talk', picked, note}) -> Promise<{ok, error?:{code,message}}>
                   note = {text, pins:[{n,on,x,y,text}]} when the person wrote words or marked spots
+     note({id, ticket, text}) -> Promise<{ok, error?}>   optional: "Add note" on the Comment sheet; saves words on the ticket, the card stays
      fileUrl(card, ref) -> string       URL of one reviewed file of that card or entry
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
@@ -213,7 +214,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{deckEl.replaceChildren();
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onNote:api.note?(it,text)=>api.note({id:it.id,ticket:it.ticketId,text}):undefined,canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus({preventScroll:true})};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
