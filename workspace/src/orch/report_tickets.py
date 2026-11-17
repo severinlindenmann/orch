@@ -134,7 +134,8 @@ def _words(folder: Path, man: dict) -> tuple[str, str]:
                 expected = parts[1].split("\n## ", 1)[0].strip()
         except OSError:
             pass
-    return note[:600], expected[:600]
+    # one line each, printable only: words from a report (maybe from another computer) add no lines
+    return plain(note, 600), plain(expected, 600)
 
 
 def _title(folder: Path, man: dict, note: str) -> str:
