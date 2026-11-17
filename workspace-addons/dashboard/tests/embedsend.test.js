@@ -18,6 +18,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, status = 'ready
     document:{querySelector:() => frame}, act:async (op, args) => { calls.acts.push([op, args]); return results[op] || {ok:true, status:200, state:op === 'run.send' ? {send_result:{id:'i_1', delivered:0, state:'none'}} : {}}; },
     addEventListener(){}, window:{orch:{toast(){}}}};
   ctx.orchFrameChan = () => 'ab'.repeat(16);  // the shown frame's per-frame code (settings.js, ORCH-186)
+  ctx.navigator = {userActivation:{isActive:true}};  // the person just clicked (ORCH-186 review M2)
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow};
 }
@@ -103,4 +104,14 @@ test('no extra run.start when a live session holds the words (only state "none" 
     assert.deepEqual(calls.acts.map(a => a[0]), ['run.send'], JSON.stringify(send_result));
     assert.equal(calls.posts[0][0].type, 'orch.send.done');
   }
+});
+
+
+// ORCH-186 review M2: nothing is done for a script alone, only right after the person's click.
+test('without a click of the person nothing is sent or started', async () => {
+  const {ctx, calls, frameWindow} = setup();
+  ctx.navigator.userActivation.isActive = false;
+  await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
+  assert.equal(JSON.stringify(calls).includes('"orch.send.failed"'), true);
+  assert.equal((calls.acts || []).length, 0);
 });

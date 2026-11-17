@@ -23,6 +23,7 @@ from orch import (
     cli_job,
     cli_leave,
     cli_look,
+    cli_manager,
     cli_needs,
     cli_record,
     cli_report,
@@ -345,7 +346,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -804,6 +805,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_github.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
     cli_chat.add_parsers(sub, common)
+    cli_manager.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
     notes = []
     if addon_lines:
@@ -1005,7 +1007,12 @@ def run(args: argparse.Namespace) -> None:
         or cli_github.dispatch(args, root)
     ):
         pass
-    elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root) or cli_shot.dispatch(args, root):
+    elif (
+        cli_chat.dispatch(args, root)
+        or cli_look.dispatch(args, root)
+        or cli_shot.dispatch(args, root)
+        or cli_manager.dispatch(args, root)
+    ):
         pass
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(
