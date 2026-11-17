@@ -172,3 +172,9 @@ A feature wish (ORCH-81, owner pick A, 16 Nov; `&about=feature`): the button kee
 - Activity: a note edit keeps its own row with "Was: … → Now: …" (at most 200 characters each).
 - Picture viewer (kit): a picture gets the tall window and a smaller header at 700 px and wider, so a 640 × 480 picture is shown whole.
 - `ticket-working.html` shows the attached picture (thumbnail, "attached by you") under What you asked and an Activity row with Was/Now. The picture viewer says "Attached by you" for such a file.
+
+## Add to this ticket (ORCH-238, 17 Nov)
+`ticket-working.html` shows the card at the top of the story: the helper's live screen (kit `.session-dock.in-card`,
+read only) above the shared composer (`kit/composer.js`). A person writes what is new, pastes screenshots or adds
+files; one click puts the files on the ticket and tells the helper (starts one when none runs; Send back in Review).
+It is the ticket page's own box, separate from Focus (owner answer on ORCH-238).
