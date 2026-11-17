@@ -1457,6 +1457,23 @@ def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
         build_argv("copies.clean", {"path": "/"})
 
 
+def test_triage_start_takes_only_known_lanes():
+    from orch_dashboard.actions import BadRequest, build_argv, needs_session
+
+    argv = build_argv("triage.start", {"lanes": ["working", "backlog"]})
+    assert argv[:5] == ["triage", "--start", "--json", "--lanes", "backlog,working"]  # board order
+    assert needs_session("triage.start")  # a person's click only
+    for bad in (
+        {},
+        {"lanes": []},
+        {"lanes": ["all"]},
+        {"lanes": "backlog"},
+        {"lanes": ["backlog"], "ticket": "t_x"},
+    ):
+        with pytest.raises(BadRequest):
+            build_argv("triage.start", bad)
+
+
 def test_copies_remove_orphaned_takes_one_folder_name_only():
     from orch_dashboard.actions import BadRequest, build_argv
 

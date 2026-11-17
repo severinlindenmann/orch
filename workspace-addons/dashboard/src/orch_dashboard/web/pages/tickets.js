@@ -557,12 +557,73 @@ function list() {
   syncTicketAddress();
   const visible = filteredTickets();
   const needN = typeof needsYouTotal === 'function' ? needsYouTotal() : 0;
-  const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null}), viewToggle()];
+  const pill = needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null;
+  const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(pill, triageButton())}), viewToggle()];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {className:'wide-only', 'data-key':'board-wide'}, board()), window.UI?.shortGroup ? phoneList(visible) : null);
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
     h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
     h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));
+}
+// ORCH-151: one helper goes through the tickets of the lanes the person picks (orch triage --start --lanes ...);
+// it opens the new Triage ticket. Lane ids and rules match the board lanes and core triage.lane_of.
+const TRIAGE_LANES = [['backlog', 'Backlog'], ['todo', 'To do'], ['working', 'Working'], ['needs-you', 'Needs you'], ['waiting', 'Waiting'],
+  ['check', 'Check'], ['done', 'Done'], ['wont-do', "Won't do"], ['superseded', 'Superseded']];
+const triagePicked = new Set(['backlog', 'todo', 'working', 'needs-you', 'waiting', 'check']);
+// The board's own lane rule (DashHelpers.laneOf, ORCH-152), named with the lane ids core triage takes.
+const TRIAGE_ID = {open:'backlog', ready:'todo', active:'working', waiting:'needs-you', blocked:'waiting', review:'check', done:'done', dropped:'wont-do', superseded:'superseded'};
+function triageLane(t) {
+  const asks = (t.questions || []).some(q => q && q.answer == null);
+  return TRIAGE_ID[window.DashHelpers.laneOf(t, t.status, asks)] || 'backlog';
+}
+function triageCounts() {
+  const n = Object.fromEntries(TRIAGE_LANES.map(([id]) => [id, 0]));
+  for (const t of tickets()) n[triageLane(t)]++;
+  return n;
+}
+const triageTotal = n => [...triagePicked].reduce((sum, id) => sum + (n[id] || 0), 0);
+const triageTitle = total => total ? 'Triage · ' + (total === 1 ? '1 ticket' : total + ' tickets') : 'Pick a lane with tickets';
+function triageButton() {
+  const n = triageCounts();
+  if (snapshot || !tickets().length) return null;
+  const title = h('strong', {'data-key':'triage-title'}, triageTitle(triageTotal(n)));
+  const start = triageStart(); start.disabled = !triageTotal(n);
+  const boxes = TRIAGE_LANES.filter(([id]) => n[id]).map(([id, label]) => {
+    const box = h('input', {type:'checkbox', 'data-key':'triage-lane-' + id});
+    box.checked = triagePicked.has(id);
+    box.addEventListener('change', () => {
+      if (box.checked) triagePicked.add(id); else triagePicked.delete(id);
+      const total = triageTotal(triageCounts());
+      title.textContent = triageTitle(total); start.disabled = !total;
+    });
+    return h('label', {className:'check-label'}, box, label + ' · ' + n[id]);
+  });
+  // Owner pick 17 Nov (draft B): count and Start triage on one line, lanes in two columns, one short line under.
+  // Starting a helper is never a one-click accident (UX D2/M1): the menu says what happens, then Start triage.
+  return h('details', {className:'menu', 'data-key':'triage'}, h('summary', {className:'btn outline sm'}, iconEl('spark'), 'Triage'),
+    h('div', {className:'menu-pop menu-pop-wide', role:'dialog', 'aria-label':'Triage'},
+      h('div', {className:'row between'}, title, start),
+      h('div', {className:'grid-2', role:'group', 'aria-label':'Lanes to go through'}, boxes),
+      h('p', {className:'meta'}, 'A helper updates, groups and closes them. Each change gets a line.')));
+}
+function triageStart() {
+  const node = button('Start triage', 'outline sm', startTriage);
+  node.setAttribute('data-key', 'triage-start');
+  return node;
+}
+async function startTriage(e) {
+  if (typeof changeUnavailable === 'function' && changeUnavailable()) return;
+  const lanes = TRIAGE_LANES.map(([id]) => id).filter(id => triagePicked.has(id));
+  if (!lanes.length) return;
+  const btn = e?.currentTarget; if (btn) btn.disabled = true;
+  btn?.closest?.('details')?.removeAttribute('open');
+  const known = new Set(tickets().map(t => t.id));
+  const result = await act('triage.start', {lanes});
+  if (btn) btn.disabled = false;
+  if (!result.ok) return window.orch.toast(changeError(result), 'error');
+  window.orch.toast('Triage started: a helper is going through the tickets', 'ok');
+  const made = tickets().find(t => !known.has(t.id) && String(t.title || '').startsWith('Triage '));
+  if (made) location.hash = href(made.id);
 }
 function ticketNotFound() {
   return fragment(h('section', {className:'not-found', 'data-key':'not-found'}, iconEl('search'), heading("We couldn't find that ticket", 'It may have been dropped or the link is old.'), h('div', {className:'row ticket-not-found'},

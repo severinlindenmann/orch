@@ -657,6 +657,30 @@ def _copies_clean(a):
     return ["copy", "clean", "--json"], [], []
 
 
+TRIAGE_LANES = (
+    "backlog",
+    "todo",
+    "working",
+    "needs-you",
+    "waiting",
+    "check",
+    "done",
+    "wont-do",
+    "superseded",
+)
+
+
+def _triage_start(a):
+    """Tickets > Triage: `orch triage --start --lanes <picked>` opens one Triage ticket with the list of the
+    picked lanes and starts a helper on it (core checks the lanes again)."""
+    _only(a, ("lanes",))
+    lanes = a.get("lanes")
+    if not isinstance(lanes, list) or not lanes or any(x not in TRIAGE_LANES for x in lanes):
+        raise BadRequest("Pick at least one lane.")
+    picked = [x for x in TRIAGE_LANES if x in lanes]
+    return ["triage", "--start", "--json", "--lanes", ",".join(picked)], [], []
+
+
 def _copies_remove_orphaned(a):
     """Remove the copies of a project that is gone or moved (a person's click; changes are saved first when git
     can reach the project, else the copies stay). `ws8` is the 8-character folder name `copies_disk` lists."""
@@ -1103,6 +1127,7 @@ OPS = {
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
+    "triage.start": _triage_start,
     "copies.remove_orphaned": _copies_remove_orphaned,
     "copies.retry": _copies_retry,
     "copies.approve": _copies_approve,

@@ -187,6 +187,13 @@ orch only records the wait. An add-on may wake the ticket when it is due; if non
 
 Read the parent first, work only in yours, keep it at most 3 levels deep. Close the sub-tickets before the parent.
 
+**Tidy the tickets** (triage)
+
+    orch triage [--lanes backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded]   # read-only list of what needs a look
+    orch triage --start [--lanes ...]   # one dated Triage ticket with that list, and one helper on it (never two at once)
+
+On a Triage ticket, follow its note: change tickets yourself, one 'Triage:' line on each, every change in the summary.
+
 **Plan big work**
 
 Big = several steps or several areas, clearly. A small request stays one ticket. For big work:
