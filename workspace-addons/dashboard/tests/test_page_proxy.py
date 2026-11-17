@@ -674,17 +674,17 @@ def test_frame_passes_end_expire_and_stay_few():
     from orch_dashboard.framepass import FramePasses, pass_tag
 
     passes = FramePasses(life=60, limit=4)
-    a, fa = passes.mint("focus", True, "tag")
+    a, fa = passes.issue("focus", True, "tag")
     assert passes.check(a, "tag", "header") == ("focus", True)
     assert passes.check(fa, "tag", "file") == ("focus", False)  # the file pass never acts
     assert passes.check(a, "tag", "file") is None and passes.check(fa, "tag", "header") is None
     assert passes.check(a, "other", "header") is None and passes.check(None, "tag", "header") is None
     assert passes.check("short", "tag", "header") is None
     for _ in range(2):
-        passes.mint("focus", False, "tag")
+        passes.issue("focus", False, "tag")
     assert passes.check(a, "tag", "header") is None  # the oldest went first
     short = FramePasses(life=-1)
-    assert short.check(short.mint("focus", True, "tag")[0], "tag", "header") is None  # expired
+    assert short.check(short.issue("focus", True, "tag")[0], "tag", "header") is None  # expired
 
     class S:
         secret, revoked = "s", False

@@ -471,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
         passes = getattr(self.server, "frame_passes", None)
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
-        header, file = passes.mint(name, act, self._pass_tag())
+        header, file = passes.issue(name, act, self._pass_tag())
         self._send(200, json.dumps({"pass": header, "file": file, "act": act}).encode(), "application/json")
 
     def do_OPTIONS(self):

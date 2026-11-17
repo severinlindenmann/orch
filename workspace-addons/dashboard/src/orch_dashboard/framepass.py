@@ -52,7 +52,7 @@ class FramePasses:
         # digest -> (addon, act, tag, expires, kind)
         self._passes: dict[str, tuple[str, bool, str, float, str]] = {}
 
-    def mint(self, addon: str, act: bool, tag: str) -> tuple[str, str]:
+    def issue(self, addon: str, act: bool, tag: str) -> tuple[str, str]:
         """(pass, file pass) for one add-on page."""
         header, file = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         now = time.time()
