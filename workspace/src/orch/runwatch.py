@@ -136,6 +136,12 @@ def only_waits_for_checks(agent_pid: int | None, table: list | None = None) -> b
     return bool(cmds) and all(c["check_wait"] for c in cmds)
 
 
+def runs_check_wait(agent_pid: int | None, table: list | None = None) -> bool:
+    """One of the commands the agent runs is a wait on checks (is_check_wait). Such a wait ends by itself
+    (its own timeout) and merges on green: the idle close must not kill it (ORCH-221)."""
+    return any(c["check_wait"] for c in tool_commands(agent_pid, table))
+
+
 def tool_commands(agent_pid: int | None, table: list | None = None) -> list[dict]:
     """The commands the agent runs right now through its shell tool (a test run, a CI watcher), oldest
     first: [{"label", "seconds", "pid", "check_wait"}]. One entry per tool shell: the program under it, else

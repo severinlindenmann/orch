@@ -67,7 +67,8 @@ function helperNeedsCard() {
     const action = typeof loginAction === 'function' ? loginAction(item, key, item.state === 'works') : null;
     return h('div', {className:'setting-row', 'data-key':key, 'data-state':item.state},
       h('div', {className:'row-label'}, settingsText('span', {}, D.needListName(item)), settingsText('p', {className:'meta'}, D.needKindWord(item))),
-      h('div', {className:'row-value'}, h('span', {className:'badge ' + st.tone}, st.word), stops ? settingsText('p', {className:'meta'}, stops) : null),
+      h('div', {className:'row-value'}, h('span', {className:'badge ' + st.tone}, st.word), stops ? settingsText('p', {className:'meta'}, stops) : null,
+        (typeof loginHowText === 'function' ? loginHowText(item) : '') ? settingsText('p', {className:'meta', 'data-key':key + '-how'}, (typeof loginHowText === 'function' ? loginHowText(item) : '')) : null),
       h('div', {className:'row-action'}, action));
   });
   return h('section', {className:'card', id:'needs', 'data-key':'settings-needs'},
@@ -934,24 +935,71 @@ function pageStopped(r) {
     h('div', {className:'row'}, h('p', {className:'grow'}, label + ' isn’t running.'),
       h('button', {type:'button', className:'btn primary sm', 'data-action':'start', 'data-key':'page-start'}, 'Start'))));
 }
+// Every add-on page runs sandboxed: its own origin is opaque, so a script in it can never read this page's
+// secret or reach into this page (ORCH-186). One orch ships acts with a pass for that add-on only, handed over in
+// the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
+const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
+const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+function framePass(name) {
+  if (framePasses.has(name)) return framePasses.get(name);
+  if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
+  framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
+    .then(r => r.ok ? r.json() : null)
+    .then(j => {
+      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew()});
+      else framePassFailed.set(name, Date.now());
+    })
+    .catch(() => framePassFailed.set(name, Date.now()))
+    .finally(() => { framePassAsks.delete(name); if (framePasses.has(name)) render(); }));
+  return null;
+}
+// A per-frame code the page's messages must carry: a document that is navigated into the frame (not the add-on's
+// own page, which got it in its address) cannot drive the dashboard (ORCH-186 review M1).
+function frameChanNew() { const b = new Uint8Array(16); crypto.getRandomValues(b); return Array.from(b, x => x.toString(16).padStart(2, '0')).join(''); }
+globalThis.orchFrameChan = () => { const r = route(); return r.kind === 'page' ? framePasses.get(r.id)?.chan || null : null; };
+// Passes go only to the add-on's own page (its start page and its own places such as t/<id>), never to one of
+// its files, pictures, answers or ticket pages (api/, page/, kit/, web/, or any name with a dot): those can carry
+// content an agent made (ORCH-186 review H1).
+const frameEntry = path => /^[A-Za-z0-9_\/-]{0,300}$/.test(path) && !/^(api|page|kit|web)(\/|$)/i.test(path) && !path.includes('//');
 function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
-  const src = '/addon/' + r.id + '/' + r.path + (r.inner ? '#' + r.inner : '');
-  const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
+  const shipped = !!addons().find(a => a.name === r.id)?.shipped, base = '/addon/' + r.id + '/' + r.path;
+  const entry = shipped && frameEntry(r.path), p = entry ? framePass(r.id) : null;
+  if (entry && !p) { const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; return wait; }
+  const src = entry ? base + '#orch-frame=' + p.pass + '&orch-file=' + p.file + '&orch-chan=' + p.chan + (r.inner ? '&' + r.inner : '') : base + (r.inner ? '#' + r.inner : '');
+  const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', sandbox:shipped ? SHIPPED_SANDBOX : 'allow-scripts'});  // allow alone: both log a warning (ORCH-186)
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
   if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }
-  // an add-on that orch did not ship gets an opaque origin: it cannot use the dashboard's session
-  if (!addons().find(a => a.name === r.id)?.shipped) frame.setAttribute('sandbox', 'allow-scripts');
-  else window.DiagTrail?.watchFrame(window, frame);  // a same-origin add-on page joins the action trail
   return fragment(skeleton, frame);
 }
+// The shown shipped add-on page asks to open another of its places (a link, or a fresh pass after a reload or an
+// expired one): the dashboard opens it, so the new page gets a pass. A link to the dashboard's own page moves it.
+globalThis.addEventListener?.('message', e => {
+  const d = e.data, r = route();
+  if (snapshot || e.origin !== 'null' || !d || (d.orch !== 'frame-go' && d.orch !== 'frame-top') || r.kind !== 'page') return;
+  const frame = document.querySelector('iframe.embed[data-key="embed"]');
+  if (!frame || e.source !== frame.contentWindow || !addons().find(a => a.name === r.id)?.shipped) return;
+  const hash = typeof d.hash === 'string' && /^[A-Za-z0-9_\/-]{0,200}$/.test(d.hash) ? d.hash : null;
+  if (hash === null) return;
+  if (d.orch === 'frame-top') { if (hash && d.chan && d.chan === globalThis.orchFrameChan()) location.hash = '#' + hash; return; }
+  const prefix = '/addon/' + r.id + '/', rel = typeof d.path === 'string' && d.path.startsWith(prefix) ? d.path.slice(prefix.length) : null;
+  if (rel === null || rel.startsWith('/') || !frameEntry(rel)) return;  // only the add-on's own page gets opened with a pass
+  if (d.fresh && d.chan && d.chan === globalThis.orchFrameChan()) {  // new passes only for the page that had the code
+    if (Date.now() - (frameFresh.get(r.id) || 0) < 5000) return;
+    frameFresh.set(r.id, Date.now()); framePasses.delete(r.id);
+  }
+  const next = '#addon/' + r.id + (rel ? '/' + rel : '') + (hash ? '#' + hash : '');
+  if (location.hash !== next) location.hash = next;
+  else render();
+});
 const framesLoaded = new Set();
 // A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
 const shellAddons = new Set();
 globalThis.addEventListener?.('message', event => {
-  const name = event.origin === location.origin && event.data?.orch === 'embed-shell' && /^\/addon\/([a-z][a-z0-9-]{1,31})\//.exec(String(event.data.path || ''))?.[1];
+  const ours = event.origin === location.origin || (event.origin === 'null' && !!event.data?.chan && event.data.chan === globalThis.orchFrameChan() && [...document.querySelectorAll('iframe.embed')].some(f => f.contentWindow === event.source));
+  const name = ours && event.data?.orch === 'embed-shell' && /^\/addon\/([a-z][a-z0-9-]{1,31})\//.exec(String(event.data.path || ''))?.[1];
   if (!name || shellAddons.has(name)) return;
   shellAddons.add(name);
   document.querySelectorAll('iframe.embed').forEach(f => { if ((f.getAttribute('src') || '').startsWith('/addon/' + name + '/')) f.classList.add('embed-shell'); });
@@ -1025,7 +1073,13 @@ function addonNotice(view) {
   if (snapshot || (op !== 'addon.start' && op !== 'addon.refresh')) return h('p', {className:tone}, clean(view.notice));
   return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':op === 'addon.start' ? 'start' : 'retry-addon'}, clean(b.label)));
 }
-let pendingRepeat = null;  // {title}: the repeat being saved, shown as a row
+let pendingRepeat = null;  // {tid, title, plan, removing}: the repeat being saved or removed, shown as a row
+// The cells of that row: "DEM-9 · Weekly report · Saving…" first, the new plan in the second cell (one line when one cell).
+function pendingCells(n, p) {
+  const head = p.title + (p.removing ? ' · Removing…' : ' · Saving…');
+  if (n < 2) return [head + (p.plan && !p.removing ? ' · ' + p.plan : '')];
+  return Array.from({length:n}, (_, i) => i === 0 ? head : i === 1 && !p.removing ? p.plan || '' : '');
+}
 function paintAddon(id) {
   const host = document.getElementById('addon-body'), a = addons().find(a => a.name === id);
   if (!host || host.dataset.name !== id || !a) return;
@@ -1043,13 +1097,15 @@ function paintAddon(id) {
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);
   }
-  // A repeat that is being saved shows as its own row ("Saving…") until the list has it.
+  // A repeat that is being saved or removed shows at once, with its number and plan, until the list has the change:
+  // in place of the ticket's own row when it has one, else as a new row on top.
   if (pendingRepeat && blocks) {
     const body = blocks.querySelector('table tbody'), first = body?.querySelector('tr');
+    const own = body ? [...body.querySelectorAll('[data-addon-edit]')].find(n => n.dataset.addonEdit === pendingRepeat.tid)?.closest('tr') : null;
     if (body && first) {
-      const cells = [...first.children].map((_, i) => h('td', {}, i === 0 ? pendingRepeat.title + ' · Saving…' : ''));
-      body.prepend(h('tr', {'data-key':'repeat-saving', role:'status'}, cells));
-    } else blocks.prepend(h('p', {className:'status-line', role:'status'}, pendingRepeat.title + ' · Saving…'));
+      const row = h('tr', {'data-key':'repeat-saving', role:'status'}, pendingCells((own || first).children.length, pendingRepeat).map(text => h('td', {}, text)));
+      if (own) own.replaceWith(row); else body.prepend(row);
+    } else blocks.prepend(h('p', {className:'status-line', role:'status'}, pendingCells(1, pendingRepeat)[0]));
   }
   reconcile(host, template);
   const slot = document.getElementById('addon-header');
@@ -1239,16 +1295,28 @@ function cronWords(cron) {
   if (f.length === 5 && f[0] === '0' && /^\*\/\d+$/.test(f[1]) && f.slice(2).every(x => x === '*')) return 'every ' + f[1].slice(2) + ' hours';
   return 'a custom plan';
 }
+// A saved repeat in plain words ("Repeats every Monday at 08:00"); a plan set by the helper in its own words.
+function savedRepeatWords(cron) {
+  const c = cronToChoice(cron), plan = c ? repeatPlan(c) : null;
+  if (plan?.phrase) return plan.summary;
+  const w = cronWords(cron);
+  return w === 'a custom plan' ? 'Repeats on a custom plan' : 'Repeats ' + w;
+}
+// A ticket as the repeat list names it: its number first ("DEM-9 · Weekly sales report").
+function repeatTicketName(t) { return (t.key ? t.key + ' · ' : '') + (t.title || t.id); }
 const REPEAT_UNITS = [['minutes', 'minutes'], ['hours', 'hours'], ['days', 'days']];
 const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];
 // The ticket is chosen in the window, or fixed when it is opened from a ticket's menu (`only`).
 function repeatsDialog(only = null, addonName = null) {
   if (snapshot) return;
-  const saved = only ? tickets().find(t => t.id === only)?.ext?.[addonName || repeatsAddon()] : null;
+  const key = addonName || repeatsAddon();
+  const repeatOf = id => { const x = tickets().find(t => t.id === id)?.ext?.[key]; return x?.recurring === true && x.cron ? x : null; };
+  const saved = only ? tickets().find(t => t.id === only)?.ext?.[key] : null;
   const had = saved?.recurring === true ? cronToChoice(saved.cron) : null;
   const {d, actions} = dialog(had ? 'Edit repeat' : 'New repeat', 'dialog repeat-dialog');
   const ticket = h('select', {className:'input', name:'ticket', id:'repeat-ticket'});
-  tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
+  tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(repeatTicketName(t) + (!only && repeatOf(t.id) ? ' · already repeats' : ''), t.id)));
+  const nameOf = id => repeatTicketName(tickets().find(t => t.id === id) || {id});
   const choice = had || {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00', unit:'minutes'};
   const outside = !had && saved?.recurring === true && saved.cron ? cronWords(saved.cron) : null;  // set by the helper: shown, never overwritten silently
   if (outside) Object.assign(choice, {freq:'custom', unit:'minutes', every:5});
@@ -1259,21 +1327,19 @@ function repeatsDialog(only = null, addonName = null) {
     const plan = repeatPlan(choice);
     if (save.disabled || !ticket.value || !plan.phrase) return;
     save.disabled = true;
-    // Close at once: saving takes a few seconds, so the list shows the repeat as "Saving…" until it is stored.
-    const target = ticket.value, addon = addonName || route().id, title = ticket.selectedOptions[0]?.textContent || 'Repeat';
-    await window.orch.close(d);
-    pendingRepeat = {title};
-    if (route().kind === 'addon') paintAddon(route().id);
-    // Saving always ends: the answer, or after 30 s a plain "taking too long" (the schedule may still have been saved)
-    let timer;
-    const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list, then try again.'}), 30000); });
-    let result;
-    try { result = await Promise.race([act('addon.act', {addon, verb:'repeat', target, value:plan.phrase}), late]); }
-    catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
-    finally { clearTimeout(timer); pendingRepeat = null; }
-    window.orch.toast(result.ok ? 'Repeat saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    if (route().kind === 'addon') await loadAddon(route().id);
+    const target = ticket.value;
+    await repeatSend(d, {addon:addonName || route().id, verb:'repeat', target, value:plan.phrase}, {tid:target, title:nameOf(target), plan:plan.summary}, 'Repeat saved.');
   });
+  // A new repeat for a ticket that already repeats replaces that plan: the window says so and Save says Replace
+  // (bug hunt 17 Nov: the old repeat was gone without a word).
+  const replaces = h('p', {className:'banner attn', role:'status', 'data-key':'repeat-replaces', hidden:true});
+  const refreshReplace = () => {
+    const old = only ? null : repeatOf(ticket.value);
+    replaces.hidden = !old;
+    replaces.textContent = old ? 'This ticket already repeats ' + savedRepeatWords(old.cron).replace(/^Repeats /, '') + '. Saving replaces that plan.' : '';
+    save.textContent = old ? 'Replace repeat' : 'Save repeat';
+  };
+  ticket.onchange = refreshReplace;
   const refreshSummary = () => {
     const plan = repeatPlan(choice);
     summary.textContent = plan.summary; hint.textContent = plan.hint;
@@ -1322,7 +1388,7 @@ function repeatsDialog(only = null, addonName = null) {
       input.onchange = () => { choice.freq = value; if (value === 'custom') { choice.unit = choice.unit || 'minutes'; if (choice.unit === 'minutes' && !(Number(choice.every) >= 5)) choice.every = 5; } draw(); };
       return h('label', {}, input, h('span', {}, label));
     }));
-  const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket),
+  const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket), replaces,
     h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary,
       outside ? h('p', {className:'meta', 'data-key':'repeat-set-by-helper'}, 'Set by your helper: ' + outside + '. Change it with the options above.') : null));
   if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
@@ -1335,18 +1401,39 @@ function repeatsDialog(only = null, addonName = null) {
   });
   draw();
   // An existing schedule: Save changes, or remove it (its tickets stay); a new one may also copy the ticket.
-  const remove = button('Delete repeat', 'outline danger', async () => {
+  // Delete asks first, in the window itself, and sits apart from Save (bug hunt 17 Nov: it acted at once, next to Save).
+  const sure = h('div', {className:'banner attn', role:'alert', 'data-key':'repeat-delete-confirm', hidden:true});
+  const remove = button('Delete repeat', 'outline danger', () => {
     if (remove.disabled) return;
-    remove.disabled = true;
-    const label = remove.textContent; remove.textContent = 'Removing…';
-    const result = await act('addon.act', {addon:addonName || route().id, verb:'delete', target:only});
-    window.orch.toast(result.ok ? 'Repeat removed. Its tickets stay.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    remove.disabled = false; remove.textContent = label;
-    if (result.ok) await window.orch.close(d);
-    if (route().kind === 'addon') await loadAddon(route().id);
+    remove.hidden = true; sure.hidden = false; yes.focus();
   });
-  if (had) actions.append(remove, save); else actions.append(copy, save);
-  d.append(fields, actions); window.orch.open(d);
+  const keep = button('Keep it', 'ghost', () => { sure.hidden = true; remove.hidden = false; remove.focus(); });
+  const yes = button('Delete repeat', 'danger', async () => {
+    if (yes.disabled) return;
+    yes.disabled = true; keep.disabled = true;
+    await repeatSend(d, {addon:addonName || route().id, verb:'delete', target:only}, {tid:only, title:nameOf(only), removing:true}, 'Repeat removed. Its tickets stay.');
+  });
+  sure.append(h('p', {className:'grow'}, 'Delete this repeat? It stops repeating. The ticket and its history stay.'), keep, yes);
+  if (had) { actions.prepend(remove, h('span', {className:'grow', 'aria-hidden':'true'})); actions.append(save); d.append(fields, sure, actions); }
+  else { actions.append(copy, save); d.append(fields, actions); }
+  refreshReplace();
+  window.orch.open(d);
+}
+// Save or Delete in the repeat window: it closes at once and the list shows the change ("Saving…" / "Removing…",
+// with the ticket's number) until it is stored. It always ends: the answer, or after 30 s a plain "taking too long"
+// (the change may still have been made).
+async function repeatSend(d, args, pending, okText) {
+  await window.orch.close(d);
+  pendingRepeat = pending;
+  if (route().kind === 'addon') paintAddon(route().id);
+  let timer;
+  const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list, then try again.'}), 30000); });
+  let result;
+  try { result = await Promise.race([act('addon.act', args), late]); }
+  catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
+  finally { clearTimeout(timer); pendingRepeat = null; }
+  window.orch.toast(result.ok ? okText : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  if (route().kind === 'addon') await loadAddon(route().id);
 }
 // `addon.prompt` (a row's Edit in an add-on view): one text line in a small window, prefilled; Save sends the add-on's
 // own verb with the new text. 1 to 200 characters; the add-on's refusal is shown here in one sentence.

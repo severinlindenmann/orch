@@ -323,3 +323,40 @@ def test_helpers_that_only_wait_for_checks_leave_their_slot_free(proj, new_ticke
         for p in procs_:
             p.kill()
             p.wait()
+
+
+def test_the_idle_close_never_kills_a_wait_for_checks(proj, new_ticket, monkeypatch):
+    """ORCH-221: six helpers idle at their prompt while `orch ref wait --merge` ran for them in the
+    background (CI took 30-50 min plus re-runs) were closed after the idle hour; the close killed the wait,
+    so their green pull requests stayed unmerged and nobody was told. A session running a wait on checks
+    stays open; one with nothing running, or only real work, still closes after the limit."""
+    from orch import runs_live
+
+    wait = f"{ORCH} ref wait t_abc --merge"
+    table = (
+        _waiter_table(21, wait)  # idle, only waits for checks: stays
+        + _waiter_table(22, wait, "uv run pytest")  # a wait and tests: stays (the wait would die too)
+        + _waiter_table(23, f"{ORCH} github wait merge --for o/r#1")  # write-limit wait before a merge: stays
+        + _waiter_table(24)  # idle, nothing running: closes
+        + _waiter_table(25, "uv run pytest")  # no wait on checks: closes as before
+    )
+    monkeypatch.setattr(runwatch, "_table", lambda: table)
+    monkeypatch.setattr(runs_live, "_close", lambda root, rec, interrupt: None)
+    monkeypatch.setattr(runs_live, "start_waiting", lambda root: None)
+    monkeypatch.setenv("ORCH_RUN_IDLE_SECONDS", "3600")
+    assert runwatch.runs_check_wait(22, table) is True
+    assert runwatch.runs_check_wait(25, table) is False
+    procs_ = [subprocess.Popen(["sleep", "120"]) for _ in range(5)]
+    try:
+        ids = {}
+        for agent in range(21, 26):
+            tid = new_ticket(f"T{agent}")
+            ids[agent] = tid
+            rec = _live(proj, tid, "idle", procs_[agent - 21].pid, since=_since(2 * 3600), agent_pid=agent)
+            rec["run"] = f"r_test{agent:04d}"
+            runs._write(proj, rec)
+        assert sorted(runs_live.cleanup(proj)) == sorted([ids[24], ids[25]])
+    finally:
+        for p in procs_:
+            p.kill()
+            p.wait()

@@ -23,6 +23,7 @@ from orch import (
     cli_job,
     cli_leave,
     cli_look,
+    cli_manager,
     cli_needs,
     cli_record,
     cli_report,
@@ -247,6 +248,8 @@ def _show(t: dict, root: Path) -> str:
         for k, label in (("changed", "Changed"), ("why", "Why"), ("not_included", "Not included")):
             if t["outcome"].get(k):
                 out.append(f"{label}: {t['outcome'][k]}")
+    if t.get("release"):
+        out.append("Release: the epics and tickets under it ship together")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(
@@ -343,7 +346,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -476,6 +479,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help="an epic: its sub-tickets (--parent) are the work; a run goes through them in order",
     )
     x.add_argument(
+        "--release",
+        action="store_true",
+        help="a release: the epics and tickets that ship together go under it (--parent)",
+    )
+    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -509,7 +517,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x.add_argument("--note", help="a free note (empty clears)")
     x.add_argument("--done-when", help="what should be true when it is done (empty clears)")
+    x.add_argument(
+        "--parent", metavar="ID", help="put it under this ticket, e.g. an epic (empty takes it out)"
+    )
+    x.add_argument(
+        "--release", choices=("yes", "no"), help="yes marks it as a release, no takes the mark off"
+    )
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
+    x = t.add_parser("order", parents=[common], help="the order of the tickets in one board lane")
+    x.add_argument("lane", help="the lane, e.g. todo or backlog")
+    x.add_argument("ids", nargs="+", metavar="ID", help="the tickets of the lane, first to last")
     x = t.add_parser("set", parents=[common], help="set an add-on field, e.g. marketing.budget 2400")
     x.add_argument("id")
     x.add_argument("field", metavar="ADDON.FIELD")
@@ -788,6 +805,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_github.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
     cli_chat.add_parsers(sub, common)
+    cli_manager.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
     notes = []
     if addon_lines:
@@ -989,7 +1007,12 @@ def run(args: argparse.Namespace) -> None:
         or cli_github.dispatch(args, root)
     ):
         pass
-    elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root) or cli_shot.dispatch(args, root):
+    elif (
+        cli_chat.dispatch(args, root)
+        or cli_look.dispatch(args, root)
+        or cli_shot.dispatch(args, root)
+        or cli_manager.dispatch(args, root)
+    ):
         pass
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(
@@ -1002,6 +1025,7 @@ def run(args: argparse.Namespace) -> None:
             title_auto=args.title_auto,
             plan_first=args.plan_first,
             epic=args.epic,
+            release=args.release,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -1057,10 +1081,28 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
-        if args.title is None and not fields:
-            raise Refused("Say what to change: --title, --owner, --due, --note or --done-when.")
-        t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
+        if args.title is None and not fields and args.parent is None and args.release is None:
+            raise Refused(
+                "Say what to change: --title, --owner, --due, --note, --done-when, --parent or --release."
+            )
+        if args.parent is not None:  # first, so a refused parent changes nothing else
+            t = tickets.set_parent(root, args.id, args.parent, by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other fields follow it
+        if args.release is not None:
+            t = tickets.set_release(root, args.id, args.release == "yes", by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other changes follow it
+        if args.title is not None or fields:
+            t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
         _out(args, t, f"Saved (revision {t['revision']}).")
+    elif cmd == "ticket" and sub == "order":
+        changed = tickets.set_lane_order(root, args.lane, args.ids, by())
+        _out(
+            args,
+            {"lane": args.lane, "order": args.ids, "changed": [t["id"] for t in changed]},
+            f"Order saved for {len(args.ids)} tickets ({len(changed)} moved).",
+        )
     elif cmd == "ticket" and sub == "set":
         _ticket_set(args, root, by)
     elif cmd == "ticket" and sub == "summary":
@@ -1557,6 +1599,7 @@ def _ticket_set(args, root: Path, by) -> None:
 _TICKET_ARGS = {
     *{(c, "id") for c in ("ticket", "check", "log", "ask", "answer", "ref", "ext", "wait")},
     ("ticket", "parent"),
+    ("ticket", "ids"),  # orch ticket order <lane> <id> ...
     ("run", "ticket"),
     ("relay", "ticket"),
     ("diag", "ticket"),

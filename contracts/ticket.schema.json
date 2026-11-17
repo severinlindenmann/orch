@@ -82,9 +82,11 @@
     },
     "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
     "plan_first": { "type": "boolean", "description": "Optional. True when the person chose \"Show plan first\": the agent makes the plan (parent and steps), asks one question \"Plan ready\" and waits for the answer before work starts. Set at creation only." },
+    "release": { "type": "boolean", "description": "Optional. True when the ticket is a release (ORCH-37): the epics and tickets that ship together sit under it as sub-tickets (parent). Set at creation (orch ticket new --release) or later (orch ticket edit --release yes|no). Older orch versions read it as a plain ticket." },
     "epic": { "type": "boolean", "description": "Optional. True when the person made this ticket with several tickets inside it at once (New ticket, Add a ticket to this epic): its sub-tickets are the work and one run goes through them in order. Set at creation only." },
     "start_requires": { "type": "object", "additionalProperties": false, "required": ["ticket", "question", "answer"], "properties": { "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, "question": { "type": "string", "pattern": "^q[A-Za-z0-9_-]{0,31}$" }, "answer": { "type": "string", "minLength": 1, "maxLength": 60 } }, "description": "Optional, no longer read. Older orch versions set it at creation (orch ticket new --start-requires) as a start check; the owner dropped that check (ORCH-29). Old tickets may still carry it." },
-    "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
+    "lane_order": { "type": "object", "additionalProperties": false, "required": ["lane", "n"], "properties": { "lane": { "type": "string", "pattern": "^[a-z][a-z_]{0,23}$" }, "n": { "type": "integer", "minimum": 1 } }, "description": "Optional. The place of the ticket inside one board lane, 1 = first (orch ticket order). Used only while the ticket is still in that lane." },
+    "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets, an epic). Set at creation or later with `orch ticket edit --parent` (never a loop). Children are not stored on the parent: they are found by reading every ticket's parent." },
     "work": {
       "type": "object",
       "description": "Optional. The ticket works in a separate copy of the project (a git worktree made by orch, branch orch/<ticket>), kept for the life of the ticket. A record for people and other machines: it holds NO local path (those stay in the machine-local registry .orch/run/worktrees.json) and no code resolves a path from it. A single-repo workspace has one entry per machine; more repositories add entries.",
@@ -397,6 +399,7 @@
         "answer": { "type": ["string", "null"] },
         "answered_by": { "oneOf": [{ "$ref": "#/$defs/who" }, { "type": "null" }] },
         "sent_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was sent to the person's phones. Set once by the core; absent when it never went to a phone." },
+        "asked_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was asked (set by the core in orch ask; absent on questions from older versions). The Reviewer's routine answers wait from this time." },
         "answered_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was answered (set by the core with the answer, whatever `via` says)." },
         "via": { "oneOf": [{ "$ref": "#/$defs/token" }, { "type": "null" }], "description": "Where the answer came from (free word, e.g. cli, web, phone). null while unanswered." },
         "kind": {

@@ -296,7 +296,7 @@ function route() {
     if (open && !open[2].startsWith('/') && !open[2].includes('..') && addons().some(a => a.name === open[1] && a.page)) return {kind:'page', id:open[1], path:open[2], hash:'#addon/' + open[1] + (open[2] ? '/' + open[2] : '')};
     // An add-on page's own place can follow a second # (#addon/factory/#/order/<id>/proposal, Home's link to a
     // proposal): it goes to the frame as the page's own hash.
-    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?(?:#(\/[A-Za-z0-9_/-]*))?$/.exec(hash);
+    const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_./-]*))?(?:#([A-Za-z0-9_/-]*))?$/.exec(hash);
     if (own && !(own[2] || '').startsWith('/') && !(own[2] || '').includes('..') && addons().some(a => a.name === own[1] && a.page)) return {kind:'page', id:own[1], path:own[2] || '', ...(own[3] ? {inner:own[3]} : {}), hash};
     if (hash.startsWith('#addon/')) {
       const id = decodeURIComponent(hash.slice(7));
@@ -316,10 +316,11 @@ function needsCountFrame() {
 }
 function postNeedsCount(n) {
   const win = needsCountFrame();
-  try { win?.postMessage({type:'orch.needs.count', count:n}, location.origin); } catch (_) { /* the page was left */ }
+  try { win?.postMessage({type:'orch.needs.count', count:n}, '*'); } catch (_) { /* the page was left */ }  // the frame's origin is opaque (sandboxed)
 }
 globalThis.addEventListener?.('message', e => {
-  if (e.origin !== location.origin || e.data?.orch !== 'needs-count' || !state) return;
+  const chan = e.origin === 'null' && !!e.data?.chan && e.data.chan === globalThis.orchFrameChan?.();  // sandboxed frame: its code
+  if ((e.origin !== location.origin && !chan) || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
 function render(arrived = new Set()) {
@@ -358,7 +359,7 @@ function render(arrived = new Set()) {
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
     const ages = array(state.tickets).filter(t => t.status !== 'done' && questions(t).length).map(t => Date.parse(t.updated_at)).filter(Number.isFinite);
     const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · longest wait ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
-    wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
+    wait.hidden = !line; if (wait.textContent !== line) { wait.textContent = line; wait.title = line; }
   }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
   const buildMark = document.getElementById('topbar-build');
@@ -615,12 +616,23 @@ function setMenu(open) {
   if (open && more) window.scrollTo(0, 0);
 }
 toggle.addEventListener('click', () => setMenu(toggle.getAttribute('aria-expanded') !== 'true'));
+// The open phone menu covers the page: going anywhere (a bottom-bar tab, a link, the back button) closes it.
+document.addEventListener('click', event => { if (event.target.closest?.('#tabbar a')) setMenu(false); });
 document.querySelector('.sidebar').addEventListener('click', event => {
   const helper = event.target.closest('[data-nav="open-agent"]');
   if (!event.target.closest('a') && !helper) return;
   setMenu(false);
   if (helper) chatOpenAgent();
 });
+// The icon rail (721-1279 px) lets its list stick out for the hover labels; on a short screen (150% zoom) that list ran
+// under the foot (report r-1117-1256-ws-2). Mark it .cramped while it does not fit: then it scrolls (master CSS).
+const sideScroll = document.querySelector('.sidebar-scroll');
+if (sideScroll && window.ResizeObserver) {
+  const fit = () => sideScroll.classList.toggle('cramped', sideScroll.scrollHeight > sideScroll.clientHeight + 1);
+  const watch = new ResizeObserver(fit);
+  watch.observe(sideScroll);
+  for (const part of sideScroll.children) watch.observe(part);
+}
 // Phone bottom bar (ORCH-73, master UI.tabbar): Home, Tickets, Review with the one needs-you number, More = the side menu.
 // Shown only up to 720 px (master CSS); the top bar comes back while the side menu is open.
 function paintTabbar(here, needCount, needsWords) {
@@ -662,7 +674,13 @@ main.addEventListener('drop', event => {
   const id = dragging;
   dragging = '';
   main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target'));
-  moveToLane(id, col.dataset.status, col);
+  const t = ticketOf(id), lane = col.dataset.status;
+  if (t && boardLane(t) === lane) {  // ORCH-156: inside its own lane a drop puts the card above the one it lands on
+    const family = event.target.closest?.('.col-body > .board-family'), over = family?.querySelector('.ticket-card')?.dataset.ticket;
+    orderInLane(id, lane, over && over !== id ? over : over === id ? id : null);
+    return;
+  }
+  moveToLane(id, lane, col);
 });
 main.addEventListener('change', async event => {
   const cap = event.target.closest('[data-key="settings-copies-max"]');
@@ -837,6 +855,7 @@ main.addEventListener('click', async event => {
   }
   if (action === 'task-toggle') { await toggleTask(control.dataset.ticket, control.dataset.check); return; }
   if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
+  if (action === 'lane-up' || action === 'lane-down') { control.closest('details')?.removeAttribute('open'); await laneStep(control.dataset.ticket, control.dataset.lane, action === 'lane-up' ? -1 : 1); return; }
   if (action === 'view') {
     ticketView = control.dataset.view === 'board' ? 'board' : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
@@ -893,6 +912,7 @@ main.addEventListener('click', async event => {
   }
 });
 window.addEventListener('hashchange', async () => {
+  if (document.querySelector('.sidebar')?.dataset.open === 'true') setMenu(false);
   for (const d of document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
 });
