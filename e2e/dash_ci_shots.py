@@ -8,13 +8,14 @@ uploads them as the artifact dashboard-shots; `orch ask ... --ci-shots <pull req
 
 usage: python e2e/dash_ci_shots.py --out <folder> [--base <commit>] [--head <sha>] [--pr <n>] [--files a,b]
 Prints the pages it took; writes pages=<list> to $GITHUB_OUTPUT when set (empty: nothing to take).
-Never run it with the real home: it makes its own HOME and ORCH_HOME under a temp folder."""
+Never run it with the real home: it makes its own HOME and ORCH_HOME in a new folder under ~/.orch-test."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import pwd
 import shutil
 import subprocess
 import sys
@@ -54,7 +55,7 @@ class Home:
             "PATH": path,
             "HOME": str(self.home),
             "USERPROFILE": str(self.home),
-            "ORCH_HOME": str(tmp / "orch"),
+            "ORCH_HOME": str(self.home / "orch-home"),  # orch trusts only a folder under HOME
             "ORCH_HOME_STRICT": "1",
             "UV_TOOL_DIR": str(tmp / "tools"),
             "UV_TOOL_BIN_DIR": str(self.bin),
@@ -164,7 +165,10 @@ def main() -> int:
         return 0
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    tmp = Path(tempfile.mkdtemp(prefix="orch-dash-shots-"))
+    # orch trusts an ORCH_HOME only under the account's real home (from the user database, not $HOME)
+    base = Path(pwd.getpwuid(os.getuid()).pw_dir) / ".orch-test"
+    base.mkdir(mode=0o700, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix="dash-shots-", dir=base))
     h = Home(tmp)
     try:
         h.install()
@@ -172,7 +176,7 @@ def main() -> int:
         url = h.start()
         spec = ",".join(f"ticket=ticket/{key}" if p == "ticket" else p for p in pages)
         widths = ",".join(map(str, dashshots.WIDTHS))
-        h.orch("shot", url, "--page", spec, "--width", widths, "--out", str(out), "--name", "dashboard",
+        h.orch("shot", url, "--page", spec, "--width", widths, "--out", str(out), "--name", "page",
                "--wait", "15", timeout=600)  # fmt: skip
     finally:
         h.stop()

@@ -49,10 +49,10 @@ def test_manifest_lists_each_page_at_three_widths(tmp_path):
     m = json.loads((d / "manifest.json").read_text())
     assert m["schema"] == dashshots.SCHEMA and m["head"] == "a" * 40 and m["pr"] == 7
     assert [p["page"] for p in m["pages"]] == ["home", "ticket"]
-    assert m["pages"][0]["files"] == {"1280": "dashboard-home-1280.png", "1920": "dashboard-home-1920.png",
-                                      "390": "dashboard-home-390.png"}  # fmt: skip
+    assert m["pages"][0]["files"] == {"1280": "page-home-1280.png", "1920": "page-home-1920.png",
+                                      "390": "page-home-390.png"}  # fmt: skip
     rows = dashshots._check_manifest(m, d)
-    assert rows[1]["label"] == "A ticket" and rows[1]["files"][390] == "dashboard-ticket-390.png"
+    assert rows[1]["label"] == "A ticket" and rows[1]["files"][390] == "page-ticket-390.png"
 
 
 @pytest.mark.parametrize(
@@ -61,9 +61,9 @@ def test_manifest_lists_each_page_at_three_widths(tmp_path):
         lambda m, d: m.update(schema="other"),
         lambda m, d: m["pages"][0].update(page="evil"),
         lambda m, d: m["pages"][0]["files"].update({"1280": "../../etc/passwd"}),
-        lambda m, d: m["pages"][0]["files"].update({"640": "dashboard-home-1280.png"}),
-        lambda m, d: (d / "dashboard-home-1280.png").write_bytes(b"<html>not a picture"),
-        lambda m, d: (d / "dashboard-home-1280.png").unlink(),
+        lambda m, d: m["pages"][0]["files"].update({"640": "page-home-1280.png"}),
+        lambda m, d: (d / "page-home-1280.png").write_bytes(b"<html>not a picture"),
+        lambda m, d: (d / "page-home-1280.png").unlink(),
         lambda m, d: m.update(pages=[]),
     ],
 )
@@ -121,7 +121,7 @@ def test_fetch_takes_the_pictures_of_the_newest_commit(tmp_path, monkeypatch):
     calls = _fake_github(monkeypatch, d)
     m, rows = dashshots.fetch(PR, tmp_path / "dest")
     assert m["pr"] == 7 and len(rows) == 2
-    assert (tmp_path / "dest" / "dashboard-ticket-390.png").read_bytes() == PNG
+    assert (tmp_path / "dest" / "page-ticket-390.png").read_bytes() == PNG
     assert ["run", "download", "11", "-R", "owner/repo", "-n", dashshots.ARTIFACT] == calls[3][:7]
 
 
@@ -152,7 +152,7 @@ def test_ask_ci_shots_puts_the_pictures_on_the_card(proj, run, tmp_path, monkeyp
     assert card["preview"]["type"] == "page" and card["open"] == PR
     sheet = proj / ".orch" / "tickets" / tid / "artifacts" / "ci-pictures-pr7.html"
     assert sheet.read_text().count("data:image/png;base64,") == 6
-    assert (sheet.parent / "ci-pictures-pr7" / "dashboard-home-1920.png").is_file()
+    assert (sheet.parent / "ci-pictures-pr7" / "page-home-1920.png").is_file()
 
 
 @pytest.mark.parametrize(

@@ -76,11 +76,11 @@ def pages_for(files: list[str]) -> list[str]:
     return [p for p in PAGES if p in pages]
 
 
-def file_name(page: str, width: int, prefix: str = "dashboard") -> str:
+def file_name(page: str, width: int, prefix: str = "page") -> str:
     return f"{prefix}-{page}-{width}.png"
 
 
-def manifest(head: str, pr: int | None, pages: list[str], out: Path, prefix: str = "dashboard") -> dict:
+def manifest(head: str, pr: int | None, pages: list[str], out: Path, prefix: str = "page") -> dict:
     """The list CI writes next to the pictures: which page is in which file, for which commit."""
     rows = []
     for p in pages:

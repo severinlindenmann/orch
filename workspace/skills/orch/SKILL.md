@@ -284,8 +284,7 @@ Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colo
     orch shot <address or html file> --width 1280,1920,390 --out <folder>    # one picture per width, prints the paths
     orch shot <address> --page home,tickets --out <folder>                  # several pages of one site in one run
 
-When the project's checks already take pictures of a pull request (a CI job that keeps them as `dashboard-shots`),
-take none yourself: `orch ask <id> "<question>" --draft "<title>" --ci-shots <pull request address> --then "<what next>"`
+When the project's checks already take pictures of the pages a pull request changes, take none yourself: `orch ask <id> "<question>" --draft "<title>" --ci-shots <pull request address> --then "<what next>"`
 puts them on the card, every page at each width.
 
 ## Rules
