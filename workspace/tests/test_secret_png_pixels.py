@@ -135,7 +135,8 @@ def test_screenshot_like_pictures_of_every_kind_get_a_proof():
             pic = _png(stream, w, h, split=split)
             spans = pngpixels.pixel_spans(pic)
             assert spans, (how, split)
-            assert sum(b - a for a, b in spans) > 0.8 * len(stream), (how, split)
+            if split >= 8192 and how != "many flushes":  # each tiny chunk or block loses EDGE bytes per end
+                assert sum(b - a for a, b in spans) > 0.8 * len(stream), (how, split)
     # palette, grey 1-bit, 16-bit RGBA and an interlaced picture: the IHDR size is computed right
     for depth, color, bpp_bits in ((8, 3, 8), (1, 0, 1), (16, 6, 64)):
         rowb = (w * bpp_bits + 7) // 8
@@ -344,8 +345,8 @@ def _canonical(lengths: list[int]) -> dict[int, tuple[int, int]]:
 
 
 def test_text_in_a_dynamic_code_table_is_not_exempt(tmp_path):
-    """The code tables of a dynamic block can carry any bytes: here `pw=x`. Only the coded symbols after the
-    table are exempt from the label rules."""
+    """The plain header fields of a dynamic block (the code length code lengths, 3 bits each) can carry any
+    bytes: here `pw=x`. Only the Huffman-coded data after them is exempt from the label rules."""
     w = _Bits()
     w.put(0b010, 3)  # not final, fixed codes: literals 0 and 144 (the 1x1 picture), end of block
     w.fixed_literal(0)
@@ -408,3 +409,18 @@ def test_the_work_caps_give_no_proof(monkeypatch):
     monkeypatch.setattr(pngpixels, "MAX_TABLE_WORK", 1 << 23)
     monkeypatch.setattr(pngpixels, "MAX_BLOCKS", 1)
     assert pngpixels.pixel_spans(pic) == []
+    monkeypatch.setattr(pngpixels, "MAX_BLOCKS", 2048)
+    monkeypatch.setattr(pngpixels, "MAX_SYMBOLS", 1000)
+    assert pngpixels.pixel_spans(pic) == []
+
+
+def test_the_label_rules_read_the_edges_of_every_run(monkeypatch):
+    """A label that starts in plain bytes (a header field, chunk framing) and goes on into coded data is seen
+    whole: EDGE bytes at both ends of every run stay in the label view."""
+    pic = screenshot(SEED, 200, 100)
+    monkeypatch.setattr(pngpixels, "EDGE", 0)
+    bare = pngpixels.pixel_spans(pic)
+    monkeypatch.undo()
+    e = pngpixels.EDGE
+    assert e >= 16
+    assert pngpixels.pixel_spans(pic) == [(a + e, z - e) for a, z in bare if z - a > 2 * e]

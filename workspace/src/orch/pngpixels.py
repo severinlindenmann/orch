@@ -16,7 +16,8 @@ proof (None), and the caller scans every byte with every rule, as before:
 - more or fewer pixel bytes than the IHDR size says.
 
 Accepted gap (an encoding, like base64): a Huffman table deliberately chosen so that the coded bytes spell a
-label and a value. The token patterns and the stored-key check still read those bytes."""
+label and a value. The token patterns and the stored-key check still read those bytes, and the label rules
+still read EDGE bytes at each edge of a run, so a label that starts outside a run is seen whole."""
 
 from __future__ import annotations
 
@@ -28,6 +29,10 @@ MAX_PIXEL_BYTES = 1 << 28  # an IHDR that claims more than this = no proof
 # Bounded work (real screenshots up to 870 KB: at most 21 blocks and 180 000 table entries): more = no proof
 MAX_BLOCKS = 2048
 MAX_TABLE_WORK = 1 << 23
+MAX_SYMBOLS = 1 << 22
+# Bytes at each edge of a proven run that the label rules still read: a label that starts outside the run
+# (in a block header, a code table, chunk framing) and ends inside it is seen whole.
+EDGE = 16
 # What a proven pixel run is replaced with in the text the label rules read: a line break in UTF-8, Latin-1
 # and in UTF-16 (both byte orders, both alignments), so no label can join across it.
 SEP = b"\n\x00\n\n\x00\n"
@@ -93,12 +98,13 @@ def _fixed() -> tuple:
 
 def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
     """Walk the raw deflate stream in `s` from byte `start` to its final block. (end byte, the bit ranges
-    [first, end) of the coded symbols of its Huffman blocks (block headers and code tables are not part of
-    them: they can hold any bytes), pixel bytes it inflates to). Raises _Bad on any error, on a stored block
-    that holds bytes and past MAX_BLOCKS / MAX_TABLE_WORK."""
+    [first, end) of the coded data of its Huffman blocks (the Huffman-coded code lengths and symbols; the
+    plain header fields before them are not part of it: they can hold any bytes), pixel bytes it inflates
+    to). Raises _Bad on any error, on a stored block that holds bytes and past the MAX_* caps."""
     pos, b, n, out, L = start, 0, 0, 0, len(s)
     huff: list[tuple[int, int]] = []
     blocks = work = 0
+    left = MAX_SYMBOLS
 
     def table(lengths: list[int], single_ok: bool) -> tuple[list[int], int]:
         nonlocal work
@@ -137,6 +143,7 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
         else:
             if btype == 1:
                 (lt, lm), (dt, dm) = _fixed()
+                coded = pos * 8 - n  # the first bit of the block's coded data
             else:
                 while n < 14:
                     if pos >= L:
@@ -161,6 +168,7 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
                     b >>= 3
                     n -= 3
                 ct, cm = table(cl, False)
+                coded = pos * 8 - n  # the code lengths, coded with that table, then the symbols
                 lens: list[int] = []
                 total = hlit + hdist
                 while len(lens) < total:
@@ -198,7 +206,6 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
                 lt, lm = table(lens[:hlit], True)
                 dist = lens[hlit:]
                 dt, dm = table(dist, True) if max(dist) else ([0, 0], 1)  # no distance code: any use fails
-            coded = pos * 8 - n  # the first bit of the block's coded symbols
             while True:  # the symbols of one block; at most 48 bits each
                 if n < 48:
                     k = (64 - n) >> 3
@@ -206,6 +213,9 @@ def _walk(s: bytes, start: int) -> tuple[int, list[tuple[int, int]], int]:
                     b |= int.from_bytes(s[pos : pos + got], "little") << n
                     pos += got
                     n += got * 8
+                left -= 1
+                if left < 0:
+                    raise _Bad("too many symbols")
                 e = lt[b & lm]
                 k = e & 15
                 if not k or k > n:
@@ -347,7 +357,7 @@ def _spans(data: bytes) -> list[tuple[int, int]]:
             else:
                 spans.append((lo, hi))
             a = s0 + n if z > s0 + n else z
-    return spans
+    return [(a + EDGE, z - EDGE) for a, z in spans if z - a > 2 * EDGE]
 
 
 def label_view(data: bytes) -> bytes | None:
