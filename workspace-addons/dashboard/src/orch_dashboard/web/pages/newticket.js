@@ -208,7 +208,7 @@ function ticketForm(t) {
     // Epic: several tickets at once (owner, ORCH-14). The text above is the epic; each entry below becomes its own
     // ticket inside it (the epic page lists them), with its own text, screenshots and files.
     const stepList = el('div', 'stack new-ticket-steps');
-    const stepHelp = el('p', 'meta new-ticket-help', 'This ticket becomes an epic. Each ticket below is made inside it, with its own files.');
+    const stepHelp = el('p', 'meta new-ticket-help', 'This ticket is split into parts. Each part below becomes its own ticket, with its own files.');
     const renumber = () => {
       steps.forEach((step, i) => {
         step.head.textContent = 'Ticket ' + (i + 1);
@@ -216,7 +216,7 @@ function ticketForm(t) {
         step.remove.setAttribute('aria-label', 'Remove ticket ' + (i + 1));
       });
       stepHelp.hidden = !steps.length;
-      addStep.textContent = steps.length ? '＋ Add another ticket' : '＋ Make it an epic with several tickets';
+      addStep.textContent = steps.length ? '＋ Add another part' : '＋ Split into parts';
     };
     const newStep = () => {
       const step = {files:[]}, box = el('section', 'card pad stack new-ticket-step'), top = el('div', 'row between');
