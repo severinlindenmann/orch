@@ -402,6 +402,8 @@ def test_no_new_helper_while_load_or_disk_says_stop(proj, new_ticket, monkeypatc
     started = []
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
     monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (45.0, 40.0, 30.0))
+    monkeypatch.setattr(runs_live.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(runs_live, "_processes", lambda: [(1200.0, "real work")])
     assert runs_live.start_waiting(proj) == []
     monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (1.0, 1.0, 1.0))
     monkeypatch.setattr(runs_live.shutil, "disk_usage", lambda p: type("U", (), {"free": 2 * 2**30})())
@@ -412,6 +414,8 @@ def test_no_new_helper_while_load_or_disk_says_stop(proj, new_ticket, monkeypatc
 def test_a_start_handed_over_by_a_script_queues_under_load(proj, new_ticket, monkeypatch):
     tid = new_ticket()
     monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (45.0, 40.0, 30.0))
+    monkeypatch.setattr(runs_live.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(runs_live, "_processes", lambda: None)  # CPU use unknown: the load alone counts
     with pytest.raises(runs.Busy) as e:
         runs_live.start_live(proj, tid, "agent:x", "claude", fresh=False, take_over=False, busy_text="wait")
     assert e.value.extra["pending"] and "very busy" in str(e.value)

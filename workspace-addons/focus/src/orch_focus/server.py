@@ -47,6 +47,7 @@ def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
 
 DEFAULT_PORT = 8430
 MAX_BODY = 16384
+FEED_IDLE = 120.0  # seconds without a view before a ticket's followed record command ends
 # a message with files (ticket.attach): up to 5 files of 25 MB as base64; one such body in memory at a time
 MAX_BIG_BODY = 5 * actions.ATTACH_MAX * 4 // 3 + MAX_BODY
 _BIG_READS = threading.BoundedSemaphore(1)
@@ -376,6 +377,14 @@ class Tracker:
         self.ticket_cache[tid] = (time.time(), doc)
         return doc
 
+    def _rest_feeds(self) -> None:
+        """A ticket nobody looked at for FEED_IDLE seconds (gone from the lists) keeps no followed command."""
+        now = time.monotonic()
+        for other in self.tickets.values():
+            f = other.get("feed")
+            if f is not None and now - f.last_poll > FEED_IDLE:
+                f.rest()
+
     def run_status(self, tid: str) -> dict:
         hit = self.status_cache.get(tid)
         if hit and time.time() - hit[0] < 1.0:
@@ -420,7 +429,8 @@ class Tracker:
                     self.last_agent[tid] = (agent, mode)
                 if tr.get("feed") is None:
                     tr["feed"] = RecordFeed(self.root, self.orch_bin, run, tid)
-                steps = tr["feed"].poll()
+                self._rest_feeds()
+                steps = tr["feed"].poll(live=bool(status.get("running")))  # none for an ended run
                 new = tr["watcher"].feed(ticket)
                 if new:
                     try:
