@@ -450,7 +450,9 @@ def test_a_plain_workflow_change_says_it_was_checked():
          {"filename": "workspace/src/orch/x.py", "additions": 3, "deletions": 1, "patch": "+secrets.KEY"}]
     )  # fmt: skip
     assert wf == {"files": [{"name": WF, "add": 5, "del": 0}], "findings": [], "more": 0}
-    assert ghmerge.workflow_words(wf).startswith("Workflow check: no secrets, no permission changes")
+    assert ghmerge.workflow_words(wf) == (
+        "Workflow check: no new secrets, permissions, outside actions or risky triggers in added lines."
+    )
 
 
 def test_no_workflow_file_is_no_workflow_check():
@@ -465,6 +467,10 @@ def test_no_workflow_file_is_no_workflow_check():
         ("      env: ${{ toJSON(secrets) }}", "reads a secret (all secrets)"),
         ("    permissions: write-all", "changes what a job may do on GitHub (permissions)"),
         ("      contents: write", "changes what a job may do on GitHub (permissions)"),
+        ("  job: {permissions: {contents: read}}", "changes what a job may do on GitHub (permissions)"),
+        ("    steps: [{uses: someone/x@v1}]", "uses an action from outside GitHub: someone/x@v1"),
+        ('      - "uses": "someone/y@v2"', "uses an action from outside GitHub: someone/y@v2"),
+        ("    secrets: inherit", "passes all secrets on"),
         ("      - uses: someone/action@v1", "uses an action from outside GitHub: someone/action@v1"),
         (
             "  pull_request_target:",
@@ -523,3 +529,13 @@ def test_a_card_without_a_workflow_file_is_as_before(tk, run, gh):
     _ask(run, tid)
     card = _q(root, tid)["card"]
     assert "paras" not in card["preview"] and card["why"].startswith("Your click merges it")
+
+
+def test_a_changed_local_action_counts_and_is_named():
+    act = _wf_file("    - uses: someone/z@v1", name=".github/actions/setup/action.yml")
+    wf = ghmerge.check_workflows([act])
+    assert wf["files"][0]["name"] == ".github/actions/setup/action.yml"
+    assert wf["findings"] == [
+        "changes an action the workflows run: .github/actions/setup/action.yml",
+        "uses an action from outside GitHub: someone/z@v1",
+    ]

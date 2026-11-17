@@ -237,11 +237,16 @@ def summary(url: str, head: str) -> dict | None:
 
 # A pull request that changes a CI workflow (ORCH-305, owner 17 Nov, option A): the helper account may push
 # it, GitHub holds it until the owner approves (CODEOWNERS), and the owner's Merge card shows these checks of
-# the lines it adds. A finding is said, never a reason to refuse: the owner decides.
+# the lines it adds. A finding is said, never a reason to refuse: the owner decides. It reads lines, not YAML:
+# the patterns match anywhere in a line (flow style `{uses: x}` and quoted keys too), and the card never says
+# more than "nothing found in the added lines".
 WORKFLOW_DIR = ".github/workflows/"
-SECRET = re.compile(r"\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[|\))")
-PERMISSION = re.compile(r"^\s*permissions\s*:|:\s*write\b|\bwrite-all\b")
-USES = re.compile(r"^\s*(?:-\s*)?uses\s*:\s*['\"]?([^\s'\"#]+)")
+ACTIONS_DIR = ".github/actions/"
+SECRET = re.compile(
+    r"\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[|\))|\bsecrets['\"]?\s*:\s*['\"]?(inherit)\b"
+)
+PERMISSION = re.compile(r"\bpermissions['\"]?\s*:|:\s*['\"]?write\b|\bwrite-all\b")
+USES = re.compile(r"\buses['\"]?\s*:\s*['\"]?([^\s'\",}\]#]+)")
 OWN_ACTIONS = ("./", "actions/", "github/")
 RISKY_TRIGGERS = ("pull_request_target", "workflow_run")
 MAX_FINDINGS = 6
@@ -249,6 +254,17 @@ MAX_FINDINGS = 6
 
 def is_workflow(path) -> bool:
     return isinstance(path, str) and path.startswith(WORKFLOW_DIR) and path.endswith((".yml", ".yaml"))
+
+
+def is_action(path) -> bool:
+    """A local action the workflows can run (`uses: ./...`): its change counts like a workflow's."""
+    return isinstance(path, str) and (
+        path.startswith(ACTIONS_DIR) or path.rsplit("/", 1)[-1] in ("action.yml", "action.yaml")
+    )
+
+
+def _is_ci(path) -> bool:
+    return is_workflow(path) or is_action(path)
 
 
 def check_workflows(files: list) -> dict | None:
@@ -263,11 +279,11 @@ def check_workflows(files: list) -> dict | None:
             found.append(text)
 
     for f in files if isinstance(files, list) else []:
-        if not isinstance(f, dict) or not (
-            is_workflow(f.get("filename")) or is_workflow(f.get("previous_filename"))
-        ):
+        if not isinstance(f, dict) or not (_is_ci(f.get("filename")) or _is_ci(f.get("previous_filename"))):
             continue
         name = str(f.get("filename"))
+        if not is_workflow(name) and not is_workflow(f.get("previous_filename")):
+            say(f"changes an action the workflows run: {name[:80]}")
         shown.append({"name": name, "add": int(f.get("additions") or 0), "del": int(f.get("deletions") or 0)})
         patch = f.get("patch")
         if not isinstance(patch, str):
@@ -280,12 +296,12 @@ def check_workflows(files: list) -> dict | None:
             text = line[1:]  # comments too: a word too many is cheaper than one missed
             for m in SECRET.finditer(text):
                 if m[1] != "GITHUB_TOKEN":
-                    say(f"reads a secret ({m[1] or 'all secrets'})")
+                    say("passes all secrets on" if m[2] else f"reads a secret ({m[1] or 'all secrets'})")
             if PERMISSION.search(text):
                 say("changes what a job may do on GitHub (permissions)")
-            u = USES.match(text)
-            if u and not u[1].startswith(OWN_ACTIONS):
-                say(f"uses an action from outside GitHub: {u[1][:80]}")
+            for u in USES.finditer(text):
+                if not u[1].startswith(OWN_ACTIONS):
+                    say(f"uses an action from outside GitHub: {u[1][:80]}")
             for trigger in RISKY_TRIGGERS:
                 if re.search(rf"\b{trigger}\b", text):
                     say(f"runs on {trigger}, which has more rights than a pull request run")
@@ -320,7 +336,9 @@ def workflow_words(wf: dict) -> str:
     if wf.get("more"):
         found.append(f"and {wf['more']} more")
     if not found:
-        return "Workflow check: no secrets, no permission changes, no outside actions, no risky triggers."
+        return (
+            "Workflow check: no new secrets, permissions, outside actions or risky triggers in added lines."
+        )
     return "Workflow check, look at this: " + "; ".join(found) + "."
 
 
