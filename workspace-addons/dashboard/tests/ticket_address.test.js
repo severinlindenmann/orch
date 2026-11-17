@@ -9,7 +9,7 @@ const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/page
 function load(hash, stored) {
   const from = src.indexOf('const TICKET_VIEWS'), to = src.indexOf('const changesPending');
   const ctx = {location:{hash}, history:{replaceState:(_s, _t, url) => { ctx.location.hash = url; }}, searchFolds:new Set(),
-    URLSearchParams, localStorage:{getItem:() => stored || null}, ticketSearch:'', ticketView:'list', window:{}};
+    URLSearchParams, localStorage:{getItem:() => stored || null}, ticketSearch:'', ticketPerson:'', ticketView:'list', window:{}};
   vm.createContext(ctx);
   vm.runInContext(src.slice(from, to).replace('let ticketAddressKey', 'var ticketAddressKey') + '\nthis.api = {ticketAddress, writeTicketAddress, syncTicketAddress, savedView};', ctx);
   return ctx;
@@ -22,6 +22,8 @@ test('the address holds view, search words and the board', () => {
   assert.equal(ctx.api.ticketAddress({view:''}), '#tickets?q=invoice+run&layout=board');
   ctx.ticketSearch = ''; ctx.ticketView = 'list';
   assert.equal(ctx.api.ticketAddress({view:''}), '#tickets');
+  ctx.ticketPerson = 'anna';
+  assert.equal(ctx.api.ticketAddress({view:''}), '#tickets?who=anna', 'ORCH-236: the Person filter is in the address');
 });
 test('typing writes the address without a new history entry; a reload adopts it', () => {
   const ctx = load('#tickets');

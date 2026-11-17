@@ -129,7 +129,7 @@ def test_build_settings_rows(answer):
     keep = options(view["keep"])
     assert list(keep) == ["30", "90", "365"]
     assert keep["90"]["selected"] and not keep["30"]["selected"]
-    assert view["keep"]["note"] == "up to 2048 MB, oldest detail first. Counts are kept."
+    assert view["keep"]["note"] == "up to 2 GB, oldest detail first. Counts are kept."
     size = options(view["size"])
     assert [size[v]["label"] for v in size] == ["512 MB", "1 GB", "2 GB", "4 GB"]
     share = options(view["share_counts"])

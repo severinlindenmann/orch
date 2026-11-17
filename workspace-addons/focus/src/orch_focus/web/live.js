@@ -9,6 +9,7 @@
   const FIELD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary', status: 'the status', done_when: 'the Done when line'};
   // The ticket lines orch writes itself, in the same plain words as the CLI and the dashboard.
   function plainLine(text, checklist) {
+    text = text.replace(/\(cron [^)]*\)/g, '(on its repeat)');  // older automation lines carry the raw rule (ORCH-232)
     const task = id => { const c = (checklist || []).find(x => x.id === id); return c && c.text ? ': ' + c.text : ''; };
     const addon = k => k.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
     let m;
@@ -195,7 +196,8 @@
     const story = checks.filter(c => !c.wont_do && (c.done || c.state === 'doing'));
     const st = window.FocusHelpers.sessionState(v), active = st.active;
     const nodes = [st.headline ? h('h2', {text: st.headline}) : null, ...recordNotes(v)].filter(Boolean);
-    if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
+    if (!asking && v.total) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
+    else if (!asking && !active) nodes.push(h('p', {class: 'meta', text: 'No tasks yet.'}));  // never "0 of 0" (ORCH-232)
     let now = null;
     const perTask = stepsByTask(v), runs = taskRuns(v);
     for (const c of story) {

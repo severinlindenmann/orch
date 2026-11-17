@@ -1502,6 +1502,23 @@ def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
         build_argv("copies.clean", {"path": "/"})
 
 
+def test_triage_start_takes_only_known_lanes():
+    from orch_dashboard.actions import BadRequest, build_argv, needs_session
+
+    argv = build_argv("triage.start", {"lanes": ["working", "backlog"]})
+    assert argv[:5] == ["triage", "--start", "--json", "--lanes", "backlog,working"]  # board order
+    assert needs_session("triage.start")  # a person's click only
+    for bad in (
+        {},
+        {"lanes": []},
+        {"lanes": ["all"]},
+        {"lanes": "backlog"},
+        {"lanes": ["backlog"], "ticket": "t_x"},
+    ):
+        with pytest.raises(BadRequest):
+            build_argv("triage.start", bad)
+
+
 def test_copies_remove_orphaned_takes_one_folder_name_only():
     from orch_dashboard.actions import BadRequest, build_argv
 
@@ -1763,3 +1780,12 @@ def test_epic_with_a_bad_ticket_makes_nothing(act_server, act_orch):
     s, _, _ = _post_raw(act_server, body)
     assert s == 400
     assert not [c for c in acts(act_orch) if c[:2] == ["ticket", "new"]]
+
+
+def test_check_move_argv_and_refusals():
+    """ORCH-236: the ticket page moves a task up or down with `orch check move <ticket> <task> --after <task>`."""
+    argv = actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3"})
+    assert argv == ["check", "move", "t_abcdef", "c2", "--after=c3", "--by", actions.actor(), "--json"]
+    for bad in ({"after": "--x"}, {"after": None}, {"check": "bad"}, {"extra": 1}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3", **bad})
