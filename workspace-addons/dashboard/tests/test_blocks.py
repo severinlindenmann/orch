@@ -566,11 +566,23 @@ def test_table_rows_become_cards_on_a_phone():
 
 
 def _switch_table(text=None):
-    toggle = {"on": True, "label": "Weekly report on or off", "action": {"op": "addon.act", "args": {"verb": "toggle", "target": "t_abcdef"}}}
+    toggle = {
+        "on": True,
+        "label": "Weekly report on or off",
+        "action": {"op": "addon.act", "args": {"verb": "toggle", "target": "t_abcdef"}},
+    }
     if text:
         toggle["text"] = text
-    return {"blocks": [{"type": "table", "title": "Repeats", "columns": [{"key": "name", "label": "Ticket", "type": "text"}],
-                        "rows": [{"cells": {"name": "Weekly report"}, "toggle": toggle}]}]}
+    return {
+        "blocks": [
+            {
+                "type": "table",
+                "title": "Repeats",
+                "columns": [{"key": "name", "label": "Ticket", "type": "text"}],
+                "rows": [{"cells": {"name": "Weekly report"}, "toggle": toggle}],
+            }
+        ]
+    }
 
 
 @node
@@ -579,11 +591,11 @@ def test_a_table_switch_says_what_it_turns_on(tmp_path):
     and sit on each switch cell (shown beside the switch on a phone card); without them the column says On."""
     nodes = list(walk(run(tmp_path, _switch_table("Repeats"))))
     assert [n["text"] for n in nodes if n["tag"] == "th"][-1] == "Repeats"
-    cell = [n for n in nodes if n["cls"] == "cell-toggle"][0]
+    cell = next(n for n in nodes if n["cls"] == "cell-toggle")
     assert cell["data"]["label"] == "Repeats" and cell["kids"][0]["attrs"]["role"] == "switch"
     nodes = list(walk(run(tmp_path, _switch_table())))
     assert [n["text"] for n in nodes if n["tag"] == "th"][-1] == "On"
-    assert [n for n in nodes if n["cls"] == "cell-toggle"][0]["data"]["label"] == "On"
+    assert next(n for n in nodes if n["cls"] == "cell-toggle")["data"]["label"] == "On"
 
 
 @node
