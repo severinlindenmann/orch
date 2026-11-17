@@ -705,6 +705,18 @@ test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All
   assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
   assert.match(page({items:[]}).text, /All clear/);
 });
+test('ORCH-185: a sub-ticket shown as its own card in the column is not also listed inside its parent card', () => {
+  const items = [{id:'p', key:'PIL-2', title:'Parent', status:'open'}, {id:'a', key:'PIL-10', title:'First', parent:'p', status:'open'},
+    {id:'c', key:'PIL-12', title:'Third', parent:'p', status:'waiting'}];
+  const c = context(items);
+  const board = c.board();
+  const openColumn = nodes(board, n => n.attrs?.['data-status'] === 'open')[0];
+  assert.equal(nodes(openColumn, n => n.tag === 'article').length, 2, 'parent and First once each, as cards');
+  const listed = nodes(openColumn, n => n.attrs?.className === 'board-part').map(n => JSON.stringify(n));
+  assert.equal(listed.length, 1, 'only Third (another column) is listed inside the parent card');
+  assert.match(listed[0], /Third/);
+  assert.doesNotMatch(listed[0], /First/);
+});
 test('home: a ticket in Review that also asks a question counts once, and the title equals the rows the page counts (ORCH-184)', () => {
   const items = [{id:'a', title:'T a', status:'review'}, {id:'b', title:'T b', status:'review'}, {id:'c', title:'T c', status:'waiting'}];
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}, {id:'c1', ticket:'c', title:'Q?', answer:{question:'c1'}}];

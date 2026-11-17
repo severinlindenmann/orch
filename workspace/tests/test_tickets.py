@@ -818,3 +818,16 @@ def test_proof_state_reworded_done_when_matches_task_text_loosely():
     c["text"] = "Add a test: 20 queued tickets, no limit set, helpers start in steps"
     ps = tickets.proof_state(_t([c], done_when=done_when))
     assert ps["uncovered"] == ["Usage belongs elsewhere."]
+
+
+def test_orch185_note_edit_history_carries_old_and_new_text(proj, new_ticket):
+    """ORCH-185: Activity can show the old and new note; the label still says "Changed the note"."""
+    tid = new_ticket("Edit me")
+    tickets.edit(proj, tid, None, "human:t", {"note": "first words"})
+    tickets.edit(proj, tid, None, "human:t", {"note": "second words " * 30})
+    lines = [h["text"] for h in read(proj, tid)["history"] if h["text"].startswith("Edited note")]
+    assert lines[0] == "Edited note (was: (empty) | now: first words)"
+    assert lines[1].startswith("Edited note (was: first words | now: second words")
+    assert lines[1].endswith("…)") and len(lines[1]) < 500
+    assert tickets.history_line(lines[0]) == "Changed the note"
+    assert tickets.history_line("Edited note") == "Changed the note"
