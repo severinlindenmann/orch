@@ -1,0 +1,66 @@
+"""`orch github`: the GitHub add-on's hourly write limit for helpers and scripts (no AI call).
+
+    orch github wait <merge|pr|comment|other> [--for "<repo#n>"] [--max-wait <minutes>]
+        waits until one write of that kind fits this computer's limit and counts it; exit 0 = write now,
+        exit 2 = no room in time (do not write)
+    orch github writes      the writes of the last hour per kind, the limit and when the next one fits
+
+The limits are settings: `orch config set github.merge_per_hour 12` (also pr_, comment_, other_per_hour).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from orch import ghlimit
+from orch.errors import Refused
+
+
+def add_parsers(sub, common) -> None:
+    g = sub.add_parser("github", parents=[common], help=argparse.SUPPRESS).add_subparsers(
+        dest="sub", required=True
+    )
+    w = g.add_parser("wait", parents=[common], help="wait for room for one GitHub write, then count it")
+    w.add_argument("kind", choices=ghlimit.KINDS)
+    w.add_argument("--for", dest="what", default="", help="what is written (a repo#number), for the log")
+    w.add_argument(
+        "--max-wait",
+        dest="max_wait",
+        type=int,
+        default=ghlimit.WAIT_SECS // 60,
+        help="minutes to wait for room (default 60)",
+    )
+    g.add_parser("writes", parents=[common], help="GitHub writes of the last hour and the limits")
+
+
+def _when(secs) -> str:
+    if secs is None:
+        return "none this hour"
+    return f"{secs // 60} min ago" if secs >= 60 else f"{secs} s ago"
+
+
+def dispatch(args, root: Path | None) -> bool:
+    if getattr(args, "cmd", None) != "github":
+        return False
+    if args.sub == "wait":
+        if args.max_wait < 0:
+            raise Refused("--max-wait is a number of minutes, 0 or more.")
+        if not ghlimit.take(args.kind, args.what, wait=args.max_wait * 60):
+            raise Refused(
+                f"No room for one of the {ghlimit.WHAT[args.kind]} within {args.max_wait} minutes "
+                "(see orch github writes). Do not write to GitHub now; try again later."
+            )
+        data = {"kind": args.kind, "taken": True}
+        text = f"Room for one of the {ghlimit.WHAT[args.kind]}: write it now."
+    else:
+        rows = ghlimit.status()
+        data = {"writes": rows}
+        text = "\n".join(
+            f"{r['kind']}: {r['used']} of {r['per_hour']} this hour, last {_when(r['last_secs_ago'])}"
+            + (f", next fits in {r['next_in_secs']} s" if r["next_in_secs"] > 0 else ", room now")
+            for r in rows
+        )
+    print(json.dumps(data, indent=2) if args.json else text)
+    return True
