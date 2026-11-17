@@ -822,14 +822,14 @@ def _consent(r: dict) -> str:
     lines = [desc, head] if desc else [head]
     if r.get("source") == "local":
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
-    lines.append(f"Adds the command: orch {name}")
-    lines.append(f"Adds a skill and an entry in the local orch instructions: orch-{name}")
+    lines.append(f"Lets helpers and you use it from the terminal: orch {name}")
+    lines.append("Teaches your helpers how to use it.")
     if r.get("ticket_view"):
-        lines.append(f"Stores data on tickets under: ext.{name}")
+        lines.append("Keeps some extra information on your tickets.")
     if d and isinstance(d.get("label"), str):
         lines.append(f"Adds a dashboard tab: {d['label']}")
     if r.get("background"):
-        lines.append("Runs a background process.")
+        lines.append("Keeps running in the background while it is on.")
     return "\n".join(lines)[:1200]
 
 
