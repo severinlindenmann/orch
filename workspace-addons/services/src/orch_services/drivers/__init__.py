@@ -34,6 +34,10 @@ class Spec:
     log: Path
     auto: bool
     env: dict[str, str] = field(default_factory=dict)
+    # An adopted service ("Manage with orch"): the existing label or unit and its file. The driver acts on that
+    # entry and never writes, moves or renames it.
+    external: str | None = None
+    external_path: Path | None = None
 
 
 @dataclass
@@ -89,6 +93,12 @@ def run_tool(argv: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
         raise Refused(
             f"{Path(argv[0]).name} did not answer within {timeout} seconds. Try again in a moment."
         ) from None
+
+
+def adopted_gone(spec: Spec) -> Refused:
+    return Refused(
+        f"The computer's entry for {spec.name} is gone. Forget it with orch services remove {spec.sid}."
+    )
 
 
 def tool_failed(what: str, cp: subprocess.CompletedProcess) -> Refused:

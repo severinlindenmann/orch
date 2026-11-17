@@ -11,10 +11,12 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import Driver, Spec, Status, Unavailable, run_tool, tool_failed
+from . import Driver, Spec, Status, Unavailable, adopted_gone, run_tool, tool_failed
 
 
 def unit_name(spec: Spec) -> str:
+    if spec.external:
+        return spec.external
     return f"orch-svc-{spec.workspace_id}-{spec.sid}.service"
 
 
@@ -80,6 +82,8 @@ class Systemd(Driver):
             raise tool_failed(what, cp)
 
     def _write(self, spec: Spec) -> None:
+        if spec.external:  # adopted: the person's own unit file is never rewritten
+            return
         p = self.entry_path(spec)
         p.parent.mkdir(parents=True, exist_ok=True)
         spec.log.parent.mkdir(parents=True, exist_ok=True)
@@ -95,6 +99,8 @@ class Systemd(Driver):
             raise Unavailable("the service manager of your account is not running")
 
     def entry_path(self, spec: Spec) -> Path:
+        if spec.external_path:
+            return spec.external_path
         return Path.home() / ".config" / "systemd" / "user" / unit_name(spec)
 
     def install(self, spec: Spec) -> None:
@@ -103,6 +109,8 @@ class Systemd(Driver):
 
     def start(self, spec: Spec) -> None:
         if not self.entry_path(spec).exists():
+            if spec.external:
+                raise adopted_gone(spec)
             self._write(spec)
         self._do("start it", "start", unit_name(spec))
 
@@ -112,6 +120,8 @@ class Systemd(Driver):
 
     def restart(self, spec: Spec) -> None:
         if not self.entry_path(spec).exists():
+            if spec.external:
+                raise adopted_gone(spec)
             self._write(spec)
         self._do("restart it", "restart", unit_name(spec))
 
@@ -136,6 +146,10 @@ class Systemd(Driver):
         return Status(running=running, pid=pid if running else None, since=since)
 
     def uninstall(self, spec: Spec) -> None:
+        if (
+            spec.external
+        ):  # never reached through the CLI (remove only forgets an adopted one); kept safe anyway
+            return
         p = self.entry_path(spec)
         if p.exists():
             self._run("stop", unit_name(spec))

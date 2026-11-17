@@ -41,10 +41,32 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `auto <id> on \| off` | `{"service": row, "next"}` |
 | `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, keeps the log |
 | `log <id> [--lines N]` (default 20, max 1000) | `{"id", "lines": [...]}`; every line goes through the core secret scan, a hit shows `••••••` in place of the value (the whole line when the value cannot be told apart) |
-| `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, remove`; same answers as the commands |
+| `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>` \| `process:<pid>`), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence. Reads only |
+| `adopt <found-id> [--name X] [--id SLUG] [--ticket ID]` | `{"service": row, "next"}`: Manage with orch (see below) |
+| `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, remove, adopt` (adopt takes a found id); same answers as the commands |
 | `view` | `orch.addon-view/1`, one `list` block (the real page is ORCH-272) |
 
-`failing` (a service that keeps crashing), found services and the health check come in ORCH-270 / ORCH-271.
+## Found on this computer and Manage with orch
+`found` lists background jobs of the person's own account that orch did not make; it only reads, nothing about a
+found job changes until the person chooses Manage with orch (`adopt`).
+- macOS: plists in `~/Library/LaunchAgents` (Label, `ProgramArguments`/`Program`, `RunAtLoad`) plus
+  `launchctl print gui/<uid>/<label>`; labels `ch.orch.svc.*` (orch's own) and `com.apple.`, `com.google.`,
+  `com.microsoft.` are left out (one list in `found.py`).
+- Linux: `systemctl --user list-units --type=service --all` and `~/.config/systemd/user/*.service`, then one
+  `systemctl --user show`; only units whose file is in `~/.config/systemd/user` or `~/.local/share/systemd/user`, never
+  `orch-svc-*`.
+- Processes: programs of this user without a terminal, not started by orch, whose working folder is inside this
+  workspace (`ps`, folder from `/proc/<pid>/cwd` on Linux, `lsof` on macOS; no lsof = no processes listed).
+- Never reads environment variables, log or other files of other programs; never prints a secret.
+
+`adopt` writes a record with `made_by: {"found": true[, "ticket"]}` and `adopted: {kind, entry, path}` (schema). It
+does not move, rename, rewrite or restart the plist, unit or process: start, stop, restart and auto act on the
+existing label or unit (auto = `launchctl enable|disable` / `systemctl --user enable|disable`), `log` reads the plist's
+`StandardOutPath` or `journalctl --user -u <unit>`. `remove` on an adopted service only forgets the record (the answer
+has `"forgotten": true` and says so). A bare process cannot be adopted: refused with the `orch services add` line to
+use instead; it is never stopped by orch.
+
+`failing` (a service that keeps crashing) and the health check come in ORCH-270 / ORCH-271.
 
 ## Turning it off
 `orch addon remove services` removes the skill and AGENTS block and the command; tickets and the core keep working.
