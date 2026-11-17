@@ -125,12 +125,16 @@ def test_a_session_waiting_on_an_answer_stays_warm_for_the_hour(proj, run, new_t
     assert runs.read(proj, tid) is not None
 
 
-def test_a_waiting_session_ends_early_when_the_sessions_are_full(proj, run, new_ticket, child, monkeypatch):
+def test_a_session_waiting_on_a_person_stays_open_when_the_sessions_are_full(
+    proj, run, new_ticket, child, monkeypatch
+):
+    """ORCH-254: the person may still answer; full sessions do not cut the hour short."""
     monkeypatch.setattr(runs_live, "_crowded", lambda root: True)
     tid = new_ticket()
     assert run("ask", tid, "Which colour?", "--option", "red", "--option", "blue")[0] == 0
     _live(proj, tid, child(), idle_for=6 * 60)
-    assert [a["action"] for a in tend.run(proj)["actions"]] == ["end"]
+    assert tend.run(proj)["actions"] == []
+    assert runs.read(proj, tid) is not None
 
 
 def test_a_session_waiting_on_a_persons_answer_ends_and_says_it_continues(proj, run, new_ticket, child):
