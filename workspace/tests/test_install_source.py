@@ -86,7 +86,7 @@ def test_switch_takes_only_the_two_builds():
 def test_update_to_runs_the_normal_update(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(addons, "tool_env_change_ok", lambda: None)
-    monkeypatch.setattr(updateinfo, "announce_lines", lambda: [])
+    monkeypatch.setattr(updateinfo, "announce_lines", lambda *a: [])
 
     def fake_update(root, project_only, after_install, **kw):
         seen["ref"], seen["project_only"] = addons.ref(), project_only

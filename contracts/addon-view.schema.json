@@ -114,6 +114,7 @@
                   "every": { "$ref": "#/$defs/text", "maxLength": 24, "description": "Optional. A repeat that runs more often than hourly, shown as ONE item for the day instead of one per run: plain words such as \"Every 5 min\", shown in place of the time. `time` is then the first (or next) run of the day." },
                   "note": { "$ref": "#/$defs/text", "maxLength": 60, "description": "Optional muted second line, e.g. \"next 15:05 · 288 runs/day\"." },
                     "title": { "$ref": "#/$defs/text", "maxLength": 80 },
+                    "full": { "$ref": "#/$defs/text", "maxLength": 400, "description": "Optional. The whole title when `title` was shortened with an ellipsis; shown as hover text." },
                     "tone": { "$ref": "#/$defs/tone" },
                     "link": { "$ref": "#/$defs/link" }
                   }

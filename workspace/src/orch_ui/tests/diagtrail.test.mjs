@@ -72,12 +72,22 @@ test('a click on a [data-action] button records its id only', async () => {
   const {win, docListeners, sent} = fakeWindow();
   const t = D.install(win);
   const btn = {dataset: {action: 'answer'}, textContent: 'SECRET label'};
-  docListeners.click({target: {closest: sel => (sel === '[data-action]' ? btn : null)}});
+  docListeners.click({target: {closest: sel => (sel.includes('[data-action]') ? btn : null)}});
   docListeners.click({target: {closest: () => null}});
   await t.flush();
   const clicks = sent[0].events.filter(e => e.ev === 'ui.action');
   assert.deepEqual(clicks.map(e => e.kv), [{id: 'answer', route: '#home'}]);
   assert.ok(!JSON.stringify(sent).includes('SECRET'));
+});
+
+test('a click on an add-on button records addon-<verb>, never the ticket or the label', async () => {
+  const {win, docListeners, sent} = fakeWindow();
+  const t = D.install(win);
+  const btn = {dataset: {addonAct: 'true', verb: 'allow-script', target: 't_secret01', review: 'true'}, textContent: 'SECRET label'};
+  docListeners.click({target: {closest: sel => (sel.includes('[data-addon-act]') ? btn : null)}});
+  await t.flush();
+  assert.deepEqual(sent[0].events.filter(e => e.ev === 'ui.action').map(e => e.kv), [{id: 'addon-allow-script', route: '#home'}]);
+  assert.ok(!JSON.stringify(sent).includes('SECRET') && !JSON.stringify(sent).includes('t_secret01'));
 });
 
 test('state: client and server revision with the cache age', async () => {

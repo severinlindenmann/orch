@@ -485,6 +485,13 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if path == "/api/release":  # a finished ticket: is its merged change in the installed release?
+            from . import update
+
+            tid = (parse_qs(query).get("ticket") or [""])[0]
+            return self._send(
+                200, json.dumps(update.ticket_release(self.root, tid)).encode(), "application/json"
+            )
         if path == "/api/update-status":  # only a page with a session (a finished result is read once)
             from . import update
 

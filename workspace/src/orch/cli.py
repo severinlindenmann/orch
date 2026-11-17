@@ -925,7 +925,7 @@ def run(args: argparse.Namespace) -> None:
         if not args.project_only and not args.after_install and not args.json:
             from orch import updateinfo
 
-            for line in updateinfo.announce_lines():  # the versions, before the install starts
+            for line in updateinfo.announce_lines(root):  # the versions, before the install starts
                 print(line, file=sys.stderr)
         report, notes = [], []
         done = addons.update(

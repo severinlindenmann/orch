@@ -2794,7 +2794,7 @@ def update(
         lines, _changed = _update_lines(before, found, sha)
         from orch import updateinfo
 
-        new_release, more = updateinfo.after_update(before.get("sha"), before.get("release"), sha)
+        new_release, more = updateinfo.after_update(before.get("sha"), before.get("release"), sha, root)
         lines += more  # "Updated orch 15 → 16", then what changed
         if not json_output:
             _say("\n".join(lines))
