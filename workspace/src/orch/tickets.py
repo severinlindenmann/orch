@@ -1434,10 +1434,15 @@ def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
             raise
 
 
-STOPPED_TEXT = "The agent stopped before the work was finished. Continue goes on where it left off."
+STOPPED_TEXT = "The helper stopped before the work was finished. Continue goes on where it left off."
+# ORCH-235: a ticket moved to Working by hand that no helper ever started is To do again,
+# without claiming one ran
+NOT_STARTED_TEXT = "No helper started on it, so it is back in To do. Press Start to begin."
 
 
-def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool = True) -> bool:
+def agent_stopped(
+    root: Path, tid: str, by: str, still_running=None, say: bool = True, text: str | None = None
+) -> bool:
     """No agent works on the ticket any more: a Working ticket is Ready again (Working is shown only while
     an agent runs). still_running() is asked under the ticket lock, so a run that started meanwhile wins.
     Returns True when the ticket was moved."""
@@ -1450,7 +1455,7 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
         ticket["status"] = "ready"
         ticket["waiting_on"] = None
         if say:
-            add_history(ticket, by, STOPPED_TEXT)
+            add_history(ticket, by, text or STOPPED_TEXT)
         return True
 
     try:
@@ -2109,12 +2114,13 @@ def tidy(
 
 
 def set_model(root: Path, tid: str, name: str, by: str) -> dict:
-    """A person's model for this ticket's helper (sonnet or opus), or auto: orch picks again next start."""
+    """A person's model for this ticket's helper (haiku, sonnet, opus or fable), or auto: orch picks again
+    next start. Haiku and Fable come only from here: orch never picks them (owner 17 Nov, ORCH-257)."""
     from orch import modelpick
 
     name = (name or "").strip().lower()
     if name not in (*modelpick.MODELS, "auto"):
-        raise Refused("Pick sonnet, opus or auto.")
+        raise Refused("Pick haiku, sonnet, opus, fable or auto.")
     if not _is_person(by):
         raise Refused(
             f'Only a person picks the model. Ask instead: orch ask {tid} "Run this ticket on Opus?" '
@@ -2171,7 +2177,7 @@ def pick_model(root: Path, tid: str, by: str) -> str:
 def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
     """Move a ticket orch put on Sonnet up to Opus (the helper when its plan shows design, security or
     several parts; orch after two failed checks on one step). One history line says why. A person's choice
-    is never changed. Returns (ticket, moved): moved False when it already runs on Opus."""
+    is never changed. Returns (ticket, moved): moved False when it already runs on Opus or Fable."""
     from orch import modelpick
 
     why = " ".join(clean_untrusted(why or "", 200).split())
@@ -2182,13 +2188,13 @@ def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
     def op(ticket):
         cur = modelpick.chosen(ticket)
         if cur and modelpick.by_person(ticket):
-            if cur["name"] == "opus":
+            if cur["name"] in modelpick.STRONG:
                 return
             raise Refused(
                 f"A person chose {modelpick.LABELS[cur['name']]} for this ticket. Ask instead: "
                 f'orch ask {tid} "Move this ticket up to Opus? {why[:80]}" --option yes --option no'
             )
-        if cur and cur["name"] == "opus":
+        if cur and cur["name"] in modelpick.STRONG:
             return
         ticket["model"] = {
             "name": "opus",
@@ -2200,8 +2206,8 @@ def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
         out["moved"] = True
 
     t = load(root, tid)
-    if (modelpick.chosen(t) or {}).get("name") == "opus":
-        return t, False  # already on Opus: nothing to write
+    if (modelpick.chosen(t) or {}).get("name") in modelpick.STRONG:
+        return t, False  # already on Opus or Fable: nothing to write
     t = apply_op(root, tid, op, by=by)[0]
     return t, out["moved"]
 
@@ -2605,7 +2611,7 @@ def _up_after_failures(root: Path, tid: str, item: dict) -> None:
 
     t = load(root, tid)
     cur = modelpick.chosen(t)
-    if not cur or cur["name"] != "sonnet" or modelpick.by_person(t):
+    if not cur or cur["name"] not in modelpick.SMALL or modelpick.by_person(t):
         return
     step = " ".join(str(item.get("text") or "").split())[:80]
     why = f'two checks failed on the step "{step}"' if step else "two checks failed on one step"
@@ -3428,7 +3434,13 @@ def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -
     if kind == "time":
         if not until:
             raise Refused("Waiting for a time needs until.")
-        return {"kind": "time", "until": parse_time(until)}
+        w = {"kind": "time", "until": parse_time(until)}
+        if ref is not None:  # ORCH-235: what it waits for, as a person wrote it (optional)
+            if not isinstance(ref, str) or len(ref.strip()) > 200:
+                raise Refused("The reason of a wait has at most 200 characters.")
+            if ref.strip():
+                w["ref"] = ref.strip()
+        return w
     if not isinstance(ref, str) or not ref.strip() or len(ref.strip()) > 200:
         raise Refused(f"Waiting on {kind} needs a ref (1 to 200 characters).")
     return {"kind": kind, "ref": ref.strip()}

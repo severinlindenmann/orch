@@ -181,7 +181,22 @@ function hashKind(hash) {
   const k = String(hash || '').split('?')[0].replace(/^#/, '').split('/')[0];
   return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : k === 'settings' ? 'settings' : ['addon', 'open', 'chat', 'general'].includes(k) ? 'page' : 'home';
 }
+// #addon/<name> of an add-on that is installed but off: say so and offer the switch (ORCH-242), not a bare 404.
+function offAddonName(hash) {
+  const m = /^#addon\/([a-z][a-z0-9-]{1,31})(?:[/#?]|$)/.exec(hash || '');
+  const row = m && array(state?.settings?.addons).find(a => a && a.name === m[1]);
+  return row && !row.active && !addons().some(a => a.name === m[1]) ? m[1] : null;
+}
 function notFoundPage() {
+  const off = offAddonName(location.hash);
+  if (off) {
+    const label = capitalise(off);
+    return fragment(heading(label + ' is turned off', 'Turn it on in Settings to use this page.'),
+      h('div', {className:'state-frame', 'data-key':'addon-off'}, h('section', {className:'card pad stack'},
+        h('p', {className:'muted'}, label + ' is turned off, so it has no page right now.'),
+        h('div', {className:'actions row'}, h('a', {className:'btn primary sm', href:'#settings/addons/' + encodeURIComponent(off)}, 'Open ' + label + ' settings'),
+          h('a', {className:'btn ghost sm', href:'#home'}, 'Go to Home')))));
+  }
   return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
     h('div', {className:'state-frame', 'data-key':'not-found'}, h('section', {className:'card error-hero'},
       h('span', {className:'error-number', 'aria-hidden':'true'}, '404'),
@@ -337,7 +352,7 @@ function render(arrived = new Set()) {
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? 'Page not found' : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -837,7 +852,15 @@ main.addEventListener('click', async event => {
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
     if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;
-    const send = () => settingsSend('addon.set', {name:addon.name, on:!addon.active}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
+    const send = async () => {
+      // Turning off: the link and the page go at once, not after the services restart (ORCH-242).
+      const before = state.addons;
+      const wasActive = addon.active;
+      if (wasActive) { state.addons = array(before).filter(a => a.name !== addon.name); addon.active = false; }
+      const result = await settingsSend('addon.set', {name:addon.name, on:!wasActive}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
+      if (!result.ok && wasActive) { state.addons = before; addon.active = true; render(); }
+      return result;
+    };
     if (addon.active) await send();
     else settingsConfirm('Turn on ' + capitalise(addon.name) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
     return;
