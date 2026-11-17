@@ -531,7 +531,7 @@ function previewText(t, kind, file, text) {
   return h('pre', {}, text.split('\n').slice(0, 8).join('\n'));
 }
 function ticketPreviewTile(t, file, kind = 'artifacts') {
-  const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || window.DashHelpers.plainFileName(file.name) || 'Result';
+  const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || String(file.name || '').split('/').pop() || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
   if (!snapshot && /\.pdf$/i.test(file.name)) {  // the browser's own PDF view, from the same-origin file endpoint
     tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
@@ -634,7 +634,8 @@ const fileUrl = (tid, kind, fileName, dl = false) => '/api/file?t=' + encodeURIC
 const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) || String(fileName).split('/').pop());
 // The title given when the file was attached; else the file name made readable.
 const oneLineTitle = value => typeof value === 'string' ? clean(value).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
-const titleOf = file => oneLineTitle(file.title) || fileTitle(file.name);
+// ORCH-240: the real file name with its extension ("big2mb.txt", not "Big2mb"), so it matches the Files tab and the disk.
+const titleOf = file => oneLineTitle(file.title) || clean(shortName(file));
 const shortName = file => String(file.name).split('/').pop();
 const fileBadge = fileName => (/\.([^./]+)$/.exec(fileName)?.[1] || 'file').slice(0, 4).toUpperCase();
 const fileMeta = file => [kindWord(file.name), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', file.mtime ? localStamp(file.mtime) : ''].filter(Boolean).join(' · ');
@@ -1187,7 +1188,7 @@ function ticketParts(t, children) {
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
   // ORCH-37: in a release, an epic's row says how far its own tickets are ("Epic · 2 of 4 done").
   const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, 'Epic · ' + kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' done'); };
-  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
@@ -1433,7 +1434,9 @@ function ticketCompletionNote(n, t) {
     h('h2', {}, linkRefs(t, n.head)), n.body ? h('p', {className:'muted preserve-lines'}, linkRefs(t, n.body)) : null);
 }
 function ticketResultsCard(t) {
-  const all = resultFiles(t), files = all.map(x => x.file), notes = completionNotes(t);
+  // ORCH-240: newest first, the same order as the Files tab opens with
+  const time = x => Date.parse(x.file.mtime) || 0;
+  const all = resultFiles(t).map((x, i) => [x, i]).sort((a, b) => time(b[0]) - time(a[0]) || a[1] - b[1]).map(x => x[0]), files = all.map(x => x.file), notes = completionNotes(t);
   if (!files.length && !notes.length) return null;
   const count = [notes.length ? notes.length + (notes.length === 1 ? ' note' : ' notes') : '', files.length ? files.length + (files.length === 1 ? ' file' : ' files') : ''].filter(Boolean).join(' · ');
   return h('section', {className:'card results', 'data-key':'results'}, h('div', {className:'section-head'}, h('h2', {}, 'Result'), h('span', {className:'meta'}, count)),
@@ -1709,7 +1712,9 @@ function startInline(control) {
   input.value = before;
   input.setAttribute('aria-label', capitalise(field));
   locks.add(key);
-  host.replaceChildren(input, el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'));
+  const hint = el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels');
+  host.replaceChildren(input, hint);
+  if (field === 'owner') ownerChoices(input, hint);
   input.focus();
   if (MULTILINE.includes(field)) {
     // Small by default (3 rows, from the top); "Show all" opens the whole note, "Show less" goes back.
@@ -1739,6 +1744,23 @@ function startInline(control) {
   input.addEventListener('blur', () => finish(true));
 }
 
+// ORCH-240: the owner box offers the workspace's people and existing owners, and says when a name is not one of them
+// (it is still saved as written: a person may own a ticket before they use the dashboard).
+const knownOwners = () => [...new Set([...array(state?.people?.people), ...tickets().map(x => String(x.owner || '').trim()).filter(Boolean).map(o => name(o) || o)].map(String))].sort((a, b) => a.localeCompare(b));
+function ownerChoices(input, hint) {
+  const known = knownOwners(), list = el('datalist', '');
+  list.id = 'owner-choices';
+  known.forEach(n => list.append(h('option', {value:n})));
+  input.setAttribute('list', list.id);
+  input.after(list);
+  const plain = hint.textContent;
+  const check = () => {
+    const v = input.value.trim(), fresh = v && !known.some(n => n.toLowerCase() === v.toLowerCase());
+    hint.replaceChildren(fresh ? h('span', {className:'warn'}, v + ' is not one of your people yet') : '', fresh ? ' · Enter saves · Esc cancels' : plain);
+  };
+  input.addEventListener('input', check);
+  check();
+}
 // A small calendar in the orch look instead of the browser's own picker. cb(value) with 'YYYY-MM-DD' (or 'YYYY-MM-DDTHH:MM' when withTime and a time is set), '' (clear) or null (closed).
 function pickDate(anchor, current, cb, withTime = false) {
   document.querySelectorAll('.cal').forEach(n => n.remove());
@@ -1758,6 +1780,8 @@ function pickDate(anchor, current, cb, withTime = false) {
     document.removeEventListener('mousedown', outside, true);
     document.removeEventListener('keydown', key, true);
     pop.remove();
+    // ORCH-240: a day in the past is kept (the person may mean it) but never without a word
+    if (value && String(value).slice(0, 10) < todayIso) window.orch.toast('That day has already passed, so the ticket shows as late.', 'info');
     cb(value);
   };
   const outside = event => { if (!pop.contains(event.target)) close(null); };
@@ -1791,9 +1815,10 @@ function pickDate(anchor, current, cb, withTime = false) {
     host.append(pop);
     try { pop.setAttribute('popover', 'manual'); pop.showPopover(); } catch (_) { pop.removeAttribute('popover'); }
   } else document.body.append(pop);
-  const r = anchor.getBoundingClientRect();
-  pop.style.top = Math.min(r.bottom + 6, Math.max(8, innerHeight - pop.offsetHeight - 8)) + 'px';
-  pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+  // ORCH-240: the visible width and height (innerWidth counts the scrollbar, so the right edge was cut off)
+  const r = anchor.getBoundingClientRect(), vw = document.documentElement.clientWidth || innerWidth, vh = document.documentElement.clientHeight || innerHeight;
+  pop.style.top = Math.min(r.bottom + 6, Math.max(8, vh - pop.offsetHeight - 8)) + 'px';
+  pop.style.left = Math.max(8, Math.min(r.left, vw - pop.offsetWidth - 8)) + 'px';
   setTimeout(() => { document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', key, true); }, 0);
   (pop.querySelector('.today, .sel') || pop.querySelector('.cal-x'))?.focus();
 }

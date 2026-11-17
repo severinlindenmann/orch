@@ -177,7 +177,7 @@ test('the review buttons show whenever the status is Review, an open question fi
   const review = all.find(n => /review-card/.test(n.attrs.className || ''));
   const reviewText = JSON.stringify(review);
   assert.match(reviewText, /Result/);
-  assert.match(reviewText, /Next steps/);
+  assert.match(reviewText, /next-steps\.html/);
   assert.doesNotMatch(reviewText, /Looks good/, 'the verdict buttons live in the header strip');
   assert.doesNotMatch(JSON.stringify(all), /Technical details|Show technical/);
 });

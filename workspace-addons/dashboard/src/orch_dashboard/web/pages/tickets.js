@@ -266,7 +266,7 @@ let ticketView = 'list';
 try { if (localStorage.getItem('orch.tickets.view') === 'board') ticketView = 'board'; } catch (_) { /* no storage: the list */ }
 const boardMore = new Set();
 const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'}, viewChips(),
-  h('div', {className:'view-toggle wide-only', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
+  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
 function boardCard(t, nested = false, column = '', here = null) {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
   const parts = boardChildren(tickets(), t);
@@ -292,12 +292,16 @@ function board() {
   // Won't do and Superseded tickets are hidden everywhere else; the board shows them in their own lanes.
   const dropped = filterTickets(ticketParents(array(state?.tickets).filter(t => t.status === 'dropped')), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView(), ticketGroup);
   const visible = sorted([...filteredTickets(), ...dropped]);
-  const cols = window.DashHelpers.LANES.map(([status, label]) => {
+  // ORCH-240: a sub-ticket with its own card anywhere on the board is not listed again inside its parent's card
+  // (ORCH-185 did this per lane only). A lane cut short ("Show 3 more") hides cards, so nothing there counts as shown.
+  const lanes = window.DashHelpers.LANES.map(([status, label]) => {
     const mine = window.DashHelpers.laneSorted(visible.filter(t => boardLane(t) === status), status);  // ORCH-156: the person's order
-    const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth), shownHere = new Set();  // ORCH-185: a sub-ticket shown as its own card here is not listed again inside its parent's card
+    const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth);
     const capped = CAPPED_LANES.includes(status) && roots.length > 3 && !String(ticketSearch).trim();  // a search shows every hit
-    const cap = capped && !boardMore.has(status) ? 3 : roots.length;
-    if (cap >= roots.length) mine.forEach(t => shownHere.add(t.id));  // a lane cut short ("Show 3 more") hides cards, so nothing there counts as shown
+    return {status, label, mine, rows, roots, capped, cap:capped && !boardMore.has(status) ? 3 : roots.length};
+  }).filter(l => l.mine.length || !['dropped', 'superseded'].includes(l.status));  // ORCH-240: empty set-aside lanes take no room
+  const shownHere = new Set(lanes.flatMap(l => l.cap >= l.roots.length ? l.mine.map(t => t.id) : []));
+  const cols = lanes.map(({status, label, mine, rows, roots, capped, cap}) => {
     const branch = row => h('div', {className:'board-family', 'data-key':'family-' + row.ticket.id}, boardCard(row.ticket, row.depth > 0, status, shownHere),
       rows.filter(child => child.depth === row.depth + 1 && [row.ticket.id, row.ticket.key].includes(child.ticket.parent)).map(branch));
     return h('section', {className:'kanban-col' + (mine.length ? '' : ' col-collapsed'), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
@@ -559,7 +563,8 @@ function list() {
   const needN = typeof needsYouTotal === 'function' ? needsYouTotal() : 0;
   const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null}), viewToggle()];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
-  if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {className:'wide-only', 'data-key':'board-wide'}, board()), window.UI?.shortGroup ? phoneList(visible) : null);
+  // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
+  if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
     h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
     h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));

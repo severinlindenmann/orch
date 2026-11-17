@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -831,3 +832,29 @@ def test_orch185_note_edit_history_carries_old_and_new_text(proj, new_ticket):
     assert lines[1].endswith("…)") and len(lines[1]) < 500
     assert tickets.history_line(lines[0]) == "Changed the note"
     assert tickets.history_line("Edited note") == "Changed the note"
+
+
+def test_history_line_never_shows_a_task_id():
+    """ORCH-240: Reopened / Renamed / Linked / Removed lines name the task, never 'c1'."""
+    checks = [{"id": "c1", "text": "Write the test"}]
+    for stored in (
+        "Reopened c1",
+        "Reopened c1 (old evidence: note)",
+        "Renamed c1 (was: a | now: b)",
+        "Linked c1 to Done when",
+        "Removed step c2 'Old one' (was done; evidence: note)",
+    ):
+        shown = tickets.history_line(stored, checks)
+        assert not re.search(r"\bc\d+\b", shown), shown
+    assert tickets.history_line("Removed step c2 'Old one' (was open)", checks).endswith("Old one")
+    assert tickets.history_line("Title changed (was: a | now: b)") == "Changed the title"
+
+
+def test_rename_title_owner_and_task_keep_old_and_new_text(proj, run, new_ticket):
+    """ORCH-240: the Activity can show what changed (was / now)."""
+    tid = new_ticket()
+    run("ticket", "edit", tid, "--owner", "Anna")
+    assert read(proj, tid)["history"][-1]["text"] == "Edited owner (was: (empty) | now: Anna)"
+    run("check", "add", tid, "Write the test")
+    run("check", "edit", tid, "c1", "Write two tests")
+    assert read(proj, tid)["history"][-1]["text"] == "Renamed c1 (was: Write the test | now: Write two tests)"
