@@ -143,3 +143,32 @@ test('the dock goes inside the mount that survives a page change (#keep), else r
   const b = run(false);
   assert.equal(b.host.parentNode, b.shellBody);
 });
+
+// ORCH-340 review: the page side of the layer.
+const page = source.slice(source.indexOf('// --- the page ---'));
+test('full screen makes the page behind inert and undoes only what it set', () => {
+  const el = (id, opts = {}) => ({id, inert: !!opts.inert, dataset:{}, attrs:new Set(), sel:opts.sel || '',
+    contains: n => n === el.dock && !!opts.holdsDock, matches: q => !!opts.sel && q.split(', ').includes(opts.sel),
+    hasAttribute(a) { return a === 'data-live-inert' && 'liveInert' in this.dataset; }});
+  el.dock = {id:'live-dock'};
+  const kids = [el('shell', {holdsDock:true}), el('side'), el('main'), el('d', {sel:'dialog'}), el('toast', {sel:'[aria-live]'}), el('was', {inert:true})];
+  const ctx = {document:{getElementById: id => (id === 'live-dock' ? el.dock : null), querySelectorAll: () => kids}};
+  vm.createContext(ctx);
+  vm.runInContext(page.slice(page.indexOf('function liveLayerInert'), page.indexOf('function liveLayerPad')) + '\nthis.f = liveLayerInert;', ctx);
+  ctx.f(true);
+  assert.deepEqual(kids.filter(k => k.inert).map(k => k.id), ['side', 'main', 'was']);
+  ctx.f(false);
+  assert.deepEqual(kids.filter(k => k.inert).map(k => k.id), ['was'], 'what was inert before stays so');
+  assert.match(page, /liveLayerInert\(where === 'full'\)/);
+  assert.match(page, /function liveLayerOff\(\) \{\n {2}liveLayerInert\(false\);/);
+});
+
+test('a drag ends when the grip loses the pointer (a repaint mid-drag), and keeps the size once', () => {
+  assert.match(page, /\['pointerup', 'pointercancel', 'lostpointercapture'\]/);
+  assert.match(page, /if \(done\) return;/);
+});
+
+test('a window resize draws the layer again only across the phone width', () => {
+  assert.doesNotMatch(page, /addEventListener\('resize', \(\) => \{ if \(document\.getElementById\('live-dock'\)\) \{ liveLayerPainted = ''/);
+  assert.match(page, /if \(now !== phone\)/);
+});
