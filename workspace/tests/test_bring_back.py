@@ -13,6 +13,17 @@ from orch import tickets, worktrees
 
 repo = repo_fixture
 
+
+@pytest.fixture(autouse=True)
+def _slow_git_budget(monkeypatch):
+    """Windows starts git slowly (about 100 ms each) and the CI runner is loaded: a sweep gets six times its
+    budget there, or a save is refused with "saving needs more time" (what that answer means is tested on its
+    own, with its own deadline)."""
+    if os.name == "nt":
+        monkeypatch.setattr(worktrees, "SWEEP_BUDGET", worktrees.SWEEP_BUDGET * 6)
+        monkeypatch.setattr(worktrees.sweep, "__defaults__", (worktrees.SWEEP_BUDGET,))
+
+
 NO_TRAILING_DOT = pytest.mark.skipif(
     os.name == "nt", reason="Windows drops a trailing dot or space in a file name"
 )

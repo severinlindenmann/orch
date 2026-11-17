@@ -19,6 +19,10 @@ from orch.errors import Refused
 HIDDEN = "other-text-the-tool-prints-that-must-not-be-kept"
 LINK = "https://claude.com/cai/oauth/authorize?code=true&state=abc"
 
+# The renew worker leads its own process group, hands its token over in a pipe descriptor and runs the tool
+# as a script with a #! line: none of that exists on Windows yet (follow-up issue: renew on Windows).
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="renew needs POSIX process groups and pipes")
+
 
 def _tool(tmp_path, body: str):
     """A stand-in for the tool's own sign-in command (a small Python program)."""

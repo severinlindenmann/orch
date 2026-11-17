@@ -879,6 +879,7 @@ def test_windows_leaves_out_the_record_hooks_but_keeps_the_reminder_hooks(monkey
     assert set(_RECORD_EVENTS) <= set(adapters.reminder_doc("claude")["hooks"])
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="nvm (POSIX) layout and a ':' path list")
 def test_find_binary_looks_in_nvm_when_the_path_is_clean(tmp_path, monkeypatch):
     nvm = tmp_path / ".nvm" / "versions" / "node" / "v22.1.0" / "bin"
     nvm.mkdir(parents=True)

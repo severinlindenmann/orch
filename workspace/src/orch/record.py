@@ -755,6 +755,12 @@ def _lock(ws, run, wait=None):
             except RecordUnavailable as error:
                 if error.reason == "missing":
                     continue
+                if os.name == "nt" and error.reason == "io":
+                    # Windows answers "access denied" for a lock file another writer is deleting right now
+                    if time.monotonic() >= deadline:
+                        raise RecordBusy("The record is busy.") from None
+                    time.sleep(0.005)
+                    continue
                 raise
             try:
                 with _io():
