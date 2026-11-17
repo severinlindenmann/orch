@@ -18,6 +18,7 @@ What a report holds is data, never instructions: the ticket note quotes it as su
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -33,6 +34,11 @@ RELAY_MAX = 5  # relay problems taken per pass
 FINISHED = ("review", "done")
 CLOSE_TRIES = 3  # a relay problem that cannot be marked done is left to a person after this many tries
 BY = "orch"
+JOIN_MIN_WORDS = 5  # a report with fewer distinct words is never matched (too little to compare)
+JOIN_SHARE = 0.7  # share of the report's words that a ticket must hold to count as the same thing
+_STOP = frozenset(
+    "the a an and or of to in on for with from by is it its be as at this that when not no new".split()
+)
 
 
 def enabled(root: Path) -> bool:
@@ -173,9 +179,16 @@ def _note(root: Path, folder: Path, man: dict, note: str, expected: str) -> str:
         if expected:
             lines.append(f"What they expected: {expected}")
         lines.append(
-            "First read the orch-diagnose skill and investigate read-only: cause, evidence, fix proposal, "
-            "the check that would have caught it. Write that into this ticket. Product questions go to the "
+            "First read the orch-diagnose skill and investigate: cause, evidence, the check that would "
+            "have caught it. Write that into this ticket. Look first whether develop already fixes it or "
+            "another ticket covers it; then say so and finish. When the fix is small (one area, a few "
+            "files, one pull request), make the fix in this same ticket: tests, pull request, merged on "
+            "green. Only for a big change make a new ticket and say why. Product questions go to the "
             "person with orch ask."
+        )
+        lines.append(
+            "Done when: the cause is found and the problem is fixed and merged, or a new ticket is made "
+            "for a big change, or it was already fixed or ticketed."
         )
     if problem_of(folder):
         lines.append(
@@ -183,6 +196,47 @@ def _note(root: Path, folder: Path, man: dict, note: str, expected: str) -> str:
         )
     lines.append("Opened by the setting: turn problem reports into tickets.")
     return "\n".join(lines)
+
+
+def _words_of(text: object) -> set[str]:
+    return {
+        w
+        for w in re.findall(r"[a-z]+", str(text or "").lower())  # no digits: ids and times differ per report
+        if len(w) > 2 and w not in _STOP
+    }
+
+
+def _ticket_text(t: dict) -> str:
+    note = t.get("note") or (t.get("fields") or {}).get("note") or ""
+    return f"{t.get('title') or ''} {note}"
+
+
+def same_thing(root: Path, note: str, expected: str) -> dict | None:
+    """The ticket this report belongs to: an open ticket, or a finished one whose change is merged but not
+    released yet (ORCH-87). Best effort and strict: most of the report's words must be in the ticket.
+    Returns {"ticket", "key", "why"} or None."""
+    mine = _words_of(f"{note} {expected}")
+    if len(mine) < JOIN_MIN_WORDS:
+        return None
+    from orch import released
+
+    best = None
+    for t in tickets.list_all(root):
+        status = t.get("status")
+        if status == "dropped" or (t.get("title") or "").startswith("Feature wish"):
+            continue
+        share = len(mine & _words_of(_ticket_text(t))) / len(mine)
+        if share < JOIN_SHARE or (best and share <= best[0]):
+            continue
+        if status in FINISHED or status == "done":
+            rel = released.ticket_release(t)
+            if not rel or rel.get("state") != "merged":
+                continue  # released (or unknown): a new report may be a new problem
+            why = "its fix is merged, not released yet"
+        else:
+            why = "it is still open"
+        best = (share, {"ticket": t["id"], "key": t.get("key"), "why": why})
+    return best[1] if best else None
 
 
 def _relay_ready(root: Path) -> bool:
@@ -273,14 +327,20 @@ def run_pass(root: Path, *, dry_run: bool = False, now: float | None = None) -> 
             return _pass(root, dry_run, now)
     except Refused as e:
         if "busy" in str(e):
-            return {"busy": True, "opened": [], "skipped": [], "relay": {}, "closed": []}
+            return {"busy": True, "opened": [], "skipped": [], "relay": {}, "closed": [], "joined": []}
         raise
 
 
 def _pass(root: Path, dry_run: bool, now: float) -> dict:
     state = load_state(root)
     seen = state["seen"]
-    res: dict = {"opened": [], "skipped": [], "relay": _relay_pass(root, state, now, dry_run), "closed": []}
+    res: dict = {
+        "opened": [],
+        "joined": [],
+        "skipped": [],
+        "relay": _relay_pass(root, state, now, dry_run),
+        "closed": [],
+    }
     if not dry_run:
         _save(root, state)
     folders = find(root)
@@ -306,6 +366,16 @@ def _pass(root: Path, dry_run: bool, now: float) -> dict:
         note, expected = _words(folder, man)
         title = _title(folder, man, note)
         wish = man.get("about") == "feature"
+        join = None if wish else same_thing(root, note, expected)
+        if join:
+            res["joined"].append({"ref": ref, **join})
+            if not dry_run:
+                tickets.log(
+                    root, join["ticket"], f"Same problem as report {ref} ({join['why']}): {note[:200]}", BY
+                )
+                seen[ref] = {"ticket": join["ticket"], "at": now, "joined": True}
+                _save(root, state)
+            continue
         if dry_run:
             res["opened"].append(
                 {"ticket": None, "ref": ref, "title": title, "wish": wish, "start": not wish}
@@ -334,6 +404,10 @@ def text(res: dict) -> str:
     if res.get("busy"):
         return "Another pass is running; nothing done."
     out = [f"Opened {r.get('key') or r['ticket'] or '(dry run)'}: {r['title']}" for r in res["opened"]]
+    out += [
+        f"Report {r['ref']} added to {r.get('key') or r['ticket']} ({r['why']})"
+        for r in res.get("joined", [])
+    ]
     out += [f"Skipped {r['ref']}: a relay copy of the own report {r['copy_of']}" for r in res["skipped"]]
     for p in (res.get("relay") or {}).get("taken") or []:
         out.append(
