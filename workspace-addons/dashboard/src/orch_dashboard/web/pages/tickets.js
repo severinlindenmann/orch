@@ -135,7 +135,7 @@ function viewChips() {
     TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered, {href:ticketAddress({view:id}), 'data-key':'view-chip-' + (id || 'all')})), own, save);
 }
 function ticketFilters() {
-  const input = h('input', {className:'input', type:'search', placeholder:'Search by number or words', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
+  const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); writeTicketAddress(); render(); });
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
   const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; render(); }) : null;

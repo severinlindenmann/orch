@@ -414,12 +414,12 @@
 
   /* A Factory start question (kind factory:start) in a few lines for Home (ORCH-60). The question's text is the frozen
      proposal Factory wrote ("Start '<title>'? ~10 h · target $5 · you're needed for ~15 min. Goal: … . Done means: …
-     Cap: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
+     Time limit: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
      text is not in that shape (the card then shows the question as it always did). */
   function factoryStart(text) {
     const m = /^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: /s.exec(String(text || ''));
     if (!m) return null;
-    const head = m[2].split(' · '), cap = /\. Cap: (.+?) active\. /.exec(String(text))?.[1];
+    const head = m[2].split(' · '), cap = /\. Time limit: (.+?) active\. /.exec(String(text))?.[1];
     const usd = head.map(x => /^target \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
     const owner = head.map(x => /^you're needed for ~(.+)$/.exec(x)?.[1]).find(Boolean);
     const meta = ['Runs about ' + head[0], owner ? 'needs you for about ' + owner : '', usd ? 'about $' + usd : '', cap ? 'up to ' + cap + ' of helper time' : ''];

@@ -558,7 +558,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "'Let the helper do everything?'",
         "' is now the default helper.'",
         "ticketButton('Start helper'",
-        "'Ask the helper to check again'",
+        "'Ask your helper to check again'",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
         "plainWhy(question, 'The helper')",
