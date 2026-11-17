@@ -704,3 +704,11 @@ test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All
   assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
   assert.match(page({items:[]}).text, /All clear/);
 });
+
+test('ORCH-158: the edit button has a name, and a long note opens whole', () => {
+  const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+  assert.match(ticket, /setAttribute\('aria-label', 'Change ' \+ FIELD_LABEL\[field\]\)/);
+  assert.match(ticket, /Shift\+Enter new line'\s*:\s*'Click to change'/);
+  assert.match(ticket, /input\.rows = Math\.min\(20, Math\.max\(3,/);
+  assert.match(ticket, /input\.addEventListener\('input', grow\)/);
+});

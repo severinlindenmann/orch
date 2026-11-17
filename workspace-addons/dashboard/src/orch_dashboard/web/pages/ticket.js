@@ -350,6 +350,12 @@ function startAddonField(control) {
   input.setAttribute('aria-label', f.title);
   host.replaceChildren(input, el('span', 'hint', 'Enter saves · Esc cancels'));
   input.focus();
+  if (MULTILINE.includes(field)) {
+    // Show the whole note: grow with the text, and start at the top instead of the end.
+    const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight + 2, window.innerHeight * 0.6) + 'px'; };
+    grow(); input.setSelectionRange(input.value.length, input.value.length); input.scrollTop = 0;
+    input.addEventListener('input', grow);
+  }
   let done = false;
   const finish = save => { if (done) return; done = true; end(save ? input.value.trim() : null); };
   input.addEventListener('keydown', event => {
@@ -1595,6 +1601,7 @@ function detail(t) {
 }
 
 const MULTILINE = ['note', 'done_when'];
+const FIELD_LABEL = {title:'title', owner:'owner', due:'due date', note:'what you asked', done_when:'what done looks like'};
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 // The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
@@ -1627,7 +1634,8 @@ function inlineField(t, field) {
   const plain = field !== 'title', setDue = field === 'due' && !shown;
   const node = el('button', 'ed' + (plain ? ' ed-plain' : '') + (setDue ? ' ed-link' : shown ? '' : ' empty-v') + (MULTILINE.includes(field) ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), setDue ? 'Set a due date' : shown || FIELD_HINT[field]);
   if (plain && !setDue) node.append(iconEl('pencil'));
-  Object.assign(node, {type:'button', title:'Click to change'});
+  Object.assign(node, {type:'button', title:MULTILINE.includes(field) ? 'Click to change · Enter saves, Shift+Enter new line' : 'Click to change'});
+  node.setAttribute('aria-label', 'Change ' + FIELD_LABEL[field]);
   Object.assign(node.dataset, {action:'inline', field, ticket:t.id});
   host.append(node);
   return host;
@@ -1648,7 +1656,7 @@ function startInline(control) {
     return;
   }
   const input = el(MULTILINE.includes(field) ? 'textarea' : 'input', 'input inline-input');
-  if (MULTILINE.includes(field)) input.rows = 3; else input.type = 'text';
+  if (MULTILINE.includes(field)) input.rows = Math.min(20, Math.max(3, before.split('\n').length + 1)); else input.type = 'text';
   if (field === 'title') input.maxLength = 200;
   input.value = before;
   input.setAttribute('aria-label', capitalise(field));
