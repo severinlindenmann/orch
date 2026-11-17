@@ -652,6 +652,7 @@ def test_settings_state_has_agents_and_every_addon(ws, act_orch):
         }
     ]
     assert [(a["name"], a["active"]) for a in s["addons"]] == [("alpha", True), ("beta", False)]
+    assert [a["label"] for a in s["addons"]] == ["Alpha", "Beta"]  # ORCH-141: the menu name for the Settings list
     assert s["folder"] == str(ws)
     assert load_state(ws, orch_bin=str(act_orch))["settings"] is None  # only the live server asks for it
     assert load_state(ws, orch_bin=str(act_orch), with_addons=False, with_settings=False)["settings"] is None

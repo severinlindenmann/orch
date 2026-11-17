@@ -173,7 +173,7 @@ def repeat(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="orch automation", description="Starts agent runs: at a time, on a repeat, from the relay inbox."
+        prog="orch automation", description="Starts helper runs: at a time, on a repeat, from the relay inbox."
     )
     ap.add_argument(
         "--dir",
