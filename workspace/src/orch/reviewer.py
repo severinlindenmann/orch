@@ -320,7 +320,10 @@ def _write_state(root: Path, state: dict) -> None:
 
 
 def _send_back(root: Path, tid: str, why: str) -> dict:
-    note = f"The Reviewer found work missing: {why}. Finish it and send the ticket to Review again."
+    if "which task proves it?" in why:  # a question, not missing work: name the task, then send it again
+        note = f"The Reviewer has a question: {why}. Answer it and send the ticket to Review again."
+    else:
+        note = f"The Reviewer found work missing: {why}. Finish it and send the ticket to Review again."
     t = tickets.ask_for_changes(root, tid, note, BY)
     from orch import runs_live
 
