@@ -994,7 +994,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
         "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
-        "focus_preview_on": focus_preview_on(root),  # Settings > Add-ons > Focus: "Preview" (the new Focus)
+        "focus_preview_on": focus_preview_on(root),  # the Preview switch for the new live page (Settings > Add-ons)
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),

@@ -20,38 +20,46 @@ test('#addon/focus is the Focus page; #open/focus/ and #open/focus/t/<id> forwar
   assert.deepEqual({...route('#open/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
   assert.deepEqual({...route('#addon/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
 });
-// ORCH-264: the Preview switch. Off (the default): every Focus address is today's Focus page, unchanged.
-// On: the same addresses show the new Focus (kind 'focus'), with the same path and address.
-test('the Preview switch turns the Focus addresses into the new Focus; off they stay today\'s Focus', () => {
-  const on = {focusPreviewOn: () => true}, off = {focusPreviewOn: () => false};
-  for (const extra of [{}, off]) {
-    assert.equal(route('#addon/focus', [FOCUS], extra).kind, 'page');
-    assert.equal(route('#addon/focus/t/t_abc12345', [FOCUS], extra).kind, 'page');
+// ORCH-264: the Preview switch. Off (the default): every address of the live-session add-on is its own page, unchanged.
+// On: the same addresses show the new live page (kind 'live'), with the same path and address. The dashboard names no
+// add-on: the page is found by its live_session capability.
+const LIVE = {name:'focus', page:{path:'/', live_session:true}, dashboard:{label:'Focus'}};
+test('the Preview switch turns the live-session add-on\'s addresses into the new page; off they stay as they are', () => {
+  const ctxOf = on => ({livePreviewOn: () => on, livePageOf: id => [LIVE].find(a => a.name === id) || null});
+  for (const extra of [{}, ctxOf(false)]) {
+    assert.equal(route('#addon/focus', [LIVE], extra).kind, 'page');
+    assert.equal(route('#addon/focus/t/t_abc12345', [LIVE], extra).kind, 'page');
   }
-  assert.deepEqual({...route('#addon/focus', [FOCUS, OTHER], on)}, {kind:'focus', id:'focus', path:'', hash:'#addon/focus'});
-  assert.deepEqual({...route('#open/focus/t/t_abc12345', [FOCUS], on)}, {kind:'focus', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
-  assert.equal(route('#addon/automation', [FOCUS, OTHER], on).kind, 'addon', 'other add-ons never change');
-  assert.equal(route('#home', [FOCUS], on).kind, 'home');
-  assert.equal(route('#addon/focus/../x', [FOCUS], on).kind, 'notfound');
+  const on = ctxOf(true);
+  assert.deepEqual({...route('#addon/focus', [LIVE, OTHER], on)}, {kind:'live', id:'focus', path:'', hash:'#addon/focus'});
+  assert.deepEqual({...route('#open/focus/t/t_abc12345', [LIVE], on)}, {kind:'live', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
+  const PAGE = {name:'factory', page:{path:'/'}, dashboard:{label:'Factory'}};
+  assert.equal(route('#addon/factory', [LIVE, PAGE], on).kind, 'page', 'a page without live sessions never changes');
+  assert.equal(route('#addon/automation', [LIVE, OTHER], on).kind, 'addon');
+  assert.equal(route('#home', [LIVE], on).kind, 'home');
+  assert.equal(route('#addon/focus/../x', [LIVE], on).kind, 'notfound');
 });
-const focusSource = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/focus.js'), 'utf8');
-test('focusPreviewOn reads the one setting: on only when it is exactly true, never in a shared copy', () => {
-  const on = (state, snapshot = false) => { const ctx = {state, snapshot}; vm.createContext(ctx); vm.runInContext(focusSource, ctx); return ctx.focusPreviewOn(); };
+const liveSource = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/live.js'), 'utf8');
+test('livePreviewOn reads the one setting: on only when it is exactly true, never in a shared copy', () => {
+  const on = (state, snapshot = false) => { const ctx = {state, snapshot}; vm.createContext(ctx); vm.runInContext(liveSource, ctx); return ctx.livePreviewOn(); };
   assert.equal(on({settings:{focus_preview_on:true}}), true);
   for (const s of [{settings:{focus_preview_on:false}}, {settings:{}}, {}, null, {settings:{focus_preview_on:'true'}}]) assert.equal(on(s), false);
   assert.equal(on({settings:{focus_preview_on:true}}, true), false);
 });
-test('the new Focus is an empty shell with the Preview tag and a way back to today\'s Focus', () => {
+test('the new live page is an empty shell with the Preview tag, the add-on\'s own name and a way back', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, kids:kids.flat(Infinity).filter(Boolean)});
-  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [FOCUS], encodeURIComponent};
-  vm.createContext(ctx); vm.runInContext(focusSource, ctx);
+  const ctx = {h, fragment:(...k) => h('frag', {}, ...k), heading:(t, sub, o) => h('header', {}, h('h1', {}, t), o?.actions), addonLabel:a => a?.dashboard?.label, addons:() => [LIVE], encodeURIComponent};
+  vm.createContext(ctx); vm.runInContext(liveSource, ctx);
   const all = n => [n, ...(n.kids || []).flatMap(k => typeof k === 'object' ? all(k) : [])];
   const text = n => all(n).flatMap(x => (x.kids || []).filter(k => typeof k === 'string')).join(' ');
-  const page = ctx.focusNextPage({kind:'focus', id:'focus', path:''}), key = k => all(page).find(x => x.attrs?.['data-key'] === k);
-  assert.equal(text(key('focus-next-tag')), 'Preview');
-  assert.match(text(key('focus-next')), /The new Focus is being built/);
-  assert.equal(key('focus-next-off').attrs.href, '#settings/addons/focus');
-  assert.equal(all(page).filter(x => x.tag === 'iframe').length, 0, 'not today\'s Focus page');
+  assert.equal(ctx.livePageOf('focus'), LIVE);
+  assert.equal(ctx.livePageOf('automation'), null);
+  const page = ctx.liveNextPage({kind:'live', id:'focus', path:''}), key = k => all(page).find(x => x.attrs?.['data-key'] === k);
+  assert.equal(text(key('live-next-tag')), 'Preview');
+  assert.match(text(key('live-next')), /The new Focus is being built; your helpers’ sessions will show here\./);
+  assert.equal(text(key('live-next-off')), 'Back to today’s Focus');
+  assert.equal(key('live-next-off').attrs.href, '#settings/addons/focus');
+  assert.equal(all(page).filter(x => x.tag === 'iframe').length, 0, 'not today\'s page');
 });
 test('an add-on without a page keeps its own tab; path tricks fall back', () => {
   assert.equal(route('#addon/automation', [FOCUS, OTHER]).kind, 'addon');

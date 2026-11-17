@@ -653,7 +653,7 @@ def _typing_set(a):
 
 
 def _focus_preview_set(a):
-    """Settings > Add-ons > Focus > Preview: the new Focus instead of today's, a plain `orch config set`."""
+    """The Preview switch on the live-session add-on's settings page: a plain `orch config set` (core names the key)."""
     from orch.config import FOCUS_PREVIEW_KEY
 
     _only(a, ("on",))
