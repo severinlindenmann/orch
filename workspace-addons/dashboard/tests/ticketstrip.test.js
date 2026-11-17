@@ -27,7 +27,7 @@ function ctx(extra = {}) {
 const base = {id:'t_one', title:'Update the opening hours', owner:'human:Anna', created_at:'2026-11-02T08:15:00Z', updated_at:'2026-11-14T10:32:00Z', questions:[]};
 const STATES = [
   ['todo', {status:'open'}, {}, /Not started/],
-  ['working', {status:'active', sessions:[{id:'s'}]}, {runs:{t_one:{running:true}}}, /Helper is working/],
+  ['working', {status:'active', sessions:[{id:'s'}]}, {runs:{t_one:{running:true}}}, /Working/],
   ['needs', {status:'waiting', questions:[{id:'q1', text:'Which opening time on Saturday?'}]}, {}, /Helper asks: Which opening time on Saturday\?/],
   ['check', {status:'review'}, {}, /Helper finished/],
   ['done', {status:'done', done_at:'2026-11-14T11:05:00Z', history:[{at:'2026-11-14T11:05:00Z', by:'human:Severin', text:'Status review -> done'}], checklist:[{id:'c1', text:'Read the page', done:true}, {id:'c2', text:'Changed 3 lines', done:true}, {id:'c3', text:'Skipped bit', wont_do:true}]}, {}, /Done .*checked by Severin/],

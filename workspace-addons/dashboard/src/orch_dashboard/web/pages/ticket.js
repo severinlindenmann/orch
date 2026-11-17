@@ -1429,7 +1429,7 @@ function ticketProperties(t, parent) {
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
     h('dl', {className:'ticket-details ed-list'}, parent ? field('Step of', h('a', {href:href(parent.id)}, partName(parent))) : null,
-      field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Model', modelField(t)),
+      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Model', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
     linksCard(t),
@@ -1473,12 +1473,50 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     if (menu) actions.push(menu);
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
+  if (ticketHelperLive(t, run)) return ticketWorkingStrip(t, run, m, quiet, menu, tabs);
   return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
       h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
+}
+// ORCH-70 (owner 16 Nov, as drawn): while a helper runs the header holds it all. One line above the title (key, the
+// ORCH-61 state word, the helper, minutes), one Watch live, Stop and the terminal commands in the ⋯ menu. No helper
+// bar and no Live session card below it; the box goes, so the page reads calmer.
+const ticketHelperLive = (t, run) => !snapshot && window.DashHelpers.helperAlive(t, run) && run?.claim?.mode !== 'oneshot' && !questions(t).length;
+function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
+  const helper = window.DashHelpers.helperState(run, t) || {state:'working', word:'Working', detail:''};
+  const agent = window.DashHelpers.agentLine(t, run, Date.now(), null, state.settings).agent;
+  const minutes = Number.isFinite(run?.age_seconds) ? Math.max(1, Math.floor(run.age_seconds / 60)) + ' min' : '';
+  const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
+  const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
+  const parts = [key ? h('span', {className:'key'}, key) : null, pill, agent ? name(agent) : null, minutes].filter(Boolean);
+  const kicker = h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
+  // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "No news since"
+  const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
+  const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
+  const live = liveLinkFor(t);
+  const actions = [live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null, menu].filter(Boolean);
+  return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
+    h('div', {className:'strip-h'},
+      h('div', {className:'grow ticket-strip-text'}, kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
+        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null),
+      actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
+    tabs);
+}
+// The ⋯ menu items for a running helper: Stop first, then the two terminal commands (Watch is read only, Take over types).
+function ticketHelperMenuItems(t, run) {
+  if (!ticketHelperLive(t, run)) return null;
+  const helper = window.DashHelpers.helperState(run, t), idle = helper && ['idle', 'stuck'].includes(helper.state);
+  const ref = typeof t.key === 'string' && t.key ? t.key : t.id;
+  const copy = (label, command, k) => ticketButton([iconEl('copy'), label], 'menu-item', async () => {
+    try { await navigator.clipboard.writeText(command); window.orch.toast('Copied', 'ok'); }
+    catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
+  }, {role:'menuitem', title:command, 'data-key':'live-copy-' + k});
+  return [ticketButton(idle ? 'Stop idle helper' : 'Stop', 'menu-item', () => act('run.stop', {ticket:t.id}), {role:'menuitem', 'data-key':'ticket-stop'}),
+    run?.claim?.mode === 'oneshot' ? null : copy('Copy watch command', 'orch run attach ' + ref + ' --watch', 'watch'),
+    run?.claim?.mode === 'oneshot' ? null : copy('Copy take-over command', 'orch run attach ' + ref, 'take')];
 }
 function detail(t) {
   if (!t) return missingTicket(route().id);
@@ -1489,14 +1527,14 @@ function detail(t) {
   loadArtifacts(t, selected === 'files');
   const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
-  const working = !fresh && !planQ && !['done', 'review'].includes(t.status);
+  const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const answeredRow = q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
     h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
   const answered = ticketAnswerNodes(t, answeredRow);
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
   const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
-    h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? null : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
+    h('div', {className:'menu-pop', role:'menu'}, ticketHelperMenuItems(t, run), t.status === 'done' ? null : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
   const tabs = ticketTabList(t);
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
@@ -1507,10 +1545,11 @@ function detail(t) {
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
-    working ? agentBar(t) : null, working ? sharedFolderLine(t) : null, working ? liveSessionStrip(t) : null,
+    working && !helperLive ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,
     t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
     note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note) : null,
+    working && helperLive ? sharedFolderLine(t) : null,
     t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),

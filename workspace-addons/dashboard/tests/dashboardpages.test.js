@@ -577,9 +577,12 @@ test('Watch live and Stop exist only while a helper is at work (not on a ticket 
   assert.equal(helpers.helperAlive({status:'active'}, {running:false}), false);
   assert.equal(helpers.helperAlive({status:'active'}, null), false);
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
-  // one Stop / Watch live pair, in the helper line; the header keeps only status, title, sentence and the menu
-  assert.equal((ticket.match(/ticketButton\((idle \? 'Stop idle helper' : )?'Stop'/g) || []).length, 1);
-  assert.match(ticket, /function agentBar[\s\S]*className:'btn primary sm'[\s\S]*Watch live[\s\S]*ticketButton\(idle \? 'Stop idle helper' : 'Stop', 'outline sm'/);
+  // ORCH-70: a running helper has its Watch live in the header and Stop in the ⋯ menu; the helper bar (with its own
+  // pair) shows only when the header does not hold them (a question open, a background run)
+  assert.equal((ticket.match(/ticketButton\((idle \? 'Stop idle helper' : )?'Stop'/g) || []).length, 2);
+  assert.match(ticket, /function ticketHelperMenuItems[\s\S]*ticketButton\(idle \? 'Stop idle helper' : 'Stop', 'menu-item'/);
+  assert.match(ticket, /function ticketWorkingStrip[\s\S]*'data-key':'watch-live'\}, 'Watch live'/);
+  assert.match(ticket, /working && !helperLive \? agentBar\(t\)/);
   assert.doesNotMatch(ticket, /Watch live ↗/);
   assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
 });
