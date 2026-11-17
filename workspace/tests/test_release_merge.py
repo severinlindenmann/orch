@@ -184,18 +184,23 @@ def test_refused_inside_a_helper(tk, run, monkeypatch):
 class ReleaseGh:
     """gh for ghmerge.release_problem: the pull request's branches, the default branch, the compare count."""
 
-    def __init__(self, head_ref="release/part30-1117", base="main", default="main", files="0"):
-        self.head_ref, self.base, self.default, self.files = head_ref, base, default, files
+    def __init__(self, head_ref="release/part30-1117", base="main", default="main", files="0", fork=False):
+        self.head_ref, self.base, self.default, self.files, self.fork = head_ref, base, default, files, fork
+        self.compared = []
 
     def __call__(self, argv, **kw):
         import subprocess
 
         args = argv[1:]
         if args[:2] == ["pr", "view"]:
-            out = json.dumps({"baseRefName": self.base, "headRefName": self.head_ref})
+            out = json.dumps({"baseRefName": self.base, "headRefName": self.head_ref,
+                              "isCrossRepository": self.fork})  # fmt: skip
         elif args[:2] == ["api", "repos/acme/app"]:
             out = self.default + "\n"
-        elif args[0] == "api" and "/compare/develop..." in args[1]:
+        elif args[:2] == ["api", "repos/acme/app/branches/develop"]:
+            out = "b" * 40 + "\n"
+        elif args[0] == "api" and "/compare/" in args[1]:
+            self.compared.append(args[1])
             out = self.files + "\n"
         else:
             raise AssertionError(args)
@@ -209,11 +214,15 @@ class ReleaseGh:
         ({"head_ref": "feat/sneaky"}, "release/"),
         ({"base": "develop"}, "default branch"),
         ({"files": "3"}, "not on develop"),
+        ({"fork": True}, "another repository"),
     ],
 )
 def test_release_problem(monkeypatch, gh_kw, want):
     monkeypatch.undo()  # the real check, not the autouse stand-in
     monkeypatch.setattr(ghmerge.shutil, "which", lambda name: "/fake/bin/gh")
-    monkeypatch.setattr(ghmerge.subprocess, "run", ReleaseGh(**gh_kw))
+    fake = ReleaseGh(**gh_kw)
+    monkeypatch.setattr(ghmerge.subprocess, "run", fake)
     got = ghmerge.release_problem(PR, HEAD)
     assert got is None if want is None else want in got
+    if want is None:  # compared with develop's own commit, never the name (a tag could carry it)
+        assert fake.compared == [f"repos/acme/app/compare/{'b' * 40}...{HEAD}"]
