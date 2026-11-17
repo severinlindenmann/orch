@@ -392,9 +392,12 @@ def _ticket_patch(a):
             and v is not None
             and not (
                 isinstance(v, dict)
-                and set(v) == {"kind", "until"}
+                and {"kind", "until"} <= set(v) <= {"kind", "until", "ref"}
                 and v["kind"] == "time"
                 and isinstance(v["until"], str)
+                and isinstance(
+                    v.get("ref", ""), str
+                )  # ORCH-235: what it waits for (optional; the core checks length)
             )
         ):
             raise BadRequest("A wait from the board is a time.")
@@ -463,14 +466,14 @@ def _ticket_order(a):
     return ["ticket", "order", lane], [], [_tid(t) for t in ids]
 
 
-MODELS = ("sonnet", "opus", "auto")
+MODELS = ("haiku", "sonnet", "opus", "fable", "auto")
 
 
 def _ticket_model(a):
     """A person picks the helper's model for this ticket (or lets orch pick again): `orch ticket model`."""
     _only(a, ("ticket", "model"))
     if a.get("model") not in MODELS:
-        raise BadRequest("Pick Sonnet, Opus or let orch pick.")
+        raise BadRequest("Pick Haiku, Sonnet, Opus, Fable or let orch pick.")
     return ["ticket", "model", _tid(a.get("ticket")), a["model"]], [], []
 
 

@@ -560,7 +560,7 @@ def test_one_chip_while_a_question_is_open(ticket, live, want):
 
 def test_the_move_to_control_is_a_visible_labelled_button():
     """6A: one visible "Move to" button; no chevron-only summary, no jargon in the choices. ORCH-152: Backlog and
-    Won't do join (owner's words)."""
+    Won't do join (owner's words); ORCH-235: Waiting and Superseded too, the same places as the board."""
     src = webjs.all_js()
     assert "status-sum-icon" not in src
     assert "'Move to'" in src
@@ -568,9 +568,11 @@ def test_the_move_to_control_is_a_visible_labelled_button():
         "Backlog",
         "To do",
         "Working",
+        "Waiting",
         "Check",
         "Done",
         "Won't do",
+        "Superseded",
     ]
 
 
