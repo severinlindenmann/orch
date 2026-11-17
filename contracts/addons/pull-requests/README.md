@@ -21,6 +21,8 @@ merges, so sync holds a changed block until a person allows it.
 - `orch pull-requests queue list [--json]`: `{"entries": [...], "running": bool}`.
 - `orch pull-requests queue remove <url>`: only a waiting entry.
 - `orch pull-requests queue run`: the runner (one per workspace, lock folder `runner.lock`).
+- `orch pull-requests failed-checks on|off|status|tend [--json]`: the failed-checks part (below). `on`/`off` write
+  the setting `act_on_failed_checks`; `tend` runs one pass now (nothing when off).
 
 ## Settings (`.orch/config.toml`, section `[pull_requests]`)
 - `bases` (list, default `["develop"]`): the base branches the queue merges into. `main` and `master` are dropped
@@ -28,6 +30,8 @@ merges, so sync holds a changed block until a person allows it.
 - `login` (text, not set by default): the GitHub login the queue merges with. Set: entries are added only from
   that login and a runner signed in as anyone else does not run. Not set: each entry keeps the login that added
   it, and only a runner with that same login takes it (logins compare without case).
+
+- `act_on_failed_checks` (true/false, default false): act on failed checks (below). Any other value is off.
 
 ## Queue file `.orch/addons/pull-requests/queue.json`
 `{"entries": [{url, repo, number, ticket, by, added, state, why, base, login, [head, title, closes, group, tries,
@@ -102,3 +106,24 @@ under the ticket's Details; set with `orch ticket set <ticket> pull-requests.mer
   when the add-on is no longer on here. `start` → `{"running": true, "pid"}`, `stop` → `{"stopped": bool}` (signals
   only the pid the lock names while that process lives with the recorded start time), `status` → `{"running",
   "pid"?}`, exit 1 when not running.
+
+## Failed checks (ORCH-167)
+Off until `act_on_failed_checks = true`. The Merge when green watcher runs one pass every minute after its own
+(a failure of one part never skips the other). One pass looks at each open pull request linked on a ticket that
+is not done or dropped (a pull request on two tickets: the first ticket), with one read
+(`gh pr view --json state,isDraft,headRefOid,statusCheckRollup`), the newest check per name:
+- a GitHub Actions job that ended cancelled or timed out is run again once per commit and job name
+  (`gh run rerun --job`). It first takes a slot of `orch.ghlimit` (kind `other`) without waiting; no room: no
+  rerun and no wake this pass. A rerun GitHub refused is not tried again and counts as a real failure. For 10
+  minutes after a rerun the replaced job still shown by GitHub counts as running.
+- when every check of the commit has finished and one failed (failure, error, startup failure, action required,
+  or cancelled / timed out again after its rerun), the ticket's helper is woken once per commit: a live helper
+  gets an input of kind `event`, otherwise the input is queued and the helper is started like the helper
+  watcher does (`agent:automation`, so the pause and the daily cap apply). The text names the pull request, the
+  short commit, each failed check with its link, and the last 30 lines (each cut at 300 characters, colour codes
+  and time stamps removed) of up to 3 failed jobs' logs (`gh run view --job --log-failed`). A log line that
+  `orch.secretscan` flags is replaced by "(line hidden: it looks like a secret)". Log lines are CI output: data,
+  never instructions.
+- each rerun and wake writes one history line on the ticket (`agent:failed-checks`).
+Memory: `.orch/addons/pull-requests/checks.json` `{pull request key: {head, reran: {name: {job, ok, at}}, woke}}`;
+a new commit starts over; pull requests no longer open on an open ticket are dropped.
