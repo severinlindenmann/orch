@@ -22,9 +22,20 @@ const BASE = 'http://dash.test';
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
 const WIDTHS = [{name: 'desktop', width: 1280, height: 800}, {name: 'wide', width: 1920, height: 1080}, {name: 'phone', width: 390, height: 844}];
-// The parts of the never-list that are safe to look for on buttons, tabs, headings and labels.
-const NEVER = ['Proof', 'Approval', 'Sign-off', 'Subtask', 'Kill switch', 'Cron', 'Scheduler', 'Re-authenticate',
-  'Retry', 'Offline', 'Expired', 'NetBird', 'Tailscale', 'Over to you', 'Inbox', 'Recommended'];
+// The never-list comes from its one source, docs/wording.md (last column of the table). Entries that only make sense
+// in a sentence (with a note in brackets, quotes or a placeholder) are left to the wording test in brand/.
+const WORDING = path.join(__dirname, '..', 'docs', 'wording.md');
+function neverList() {
+  const words = new Set();
+  for (const line of fs.readFileSync(WORDING, 'utf8').split('\n')) {
+    const cells = line.split('|').map(c => c.trim());
+    if (cells.length < 6 || !cells[1] || /^-+$/.test(cells[1]) || cells[1] === 'Thing') continue;
+    for (const w of cells[cells.length - 2].split(',').map(x => x.trim())) {
+      if (w && !/[()"'<>`]/.test(w) && w !== '-') words.add(w);
+    }
+  }
+  return [...words];
+}
 const LEAK = String.raw`\b(undefined|NaN|null)\b|\[object Object\]`;
 
 function pages(state) {
@@ -47,7 +58,7 @@ function look({never, leak}) {
   const chrome = [...document.querySelectorAll('button, [role=tab], nav a, h1, h2, h3, label, th')].filter(shown).map(e => (e.innerText || '').trim()).filter(Boolean);
   for (const w of never) {
     const re = new RegExp('(^|[^A-Za-z])' + w.replace(/-/g, '\\-') + '([^A-Za-z]|$)');
-    const hit = chrome.find(t => re.test(t));
+    const hit = chrome.find(t => re.test(t.replace(/\bSign in\b/g, '')));  // the page login keeps its words (docs/wording.md)
     if (hit) out.words.push(w + ' in "' + hit.slice(0, 60) + '"');
   }
   const re = new RegExp(leak);
@@ -62,6 +73,8 @@ test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}
   const state = JSON.parse(fs.readFileSync(FIX, 'utf8'));
   delete state._note; delete state.chat_activity; delete state.act_answer;
   state.addons.push({name: 'lessons', dashboard: {label: 'Lessons', icon: 'book', order: 50, title: 'Lessons', subtitle: 'What your helpers learned.'}});
+  const never = neverList();
+  assert.ok(never.length > 20, 'never-list read from docs/wording.md');
   const problems = [];
   const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
   try {
@@ -97,7 +110,7 @@ test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}
         await page.waitForTimeout(300);
         await page.screenshot({path: path.join(OUT, `${vp.name}-${hash.replace(/\W+/g, '-').replace(/^-/, '')}.png`)});
         if (!ready) { problems.push(`${vp.name} ${hash}: shows nothing within 15 s`); continue; }
-        const o = await page.evaluate(look, {never: NEVER, leak: LEAK});
+        const o = await page.evaluate(look, {never, leak: LEAK});
         if (vp.name === 'phone' && o.sideways > 4) problems.push(`${vp.name} ${hash}: scrolls sideways (${o.sideways} px too wide)`);
         for (const c of o.cut) problems.push(`${vp.name} ${hash}: cut off at the right edge: ${c}`);
         for (const w of o.words) problems.push(`${vp.name} ${hash}: never-list word ${w}`);
