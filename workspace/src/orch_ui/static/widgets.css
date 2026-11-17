@@ -946,8 +946,9 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
    page changes. The page (pages/live-layer.js) sets data-mode on .live-dock and the size in --live-h / --live-w, and
    body[data-live-layer] plus --live-pad / --live-padr keep the page usable behind it. Modes: bar (only the bar), bottom
    and right (a panel above the bar or at the right edge), full (the whole window, bar on top), side (a slim edge tab).
-   Panes sit side by side in .live-panel (one for now; split adds more). Opening and moving animate; reduced motion
-   is still through the global rule in motion.css. */
+   Panes (1 to 3, ORCH-339) sit side by side in .live-panel, stacked in the right panel; with more than one, the selected
+   pane ([data-on]) has a brand line on top and the others a quiet header whose title selects them. Opening, moving and
+   a new pane ([data-new]) animate; reduced motion is still through the global rule in motion.css. */
 .live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:min(42vw,760px)}
 .live-dock[data-mode=side]{left:auto;right:0;top:50%;bottom:auto;transform:translateY(-50%)}
 .live-dock[data-mode=right]{right:var(--live-w)}
@@ -973,9 +974,17 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-panel[data-mode=full]{flex:1;border-top:0;animation:orch-dialog var(--dur-settle) var(--ease-enter)}
 .live-pane{display:flex;flex:1 1 0;flex-direction:column;min-width:0;min-height:0}
 .live-pane+.live-pane{border-left:1px solid var(--border-strong)}
+.live-panel[data-mode=right]{flex-direction:column}
+.live-panel[data-mode=right] .live-pane+.live-pane{border-left:0;border-top:1px solid var(--border-strong)}
+.live-panel:not([data-n="1"]) .live-pane[data-on]>.live-ph{box-shadow:inset 0 2px 0 var(--brand)}
+.live-panel:not([data-n="1"]) .live-pane:not([data-on])>.live-ph{background:var(--sidebar)}
+.live-pane[data-new]{animation:live-in var(--dur-base) var(--ease-enter)}
+.live-panel[data-mode=right] .live-pane[data-new]{animation-name:live-up}
 .live-ph{display:flex;gap:var(--s2);align-items:center;min-width:0;min-height:var(--s8);padding:var(--s1) var(--s2) var(--s1) var(--s4);border-bottom:1px solid var(--border)}
 .live-ph .key{flex:none;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .live-pt{flex:1 1 0;min-width:0;overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+button.live-pt{min-height:32px;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;font-weight:600;text-align:left;cursor:pointer}
+button.live-pt:hover{color:var(--brand)}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}

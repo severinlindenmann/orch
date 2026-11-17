@@ -325,6 +325,121 @@ async function layer(page, dash, width) {
   await noSideways(page);
 }
 
+// Step 12: the split. The test workspace has one ticket, so the step uses the bar's 24 sessions of draft D (step 9).
+// Every pane has pin, add beside, place, minimise and close; narrow panes keep pin and place in More (draft D).
+async function split(page, dash, width) {
+  const phone = width <= 720;
+  const panes = () => page.$$eval('#live-dock .live-pane', els => els.map(el => {
+    const r = el.getBoundingClientRect();
+    return { key: el.dataset.session, on: el.dataset.on !== undefined, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+  }));
+  const count = async n => {
+    await page.waitForFunction(k => document.querySelectorAll('#live-dock .live-pane').length === k, n, { timeout: 5000 });
+    return panes();
+  };
+  const inPane = (key, what) => `#live-dock .live-pane[data-session="${key}"] [data-key="${what}"]`;
+  // pin, add beside, place, minimise and close on every pane (pin and place through More when the pane is narrow)
+  const controls = async () => {
+    for (const p of await panes()) {
+      const has = async what => !!await page.$(inPane(p.key, what));
+      const more = await has('live-pane-more');
+      if (!more && !(await has('live-pin') && await has('live-pane-place'))) throw new Error(`the pane of ${p.key} has no pin or place`);
+      if (!phone && !await has('live-beside')) throw new Error(`the pane of ${p.key} has no add beside`);
+      if (!await has('live-min') || !await has('live-close')) throw new Error(`the pane of ${p.key} has no minimise or close`);
+      if (more) {
+        await page.click(inPane(p.key, 'live-pane-more'));
+        await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-pin"]', { timeout: 5000 });
+        if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bottom"]')) throw new Error(`More of ${p.key} has no place`);
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('[data-key="live-more-menu"]', { state: 'detached', timeout: 5000 });
+      }
+    }
+  };
+  const sideBySide = (list, stacked) => list.every((p, i) => !i || (stacked ? p.y > list[i - 1].y && p.x === list[0].x : p.x > list[i - 1].x && p.y === list[0].y));
+  await liveBarState(page);
+  await page.goto(dash + '/#home');
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.reload();
+  await mainHasText(page);
+  await page.waitForSelector('#live-dock[data-mode="bar"] #live-bar [data-key="live-open"]', { timeout: 10000 });
+  await page.click('[data-key="live-open"]');
+  let list = await count(1);
+  await controls();
+  if (phone) {
+    // a phone shows one session at a time: no add beside; a second session from the bar takes the pane
+    if (await page.$('[data-key="live-beside"]')) throw new Error('a phone offers add beside');
+    await page.evaluate(() => window.LiveLayer.beside('t_bar232'));
+    list = await count(1);
+    if (list[0].key !== 't_bar232') throw new Error('on a phone the second session does not take the pane');
+  } else {
+    // Add beside twice: two, then three panes next to each other; the third is the most
+    await page.click('[data-key="live-beside"]');
+    list = await count(2);
+    if (!sideBySide(list)) throw new Error('two panes do not sit next to each other');
+    await page.click(inPane(list[0].key, 'live-beside'));
+    list = await count(3);
+    if (!sideBySide(list)) throw new Error('three panes do not sit next to each other');
+    if (!list[2].on || list.filter(p => p.on).length !== 1) throw new Error('the new pane is not the selected one');
+    if (!await page.$eval(inPane(list[0].key, 'live-beside'), b => b.disabled)) throw new Error('add beside still works with three panes');
+    await controls();
+  }
+  // the split stays while the page changes (the same element, never painted again)
+  await page.$eval('[data-key="live-panel"]', el => { el.dataset.kept = '1'; });
+  for (const hash of ['#tickets', '#review', '#home']) {
+    await page.evaluate(h => { location.hash = h; }, hash);
+    await mainHasText(page);
+  }
+  if (!await page.$('[data-key="live-panel"][data-kept="1"]')) throw new Error('the split did not stay when the page changed');
+  if ((await panes()).length !== list.length) throw new Error('the split lost a pane when the page changed');
+  // pin one pane
+  const one = list[0].key;
+  if (await page.$(inPane(one, 'live-pane-more'))) {
+    await page.click(inPane(one, 'live-pane-more'));
+    await page.click('[data-key="live-more-menu"] [data-key="live-pin"]');
+  } else await page.click(inPane(one, 'live-pin'));
+  await page.waitForFunction(k => JSON.parse(localStorage.getItem('orch.live.pins') || '[]').includes(k), one, { timeout: 5000 });
+  if (!await page.evaluate(k => window.LiveLayer.pins.includes(k), one)) throw new Error('the pin was not kept');
+  // place from a pane: on the right the panes stack; then back to the bottom (a phone has no right)
+  const place = async mode => {
+    if (await page.$(inPane(one, 'live-pane-more'))) await page.click(inPane(one, 'live-pane-more'));
+    else await page.click(inPane(one, 'live-pane-place'));
+    const opt = await page.$(`#live-dock .live-pane .live-pop [data-live="place"][data-mode="${mode}"]`);
+    if (!opt) return false;
+    await opt.click();
+    await page.waitForSelector(`#live-dock[data-mode="${mode}"] .live-panel[data-mode="${mode}"]`, { timeout: 5000 });
+    return true;
+  };
+  if (await place('right') === phone) throw new Error(phone ? 'a phone offers the right edge' : 'the pane has no right place');
+  if (!phone) {
+    if (!sideBySide(await panes(), true)) throw new Error('on the right the panes are not stacked');
+    await place('bottom');
+  } else await page.keyboard.press('Escape');
+  // minimise to the bar; Open brings the split back
+  await page.click(inPane(one, 'live-min'));
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  await page.click('[data-key="live-open"]');
+  list = await count(list.length);
+  // close one pane: the others take its room
+  if (!phone) {
+    const room = list.reduce((a, p) => a + p.w, 0), gone = list[1].key;
+    await page.click(inPane(gone, 'live-close'));
+    const left = await count(2);
+    if (left.some(p => p.key === gone)) throw new Error('the closed pane is still there');
+    const now = left.reduce((a, p) => a + p.w, 0);
+    if (Math.abs(now - room) > 2) throw new Error(`the others did not take the room (${room} px before, ${now} px after)`);
+    // the picture: three panes again, as in draft D
+    await page.click(inPane(left[0].key, 'live-beside'));
+    await count(3);
+  } else {
+    await page.click(inPane(list[0].key, 'live-close'));
+    await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+    await page.click('[data-key="live-open"]');
+    await count(1);
+  }
+  await page.waitForTimeout(300);
+  await noSideways(page);
+}
+
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -452,10 +567,13 @@ const STEPS = [
   },
   {
     n: 12, pic: 'fd-12-split', area: 'split', title: 'Split into two and three sessions with the pane controls', feature: [7],
-    waits: T.split,
-    do: ['In the layer press Add beside twice.', 'On one pane use pin, Place, minimise and close.'],
-    see: ['Two, then three panes sit next to each other.', 'Every pane has pin, add beside, place, minimise and close.',
-      'Closing a pane gives its room to the others.'],
+    do: ['In the layer press Add beside twice.', 'Change to Tickets, Review and Home.', 'On one pane use pin, Place, minimise and close.'],
+    see: ['Two, then three panes sit next to each other; on the right they are stacked.', 'Every pane has pin, add beside, place, minimise and close.',
+      'The split stays while the page changes.', 'Closing a pane gives its room to the others.',
+      'On a phone one session shows at a time and there is no add beside.'],
+    async run({ page, dash, width }) {
+      await split(page, dash, width);
+    },
     draft: { q: '?page=home&mode=bottom&split=3' },
   },
   {

@@ -2,16 +2,24 @@
 // The layer of the new live page (draft D, ORCH-338), behind the Preview switch (pages/live.js). One dock under every
 // page, outside main, so it stays open while the page changes: a panel at the bottom, on the right or full screen,
 // above a bar; minimised it is only the bar, closed to the side it is a slim edge tab. Place and size are kept per
-// browser. Esc goes one step back: an open menu, then full screen, then the panel to the bar. One session for now;
-// panes is a list so the split can add more. The pane is a placeholder until the chat and terminal tasks fill it.
+// browser. Esc goes one step back: an open menu, then full screen, then the panel to the bar. The split (ORCH-339):
+// 1, 2 or 3 sessions side by side (stacked on the right), one of them selected; each pane has pin, add beside, place,
+// full screen, minimise and close (pin and place fold into More when the pane is narrow). On a phone
+// only the selected session shows. The pane is a placeholder until the chat and terminal tasks fill it.
 // Look: the kit's .live-* rules (widgets.css). The bar's session chips go into [data-key="live-bar-sessions"].
 const LIVE_LAYER_KEY = 'orch.live.layer';
 const LIVE_PLACES = ['bottom', 'right'];
 const LIVE_SIZE = {height:[200, 0.85], width:[320, 0.7]};  // smallest px, largest share of the window
+const LIVE_MAX = 3;  // sessions side by side
+const LIVE_NARROW = 480;  // a pane narrower than this folds pin and place into More (draft D)
 
 // --- the model: plain data, no page (tested in tests/live_layer.test.js) ---
 function liveLayerFresh() {
-  return {mode:'bar', last:'bottom', back:'bottom', height:null, width:null, panes:[], menu:''};
+  return {mode:'bar', last:'bottom', back:'bottom', height:null, width:null, panes:[], cur:'', menu:''};
+}
+// Narrow panes: on a phone, on the right with more than one, or when a share of the room is under LIVE_NARROW.
+function liveLayerNarrow(where, n, room, phone) {
+  return !!phone || (n > 1 && (where === 'right' || room / n < LIVE_NARROW));
 }
 function liveLayerRead(store) {
   const s = liveLayerFresh();
@@ -23,12 +31,19 @@ function liveLayerRead(store) {
   if (LIVE_PLACES.includes(saved.last)) s.last = saved.last;
   s.back = s.last;
   for (const k of ['height', 'width']) if (Number.isFinite(saved[k]) && saved[k] > 0) s[k] = Math.round(saved[k]);
-  if (Array.isArray(saved.panes)) s.panes = saved.panes.filter(k => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(k)).slice(0, 1);
+  if (Array.isArray(saved.panes)) s.panes = saved.panes.filter((k, i, a) => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(k) && a.indexOf(k) === i).slice(0, LIVE_MAX);
+  s.cur = s.panes.includes(saved.cur) ? saved.cur : s.panes[0] || '';
   if (!s.panes.length && s.mode !== 'bar' && s.mode !== 'side') s.mode = 'bar';
   return s;
 }
 function liveLayerWrite(store, s) {
-  try { store?.setItem(LIVE_LAYER_KEY, JSON.stringify({mode:s.mode, last:s.last, back:s.back, height:s.height, width:s.width, panes:s.panes})); } catch { /* private window: nothing kept */ }
+  try { store?.setItem(LIVE_LAYER_KEY, JSON.stringify({mode:s.mode, last:s.last, back:s.back, height:s.height, width:s.width, panes:s.panes, cur:s.cur})); } catch { /* private window: nothing kept */ }
+}
+// Panes sit in the same order as the chips in the bar (draft D): order is the bar's list; a session not in it stays last.
+function liveLayerSort(s, order) {
+  const at = k => { const i = order.indexOf(k); return i < 0 ? order.length : i; };
+  const panes = s.panes.map((k, i) => [k, i]).sort((a, b) => at(a[0]) - at(b[0]) || a[1] - b[1]).map(x => x[0]);
+  return panes.every((k, i) => k === s.panes[i]) ? s : {...s, panes};
 }
 // Where the layer really is: on a phone the right edge falls back to the bottom.
 function liveLayerWhere(s, phone) {
@@ -40,11 +55,28 @@ function liveLayerOpenAt(s, phone) {
 // One step of the layer: returns the next model, never changes the one it got.
 function liveLayerStep(s, act, phone = false) {
   const n = {...s, panes:[...s.panes], menu:''};
+  const opened = () => { if (n.mode === 'bar' || n.mode === 'side') n.mode = liveLayerOpenAt(n, phone); return n; };
   switch (act.type) {
-    case 'open':  // a session from the bar, a tile or a ticket; it replaces the one shown (split adds beside later)
-      if (act.key) n.panes = [act.key];
+    case 'open':  // a session from the bar, a tile or a ticket: shown already, it is selected; else it takes the selected pane
+      if (act.key && !n.panes.includes(act.key)) {
+        const at = n.panes.indexOf(n.cur);
+        if (at < 0) n.panes = [act.key, ...n.panes].slice(0, LIVE_MAX); else n.panes[at] = act.key;
+      }
+      if (act.key) n.cur = act.key;
       if (!n.panes.length) return s;
-      if (n.mode === 'bar' || n.mode === 'side') n.mode = liveLayerOpenAt(n, phone);
+      if (!n.panes.includes(n.cur)) n.cur = n.panes[0];
+      return opened();
+    case 'beside': {  // Add beside: one more pane next to the others (the third is the most: it then takes the last pane)
+      if (!act.key) return s;
+      if (!n.panes.includes(act.key)) {
+        if (n.panes.length >= LIVE_MAX) n.panes[LIVE_MAX - 1] = act.key; else n.panes.push(act.key);
+      }
+      n.cur = act.key;
+      return opened();
+    }
+    case 'select':
+      if (!n.panes.includes(act.key) || n.cur === act.key) return s;
+      n.cur = act.key;
       return n;
     case 'place':
       if (act.mode === 'bar' || act.mode === 'side') { if (n.mode === 'full') n.back = n.back || n.last; n.mode = act.mode; return n; }
@@ -67,10 +99,14 @@ function liveLayerStep(s, act, phone = false) {
       if (n.mode === 'full') n.back = n.back || n.last;
       n.mode = 'bar';
       return n;
-    case 'close':  // the last pane closes: the bar stays
-      n.panes = n.panes.filter(k => k !== act.key);
+    case 'close': {  // the others take its room and the selection moves to its neighbour; the last pane closes: the bar stays
+      const at = n.panes.indexOf(act.key);
+      if (at < 0) return s;
+      n.panes.splice(at, 1);
+      if (!n.panes.includes(n.cur)) n.cur = n.panes[Math.min(at, n.panes.length - 1)] || '';
       if (!n.panes.length) n.mode = n.mode === 'side' ? 'side' : 'bar';
       return n;
+    }
     case 'menu':
       n.menu = s.menu === act.menu ? '' : act.menu;
       return n;
@@ -94,6 +130,7 @@ function liveLayerStep(s, act, phone = false) {
 let liveLayer = null;
 let liveLayerPainted = '';
 let liveLayerWas = '';
+let liveLayerWasPanes = [];  // the panes painted last: a new one slides in
 function liveLayerStore() { try { return window.localStorage; } catch { return null; } }
 function liveLayerPhone() { return !!window.matchMedia?.('(max-width: 720px)').matches; }
 function liveLayerModel() {
@@ -114,10 +151,35 @@ function liveLayerSession(key) {
   const pill = window.UI?.ticketState && window.UI?.ticketPill ? window.UI.ticketPill(window.UI.ticketState(t, helper)) : null;
   return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(t.title) || 'Untitled', running:!!state.runs?.[t.id]?.running};
 }
+// The live sessions in the bar's order (needs you, pinned, working, idle; pages/livebar.js), else the ticket order.
+function liveLayerLive() {
+  const live = array(state?.tickets).filter(x => state.runs?.[x.id]?.running).map(x => x.id);
+  if (typeof liveBarModel !== 'function' || !window.DashHelpers?.helperState) return live;
+  const order = liveBarModel(state.tickets, state.runs, liveLayerPins(), window.DashHelpers.helperState).map(o => o.id);
+  return live.sort((a, b) => (order.indexOf(a) + 1 || 1e6) - (order.indexOf(b) + 1 || 1e6));
+}
 // What Open shows when nothing was open yet: the first working helper.
 function liveLayerFirst() {
-  const t = array(state?.tickets).find(x => state.runs?.[x.id]?.running);
-  return t ? t.id : '';
+  return liveLayerLive()[0] || '';
+}
+// What Add beside opens: the first live session not shown yet.
+function liveLayerNext(panes) {
+  return liveLayerLive().find(k => !panes.includes(k)) || '';
+}
+// Pinned sessions: kept in this browser under the bar's key until orch stores them (the wall task); the bar reads them.
+const LIVE_PINS_KEY = 'orch.live.pins';
+function liveLayerPins() {
+  try { const p = JSON.parse(liveLayerStore()?.getItem(LIVE_PINS_KEY) || '[]'); return Array.isArray(p) ? p.filter(k => typeof k === 'string') : []; } catch { return []; }
+}
+function liveLayerPin(key) {
+  const pins = liveLayerPins(), on = !pins.includes(key);
+  try { liveLayerStore()?.setItem(LIVE_PINS_KEY, JSON.stringify(on ? [...pins, key] : pins.filter(k => k !== key))); } catch { /* private window */ }
+  window.paintLiveBar?.();
+  liveLayer = liveLayerSort(liveLayerModel(), liveLayerLive());  // a pinned session moves first, in the bar and here
+  liveLayerWrite(liveLayerStore(), liveLayer);
+  liveLayerPaint();
+  window.dispatchEvent(new CustomEvent('orch:live-pins', {detail:{key, pinned:on}}));
+  return on;
 }
 function liveDockHost() {
   // Inside the mount that survives a page change (#keep of the soft page changes: render() never touches it and a
@@ -135,8 +197,9 @@ function liveDockHost() {
   return host;
 }
 function liveLayerDo(act, after) {
-  const before = liveLayerModel(), next = liveLayerStep(before, act, liveLayerPhone());
-  if (next === before) return;
+  const before = liveLayerModel(), stepped = liveLayerStep(before, act, liveLayerPhone());
+  if (stepped === before) return;
+  const next = liveLayerSort(stepped, liveLayerLive());
   liveLayer = next;
   liveLayerWrite(liveLayerStore(), next);
   liveLayerPaint();
@@ -147,8 +210,9 @@ const liveIc = name => { const s = h('span', {className:'ic-wrap', 'aria-hidden'
 function liveBtn(cls, act, label, glyph, extra = {}, word = '') {
   return h('button', {type:'button', className:cls, 'data-live':act, 'aria-label':word ? null : label, title:label, ...extra}, glyph ? liveIc(glyph) : null, word ? h('span', {className:'live-word'}, word) : null);
 }
+const liveOpt = (mode, glyph, words, on) => h('button', {type:'button', className:'live-opt', 'data-live':'place', 'data-mode':mode, 'aria-pressed':String(on)}, liveIc(glyph), h('span', {}, words));
 function livePlaceMenu(where, inPane) {
-  const phone = liveLayerPhone(), placeWords = 'Where ' + liveLayerName() + ' sits', opt = (mode, glyph, words, on) => h('button', {type:'button', className:'live-opt', 'data-live':'place', 'data-mode':mode, 'aria-pressed':String(on)}, liveIc(glyph), h('span', {}, words));
+  const phone = liveLayerPhone(), placeWords = 'Where ' + liveLayerName() + ' sits', opt = liveOpt;
   return h('div', {className:'live-pop', role:'group', 'aria-label':placeWords, 'data-key':'live-place-menu'},
     h('p', {className:'live-pop-h'}, placeWords),
     opt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
@@ -157,20 +221,42 @@ function livePlaceMenu(where, inPane) {
     inPane ? null : opt('bar', 'chevron-down', 'Bar only', where === 'bar'),
     opt('side', 'dock-side', 'Closed to the side', where === 'side'));
 }
-function livePane(key, where, s) {
-  const sess = liveLayerSession(key), name = liveLayerName();
-  const title = sess ? sess.title : 'This session has ended';
-  return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
+// The More menu of a narrow pane: pin and the places.
+function liveMoreMenu(key, label, where, pinned) {
+  const phone = liveLayerPhone(), item = (act, glyph, words, extra = {}) => h('button', {type:'button', className:'live-opt', 'data-live':act, 'data-session':key, ...extra}, liveIc(glyph), h('span', {}, words));
+  return h('div', {className:'live-pop', role:'group', 'aria-label':'More for ' + label, 'data-key':'live-more-menu'},
+    h('p', {className:'live-pop-h'}, 'More for ' + label),
+    item('pin', 'pinned', pinned ? 'Unpin' : 'Pin', {'aria-pressed':String(pinned), 'data-key':'live-pin'}),
+    h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
+    liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
+    phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'));
+}
+function livePane(key, where, s, o) {
+  const sess = liveLayerSession(key), name = liveLayerName(), n = o.n;
+  const title = sess ? sess.title : 'This session has ended', label = sess?.key || title, on = key === s.cur;
+  const pinned = o.pins.includes(key), placeMenu = 'pane:' + key, moreMenu = 'more:' + key;
+  const full = where === 'full'
+    ? liveBtn('btn icon sm ghost', 'leave-full', 'Leave full screen', 'full-exit', {'data-key':'live-full'})
+    : liveBtn('btn icon sm ghost', 'full', 'Full screen', 'full-screen', {'data-key':'live-full'});
+  const besideWhy = o.total >= LIVE_MAX ? 'Three sessions is the most' : o.next ? 'Add a session beside this one' : 'No other session is live';
+  return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
+    'data-new':o.fresh ? '' : null, 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
     h('header', {className:'live-ph'},
-      sess?.pill || null,
+      o.narrow ? null : sess?.pill || null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
-      h('span', {className:'live-pt', title}, title),
+      n > 1 && !on
+        ? h('button', {type:'button', className:'live-pt', 'data-live':'select', 'data-session':key, title, 'aria-label':'Select the pane of ' + label}, title)
+        : h('span', {className:'live-pt', title}, title),
       h('span', {className:'live-ctl'},
-        where === 'full' ? null : liveBtn('btn icon sm ghost', 'menu', 'Where ' + name + ' sits', where === 'right' ? 'dock-right' : 'dock-bottom', {'data-menu':'pane', 'aria-expanded':String(s.menu === 'pane'), 'data-key':'live-pane-place'}),
-        liveBtn('btn icon sm ghost', where === 'full' ? 'leave-full' : 'full', where === 'full' ? 'Leave full screen' : 'Full screen', where === 'full' ? 'full-exit' : 'full-screen', {'data-key':'live-full'}),
+        o.narrow ? null : liveBtn('btn icon sm ghost', 'pin', (pinned ? 'Unpin ' : 'Pin ') + label, 'pinned', {'data-session':key, 'aria-pressed':String(pinned), 'data-key':'live-pin'}),
+        o.phone ? null : liveBtn('btn icon sm ghost', 'beside', besideWhy, 'plus', {'data-key':'live-beside', disabled:o.total >= LIVE_MAX || !o.next}),
+        o.narrow || where === 'full' ? null : liveBtn('btn icon sm ghost', 'menu', 'Where ' + name + ' sits', where === 'right' ? 'dock-right' : 'dock-bottom', {'data-menu':placeMenu, 'aria-expanded':String(s.menu === placeMenu), 'data-key':'live-pane-place'}),
+        full,
         liveBtn('btn icon sm ghost', 'min', 'Minimise to the bar', 'chevron-down', {'data-key':'live-min'}),
-        liveBtn('btn icon sm ghost', 'close', 'Close (the bar stays)', 'x', {'data-session':key, 'data-key':'live-close'}),
-        s.menu === 'pane' ? livePlaceMenu(where, true) : null)),
+        liveBtn('btn icon sm ghost', 'close', o.total > 1 ? 'Close this pane' : 'Close (the bar stays)', 'x', {'data-session':key, 'data-key':'live-close'}),
+        o.narrow ? liveBtn('btn icon sm ghost', 'menu', 'More for ' + label, 'more', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}) : null,
+        s.menu === placeMenu ? livePlaceMenu(where, true) : null,
+        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned) : null)),
     h('div', {className:'live-pb'},
       h('p', {}, sess ? (sess.running ? 'The helper’s session shows here.' : 'No helper is working on this ticket right now.') : 'This session is no longer in the list.'),
       sess ? h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket'}, 'Open ticket') : null,
@@ -204,20 +290,28 @@ function liveLayerTree(s, where) {
   }
   const bar = liveBarShared() ? null : liveBar(where, s);
   if (where === 'bar' || !s.panes.length) return bar;
-  const dim = where === 'right' ? 'width' : 'height', px = s[dim];
-  const panel = h('div', {className:'live-panel', 'data-mode':where, 'data-n':String(s.panes.length), 'data-key':'live-panel'},
+  const dim = where === 'right' ? 'width' : 'height', px = s[dim], v = liveLayerView(s, where);
+  const panel = h('div', {className:'live-panel', 'data-mode':where, 'data-n':String(v.shown.length), 'data-key':'live-panel'},
     where === 'full' ? null : h('div', {className:'live-grip', role:'separator', tabindex:'0', 'data-live-grip':dim,
       'aria-orientation':dim === 'width' ? 'vertical' : 'horizontal', 'aria-label':dim === 'width' ? 'Width of the panel' : 'Height of the panel',
       'aria-valuenow':px ? String(px) : null, title:'Drag or use the arrow keys to resize'}),
-    s.panes.map(k => livePane(k, where, s)));
+    v.shown.map(k => livePane(k, where, s, {...v, fresh:!!liveLayerWasPanes.length && !liveLayerWasPanes.includes(k)})));
   return fragment(panel, bar);
+}
+// What the panel shows: on a phone only the selected session; whether the panes are narrow; what Add beside opens.
+function liveLayerView(s, where) {
+  const phone = liveLayerPhone(), shown = phone ? [s.cur || s.panes[0]] : s.panes;
+  const host = document.getElementById('live-dock');
+  const room = where === 'right' ? (s.width || Math.min(window.innerWidth * 0.42, 760)) : (host?.offsetWidth || window.innerWidth);
+  return {shown, n:shown.length, total:s.panes.length, phone, narrow:liveLayerNarrow(where, shown.length, room, phone), pins:liveLayerPins(), next:liveLayerNext(s.panes)};
 }
 // Paints the dock when something it shows changed; a state poll that changes nothing leaves it alone (no flicker, the
 // keyboard place and any open menu stay).
 function liveLayerPaint() {
   const host = liveDockHost(), s = liveLayerModel(), where = liveLayerWhere(s, liveLayerPhone());
   const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '']);
-  const key = JSON.stringify([where, s.menu, s.panes, shown, liveLayerName(), liveLayerPage()?.name]);
+  const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
+  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, v && [v.narrow, v.pins.filter(k => s.panes.includes(k)), !!v.next], liveLayerName(), liveLayerPage()?.name]);
   host.dataset.mode = where;
   host.style.setProperty('--live-h', s.height ? s.height + 'px' : '');
   host.style.setProperty('--live-w', s.width ? s.width + 'px' : '');
@@ -235,6 +329,7 @@ function liveLayerPaint() {
     }
     liveLayerPainted = key;
     liveLayerWas = where;
+    liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...s.panes];
   }
   document.body.dataset.liveLayer = where;
   liveLayerPad();
@@ -258,6 +353,7 @@ function liveLayerOff() {
   document.body.style.removeProperty('--live-padr');
   liveLayerPainted = '';
   liveLayerWas = '';
+  liveLayerWasPanes = [];
 }
 // Called after every page render (app.js): on with the Preview switch, gone without it.
 function liveDockSync() {
@@ -268,8 +364,11 @@ function liveDockSync() {
 window.LiveLayer = {
   open(key) { liveLayerDo({type:'open', key:liveLayerSession(key)?.id || key}); },  // the bar marks chips by ticket id
   place(mode) { liveLayerDo({type:'place', mode}); },
+  beside(key) { liveLayerDo({type:liveLayerPhone() ? 'open' : 'beside', key:liveLayerSession(key)?.id || key}); },  // a wall tile's Add beside
+  pin(key) { return liveLayerPin(liveLayerSession(key)?.id || key); },
   get mode() { return liveLayerWhere(liveLayerModel(), liveLayerPhone()); },
   get panes() { return [...liveLayerModel().panes]; },
+  get pins() { return liveLayerPins(); },
 };
 
 document.addEventListener('click', e => {
@@ -289,8 +388,26 @@ document.addEventListener('click', e => {
   else if (act === 'full') liveLayerDo({type:'place', mode:'full'}, '[data-key="live-full"]');
   else if (act === 'leave-full') liveLayerDo({type:'leave-full'}, '[data-key="live-full"]');
   else if (act === 'min') liveLayerDo({type:'min'}, '[data-key="live-open"]');
-  else if (act === 'close') liveLayerDo({type:'close', key:b.dataset.session}, '[data-key="live-open"]');
+  else if (act === 'close') {
+    const s = liveLayerModel(), at = s.panes.indexOf(b.dataset.session);
+    liveLayerDo({type:'close', key:b.dataset.session}, s.panes.length > 1 ? liveSel(s.panes[at + 1] || s.panes[at - 1], 'live-close') : '[data-key="live-open"]');
+  }
+  else if (act === 'beside') {
+    const next = liveLayerNext(liveLayerModel().panes);
+    if (next) liveLayerDo({type:'beside', key:next}, liveSel(next, 'live-close'));
+  }
+  else if (act === 'select') liveLayerDo({type:'select', key:b.dataset.session}, liveSel(b.dataset.session, 'live-close'));
+  else if (act === 'pin') {
+    const key = b.dataset.session, menu = liveLayerModel().menu;
+    liveLayerPin(key);
+    if (menu) liveLayerDo({type:'menu', menu});  // the More menu closes after its choice
+    document.querySelector('#live-dock ' + liveSel(key, 'live-pin') + ', #live-dock ' + liveSel(key, 'live-pane-more'))?.focus({preventScroll:true});
+  }
 });
+// A control of one pane, for the keyboard place after a repaint.
+function liveSel(key, what) {
+  return `.live-pane[data-session="${String(key || '').replace(/["\\]/g, '')}"] [data-key="${what}"]`;
+}
 document.addEventListener('keydown', e => {
   if (!document.getElementById('live-dock')) return;
   const grip = e.target.closest?.('[data-live-grip]');

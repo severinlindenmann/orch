@@ -207,3 +207,14 @@ dock-side, full-screen, full-exit.
 - Two changes from this draft: an open list scrolls inside its box (here it runs past it), and when even symbols and
   numbers do not fit, needs you stays and the rest becomes one More count (fold 4), so nothing is cut at 320 wide.
 - New, Open and Where Focus sits come with the layer; the bar keeps an empty `.lbar-end` slot for them.
+
+## The split, built (ORCH-339, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch the layer now holds
+1, 2 or 3 sessions side by side (stacked in the right panel), in the order of the bar's chips. One pane is selected
+(brand line on top); the title of another selects it. Every pane has pin, add beside (the next live session; off at
+three), place, full screen, minimise and close; closing a pane gives its room to the others and selects its neighbour.
+Narrow panes (three at 1280, more than one on the right, a phone) fold pin and place into More, as in the draft. A
+phone shows only the selected session and has no add beside. The split and the selection are kept per browser and
+stay while the page changes. Pins are kept in this browser (the bar's key) until the wall stores them in orch.
+Master: `.live-*` in widgets.css (style guide: Live layer); click-through step 12.
