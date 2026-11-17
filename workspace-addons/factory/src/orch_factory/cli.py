@@ -11,6 +11,28 @@ from . import ask, autopilot, commands, flow, server, service, watch
 from .store import Refused, field_list, read_bytes, schema_of
 from .view import view as render_view
 
+HELP = {
+    "propose": "propose the whole run of an order (the person presses Start)",
+    "autopilot": "propose autopilot for an order",
+    "change": "propose a change to a started order",
+    "stop": "with an order and --file: its stop review; with no order: stop the Factory watcher",
+    "start": "start the Factory watcher (takes no order: a person starts an order on its page)",
+    "status": "whether the Factory watcher runs (takes no order: use show <order>)",
+    "next": "what the manager of an order does next",
+    "ship": "ship an order once the person said Ship it",
+    "list": "every order",
+    "view": "the dashboard view of all orders (takes no order: use show <order>)",
+    "needs": "what waits for a person (the dashboard shows Factory's questions)",
+    "reconcile": "check every order's record against its tickets",
+}
+NO_ORDER = {
+    "start": "orch factory start takes no order: it starts the Factory watcher. "
+    "A person starts an order on its page in Factory.",
+    "status": "orch factory status takes no order: it says whether the Factory watcher runs. "
+    "For one order use orch factory show <order>.",
+    "view": "orch factory view takes no order. For one order use orch factory show <order>.",
+}
+
 
 class Parser(argparse.ArgumentParser):
     def error(self, message):
@@ -79,13 +101,19 @@ def main(argv=None):
         common = Parser(add_help=False)
         common.add_argument("--json", action="store_true")
         sub = parser.add_subparsers(dest="cmd", required=True)
-        p = sub.add_parser("idea", parents=[common])
+        p = sub.add_parser(
+            "idea", parents=[common], help="file a new idea as an order (or --ticket: turn a ticket into one)"
+        )
         p.add_argument("title", nargs="?")
         p.add_argument("--file")
         p.add_argument("--ticket", help="turn this existing ticket (e.g. one made from Chat) into the order")
         # what the Factory page's idea box does through the dashboard (the add-on act contract)
-        p = sub.add_parser("act", parents=[common])
-        p.add_argument("verb", choices=("idea", "ask"))
+        p = sub.add_parser(
+            "act",
+            parents=[common],
+            help="what a person's click on the Factory page does (the dashboard runs it)",
+        )
+        p.add_argument("verb", choices=("idea", "ask", "start"))
         p.add_argument("target")
         p.add_argument("--by")
         kinds = {"propose": "proposal", "autopilot": "autopilot", "change": "change", "stop": "stop"}
@@ -96,53 +124,61 @@ def main(argv=None):
         def contract(command):
             return {"epilog": epilog(command), "formatter_class": argparse.RawDescriptionHelpFormatter}
 
-        p = sub.add_parser("ask", parents=[common])  # #816 A: ask another workspace for its view at a stop
+        p = sub.add_parser(
+            "ask", parents=[common], help="ask another workspace for its view at a stop of an order"
+        )  # #816 A: ask another workspace for its view at a stop
         p.add_argument("order")
         p.add_argument("stop", type=int)
         p.add_argument("ws")
         p.add_argument("--item", type=int, action="append", default=[])
         p.add_argument("--no-pictures", action="store_true")
         p.add_argument("--by")
-        p = sub.add_parser("draft", parents=[common])
+        p = sub.add_parser("draft", parents=[common], help="save a new draft of an order")
         p.add_argument("order")
         p.add_argument("--file", required=True)
         for command in ("propose", "autopilot", "change"):
-            p = sub.add_parser(command, parents=[common], **contract(command))
+            p = sub.add_parser(command, parents=[common], help=HELP[command], **contract(command))
             p.add_argument("order")
             p.add_argument("--file", required=True)
-        p = sub.add_parser("schema", parents=[common])
+        p = sub.add_parser("schema", parents=[common], help="print the contract of a file Factory takes")
         p.add_argument("what", nargs="?", default="proposal")
         # an order's stop stage, or (no order) the watcher
-        p = sub.add_parser("stop", parents=[common], **contract("stop"))
+        p = sub.add_parser("stop", parents=[common], help=HELP["stop"], **contract("stop"))
         p.add_argument("order", nargs="?")
         p.add_argument("--file")
-        sub.add_parser("start", parents=[common])
-        sub.add_parser("status", parents=[common])
-        p = sub.add_parser("watch", parents=[common])
+        for command in ("start", "status"):
+            p = sub.add_parser(command, parents=[common], help=HELP[command], description=HELP[command])
+            p.add_argument("order", nargs="?", help=argparse.SUPPRESS)  # refused below in plain words
+        p = sub.add_parser("watch", parents=[common], help="the watcher loop itself (--once: one pass)")
         p.add_argument("--once", action="store_true")
-        p = sub.add_parser("show", parents=[common])
+        p = sub.add_parser("show", parents=[common], help="an order's stage and open questions")
         p.add_argument("order")
         for command in ("next", "ship"):
-            p = sub.add_parser(command, parents=[common])
+            p = sub.add_parser(command, parents=[common], help=HELP[command])
             p.add_argument("order")
-        p = sub.add_parser("crew", parents=[common])
+        p = sub.add_parser(
+            "crew", parents=[common], help="add or start the crew ticket of one task of an order"
+        )
         crew = p.add_subparsers(dest="crew_cmd", required=True)
         for command in ("add", "start"):
             p = crew.add_parser(command, parents=[common])
             p.add_argument("order")
             p.add_argument("task")
-        p = sub.add_parser("tiny", parents=[common])
+        p = sub.add_parser("tiny", parents=[common], help="record a tiny change made during a run")
         p.add_argument("order")
         p.add_argument("--minutes", type=int, required=True)
         p.add_argument("--what", required=True)
-        p = sub.add_parser("decide", parents=[common])
+        p = sub.add_parser("decide", parents=[common], help="autopilot: decide a routine stop of an order")
         p.add_argument("order")
         p.add_argument("question")
         p.add_argument("--answer", required=True)
         p.add_argument("--why", required=True)
         for command in ("list", "view", "needs", "reconcile"):
-            sub.add_parser(command, parents=[common])
+            p = sub.add_parser(command, parents=[common], help=HELP[command], description=HELP[command])
+            p.add_argument("order", nargs="?", help=argparse.SUPPRESS)  # refused below in plain words
         args = parser.parse_args(argv)
+        if args.cmd in ("start", "status", "list", "view", "needs", "reconcile") and args.order is not None:
+            raise Refused(NO_ORDER.get(args.cmd, f"orch factory {args.cmd} takes no order."), "invalid")
         if args.cmd == "schema":
             print(json.dumps(schema_of(args.what)))
             return 0
@@ -183,7 +219,8 @@ def main(argv=None):
             else:
                 result = fn(root, target, data)
         elif args.cmd == "act":
-            result = (ask.act if args.verb == "ask" else commands.idea_act)(root, args.target, args.by)
+            fn = {"ask": ask.act, "start": commands.start_act, "idea": commands.idea_act}[args.verb]
+            result = fn(root, args.target, args.by)
         elif args.cmd == "ask":
             result = ask.ask(root, args.order, args.stop, args.ws, args.item, args.by, not args.no_pictures)
         elif args.cmd in ("next", "ship"):
