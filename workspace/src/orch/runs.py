@@ -729,7 +729,9 @@ def running(root: Path, tid: str) -> bool:
     return bool(rec) and state(rec) != "dead"
 
 
-def settle(root: Path, tid: str, by: str, say: bool = True, ignore_input: bool = False) -> bool:
+def settle(
+    root: Path, tid: str, by: str, say: bool = True, ignore_input: bool = False, text: str | None = None
+) -> bool:
     """A run ended (or never came): a ticket still Working is Ready again, so every surface that shows the
     ticket status (dashboard, Focus, phone) says what is true. Never touches a ticket a run holds now."""
     if tickets.is_general(root, tid) or tickets.is_manager(root, tid):
@@ -743,7 +745,7 @@ def settle(root: Path, tid: str, by: str, say: bool = True, ignore_input: bool =
         return not ignore_input and any(i.get("via") != "start" for i in undelivered(root, tid))
 
     with contextlib.suppress(Exception):  # best effort: a run ending must never fail here
-        return tickets.agent_stopped(root, tid, by, busy, say)
+        return tickets.agent_stopped(root, tid, by, busy, say, text)
     return False
 
 
@@ -767,7 +769,10 @@ def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
         diag_incident.capture(
             root, "orphan_ticket", ticket=tid, fingerprint=tid, now=at
         )  # the evidence, BEFORE recovery
-        return settle(root, tid, "orch", ignore_input=True)
+        # no run record at all: no helper ever started on it (a person or a phone text moved it, a start never
+        # came), so the history must not say a helper stopped (ORCH-235). A dead record did run and stop.
+        text = None if read(root, tid) else tickets.NOT_STARTED_TEXT
+        return settle(root, tid, "orch", ignore_input=True, text=text)
     except Exception as e:  # noqa: BLE001 - never fails `orch run status`, but is never silent either
         why = f"{e.__class__.__name__}: {e}"
         print(f"orch: could not check whether {tid} is worked on: {why}", file=sys.stderr)

@@ -66,7 +66,7 @@ def test_a_run_that_ends_without_finishing_leaves_the_ticket_ready_not_working(p
     assert _status(proj, tid) == "active"
     _wait(proj, tid)
     assert _status_soon(proj, tid, "ready") == "ready"  # nobody works on it now: not "Working"
-    assert any("agent stopped" in t for t in _texts(proj, tid))
+    assert any("helper stopped" in t for t in _texts(proj, tid))
 
 
 def test_a_run_that_asked_a_question_stays_waiting(proj, run, gen, one_step):
@@ -615,6 +615,29 @@ def test_a_working_ticket_with_queued_input_and_no_run_is_ready_after_the_grace(
     runs.pending_add(proj, tid, "human:t", "message", "One more thing")
     assert runs.settle_orphan(proj, tid, at=time.time() + 600) is True
     assert _status(proj, tid) == "ready" and runs.undelivered(proj, tid)
+
+
+def test_a_ticket_moved_to_working_by_hand_says_no_helper_started_not_that_one_stopped(proj, run):
+    """ORCH-235: a person moves a ticket to Working and no helper ever starts. After the grace it is To do
+    again, and the history never claims a helper ran or stopped (nor says agent)."""
+    tid = _new(run)
+    tickets.set_status(proj, tid, "active", "human:t")
+    assert runs.settle_orphan(proj, tid, at=time.time() + 600) is True
+    last = _texts(proj, tid)[-1]
+    assert _status(proj, tid) == "ready" and last == tickets.NOT_STARTED_TEXT
+    assert "stopped" not in last and "agent" not in last.lower()
+
+
+def test_a_dead_run_on_a_working_ticket_still_says_the_helper_stopped(proj, run):
+    """A run record that went dead: a helper did run, so the stop line stays (helper, not agent)."""
+    from diag_fixtures import claim_dead
+
+    tid = _new(run)
+    tickets.set_status(proj, tid, "active", "human:t")
+    claim_dead(proj, tid)
+    assert runs.settle_orphan(proj, tid, at=time.time() + 600) is True
+    assert _texts(proj, tid)[-1] == tickets.STOPPED_TEXT
+    assert "agent" not in tickets.STOPPED_TEXT.lower()
 
 
 @pytest.mark.skipif(not hasattr(os, "waitid"), reason="os.waitid is not available here")
