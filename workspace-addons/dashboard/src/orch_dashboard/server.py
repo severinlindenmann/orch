@@ -236,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
             "dashboard.request",
             "debug",
             method=getattr(self, "command", ""),
-            path=self.path.split("?", 1)[0][:200],
+            path="/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200],
         )
 
     def log_message(self, *a):  # quiet

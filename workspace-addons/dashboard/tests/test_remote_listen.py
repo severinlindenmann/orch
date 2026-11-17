@@ -277,3 +277,20 @@ def test_only_a_person_makes_the_bookmark(ws, monkeypatch, capsys):
     assert cli.main(["--dir", str(ws), "remote", "link", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["url"].startswith(f"http://{NAME}:8791/go/")
     assert cli.main(["--dir", str(ws), "remote", "link", "--remove"]) == 0
+
+
+def test_the_bookmark_secret_never_reaches_the_debug_log(live, monkeypatch):
+    from orch_dashboard import server
+
+    logged = []
+
+    class fake:
+        bind = staticmethod(lambda *a: None)
+        new_trace = staticmethod(lambda *a: None)
+        log = staticmethod(lambda *a, **k: logged.append(k))
+
+    monkeypatch.setattr(server, "diag", fake)
+    root, _port, rport = live
+    secret = pagelaunch.standing_link_secret(root)
+    assert _go(rport, secret, f"{NAME}:{rport}")[0] == 302
+    assert logged and all(secret not in json.dumps(k) for k in logged)
