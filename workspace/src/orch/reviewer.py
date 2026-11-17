@@ -203,6 +203,27 @@ def _n(text: str, n: int) -> str:
     return f"{n} {text}" if n == 1 else f"{n} {text}s"
 
 
+_SKIP = {
+    "with",
+    "that",
+    "this",
+    "from",
+    "when",
+    "have",
+    "does",
+    "must",
+    "only",
+    "then",
+    "them",
+    "into",
+    "also",
+}
+
+
+def _words(text: str) -> list[str]:
+    return list(dict.fromkeys(w for w in tickets._norm_words(text).split() if len(w) >= 4 and w not in _SKIP))
+
+
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
@@ -211,7 +232,13 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
-    gaps += [f"Done when part '{p}' has no task" for p in proof["uncovered"]]
+    # a part no task links to is sent back with the words looked for and the question which task proves it
+    for p in proof["uncovered"]:
+        looked = ", ".join(_words(p)[:6]) or "none"
+        gaps.append(
+            f"Done when part '{p}' has no task (looked for: {looked}; "
+            'which task proves it? orch check done <ticket> <task> --proves "<part>")'
+        )
     gaps += [
         f"the check on '{c['text']}' failed" for c in items if proof["per_item"].get(c["id"]) == "failed"
     ]

@@ -611,6 +611,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--title", help="short name of the evidence")
     x.add_argument("--role", help="result, check or support")
     x.add_argument("--summary", help="one line: what came out of this step (shown on the task)")
+    x.add_argument(
+        "--proves", action="append", default=[], metavar="TEXT", help='the part of "Done when" this proves'
+    )
 
     x = sub.add_parser("log", parents=[common], help="add a history entry")
     x.add_argument("id")
@@ -1194,7 +1197,7 @@ def run(args: argparse.Namespace) -> None:
                 root, args.id, args.file, args.title, args.role, args.summary, by=by()
             )
             shorthand.append(json.dumps(attached))
-        t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by())
+        t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by(), args.proves)
         ev = c["evidence"][-1]
         copied = args.file and tickets.proof_present(root, ev)
         _out(

@@ -981,6 +981,10 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
             per[c["id"]] = "note" if evs else "missing"
     done_when = ticket.get("done_when")
     covers = [_norm_words(c["covers"]) for c in items if isinstance(c.get("covers"), str)]
+    # a finished task with evidence that the helper linked to a part proves it, in any words
+    for c in items:
+        if c.get("done") and c.get("evidence") and isinstance(c.get("proves"), list):
+            covers += [_norm_words(q) for q in c["proves"] if isinstance(q, str)]
     covers = [c for c in covers if c]
     uncovered: list[str] = []
     if isinstance(done_when, str) and done_when.strip():
@@ -2025,7 +2029,11 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
         secretscan.refuse_if_secret_in(root, body, "evidence", verb="saved")
 
 
-def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> tuple[dict, dict]:
+def check_done(
+    root: Path, tid: str, cid: str, evidence: list[str], by: str, proves: list[str] | None = None
+) -> tuple[dict, dict]:
+    """`proves`: quoted parts of Done when this finished task shows; the evidence decides, not the wording."""
+    proved = [q for q in (_clean_covers(p) for p in proves or []) if q]
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
         raise Refused(
@@ -2045,6 +2053,8 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
             ev.setdefault("at", now())
         add_evidence(item, evs)
         item["done"] = True
+        if proved:
+            item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
         add_history(t, by, f"Check {cid} done")
         return item
