@@ -3,7 +3,6 @@
 // prints one JSON line with what it saw; exit 1 on a failed step.
 const { chromium } = require(require('path').join(process.env.PW_DIR, 'playwright'));
 const [base, shots, desc] = process.argv.slice(2);
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   const out = {};
   const b = await chromium.launch();
@@ -31,8 +30,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await p.waitForSelector('[data-testid=profile-relay-state]', { timeout: 15000 });
       out.pending = await p.textContent('[data-testid=profile-relay-state]');
       // shared pages switch off
+      const sharedBefore = await p.getAttribute('[data-testid=look-shared-pages]', 'aria-checked');
       await p.click('[data-testid=look-shared-pages]');
-      await sleep(1500);
+      await p.waitForFunction(b => document.querySelector('[data-testid=look-shared-pages]')?.getAttribute('aria-checked') !== b,
+        sharedBefore, { timeout: 15000 });
       out.shared = await p.getAttribute('[data-testid=look-shared-pages]', 'aria-checked');
       // switcher
       await p.click('[data-testid=ws-switch]');

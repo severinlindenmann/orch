@@ -40,7 +40,7 @@ async function start(project = 'workspace-addons/focus', script = 'e2e/focus_ins
   fs.mkdirSync(path.join(os.homedir(), '.orch-test'), { recursive: true });
   const dir = fs.mkdtempSync(path.join(os.homedir(), `.orch-test/${tag}-`));
   const port = await freePort();
-  const env = { HOME: dir, PATH: process.env.PATH, UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache/uv') };
+  const env = { HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1', PATH: process.env.PATH, UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache/uv') };
   const child = spawn('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`),
     'uv', 'run', '--project', project, 'python', script, dir, String(port)],
   { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] });

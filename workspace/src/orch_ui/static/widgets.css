@@ -158,6 +158,8 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .tbl td{padding:12px 16px;border-top:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rowlink .chev{transform:rotate(-90deg);color:var(--text-faint)}
 .radio-row{display:flex;gap:12px;align-items:flex-start;padding:12px 0}
+/* a choice with one line below it that says what it does */
+.radio-text{display:grid;gap:2px;min-width:0}
 .frames{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
 .frame{border:1px dashed var(--border-strong);border-radius:var(--radius-card);padding:16px;display:grid;gap:12px;align-content:start;min-height:300px;position:relative}
 .qcard2{border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);padding:20px;display:grid;gap:12px}
@@ -591,7 +593,8 @@ dialog.report-dialog .actions{margin-top:12px}
 .day-chip:focus-within{outline:2px solid var(--brand);outline-offset:2px}
 .custom-interval{display:flex;align-items:center;gap:12px}.custom-interval input{width:100px}
 .repeat-summary{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);color:var(--text-muted)}
-@media(max-width:599px){.frequency-control label{padding:4px 6px;font-size:12px}.schedule-row{grid-template-columns:92px minmax(0,1fr);gap:12px}}
+/* Phone width: the four How-often choices sit two by two, so none is cut off (bug hunt 17 Nov: Custom was clipped). */
+@media(max-width:599px){.repeat-block .frequency-control{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.schedule-row{grid-template-columns:92px minmax(0,1fr);gap:12px}}
 .strip-panel{overflow:hidden}
 .week-strip{grid-template-columns:repeat(7,minmax(0,1fr))}
 .week-strip .day{display:flex;flex-direction:column;align-items:stretch;gap:12px;min-height:116px;border-width:0 1px 0 0}
@@ -872,6 +875,8 @@ a.helper-title:hover{text-decoration:underline}
 .short-row.child{padding-left:var(--s7)}
 a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-decoration:underline}
 .short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
+/* A switch's own words (an add-on view's toggle `text`) sit just before it. */
+.switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center}
 /* phone width (ORCH-136): a table block row is a card: first cell is the name line, the other cells show "label: value" below, the buttons sit in one row at the end */
 @media(max-width:720px){
 .blk-table,.blk-table tbody,.blk-table tr,.blk-table td{display:block;min-width:0}
@@ -882,6 +887,8 @@ a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-de
 .blk-table.data-table td[data-label]:not(:first-child):before{content:attr(data-label) ": ";color:var(--text-muted)}
 .blk-table.data-table td.cell-actions,.blk-table.data-table td.cell-toggle{display:inline-flex;align-items:center;margin:8px 8px 0 0;padding:0;vertical-align:middle}
 .blk-table.data-table td.cell-actions .row{flex-wrap:wrap}
+/* the switch says what it turns on: the column's words (e.g. Repeats) sit before it, without the colon */
+.blk-table.data-table td.cell-toggle[data-label]:before{content:attr(data-label);margin-right:var(--s2)}
 .table-wrap table.blk-table{min-width:0}
 }
 /* Review viewer (UI.reviewViewer, ORCH-172): one tile of a Review card, large. Uses most of the window; a picture fits the
