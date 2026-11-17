@@ -141,6 +141,18 @@
     var action = e.target && typeof e.target.action === 'string' ? e.target.action : location.href;
     if (same(action || location.href)) e.preventDefault();
   }, true);
+  // A move inside this same page (its own #place, e.g. Factory's #/order/<id>) loads nothing, so the dashboard would
+  // never hear of it: tell it where the page is now, so its address, reload and Back keep this place (ORCH-241).
+  // Only with the message code (the dashboard drops a frame-at without it) and only a place it would accept.
+  var at = location.hash;
+  function moved() {
+    if (!chan || location.hash === at) return;
+    at = location.hash;
+    var hash = at.slice(1);
+    if (/^[A-Za-z0-9_\/-]{0,200}$/.test(hash)) tell({orch: 'frame-at', path: location.pathname, hash: hash});
+  }
+  window.addEventListener('hashchange', moved);
+  window.addEventListener('popstate', moved);
 
-  window.OrchFrame = {on: true, chan: chan, url: withPass, EventSource: FrameEvents};
+  window.OrchFrame ={on: true, chan: chan, url: withPass, EventSource: FrameEvents};
 })();

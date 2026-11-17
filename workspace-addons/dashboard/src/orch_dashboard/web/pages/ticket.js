@@ -531,7 +531,7 @@ function previewText(t, kind, file, text) {
   return h('pre', {}, text.split('\n').slice(0, 8).join('\n'));
 }
 function ticketPreviewTile(t, file, kind = 'artifacts') {
-  const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || window.DashHelpers.plainFileName(file.name) || 'Result';
+  const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || String(file.name || '').split('/').pop() || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
   if (!snapshot && /\.pdf$/i.test(file.name)) {  // the browser's own PDF view, from the same-origin file endpoint
     tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
@@ -634,7 +634,8 @@ const fileUrl = (tid, kind, fileName, dl = false) => '/api/file?t=' + encodeURIC
 const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) || String(fileName).split('/').pop());
 // The title given when the file was attached; else the file name made readable.
 const oneLineTitle = value => typeof value === 'string' ? clean(value).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
-const titleOf = file => oneLineTitle(file.title) || fileTitle(file.name);
+// ORCH-240: the real file name with its extension ("big2mb.txt", not "Big2mb"), so it matches the Files tab and the disk.
+const titleOf = file => oneLineTitle(file.title) || clean(shortName(file));
 const shortName = file => String(file.name).split('/').pop();
 const fileBadge = fileName => (/\.([^./]+)$/.exec(fileName)?.[1] || 'file').slice(0, 4).toUpperCase();
 const fileMeta = file => [kindWord(file.name), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', file.mtime ? localStamp(file.mtime) : ''].filter(Boolean).join(' · ');
@@ -1311,7 +1312,7 @@ function ticketCardShown(t, q, card) {
 // A step is named by its title only; the ticket key is a quiet line under Properties.
 const partName = p => clean(p.title);
 function ticketAddStep(t) {
-  const ask = t.release ? 'What ships in this release?' : t.epic ? 'What needs doing in this ticket?' : 'What is this step about?';  // an epic (ORCH-14) or a release (ORCH-37) holds tickets
+  const ask = t.release ? 'What ships in this release?' : t.epic ? 'What needs doing in this ticket?' : 'What is this sub-ticket about?';  // an epic (ORCH-14) or a release (ORCH-37) holds tickets
   const {d, actions} = dialog(ask);
   const input = h('input', {className:'input', 'aria-label':ask, maxlength:200});
   // ORCH-156: or a ticket that already exists moves in (its "Part of" changes). Not this ticket, not one it is
@@ -1335,17 +1336,17 @@ function ticketAddStep(t) {
   actions.append(send); d.append(h('div', {className:'stack'}, input, pick), actions); window.orch.open(d); input.focus();
 }
 function ticketParts(t, children) {
-  const holds = t.epic || t.release, add = snapshot ? null : ticketButton(holds ? '+ Add a ticket' : '+ Add a step', 'ghost add-row', () => ticketAddStep(t));
+  const holds = t.epic || t.release, add = snapshot ? null : ticketButton(holds ? '+ Add a ticket' : '+ Add a sub-ticket', 'ghost add-row', () => ticketAddStep(t));
   // No steps yet: only the add button, so a top-level ticket can get its first step (a step itself gets none).
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
   // ORCH-37: in a release, an epic's row says how far its own tickets are ("Epic · 2 of 4 done").
   const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, 'Epic · ' + kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' done'); };
-  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
-  const {d, actions} = dialog('Rename step');
-  const input = h('input', {className:'input', 'aria-label':'Step title', maxlength:200, value:child.title});
+  const {d, actions} = dialog('Rename sub-ticket');
+  const input = h('input', {className:'input', 'aria-label':'Sub-ticket title', maxlength:200, value:child.title});
   const save = ticketButton('Save', 'primary', async () => {
     const title = input.value.trim(); if (!title || save.disabled) return;
     save.disabled = true;
@@ -1388,8 +1389,8 @@ function ticketPlan(t, q, children) {
               render();
             })) : null)))),
     snapshot ? null : h('div', {className:'row ticket-plan-actions'}, start,
-      ticketButton('Change a step', 'outline', () => { if (editing) ticketPlanEditing.delete(t.id); else ticketPlanEditing.add(t.id); render(); }),
-      editing ? [ticketButton('+ Add a step', 'ghost', () => ticketAddStep(t)),
+      ticketButton('Change sub-tickets', 'outline', () => { if (editing) ticketPlanEditing.delete(t.id); else ticketPlanEditing.add(t.id); render(); }),
+      editing ? [ticketButton('+ Add a sub-ticket', 'ghost', () => ticketAddStep(t)),
         ticketButton('Done editing', 'ghost', () => { ticketPlanEditing.delete(t.id); render(); })] : null));
 }
 const NOTE_LABELS = [['changed', 'Changed'], ['why', 'Why'], ['not_included', 'Not in this ticket']];
@@ -1556,7 +1557,7 @@ function ticketReviewCard(t) {
     h('div', {className:'section-head'}, h('h2', {}, 'Result'), count ? h('span', {className:'meta'}, count + (count === 1 ? ' file' : ' files')) : null),
     t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)) : null,
     t.verdict_needed ? h('p', {className:'meta', 'data-key':'ticket-verdict-needed'}, 'Marked done without your OK. Check the work, then click Looks good.') : null,
-    file ? ticketResultFrame(t, found.kind, file) : h('p', {className:'meta'}, array(t.checklist).length ? 'No result file is attached. Each step below shows what was done and how it was checked.' : 'No result file and no steps are attached.'),
+    file ? ticketResultFrame(t, found.kind, file) : h('p', {className:'meta'}, array(t.checklist).length ? 'No result file is attached. Each task below shows what was done and how it was checked.' : 'No result file and no tasks are attached.'),
     t.done_when ? h('p', {className:'review-check'}, 'Is this what you asked for? “', linkRefs(t, t.done_when), '”') : null,
     ticketProofLine(t));
 }
@@ -1567,7 +1568,7 @@ function ticketHelperDid(t) {
   if (!done.length) return null;
   const shown = done.slice(0, 6);
   return h('section', {className:'card helper-did', 'data-key':'helper-did'}, h('div', {className:'section-head'}, h('h2', {}, 'What the helper did')),
-    h('ul', {className:'lines'}, shown.map(c => h('li', {}, taskTitle(c))), done.length > shown.length ? h('li', {className:'meta'}, '+ ' + (done.length - shown.length) + ' more on the Steps tab') : null));
+    h('ul', {className:'lines'}, shown.map(c => h('li', {}, taskTitle(c))), done.length > shown.length ? h('li', {className:'meta'}, '+ ' + (done.length - shown.length) + ' more on the Tasks tab') : null));
 }
 // What the helper (or you) said when a task was finished: the note shown in Results of a Done ticket.
 function completionNotes(t) {
@@ -1586,7 +1587,9 @@ function ticketCompletionNote(n, t) {
     h('h2', {}, linkRefs(t, n.head)), n.body ? h('p', {className:'muted preserve-lines'}, linkRefs(t, n.body)) : null);
 }
 function ticketResultsCard(t) {
-  const all = resultFiles(t), files = all.map(x => x.file), notes = completionNotes(t);
+  // ORCH-240: newest first, the same order as the Files tab opens with
+  const time = x => Date.parse(x.file.mtime) || 0;
+  const all = resultFiles(t).map((x, i) => [x, i]).sort((a, b) => time(b[0]) - time(a[0]) || a[1] - b[1]).map(x => x[0]), files = all.map(x => x.file), notes = completionNotes(t);
   if (!files.length && !notes.length) return null;
   const count = [notes.length ? notes.length + (notes.length === 1 ? ' note' : ' notes') : '', files.length ? files.length + (files.length === 1 ? ' file' : ' files') : ''].filter(Boolean).join(' · ');
   return h('section', {className:'card results', 'data-key':'results'}, h('div', {className:'section-head'}, h('h2', {}, 'Result'), h('span', {className:'meta'}, count)),
@@ -1621,7 +1624,7 @@ function ticketAnswerNodes(t, plainRow) {
     .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
 }
-const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
+const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
 function ticketProperties(t, parent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
@@ -1767,7 +1770,7 @@ function detail(t) {
     h('div', {className:'columns ticket-layout' + (selected === 'files' ? ' wide' : '')},
       h('div', {className:'stack story'},
         panel('overview', 'Overview', overview),
-        panel('tasks', 'Steps', card('tasks', 'Steps', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No steps yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
+        panel('tasks', 'Tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
       h('div', {className:'stack ticket-side'}, ticketProperties(t, parent), fieldSections(t)))));
@@ -1871,7 +1874,9 @@ function startInline(control) {
   input.value = before;
   input.setAttribute('aria-label', capitalise(field));
   locks.add(key);
-  host.replaceChildren(input, el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'));
+  const hint = el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels');
+  host.replaceChildren(input, hint);
+  if (field === 'owner') ownerChoices(input, hint);
   input.focus();
   if (MULTILINE.includes(field)) {
     // Small by default (3 rows, from the top); "Show all" opens the whole note, "Show less" goes back.
@@ -1901,6 +1906,23 @@ function startInline(control) {
   input.addEventListener('blur', () => finish(true));
 }
 
+// ORCH-240: the owner box offers the workspace's people and existing owners, and says when a name is not one of them
+// (it is still saved as written: a person may own a ticket before they use the dashboard).
+const knownOwners = () => [...new Set([...array(state?.people?.people), ...tickets().map(x => String(x.owner || '').trim()).filter(Boolean).map(o => name(o) || o)].map(String))].sort((a, b) => a.localeCompare(b));
+function ownerChoices(input, hint) {
+  const known = knownOwners(), list = el('datalist', '');
+  list.id = 'owner-choices';
+  known.forEach(n => list.append(h('option', {value:n})));
+  input.setAttribute('list', list.id);
+  input.after(list);
+  const plain = hint.textContent;
+  const check = () => {
+    const v = input.value.trim(), fresh = v && !known.some(n => n.toLowerCase() === v.toLowerCase());
+    hint.replaceChildren(fresh ? h('span', {className:'warn'}, v + ' is not one of your people yet') : '', fresh ? ' · Enter saves · Esc cancels' : plain);
+  };
+  input.addEventListener('input', check);
+  check();
+}
 // A small calendar in the orch look instead of the browser's own picker. cb(value) with 'YYYY-MM-DD' (or 'YYYY-MM-DDTHH:MM' when withTime and a time is set), '' (clear) or null (closed).
 function pickDate(anchor, current, cb, withTime = false) {
   document.querySelectorAll('.cal').forEach(n => n.remove());
@@ -1920,6 +1942,8 @@ function pickDate(anchor, current, cb, withTime = false) {
     document.removeEventListener('mousedown', outside, true);
     document.removeEventListener('keydown', key, true);
     pop.remove();
+    // ORCH-240: a day in the past is kept (the person may mean it) but never without a word
+    if (value && String(value).slice(0, 10) < todayIso) window.orch.toast('That day has already passed, so the ticket shows as late.', 'info');
     cb(value);
   };
   const outside = event => { if (!pop.contains(event.target)) close(null); };
@@ -1953,9 +1977,10 @@ function pickDate(anchor, current, cb, withTime = false) {
     host.append(pop);
     try { pop.setAttribute('popover', 'manual'); pop.showPopover(); } catch (_) { pop.removeAttribute('popover'); }
   } else document.body.append(pop);
-  const r = anchor.getBoundingClientRect();
-  pop.style.top = Math.min(r.bottom + 6, Math.max(8, innerHeight - pop.offsetHeight - 8)) + 'px';
-  pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+  // ORCH-240: the visible width and height (innerWidth counts the scrollbar, so the right edge was cut off)
+  const r = anchor.getBoundingClientRect(), vw = document.documentElement.clientWidth || innerWidth, vh = document.documentElement.clientHeight || innerHeight;
+  pop.style.top = Math.min(r.bottom + 6, Math.max(8, vh - pop.offsetHeight - 8)) + 'px';
+  pop.style.left = Math.max(8, Math.min(r.left, vw - pop.offsetWidth - 8)) + 'px';
   setTimeout(() => { document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', key, true); }, 0);
   (pop.querySelector('.today, .sel') || pop.querySelector('.cal-x'))?.focus();
 }

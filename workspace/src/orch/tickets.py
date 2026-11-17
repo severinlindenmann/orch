@@ -836,11 +836,23 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
                 "Changed " + f + (f" (now {STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
             )
     if m := re.fullmatch(r"Added check (c\d+)", t):
-        return "Added a step" + task(m.group(1))
+        return "Added a task" + task(m.group(1))
     if m := re.fullmatch(r"Check (c\d+) done", t):
         return "Finished a task" + task(m.group(1))
     if m := re.fullmatch(r"Marked (c\d+) as won't do", t):
         return "Marked as won't do" + task(m.group(1))
+    # ORCH-240: never a raw task id ("Reopened c1") in the Activity
+    if m := re.fullmatch(r"Reopened (c\d+)(?: \(old evidence: .*\))?", t, re.DOTALL):
+        return "Opened a task again" + task(m.group(1))
+    if m := re.fullmatch(r"Renamed (c\d+)(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
+        return "Renamed a task" + task(m.group(1))
+    if m := re.fullmatch(r"Linked (c\d+) to Done when", t):
+        return "Linked a task to Done when" + task(m.group(1))
+    removed = r"Removed step c\d+ '(.*)' \((?:was done|was open)(?:; evidence: .*)?\)"
+    if m := re.fullmatch(removed, t, re.DOTALL):
+        return f"Removed a task: {m.group(1)}"
+    if re.fullmatch(r"Title changed(?: \(was: .* \| now: .*\))?", t, re.DOTALL):
+        return "Changed the title"
     if m := re.fullmatch(r"Set ext\.([a-z][a-z0-9-]*)", t):
         return f"Updated {addon(m.group(1))} settings"
     if m := re.fullmatch(r"Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?", t):
@@ -1598,9 +1610,9 @@ def _when_words(at: datetime, now: datetime) -> str:
 
 
 def due_label(due: str | None, status: str = "open", now: datetime | None = None) -> str | None:
-    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 18:30" (another day), "Late since
-    18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day wording).
-    Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
+    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 16 Nov, 18:30" (another day),
+    "Late since 18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day
+    wording). Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
     if not due or "T" not in str(due):
         return None
     try:
@@ -1609,7 +1621,10 @@ def due_label(due: str | None, status: str = "open", now: datetime | None = None
         return None
     now = now or datetime.now()
     late = at < now and status not in ("done", "dropped")
-    return f"{'Late since' if late else 'Due'} {_when_words(at, now)}"
+    words = _when_words(at, now)
+    if 0 < abs((at.date() - now.date()).days) < 7:  # ORCH-240: which Monday? the day of the month too
+        words = f"{at.strftime('%a')} {at.day} {at.strftime('%b')}, {at.strftime('%H:%M')}"
+    return f"{'Late since' if late else 'Due'} {words}"
 
 
 QUIET_HOURS = 6  # a working ticket with no history line for this long is "quiet" (fixed, no setting: R4.4)
@@ -1778,16 +1793,22 @@ def edit(
 
     def op(ticket):
         if title is not None:
-            if title != ticket.get("title"):
+            before = ticket.get("title")
+            if title != before:
                 ticket.pop("title_auto", None)  # a person's (or anyone's) own title is final
             ticket["title"] = title
-            add_history(ticket, by, "Title changed")
+            # ORCH-240: the Activity shows what the title was and is now
+            line = "Title changed"
+            if title != before:
+                line += f" (was: {_edit_snip(before)} | now: {_edit_snip(title)})"
+            add_history(ticket, by, line)
         was = {k: ticket.get(k) for k in fields}
         for k, v in fields.items():
             _set_field(ticket, k, v)
         if fields:
             text = "Edited " + ", ".join(sorted(fields))
-            if len(fields) == 1 and next(iter(fields)) in ("note", "done_when"):
+            # ORCH-240: owner and due keep their old and new value too
+            if len(fields) == 1 and next(iter(fields)) in ("note", "done_when", "owner", "due"):
                 k = next(iter(fields))
                 text += f" (was: {_edit_snip(was[k])} | now: {_edit_snip(ticket.get(k))})"  # ORCH-185
             add_history(ticket, by, text)
@@ -2056,7 +2077,11 @@ def tidy(
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
         edited = any(  # someone renamed it after it was created: that title is theirs, tidy leaves it
-            str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED) == "Title changed"
+            re.fullmatch(
+                r"Title changed(?: \(was: .* \| now: .*\))?",
+                str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED),
+                re.DOTALL,
+            )
             for h in history.lines(root, ticket)
         )
         if title != old and not edited:
@@ -2616,8 +2641,10 @@ def check_edit(
         item = _item(t, cid)
         _person_only(by, item, tid, cid)
         if text is not None:
+            before = item.get("text")
             item["text"] = text.strip()
-            add_history(t, by, f"Renamed {cid}")
+            # ORCH-240: the Activity shows the old and the new task text
+            add_history(t, by, f"Renamed {cid} (was: {_edit_snip(before)} | now: {_edit_snip(item['text'])})")
         if covers is not None:
             item["covers"] = covers
             if text is None:
