@@ -198,7 +198,7 @@ test('ORCH-227: a Settings choice shows at once with Saving…, a second click w
   const first = choose('permissions', 'ask', send('ask'));
   const card = vm.runInContext('permissionsCard', c)({permissions:'auto'});
   assert.equal(checked(card), 'ask', 'the click shows at once');
-  assert.equal(saving(card, 'permissions'), 1, 'with a saving sign');
+  assert.equal(saving(card, 'permissions'), 1, 'with Saving…');
   assert.equal(all(card, n => n.tag === 'input' && n.attrs.disabled).length, 0, 'a second click is possible');
   // a second click while the first saves is kept and sent after it; the last click wins
   assert.equal(await choose('permissions', 'full', send('full')), null);
@@ -209,7 +209,7 @@ test('ORCH-227: a Settings choice shows at once with Saving…, a second click w
   finish();
   await first;
   const after = vm.runInContext('permissionsCard', c)({permissions:'full'});
-  assert.equal(checked(after), 'full'); assert.equal(saving(after, 'permissions'), 0, 'no saving sign once saved');
+  assert.equal(checked(after), 'full'); assert.equal(saving(after, 'permissions'), 0, 'no Saving… once saved');
   // a failed save falls back to what the server says
   const failed = choose('live', 4, () => Promise.resolve({ok:false}));
   await failed;
