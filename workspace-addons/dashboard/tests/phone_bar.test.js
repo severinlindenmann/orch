@@ -121,11 +121,11 @@ test('phone list: a long group shows 8 rows and "n more"; a folded group no rows
   assert.equal(groups[0].folded, true);
 });
 
-test('the table and the List/Board switch are wide-only; the phone list rides along in list and board view', () => {
+test('the table is wide-only with the phone list beside it; the List/Board switch and the Board show on the phone too (ORCH-240)', () => {
   assert.match(listSrc, /className:'table-wrap wide-only'/);
-  assert.match(listSrc, /className:'view-toggle wide-only'/);
+  assert.match(listSrc, /className:'view-toggle', role:'group'/);
   assert.match(listSrc, /fragment\(ticketTable\(visible\), window\.UI\?\.shortGroup \? phoneList\(visible\) : null\)/);
-  assert.match(listSrc, /className:'wide-only', 'data-key':'board-wide'/);
+  assert.match(listSrc, /h\('div', \{'data-key':'board-wide'\}, board\(\)\)/);
 });
 
 test('the shell paints the bottom bar with the needs-you number on Review and More opening the side menu', () => {

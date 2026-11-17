@@ -68,7 +68,7 @@ test('b4: a file attached with a title shows that title, the file name small und
   const row = nodes(vm.runInContext('ticketFileRow', c)(t, 'evidence', file));
   assert.ok(row.some(x => x.attrs.className === 'file-name' && text(x) === 'Poster draft'));
   const plain = vm.runInContext('fileEntry', c)(t, {kind:'artifacts'}, {name:'quote-Q-2026-114.pdf'});
-  assert.equal(plain.title, 'Quote Q 2026 114', 'without a title the readable file name stays');
+  assert.equal(plain.title, 'quote-Q-2026-114.pdf', 'ORCH-240: without a title the real file name, extension included');
 });
 test('b4: a PDF result shows a small inline preview from the same-origin file endpoint', () => {
   const c = ctx(), t = {id:'t_one'};

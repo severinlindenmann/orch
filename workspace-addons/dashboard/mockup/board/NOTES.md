@@ -113,3 +113,32 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - Date picker (kit): today is marked with a ring and `aria-current="date"`; it opens as a small 340 px popup, not the 480 px dialog width.
 - `new.html` and `new.js` show the draft line with Discard and the picture thumbnail.
 - Board: a sub-ticket that has its own card in the same column is no longer listed again inside its parent's card; sub-tickets in other columns still are.
+
+## Releases (ORCH-37, owner picked "a release is a parent ticket", 17 Nov)
+
+- `list.html`: a release is its own group above the status groups ("Release 26 · 1 of 4 done", Open release), with its epic, the epic's tickets and its other tickets as one tree; each row carries its status chip. Finished releases start folded.
+- `../ticket/ticket-working.html`: Properties has a Release switch under Part of; Part of offers releases first, marked "(release)".
+## Triage button (ORCH-151, 17 Nov)
+
+- `board.html`, `list.html`: a Triage button beside the page title. It opens a small menu that says what happens and lists the lanes with their counts as tick boxes (Backlog to Check ticked, Done, Won't do and Superseded not); Start triage opens a dated Triage ticket and starts one
+  helper that goes through every open ticket (brings it up to date, groups related ones, closes what is no longer
+  needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
+  says so in a notice.
+- Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).
+
+
+## Manager view (ORCH-189, owner approved 17 Nov)
+
+- `list.html`: Due column (red when past, amber today) and Time · cost column (helper time and money at list price);
+  quick views This week and Stuck; the Stuck pill also for an old question, no news for a day or past due.
+- `../insights/insights.html`: Helper time, Cost, Tickets finished, Stuck now and a By person table on top.
+- `../ticket/ticket-change.html`, `ticket-question.html`: Time · cost in Properties (the helper's first-run estimate
+  beside what it took so far).
+## ORCH-240 (17 Nov, owner's words)
+
+- The filter "Group" is now "Part of", with "Any ticket" for no choice; the list column "Steps" is "Tasks".
+- The to-do lines of a ticket are "tasks" everywhere ("+ Add task", "2 of 5 tasks", "Added a task"); the
+  sub-tickets of a plain ticket are headed "Sub-tickets".
+- The board fits at 1440: lanes shrink to 210 px, empty lanes to 76 px, empty Won't do and Superseded lanes
+  are hidden until they hold a card. A sub-ticket with its own card is not listed again in its parent's card.
+- On the phone the List/Board switch shows too; the Board is lanes side by side that you swipe.

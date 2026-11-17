@@ -248,7 +248,7 @@ def test_plan_first_prompt_plans_asks_one_question_and_stops(proj):
     t = tickets.create(proj, "Online payments", "human:me", plan_first=True)
     prompt = runs.fresh_prompt(t, [], proj)
     assert "Plan big work" in prompt and f"orch ticket new --parent {t['id']}" in prompt
-    assert f'orch ask {t["id"]} "Plan ready" --option "Start work" --option "Change a step"' in prompt
+    assert f'orch ask {t["id"]} "Plan ready" --option "Start work" --option "Change sub-tickets"' in prompt
     assert '--recommend "Start work"' in prompt and "Do NOT change any project file" in prompt
     assert "Plan big work" in runs.resume_prompt(t, [], None, "claude", proj)
 
@@ -264,9 +264,9 @@ def test_plan_first_rule_holds_until_start_work_is_answered(proj):
     for qs in ([], [ready]):
         t["questions"] = qs
         assert "Do NOT change any project file" in runs.fresh_prompt(t, [], proj)
-    # 3. "Change a step": re-plan, still no start
+    # 3. "Change sub-tickets": re-plan, still no start
     t["questions"] = [
-        {**ready, "answer": "Change a step"},
+        {**ready, "answer": "Change sub-tickets"},
         {"id": "q2", "text": "Which step, and what should change?", "answer": "Step 2 is too big"},
     ]
     for prompt in (runs.fresh_prompt(t, [], proj), runs.resume_prompt(t, [], None, "claude", proj)):

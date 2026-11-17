@@ -108,10 +108,12 @@
     const t = v.ticket || {}, run = v.run || {}, s = ticketState(v, rule), hs = helperOf(v);
     const pill = s ? s.word : null, detail = hs ? hs.detail : '';
     if (v.state === 'done') return {key: 'finished', pill, headline: 'Work completed', active: false};
-    if (hs && ['working', 'starting'].includes(hs.state) && !(t.questions || []).some(q => q.answer == null)) return {key: 'running', pill, headline: 'The work is taking shape', active: true, detail};
+    // a helper that works on a ticket without tasks is not "taking shape" (a repeat ran 2 days with none, ORCH-232)
+    const shaping = (t.checklist || []).some(c => c && !c.wont_do) ? 'The work is taking shape' : 'Working, no tasks yet';
+    if (hs && ['working', 'starting'].includes(hs.state) && !(t.questions || []).some(q => q.answer == null)) return {key: 'running', pill, headline: shaping, active: true, detail};
     if (hs && hs.state !== 'you' && !(t.questions || []).some(q => q.answer == null)) return {key: 'paused', pill, headline: detail || pill || 'Work so far', active: false, detail};
     if ((t.questions || []).some(q => q.answer == null)) return {key: 'waiting-for-you', pill, headline: '', active: false, detail};
-    if (v.state === 'needs' || (hs && hs.state === 'you')) return {key: 'waiting-for-you', pill, headline: run.running === true ? 'The work is taking shape' : 'Work so far', active: run.running === true, detail};
+    if (v.state === 'needs' || (hs && hs.state === 'you')) return {key: 'waiting-for-you', pill, headline: run.running === true ? shaping : 'Work so far', active: run.running === true, detail};
     if (t.status === 'review') return {key: 'stopped', pill, headline: 'Work so far', active: false};
     if (t.started || run.run) return {key: 'paused', pill, headline: 'Work so far', active: false};
     return {key: 'stopped', pill, headline: 'Work so far', active: false};

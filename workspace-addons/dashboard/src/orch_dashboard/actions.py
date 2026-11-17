@@ -425,10 +425,14 @@ def _ticket_changes(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "parent", "if_revision"))
+    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "parent", "release", "if_revision"))
     flags = []
     if "parent" in a:  # ORCH-156: "Part of": put the ticket under an epic, or None to take it out
         flags.append(f"--parent={_tid(a['parent']) if a['parent'] else ''}")
+    if "release" in a:  # ORCH-37: the Release switch on the ticket page (true marks it, false takes it off)
+        if not isinstance(a["release"], bool):
+            raise BadRequest("release is true or false.")
+        flags.append(f"--release={'yes' if a['release'] else 'no'}")
     for k in ("title", "owner", "due", "note", "done_when"):
         if k in a:
             v = _text(a[k], k, empty=k != "title")
@@ -520,6 +524,15 @@ def _check_edit(a):
     if a.get("was") is not None:
         flags.append(f"--was={_text(a['was'], 'old text')}")
     return ["check", "edit", _tid(a.get("ticket")), cid], flags, [_text(a.get("text"))]
+
+
+def _check_move(a):
+    """Put a task after another (ticket page Move up / Move down): `orch check move <ticket> <task> --after <task>`."""
+    _only(a, ("ticket", "check", "after"))
+    cid, after = a.get("check"), a.get("after")
+    if not all(isinstance(v, str) and CID.fullmatch(v) for v in (cid, after)):
+        raise BadRequest("Choose a task.")
+    return ["check", "move", _tid(a.get("ticket")), cid], [f"--after={after}"], []
 
 
 def _check_remove(a):
@@ -651,6 +664,30 @@ def _copies_clean(a):
     """The Clean up now button (settings): `orch copy clean`, the same sweep every start runs."""
     _only(a, ())
     return ["copy", "clean", "--json"], [], []
+
+
+TRIAGE_LANES = (
+    "backlog",
+    "todo",
+    "working",
+    "needs-you",
+    "waiting",
+    "check",
+    "done",
+    "wont-do",
+    "superseded",
+)
+
+
+def _triage_start(a):
+    """Tickets > Triage: `orch triage --start --lanes <picked>` opens one Triage ticket with the list of the
+    picked lanes and starts a helper on it (core checks the lanes again)."""
+    _only(a, ("lanes",))
+    lanes = a.get("lanes")
+    if not isinstance(lanes, list) or not lanes or any(x not in TRIAGE_LANES for x in lanes):
+        raise BadRequest("Pick at least one lane.")
+    picked = [x for x in TRIAGE_LANES if x in lanes]
+    return ["triage", "--start", "--json", "--lanes", ",".join(picked)], [], []
 
 
 def _copies_remove_orphaned(a):
@@ -1067,6 +1104,7 @@ OPS = {
     "check.reopen": _check_reopen,
     "check.edit": _check_edit,
     "check.remove": _check_remove,
+    "check.move": _check_move,
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,
@@ -1099,6 +1137,7 @@ OPS = {
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
+    "triage.start": _triage_start,
     "copies.remove_orphaned": _copies_remove_orphaned,
     "copies.retry": _copies_retry,
     "copies.approve": _copies_approve,

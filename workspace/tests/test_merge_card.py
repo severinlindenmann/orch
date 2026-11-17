@@ -22,6 +22,7 @@ class FakeGh:
         self.calls, self.envs, self.review, self.head = [], [], "", HEAD
         self.state, self.merge_rc, self.merge_err = state, merge_rc, merge_err
         self.login, self.user_rc = login, user_rc
+        self.rollup = []  # statusCheckRollup that `gh pr view --json statusCheckRollup` answers
         self.summary = (
             None  # what `gh pr view --json title,...` answers when the card is made (None: refused)
         )
@@ -37,6 +38,8 @@ class FakeGh:
             if self.summary is None:
                 return subprocess.CompletedProcess(argv, 1, "", "not found")
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.summary), "")
+        if args[:2] == ["pr", "view"] and args[3:] == ["--json", "statusCheckRollup"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"statusCheckRollup": self.rollup}), "")
         if args[:2] == ["pr", "view"]:
             return subprocess.CompletedProcess(argv, 0, f"{self.state}\t{self.review}\t{self.head}\n", "")
         if args[:3] == ["api", "-X", "POST"]:
@@ -141,18 +144,44 @@ def test_not_now_merges_nothing(tk, run, gh):
     assert _q(root, tid)["decision"]["action"] == "dont"
 
 
-def test_refused_merge_saves_no_answer_and_can_be_clicked_again(tk, run, gh):
+def test_refused_merge_is_sent_back_to_the_helper_with_the_reason(tk, run, gh):
     root, tid = tk
     assert _ask(run, tid)[0] == 0
-    gh.merge_rc, gh.merge_err = 1, "X Pull request acme/app#12 is not mergeable: checks are failing.\n"
+    gh.merge_rc, gh.merge_err = (
+        1,
+        "X Pull request acme/app#12 is not mergeable: the base branch policy prohibits the merge.\n",
+    )
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    q = _q(root, tid)
+    assert q["answer"] is not None and q["decision"]["action"] == "send_back"
+    change = q["decision"]["changes"][0]
+    assert "Merge failed on GitHub, please fix it:" in change and "base branch policy prohibits" in change
+    assert "Open the pull request and merge it there." not in change
+    assert len(gh.merges) == 1
+
+
+def test_only_a_person_merge_refusal_still_refuses(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", "agent:claude")
+    assert code == 2 and _q(root, tid)["answer"] is None
+
+
+def test_running_checks_hold_the_merge_and_save_no_answer(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.rollup = [
+        {"name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "workflowName": "ci"},
+        {"name": "tests", "status": "IN_PROGRESS", "conclusion": "", "workflowName": "ci"},
+    ]
     code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
     assert code == 2
-    assert "GitHub did not merge it: Pull request acme/app#12 is not mergeable" in out + err
-    assert "Open the pull request and merge it there." in out + err
-    assert _q(root, tid)["answer"] is None
-    gh.merge_rc = 0
+    assert "1 of 2 checks still running" in out + err and "nothing was merged" in out + err
+    assert gh.merges == [] and _q(root, tid)["answer"] is None
+    gh.rollup[1].update(status="COMPLETED", conclusion="SUCCESS")
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
-    assert len(gh.merges) == 2 and _q(root, tid)["answer"] is not None
+    assert len(gh.merges) == 1
 
 
 def test_already_merged_is_not_merged_twice(tk, run, gh):
@@ -233,9 +262,9 @@ def test_a_required_review_is_the_persons_own_before_the_merge(tk, run, gh):
     gh.review = "REVIEW_REQUIRED"
     assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
     acts = [c[:2] for c in gh.calls]
-    assert acts == [["api", "user"], ["pr", "view"], ["api", "-X"], ["pr", "merge"]]
-    assert gh.calls[2][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
-    assert f"commit_id={HEAD}" in gh.calls[2] and "event=APPROVE" in gh.calls[2]
+    assert acts == [["api", "user"], ["pr", "view"], ["pr", "view"], ["api", "-X"], ["pr", "merge"]]
+    assert gh.calls[3][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
+    assert f"commit_id={HEAD}" in gh.calls[3] and "event=APPROVE" in gh.calls[3]
     assert all(e == {} for e in gh.envs)
 
 

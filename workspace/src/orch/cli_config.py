@@ -23,6 +23,7 @@ from orch import (
     ghlimit,
     history,
     nextstep,
+    releasekeeper,
     report_tickets,
     tickets,
 )
@@ -39,6 +40,8 @@ KEYS = (
     "workspace.live_max",
     "workflow.agents_may_finish",
     "workflow.reviewer",
+    "workflow.reviewer_answers",
+    "workflow.reviewer_look",
     "workflow.release_merge",
     "workflow.copies",
     "workflow.copies_max",
@@ -51,6 +54,7 @@ KEYS = (
     *ghlimit.SETTING_KEYS,
     "github.dev_expert",
     "github.dev_expert_repo",
+    *releasekeeper.SETTING_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
@@ -287,6 +291,8 @@ def _config(args, root: Path) -> None:
             "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
+            "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
+            "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
@@ -302,6 +308,7 @@ def _config(args, root: Path) -> None:
             **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
             "github.dev_expert": lambda: devexpert.role(root),
             "github.dev_expert_repo": lambda: devexpert.repo(root),
+            **{key: (lambda k=key: releasekeeper.get(root, k)) for key in releasekeeper.SETTING_KEYS},
         }
         if args.key:
             key = args.key
@@ -335,6 +342,15 @@ def _config(args, root: Path) -> None:
             {args.key: v},
             f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
         )
+    elif args.sub == "set" and args.key in releasekeeper.SETTING_KEYS:
+        # the release keeper pushes, dispatches, sources github.release_env and reads production: only a
+        # person points it somewhere (turning a setting off is fine for anyone)
+        if args.value.strip().lower() not in ("off", "none", "") and not _actor(args).startswith("human:"):
+            raise Refused(
+                f"Only a person sets {args.key}. Ask the owner to run: orch config set {args.key} ..."
+            )
+        v = releasekeeper.set_setting(root, args.key, args.value)
+        _out(args, {args.key: v}, f"Saved: {args.key} = {v}." if v else f"Cleared: {args.key}.")
     elif args.sub == "set" and args.if_current is not None:
         raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
@@ -350,6 +366,32 @@ def _config(args, root: Path) -> None:
             args,
             {"workflow.reviewer": value},
             f"The Reviewer accepts small finished work for you: {args.value}.",
+        )
+    elif args.sub == "set" and args.key == "workflow.reviewer_answers":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # answers in the owner's place
+            raise Refused("Only the owner turns this on: in their own terminal with orch config set.")
+        value = config.set_reviewer_answers(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.reviewer_answers": value},
+            "Saved: small routine questions are "
+            + ("answered for you by the Reviewer." if value else "left for you."),
+        )
+    elif args.sub == "set" and args.key == "workflow.reviewer_look":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # it accepts bigger work for the owner
+            raise Refused("Only the owner turns this on: orch config set in their own terminal.")
+        value = config.set_reviewer_look(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.reviewer_look": value},
+            f"The Reviewer gives bigger finished work a second look: {args.value}."
+            + ("" if config.reviewer_on(root) else " It works once workflow.reviewer is on too."),
         )
     elif args.sub == "set" and args.key == "workflow.release_merge":
         if args.value not in ("on", "off"):
