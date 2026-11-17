@@ -235,7 +235,32 @@ struct ToolAlert: Codable, Sendable, Equatable {
     var endsAt: String? = nil
     var stops: [String] = []
     var noNewWork: Bool = false
-    var isValid: Bool { !name.isEmpty && !label.isEmpty && Self.states.contains(state) && ["login", "connection", "key"].contains(kind) }
+    /// The contract's limits (message.schema.json `tool_alert`): a message that breaks one is not shown as a warning.
+    static let maxLabel = 60
+    static let maxStops = 20
+    private static func matches(_ s: String, _ pattern: String) -> Bool {
+        s.range(of: pattern, options: .regularExpression) != nil
+    }
+    /// Control, line-break, zero-width and bidi characters the label must not hold (the schema's label pattern).
+    private static func isHidden(_ u: Unicode.Scalar) -> Bool {
+        switch u.value {
+        case 0x00...0x1f, 0x7f...0x9f, 0x61c, 0x200b...0x200f, 0x2028...0x2029, 0x202a...0x202e,
+             0x2060...0x2064, 0x2066...0x2069, 0xfeff: return true
+        default: return false
+        }
+    }
+    var isValid: Bool {
+        guard Self.matches(name, "^[a-z][a-z0-9-]{0,31}\\z"),
+              !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              label.unicodeScalars.count <= Self.maxLabel,
+              label.unicodeScalars.allSatisfy({ !Self.isHidden($0) }),
+              Self.states.contains(state), ["login", "connection", "key"].contains(kind),
+              stops.count <= Self.maxStops, Set(stops).count == stops.count,
+              stops.allSatisfy({ Self.matches($0, "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}\\z") })
+        else { return false }
+        if let e = endsAt, !Self.matches(e, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\\z") { return false }
+        return true
+    }
 }
 
 /// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction).
