@@ -672,3 +672,15 @@ def test_a_waiting_report_ticket_survives_a_restart_and_a_closed_one_is_left(ws)
     assert Scheduler(ws).tick(T(8, 1)) == []  # a new scheduler (restart) reads what still waits
     assert load_state(ws)["t_rep0003"]["report_start"] == "skipped"
     assert runs_started(ws) == ["t_rep0001", "t_rep0002"]
+
+
+def test_loop_asks_core_for_the_health_checks_once_a_minute_without_a_ticket(ws):
+    """ORCH-104: the machine's health checks belong to no ticket. The loop asks core (`orch doctor soon`) on its
+    own clock, also with no ticket at all, and at most once a minute; core decides whether a pass is due."""
+    s = Scheduler(ws)
+    s.tick(T(10, 0))
+    s.tick(T(10, 0).replace(second=30))
+    asked = [c for c in calls(ws) if c["args"][:2] == ["doctor", "soon"]]
+    assert len(asked) == 1 and asked[0]["by"] is None
+    s.tick(T(10, 1))
+    assert len([c for c in calls(ws) if c["args"][:2] == ["doctor", "soon"]]) == 2

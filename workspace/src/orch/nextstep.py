@@ -199,6 +199,12 @@ HINTS = {
     "ticket changes": _on_ticket,
     "ticket patch": _on_ticket,
     "doctor": _doctor,
+    "doctor pass": "orch ticket list",  # the problems it found are tickets now
+    "doctor soon": "orch ticket list",
+    "doctor setup": "orch doctor pass --dry-run",
+    "doctor clean": "orch doctor",
+    "doctor remove-temp": "orch ticket list",
+    "doctor stop-pids": "orch ticket list",
     "logins": _logins,
     "pause": "turn it back on with: orch resume",
     "resume": "orch needs",

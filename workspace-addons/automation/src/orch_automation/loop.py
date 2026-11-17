@@ -36,6 +36,7 @@ KIND = "automation:failure"
 KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
 GENERAL_NOTE = "General conversation"  # `orch relay inbox` note of a phone text in General
+DOCTOR_EVERY = 60  # seconds between two asks for the scheduled health checks (core runs them every 15 min)
 BUSY_TEXT = "More work arrived for this ticket: read the newest note on it."
 
 
@@ -99,6 +100,7 @@ class Scheduler:
         self.cfg = load_config(root)
         self.last_inbox: datetime | None = None
         self.last_reports: datetime | None = None
+        self.last_doctor: datetime | None = None
         self.wake = threading.Event()  # the listener sets it when something arrived
         self.watch: dict[str, dict] = {}  # tid -> {t0, at, log, hist} for runs started in the last moments
         sdir(root)
@@ -412,6 +414,7 @@ class Scheduler:
                 nxt = next_after(cron, now, tz)
                 upd["next_run"] = fmt(nxt) if nxt else None
                 update_state(self.root, tid, **upd)
+        self.doctor_soon(now)
         force = self.wake.is_set()
         self.wake.clear()
         if self._inbox_due(now, force):
@@ -458,6 +461,16 @@ class Scheduler:
             if self.start_run(tid, "a new problem report", now) == "started":
                 started.append(tid)
         return started
+
+    def doctor_soon(self, now: datetime) -> None:
+        """The machine's health checks and clean-up (core `orch doctor pass`) belong to no ticket: once a minute
+        the loop asks core to start a pass in the background when one is due. Core decides whether the checks are
+        set up here and due, and never waits for the pass. A pause does not stop them: they are what lifts the
+        hold on a full disk."""
+        if self.last_doctor and now - self.last_doctor < timedelta(seconds=DOCTOR_EVERY):
+            return
+        self.last_doctor = now
+        orchcli.call(self.root, "doctor", "soon", by=False)
 
     # -- relay inbox --------------------------------------------------------
     def _inbox_due(self, now: datetime, force: bool = False) -> bool:
