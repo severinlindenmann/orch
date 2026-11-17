@@ -251,7 +251,7 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
     from orch import worktrees
 
     nobody = "Only the second-look helper or a person gives a verdict."
-    try:  # a person (no agent signs at all), or an agent tied to its live run record: never forged variables
+    try:  # a person (no agent in the environment), or an agent tied to its live run record: never forged variables
         me = worktrees._agent_ticket(root)
     except Refused:
         raise Refused(nobody) from None
