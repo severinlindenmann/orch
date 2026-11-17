@@ -793,7 +793,7 @@ def test_proof_state_reworded_done_when_matches_task_text_loosely():
 
 
 def test_orch185_note_edit_history_carries_old_and_new_text(proj, new_ticket):
-    """ORCH-185: Activity can show the old and the new note; the readable label still says "Changed the note"."""
+    """ORCH-185: Activity can show the old and new note; the label still says "Changed the note"."""
     tid = new_ticket("Edit me")
     tickets.edit(proj, tid, None, "human:t", {"note": "first words"})
     tickets.edit(proj, tid, None, "human:t", {"note": "second words " * 30})
