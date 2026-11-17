@@ -495,6 +495,9 @@ test('home: Finished shows the 5 newest finished today and one link to all of th
   const fin = nodes(c.home(), n => n.tag === 'section' && n.children?.[0] === 'Finished')[0];
   const rows = nodes(fin, n => String(n.attrs?.['data-key'] || '').startsWith('ticket-')).map(n => n.attrs['data-key']);
   assert.deepEqual(rows, ['ticket-d0', 'ticket-d1', 'ticket-d2', 'ticket-d3', 'ticket-d4'], 'newest first, five rows');
+  const row = nodes(fin, n => n.attrs?.['data-key'] === 'ticket-d0')[0];
+  assert.equal(row.children[1].attrs.className, 'meta', 'the time is a line under the title, not inside the title row');
+  assert.doesNotMatch(JSON.stringify(row.children[0]), /Finished/);
   const link = nodes(fin, n => n.tag === 'a' && n.attrs?.href === '#tickets?view=done-today')[0];
   assert.ok(link, 'link to the finished-today view'); assert.match(JSON.stringify(link), /All finished today \(12\)/);
   const few = context(items.slice(0, 4), {parse:v => v ? new Date(v) : null, now:() => day, time:d => String(d), state:{runs:{}, settings:{}}});

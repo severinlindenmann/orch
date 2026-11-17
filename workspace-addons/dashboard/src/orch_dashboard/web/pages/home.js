@@ -24,7 +24,8 @@ const finishedAt = t => parse(t.done_at || t.completed_at || t.updated_at);
 
 function ticketRow(t) {
   const at = finishedAt(t);
-  return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t, at ? h('span', {className:'meta'}, 'Finished ' + time(at)) : null));
+  // The time sits under the title (not beside it), so a title fits on one line in the narrow side card.
+  return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t), at ? h('p', {className:'meta'}, 'Finished ' + time(at)) : null);
 }
 // Answered on Home but not sent yet (the Undo window): the question is hidden and not counted.
 const pendingAnswers = new Map();
