@@ -261,6 +261,7 @@ HINTS = {
     "review tend-releases": "orch review list  (what still waits for the owner)",
     "review accepted": "orch needs",
     "github expert": "orch ticket list  (a red run opened a top ticket)",
+    "github unblock": "orch needs  (a workflow-file pull request asks the owner)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",
