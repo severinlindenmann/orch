@@ -82,7 +82,7 @@ def cmd_setup(args, root: Path) -> int:
     if not args.no_browser and not browser.browser_ready():
         print("Downloading the browser for the daily look (about 100 MB, once)...", file=sys.stderr)
         r = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "--only-shell", "chromium"],
+            [sys.executable, "-P", "-m", "playwright", "install", "--only-shell", "chromium"],
             capture_output=True,
             text=True,
             check=False,

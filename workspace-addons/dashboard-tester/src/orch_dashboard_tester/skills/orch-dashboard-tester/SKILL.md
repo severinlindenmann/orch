@@ -14,30 +14,37 @@ New findings become problem reports kept on this computer (never shared): each b
 at most 3 a day. A finding that an open ticket already names is not reported. When the ticket of a report is
 finished, the next look checks it again and reports it once more if it is still there.
 
+## When to use
+- The person asks for a daily check of the dashboard, or asks what the daily look found.
+- You want to know whether a dashboard page was broken this morning before you look into a report.
+
 ## Recipes
 
-**Set it up** (only when the person asked for it; downloads a browser of about 100 MB once, unless Chrome is on this computer)
+**Set it up** (downloads a browser of about 100 MB once, unless Chrome is on this computer)
 
     orch dashboard-tester setup                    # a new ticket, every day at 06:30
     orch dashboard-tester setup --at 07:15 --ticket <id>
 
-It adds the script to automation and a daily repeat on the ticket. A script you add runs only after the person
-presses Allow this script on the repeat in the dashboard's Automation tab: tell them so.
+It adds the script to automation and a daily repeat on the ticket.
 
 **What did it find**
 
     orch dashboard-tester status
 
 Each look also writes one line on the repeat's ticket. Pictures and page texts of the last look:
-`.orch/addons/dashboard-tester/last/`.
+`.orch/addons/dashboard-tester/last/` (settings pages keep no text).
 
 **One look now**
 
     orch dashboard-tester run --dry-run     # looks, reports and keeps nothing
 
-A look signs in to the dashboard with a one-time link that orch makes only for a run a person started (the daily
-repeat). Started from a helper it is refused: that is on purpose.
-
 **A helper per release** (optional, costs tokens): `orch dashboard-tester setup --helper-each-release`. When orch's
 version changed, the look starts one helper at low priority on the small model that reads the pictures and texts of
 the look and reports what a person would stumble over.
+
+## Rules
+- Set it up only when the person asked for it. A script you add runs only after the person presses Allow this
+  script on the repeat in the dashboard's Automation tab: tell them so.
+- A look signs in with a one-time link that orch makes only for a run a person started (the daily repeat). Started
+  from a helper it is refused: that is on purpose, do not work around it.
+- Never open the dashboard yourself to repeat its checks; read `status` and the pictures instead.
