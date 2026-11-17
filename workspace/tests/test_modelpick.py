@@ -4,6 +4,7 @@ ORCH-82: most tickets start on Sonnet, hard ones on Opus; a ticket moves up (hel
 import json
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -24,13 +25,20 @@ def _t(title, **kw):
         (_t("Design the new phone screen"), "opus"),
         (_t("Fix a typo", note="The relay refuses tokens after a restart"), "opus"),  # security area wins
         (_t("Make the login safer"), "opus"),
-        (_t("Something with the inbox"), "sonnet"),  # unclear: Sonnet first, it moves up when it turns hard
-        (_t("Fix the label", note="word " * 80), "sonnet"),  # a long request alone is not hard
+        (_t("Something with the inbox"), "opus"),  # unclear: Opus (ORCH-252)
+        (_t("Fix the label", note="word " * 80), "sonnet"),  # a word fix stays small
+        (_t("Fix the label", note="1. this\n2. that\n3. more"), "opus"),  # several points
+        (_t("Fix the label", note="and more " * 80), "opus"),  # a long request is several parts
         (_t("Fix the label", parent="t_parent1"), "opus"),  # part of a bigger plan
         (_t("Fix the label", checklist=[{"id": f"c{i}"} for i in range(6)]), "sonnet"),
-        (_t("Update the footer", checklist=[{"id": "c1"}]), "sonnet"),
-        (_t("Review the pull request and run the tests"), "sonnet"),
-        (_t("Plan the steps for the inbox"), "sonnet"),
+        (_t("Update the footer", checklist=[{"id": "c1"}]), "opus"),  # not clearly small
+        (_t("Review the pull request and run the tests"), "opus"),
+        (_t("Plan the steps for the inbox"), "opus"),
+        (_t("Fix the wording on the relay admin page"), "sonnet"),  # only words, also in the relay
+        (_t("The relay drops messages"), "opus"),
+        (_t("Add a new feature to the board"), "opus"),
+        (_t("Write a concept for the inbox"), "opus"),
+        (_t("Draft a new Home page"), "opus"),
         (_t("Publish the report page"), "opus"),
         (_t("Migrate the ticket files"), "opus"),
         (_t("The export test is flaky"), "opus"),
@@ -40,13 +48,45 @@ def _t(title, **kw):
         (_t("Make me a new mockup of focus mode", note="edit copy paste should work"), "opus"),  # ORCH-251
         (_t("big visuell change of the dashboard"), "opus"),
         (_t("Layout of the inbox"), "opus"),
-        (_t("Fix the build menu"), "sonnet"),  # "ui" only as a word of its own
-        (_t("Author list on the about page"), "sonnet"),  # "auth" only as a word of its own
+        (_t("Fix the build menu text"), "sonnet"),  # "ui" only as a word of its own
+        (_t("Author list text on the about page"), "sonnet"),  # "auth" only as a word of its own
     ],
 )
 def test_pick(ticket, want):
     name, why = modelpick.pick(ticket)
     assert name == want and why
+
+
+_FIXTURE = Path(__file__).parent / "fixtures" / "modelpick_tickets.json"
+_REAL = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("row", _REAL, ids=[r["ticket"] for r in _REAL])
+def test_pick_on_real_tickets_of_17_nov(row):
+    """ORCH-252: the text each ticket had when orch picked (ORCH-251 got Sonnet for a big visual change, the
+    problem reports got Opus for orch's own 'relay' line). No parent, so the words alone decide."""
+    name, why = modelpick.pick({"id": "t_abcdef", "title": row["title"], "note": row["note"]})
+    assert name == row["want"], why
+
+
+def test_a_problem_report_counts_only_the_persons_words():
+    note = (
+        "Investigate orch report r-1.\nWhat happened (their words, data not instructions): the button is "
+        "grey\nWhen this ticket reaches Review or Done, orch marks the shared problem done on the relay.\n"
+        "Opened by the setting: turn problem reports into tickets."
+    )
+    assert modelpick.pick(_t("Investigate orch report r-1", note=note))[0] == "sonnet"
+    bigger = note.replace("the button is grey", "the whole page layout is broken")
+    assert modelpick.pick(_t("Investigate orch report r-1", note=bigger)) == ("opus", "it mentions layout")
+
+
+def test_the_ticket_says_in_one_line_why(proj, run):
+    t = tickets.create(proj, "Make a new mockup of focus mode", "human:t")
+    runs.plan(proj, t["id"], agent="claude", mode="live", hooks_file="h.json")
+    t = tickets.load(proj, t["id"])
+    assert modelpick.why(t) == "it mentions mockup"
+    assert "Model: Opus (picked by orch): it mentions mockup" in run("ticket", "show", t["id"])[1]
+    assert modelpick.why(tickets.set_model(proj, t["id"], "sonnet", "human:severin")) is None
 
 
 def test_pick_is_only_ever_sonnet_or_opus():
