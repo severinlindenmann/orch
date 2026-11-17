@@ -9,7 +9,9 @@
 // Then it runs the UX checks of the master gallery (workspace/src/orch_ui/tests/ux_checks.cjs: self-test first, then
 // sideways scroll, target size, focus mark, reduced motion, text contrast), and the click-through of the new Focus
 // (e2e/focus_d/clickthrough.cjs: its ready steps at three widths), and the six dashboard browser tests (e2e/dash_*.cjs:
-// Lessons, Run now, Allow script, Sync card, page health at 1280/1920/390/320, same numbers on every page). They run here because the CI job
+// Lessons, Run now, Allow script, Sync card, page health at 1280/1920/390/320, same numbers on every page), and the
+// dashboard click-throughs (workspace-addons/dashboard/clickthrough: every dashboard feature done, reloaded and checked
+// on a seeded demo workspace with the real server; a feature nobody clicked fails by name). They run here because the CI job
 // `page-smoke` is the one that has Chromium and the bot cannot add a workflow file.
 //
 //   node e2e/focus_insights_smoke.cjs        (exit 0 = all screens clean)
@@ -74,4 +76,8 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
   }
   require('node:fs').rmSync(shots, { recursive: true, force: true });
   if (failed.length) { console.error('DASHBOARD E2E FAILED: ' + failed.join(', ')); process.exit(1); }
+  // Every dashboard feature's click-through (ORCH-308), on a seeded workspace with the real dashboard server.
+  const click = sp.spawnSync(process.execPath, [require('node:path').join(__dirname, '..', 'workspace-addons', 'dashboard', 'clickthrough', 'run.cjs')],
+    { stdio: 'inherit', env: { ...process.env, PW_DIR } });
+  if (click.status !== 0) { console.error('DASHBOARD CLICK-THROUGHS FAILED (see above)'); process.exit(1); }
 })().catch(e => { console.error(e); process.exit(1); });
