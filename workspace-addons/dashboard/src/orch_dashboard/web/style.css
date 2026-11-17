@@ -305,6 +305,10 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .topbar-ws{display:none;align-items:center;flex:none;text-decoration:none}
 .topbar-ws img{width:24px;height:24px}
 .topbar>#crumb,.breadcrumb>#crumb,.breadcrumb>#updated{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* One line, never cut mid-word: the page name takes the room (a line of whole words, the rest wraps out of sight); "· Updated …" wraps out of sight when it does not fit whole */
+.topbar>.breadcrumb{flex-wrap:wrap;height:16px;overflow:hidden;column-gap:8px}
+.breadcrumb>#crumb{display:block;height:16px;overflow:hidden;white-space:normal;text-overflow:clip;max-width:100%}
+.breadcrumb>#updated{flex:none;white-space:nowrap;overflow:visible;text-overflow:clip}
 @media(max-width:720px){
   .shell{display:flex;flex-direction:column}
   .shell>div{display:contents}

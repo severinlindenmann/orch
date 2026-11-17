@@ -35,7 +35,7 @@ def test_settings_navigation_and_cards():
     detail = src[src.index("function addonDetailPage(addon)") :][:3500]
     assert "h('summary'" not in detail and "'Details'" not in detail
     assert "Pair a phone" not in src and "phonePairDialog" not in src
-    assert "history.replaceState(null, '', '#settings/' + tab)" in src
+    assert "history.pushState(null, '', '#settings/' + (SETTINGS_TAB_ADDRESS[tab] || tab))" in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
     # folder: plain name + Copy path + quiet full path, no Details toggle
     folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:900]

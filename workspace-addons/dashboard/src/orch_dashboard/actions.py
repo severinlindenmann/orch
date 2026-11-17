@@ -1065,17 +1065,21 @@ OPS = {
 }
 
 
+def computer_user() -> str:
+    """The computer's login name (what an action is recorded under when nobody picked a name in "You: ...")."""
+    try:
+        return re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:64]
+    except (OSError, KeyError, ImportError):
+        return ""
+
+
 def actor(root: Path | None = None) -> str:
     """Who acts from this dashboard: the person picked in "You: ..." (people.py), else the computer's user."""
     if root is not None:
         me = people.current(root)
         if me:
             return f"human:{me}"
-    try:
-        who = re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:64]
-    except (OSError, KeyError, ImportError):
-        who = ""
-    return f"human:{who or 'dashboard'}"
+    return f"human:{computer_user() or 'dashboard'}"
 
 
 def build_argv(op, args, root: Path | None = None) -> list[str]:
