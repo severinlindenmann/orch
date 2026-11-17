@@ -179,8 +179,10 @@ orch only records the wait. An add-on may wake the ticket when it is due; if non
 
 **Sub-tickets**
 
-    orch ticket new "<title>" --parent <id>      # set only when creating; the parent must exist
+    orch ticket new "<title>" --parent <id>      # a new ticket under a parent; the parent must exist
+    orch ticket edit <id> --parent <epic>        # put a ticket that already exists under an epic (--parent "" takes it out)
     orch ticket tree <id>
+    orch ticket order <lane> <id> <id> ...       # the order of tickets inside one board lane (todo, backlog ...), first to last
 
 Read the parent first, work only in yours, keep it at most 3 levels deep. Close the sub-tickets before the parent.
 

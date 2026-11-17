@@ -154,6 +154,81 @@ def checks(url: str) -> dict | None:
     return {"state": data["state"], "head": head, "green": green}
 
 
+MERGE_COMMIT = re.compile(r"Merge pull request #([0-9]{1,9}) from ")
+MAX_ITEMS = 40
+
+
+def checks_state(rollup) -> tuple[str, str]:
+    """(tone, plain words) of a pull request's checks (ORCH-183): ("done", "All 18 checks passed"),
+    ("working", "3 of 18 checks still running"), ("failed", "1 check failed: lint"). The newest run of each
+    check counts, as in passed()."""
+    if not isinstance(rollup, list) or not rollup:
+        return "working", "No checks have run yet"
+    runs = [c for c in _newest(rollup) if isinstance(c, dict)]
+    failed, running = [], 0
+    for c in runs:
+        if "state" in c and "status" not in c:
+            word = c.get("state")
+            if word == "PENDING":
+                running += 1
+                continue
+        elif c.get("status") != "COMPLETED":
+            running += 1
+            continue
+        else:
+            word = c.get("conclusion")
+        if word not in PASSED:
+            failed.append(str(c.get("name") or c.get("context") or "a check")[:60])
+    if failed:
+        n = len(failed)
+        return "failed", f"{n} check{'' if n == 1 else 's'} failed: " + ", ".join(failed[:3]) + (
+            " …" if n > 3 else ""
+        )
+    if running:
+        return "working", f"{running} of {len(runs)} checks still running"
+    return "done", f"All {len(runs)} checks passed" if len(runs) > 1 else "The check passed"
+
+
+def summary(url: str, head: str) -> dict | None:
+    """What a merge card shows (ORCH-183, owner 17 Nov: "the address is a link, not the content"), read
+    once when the card is made, with whatever login this process has: {"title", "base", "checks" (plain
+    words), "items": [{"pr": n, "title"}], "other": commits that are no pull request merge}. Items come from
+    merge commit headlines, which a commit author writes: GitHub's own titles, never a ticket alone, and the
+    count of other commits is always shown. None when GitHub cannot be read or the newest commit is no longer
+    `head` (the commit the click merges): the card then shows only that commit."""
+    gh = shutil.which("gh")
+    if gh is None or not is_pr_url(url):
+        return None
+    try:
+        v = _gh_plain(
+            gh, ["pr", "view", url, "--json", "title,baseRefName,headRefOid,commits,statusCheckRollup"], 20
+        )
+        data = json.loads(v.stdout) if v.returncode == 0 else None
+    except (Refused, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("headRefOid") != head:
+        return None
+    items, seen, other = [], set(), 0
+    for c in data.get("commits") or []:
+        if not isinstance(c, dict):
+            continue
+        m = MERGE_COMMIT.match(str(c.get("messageHeadline") or ""))
+        if not m or m[1] in seen:
+            other += 1
+            continue
+        seen.add(m[1])
+        title = next((x.strip() for x in str(c.get("messageBody") or "").splitlines() if x.strip()), "")
+        items.append({"pr": int(m[1]), "title": title[:200]})
+    return {
+        "title": str(data.get("title") or "")[:200],
+        "base": str(data.get("baseRefName") or "")[:100],
+        "checks": checks_state(data.get("statusCheckRollup")),
+        "items": items[:MAX_ITEMS],
+        "more": max(0, len(items) - MAX_ITEMS),
+        "other": other,
+    }
+
+
 RELEASE_PREFIX = "release/"
 RELEASE_FROM = "develop"  # a release only carries what is on this branch already (reviewed there)
 
