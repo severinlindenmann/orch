@@ -43,7 +43,12 @@ function serverOps() {
 /** The ops the page code names (a quoted op name anywhere in web/**.js): the actions a person can trigger. */
 function pageOps() {
   const web = walk(WEB).filter(f => f.endsWith('.js')).map(read).join('\n');
-  return [...serverOps()].filter(op => new RegExp(`['"\`]${op.replace(/[.]/g, '\\.')}['"\`]`).test(web)).sort();
+  // A dotted name (ticket.new) is an op wherever it is quoted; a one-word name (answer, log) also means other things
+  // in page code (role:'log'), so it counts only when it is passed to a call or set as `op:`.
+  const named = op => op.includes('.')
+    ? new RegExp(`['"\`]${op.replace(/[.]/g, '\\.')}['"\`]`).test(web)
+    : new RegExp(`(\\w\\(\\s*|\\bop\\s*:\\s*)['"\`]${op}['"\`]`).test(web);
+  return [...serverOps()].filter(named).sort();
 }
 
 /** The dashboard's pages: router kinds (minus add-on frames) and Settings tabs, as `page:<kind>` / `page:settings/<tab>`. */

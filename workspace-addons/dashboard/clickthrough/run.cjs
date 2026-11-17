@@ -79,6 +79,14 @@ async function serve() {
   });
   const stop = () => {
     try { child.stdin.end(); process.kill(child.pid); } catch (e) { /* gone */ }
+    // a helper run the page started (its tmux and wrapper) outlives the server: stop every process that names this
+    // run's own folder, and nothing else
+    try {
+      for (const l of execFileSync('ps', ['-ax', '-o', 'pid=,command='], { encoding: 'utf8', maxBuffer: 1 << 26 }).split('\n')) {
+        const m = /^\s*(\d+)\s+(.*)$/.exec(l);
+        if (m && m[2].includes(dir + path.sep) && Number(m[1]) !== process.pid) try { process.kill(Number(m[1])); } catch (e) { /* gone */ }
+      }
+    } catch (e) { /* no ps */ }
     if (path.dirname(dir) === root && path.basename(dir).startsWith('clickthrough-')) fs.rmSync(dir, { recursive: true, force: true });
   };
   try {
@@ -115,9 +123,9 @@ function recorder(page, base) {
     if (req.method() !== 'POST' || !r.url().startsWith(base + '/api/act')) return;
     let op = req.headers()['x-orch-op'];
     if (!op) try { op = JSON.parse(req.postData() || '{}').op; } catch (e) { /* not JSON */ }
-    let text = '';
-    if (r.status() !== 200) try { text = (await r.text()).slice(0, 200); } catch (e) { /* gone */ }
-    rec.ops.push({ op, status: r.status(), text });
+    const hit = { op, status: r.status(), text: '' };
+    rec.ops.push(hit);  // before any await: the console line of a 4xx comes right after the answer
+    if (r.status() !== 200) try { hit.text = (await r.text()).slice(0, 200); } catch (e) { /* gone */ }
   });
   return rec;
 }
@@ -140,6 +148,17 @@ function tools(page, srv, rec) {
   };
   const t = {
     page, ids: srv.ids, base: srv.base,
+    /** the demo workspace folder (in the throw-away home) */
+    workspace: path.join(srv.dir, 'Pilatus'),
+    /** run this checkout's orch in the demo workspace as the stand-in helper would (env -i, the throw-away home);
+     *  for what only a helper can do (a chat reply, a proposal). Returns stdout; throws on a non-zero exit. */
+    orch(...words) {
+      const env = { HOME: srv.dir, USERPROFILE: srv.dir, ORCH_HOME: path.join(srv.dir, 'orch'), ORCH_HOME_STRICT: '1',
+        PATH: process.env.PATH, LANG: 'en_US.UTF-8', ORCH_AGENT: 'standin',
+        UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache', 'uv') };
+      return execFileSync('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), 'uv', 'run', '-q', '--project',
+        path.join(REPO, 'workspace'), 'python', '-I', '-m', 'orch', ...words], { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
+    },
     /** open a dashboard address (`#tickets`, `#ticket/<id>`, `#settings/agent`) and wait until it is drawn */
     async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); },
     /** reload the page and wait until it is drawn again: what is shown now came from the files, not the page's memory */
@@ -210,6 +229,7 @@ async function main() {
       results.push({ c, problems, secs: ((Date.now() - t0) / 1000).toFixed(1) });
       console.log(`${problems.length ? 'FAILED' : 'passed'}  ${c.name} (${c.file}, ${results.at(-1).secs}s)`);
       for (const p of problems) console.log(`        ${p}`);
+      if (problems.length && rec.ops.length) console.log(`        actions sent: ${rec.ops.map(x => `${x.op} ${x.status}`).join(', ')}`);
     }
   } finally {
     await browser.close();

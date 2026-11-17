@@ -33,6 +33,21 @@ if not str(D).startswith(str(ACCOUNT / ".orch-test") + os.sep) or os.environ.get
 WS = D / "Pilatus"
 WS.mkdir(parents=True, exist_ok=True)
 
+# No real agent tool may ever run here: stand-ins named like the built-in agent programs come first on PATH for
+# this server and everything it starts (a helper run, a Test click, a ticket pinned to Claude). Each writes one log
+# line, waits a little (so Stop has something to stop) and ends.
+STUB = (
+    "#!/bin/sh\n"
+    'echo "$(date) $(basename "$0") $*" >> "$(dirname "$0")/../fake-agent.log"\n'
+    'case " $* " in *" --session-id "*|*" -p "*|*" exec "*) sleep 20 ;; *) echo "stand-in 0.0 (not a real agent)" ;; esac\n'
+)  # a version or help question is answered at once (orch asks it to list the agents); only a session waits
+BIN = D / "bin"
+BIN.mkdir(exist_ok=True)
+for name in ("claude", "codex"):
+    (BIN / name).write_text(STUB)
+    (BIN / name).chmod(0o755)
+os.environ["PATH"] = f"{BIN}{os.pathsep}{os.environ.get('PATH', '')}"
+
 
 def orch(*args: str, stdin: str | None = None) -> dict | str:
     """One orch command in the demo workspace (this Python, isolated mode). Returns parsed --json output."""
@@ -58,7 +73,7 @@ def seed() -> dict:
     # The helper is a stand-in script, never a real agent tool: a click on Start runs it, it writes one log line
     # and ends. Nothing here may start a model, spend money or reach outside this computer.
     fake = D / "fake-agent.sh"
-    fake.write_text('#!/bin/sh\necho "$(date) $*" >> "$(dirname "$0")/fake-agent.log"\nsleep 2\n')
+    fake.write_text('#!/bin/sh\necho "$(date) $*" >> "$(dirname "$0")/fake-agent.log"\nsleep 20\n')
     fake.chmod(0o755)
     cfg = WS / ".orch" / "config.toml"
     text = re.sub(r"(?m)^agent = .*\n", "", cfg.read_text() if cfg.exists() else "")  # init's own pick goes
@@ -66,6 +81,17 @@ def seed() -> dict:
         text + '\n[workspace]\nagent = "standin"\n'
     )
     cfg.write_text(text + f'\n[agents.standin]\nadapter = "generic"\ncommand = "sh {fake} {{prompt}}"\n')
+    # A settings command runs only once this computer allowed it; unallowed, orch would fall back to the first agent
+    # tool found on PATH (a real one). Allow the stand-in, and refuse to serve unless it is the helper that runs.
+    from orch import adapters, config
+
+    key = next(p["key"] for p in config.pending_agents(WS) if p["name"] == "standin")
+    config.allow_agent(WS, "standin", key)
+    if adapters.chosen(WS) != "standin" or config.pending_agents(WS):
+        sys.exit("the stand-in helper is not the one that would run: refusing to start (a real agent could run)")
+    for name in ("claude", "codex"):
+        if adapters.find_binary(name) != str(BIN / name):
+            sys.exit(f"{name} would not be the stand-in here: refusing to start (a real agent could run)")
     ids = {}
 
     def new(key: str, title: str, *steps: str) -> str:
