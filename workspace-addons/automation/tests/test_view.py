@@ -57,7 +57,7 @@ def test_schedule_listed_as_a_table_with_the_week_ahead(ws, monkeypatch):
     check(v)
     assert not blocks(v, "stat")
     (table,) = blocks(v, "table")
-    assert [c["label"] for c in table["columns"]] == ["Ticket", "Repeats", "Next time", "Last time"]
+    assert [c["label"] for c in table["columns"]] == ["Ticket", "Plan", "Next time", "Last time"]
     (row,) = table["rows"]
     assert row["cells"]["schedule"] == "Weekly breport/b" and row["cells"]["repeats"] == "Mondays at 07:00"
     assert row["cells"]["last"] == "Not yet" and row["link"] == "t_rec00001"
@@ -554,3 +554,22 @@ def test_long_calendar_titles_end_at_a_whole_word_with_an_ellipsis():
     assert out.endswith("…") and len(out) <= 80 and long.startswith(out[:-1])
     assert long[len(out) - 1] == " "
     assert clean("Weekly report") == "Weekly report"
+
+
+def test_one_time_wake_up_is_a_row_marked_once(ws, monkeypatch):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    add_ticket(
+        ws,
+        "t_once0001",
+        title="Check the build",
+        waiting_on={"kind": "time", "until": "2026-11-04T10:00:00Z"},
+    )
+    add_ticket(ws, "t_rec00002", title="Weekly", ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
+    v = build(ws, T(8))
+    check(v)
+    (table,) = blocks(v, "table")
+    cells = {r["cells"]["schedule"]: r["cells"] for r in table["rows"]}
+    assert cells["Check the build"]["repeats"] == "Once"
+    assert cells["Weekly"]["repeats"] == "Mondays at 07:00"
