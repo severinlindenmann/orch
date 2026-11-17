@@ -1646,3 +1646,30 @@ def test_addon_act_allow_script_takes_only_the_shown_key(act_orch, ws):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_epic_in_one_request_answers_with_every_ticket(act_server, act_orch):
+    """ORCH-185: one ticket.new with `steps` makes the epic and the tickets inside it, and the answer says which."""
+    body = {
+        "op": "ticket.new",
+        "args": {"title": "Epic", "epic": True, "steps": [{"title": "One"}, {"title": "Two"}]},
+    }
+    s, text, _ = _post_raw(act_server, body)
+    assert s == 200, text
+    made = [c for c in acts(act_orch) if c[:2] == ["ticket", "new"]]
+    assert len(made) == 3 and "--epic" in made[0]
+    assert [a for a in made[1] if a.startswith("--parent=")] and [
+        a for a in made[2] if a.startswith("--parent=")
+    ]
+    state = json.loads(text)
+    assert [m["index"] for m in state["steps"]["made"]] == [0, 1] and state["steps"]["failed"] == []
+
+
+def test_epic_with_a_bad_ticket_makes_nothing(act_server, act_orch):
+    body = {
+        "op": "ticket.new",
+        "args": {"title": "Epic", "epic": True, "steps": [{"title": "One"}, {"title": ""}]},
+    }
+    s, _, _ = _post_raw(act_server, body)
+    assert s == 400
+    assert not [c for c in acts(act_orch) if c[:2] == ["ticket", "new"]]

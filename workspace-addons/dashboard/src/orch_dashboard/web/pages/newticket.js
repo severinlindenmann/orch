@@ -61,7 +61,7 @@ function ticketPreview(file) {
 function ticketFileChip(file, remove, label = file.name) {
   const row = el('li', 'new-ticket-file');
   const body = button('', 'new-ticket-file-main', () => ticketPreview(file));
-  if (file.type === 'image' && file.url) { const thumb = el('img', 'new-ticket-thumb'); thumb.alt = ''; thumb.src = file.url; body.append(thumb); }  // ORCH-185: a picture shows itself
+  if (file.type === 'image' && file.url) { const thumb = el('img', 'thumbnail'); thumb.alt = ''; thumb.src = file.url; body.append(thumb); }  // ORCH-185: a picture shows itself
   body.append(el('span', '', label));
   if (label === file.name && typeof sizeText === 'function') body.append(el('span', 'meta', sizeText(file.size)));
   const x = button('Remove', 'btn ghost xs new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + (label === file.name ? file.name : 'pasted text'));
@@ -330,7 +330,7 @@ function ticketForm(t) {
     window.orch.toast(run.ok ? 'Helper started' : 'The ticket was created, but the helper did not start: ' + run.text, run.ok ? 'ok' : 'error');
   };
   form.append(fields, error, reload, actions); d.append(form);
-  let created = null, creationUnresolved = false, epicMade = false;
+  let created = null, creationUnresolved = false, epicMade = false, epicProblems = [], togetherDone = false;
   form.addEventListener('submit', async event => {
     event.preventDefault();
     await reading;
@@ -343,6 +343,7 @@ function ticketForm(t) {
     const busy = t || startAfter || !plain ? submit : plain, busyText = busy.textContent;
     busy.textContent = t || !startAfter ? 'Saving…' : 'Starting…'; busy.setAttribute('aria-busy', 'true'); if (plain) plain.disabled = true;
     const idle = () => { busy.textContent = busyText; busy.removeAttribute?.('aria-busy'); busy.ariaBusy = null; if (plain) plain.disabled = false; };
+    togetherDone = false; epicProblems = [];
     const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, key === 'done_when' ? input.value : input.value.trim()]));
     // A helper other than the default is kept as the ticket's owner. FOLLOW-UP: run.start takes no helper yet.
     if (!t) values.owner = helperSelect && helperSelect.value !== helpers[0].name ? 'agent:' + helperSelect.value : '';
@@ -366,6 +367,11 @@ function ticketForm(t) {
         const planFirst = startAfter && !!planBox?.checked;
         const epic = epicMade = steps.some(step => ticketStepArgs(step.input.value, step.files, 'x'));
         const args = {...base, ...(planFirst ? {plan_first:true} : {}), ...(epic ? {epic:true} : {}), ...Object.fromEntries(['owner', 'due', 'done_when'].filter(k => values[k]).map(k => [k, values[k]]))};
+        // ORCH-185: the epic and its tickets go in ONE request (all checked before anything is made) when they fit; a
+        // bigger set (many pictures) still goes one ticket at a time, as before.
+        const filled = epic ? steps.filter(step => ticketStepArgs(step.input.value, step.files, 'x')) : [];
+        const bodies = filled.map(step => { const {parent, ...body} = ticketStepArgs(step.input.value, step.files, 'x', values.owner); return body; });
+        if (epic && !ticketTooBig({...args, steps:bodies})) args.steps = bodies;
         if (ticketTooBig(args)) {
           error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
           submit.disabled = false; idle(); return;
@@ -373,6 +379,12 @@ function ticketForm(t) {
         result = await act('ticket.new', args);  // one write, one history line
         if (result.ok) {
           if (result.state?.attached?.failed?.length) window.orch.toast('The ticket was created. Not saved: ' + result.state.attached.failed.join(', '), 'error');
+          if (args.steps && result.state?.steps) {  // the tickets inside came with the same answer
+            togetherDone = true;
+            const {made = [], failed: notMade = []} = result.state.steps;
+            for (const m of made) { filled[m.index]?.remove.click(); if (m.attached?.failed?.length) window.orch.toast('Ticket ' + (m.index + 1) + ' was created. Not saved: ' + m.attached.failed.join(', '), 'error'); }
+            if (notMade.length) epicProblems = notMade.map(f => 'Ticket ' + (f.index + 1) + ': ' + window.DashHelpers.scrubText(f.message));
+          }
           // The reply names the new ticket; the title match is only for an older server without that.
           const newId = result.state?.created?.id || result.state?.attached?.id;
           created = newId ? tickets().find(t => t.id === newId) : null;
@@ -386,8 +398,8 @@ function ticketForm(t) {
       // The epic's tickets, one each inside it, in order. One that was made leaves the list, so pressing the button
       // again only sends the ones that failed.
       if (result.ok && created) {
-        const failed = [];
-        for (const step of [...steps]) {
+        const failed = [...epicProblems];
+        for (const step of togetherDone ? [] : [...steps]) {
           const args = ticketStepArgs(step.input.value, step.files, created.id, values.owner);
           if (!args) continue;
           const made = await act('ticket.new', args);

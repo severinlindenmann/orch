@@ -436,6 +436,39 @@ test('ORCH-185: Cancel, Esc or Back keep the typed text; the next New ticket bri
 test('ORCH-185: an added picture shows a thumbnail in its chip; a text file does not', () => {
   const c = setup().c;
   const img = walk(c.ticketFileChip({name:'hero.png', type:'image', size:99, url:'blob:x'}, () => {}));
-  assert.ok(img.some(n => n.tag === 'img' && n.className === 'new-ticket-thumb' && n.src === 'blob:x'));
+  assert.ok(img.some(n => n.tag === 'img' && n.className === 'thumbnail' && n.src === 'blob:x'));
   assert.ok(!walk(c.ticketFileChip({name:'a.txt', type:'text', size:1, text:'x'}, () => {})).some(n => n.tag === 'img'));
+});
+async function epicSetup(reply) {
+  const s = setupWith(null, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
+  s.c.act = async (op, args) => { s.calls.push({op, args}); if (op === 'ticket.new') { s.c.tickets().push({id:'t_epic', title:args.title}); return {ok:true, state:{created:{id:'t_epic'}, ...reply(args)}}; } return {ok:true}; };
+  s.input.value = 'Dashboard fixes'; await s.input.fire('input');
+  await addStepButton(s).click(); await addStepButton(s).click();
+  const [one, two] = stepBoxes(s);
+  walk(one).find(n => n.tag === 'textarea').value = 'Fix the header';
+  walk(two).find(n => n.tag === 'textarea').value = 'Larger buttons';
+  return s;
+}
+test('ORCH-185: an epic and its tickets go in ONE request, none of them naming a parent', async () => {
+  const s = await epicSetup(args => ({steps:{made:args.steps.map((_, index) => ({index})), failed:[]}}));
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'run.start']);
+  assert.equal(s.calls[0].args.epic, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0].args.steps.map(x => [x.title, 'parent' in x]))), [['Fix the header', false], ['Larger buttons', false]]);
+  assert.ok(s.toasts.some(x => x[0] === 'Epic created'));
+});
+test('ORCH-185: when one ticket of the epic is not made, the window says which and pressing again sends only that one', async () => {
+  const s = await epicSetup(args => ({steps:{made:[{index:0}], failed:[{index:1, message:'Too long'}]}}));
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stepBoxes(s).length, 1, 'the ticket that was made left the list');
+  const err = walk(s.d).find(n => n.className === 'bad');
+  assert.match(err.textContent, /not every ticket in it\. Ticket 2: Too long/);
+  s.calls.length = 0;
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(s.calls.map(c => c.op).slice(0, 1), ['ticket.new']);
+  assert.equal(s.calls[0].args.parent, 't_epic');
+  assert.equal(s.calls[0].args.title, 'Larger buttons');
 });

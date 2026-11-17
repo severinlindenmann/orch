@@ -273,6 +273,7 @@ def _ticket_new(a):
             "title_auto",
             "plan_first",
             "epic",
+            "steps",
         ),
     )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
@@ -1294,6 +1295,54 @@ def _op_timeout(op, args) -> int:
     return 75 if op == "config.agent.test" else 60
 
 
+MAX_EPIC_STEPS = 50
+
+
+def epic_new(root: Path, orch_bin: str | None, args: dict, session: bool) -> tuple[int, str, dict | None]:
+    """ORCH-185: an epic and its tickets in ONE request. Every ticket is checked (fields, files) before anything is
+    made, so a bad one never leaves a half-built epic behind. Then the epic is made and each ticket inside it; the
+    answer says which tickets were made and which were not (`steps.made` / `steps.failed`, by position)."""
+    steps = args.get("steps")
+    if (
+        not isinstance(steps, list)
+        or not 1 <= len(steps) <= MAX_EPIC_STEPS
+        or not all(isinstance(x, dict) for x in steps)
+    ):
+        raise BadRequest(f"An epic needs 1 to {MAX_EPIC_STEPS} tickets, each with its text.")
+    if not _flag(args.get("epic")):
+        raise BadRequest("Tickets inside a ticket need it to be an epic.")
+    rest = {k: v for k, v in args.items() if k != "steps"}
+    build_argv("ticket.new", rest, root)
+    attachments("ticket.new", rest)
+    for number, step in enumerate(steps, 1):
+        if "parent" in step or _flag(step.get("epic")):
+            raise BadRequest(f"Ticket {number} cannot name a parent.")
+        try:
+            build_argv("ticket.new", {**step, "parent": "t_aaaaaa"}, root)
+            attachments("ticket.new", step)
+        except BadRequest as e:
+            raise BadRequest(f"Ticket {number}: {e}") from None
+    status, text, out = run_op(root, orch_bin, "ticket.new", rest, session)
+    if status != 200 or not isinstance(out, dict):
+        return status, text, out
+    epic_id = out.get("id") or (out.get("created") or {}).get("id")
+    if not isinstance(epic_id, str) or not TID.fullmatch(epic_id):
+        return 422, "The epic was made, but its address could not be read. Reload before trying again.", None
+    made, failed = [], []
+    for index, step in enumerate(steps):
+        try:
+            st, msg, child = run_op(root, orch_bin, "ticket.new", {**step, "parent": epic_id}, session)
+        except (BadRequest, Unavailable) as e:
+            st, msg, child = 422, str(e), None
+        if st == 200:
+            made.append(
+                {"index": index, "id": (child or {}).get("id"), "attached": (child or {}).get("attached")}
+            )
+        else:
+            failed.append({"index": index, "message": msg})
+    return 200, "", {**out, "steps": {"made": made, "failed": failed}}
+
+
 def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) -> tuple[int, str, dict | None]:
     """Run one op as the person. Returns (http status, plain text, parsed json or None). `session` is True for a
     request that carries the page session; False = watch-only (the click is refused)."""
@@ -1317,6 +1366,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
 
         update.dismiss_auto_note()
         return 200, "", None
+    if op == "ticket.new" and isinstance(args, dict) and "steps" in args:
+        return epic_new(root, orch_bin, args, session)
     argv = build_argv(op, args, root)
     if orch_bin == SELF and needs_session(op) and not session:  # before anything is read or run
         raise NeedsPerson(SIGNIN)
