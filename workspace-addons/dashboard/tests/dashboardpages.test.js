@@ -163,7 +163,7 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const LIVE_MAX_CHOICES'), end = src.indexOf('function shareCard');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
-  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsPending:new Map(), settingsSaving:() => null, settingsText:(tag, a, t) => h(tag, a, t)});
   vm.runInContext(src.slice(start, end), c);
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
   const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join(' ');
@@ -177,6 +177,48 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   assert.match(text(four), /When 4 helpers are working, the next one waits in line/);
   assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:99}), n => n.tag === 'select')[0].value, 'none');
   assert.ok(src.includes("permissionsCard(settings), helpersAtOnceCard(settings)]"), 'sits on the Helper tab');
+});
+
+test('ORCH-227: a Settings choice shows at once with Saving…, a second click while it saves is sent after it', async () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  let renders = 0;
+  const c = vm.createContext({h, snapshot:false, render:() => { renders++; }});
+  vm.runInContext(src.slice(src.indexOf('const settingsBusy'), src.indexOf('const addonOpen')), c);
+  vm.runInContext(src.slice(src.indexOf('const FULL_WARNING'), src.indexOf('// What helpers need')), c);
+  vm.runInContext(src.slice(src.indexOf('const LIVE_MAX_CHOICES'), src.indexOf('function shareCard')), c);
+  const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+  const checked = card => all(card, n => n.tag === 'input' && n.checked)[0]?.attrs.value;
+  const saving = (card, key) => all(card, n => n.attrs?.['data-key'] === 'settings-saving-' + key).length;
+  const choose = vm.runInContext('settingsChoose', c), busy = vm.runInContext('settingsBusy', c);
+  // the server answers slowly: the clicked choice is drawn at once, with Saving…, never the old one
+  const sent = [];
+  let finish;
+  const send = mode => () => { busy.add('permissions'); sent.push(mode); return new Promise(done => { finish = () => { busy.delete('permissions'); done({ok:true}); }; }); };
+  const first = choose('permissions', 'ask', send('ask'));
+  const card = vm.runInContext('permissionsCard', c)({permissions:'auto'});
+  assert.equal(checked(card), 'ask', 'the click shows at once');
+  assert.equal(saving(card, 'permissions'), 1, 'with a saving sign');
+  assert.equal(all(card, n => n.tag === 'input' && n.attrs.disabled).length, 0, 'a second click is possible');
+  // a second click while the first saves is kept and sent after it; the last click wins
+  assert.equal(await choose('permissions', 'full', send('full')), null);
+  assert.equal(checked(vm.runInContext('permissionsCard', c)({permissions:'auto'})), 'full');
+  finish();
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(sent, ['ask', 'full']);
+  finish();
+  await first;
+  const after = vm.runInContext('permissionsCard', c)({permissions:'full'});
+  assert.equal(checked(after), 'full'); assert.equal(saving(after, 'permissions'), 0, 'no saving sign once saved');
+  // a failed save falls back to what the server says
+  const failed = choose('live', 4, () => Promise.resolve({ok:false}));
+  await failed;
+  assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:null}), n => n.tag === 'select')[0].value, 'none');
+  // Helpers at once shows the picked number at once too
+  choose('live', 6, () => new Promise(() => {}));
+  const live = vm.runInContext('helpersAtOnceCard', c)({live_max:null});
+  assert.equal(all(live, n => n.tag === 'select')[0].value, '6'); assert.equal(saving(live, 'live'), 1);
+  assert.ok(renders > 0);
 });
 
 test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote shown plainly (no Details)', () => {

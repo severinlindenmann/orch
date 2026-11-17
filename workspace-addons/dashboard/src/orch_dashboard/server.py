@@ -26,6 +26,7 @@ from .data import (
     load_links,
     load_services,
     load_state,
+    patch_settings,
     patch_ticket,
 )
 from .events import Revisions
@@ -45,6 +46,22 @@ MAX_BIG_BODY = (
 LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose")
 # ops that name a ticket but change more than it (settings, add-ons, the workspace): answered with a full build
 WIDE_OPS = ("addon.act", "addon.set", "addon.uninstall", "addon.start", "update.start")
+# Settings choices that change only what Settings (or the phone switch) shows: answered at once with the Settings
+# values read again, the full build follows in the background (ORCH-227: a choice took 4 to 12 s to show)
+SETTINGS_OPS = (
+    "config.permissions",
+    "config.agent",
+    "live.set",
+    "workflow.set",
+    "reviewer.set",
+    "release_merge.set",
+    "diag.set",
+    "typing.set",
+    "update.auto",
+    "copies.set",
+    "mobile.set",
+    "mobile.hours",
+)
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -1131,6 +1148,9 @@ class Handler(BaseHTTPRequestHandler):
             # A workspace text changes no ticket: answer with the cached state at once (a full rebuild took 10 s on a
             # big workspace and kept "Sending…" on screen), never as the new cache.
             state = dict(self.server.state_cache.get()[0])
+        elif state is None and body.get("op") in SETTINGS_OPS:
+            state = patch_settings(self.root, self.orch_bin, self.server.state_cache.get()[0], body.get("op"))
+            self.server.state_cache.quick(state)  # before the reply's own keys are added
         elif (
             state is None
             and isinstance(tid, str)

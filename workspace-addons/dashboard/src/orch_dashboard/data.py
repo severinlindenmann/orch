@@ -887,11 +887,13 @@ def _ws_tags(root: Path) -> list[str]:
 
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
-    agents, rows = (
-        run_orch(orch_bin, ["agents", "--json"], root),
-        run_orch(orch_bin, ["addon", "list", "--json"], root),
-    )
-    private = run_orch(orch_bin, ["private", "--json"], root)
+    # the four `orch ... --json` reads side by side (one after the other they took seconds with helpers running)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_agents = pool.submit(run_orch, orch_bin, ["agents", "--json"], root)
+        f_rows = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
+        f_private = pool.submit(run_orch, orch_bin, ["private", "--json"], root)
+        f_perm = pool.submit(run_orch, orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
+    agents, rows, private = f_agents.result(), f_rows.result(), f_private.result()
     private = private if isinstance(private, dict) else {}
     private_lines = private.get("lines")
     git_private = {
@@ -920,7 +922,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         ],
     }
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
-    perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
+    perm = f_perm.result()
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     from orch.config import (
         agents_may_finish,
@@ -1206,6 +1208,19 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
         out["runs"][tid] = runs[tid]
     add_warmth(root, [t], out["runs"])
     out["review"] = review
+    out["now"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out["rev"] = state_rev(out)
+    return out
+
+
+def patch_settings(root: Path, orch_bin: str | None, state: dict, op: str) -> dict:
+    """A Settings click's answer (ORCH-227): the last full state with the Settings values read again (and Mobile
+    mode for a phone choice); everything else stays until the background build replaces it. Before, every choice
+    waited for a full build and the page showed the old choice for 4 to 12 s."""
+    out = dict(state)
+    out["settings"] = load_settings(root, orch_bin)
+    if op.startswith("mobile."):
+        out["mobile_mode"] = mobile.load_mobile(root, orch_bin)
     out["now"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     out["rev"] = state_rev(out)
     return out
