@@ -77,6 +77,9 @@ def check_run(value):
         raise Refused("The last stage must be ship, with a stop for you.", "invalid")
     if len(set(names)) != len(names):
         raise Refused("Every stage name must be used only once.", "invalid")
+    for i, x in enumerate(value["line"]):
+        if any(a not in names[:i] for a in x.get("after", [])):
+            raise Refused("A stage can only wait for stages before it in the line.", "invalid")
     if any(t["stage"] not in names for t in value["tasks"]):
         raise Refused("Every task must belong to a stage in the line.", "invalid")
     if any(i >= len(value["done_means"]) for t in value["tasks"] for i in t.get("proves", [])):
