@@ -39,6 +39,7 @@ KEYS = (
     "workspace.live_max",
     "workflow.agents_may_finish",
     "workflow.reviewer",
+    "workflow.reviewer_answers",
     "workflow.reviewer_look",
     "workflow.release_merge",
     "workflow.copies",
@@ -288,6 +289,7 @@ def _config(args, root: Path) -> None:
             "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
+            "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
             "workflow.copies": lambda: config.copies_mode(root),
@@ -352,6 +354,19 @@ def _config(args, root: Path) -> None:
             args,
             {"workflow.reviewer": value},
             f"The Reviewer accepts small finished work for you: {args.value}.",
+        )
+    elif args.sub == "set" and args.key == "workflow.reviewer_answers":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # answers in the owner's place
+            raise Refused("Only the owner turns this on: in their own terminal with orch config set.")
+        value = config.set_reviewer_answers(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.reviewer_answers": value},
+            "Saved: small routine questions are "
+            + ("answered for you by the Reviewer." if value else "left for you."),
         )
     elif args.sub == "set" and args.key == "workflow.reviewer_look":
         if args.value not in ("on", "off"):
