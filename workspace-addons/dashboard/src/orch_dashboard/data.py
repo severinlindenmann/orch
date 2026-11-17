@@ -1219,7 +1219,7 @@ def load_state(
     with_settings: bool = False,
 ) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
-    from .actions import actor
+    from .actions import actor, computer_user
 
     # The independent `orch ... --json` reads run side by side; .result() in the old order raises as before.
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -1258,6 +1258,7 @@ def load_state(
     state = {
         "workspace": root.name,
         "who": actor(root).removeprefix("human:"),
+        "login": computer_user(),  # the computer's login name: old lines recorded under it are the person's own
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "me": _me(root) if with_settings else None,
         "people": people.load(root)
