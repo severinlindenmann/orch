@@ -539,11 +539,13 @@ class Scheduler:
         if not due:
             record_last_run(self.root, t, now)  # looked at, nothing due: the health check still sees it alive
             return False
-        res = start_group(self.root, t, due)
-        if res["result"] == "failed":
-            ask_failure(self.root, tid, f"A script did not run: {res['reason']}")
+        # the pass is written down before the scripts start: they read the ticket while they begin
         update_state(self.root, tid, group_runs={**seen, **{n: fmt(now) for n in due}})
         record_last_run(self.root, t, now)  # the repeat's own line (last run, next planned pass)
+        fresh = orchcli.ticket(self.root, tid) or t
+        res = start_group(self.root, fresh, due)
+        if res["result"] == "failed":
+            ask_failure(self.root, tid, f"A script did not run: {res['reason']}")
         return res["result"] == "started"
 
     def may_start(self, t: dict) -> bool:

@@ -23,6 +23,9 @@ class Refused(Exception):
     pass
 
 
+SCRIPT_OR_AGENT = "A repeat runs either a script or an agent, and a script never gets its own sub-tickets."
+
+
 def find_workspace(start: Path) -> Path | None:
     p = start.resolve()
     for d in (p, *p.parents):
@@ -174,9 +177,7 @@ def repeat(
             changes["when_changed"] = when_changed
     if script is not None:
         if agent or each_run:
-            raise Refused(
-                "A repeat runs either a script or an agent, and a script never gets its own sub-tickets."
-            )
+            raise Refused(SCRIPT_OR_AGENT)
         if not scripts.NAME_RE.match(script):
             raise Refused(
                 "A script name may only have a-z, 0-9 and -. It names a script (orch automation script list)."
@@ -290,9 +291,7 @@ def _group(root: Path, given: list[str], zone_name: str, agent, each_run, own: s
     """--script given once or more: "name" (on the repeat's own plan) or "name=<plan in plain words>".
     Returns name -> cron rule; every script must be set up on this computer."""
     if agent or each_run:
-        raise Refused(
-            "A repeat runs either a script or an agent, and a script never gets its own sub-tickets."
-        )
+        raise Refused(SCRIPT_OR_AGENT)
     out: dict[str, str] = {}
     for item in given:
         name, _, words = item.partition("=")
