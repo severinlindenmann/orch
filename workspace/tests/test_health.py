@@ -170,7 +170,19 @@ def test_overview_names_the_tickets_that_stop_and_leaks_nothing(proj, run, new_t
     assert (r["state"], r["ends_at"], r["helper"]) == ("soon", "2026-11-17T21:24:57Z", "claude")
     assert [t["id"] for t in r["stops"]] == [tid] and other not in json.dumps(rows)
     assert r["stops"][0]["title"] == "Plan the newsletter"
-    assert set(r) == {"name", "label", "kind", "state", "ends_at", "helper", "chosen", "stops"}
+    assert set(r) == {
+        "name",
+        "label",
+        "kind",
+        "state",
+        "ends_at",
+        "helper",
+        "chosen",
+        "stops",
+        "renew",
+        "key",
+    }
+    assert r["renew"] is True and r["key"] is None  # orch can start the Claude Code sign-in (ORCH-46)
     assert HIDDEN not in json.dumps(rows)
 
 
@@ -233,7 +245,7 @@ def test_command_text_and_json(proj, run, new_ticket, tools):
     assert code == 0, err
     label = adapters.load("claude")["label"]
     assert out.startswith(f"The {label} login no longer works. The helper cannot go on with 1 ticket: ")
-    assert "Plan the newsletter" in out and "orch logins again" in out + err
+    assert "Plan the newsletter" in out and "orch logins renew claude" in out + err
     assert HIDDEN not in out + err
     code, out, err = run("logins", "--json")
     doc = json.loads(out)

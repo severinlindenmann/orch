@@ -194,8 +194,11 @@
           "properties": {
             "status": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Arguments after the detect binary. Fixed words only, no placeholders." },
             "logged_in": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Field of the JSON answer that is true while the login works." },
-            "ends": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Optional. Field with the end time (an ISO time, or seconds or milliseconds since 1970). Absent = the tool tells no end time: no early warning." }
-          }
+            "ends": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Optional. Field with the end time (an ISO time, or seconds or milliseconds since 1970). Absent = the tool tells no end time: no early warning." },
+            "renew": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Optional (with links). The tool's own sign-in step, arguments after the detect binary. orch runs it in the background from the warning's Renew (renew.py): it hands the person only the sign-in link and passes a code the sign-in page shows to the tool's input. Nothing else of its output is kept." },
+            "links": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^https://[a-z0-9.-]+/$" }, "description": "Required with renew. How the sign-in link starts; any other link the tool prints is never shown." }
+          },
+          "dependentRequired": { "renew": ["links"], "links": ["renew"] }
         },
         "reminder": {
           "type": "object", "required": ["settings_file", "output"], "additionalProperties": false,

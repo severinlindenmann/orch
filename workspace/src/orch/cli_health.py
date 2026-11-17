@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from orch import health, history, net, nextstep
+from orch import health, history, net, nextstep, renew
 
 NONE_SET = "Nothing here tells orch whether it works."
 
@@ -24,7 +25,17 @@ def _out(args, data, text: str) -> None:
 
 def add_parsers(sub, common) -> None:
     # hidden from help until the owner has chosen the words (ORCH-43); the dashboard and phone use it
-    sub.add_parser("logins", parents=[common], help=argparse.SUPPRESS)
+    p = sub.add_parser("logins", parents=[common], help=argparse.SUPPRESS)
+    acts = p.add_subparsers(dest="logins_action")
+    r = acts.add_parser("renew", parents=[common], help=argparse.SUPPRESS)  # ORCH-46: the tool's own sign-in
+    r.add_argument("name")
+    how = r.add_mutually_exclusive_group()
+    how.add_argument("--code", metavar="-", help=argparse.SUPPRESS)  # '-' = the code on stdin (never argv)
+    how.add_argument("--status", action="store_true", help=argparse.SUPPRESS)
+    how.add_argument("--cancel", action="store_true", help=argparse.SUPPRESS)
+    how.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)  # the background worker
+    k = acts.add_parser("replace", parents=[common], help=argparse.SUPPRESS)  # a key: new value on stdin
+    k.add_argument("name")
 
 
 def line(r: dict) -> str:
@@ -46,9 +57,61 @@ def line(r: dict) -> str:
     return f"{label} did not answer, so orch cannot tell whether its {kind} works."
 
 
+RENEW_SAYS = {
+    "none": "No sign-in was started for this login.",
+    "starting": "The sign-in is starting.",
+    "link": "Open this link and sign in: {link}\n"
+    "If the page shows a code, paste it with: orch logins renew {name} --code -",
+    "checking": "orch is checking the login.",
+    "done": "The login is renewed.",
+    "failed": "The sign-in did not finish. Press Renew to try again.",
+    "stopped": "The sign-in was closed.",
+}
+
+
+AGAIN = "The tool did not take that code. Copy the whole code from the sign-in page and paste it again."
+
+
+def renew_line(st: dict) -> str:
+    if st.get("state") == "link" and st.get("again"):
+        return AGAIN + f"\nPaste it with: orch logins renew {st.get('name') or ''} --code -"
+    text = RENEW_SAYS.get(st.get("state"), RENEW_SAYS["failed"]).format(
+        link=st.get("link") or "", name=st.get("name") or ""
+    )
+    if st.get("state") == "done" and st.get("went_on"):
+        text += " Helpers go on with " + ", ".join(st["went_on"]) + "."
+    return text
+
+
+def _stdin_line() -> str:
+    return sys.stdin.read(4096).strip()
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "logins":
         return False
+    action = getattr(args, "logins_action", None)
+    if action == "renew":
+        if args.worker:
+            raise SystemExit(renew.work(root, args.name))
+        if args.code is not None:
+            st = renew.code(root, args.name, _stdin_line() if args.code == "-" else args.code)
+        elif args.status:
+            st = renew.status(root, args.name)
+        elif args.cancel:
+            st = renew.cancel(root, args.name)
+        else:
+            st = renew.start(root, args.name)
+        _out(args, st, renew_line(st))
+        return True
+    if action == "replace":
+        res = renew.replace_key(root, args.name, sys.stdin.read().removesuffix("\n").removesuffix("\r"))
+        ok = res["state"] in ("works", "soon")
+        text = "The new key is in and works." if ok else "The new key is in, but the check still fails."
+        if res.get("went_on"):
+            text += " Helpers go on with " + ", ".join(res["went_on"]) + "."
+        _out(args, res, text)
+        return True
     doc = health.check(root)
     _out(args, doc, "\n".join(line(r) for r in doc["items"]) or NONE_SET)
     return True
