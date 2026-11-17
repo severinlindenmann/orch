@@ -315,7 +315,9 @@ function needCardQuestion(row) {
 function cardSetRow(row) {
   const t = ticketOf(row.ticket), open = array(t?.questions).filter(q => q.answer == null && !q.taken_back && q.card && typeof q.card === 'object');
   const names = [...new Set(open.map(q => q.group).filter(Boolean))], n = open.length || 1, key = 'need-set-' + (t?.id || row.id);
-  const title = names.length === 1 ? names[0] : clean(t?.title || 'Cards to look at');
+  // One card: the row says what it asks (its title, else its question); several: the set's name. Always with the ticket key.
+  const one = open.length === 1 ? open[0] : null, ask = one ? clean(one.card?.title || shortQuestion(one.text)) : '';
+  const title = ask || (names.length === 1 ? names[0] : clean(t?.title || 'Cards to look at'));
   const api = typeof reviewApi === 'function' ? reviewApi() : null, o = {fileUrl:api ? api.fileUrl : () => ''};
   const pics = window.UI?.cardShown ? open.slice(0, 3).map(q => {
     const g = window.UI.cardShown({card:q.card, ticket:t.id}, o), tiles = g ? [...g.children] : [];
@@ -325,10 +327,10 @@ function cardSetRow(row) {
     if (cap) cap.textContent = clean(q.card.title || '');
     return pick;
   }).filter(Boolean) : [];
-  const meta = [n === 1 ? '1 card to look at' : n + ' cards to look at', names.length === 1 && t && clean(t.title) !== title ? clean(t.title) : '', typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
+  const meta = [n === 1 ? '1 card to look at' : n + ' cards to look at', (names[0] && names[0] !== title ? names[0] : '') || (t && clean(t.title) !== title ? clean(t.title) : ''), typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
   const go = snapshot ? null : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + row.ticket + ':' + (open[0]?.id || row.answer?.question)), 'data-key':key + '-go'}, n === 1 ? 'Look at it' : 'Look at all ' + n);
   return h('div', {className:'card-row', 'data-key':key, 'data-need-row':row.id},
-    h('div', {className:'grow stack'}, h('div', {}, h('h3', {}, title), h('p', {className:'meta'}, meta)), pics.length ? h('div', {className:'decision-shown'}, pics) : null), go);
+    h('div', {className:'grow stack'}, h('div', {}, h('h3', {}, window.DashHelpers.keyTag(t, h), title), h('p', {className:'meta'}, meta)), pics.length ? h('div', {className:'decision-shown'}, pics) : null), go);
 }
 // A further question, startable failure or add-on row: the same one button the full card would open.
 function needListRow(row, count, same) {
