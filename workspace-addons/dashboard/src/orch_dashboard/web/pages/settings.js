@@ -937,7 +937,7 @@ function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
   const src = '/addon/' + r.id + '/' + r.path + (r.inner ? '#' + r.inner : '');
-  const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
+  const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen'});  // allow alone: both log a warning (ORCH-186)
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
   if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }

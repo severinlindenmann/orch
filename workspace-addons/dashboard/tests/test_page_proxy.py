@@ -139,7 +139,7 @@ def test_only_addons_with_a_page_that_run_are_shown(stack):
 def test_get_from_another_site_or_host_is_refused(stack):
     base, _ = stack
     assert call(base + "/addon/viewer/", headers={"Sec-Fetch-Site": "cross-site"})[0] == 403
-    assert call(base + "/addon/viewer/", headers={"Host": "evil.example"})[0] == 421
+    assert call(base + "/addon/viewer/", headers={"Host": "evil.example"})[0] == 401
     assert not SEEN
 
 

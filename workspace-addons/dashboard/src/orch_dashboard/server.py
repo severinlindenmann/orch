@@ -246,7 +246,8 @@ class Handler(BaseHTTPRequestHandler):
         """The words of a 403 for a missing page session: a sign-in link that was used twice, else sign in."""
         from orch.pagesession import REVOKED_MSG
 
-        if self.session is not None and self.session.revoked:
+        session = getattr(self, "session", None)
+        if session is not None and session.revoked:
             return REVOKED_MSG
         return text
 
@@ -311,6 +312,23 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return path == "/" or (
             not path.startswith(_PRIVATE_PREFIXES) and path.lower().endswith((*STATIC_EXT, ".html"))
+        )
+
+    def _refuse_host(self):
+        """The answer when _host_ok says no. A well-formed host name (a proxy, another computer) only lacks the
+        sign-in: 401 with the sign-in words, so the page can say so. A malformed Host is 421 (misdirected)."""
+        try:
+            from orch.pagesession import SIGNIN_MSG
+            from orch_ui.origin import any_host_ok
+        except ImportError:
+            return self._send(421, b"misdirected request", "text/plain")
+        if not any_host_ok((self.headers.get("Host") or "").strip()):
+            return self._send(421, b"misdirected request", "text/plain")
+        return self._send(
+            401,
+            self._refused_text(SIGNIN_MSG).encode(),
+            "text/plain; charset=utf-8",
+            {"WWW-Authenticate": 'OrchPage realm="orch"', "Cache-Control": "no-store"},
         )
 
     def _remote(self) -> bool:
@@ -440,7 +458,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/go/"):
             return self._standing_link(path[len("/go/") :])
         if not self._host_ok(path):  # DNS rebinding guard
-            return self._send(421, b"misdirected request", "text/plain")
+            return self._refuse_host()
         if path == "/" and selfupdate.answer(self):
             return
         px = PROXY.fullmatch(path)

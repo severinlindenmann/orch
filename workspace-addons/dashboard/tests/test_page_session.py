@@ -143,10 +143,21 @@ def test_sign_in_and_every_click_work_through_a_proxy_from_another_computer(live
     # reads under the proxy's host name: with the cookie yes, without it only the page shell (no data)
     get = lambda path, h: _raw(port, "GET", path, None, h)[0]
     assert get("/api/state", {"Host": REMOTE, "Cookie": cookie, "Sec-Fetch-Site": "same-origin"}) == 200
-    assert get("/api/state", {"Host": REMOTE}) == 421
+    assert get("/api/state", {"Host": REMOTE}) == 401  # well-formed name, no sign-in (ORCH-186)
     assert get("/", {"Host": REMOTE}) == 200
     assert get("/session.js", {"Host": REMOTE}) == 200
     assert get("/api/state", {"Host": "evil example"}) == 421
+
+
+def test_a_read_without_sign_in_answers_401_with_the_sign_in_words(live):
+    """ORCH-186: a well-formed host name that only lacks the sign-in is told to sign in (401), not 421."""
+    _root, port = live
+    st, headers, body = _raw(port, "GET", "/api/state", None, {"Host": REMOTE})
+    assert st == 401
+    assert body.decode().startswith("Sign in to ")  # session.js shows its sign-in notice for these words
+    assert headers.get("www-authenticate") and headers.get("cache-control") == "no-store"
+    assert b'"tickets"' not in body  # no data
+    assert _raw(port, "GET", "/api/state", None, {"Host": "evil example"})[0] == 421  # malformed: misdirected
 
 
 def test_click_without_a_session_is_watch_only(live, monkeypatch):
