@@ -41,12 +41,17 @@ At start the runner asks GitHub which login gh uses and does not run when GitHub
 set `login`; it takes only entries added by its own login. Per round: up to 5 waiting pull requests of the first
 one's repository and base branch, in line order. Merged already -> merged; closed, draft, base branch not allowed,
 changes requested or review required, own checks failed -> out with the reason; GitHub did not show it -> a
-counted try. A member whose own checks still run or are missing can still join: the checks of the group run on its code.
+counted try, unless GitHub does not answer at all (no view and no login): an outage uses up no tries, and the
+runner pauses instead of stopping when its login lookup gets no answer. An entry without a login leaves with the
+reason. A member whose own checks still run or are missing can still join: the checks of the group run on its code.
 
 Every member is looked at again (state open, not a draft, same base branch and allowed, same head commit, no
 changes requested or missing review, no unanswered Merge card) before its group is built, just before the
 group pull request is opened, and right before the merge: the core waiter asks the runner (`before_merge`) just
-before `gh pr merge`. A member that changed is taken out (closed, draft, base not allowed, review, Merge card) or
+before `gh pr merge`, after the wait for room. That last check also needs the group pull request itself still
+open, on the same head and the same allowed base branch, and gh still on the runner's login; a check that fails
+with an error stops the merge. Changes requested count from `reviewDecision` and from each reviewer's latest
+review (`reviewDecision` is empty when the base branch's rules require no reviews). A member that changed is taken out (closed, draft, base not allowed, review, Merge card) or
 put back in line (new commit, another allowed base branch); a group that was stopped this way is closed and the
 rest wait again. One left: the core waiter
 (`orch.prwait.run_one`, merge on green). Several: a group commit built in a bare blobless copy
