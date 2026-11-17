@@ -61,8 +61,7 @@ def line(r: dict) -> str:
 RENEW_SAYS = {
     "none": "No sign-in was started for this login.",
     "starting": "The sign-in is starting.",
-    "link": "Open this link and sign in: {link}\n"
-    "If the page shows a code, paste it with: orch logins renew {name} --code -",
+    "link": "Open this link and sign in: {link}\nIf the page shows a code, paste it in the Renew window.",
     "checking": "orch is checking the login.",
     "done": "The login is renewed.",
     "failed": "The sign-in did not finish. Press Renew to try again.",
@@ -75,7 +74,7 @@ AGAIN = "The tool did not take that code. Copy the whole code from the sign-in p
 
 def renew_line(st: dict) -> str:
     if st.get("state") == "link" and st.get("again"):
-        return AGAIN + f"\nPaste it with: orch logins renew {st.get('name') or ''} --code -"
+        return AGAIN
     text = RENEW_SAYS.get(st.get("state"), RENEW_SAYS["failed"]).format(
         link=st.get("link") or "", name=st.get("name") or ""
     )
@@ -88,13 +87,6 @@ def _stdin_line() -> str:
     return sys.stdin.read(4096).strip()
 
 
-def _hidden(prompt: str) -> str:
-    """A person at a terminal: the value is typed hidden, never shown or kept in the shell history."""
-    import getpass
-
-    return getpass.getpass(prompt, stream=sys.stderr)
-
-
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "logins":
         return False
@@ -102,17 +94,12 @@ def dispatch(args, root: Path) -> bool:
     if action == "renew":
         if args.worker:
             raise SystemExit(renew.work(root, args.name))
-        by = tickets.acting_by(
-            args
-        )  # renew.person_only: a dashboard grant or a person at a terminal, else refused
+        by = tickets.acting_by(args)  # renew.person_only: only with the dashboard's one-time grant
         if args.code is not None:
-            how = renew.person_only(root, by)  # before anything is read
+            renew.person_only(root, by)  # before anything is read
             if args.code != "-":
-                raise Refused(
-                    "Paste the code when asked, not on the command line: orch logins renew <name> --code -"
-                )
-            text = _hidden("Code from the sign-in page: ") if how == "terminal" else _stdin_line()
-            st = renew.code(root, args.name, text, by=by)
+                raise Refused("The code goes on stdin, never on the command line: --code -")
+            st = renew.code(root, args.name, _stdin_line(), by=by)
         elif args.status:
             st = renew.status(root, args.name, by=by)
         elif args.cancel:
@@ -123,8 +110,8 @@ def dispatch(args, root: Path) -> bool:
         return True
     if action == "replace":
         by = tickets.acting_by(args)
-        how = renew.person_only(root, by)  # before the value is read
-        value = _hidden("New key (hidden while you type): ") if how == "terminal" else sys.stdin.read(65537)
+        renew.person_only(root, by)  # before the value is read
+        value = sys.stdin.read(65537)
         res = renew.replace_key(root, args.name, value, by=by)
         ok = res["state"] in ("works", "soon")
         text = "The new key is in and works." if ok else "The new key is in, but the check still fails."

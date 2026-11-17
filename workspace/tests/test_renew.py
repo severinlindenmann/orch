@@ -266,7 +266,7 @@ def test_command_status_and_code_on_stdin(proj, run, fake, monkeypatch):
     t.start()
     _wait(proj, {"link"})
     code, out, err = run("logins", "renew", "claude", "--status")
-    assert code == 0 and LINK in out and "--code -" in out
+    assert code == 0 and LINK in out and "Renew window" in out
     monkeypatch.setattr(sys, "stdin", io.StringIO("abc-def-123\n"))
     code, out, err = run("logins", "renew", "claude", "--code", "-")
     assert code == 0 and "abc-def" not in out + err
@@ -580,7 +580,7 @@ def test_a_grant_serves_once(proj, monkeypatch):
         p.name for p in renew._grants(proj).iterdir()
     )  # only its hash is kept
     monkeypatch.setenv(renew.GRANT_ENV, token)
-    assert renew.person_only(proj, "human:owner") == "grant"
+    renew.person_only(proj, "human:owner")  # passes with the grant
     assert renew.GRANT_ENV not in os.environ and not list(renew._grants(proj).iterdir())
     monkeypatch.setattr(renew, "_GRANTED", set())
     monkeypatch.setenv(renew.GRANT_ENV, token)  # the same grant again
@@ -602,23 +602,13 @@ def test_an_old_grant_is_refused(proj, monkeypatch):
         renew.person_only(proj, "human:owner")
 
 
-def test_a_person_at_a_terminal_types_the_key_hidden(proj, run, monkeypatch):
+def test_a_terminal_is_no_proof(proj, run, monkeypatch):
+    """A helper can fake a terminal (script, a pty): without the dashboard's grant it is refused there too."""
     from orch import term
 
     monkeypatch.setattr(renew, "_GRANTED", set())
-    keystore.record_write(
-        proj, "checks", {"checks": {"payments": {"label": "Payments key", "command": ["pay"], "key": "PAY"}}}
-    )
-    keystore.add(proj, "PAY", "token", "old-value-123")
     monkeypatch.setattr(term, "is_terminal", lambda stream: True)
-    asked = []
-    import getpass
-
-    monkeypatch.setattr(
-        getpass, "getpass", lambda prompt, stream=None: asked.append(prompt) or "typed-value-456"
-    )
-    monkeypatch.setattr(renew, "after", lambda root, name: {"state": "works", "ends_at": None, "went_on": []})
-    code, out, err = run("logins", "replace", "payments")
-    assert code == 0, err
-    assert asked == ["New key (hidden while you type): "] and "typed-value" not in out + err
-    assert keystore.get_value(proj, "PAY") == "typed-value-456"
+    monkeypatch.setattr(sys, "stdin", io.StringIO("typed-value-456\n"))
+    for argv in (["renew", "claude"], ["replace", "payments"], ["renew", "claude", "--code", "-"]):
+        code, out, err = run("logins", *argv, "--by", "human:owner")
+        assert code == 2 and "Only a person" in out + err and "claude auth login" in out + err, argv

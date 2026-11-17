@@ -146,11 +146,8 @@ def _doctor(data, args) -> str:
 
 def _logins(data, args) -> str:
     rows = [r for r in (data or {}).get("items") or [] if r.get("state") == "renew"]
-    if any(r.get("renew") for r in rows):
-        name = next(r["name"] for r in rows if r.get("renew"))
-        return f"orch logins renew {name}"
-    if any(r.get("key") for r in rows):
-        return "replace the key on the dashboard warning, then run orch logins again"
+    if any(r.get("renew") or r.get("key") for r in rows):
+        return "the person presses Renew or Replace on the dashboard warning (person only)"
     if rows:
         return "renew it with the tool's own login, then run orch logins again"
     return "orch ticket list"
@@ -161,15 +158,12 @@ def _logins_replace(data, args) -> str:
 
 
 def _logins_renew(data, args) -> str:
-    st, name = (data or {}).get("state"), (data or {}).get("name") or "<name>"
-    if st == "starting":
-        return f"wait a moment, then: orch logins renew {name} --status"
-    if st == "link":
-        return f"open the link and sign in; if the page shows a code: orch logins renew {name} --code -"
-    if st == "checking":
-        return f"wait a moment, then: orch logins renew {name} --status"
+    """The dashboard reads these calls; their hint stays plain (a person renews in the Renew window)."""
+    st = (data or {}).get("state")
     if st == "done":
         return "orch ticket list"
+    if st in ("starting", "link", "checking"):
+        return "the person goes on in the Renew window on the dashboard"
     return "orch logins"
 
 

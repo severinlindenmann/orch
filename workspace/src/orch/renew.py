@@ -40,7 +40,6 @@ import secrets
 import shutil
 import signal
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -65,28 +64,24 @@ GRANT_ENV = "ORCH_PERSON_GRANT"  # the one-time grant the dashboard's signed-in 
 GRANT_LIFE = 120  # seconds a grant stays good
 RUN_MARKS = ("ORCH_RUN", "ORCH_TICKET", "ORCH_JOB", "ORCH_AGENT")  # set inside a helper run
 PERSON_ONLY = (
-    "Only a person renews a login or replaces a key: press Renew or Replace on the warning, "
-    "or run it yourself in a terminal."
+    "Only a person renews a login or replaces a key, with Renew or Replace on the dashboard warning. "
+    "In a terminal, sign in with the tool itself (for example claude auth login), then run orch logins."
 )
 _GRANTED: set[str] = set()  # workspaces this process was granted for (one grant serves one orch call)
 
 
-def person_only(root: Path, by: str | None = None) -> str:
-    """THE person check for renewing a login, pasting a code and replacing a key, on every path. Returns how
-    the person is here: "grant" (the dashboard's signed-in session handed this call a one-time grant kept in
-    the guarded orch home, see grant) or "terminal" (a person at a real terminal; values are asked hidden).
-    Refused for an agent actor, an agent tool's environment, a process inside a helper run, and every other
-    call: a piped or scripted call without a grant, whatever its --by says."""
+def person_only(root: Path, by: str | None = None) -> None:
+    """THE person check for renewing a login, pasting a code and replacing a key, on every path. The one proof
+    accepted: a one-time grant the dashboard's signed-in page session handed this call (kept as a hash in the
+    guarded orch home, see grant). Refused for an agent actor, an agent tool's environment, a process inside
+    a helper run, and every call without a grant, whatever its --by says. A terminal is no proof (a helper can
+    fake one), so there is no terminal way in: a person at a terminal signs in with the tool itself."""
     if (by or "").startswith("agent:") or tickets.agent_tool() or any(os.environ.get(k) for k in RUN_MARKS):
         raise Refused(PERSON_ONLY)
     key = str(Path(root).resolve())
     if key in _GRANTED or _take_grant(root):
         _GRANTED.add(key)
-        return "grant"
-    from orch import term
-
-    if term.is_terminal(sys.stdin) and term.is_terminal(sys.stderr):
-        return "terminal"
+        return
     raise Refused(PERSON_ONLY)
 
 

@@ -245,7 +245,7 @@ def test_command_text_and_json(proj, run, new_ticket, tools):
     assert code == 0, err
     label = adapters.load("claude")["label"]
     assert out.startswith(f"The {label} login no longer works. The helper cannot go on with 1 ticket: ")
-    assert "Plan the newsletter" in out and "orch logins renew claude" in out + err
+    assert "Plan the newsletter" in out and "Renew or Replace on the dashboard warning" in out + err
     assert HIDDEN not in out + err
     code, out, err = run("logins", "--json")
     doc = json.loads(out)
