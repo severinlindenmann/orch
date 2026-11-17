@@ -46,13 +46,18 @@ def ready_stage(d):
     handed to another workspace)."""
     if d["phase"] != "started" or d["kind"] != "run" or d["shipped"] or d["finished"]:
         return None
-    if d["open"] or d["edit"] or not d["stage"] or not any(x["state"] == "done" for x in d["line"]):
+    if d["open"] or d["edit"] or not d["stages"] or not any(x["state"] == "done" for x in d["line"]):
         return None
-    mine = [t for t in d["tasks"].values() if t["stage"] == d["stage"]]
     handed = {h["task"] for h in d["proposal"].get("handovers", [])}
-    if not mine or any(t["slug"] in d["crew"] or t["slug"] in handed or not t.get("agent") for t in mine):
-        return None
-    return d["stage"]
+    for stage in d["stages"]:  # several stages can be current at once (ORCH-277): the first fresh one
+        mine = [t for t in d["tasks"].values() if t["stage"] == stage]
+        if mine and not any(
+            t["slug"] in d["crew"] or t["slug"] in handed or not t.get("agent") for t in mine
+        ):
+            return stage
+        if any(t["slug"] not in d["crew"] for t in mine):
+            return None  # an earlier stage is not fully started: the plan's next step is that one
+    return None
 
 
 def _reasons(root, store, ticket, tickets, entry, granted, decided):
@@ -128,7 +133,7 @@ def _standstill(root, store, ticket, tickets):
     if not w or w["kind"] not in ("idle", "starting"):
         return None
     crew = sorted((slug, t.get("status") or "") for slug, t in d["crew"].items())
-    return json.dumps([d["stage"], crew, ticket.get("status")])
+    return json.dumps([d["stages"], crew, ticket.get("status")])
 
 
 def _still(entry, sig):

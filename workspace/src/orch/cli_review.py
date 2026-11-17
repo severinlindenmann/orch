@@ -13,7 +13,7 @@ from pathlib import Path
 from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
 CARD_KINDS = ("draft", "link", "plan", "choose")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
@@ -77,6 +77,15 @@ def add_parsers(sub, common) -> None:
     x.add_argument(
         "--point", action="append", default=[], metavar="TEXT", help="one point and what you saw (repeat)"
     )
+    x = s.add_parser(
+        "security",
+        parents=[common],
+        help="the security review of one pull request records its verdict (ok or problems)",
+    )
+    x.add_argument("pr", type=int, help="the pull request number")
+    x.add_argument("word", choices=("ok", "problems"), help="ok: nothing High or Medium left; else problems")
+    x.add_argument("why", help="one line: the worst finding, or what was checked")
+    x.add_argument("--sha", required=True, metavar="COMMIT", help="the commit you reviewed (from the brief)")
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -129,7 +138,16 @@ def _file_preview(root: Path, src: str, where: str) -> dict:
         text = data.decode("utf-8", "replace")
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()][:50]
         return {"type": "doc", "heading": Path(src).name, "paras": [p[:2000] for p in paras]}
-    raise Refused(f"{where}: show an image, a page (.html) or a text file (.md, .txt).")
+    if ext == ".json":  # a glance card (ORCH-329): headline, progress, chips, flow, chart, diff, details
+        data = safefile.open_file_ref(root, src, 64 * 1024) if not src.startswith("artifacts/") else None
+        try:
+            pv = json.loads(data.decode("utf-8")) if data is not None else None
+        except ValueError:
+            pv = None
+        if not isinstance(pv, dict):
+            raise Refused(f"{where}: '{src}' was not found or is not a JSON object.")
+        return {"type": "doc", **pv}
+    raise Refused(f"{where}: show an image, a page (.html), a text file (.md, .txt) or a card (.json).")
 
 
 def _option(root: Path, spec: str) -> dict:
@@ -547,6 +565,16 @@ def _verdict(args, root: Path) -> None:
     _out(args, res, f"{res['key']}: {lookreview.VERDICT_TEXT[res['verdict']]}: {res['why']}")
 
 
+def _security(args, root: Path) -> None:
+    from orch import secreview
+
+    res = _guard(
+        secreview.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by), args.sha
+    )
+    words = "OK: the release may include it" if res["verdict"] == "ok" else "problems: releases wait"
+    _out(args, res, f"Pull request #{res['pr']}: security review {words}. {res['line']}")
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "review":
         return False
@@ -564,5 +592,6 @@ def dispatch(args, root: Path) -> bool:
         "tend-releases": _tend_releases,
         "accepted": _accepted,
         "verdict": _verdict,
+        "security": _security,
     }[args.sub](args, root)
     return True

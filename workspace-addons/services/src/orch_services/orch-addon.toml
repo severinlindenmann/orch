@@ -1,0 +1,16 @@
+# Services: background jobs of this workspace, kept running by launchd (macOS), systemd user units (Linux)
+# or a Task Scheduler task of the person's own (Windows).
+# No background process of its own: the computer's service tool does the keeping.
+schema = "orch.addon/1"
+orch_api = 1
+name = "services"
+version = "0.1.0"
+description = "Keep this workspace's background services running and see their state and log."
+run = "orch_services"
+skill = "skills/orch-services"
+agents_block = "skills/orch-services/AGENTS-block.md"
+gitignore = [".orch/addons/services/"]
+
+[dashboard]
+label = "Services"
+icon = "box"

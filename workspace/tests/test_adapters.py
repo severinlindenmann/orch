@@ -70,6 +70,8 @@ _REMINDER_CMD = reminder_settings.hook_command("claude")  # absolute, quoted, ne
 _RECORD_CMD = reminder_settings.record_hook_command()
 _RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
 _GUARD_CMD = reminder_settings.guard_hook_command("claude")  # before each Bash command (test_protected.py)
+# #1268: after each tool step the work-check command again, so a one-step run hears of waiting input
+_STEP_EVENTS = ("PostToolUse", "PostToolUseFailure")
 _REMINDER = {
     **{
         e: [{"hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}]
@@ -85,6 +87,10 @@ _REMINDER = {
         {"matcher": "Bash", "hooks": [{"type": "command", "command": _GUARD_CMD, "timeout": 5}]},
     ],
 }
+for _e in _STEP_EVENTS:
+    _REMINDER[_e].append(
+        {"matcher": "*", "hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}
+    )
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
 
 
@@ -587,13 +593,8 @@ def test_hooks_doc_comes_from_data():
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
     run_events = {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
     assert set(cmds) == run_events | set(_RECORD_EVENTS)
-    for (
-        event
-    ) in _RECORD_EVENTS:  # the record hook: the only group there, every tool (but the guard, Bash only)
-        groups = [g for g in d["hooks"][event] if g.get("matcher") != "Bash"]
-        assert groups == [
-            {"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}
-        ]
+    for event in _RECORD_EVENTS:  # the record hook first, every tool; after a step the input notice too
+        assert d["hooks"][event] == _REMINDER[event]
     for event in ("SessionStart", "UserPromptSubmit"):  # the reminder: a second command, with a timeout
         group = d["hooks"][event][1]  # its own group: the run-event group's matcher does not apply
         assert group == {
@@ -631,7 +632,8 @@ def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj):
         for event in ("SessionStart", "UserPromptSubmit"):
             assert _REMINDER_CMD in _orch_groups(doc, event)
         for event in _RECORD_EVENTS:
-            assert _orch_groups(doc, event) == [_RECORD_CMD]
+            want = [_RECORD_CMD, _REMINDER_CMD] if event in _STEP_EVENTS else [_RECORD_CMD]
+            assert _orch_groups(doc, event) == want
         assert not any(_RECORD_CMD in _orch_groups(doc, e) for e in ("SessionStart", "UserPromptSubmit"))
 
     v = {"prompt": "p", "new_session": NEW, "session": OLD, "permissions": "ask", "stream": True}
@@ -675,7 +677,7 @@ def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want):
     assert cmd_words == argv  # cmd: the quoted path is one word (adapters._split's rule)
     monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)  # no such interpreter here
     doc = adapters.reminder_doc("claude")
-    assert all(_orch_groups(doc, e) == [cmd] for e in _RECORD_EVENTS)
+    assert all(_orch_groups(doc, e)[0] == cmd for e in _RECORD_EVENTS)
     assert _orch_groups(doc, "SessionStart") == [f"{want} -I -P -m orch work-check --hook claude"]
 
 
@@ -729,7 +731,17 @@ def test_detect_finds_binaries_and_versions(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- the tool-name rule
 
 NAME = re.compile(r"claude|codex", re.I)
-SKIP_DIRS = {"agents", "tests", ".venv", "node_modules", "__pycache__", ".pytest_cache", "templates"}
+# mockup: sample screens for the person (account names such as a provider's API key), not code that runs
+SKIP_DIRS = {
+    "agents",
+    "tests",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    "templates",
+    "mockup",
+}
 SKIP_FILES = {"adapters.py", "uv.lock"}
 
 
@@ -880,12 +892,8 @@ def test_windows_leaves_out_the_record_hooks_but_keeps_the_reminder_hooks(monkey
     monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)
     monkeypatch.setattr(adapters, "_is_windows", lambda: True)
     doc = adapters.reminder_doc("claude")
-    assert set(doc["hooks"]) == {
-        "SessionStart",
-        "UserPromptSubmit",
-        "PreToolUse",
-    }  # PreToolUse: the guard only
-    assert _orch_groups(doc, "PreToolUse") == []
+    assert set(doc["hooks"]) == {"SessionStart", "UserPromptSubmit", "PreToolUse", *_STEP_EVENTS}
+    assert _orch_groups(doc, "PreToolUse") == []  # PreToolUse: the guard only; the step notice stays
     assert all("record hook" not in c for e in doc["hooks"] for c in _orch_groups(doc, e))
     monkeypatch.setattr(adapters, "_is_windows", lambda: False)
     assert set(_RECORD_EVENTS) <= set(adapters.reminder_doc("claude")["hooks"])

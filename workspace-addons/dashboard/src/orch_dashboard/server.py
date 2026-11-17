@@ -242,6 +242,21 @@ def _arm_resume(root: Path, session) -> None:
         pagelaunch.arm_restart(root)  # the other page server hands its tabs over too (#705)
 
 
+def _client_gone(sock) -> bool:
+    """True when the page of an event stream has closed. The page sends nothing after its request, so a socket that
+    can be read now holds only the end of the connection."""
+    if sock is None:
+        return False
+    try:
+        import select
+        import socket
+
+        ready, _, _ = select.select([sock], [], [], 0)
+        return bool(ready) and sock.recv(1, socket.MSG_PEEK) == b""
+    except (OSError, ValueError):
+        return True
+
+
 class Handler(BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
@@ -289,7 +304,12 @@ class Handler(BaseHTTPRequestHandler):
         act = getattr(self, "_act", None)
         if act is not None:
             self._act = None
-            self._act_log(f"{act[0]} end status={code} ms={int((time.monotonic() - act[1]) * 1000)}")
+            ms = int((time.monotonic() - act[1]) * 1000)
+            self._act_log(f"{act[0]} end status={code} ms={ms}")
+            if diag:  # a click that did nothing shows in a problem report (ORCH-341): op, ticket, status, never the arguments
+                diag.log(
+                    "dashboard.act", "info", root=self.root, op=act[0], ticket=act[2], status=code, ms=ms
+                )
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -880,7 +900,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live|soft|live-layer|livebar)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -924,8 +944,10 @@ class Handler(BaseHTTPRequestHandler):
                 with revisions.condition:
                     rev = revisions.rev
                     if rev == last:
-                        revisions.condition.wait(timeout=max(0, 15 - (time.monotonic() - ping)))
+                        revisions.condition.wait(timeout=min(1, max(0, 15 - (time.monotonic() - ping))))
                         rev = revisions.rev
+                if rev == last and _client_gone(getattr(self, "connection", None)):
+                    break  # a closed or reloaded page gives its place back within a second, not at the next ping
                 if rev != last:
                     self.wfile.write(f"event: rev\ndata: {rev}\n\n".encode())
                     self.wfile.flush()
@@ -1133,7 +1155,13 @@ class Handler(BaseHTTPRequestHandler):
             if why:
                 return self._send(403, why.encode(), "text/plain; charset=utf-8")
         op_name = re.sub(r"[^A-Za-z0-9_.-]", "?", str(body.get("op"))[:40])
-        self._act = (op_name, time.monotonic())
+        args = body.get("args")
+        tid0 = args.get("ticket") if isinstance(args, dict) else None
+        self._act = (
+            op_name,
+            time.monotonic(),
+            tid0 if isinstance(tid0, str) and actions.TID.fullmatch(tid0) else None,
+        )
         from . import update as _update
 
         session = self._can_act()

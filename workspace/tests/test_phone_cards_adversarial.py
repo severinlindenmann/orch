@@ -302,7 +302,8 @@ def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
         ],
     }
     card = review.check_card(t)
-    (step,) = card["preview"]["steps"]
+    assert card["preview"]["steps"] == ["Done: Tests pass"]  # short on the card, proof behind Details
+    step = card["preview"]["details"][-1]
     assert step.startswith("Done: Tests pass — ")
     for bit in (
         "12 tests pass.",
@@ -312,7 +313,7 @@ def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
         "PR #12",
     ):
         assert bit in step
-    assert card["preview"]["paras"] == [
+    assert card["preview"]["details"][:-1] == [
         "In short: Merged in PR 12 on green CI.",
         "Done when: Tests pass; the phone shows it",
         "No task covers: “the phone shows it”",
@@ -336,7 +337,7 @@ def test_check_card_of_a_sub_ticket_without_steps_names_done_when_and_parent(pro
     ):
         assert run(*argv, "--by", "human:tester")[0] == 0
     t = tickets.load(proj, tid)
-    paras = review.check_card(t, proj)["preview"]["paras"]
+    paras = review.check_card(t, proj)["preview"]["details"]
     assert paras[:2] == [
         "In short: Both comments now say helper.",
         "Done when: The two comments no longer name it",

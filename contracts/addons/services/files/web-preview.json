@@ -1,0 +1,11 @@
+{
+  "schema": "orch.services.service/1",
+  "id": "web-preview",
+  "name": "Web preview",
+  "command": ["npm", "run", "dev", "--", "--port", "5173"],
+  "cwd": "site",
+  "port": 5173,
+  "auto": true,
+  "made_by": { "ticket": "ORCH-20" },
+  "created_at": "2026-11-17T16:30:00Z"
+}

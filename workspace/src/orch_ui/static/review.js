@@ -29,6 +29,7 @@
                   changes:[str], words:{text, voice:[{text,secs}]}, pins:[{n,on,x,y,text}], summary, replaces, replaced_by}}
      answer({id, digest, verdict:'ok'|'no'|'talk', picked, note}) -> Promise<{ok, error?:{code,message}}>
                   note = {text, pins:[{n,on,x,y,text}]} when the person wrote words or marked spots
+     note({id, ticket, text}) -> Promise<{ok, error?}>   optional: "Add note" on the Comment sheet; saves words on the ticket, the card stays
      fileUrl(card, ref) -> string       URL of one reviewed file of that card or entry
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
@@ -128,6 +129,12 @@ UI.reviewViewer=(shots,index,o)=>{o=o||{};shots=(shots||[]).filter(Boolean);if(!
 const oneLine=(x,n)=>{x=String(x||'').replace(/\s+/g,' ').trim();if(x.length<=n)return x;const cut=x.slice(0,n),sp=cut.lastIndexOf(' ');return (sp>n*.6?cut.slice(0,sp):cut).replace(/[\s,;:.]+$/,'')+'…'};
 const recordTitle=e=>{const k=e.card||{};return k.title||oneLine(e.text,120)||e.ticket_title||'Answered'};
 const ticketLine=e=>[e.ticket_key,e.ticket_title].filter(x=>typeof x==='string'&&x).join(' · ');
+/* UI.moreText(text, o): a long text cut to three lines with "Show more" / "Show less" (ORCH-294); a short one is plain. */
+UI.moreText=(text,o)=>{o=o||{};const t=String(text||''),w=el('div','more-text'),p=el('p','meta',t);w.append(p);
+ if(t.length<=(o.max||180))return w;w.classList.add('clamped');
+ const b=el('button','btn ghost sm','Show more');b.type='button';b.setAttribute('aria-expanded','false');
+ b.onclick=()=>{const c=w.classList.toggle('clamped');b.textContent=c?'Show more':'Show less';b.setAttribute('aria-expanded',String(!c))};
+ w.append(b);return w};
 UI.cardShown=(c,o)=>{o=o||{};const th=thumbs({card:c.card||{},decision:{},ticket:c.ticket},o);if(!th.length)return null;const g=el('div','decision-shown');th.forEach(x=>g.append(x));return g};
 UI.answerRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('article','decision');c.dataset.id=e.id||'';
  const h=el('div','decision-h'),v=el('span','decision-verdict '+verdictClass(e),verdictWord(e));
@@ -207,7 +214,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{deckEl.replaceChildren();
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onNote:api.note?(it,text)=>api.note({id:it.id,ticket:it.ticketId,text}):undefined,canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus({preventScroll:true})};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));

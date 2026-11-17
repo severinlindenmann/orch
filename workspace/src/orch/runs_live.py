@@ -813,29 +813,40 @@ def switch_model(root: Path, tid: str, model: str, by: str, up: bool = True) -> 
     return True
 
 
+def oneshot_waiting(root: Path, tid: str) -> list[dict]:
+    """Input a one-step run can read while it works (#1268): what arrived after its turn started. Its own
+    turn's input was marked delivered when the turn began; a start or slot request is never its to read."""
+    return [i for i in runs.undelivered(root, tid) if i.get("via") not in ("start", "slots")]
+
+
 def read_input(root: Path, tid: str, run: str | None, agent: bool) -> tuple[str, int]:
-    """`orch run input`. An agent (agent: its tool's environment or ORCH_RUN) reads only as the live run
-    that holds the ticket (run == the claim's run, not being stopped): that read marks the input delivered
-    and is the sign the notice was taken. A person (no agent environment) only looks: nothing is marked,
-    nothing changes for the run. Anyone else is refused."""
+    """`orch run input`. An agent (agent: its tool's environment or ORCH_RUN) reads only as the run that
+    holds the ticket (run == the claim's run, not being stopped): that read marks the input delivered. For a
+    live session it is the sign the notice was taken; a one-step run (#1268) reads what arrived while it
+    works, so a person's message reaches it at its next step and it can finish the ticket. A person (no agent
+    environment) only looks: nothing is marked, nothing changes for the run. Anyone else is refused."""
     if not _TID.fullmatch(tid):
         raise Refused("Say which ticket: orch run input <ticket id>")
     if not agent:
         return input_text(runs.undelivered(root, tid)), 0
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
-        if not run or not rec or rec["run"] != run or rec.get("mode") != "live":
-            raise Refused(f"Only the live run working on {tid} reads its input.")
+        mode = (rec or {}).get("mode") or "oneshot"
+        if not run or not rec or rec["run"] != run or mode not in ("live", "oneshot"):
+            raise Refused(f"Only the run working on {tid} reads its input.")
+        if mode == "oneshot" and runs.state(rec) != "alive":
+            raise Refused(f"Only the run working on {tid} reads its input.")
         if rec.get("stop_requested"):
-            raise Refused(f"The live session on {tid} is closing; the input waits for the next start.")
-        items = runs.undelivered(root, tid)
+            raise Refused(f"The run on {tid} is closing; the input waits for the next start.")
+        items = oneshot_waiting(root, tid) if mode == "oneshot" else runs.undelivered(root, tid)
         if items:
             runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
-        rec = runs.read(root, tid) or rec
-        rec.pop("submit", None)  # the agent has it: nothing more to check or type
-        rec["live"] = {"state": "working", "since": tickets.now()}
-        rec["renewed_at"] = tickets.now()
-        runs._write(root, rec)
+        if mode == "live":
+            rec = runs.read(root, tid) or rec
+            rec.pop("submit", None)  # the agent has it: nothing more to check or type
+            rec["live"] = {"state": "working", "since": tickets.now()}
+            rec["renewed_at"] = tickets.now()
+            runs._write(root, rec)
     if items:
         runs.notify_working(root)
     return input_text(items), len(items)
@@ -1813,6 +1824,22 @@ def start_waiting(root: Path) -> list[str]:
             runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)
     return started
+
+
+def line_status(root: Path) -> dict | None:
+    """For Home (ORCH-266): the tickets waiting in line and why none starts now, or None when nothing waits.
+    {"waiting": [ticket ids in start order], "why": plain reason or None, "limit": the helper limit when
+    that is what holds them}. The short pause between two starts is not a reason: it passes within seconds."""
+    waiting = [tid for tid, _ in waiting_line(root)]
+    if not waiting:
+        return None
+    from orch import limitstop
+
+    why, limit = _pressure(root) or limitstop.held_words(root), None
+    if why is None:
+        limit = _full(root)
+        why = f"{limit} helpers are working at once, the most you allowed" if limit else None
+    return {"waiting": waiting, "why": why, "limit": limit}
 
 
 def hold_text(rec: dict) -> str | None:

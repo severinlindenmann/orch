@@ -515,7 +515,7 @@ test('ORCH-156: Add a ticket can move in a ticket that already exists; never its
   const lanes = {id:'t_lanes', key:'WS-3', title:'Board lanes', status:'active', revision:5};
   const done = {id:'t_done', key:'WS-4', title:'Old', status:'done'};
   const kid = {id:'t_kid', key:'WS-5', title:'Already in', status:'open', parent:'t_epic'};
-  const c = context({h:node, clean:v => String(v ?? ''), tickets:() => [top, epic, lanes, done, kid], act:async (op, args) => { calls.push([op, args]); return {ok:true}; },
+  const c = context({h:node, clean:v => String(v ?? ''), tickets:() => [top, epic, lanes, done, kid], ticketOf:id => [top, epic, lanes, done, kid].find(x => x.id === id), act:async (op, args) => { calls.push([op, args]); return {ok:true}; },
     dialog:() => { const value = {d:node('dialog'), actions:node('div')}; dialogs.push(value); return value; }});
   c.window.orch.open = () => {}; c.window.orch.close = () => {};
   c.ticketAddStep(epic);
@@ -652,6 +652,15 @@ test('Looks good says when part of Done when has no task; nothing when all is co
   assert.match(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:['a', 'b']}})), /2 parts of “Done when” have no task/);
   assert.match(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:['a']}})), /1 part of “Done when” has no task/);
   assert.doesNotMatch(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:[]}})), /Done when/);
+});
+test('the ticket keeps saying that the plan was asked for first (ORCH-248)', () => {
+  const c = context();
+  const say = n => !n ? '' : typeof n === 'string' ? n : n.children.map(say).join('');
+  assert.equal(c.ticketPlanFirstLine({id:'t_1', status:'active'}, false), null);
+  assert.equal(c.ticketPlanFirstLine({id:'t_1', status:'active', plan_first:true}, true), null, 'the plan card already says it');
+  assert.equal(c.ticketPlanFirstLine({id:'t_1', status:'done', plan_first:true}, false), null);
+  assert.match(say(c.ticketPlanFirstLine({id:'t_1', status:'active', plan_first:true, questions:[]}, false)), /asked to see the plan first.*waits for your OK/);
+  assert.match(say(c.ticketPlanFirstLine({id:'t_1', status:'active', plan_first:true, questions:[{text:'Plan ready: steps', answer:'Yes'}]}, false)), /You have approved it/);
 });
 test('Answer in the header opens the answer window like the ticket list; without one it brings the card into view (ORCH-234)', () => {
   const opened = [], trigger = {};
