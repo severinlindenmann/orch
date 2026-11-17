@@ -7,7 +7,7 @@
 .ticket-row h3 a::after{display:none}.ticket-row h3 a{display:inline-flex;align-items:center;min-height:44px;gap:8px}
 .ticket-next{gap:10px;flex-wrap:wrap;margin-top:8px}.ticket-next .btn{position:relative;z-index:2}
 .ticket-meta{flex-wrap:wrap;gap:8px}
-.board .board-track{grid-template-columns:repeat(5,minmax(0,1fr))}
+.board .board-track{display:flex;gap:12px;overflow-x:auto;align-items:flex-start}.board .kanban-col{flex:1 0 260px}.ticket-card h3 a{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .board .col-head{border:0;border-top:2px solid var(--border-strong);border-radius:0}
 .column-hint{min-height:36px;margin:0 0 12px}.board-hint{text-align:right;margin-bottom:16px}
 .board .ticket-card{padding:12px}.ticket-card h3{display:block;overflow:visible}.ticket-card h3 a{display:inline-flex;min-height:44px;align-items:center}

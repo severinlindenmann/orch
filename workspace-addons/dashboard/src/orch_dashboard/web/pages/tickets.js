@@ -315,7 +315,7 @@ function ticketTable(visible) {
 // Phone (ORCH-73, owner 16 Nov): the same groups as short rows (master UI.shortGroup), never a squeezed table.
 // One row: number and title, one fact, one thing on the right (Answer where the person is needed, else steps n/m or an
 // Idle/Stuck chip). A group shows its first PHONE_ROWS rows, then "n more".
-const PHONE_ROWS = 5, phoneMore = new Set();
+const PHONE_ROWS = 8, phoneMore = new Set();
 const SHORT_ICON = {waiting:'needs', review:'check', active:'working', blocked:'todo', open:'todo', done:'done'};
 function shortFact(t, row) {
   const ago = iso => iso && window.DashHelpers.ago ? window.DashHelpers.ago(iso, Date.now()) : '';
