@@ -39,3 +39,8 @@ writes = ["ext.factory"]
 summary = "Ask another workspace for its view on a stop, with the items you picked"
 who = "people"
 writes = ["ext.factory"]
+
+[acts.start]
+summary = "Ask again to start an order saved for later (you press Start)"
+who = "people"
+writes = ["ext.factory"]
