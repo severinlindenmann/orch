@@ -5,7 +5,8 @@ console program would show a window. So the task starts this keeper (pythonw: no
 - starts the program with a hidden console, output appended to the service's log,
 - starts it again after a crash (exit code other than 0), after 2 seconds, longer when it keeps crashing,
 - writes `<id>.run.json` next to its settings file: its own pid and the program's pid, each with its start time,
-- holds the program in a job, so ending the keeper ends the program and everything it started.
+- holds the program in a job, so ending the keeper ends the program and everything it started,
+- never starts the program again once the settings are gone (the service was removed).
 Exit code 0 ends the service (like systemd's Restart=on-failure)."""
 
 from __future__ import annotations
@@ -78,9 +79,13 @@ def keep(settings: Path, sleep=time.sleep) -> int:
     if old and old.get("keeper") != me and winproc.is_same(old.get("keeper"), old.get("keeper_start")):
         return 0  # one keeper per service: this one came second
     winproc.keep_children_with_me()
+    idle = {"keeper": me, "keeper_start": me_start, "pid": None}
+    _write_run(settings, idle)  # who I am, before any program starts: a stop finds me from now on
     log.parent.mkdir(parents=True, exist_ok=True)
     delay = FIRST_DELAY / 2  # the first crash waits FIRST_DELAY
     while True:
+        if not settings.exists():
+            return 0
         t0 = time.monotonic()
         try:
             with open(log, "ab") as out:
@@ -97,22 +102,14 @@ def keep(settings: Path, sleep=time.sleep) -> int:
             _note(log, f"Could not start the program ({e.strerror or e}).")
             code = None
         else:
-            _write_run(
-                settings,
-                {
-                    "keeper": me,
-                    "keeper_start": me_start,
-                    "pid": child.pid,
-                    "pid_start": winproc.started(child.pid),
-                    "since": _now(),
-                },
-            )
+            started = winproc.started(child.pid)
+            _write_run(settings, {**idle, "pid": child.pid, "pid_start": started, "since": _now()})
             code = child.wait()
             if code == 0:
-                _write_run(settings, {"keeper": me, "keeper_start": me_start, "pid": None, "exit": 0})
+                _write_run(settings, {**idle, "exit": 0})
                 return 0
         delay = next_delay(delay, time.monotonic() - t0)
-        _write_run(settings, {"keeper": me, "keeper_start": me_start, "pid": None, "exit": code})
+        _write_run(settings, {**idle, "exit": code})
         if code is not None:
             _note(log, f"The program stopped with code {code}; it starts again in {delay:.0f} seconds.")
         sleep(delay)

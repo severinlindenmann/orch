@@ -5,6 +5,8 @@ real keeper runs and keeps a real program. The real Task Scheduler run is in tes
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -73,6 +75,7 @@ def _tool(bin_dir: Path, name: str, body: str) -> None:
 @pytest.fixture
 def st(tmp_path, monkeypatch, ws):
     from orch_services import drivers
+    from orch_services.drivers import windows
     from orch_services.drivers.windows import Windows
 
     bin_dir = tmp_path / "bin"
@@ -82,6 +85,8 @@ def st(tmp_path, monkeypatch, ws):
     state = tmp_path / "st"
     monkeypatch.setenv("FAKE_ST_DIR", str(state))
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '/usr/bin:/bin')}")
+    # the driver takes Windows tools from System32 only; here from the fake folder only (also on Windows)
+    monkeypatch.setattr(windows, "system_tool", lambda name: shutil.which(name, path=str(bin_dir)))
     made: list[Windows] = []
 
     def get():
@@ -215,9 +220,10 @@ def test_windows_add_with_auto_turns_the_sign_in_trigger_on(wcli, st):
 def test_windows_refuses_when_schtasks_is_missing(ws, fake, monkeypatch, capsys, tmp_path):
     from orch_services import drivers
     from orch_services.cli import main
+    from orch_services.drivers import windows
     from orch_services.drivers.windows import Windows
 
-    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    monkeypatch.setattr(windows, "system_tool", lambda name: None)
     monkeypatch.setattr(drivers, "get", lambda: Windows())
     code = main(["add", "Web", "--id", "web", "--json", "--", sys.executable, "-c", "pass"])
     out = json.loads(capsys.readouterr().out)
@@ -227,11 +233,7 @@ def test_windows_refuses_when_schtasks_is_missing(ws, fake, monkeypatch, capsys,
 
 def test_windows_is_picked_on_windows(monkeypatch):
     from orch_services import drivers
-    from orch_services.drivers import windows
 
-    monkeypatch.setattr(
-        windows.shutil, "which", lambda *a, **k: None
-    )  # shutil.which itself needs real Windows
     monkeypatch.setattr(sys, "platform", "win32")
     assert drivers.get().name == "windows"
 
@@ -312,3 +314,53 @@ def test_keeper_back_off():
     assert next_delay(FIRST_DELAY, 1) == 4.0
     assert next_delay(40, 1) == MAX_DELAY
     assert next_delay(MAX_DELAY, 120) == FIRST_DELAY
+
+
+def test_start_replaces_a_keeper_that_waits_after_a_crash(wcli, st, ws):
+    from orch_services import winproc
+
+    code, out = jrun(wcli, "add", "Sleeper", "--id", "sleeper", "--", sys.executable, "-u", "-c", SLEEPER)
+    assert code == 0, out
+    # a keeper in its wait after a crash: alive, no program
+    waiting = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        run = ws / ".orch/addons/services/keeper/sleeper.run.json"
+        run.write_text(
+            json.dumps({"keeper": waiting.pid, "keeper_start": winproc.started(waiting.pid), "pid": None})
+        )
+        code, out = jrun(wcli, "start", "sleeper")
+        assert code == 0 and out["service"]["state"] == "running", out
+        assert waiting.wait(timeout=10) is not None  # the waiting keeper was ended
+        assert json.loads(run.read_text(encoding="utf-8"))["keeper"] != waiting.pid
+    finally:
+        if waiting.poll() is None:
+            waiting.kill()
+
+
+def test_end_leaves_a_process_with_another_start_alone():
+    from orch_services import winproc
+
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert winproc.end(p.pid, (winproc.started(p.pid) or 0) + 12345) is False
+        assert winproc.end(p.pid, None) is False and winproc.end(None, 1) is False
+        assert p.poll() is None
+        assert winproc.end(p.pid, winproc.started(p.pid)) is True
+        assert p.wait(timeout=10) is not None
+    finally:
+        if p.poll() is None:
+            p.kill()
+
+
+def test_keeper_ends_once_the_service_is_removed(tmp_path):
+    from orch_services import keeper
+
+    s = _settings(tmp_path, [sys.executable, "-c", "raise SystemExit(4)"])
+    waits: list[float] = []
+
+    def sleep(d):
+        waits.append(d)
+        s.unlink()  # removed while the keeper waits after a crash
+
+    assert keeper.keep(s, sleep=sleep) == 0
+    assert waits == [2.0]

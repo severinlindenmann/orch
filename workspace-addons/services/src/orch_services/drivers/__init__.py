@@ -90,6 +90,7 @@ def run_tool(argv: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
             check=False,
             capture_output=True,
             text=True,
+            errors="replace",  # Windows tools print in the console code page: never fail on one letter
             timeout=timeout,
             stdin=subprocess.DEVNULL,
             creationflags=0x08000000 if sys.platform == "win32" else 0,  # CREATE_NO_WINDOW: no console flash

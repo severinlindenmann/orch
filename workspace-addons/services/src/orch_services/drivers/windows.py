@@ -34,6 +34,15 @@ def task_name(spec: Spec) -> str:
     return f"{FOLDER}orch-svc-{spec.workspace_id}-{spec.sid}"
 
 
+def system_tool(name: str) -> str | None:
+    """A Windows tool by its full path in System32, never from PATH or the current folder (a planted copy).
+    Elsewhere (the tests' fake tools) from PATH."""
+    if sys.platform != "win32":
+        return shutil.which(name)
+    p = Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32" / f"{name}.exe"
+    return str(p) if p.is_file() else None
+
+
 def settings_path(spec: Spec) -> Path:
     return spec.log.parent.parent / "keeper" / f"{spec.sid}.json"
 
@@ -91,7 +100,7 @@ class Windows(Driver):
     name = "windows"
 
     def __init__(self) -> None:
-        self.tool = shutil.which("schtasks") or "schtasks"
+        self.tool = system_tool("schtasks") or "schtasks.exe"
         self._user: str | None = None
 
     # -- helpers
@@ -102,7 +111,7 @@ class Windows(Driver):
         """This account's SID (language-independent), else DOMAIN\\name."""
         if self._user is None:
             sid = None
-            who = shutil.which("whoami")
+            who = system_tool("whoami")
             if who:
                 cp = run_tool([who, "/user", "/fo", "csv", "/nh"])
                 rows = list(csv.reader(io.StringIO(cp.stdout))) if cp.returncode == 0 else []
@@ -137,6 +146,8 @@ class Windows(Driver):
         return bool(run) and winproc.is_same(run.get("keeper"), run.get("keeper_start"))
 
     def _end_all(self, spec: Spec) -> None:
+        """End the keeper (it would start the program again), then the program, each checked by pid and start
+        time. The keeper's job ends what the program started."""
         run = self._run_info(spec)
         if run:
             winproc.end(run.get("keeper"), run.get("keeper_start"))  # first: it would start the program again
@@ -145,7 +156,7 @@ class Windows(Driver):
 
     # -- interface
     def check(self) -> None:
-        if not shutil.which("schtasks"):
+        if not system_tool("schtasks"):
             raise Unavailable("schtasks is missing")
         if sys.platform == "win32" and python().name.lower() != "pythonw.exe":
             raise Unavailable("pythonw.exe is missing next to orch's Python")
@@ -160,8 +171,8 @@ class Windows(Driver):
         self._write(spec)  # also heals a task whose Python moved
         if self.status(spec).running:
             return
-        if not self._keeper_alive(self._run_info(spec)):
-            keeper.run_file(settings_path(spec)).unlink(missing_ok=True)
+        # a keeper waiting after a crash (up to a minute) is replaced, so the program starts now
+        self.stop(spec)
         cp = self._run("/Run", "/TN", task_name(spec))
         if cp.returncode != 0:
             raise tool_failed("start it", cp)
@@ -170,8 +181,10 @@ class Windows(Driver):
             time.sleep(0.2)
 
     def stop(self, spec: Spec) -> None:
+        # /End first: it ends the task's pythonw launcher and with it a keeper that is still starting (the launcher
+        # holds it in a job; tried on Windows 11). Then the keeper and the program by their recorded identity.
+        self._run("/End", "/TN", task_name(spec))
         self._end_all(spec)
-        self._run("/End", "/TN", task_name(spec))  # tidies the task's own state; nothing is left to end
 
     def restart(self, spec: Spec) -> None:
         self.stop(spec)

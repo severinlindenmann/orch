@@ -57,6 +57,17 @@ if WIN:  # pragma: no cover - Windows only
         ]
 
 
+def _start_of(h) -> int | None:  # pragma: no cover - Windows only
+    """Start time of the process behind an open handle, or None when it has ended."""
+    code = wintypes.DWORD()
+    if not _k32.GetExitCodeProcess(h, ctypes.byref(code)) or code.value != STILL_ACTIVE:
+        return None
+    t = [wintypes.FILETIME() for _ in range(4)]
+    if not _k32.GetProcessTimes(h, *(ctypes.byref(x) for x in t)):
+        return None
+    return (t[0].dwHighDateTime << 32) | t[0].dwLowDateTime
+
+
 def started(pid: int) -> int | None:
     """A number for when the process started (same process = same number), or None when it is not running."""
     if type(pid) is not int or pid <= 0:
@@ -73,13 +84,7 @@ def started(pid: int) -> int | None:
     if not h:  # pragma: no cover
         return None
     try:  # pragma: no cover
-        code = wintypes.DWORD()
-        if not _k32.GetExitCodeProcess(h, ctypes.byref(code)) or code.value != STILL_ACTIVE:
-            return None
-        t = [wintypes.FILETIME() for _ in range(4)]
-        if not _k32.GetProcessTimes(h, *(ctypes.byref(x) for x in t)):
-            return None
-        return (t[0].dwHighDateTime << 32) | t[0].dwLowDateTime
+        return _start_of(h)
     finally:  # pragma: no cover
         _k32.CloseHandle(h)
 
@@ -97,11 +102,14 @@ def is_same(pid: object, start: object) -> bool:
     return type(pid) is int and type(start) is int and started(pid) == start
 
 
-def end(pid: int, start: int) -> bool:
-    """End this one process, only when it is still the one that started at `start`. True when it was ended."""
-    if not is_same(pid, start):
+def end(pid: object, start: object) -> bool:
+    """End this one process, only when it is still the one that started at `start`. True when it was ended.
+    Windows: the check and the end go through one handle, so a pid used again in between is never hit."""
+    if type(pid) is not int or type(start) is not int or pid <= 0:
         return False
     if not WIN:
+        if started(pid) != start:
+            return False
         try:
             os.kill(pid, signal.SIGKILL)
         except OSError:
@@ -111,7 +119,7 @@ def end(pid: int, start: int) -> bool:
     if not h:  # pragma: no cover
         return False
     try:  # pragma: no cover
-        return bool(_k32.TerminateProcess(h, 1))
+        return _start_of(h) == start and bool(_k32.TerminateProcess(h, 1))
     finally:  # pragma: no cover
         _k32.CloseHandle(h)
 
