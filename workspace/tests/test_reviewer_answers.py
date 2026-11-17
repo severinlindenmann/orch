@@ -147,3 +147,18 @@ def test_a_changed_question_is_refused(proj, run, new_ticket, on):
     _ask(run, tid, "The test fails once in ten. Fix it now or open an issue?")
     with pytest.raises(tickets.Refused, match="changed"):
         tickets.answer_for_owner(proj, tid, "q1", "0" * 64, "x")
+
+
+@pytest.mark.parametrize("text", ["Fix the d\u0435ploy now?", "Fix it now or open an iss\u200bue?"])
+def test_look_alike_letters_and_hidden_marks_stay_for_the_owner(proj, run, new_ticket, on, text):
+    tid = new_ticket("Small fix")
+    _ask(run, tid, text)
+    assert reviewer.answer_routine(proj, now=LATER)[0]["routine"] is False
+
+
+def test_a_copied_asked_line_does_not_make_a_question_older(proj, run, new_ticket, on):
+    tid = new_ticket("Small fix")
+    _ask(run, tid, "The test fails once in ten. Fix it now or open an issue?")
+    tickets.log(proj, tid, "Asked q1, waiting (copy)", "agent:helper")
+    rows = reviewer.answer_routine(proj)
+    assert rows[0]["routine"] is False and "30 minutes" in rows[0]["why"]

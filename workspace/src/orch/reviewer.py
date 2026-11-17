@@ -28,6 +28,7 @@ import json
 import re
 import shutil
 import time
+import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -464,6 +465,7 @@ STAYS = {  # words split by spaces; each one is a regular expression
 }
 STAYS_RE = {k: re.compile(rf"(?<![\w-])({'|'.join(v.split())})(?![\w-])", re.I) for k, v in STAYS.items()}
 MONEY_SIGN = re.compile(r"[$€£]")
+ROUTINE_TEXT_MAX = 2000
 ROUTINE_WHY = (
     "routine: a plain question with the helper's recommendation, no concept, words, look, money or production"
 )
@@ -471,7 +473,8 @@ ROUTINE_WHY = (
 
 def _asked_at(root: Path, ticket: dict, qid: str) -> float | None:
     for h in history.lines(root, ticket):
-        if isinstance(h, dict) and str(h.get("text", "")).startswith(f"Asked {qid},"):
+        # the first line ask() wrote (exact words); a later copy cannot move the time earlier
+        if isinstance(h, dict) and str(h.get("text", "")) == f"Asked {qid}, waiting":
             return _at(h.get("at"))
     return None
 
@@ -494,6 +497,9 @@ def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tupl
     if asked is None or now - asked < ROUTINE_WAIT:
         return False, "asked less than 30 minutes ago"
     text = " ".join([str(q.get("text") or ""), *map(str, opts), str(ticket.get("title") or "")])
+    text = unicodedata.normalize("NFKC", text)
+    if not text.isascii() or len(text) > ROUTINE_TEXT_MAX:  # look-alike letters or hidden marks: fail safe
+        return False, "not plain short text"
     hits = [k for k, rx in STAYS_RE.items() if rx.search(text) or (k == "money" and MONEY_SIGN.search(text))]
     if hits:
         return False, "names " + ", ".join(hits)
