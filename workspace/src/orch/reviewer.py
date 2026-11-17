@@ -6,7 +6,8 @@ concept, technical) wait for his answer. A program decides from facts, never a m
 - **Accept for you** (Review -> Done) when every task is done with evidence, every part of Done when has a
   task, no question waits, every linked pull request is merged with its checks green, and the change is
   small by its files (`size_reasons`).
-- **Leave it for you** when the change is not small, there is no pull request to check, or it was already sent
+- **Leave it for you** when the change is not small, there is no pull request to check, a part of Done when
+  has no task (ORCH-220: a missing link is a question for you, not work for a helper), or it was already sent
   back once. One line in the history says why.
 - **Send it back to the helper** when work is missing (a pull request not merged, checks not green, a task
   without evidence). Once per ticket: reviews never loop (R4.5).
@@ -257,19 +258,17 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
-    # a part no task links to: with related work in the finished tasks it only gets a note (the owner can send
-    # the ticket back); with none it is a real gap, sent back with the words looked for and the question.
-    unmatched = []
+    # a part no task links to: with related work in the finished tasks it only gets a note on the accept; with
+    # none the ticket is left for the owner with the words looked for (ORCH-220: never sent back for it, a
+    # helper run cannot answer whether the work is missing; the owner sends it back when it is).
+    unmatched, uncovered = [], []
     for p in proof["uncovered"]:
         want, found = part_match(p, items)
         if want and len(found) * 5 >= len(want) * 2:
             unmatched.append(p)
             continue
         looked = ", ".join(want[:6]) or "none"
-        gaps.append(
-            f"Done when part '{p}' has no task (looked for: {looked}; "
-            'which task proves it? orch check done <ticket> <task> --proves "<part>")'
-        )
+        uncovered.append(f"Done when part '{p}' has no task (looked for: {looked})")
     gaps += [
         f"the check on '{c['text']}' failed" for c in items if proof["per_item"].get(c["id"]) == "failed"
     ]
@@ -280,6 +279,10 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         if missing:
             return _back_or_leave("work is missing: " + missing[0], sent_back)
         return {"verdict": "leave", "why": "no pull request to check, so you look at it yourself."}
+    open_part = None
+    if uncovered:
+        more = f" (and {len(uncovered) - 1} more)" if len(uncovered) > 1 else ""
+        open_part = f"{uncovered[0]}{more}; send it back if that work is missing."
     if any(f is None for f in facts):
         return {"verdict": "wait", "why": "GitHub could not be read; looked at again next time."}
     for f in facts:
@@ -296,6 +299,8 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
             missing.append(f"checks of pull request {num} were not green when it was merged ({bad} failed)")
     if missing:
         return _back_or_leave("; ".join(missing[:2]), sent_back)
+    if open_part:
+        return {"verdict": "leave", "why": open_part}
     why: list[str] = []
     files = lines = 0
     for f in facts:
@@ -352,10 +357,7 @@ def _write_state(root: Path, state: dict) -> None:
 
 
 def _send_back(root: Path, tid: str, why: str) -> dict:
-    if "which task proves it?" in why:  # a question, not missing work: name the task, then send it again
-        note = f"The Reviewer has a question: {why}. Answer it and send the ticket to Review again."
-    else:
-        note = f"The Reviewer found work missing: {why}. Finish it and send the ticket to Review again."
+    note = f"The Reviewer found work missing: {why}. Finish it and send the ticket to Review again."
     t = tickets.ask_for_changes(root, tid, note, BY)
     from orch import runs_live
 
