@@ -114,6 +114,22 @@ def test_ids_and_text_are_checked(act_server, act_orch):
             {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "ticket", "ref": "x"}}, "if_revision": 1},
         ),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"waiting_on": {"kind": "time"}}, "if_revision": 1}),
+        (
+            "ticket.patch",
+            {
+                "ticket": "t_abcdef",
+                "data": {"waiting_on": {"kind": "time", "until": "x", "ref": 5}},
+                "if_revision": 1,
+            },
+        ),
+        (
+            "ticket.patch",
+            {
+                "ticket": "t_abcdef",
+                "data": {"waiting_on": {"kind": "time", "until": "x", "on": "y"}},
+                "if_revision": 1,
+            },
+        ),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": "--all"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": 5}, "if_revision": 1}),
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
@@ -201,6 +217,35 @@ def test_argv_snapshot_per_op(act_server, act_orch):
                 *common,
                 "--",
                 '{"status": "dropped", "superseded_by": "ORCH-7"}',
+            ],
+        ),
+        (  # ORCH-235: a wait from the board or the ticket page has a date and may say what it waits for
+            {
+                "op": "ticket.patch",
+                "args": {
+                    "ticket": "t_abcdef",
+                    "data": {
+                        "status": "waiting",
+                        "waiting_on": {
+                            "kind": "time",
+                            "until": "2030-01-01T08:00:00Z",
+                            "ref": "The price list",
+                        },
+                    },
+                    "if_revision": 3,
+                },
+            },
+            [
+                "ticket",
+                "patch",
+                "t_abcdef",
+                "--if-revision=3",
+                *common,
+                "--",
+                (
+                    '{"status": "waiting", "waiting_on": {"kind": "time", "until": "2030-01-01T08:00:00Z", '
+                    '"ref": "The price list"}}'
+                ),
             ],
         ),
         (

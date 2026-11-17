@@ -1434,10 +1434,15 @@ def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
             raise
 
 
-STOPPED_TEXT = "The agent stopped before the work was finished. Continue goes on where it left off."
+STOPPED_TEXT = "The helper stopped before the work was finished. Continue goes on where it left off."
+# ORCH-235: a ticket moved to Working by hand that no helper ever started is To do again,
+# without claiming one ran
+NOT_STARTED_TEXT = "No helper started on it, so it is back in To do. Press Start to begin."
 
 
-def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool = True) -> bool:
+def agent_stopped(
+    root: Path, tid: str, by: str, still_running=None, say: bool = True, text: str | None = None
+) -> bool:
     """No agent works on the ticket any more: a Working ticket is Ready again (Working is shown only while
     an agent runs). still_running() is asked under the ticket lock, so a run that started meanwhile wins.
     Returns True when the ticket was moved."""
@@ -1450,7 +1455,7 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
         ticket["status"] = "ready"
         ticket["waiting_on"] = None
         if say:
-            add_history(ticket, by, STOPPED_TEXT)
+            add_history(ticket, by, text or STOPPED_TEXT)
         return True
 
     try:
@@ -3429,7 +3434,13 @@ def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -
     if kind == "time":
         if not until:
             raise Refused("Waiting for a time needs until.")
-        return {"kind": "time", "until": parse_time(until)}
+        w = {"kind": "time", "until": parse_time(until)}
+        if ref is not None:  # ORCH-235: what it waits for, as a person wrote it (optional)
+            if not isinstance(ref, str) or len(ref.strip()) > 200:
+                raise Refused("The reason of a wait has at most 200 characters.")
+            if ref.strip():
+                w["ref"] = ref.strip()
+        return w
     if not isinstance(ref, str) or not ref.strip() or len(ref.strip()) > 200:
         raise Refused(f"Waiting on {kind} needs a ref (1 to 200 characters).")
     return {"kind": kind, "ref": ref.strip()}
