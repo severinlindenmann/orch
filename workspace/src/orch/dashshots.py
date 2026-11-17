@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import base64
 import html
+import io
 import json
 import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 
 from orch import ghmerge
@@ -183,8 +185,9 @@ def _pr(url: str) -> tuple[str, int]:
     return m[1], int(m[2])
 
 
-def find_run(repo: str, head: str) -> int:
-    """The newest finished CI run of this commit that kept the dashboard pictures."""
+def find_artifact(repo: str, head: str) -> int:
+    """The pictures of this commit: the id of the newest upload. It is there as soon as the picture job has
+    uploaded it, while the run's other jobs may still go on."""
     # only the pull request runs of the ci workflow (it calls dash-shots): no other workflow's upload of the
     # same name counts
     pick = f'.path == "{CI_WORKFLOW}" and .event == "pull_request"'
@@ -197,21 +200,53 @@ def find_run(repo: str, head: str) -> int:
         rid, _, status = line.partition("\t")
         if not rid.isdigit():
             continue
-        if status != "completed":
-            running = True
-            continue
+        running = running or status != "completed"
         jq = f'.artifacts[] | select(.name == "{ARTIFACT}" and (.expired | not)) | .id'
         a = _gh(["api", f"repos/{repo}/actions/runs/{rid}/artifacts", "--jq", jq])
-        if a.returncode == 0 and a.stdout.strip():
-            return int(rid)
+        ids = [int(x) for x in a.stdout.split() if x.isdigit()] if a.returncode == 0 else []
+        if ids:
+            return max(ids)
     if running:
-        raise Refused(
-            "CI is still taking the pictures of the newest commit. Ask again when the checks are done."
-        )
+        raise Refused("CI is still taking the pictures of the newest commit. Ask again in a few minutes.")
     raise Refused(
         "CI kept no dashboard pictures for the newest commit of this pull request (it changes no "
         "dashboard page, or the checks did not run)."
     )
+
+
+def _gh_bytes(args: list[str], timeout: int = 120) -> bytes:
+    gh = shutil.which("gh")
+    if gh is None:
+        raise Refused("--ci-shots needs the GitHub command line (gh) to fetch the pictures.")
+    try:
+        r = subprocess.run([gh, *args], capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise Refused("GitHub did not answer in time. Try again in a minute.") from None
+    if r.returncode != 0:
+        raise Refused(
+            f"GitHub did not hand over the pictures: {_first(r.stderr.decode('utf-8', 'replace'))}."
+        )
+    return r.stdout
+
+
+MAX_ZIP = 40 * 1024 * 1024
+
+
+def _unpack(data: bytes, folder: Path) -> None:
+    """Only the list and plainly named pictures, each within its size; nothing else leaves the archive."""
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+        infos = z.infolist()
+    except (zipfile.BadZipFile, ValueError):
+        raise Refused("The pictures from CI came broken. Run the checks again.") from None
+    for i in infos:
+        if i.is_dir():
+            continue
+        if not (i.filename == "manifest.json" or FILE_RE.fullmatch(i.filename)):
+            raise Refused("The pictures from CI hold an odd file. Run the checks again.")
+        if i.file_size > MAX_PNG:
+            raise Refused(f"{i.filename} from CI is too large. Run the checks again.")
+        (folder / i.filename).write_bytes(z.read(i))
 
 
 def fetch(url: str, dest: Path) -> tuple[dict, list[dict]]:
@@ -222,12 +257,13 @@ def fetch(url: str, dest: Path) -> tuple[dict, list[dict]]:
     head = head.strip()
     if v.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", head):
         raise Refused(f"GitHub did not show the pull request: {_first(v.stderr)}.")
-    run = find_run(repo, head)
+    art = find_artifact(repo, head)
+    data = _gh_bytes(["api", f"repos/{repo}/actions/artifacts/{art}/zip"])
+    if len(data) > MAX_ZIP:
+        raise Refused("The pictures from CI are too large. Run the checks again.")
     tmp = Path(tempfile.mkdtemp(prefix="orch-ci-shots-"))
     try:
-        d = _gh(["run", "download", str(run), "-R", repo, "-n", ARTIFACT, "-D", str(tmp)], timeout=120)
-        if d.returncode != 0:
-            raise Refused(f"GitHub did not hand over the pictures: {_first(d.stderr)}.")
+        _unpack(data, tmp)
         try:
             m = json.loads((tmp / "manifest.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):

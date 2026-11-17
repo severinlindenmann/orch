@@ -3,7 +3,9 @@ Which pages a change touches, the list CI writes, its checks, the page the card 
 
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -103,13 +105,18 @@ def _fake_github(monkeypatch, folder: Path, head="a" * 40, runs="11\tcompleted\n
             r.stdout = runs
         elif args[0] == "api" and args[1].endswith("/artifacts"):
             r.stdout = artifact
-        elif args[:2] == ["run", "download"]:
-            dest = Path(args[args.index("-D") + 1])
-            for f in folder.iterdir():
-                (dest / f.name).write_bytes(f.read_bytes())
         return r
 
+    def gh_bytes(args, timeout=120):
+        calls.append(args)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for f in folder.iterdir():
+                z.writestr(f.name, f.read_bytes())
+        return buf.getvalue()
+
     monkeypatch.setattr(dashshots, "_gh", gh)
+    monkeypatch.setattr(dashshots, "_gh_bytes", gh_bytes)
     return calls
 
 
@@ -122,7 +129,7 @@ def test_fetch_takes_the_pictures_of_the_newest_commit(tmp_path, monkeypatch):
     m, rows = dashshots.fetch(PR, tmp_path / "dest")
     assert m["pr"] == 7 and len(rows) == 2
     assert (tmp_path / "dest" / "page-ticket-390.png").read_bytes() == PNG
-    assert ["run", "download", "11", "-R", "owner/repo", "-n", dashshots.ARTIFACT] == calls[3][:7]
+    assert calls[3] == ["api", "repos/owner/repo/actions/artifacts/99/zip"]
 
 
 def test_fetch_refuses_old_pictures_running_checks_and_none(tmp_path, monkeypatch):
@@ -130,7 +137,7 @@ def test_fetch_refuses_old_pictures_running_checks_and_none(tmp_path, monkeypatc
     _fake_github(monkeypatch, d)
     with pytest.raises(Refused, match="older commit"):
         dashshots.fetch(PR, tmp_path / "x")
-    _fake_github(monkeypatch, d, runs="12\tin_progress\n")
+    _fake_github(monkeypatch, d, runs="12\tin_progress\n", artifact="")
     with pytest.raises(Refused, match="still taking"):
         dashshots.fetch(PR, tmp_path / "x")
     _fake_github(monkeypatch, d, artifact="")
@@ -230,3 +237,14 @@ def test_shot_waits_while_the_page_says_it_is_loading(monkeypatch):
     assert [m for m, _, _ in pipe.calls][-2:] == ["Page.captureScreenshot", "Target.closeTarget"]
     with pytest.raises(TimeoutError):
         cli_shot.capture(Busy(10**9), "http://x/", 1280, 800, 0)
+
+
+def test_pictures_are_taken_while_the_run_goes_on_and_odd_files_refused(tmp_path, monkeypatch):
+    d = _ci_folder(tmp_path)
+    _fake_github(monkeypatch, d, runs="12\tin_progress\n")  # the picture job is done, the tests still run
+    assert len(dashshots.fetch(PR, tmp_path / "dest")[1]) == 2
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("../evil.sh", "x")
+    with pytest.raises(Refused, match="odd file"):
+        dashshots._unpack(buf.getvalue(), tmp_path)
