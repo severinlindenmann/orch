@@ -203,5 +203,5 @@ class Windows(Driver):
         self.stop(spec)
         cp = self._run("/Delete", "/TN", task_name(spec), "/F")
         if cp.returncode != 0 and self._run("/Query", "/TN", task_name(spec)).returncode == 0:
-            raise tool_failed("remove it from this computer", cp)
+            raise tool_failed("remove it", cp)
         settings_path(spec).unlink(missing_ok=True)
