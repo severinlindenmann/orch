@@ -72,7 +72,7 @@ test('running, no service, or a shared copy: the page itself', () => {
 
 test('the sign-in notice: plain wording, above any open dialog, never "orch restarted", no window opened on the server', () => {
   const js = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/session.js'), 'utf8');
-  assert.match(js, /indexOf\("Sign in to "\) !== 0/);
+  assert.match(js, /indexOf\("Sign in to "\) === 0/);
   assert.match(js, /querySelectorAll\("dialog\[open\]"\)/);
   assert.doesNotMatch(js, /orch restarted/);
   assert.doesNotMatch(js, /session\/reopen/);
