@@ -554,7 +554,7 @@ test('a file that is both an artifact and a proof shows once in the Files tab an
   assert.deepEqual(Array.from(vm.runInContext('[artifactEntries(tt).length, artifactCount(tt)]', ctx)), [1, 1]);
 });
 test('Results of a Done ticket shows the completion note, newest first, and nothing for other states', () => {
-  const c = context({clean:v => String(v ?? ''), time:v => String(v).slice(11, 16), artifactFiles:() => [], headerProof:() => null});
+  const c = context({clean:v => String(v ?? ''), time:v => String(v).slice(11, 16), resultFiles:() => [], headerProof:() => null});
   const note = (at, summary, ref) => ({done:true, evidence:[{type:'note', at, summary, ref}]});
   const t = {id:'t_x', status:'done', checklist:[note('2026-11-13T12:26:00Z', 'The typo is fixed.', 'Page now says 9:00 - 13:00'), note('2026-11-13T12:20:00Z', 'Older note', 'x'), {done:true, evidence:[{type:'file', ref:'a.md'}]}]};
   const notes = c.completionNotes(t);

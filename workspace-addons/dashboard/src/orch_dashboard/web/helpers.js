@@ -132,6 +132,14 @@
   }
 
   /* Who a history line is about: "You" for the current person, the display name otherwise. */
+  /* A person's name for a "by": a line recorded under the computer's login ("human:lume") is the person who picked
+     their name in "You: ..." (people.me), never the login (ORCH-184). Agents and other people keep their own name. */
+  function personName(by, st) {
+    const b = String(by || '').replace(/^(?:agent|human):/, ''), s = st || {};
+    const me = s.people && s.people.me;
+    return /^human:/.test(String(by || '')) && me && s.login && b === s.login ? me : b;
+  }
+
   function historyWho(by, me) {
     const b = String(by || '');
     if (me && b === me) return 'You';
@@ -434,6 +442,27 @@
     return text.length > 90 ? text.slice(0, 89) + '…' : text;
   }
 
+  /* When a ticket was finished: the history entry that marked it done, else done_at, else the last change. Every page
+     (Home, Tickets, the board, the ticket) takes the day and time from here, so one ticket never has two dates (ORCH-184). */
+  function doneAt(ticket) {
+    const t = ticket || {}, event = arr(t.history).slice().reverse().find(e => e && (e.kind === 'done' || /(?:->|to) done\b|^Done\b/i.test(e.text || '')));
+    return (event && event.at) || t.done_at || t.completed_at || t.updated_at || '';
+  }
+
+  /* When a ticket's question was asked: the time Home shows for it (the oldest open row of that ticket), else the last
+     change. Home, Tickets and the ticket page say the same wait (ORCH-184). */
+  function askedAt(ticket, rows) {
+    const id = ticket && ticket.id, times = arr(rows).filter(r => r && r.ticket === id && Number.isFinite(Date.parse(r.since))).map(r => Date.parse(r.since));
+    return times.length ? new Date(Math.min(...times)).toISOString() : (ticket && ticket.updated_at) || '';
+  }
+
+  /* Is phone mode on right now? A mode whose end time has passed is over, whatever the last state said (ORCH-184). */
+  function mobileOn(mm, nowMs) {
+    if (!mm || !mm.on) return false;
+    const end = mm.ends_at ? Date.parse(mm.ends_at) : NaN;
+    return !(Number.isFinite(end) && end <= (Number(nowMs) || Date.now()));
+  }
+
   /* One state per ticket: a ticket the agent cannot go on with (live state attention) is Waiting, never Working. */
   function shownStatus(ticket, run) {
     const t = ticket || {}, live = run && run.claim && run.claim.live;
@@ -641,5 +670,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });
