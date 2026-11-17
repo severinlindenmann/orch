@@ -79,16 +79,23 @@ async function previewSwitch(page, dash) {
   await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
     body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
   const sw = '[data-key="addon-detail-live-preview"]';
+  // The Preview switch sits in the closed "More settings" fold of the add-on's settings: open it first.
+  const fold = '[data-key="settings-more-addon-focus"]';
+  const openFold = async () => {
+    await page.waitForSelector(fold, { timeout: 20000 });
+    if (!(await page.$eval(fold, d => d.open))) await page.click(fold + ' > summary');
+    await page.waitForSelector(sw, { timeout: 20000 });
+  };
   const settings = async want => {
     await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
-    await page.waitForSelector(sw, { timeout: 20000 });
+    await openFold();
     if (await page.getAttribute(sw, 'aria-checked') !== String(!want)) throw new Error('the Preview switch is not ' + (want ? 'off' : 'on') + ' before the click');
     await page.click(sw);
     await page.waitForSelector(`${sw}[aria-checked="${want}"]`, { timeout: 10000 });
   };
   const focusPage = async () => { await page.evaluate(() => { location.hash = '#addon/focus'; }); await page.waitForTimeout(300); };
   await page.goto(dash + '/#settings/addons/focus');
-  await page.waitForSelector(sw, { timeout: 20000 });
+  await openFold();
   await focusPage();
   await page.waitForSelector('iframe.embed', { timeout: 10000 });  // off: today's Focus
   await settings(true);

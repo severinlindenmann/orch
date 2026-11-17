@@ -122,7 +122,9 @@ def test_contract_vectors(case, nothing):
             assert row["uses"] is None and row["numbers"] == "Can't tell yet"
             assert row["label"] == "Can't tell yet"
         else:
-            assert row["numbers"] == f"{entry['runs']['used']} of the {entry['runs']['of']} times helpers worked"
+            assert (
+                row["numbers"] == f"{entry['runs']['used']} of the {entry['runs']['of']} times helpers worked"
+            )
         if entry["runs"]["unseen"] == 1:
             assert row["unseen"] == "Can't tell for 1 of the times helpers worked"
 
