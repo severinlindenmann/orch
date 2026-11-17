@@ -385,7 +385,7 @@ def _pass(root: Path, dry_run: bool, now: float) -> dict:
                 tickets.log(
                     root,
                     join["ticket"],
-                    f"Report {ref} looks like the same problem ({join['why']}); its text stays in the report folder.",
+                    f"Report {ref} looks like the same problem ({join['why']}); its text is in the report.",
                     BY,
                 )
                 seen[ref] = {"ticket": join["ticket"], "at": now, "joined": True}
