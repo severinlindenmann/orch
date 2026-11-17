@@ -424,6 +424,7 @@ function render(arrived = new Set()) {
     throw err;
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
+  if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
   main.querySelectorAll('[data-question]').forEach(host => {
@@ -977,6 +978,7 @@ window.addEventListener('hashchange', async () => {
   soft?.hold(true);
   for (const d of soft ? soft.dialogsToClose() : document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
+  soft?.hold(false);  // render() returns early before the state arrives: scrolls must not stay unremembered (ORCH-340)
 });
 document.getElementById('side-nav')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;

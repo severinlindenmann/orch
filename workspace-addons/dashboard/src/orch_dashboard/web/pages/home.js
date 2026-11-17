@@ -321,12 +321,13 @@ function cardSetRow(row) {
   const api = typeof reviewApi === 'function' ? reviewApi() : null, o = {fileUrl:api ? api.fileUrl : () => ''};
   const pics = window.UI?.cardShown ? open.slice(0, 3).map(q => {
     const g = window.UI.cardShown({card:q.card, ticket:t.id}, o), tiles = g ? [...g.children] : [];
-    const pick = tiles.find(x => x.dataset.on === 'after') || tiles.find(x => x.dataset.on !== 'before') || tiles[0];  // the proposal, not how it is
+    if (open.length === 1) return tiles;  // one card: every picture side by side (Before and After, A and B), each captioned
+    const pick = tiles.find(x => x.dataset.on === 'after') || tiles.find(x => x.dataset.on !== 'before') || tiles[0];  // a set: the proposal of each card
     if (!pick) return null;
     const cap = pick.querySelector('b');
     if (cap) cap.textContent = clean(q.card.title || '');
     return pick;
-  }).filter(Boolean) : [];
+  }).flat().filter(Boolean) : [];
   const meta = [n === 1 ? '1 card to look at' : n + ' cards to look at', (names[0] && names[0] !== title ? names[0] : '') || (t && clean(t.title) !== title ? clean(t.title) : ''), typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
   const go = snapshot ? null : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + row.ticket + ':' + (open[0]?.id || row.answer?.question)), 'data-key':key + '-go'}, n === 1 ? 'Look at it' : 'Look at all ' + n);
   return h('div', {className:'card-row', 'data-key':key, 'data-need-row':row.id},

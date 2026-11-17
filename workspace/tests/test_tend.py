@@ -177,7 +177,7 @@ def test_an_idle_helper_is_reminded_once_with_what_changed(proj, run, new_ticket
     sent = [i for i in runs.undelivered(proj, tid) if i["by"] == tend.BY]
     assert len(sent) == 1
     assert "Release 28 is out." in sent[0]["text"] and "Write the page" in sent[0]["text"]
-    assert "Reminded the helper" in _history(proj, tid)[0]
+    assert "Sent the helper on" in _history(proj, tid)[0]  # it has an open step (ORCH-318)
     for i in sent:  # it went in; the helper is still idle
         runs.mark_delivered(proj, tid, [i["id"]])
     assert tend.run(proj)["actions"] == []  # once
@@ -501,3 +501,54 @@ def test_line_status_says_why_tickets_wait(proj, new_ticket, monkeypatch):
     }  # fmt: skip
     monkeypatch.setattr(runs_live, "_full", lambda root: None)
     assert runs_live.line_status(proj)["why"] is None  # only the short pause between starts: no reason shown
+
+
+# ---------------------------------------------------------------- ORCH-318: stopped with open steps
+
+
+def _stopped_with_open_step(proj, run, new_ticket, child, idle_for):
+    tid = new_ticket()
+    assert run("check", "add", tid, "Write the page")[0] == 0
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=idle_for, started=3 * 3600)
+    return tid
+
+
+def test_a_helper_that_stops_with_open_steps_is_sent_on_within_a_minute(proj, run, new_ticket, child):
+    tid = _stopped_with_open_step(proj, run, new_ticket, child, idle_for=50)
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
+    assert "Sent the helper on" in _history(proj, tid)[0]
+    assert tickets.load(proj, tid).get("model", {}).get("name") != "opus"  # first time: no move
+
+
+def test_a_helper_idle_under_the_open_steps_limit_is_left(proj, run, new_ticket, child):
+    _stopped_with_open_step(proj, run, new_ticket, child, idle_for=20)
+    assert tend.run(proj)["actions"] == []
+
+
+def test_without_open_steps_the_twenty_minute_reminder_still_rules(proj, new_ticket, child):
+    tid = new_ticket()
+    _status(proj, tid, "active")
+    _live(proj, tid, child(), idle_for=50, started=3 * 3600)
+    assert tend.run(proj)["actions"] == []
+
+
+def test_a_waiting_helper_with_open_steps_is_not_sent_on(proj, run, new_ticket, child):
+    tid = _stopped_with_open_step(proj, run, new_ticket, child, idle_for=50)
+    assert run("ask", tid, "Which one?", "--option", "A", "--option", "B")[0] == 0
+    assert "nudge" not in [a["action"] for a in tend.run(proj)["actions"]]
+
+
+def test_the_second_stop_moves_the_ticket_up_to_opus(proj, run, new_ticket, child):
+    tid = _stopped_with_open_step(proj, run, new_ticket, child, idle_for=50)
+    tend.run(proj)
+    for i in runs.undelivered(proj, tid):
+        runs.mark_delivered(proj, tid, [i["id"]])
+    st = tend._read_state(proj)
+    st.pop(tid)  # the helper moved after the first reminder: a new chance
+    tend._write_state(proj, st)
+    _live(proj, tid, child(), idle_for=50, started=3 * 3600)
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
+    t = tickets.load(proj, tid)
+    assert t["model"]["name"] == "opus"
+    assert "moved up to Opus" in " ".join(_history(proj, tid))

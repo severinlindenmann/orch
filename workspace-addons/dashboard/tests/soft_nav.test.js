@@ -133,3 +133,18 @@ test('the router uses it: dialogs, scroll, the page-change event and the fallbac
   assert.match(render, /soft\.said\(/);
   assert.doesNotMatch(render, /getElementById\('keep'\)/, 'render never draws the keep place');
 });
+
+test('many page changes keep only the last places, not one per change forever (ORCH-340)', () => {
+  const {soft, ctx} = load();
+  for (let i = 0; i < soft.KEEP_SCROLLS + 50; i++) { ctx.history.state = {softNav:'e' + i}; ctx.scrollY = i; soft.remember(); }
+  assert.equal(soft.scrolls.size, soft.KEEP_SCROLLS);
+  assert.equal(soft.scrolls.has('e0'), false, 'the oldest place went first');
+  assert.deepEqual([...soft.scrolls.get('e' + (soft.KEEP_SCROLLS + 49))], [0, soft.KEEP_SCROLLS + 49]);
+  ctx.history.state = {softNav:'e50'}; ctx.scrollY = 7; soft.remember();
+  ctx.history.state = {softNav:'new'}; soft.remember();
+  assert.equal(soft.scrolls.has('e50'), true, 'a place used again counts as new');
+});
+
+test('a page change always lets scrolls be remembered again, even when the page was not drawn yet', () => {
+  assert.match(app, /render\(\);\n {2}soft\?\.hold\(false\);/);
+});

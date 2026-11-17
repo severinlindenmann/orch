@@ -1,7 +1,8 @@
 # Services add-on contract (`orch services`)
 
 Background jobs a workspace needs (a web preview, a local server, a watcher) kept running by the computer's own
-service tool, under the person's own account: launchd on macOS, systemd user units on Linux (Windows comes later).
+service tool, under the person's own account: launchd on macOS, systemd user units on Linux, a
+Task Scheduler task of the person's own account on Windows (no admin rights).
 The add-on has no background process of its own. Parent plan ORCH-23; the page follows the mockup
 `workspace-addons/dashboard/mockup/services/` (layout C).
 
@@ -15,6 +16,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 - `services/<id>.json`: one record per service (`orch.services.service/1`), written as a new file + rename (R8.2).
   Fields this version does not know are kept on rewrite. A file that cannot be read is skipped and counted.
 - `logs/<id>.log`: stdout and stderr of the service, appended. Kept when the service is removed.
+- `keeper/<id>.json`, `keeper/<id>.run.json`: Windows only, see below.
 - `state/<id>.json`: `{"running", "since"}` of the last start or stop through orch (the `since` of a stopped
   service when the platform does not say it).
 
@@ -30,6 +32,16 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
   `systemctl --user show` (`ActiveState`, `MainPID`, `ActiveEnterTimestamp` / `InactiveEnterTimestamp`).
   `ExecStart` words are double-quoted (`\` and `"` escaped, `$` → `$$`, `%` → `%%`). `WorkingDirectory=` and
   `append:` take the rest of the line as the path, so those are written unquoted with `%` escaped.
+- Windows: task `\orch\orch-svc-<workspace id>-<id>` for the person only (their SID, `InteractiveToken`,
+  `LeastPrivilege`, no time limit, one sign-in trigger that is on = starts by itself), registered with
+  `schtasks /Create /XML ... /F` (also while it runs). Its action is `pythonw -P -m orch_services.keeper
+  keeper/<id>.json` (no window): the keeper starts the program with a hidden console, appends its output to the log,
+  starts it again after a crash (exit code not 0; 2 s, doubling up to 60 s while it keeps crashing) and holds it in a
+  job so ending the keeper ends the program. It writes `keeper/<id>.run.json` (keeper and program pid, each with its
+  start time; `since`). start = `schtasks /Run`, stop = end the keeper and the program (checked by pid and start
+  time) + `schtasks /End`, state from `<id>.run.json`. Task Scheduler's own restart-on-failure does not restart a
+  crashed program, and `/End` leaves child processes running (tried on Windows 11 as a standard user, ORCH-346).
+  `found` on Windows is `[]` with a `note` sentence (no found list there yet).
 - Missing tool or no session: refused with "This computer cannot keep services running for you: <reason>."
 
 ## Commands (every one takes `--json`; exit 2 = refused, `{"error": "<one sentence with the next step>"}`)
@@ -41,7 +53,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `auto <id> on \| off` | `{"service": row, "next"}` |
 | `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, keeps the log |
 | `log <id> [--lines N]` (default 20, max 1000) | `{"id", "lines": [...]}`; every line goes through the core secret scan, a hit shows `••••••` in place of the value (the whole line when the value cannot be told apart) |
-| `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>` \| `process:<pid>`), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence. Reads only |
+| `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>` \| `process:<pid>`), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; Windows: `[]` and `"note"`. Reads only |
 | `adopt <found-id> [--name X] [--id SLUG] [--ticket ID]` | `{"service": row, "next"}`: Manage with orch (see below) |
 | `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, remove, adopt` (adopt takes a found id); same answers as the commands |
 | `view` | `orch.addon-view/1`, one `list` block (the real page is ORCH-272) |
