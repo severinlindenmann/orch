@@ -9,7 +9,8 @@
 //
 // Mount: the bar is one element (#live-bar). It goes into the dashboard's keep place ([data-keep], the mount point that
 // outlives page changes) when there is one, else at the end of .shell-body; LiveBar.mount(host) moves it anywhere else
-// and it stays the same element (its open list included).
+// and it stays the same element (its open list included). With the layer (window.LiveLayer.open) a chip opens its
+// session there; the layer's orch:live-layer event marks the open ones; LiveBar.end(fn) fills the right end.
 const LIVEBAR_PINS = 'orch.live.pins';
 const LIVEBAR_LISTS = {
   wait: {sym:'◆', word:'need you', head:'Needs you'},
@@ -57,7 +58,7 @@ if (typeof module === 'object' && module.exports) {
   module.exports = {liveBarModel, liveBarIn, liveBarSessions, liveBarCountText, LIVEBAR_LISTS};
 } else {
   (() => {
-    const bar = {el:null, host:null, list:'', q:'', sig:'', fold:0};
+    const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0};
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
     const pins = () => { try { return JSON.parse(localStorage.getItem(LIVEBAR_PINS) || '[]'); } catch (e) { return []; } };
     const phone = () => window.matchMedia('(max-width: 720px)').matches;
@@ -66,7 +67,8 @@ if (typeof module === 'object' && module.exports) {
     const sym = (s, text) => h('span', {className:'lbar-sym', 'data-s':s, 'aria-hidden':'true'}, text);
 
     function chip(a, o) {
-      return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + o.id, title:o.title + ' · ' + o.word},
+      return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + o.id, 'data-lbar-open':o.id,
+        'aria-current':bar.panes.includes(o.id) ? 'true' : null, title:o.title + ' · ' + o.word},
         sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)));
     }
     function count(all, l, compact) {
@@ -95,7 +97,7 @@ if (typeof module === 'object' && module.exports) {
     function rows(a, all) {
       const q = bar.q.trim().toLowerCase();
       const list = all.filter(o => liveBarIn(o, bar.list) && (!q || (o.key + ' ' + o.title).toLowerCase().includes(q)));
-      return list.length ? list.map(o => h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id},
+      return list.length ? list.map(o => h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id, 'data-lbar-open':o.id},
         h('span', {className:'lbar-st', 'data-s':o.s}, h('span', {className:'lbar-sym', 'aria-hidden':'true'}, LIVEBAR_LISTS[o.s].sym), o.word),
         h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.title)))
         : [h('p', {className:'meta'}, 'No session matches.')];
@@ -112,10 +114,10 @@ if (typeof module === 'object' && module.exports) {
         h('div', {className:'lbar-list', 'data-lbar-rows':'1'}, rows(a, all)));
     }
     function build(a, all, fold) {
-      return h('div', {id:'live-bar', className:'lbar', role:'group', 'aria-label':addonLabel(a) + ' bar', 'data-fold':String(fold)},
+      return h('div', {id:'live-bar', className:bar.docked ? 'lbar lbar-docked' : 'lbar', role:'group', 'aria-label':addonLabel(a) + ' bar', 'data-fold':String(fold)},
         h('a', {className:'lbar-home', href:'#addon/' + encodeURIComponent(a.name), 'data-key':'lbar-home', title:addonLabel(a) + ' start page'}, addonLabel(a)),
         h('nav', {className:'lbar-sw', 'aria-label':'Sessions'}, sessionsRow(a, all, fold)),
-        h('span', {className:'lbar-end'}),
+        h('span', {className:'lbar-end'}, typeof bar.end === 'function' ? bar.end() : null),
         pop(a, all));
     }
     function place() {
@@ -138,7 +140,7 @@ if (typeof module === 'object' && module.exports) {
         return;
       }
       const all = liveBarModel(state.tickets, state.runs, pins(), window.DashHelpers.helperState);
-      const sig = JSON.stringify([a.name, addonLabel(a), all, bar.list, phone(), window.innerWidth]);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, bar.list, bar.panes, bar.docked, phone(), window.innerWidth]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
       const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';
@@ -172,6 +174,11 @@ if (typeof module === 'object' && module.exports) {
     document.addEventListener('click', e => {
       const b = e.target.closest?.('[data-lbar-list]');
       if (b && bar.el?.contains(b)) { toggle(b.dataset.lbarList); return; }
+      // with the layer there, a chip or row opens its session in the layer instead of changing page
+      const o = e.target.closest?.('[data-lbar-open]');
+      if (o && bar.el?.contains(o) && typeof window.LiveLayer?.open === 'function' && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
+        e.preventDefault(); close(false); window.LiveLayer.open(o.dataset.lbarOpen); return;
+      }
       if (bar.list && (!bar.el?.contains(e.target) || e.target.closest('a'))) close(false);
     });
     document.addEventListener('input', e => {
@@ -181,12 +188,18 @@ if (typeof module === 'object' && module.exports) {
       if (a && box) box.replaceChildren(...rows(a, liveBarModel(state.tickets, state.runs, pins(), window.DashHelpers.helperState)));
     });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && bar.list && bar.el?.contains(document.activeElement)) { e.stopPropagation(); close(true); } }, true);
+    // the layer says which sessions are open ({mode, panes: ticket ids}); their chips are marked current
+    window.addEventListener('orch:live-layer', e => { const p = e.detail?.panes; bar.panes = Array.isArray(p) ? p.map(String) : []; paint(); });
     let frame = 0;
     window.addEventListener('resize', () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => paint(true)); });
     window.paintLiveBar = paint;
     window.LiveBar = {
       // Move the bar into another host (a mount point that survives page changes); it stays the same element.
-      mount(host) { bar.host = host || null; if (bar.el && host) host.append(bar.el); paint(true); },
+      // docked: the host places it (the layer's dock), so it is not fixed to the bottom of the window.
+      mount(host, opts = {}) { bar.host = host || null; bar.docked = !!(host && opts.docked); if (bar.el && host) host.append(bar.el); paint(true); },
+      // The buttons at the right end (the layer's Open and Place): fn returns nodes, called on every repaint.
+      end(fn) { bar.end = typeof fn === 'function' ? fn : null; paint(true); },
+      repaint() { paint(true); },
       model: liveBarModel,
     };
   })();

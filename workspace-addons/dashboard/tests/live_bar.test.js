@@ -59,7 +59,7 @@ test('loaded before app.js, served as a page module, painted on every render, na
   assert.doesNotMatch(src.replace(/\.focus\(\)|focusKey/g, ''), /\b(focus|automation|factory|insights|relay)\b/i, 'found by its live_session capability, never by name');
   assert.match(src, /live_session === true/);
   assert.match(src, /querySelector\('\.shell-body \[data-keep\]'\)/, 'the bar goes into the keep place of soft page changes when it exists');
-  assert.match(src, /LiveBar = \{\s*\/\/[^\n]*\n\s*mount\(host\)/, 'another page can move the bar into its own mount point');
+  assert.match(src, /LiveBar = \{(\s*\/\/[^\n]*\n)+\s*mount\(host/, 'another page can move the bar into its own mount point');
 });
 
 test('the look is the kit component, with the gallery entry and the thumbtack icon', () => {
@@ -70,4 +70,16 @@ test('the look is the kit component, with the gallery entry and the thumbtack ic
   assert.match(fs.readFileSync(path.join(KIT, 'gallery.html'), 'utf8'), /id="live-bar"[\s\S]*data-fold="3"/);
   assert.match(fs.readFileSync(path.join(KIT, 'icons.js'), 'utf8'), /pinned: '/);
   for (const f of ['pages/livebar.js']) assert.doesNotMatch(fs.readFileSync(path.join(WEB, f), 'utf8'), /\bstyle="/);
+});
+
+test('plugs into the layer: a chip opens its session there, open ones are marked, the layer fills the right end', () => {
+  const src = fs.readFileSync(path.join(WEB, 'pages/livebar.js'), 'utf8');
+  assert.match(src, /window\.LiveLayer\.open\(o\.dataset\.lbarOpen\)/, 'a chip or row opens in the layer when it is there');
+  assert.match(src, /!e\.metaKey && !e\.ctrlKey && !e\.shiftKey/, 'a new-tab click stays a link');
+  assert.match(src, /addEventListener\('orch:live-layer'/, 'the layer says which sessions are open');
+  assert.match(src, /'aria-current':bar\.panes\.includes\(o\.id\)/);
+  assert.match(src, /end\(fn\) \{/, 'the layer puts Open and Place at the right end');
+  assert.match(src, /mount\(host, opts = \{\}\)/);
+  const css = fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8');
+  assert.ok(css.includes('.lbar.lbar-docked{position:relative') && css.includes('.lbar-chip[aria-current=true]{'));
 });

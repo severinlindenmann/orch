@@ -948,6 +948,8 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
    Fixed under the page beside the side bar; at phone width above the tab bar (--lbar-bottom, set by the page).
    .lbar-sample shows it inline in the gallery. ---- */
 .lbar{position:fixed;left:var(--sidebar-width);right:0;bottom:var(--lbar-bottom,0px);z-index:40;display:flex;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-height:var(--s8);padding:var(--s2) var(--s4);border-top:1px solid var(--border-strong);background:var(--sidebar);color:var(--text)}
+.lbar.lbar-docked{position:relative;left:auto;right:auto;bottom:auto;z-index:auto}
+.lbar-chip[aria-current=true]{background:var(--surface-3);color:var(--text)}
 .lbar.lbar-sample{position:relative;left:auto;right:auto;bottom:auto;z-index:auto;border:1px solid var(--border);border-radius:var(--r2)}
 .lbar-home{display:inline-flex;flex:none;align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border-radius:var(--r1);color:var(--text);font-weight:600;white-space:nowrap;text-decoration:none}
 .lbar-home:hover{background:var(--surface-2)}
