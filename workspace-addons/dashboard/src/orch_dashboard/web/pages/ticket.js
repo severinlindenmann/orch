@@ -2209,7 +2209,7 @@ async function fileEmbedIdea(req) {
 }
 addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });
 
-// "Looks good, all" on the Factory results card: the SAME Looks good as on each ticket page (the status move with the
+// "Looks good" on a Factory stage review (all of the stage's results at once): the SAME Looks good as on each ticket page (the status move with the
 // recorded review tip), for the listed tickets that still wait in review. One toast for the batch, with one Undo.
 const EMBED_BATCH_MAX = 10;
 function embedLooksGoodRequest(e) {

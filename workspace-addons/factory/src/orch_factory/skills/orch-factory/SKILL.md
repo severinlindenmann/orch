@@ -84,6 +84,13 @@ Each time you are woken, ask Factory what to do next and follow it:
   Several stages can be on at once: call `next` again after starting a crew, it gives the next stage that can
   start (also while another stage's stop waits for the owner).
 - Check the crew's results against the done-means points (evidence on the checks), then move on.
+- The owner judges a stage on ONE review card built from the crew's evidence: pictures of the built screens, a short
+  demo, the tests (passed or failed) and whether the code is merged. So tell every builder in the task text to attach
+  to its checks: a screenshot of each built screen (`--file <png>`, phone width and desktop), a short demo of the flow
+  (`--file <gif, mp4 or webm>`, a few seconds), every test run with `orch check record` (its exit), and the pull
+  request (`orch ref add`). A result without them shows the owner "nothing to show".
+- A message from the owner "Change at <stage>: <words>" comes from that review card: send the stage's crew tickets
+  back with those words (`orch run send <crew> "<words>"`), and they come back to the owner for a new review.
 - Words that people read in a built app use the right singular and plural ("1 point", "2 points", never "1 pts"): tell
   the builders in their task text, and look for it when you check the results.
 - Pictures at a stop: for every taste item copy the tester's screenshots of that screen (phone width and desktop) to
