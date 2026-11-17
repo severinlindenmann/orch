@@ -223,6 +223,8 @@ def _show(t: dict, root: Path) -> str:
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
+    if t.get("release"):
+        extra.append(f"Release: {t['release']}")
     from orch import modelpick
 
     if modelpick.label(t):
@@ -452,6 +454,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--due", metavar="DAY[ HH:MM]|HH:MM", help="due day, with an optional time (18:30 = today)"
     )
+    x.add_argument("--release", help="the release it belongs to, e.g. 26 (tickets group by it)")
     x.add_argument("--note", help="a free note")
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
@@ -492,6 +495,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         metavar="DAY[ HH:MM]|HH:MM",
         help="due day, with an optional time (18:30 = today; empty clears)",
     )
+    x.add_argument("--release", help="the release it belongs to, e.g. 26 (empty clears)")
     x.add_argument("--note", help="a free note (empty clears)")
     x.add_argument("--done-when", help="what should be true when it is done (empty clears)")
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
@@ -982,7 +986,11 @@ def run(args: argparse.Namespace) -> None:
             by(),
             args.parent,
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
-            {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
+            {
+                k: getattr(args, k)
+                for k in ("owner", "due", "release", "note", "done_when")
+                if getattr(args, k)
+            },
             title_auto=args.title_auto,
             plan_first=args.plan_first,
             epic=args.epic,
@@ -1039,10 +1047,10 @@ def run(args: argparse.Namespace) -> None:
         )
         _out(args, shown, text)
     elif cmd == "ticket" and sub == "edit":
-        keys = ("owner", "due", "note", "done_when")
+        keys = ("owner", "due", "release", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
         if args.title is None and not fields:
-            raise Refused("Say what to change: --title, --owner, --due, --note or --done-when.")
+            raise Refused("Say what to change: --title, --owner, --due, --release, --note or --done-when.")
         t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
         _out(args, t, f"Saved (revision {t['revision']}).")
     elif cmd == "ticket" and sub == "set":

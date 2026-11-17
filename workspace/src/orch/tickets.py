@@ -47,7 +47,7 @@ RUNS_PER_CHECK = 45  # notes are not capped: only people write them, orch writes
 SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
-PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
+PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "release", "note", "done_when", "summary")
 VIA_RE = re.compile(r"^[a-z][a-z0-9-]{1,15}$")
 KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
 DOING_STALE_SECONDS = 2 * 3600
@@ -707,6 +707,7 @@ _FIELD_WORDS = {
     "title": "title",
     "owner": "owner",
     "due": "due date",
+    "release": "release",
     "note": "note",
     "done_when": "done criteria",
     "summary": "summary",
@@ -1382,6 +1383,10 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by", "model")
 
 
+# ORCH-37: the release a ticket belongs to (free text, e.g. "26"); the Tickets page groups by it.
+RELEASE_MAX = 40
+
+
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
 _DUE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?|(\d{1,2}:\d{2})")
 
@@ -1485,6 +1490,8 @@ def clean_field(key: str, value):
     v = value if key in ("note", "done_when") else value.strip()
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
+    if key == "release" and (len(v) > RELEASE_MAX or "\n" in v or UNSAFE_TEXT.search(v)):
+        raise Refused(f"A release is one line of at most {RELEASE_MAX} characters, e.g. 26 or Spring launch.")
     if key == "note" and len(v) > 2000:
         raise Refused("A note is at most 2000 characters.")
     if key == "done_when" and len(v) > 2000:
@@ -1512,7 +1519,7 @@ def edit(
     fields: dict | None = None,
     if_revision: int | None = None,
 ) -> dict:
-    """Rename and/or set owner, due, note, done_when (`fields`)."""
+    """Rename and/or set owner, due, release, note, done_when (`fields`)."""
     if title is not None:
         title = title.strip()
         if not title or len(title) > 200:
@@ -3062,7 +3069,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         t = obj["title"]
         if not isinstance(t, str) or not t.strip() or len(t.strip()) > 200:
             raise Refused("A title needs 1 to 200 characters.")
-    for k in ("owner", "due", "note", "done_when", "summary"):
+    for k in ("owner", "due", "release", "note", "done_when", "summary"):
         if k in obj:
             clean_field(k, obj[k])
     w = obj.get("waiting_on")
@@ -3084,7 +3091,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             status, actor = _finish_status(root, ticket, status, by)
             if status in ("open", "ready") and not actor.startswith("agent:"):
                 ticket.pop("started", None)
-        for k in ("owner", "due", "note", "done_when", "summary"):
+        for k in ("owner", "due", "release", "note", "done_when", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])
         if "waiting_on" in obj:

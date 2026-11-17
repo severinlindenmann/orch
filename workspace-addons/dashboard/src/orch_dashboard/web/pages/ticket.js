@@ -1450,7 +1450,7 @@ function ticketProperties(t, parent) {
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
     h('dl', {className:'ticket-details ed-list'}, parent ? field('Sub-ticket of', h('a', {href:href(parent.id)}, partName(parent))) : null,
-      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Model', modelField(t)),
+      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Release', inlineField(t, 'release')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Model', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
     linksCard(t),
@@ -1595,7 +1595,7 @@ function detail(t) {
 }
 
 const MULTILINE = ['note', 'done_when'];
-const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
+const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', release:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 // The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
 // chooses one here; "Let orch pick" hands it back. Applies from the next start.
@@ -1650,10 +1650,17 @@ function startInline(control) {
   const input = el(MULTILINE.includes(field) ? 'textarea' : 'input', 'input inline-input');
   if (MULTILINE.includes(field)) input.rows = 3; else input.type = 'text';
   if (field === 'title') input.maxLength = 200;
+  // ORCH-37: the release names other tickets already use are offered, so tickets of one release share one spelling.
+  let names = null;
+  if (field === 'release') {
+    input.maxLength = 40;
+    const known = [...new Set(tickets().map(o => String(o.release || '').trim()).filter(Boolean))].sort();
+    if (known.length) { names = h('datalist', {id:'release-names-' + t.id}, known.map(n => h('option', {value:n}))); input.setAttribute('list', names.id); }
+  }
   input.value = before;
   input.setAttribute('aria-label', capitalise(field));
   locks.add(key);
-  host.replaceChildren(input, el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'));
+  host.replaceChildren(input, el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'), ...(names ? [names] : []));
   input.focus();
   let done = false;
   const finish = async save => {

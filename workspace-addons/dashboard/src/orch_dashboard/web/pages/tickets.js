@@ -25,7 +25,7 @@ function filterTickets(items, query, mine, me = '', person = '', view = '') {
   const needle = String(query || '').trim().toLowerCase();
   return items.filter(t => (!mine || (me ? String(t.owner || '') === me : !String(t.owner || '').startsWith('agent:'))) &&
     (!person || String(t.owner || '') === person) && (!view || inView(t, view)) &&
-    (!needle || keyMatch(t, needle) || [t.title, /^#?\d+$/.test(needle) ? '' : t.key, t.owner, t.note].some(value => String(value || '').toLowerCase().includes(needle))));
+    (!needle || keyMatch(t, needle) || [t.title, /^#?\d+$/.test(needle) ? '' : t.key, t.owner, t.release, t.note].some(value => String(value || '').toLowerCase().includes(needle))));
 }
 // ORCH-58: "58" or "ORCH-58" finds that ticket by its number (exact, so 58 is not ORCH-158); words search the text.
 function keyMatch(t, needle) {
@@ -55,6 +55,28 @@ function ticketGroups(items) {
   for (const t of items) groups.find(group => group.status === ticketGroupOf(t))?.tickets.push(t);
   return groups;
 }
+// ORCH-37: "Group by release": one group per release name a ticket carries, then "No release". Releases with
+// unfinished tickets come first (lowest first: 26 before 27), finished releases after them, newest first.
+let ticketGroupBy = 'status';
+try { if (localStorage.getItem('orch.tickets.group') === 'release') ticketGroupBy = 'release'; } catch (_) { /* no storage: by status */ }
+const releaseOf = t => String(t.release || '').trim();
+const hasReleases = () => tickets().some(releaseOf);
+const byRelease = () => ticketGroupBy === 'release' && hasReleases();
+const releaseTitle = rel => !rel ? 'No release' : /^v?\d/i.test(rel) ? 'Release ' + rel : rel;
+function releaseGroups(items) {
+  const map = new Map();
+  for (const t of items) { const rel = releaseOf(t); if (!map.has(rel)) map.set(rel, []); map.get(rel).push(t); }
+  const allDone = list => list.every(t => window.DashHelpers.columnOf(shown(t).status) === 'done');
+  const cmp = (a, b) => a.localeCompare(b, undefined, {numeric:true, sensitivity:'base'});
+  const names = [...map.keys()].filter(Boolean).sort((a, b) => allDone(map.get(a)) - allDone(map.get(b)) || (allDone(map.get(a)) ? cmp(b, a) : cmp(a, b)));
+  if (map.has('')) names.push('');
+  return names.map(rel => {
+    const list = map.get(rel), done = list.filter(t => window.DashHelpers.columnOf(shown(t).status) === 'done').length;
+    return {status:'release:' + rel, release:rel, title:releaseTitle(rel), tickets:list, done, finished:done === list.length};
+  });
+}
+const releaseCount = g => g.done + ' of ' + g.tickets.length + ' done';
+const releaseTag = t => releaseOf(t) && !byRelease() ? h('span', {className:'meta release-tag', 'data-key':'release-' + t.id}, releaseTitle(releaseOf(t))) : null;
 const blockedTitle = items => items.filter(ticketWaitsOnly).every(t => t.waiting_on?.kind === 'ticket') ? 'Waiting for another ticket' : 'Waiting';
 // "Waits for ORCH-56" under a ticket that waits for another one; "Waits until 18:00" for a time.
 function waitsLine(t) {
@@ -108,7 +130,12 @@ function ticketFilters() {
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); render(); });
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
   const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; render(); }) : null;
-  return [h('span', {className:'grow'}), person, h('label', {className:'search-field'}, input)];
+  const group = hasReleases() ? ticketSelect('Group tickets', 'ticket-group', [['status', 'By status'], ['release', 'By release']], ticketGroupBy, value => {
+    ticketGroupBy = value === 'release' ? 'release' : 'status';
+    try { localStorage.setItem('orch.tickets.group', ticketGroupBy); } catch (_) { /* no storage: only this visit */ }
+    render();
+  }) : null;
+  return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];
 }
 function clearTicketFilters() {
   ticketSearch = ''; ticketMine = false; ticketPerson = '';
@@ -179,7 +206,7 @@ function treeBranch(rows, index, section) {
   const node = h('tr', {className:'ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
     h('td', {className:'ticket-cell'}, h('div', {className:'ticket-line'},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
-      h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t), helper?.chip), sub),
+      h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t), helper?.chip || (section.startsWith('release:') ? ticketAttentionChip(t, '') : null)), sub),
     h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'meta when', title:String(at || '')}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
     h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, nextAction, ticketMenu(t, 'tree'))));
@@ -218,7 +245,7 @@ function boardCard(t, nested = false, column = '') {
       parts.map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'part-title'}, window.DashHelpers.keyTag(part, h), clean(part.title)), ticketAttentionChip(part)))) : null,
     changesLine(t),
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Steps done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length))) : null,
-    ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'who'}, h('span', {className:'avatar', 'aria-hidden':'true'}, initials(t.owner)), name(t.owner)) : null, t.due ? h('span', {className:'due' + (overdue(t) && String(t.due).includes('T') ? ' bad' : '')}, dueText(t)) : null, quietLine(t), whenLine(t)));
+    ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'who'}, h('span', {className:'avatar', 'aria-hidden':'true'}, initials(t.owner)), name(t.owner)) : null, t.due ? h('span', {className:'due' + (overdue(t) && String(t.due).includes('T') ? ' bad' : '')}, dueText(t)) : null, releaseTag(t), quietLine(t), whenLine(t)));
 }
 const COLUMN_EMPTY = {open:'Nothing to start', active:'No helper is working right now', waiting:'No questions for you. All clear', review:'Nothing to check', done:'Finished tickets land here'};
 function board() {
@@ -291,18 +318,28 @@ function groupAction(status, group, folded = foldedGroups.has(status)) {
   return null;
 }
 const searchHead = n => { const q = String(ticketSearch).trim(); return q ? n + (n === 1 ? ' ticket matches “' : ' tickets match “') + q + '”' : 'Ticket · ' + n; };
+// The groups in the order they show: by status (GROUP_ORDER) or, when chosen, by release (ORCH-37).
+const releaseFoldSeen = new Set();
+function shownGroups(visible) {
+  if (!byRelease()) { const groups = ticketGroups(visible); return GROUP_ORDER.map(status => groups.find(g => g.status === status)); }
+  const groups = releaseGroups(visible);
+  // a finished release starts folded, once; the person's own fold or unfold then stays
+  for (const g of groups) if (!releaseFoldSeen.has(g.status)) { releaseFoldSeen.add(g.status); if (g.finished && g.release) foldedGroups.add(g.status); }
+  return groups;
+}
 function ticketTable(visible) {
-  const groups = ticketGroups(visible);
+  const groups = shownGroups(visible);
   if (!foldSeen) { foldSeen = true; if ((groups.find(g => g.status === 'done')?.tickets.length || 0) > 5) foldedGroups.add('done'); }
   const body = [];
-  for (const status of GROUP_ORDER) {
-    const group = groups.find(g => g.status === status), rows = window.DashHelpers.treeRows(group.tickets);
+  for (const group of groups) {
+    const status = group.status, rows = window.DashHelpers.treeRows(group.tickets);
     const roots = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0);
     if (!roots.length) continue;
     // a search shows its hits: every group opens while a search is typed; folding then lasts for that search (ORCH-58)
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups;
-    const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = folds.has(status);
-    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(group.tickets.length)));
+    const icon = group.release == null ? (STATUS_BADGE[status] || STATUS_BADGE.open)[0] + ' ' : '', folded = folds.has(status);
+    const count = group.release == null ? String(group.tickets.length) : releaseCount(group);
+    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + group.title + ' ', h('span', {className:'meta'}, count));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:4}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
     if (!folded) for (const {i} of roots) body.push(treeBranch(rows, i, status));
@@ -346,17 +383,18 @@ function shortSide(t, row, status) {
   return pill;
 }
 function phoneList(visible) {
-  const groups = ticketGroups(visible), out = [];
-  for (const status of GROUP_ORDER) {
-    const group = groups.find(g => g.status === status), rows = window.DashHelpers.treeRows(group.tickets);
+  const out = [];
+  for (const group of shownGroups(visible)) {
+    const status = group.status, rows = window.DashHelpers.treeRows(group.tickets);
     const roots = rows.filter(row => row.depth === 0);
     if (!roots.length) continue;
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups, folded = folds.has(status);
     const shownRows = rows.filter(row => row.depth <= 1), all = phoneMore.has(status), cut = all ? shownRows : shownRows.slice(0, PHONE_ROWS);
-    const sec = window.UI.shortGroup({key:'short-' + status, title:group.title, icon:SHORT_ICON[status], count:group.tickets.length, folded,
+    const rel = group.release != null;
+    const sec = window.UI.shortGroup({key:'short-' + status, title:rel ? group.title + ' · ' + releaseCount(group) : group.title, icon:rel ? (group.finished ? 'done' : 'todo') : SHORT_ICON[status], count:group.tickets.length, folded,
       onToggle:() => { if (folded) folds.delete(status); else folds.add(status); render(); },
       rows:cut.map(row => ({key:typeof row.ticket.key === 'string' ? row.ticket.key : '', title:clean(row.ticket.title), href:href(row.ticket.id), child:row.depth > 0,
-        fact:shortFact(row.ticket, row), side:shortSide(row.ticket, row, status), dataKey:'short-' + row.ticket.id})),
+        fact:shortFact(row.ticket, row), side:shortSide(row.ticket, row, rel ? ticketColumn(row.ticket) : status), dataKey:'short-' + row.ticket.id})),
       more:cut.length < shownRows.length ? {label:(shownRows.length - cut.length) + ' more', onClick:() => { phoneMore.add(status); render(); }} : null});
     sec.querySelectorAll('.short-row').forEach(rowEl => rowEl.addEventListener('click', e => {
       if (e.target.closest('a,button')) return;

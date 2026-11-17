@@ -99,7 +99,7 @@ AGENT = re.compile(r"[a-z][a-z0-9-]{1,31}")
 MAX_COMMAND = 500
 MAX_TASK = 500
 PERMISSIONS = ("ask", "auto", "full")
-PATCH_KEYS = ("title", "status", "owner", "due", "note", "done_when", "summary")
+PATCH_KEYS = ("title", "status", "owner", "due", "release", "note", "done_when", "summary")
 STATUSES = ("open", "ready", "active", "waiting", "review", "done")
 
 
@@ -378,7 +378,7 @@ def _ticket_patch(a):
         if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
             raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
         if k not in ("status", "due"):
-            _text(v, k, empty=k in ("owner", "note", "done_when"))
+            _text(v, k, empty=k in ("owner", "release", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
     flags = [f"--if-revision={rev}"]
     # "Accept" sends the review tip the page showed; the core binds the Done to it. Anything that is not a
@@ -400,9 +400,9 @@ def _ticket_changes(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "if_revision"))
+    _only(a, ("ticket", "title", "owner", "due", "release", "note", "done_when", "if_revision"))
     flags = []
-    for k in ("title", "owner", "due", "note", "done_when"):
+    for k in ("title", "owner", "due", "release", "note", "done_when"):
         if k in a:
             v = _text(a[k], k, empty=k != "title")
             if k == "due" and not DAY.fullmatch(v):
