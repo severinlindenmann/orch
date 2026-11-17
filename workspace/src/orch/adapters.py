@@ -668,6 +668,19 @@ def transcript_exists(
     resuming it would only fail with "no conversation found"."""
     if not valid_session_id(sid):
         return False  # an id orch would never record or resume: never "trust" it
+    f = transcript_path(name, sid, root, environ, folder)
+    if f is None or not f.parent.is_dir():
+        return None
+    return f.is_file()
+
+
+def transcript_path(
+    name: str, sid: str, root: Path, environ: Mapping[str, str] | None = None, folder: Path | None = None
+) -> Path | None:
+    """Where the tool saves the conversation of session `sid` (adapter session.transcript), or None when the
+    adapter declares nothing or the id is not one orch would record."""
+    if not valid_session_id(sid):
+        return None
     t = (load(name, root).get("session") or {}).get("transcript")
     if not t:
         return None
@@ -677,10 +690,7 @@ def transcript_exists(
     # workspace's
     folder = re.sub(r"[^A-Za-z0-9]", "-", str((folder or root).resolve()))
     parts = [folder if k == "{folder}" else k.replace("{session}", sid) for k in t["path"]]
-    f = base.joinpath(*parts)
-    if not f.parent.is_dir():
-        return None
-    return f.is_file()
+    return base.joinpath(*parts)
 
 
 def session_missing(name: str, output: str, root: Path | None = None) -> bool:

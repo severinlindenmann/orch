@@ -351,7 +351,7 @@ function render(arrived = new Set()) {
   const wait = document.getElementById('topbar-wait');
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
     const ages = array(state.tickets).filter(t => t.status !== 'done' && questions(t).length).map(t => Date.parse(t.updated_at)).filter(Number.isFinite);
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
+    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · longest wait ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
   }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates

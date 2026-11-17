@@ -7,7 +7,7 @@
 .ticket-row h3 a::after{display:none}.ticket-row h3 a{display:inline-flex;align-items:center;min-height:44px;gap:8px}
 .ticket-next{gap:10px;flex-wrap:wrap;margin-top:8px}.ticket-next .btn{position:relative;z-index:2}
 .ticket-meta{flex-wrap:wrap;gap:8px}
-.board .board-track{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px}
+.board .board-track{display:flex;gap:12px;overflow-x:auto;align-items:flex-start}.board .kanban-col{flex:1 0 260px;max-width:340px}.ticket-card h3 a{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .board .col-head{border:0;border-top:2px solid var(--border-strong);border-radius:0}
 .column-hint{min-height:36px;margin:0 0 12px}.board-hint{text-align:right;margin-bottom:16px}
 .board .ticket-card{padding:12px}.ticket-card h3{display:block;overflow:visible}.ticket-card h3 a{display:inline-flex;min-height:44px;align-items:center}
@@ -31,7 +31,7 @@
 @media(max-width:440px){.ticket-row .grow{min-width:0;flex-basis:100%}.ticket-row h3 a{display:flex;flex-direction:column;align-items:flex-start;gap:2px}.ticket-row .mono{display:block}}
 
 .ticket-select{min-height:44px;width:auto;max-width:220px}
-.board .kanban-col{display:flex;flex-direction:column;flex:1 1 0;min-width:176px;max-height:calc(100dvh - 200px);min-height:240px}
+.board .kanban-col{display:flex;flex-direction:column;max-height:calc(100dvh - 200px);min-height:240px}
 .board .col-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-bottom:8px}
 .board-none{padding:16px 8px;text-align:center;border:1px dashed var(--border);border-radius:8px}
 .changes-pending{color:var(--warning);font-weight:500;margin:2px 0 0}
@@ -76,7 +76,7 @@
 .view-chip.active{background:var(--accent-soft,var(--surface-3));color:var(--text);border-color:var(--border-strong)}
 .view-chip.add{border-style:dashed;background:none}
 .view-chip.add[disabled]{opacity:.5;cursor:default}
-.board .kanban-col.col-collapsed{flex:0 0 56px;min-width:56px;min-height:0;max-height:none}
+.board .kanban-col.col-collapsed{flex:0 0 92px;min-width:92px;max-width:92px;min-height:0;max-height:none}
 .board .kanban-col.col-collapsed .col-head{flex-direction:column;align-items:flex-start;gap:4px}
 .board .kanban-col.col-collapsed .board-none{display:none}
 .ticket-table tr.row-click{cursor:pointer}
@@ -93,3 +93,5 @@
 .ticket-card>.row:first-child>details.menu{flex:none;margin:-4px -4px 0 0}
 .ticket-card .move-button{width:28px;min-width:28px;min-height:28px;height:28px}
 .board .ticket-card .menu-pop{min-width:180px}
+
+.ticket-table td:first-child a{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
