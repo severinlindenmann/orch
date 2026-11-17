@@ -639,7 +639,8 @@ def save(root: Path, ticket: dict) -> None:
 
 def list_all(root: Path, include_general: bool = False) -> list[dict]:
     """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
-    `general: true`) is left out unless include_general: it is not a ticket anyone lists, counts or closes."""
+    `general: true`) and the hidden Manager ticket (flag `manager: true`) are left out unless include_general:
+    they are not tickets anyone lists, counts or closes."""
     d = tickets_dir(root)
     out = []
     if d.is_dir():
@@ -654,7 +655,7 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
                 continue
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten
-            if include_general or t.get("general") is not True:
+            if include_general or (t.get("general") is not True and t.get("manager") is not True):
                 out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
@@ -674,6 +675,57 @@ def general_id(root: Path) -> str | None:
         if isinstance(t, dict) and t.get("general") is True:
             return t["id"]
     return None
+
+
+def is_manager(root: Path, tid: str) -> bool:
+    """True for the hidden Manager ticket: the workspace's always-on helper session (ORCH-147)."""
+    try:
+        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("manager") is True
+    except (OSError, ValueError, Refused, AttributeError):
+        return False
+
+
+def manager_id(root: Path) -> str | None:
+    """The id of this workspace's hidden Manager ticket, or None before the Manager was first started."""
+    for t in list_all(root, include_general=True):
+        if isinstance(t, dict) and t.get("manager") is True and t.get("general") is not True:
+            return t["id"]
+    return None
+
+
+MANAGER_NOTE = (
+    "The Manager: an always-on helper the person talks to in Focus or joins in a terminal. It looks after "
+    "the workspace's tickets and helpers with the full rights of a normal helper. Nothing ends its session "
+    "by itself."
+)
+
+
+def ensure_manager(root: Path, by: str) -> str:
+    """The Manager ticket (flag manager: true, no display key so no number is used up), made once. Kept out of
+    git like the Chat ticket: it is this computer's own session."""
+    from orch import harness
+
+    if tid := manager_id(root):
+        return tid
+    t = now()
+    ticket = {
+        "schema": "orch.ticket/1",
+        "id": new_id(root),
+        "title": "Manager",
+        "manager": True,
+        "status": "open",
+        "note": MANAGER_NOTE,
+        "created_at": t,
+        "updated_at": t,
+        "checklist": [],
+        "refs": [],
+        "questions": [],
+        "history": [],
+    }
+    add_history(ticket, by, "Created", "cli", at=t)
+    save(root, ticket)
+    harness.protect_local(root)
+    return ticket["id"]
 
 
 def ensure_general(root: Path, by: str) -> str:
@@ -1068,6 +1120,23 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
 
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
+MANAGER_REFUSAL = "The Manager is not a ticket: it is never finished, dropped or reopened."
+
+
+def hidden_kind(ticket: dict) -> str | None:
+    """'general' (Chat) or 'manager' for the two hidden tickets that hold a conversation, never a piece of
+    work: no status moves, never Working. None for every other ticket."""
+    if ticket.get("general") is True:
+        return "general"
+    if ticket.get("manager") is True:
+        return "manager"
+    return None
+
+
+def _hidden_refusal(ticket: dict) -> str:
+    return MANAGER_REFUSAL if hidden_kind(ticket) == "manager" else GENERAL_REFUSAL
+
+
 GENERAL_REFUSED = (
     "open",
     "review",
@@ -1078,10 +1147,8 @@ GENERAL_REFUSED = (
 
 
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
-    if (
-        ticket.get("general") is True and status in GENERAL_REFUSED
-    ):  # the ONE status guard (agent, person, wrapper)
-        raise Refused(GENERAL_REFUSAL)
+    if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
+        raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
@@ -1118,8 +1185,8 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
         raise Refused("Only a person can accept.")
 
     def op(ticket):
-        if ticket.get("general") is True:
-            raise Refused(GENERAL_REFUSAL)
+        if hidden_kind(ticket):
+            raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not waiting for your review.")
         ticket["status"] = "done"
@@ -1154,8 +1221,8 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
     why = _one_line(reasons)
 
     def op(ticket):
-        if ticket.get("general") is True:
-            raise Refused(GENERAL_REFUSAL)
+        if hidden_kind(ticket):
+            raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not in Review.")
         _check_can_finish(ticket)
@@ -1270,7 +1337,7 @@ def ask_for_changes(
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
-        if ticket.get("general") is True:
+        if hidden_kind(ticket):
             return NO_WRITE
         was_started = ticket.get("started") is True
         ticket["started"] = True
@@ -1299,7 +1366,7 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
     Returns True when the ticket was moved."""
 
     def op(ticket):
-        if ticket.get("general") is True:
+        if hidden_kind(ticket):
             return NO_WRITE
         if ticket["status"] != "active" or (still_running is not None and still_running()):
             return NO_WRITE
@@ -1363,7 +1430,7 @@ def recheck_hint(root: Path, tid: str, status: str, by: str) -> str | None:
     if status != "review" or not (agent_tool() or by.startswith("agent:")):
         return None
     t = load(root, tid)
-    if t.get("status") == "review" or t.get("general") is True:
+    if t.get("status") == "review" or hidden_kind(t):
         return None
     if not {"changed", "failed"} & set(proof_state(t, root)["per_item"].values()):
         return None
@@ -2843,7 +2910,7 @@ def _release_wait(root: Path, tid: str, ticket: dict, qid: str) -> None:
         else:
             ticket["waiting_on"] = None
             if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
-                chat = ticket.get("general") is True  # the Chat ticket is never Working
+                chat = hidden_kind(ticket) is not None  # the Chat and Manager tickets are never Working
                 ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
 
 

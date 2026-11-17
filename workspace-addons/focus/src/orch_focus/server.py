@@ -498,6 +498,7 @@ class Tracker:
         return {
             "ticket": {
                 "id": ticket.get("id"), "key": ticket.get("key"), "title": ticket.get("title"),
+                "manager": ticket.get("manager") is True,  # ORCH-147: the always-on Manager, not a piece of work
                 "status": ticket.get("status"), "closed_at": ticket.get("closed_at"),
                 "started": bool(ticket.get("started") or (ticket.get("ticket_view") or {}).get("started") or claim.get("run")),
                 "revision": ticket.get("revision", 0), "checklist": checks,
@@ -552,6 +553,22 @@ class Tracker:
         if not agent:
             return True
         return adapterdata.events_kind(self.root, agent, mode or "oneshot") is None
+
+    def manager(self) -> dict | None:
+        """The always-on Manager (ORCH-147): {ticket, running} from `orch manager status`; None when this orch
+        has no Manager yet (an older core), so the start page shows no Manager row."""
+        try:
+            code, out, _ = actions.orch(self.root, self.orch_bin, ["manager", "status", "--json"], timeout=15)
+            d = json.loads(out) if code == 0 else None
+        except (actions.Unavailable, ValueError, RecursionError):
+            d = None
+        if not isinstance(d, dict):
+            return None
+        tid = d.get("ticket")
+        return {
+            "ticket": tid if isinstance(tid, str) and TID_RE.fullmatch(tid) else None,
+            "running": d.get("running") is True,
+        }
 
     def tickets_list(self) -> list[dict]:
         try:
@@ -703,7 +720,12 @@ class Handler(BaseHTTPRequestHandler):
             self._keep_session_for_restart()
         if path == "/api/tickets":
             return self._json(
-                200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()}
+                200,
+                {
+                    "workspace": self.tracker.workspace(),
+                    "tickets": self.tracker.tickets_list(),
+                    "manager": self.tracker.manager(),
+                },
             )
         if path == "/api/live":
             cards = livecards.cards(self.tracker)

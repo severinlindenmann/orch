@@ -163,8 +163,8 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
             t = tickets.load(root, tid)
         except Exception:  # noqa: BLE001, S112 - a broken ticket is never acted on
             continue
-        if t.get("general") is True:
-            continue  # Chat: a person talks to it
+        if t.get("general") is True or t.get("manager") is True:
+            continue  # Chat and the Manager: a person talks to them; they are never nudged or ended
         info = runwatch.describe(root, tid, rec, table)
         waits = _waits(info)
         if any(w.get("kind") == "command" for w in waits):

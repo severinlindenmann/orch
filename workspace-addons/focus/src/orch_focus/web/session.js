@@ -37,10 +37,12 @@
 
   function showAttach() {
     // waiting for an OK: the person must type in the session, so no --watch; the short key (DM1-12) works too
-    const ok = !!(S.state.view && S.state.view.attention), key = (els.key && els.key.textContent) || TID;
+    /* the Manager (ORCH-147) is a session to talk in: joined to type, never only watched */
+    const manager = !!(S.state.view && S.state.view.ticket.manager);
+    const ok = manager || !!(S.state.view && S.state.view.attention), key = (els.key && els.key.textContent) || TID;
     const cmd = 'orch run attach ' + key + (ok ? '' : ' --watch');
     els.attachBox.hidden = !els.attachBox.hidden;
-    els.attachBox.replaceChildren(h('span', {class: 'meta', text: ok ? 'Answer it in a terminal (Ctrl-b d to leave):' : 'Watch the helper’s screen in a terminal:'}), h('code', {class: 'mono', text: cmd}),
+    els.attachBox.replaceChildren(h('span', {class: 'meta', text: manager ? 'Join the Manager in a terminal (Ctrl-b d to leave):' : ok ? 'Answer it in a terminal (Ctrl-b d to leave):' : 'Watch the helper’s screen in a terminal:'}), h('code', {class: 'mono', text: cmd}),
       h('button', {class: 'btn ghost xs', text: 'Copy', onclick: () => { try { navigator.clipboard.writeText(cmd); toast('Copied.', 'ok'); } catch (e) { /* select by hand */ } }}));
   }
 

@@ -58,12 +58,13 @@ def alive(rec: dict, now: float | None = None) -> bool:
 
 
 def _is_general(root: Path, tid: str) -> bool:
-    """The hidden General ticket of the phone conversation is not shown in Focus."""
+    """The hidden General ticket of the phone conversation is not shown in Focus's helper list, nor the hidden
+    Manager (ORCH-147): the start page shows it in its own row."""
     try:
         t = json.loads((Path(root) / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return isinstance(t, dict) and t.get("general") is True
+    return isinstance(t, dict) and (t.get("general") is True or t.get("manager") is True)
 
 
 def records(root: Path) -> list[dict]:

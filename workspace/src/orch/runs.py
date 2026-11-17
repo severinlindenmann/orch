@@ -647,7 +647,14 @@ def claim_routed(root: Path, tid: str, by: str, agent: str, mode: str, **kw) -> 
 
     with worktrees.start_lock(root):
         try:
-            folder, notes, after = worktrees.route(root, tid)
+            if tickets.is_manager(root, tid):
+                folder, notes, after = (
+                    root,
+                    [],
+                    [],
+                )  # the Manager looks after the workspace itself, never a copy
+            else:
+                folder, notes, after = worktrees.route(root, tid)
         except Exception:  # noqa: BLE001 - copies are an extra; a start never fails because of them
             folder, notes, after = root, [], []
         rec = claim(root, tid, by, agent, mode, folder=folder, **kw)
@@ -725,7 +732,7 @@ def running(root: Path, tid: str) -> bool:
 def settle(root: Path, tid: str, by: str, say: bool = True, ignore_input: bool = False) -> bool:
     """A run ended (or never came): a ticket still Working is Ready again, so every surface that shows the
     ticket status (dashboard, Focus, phone) says what is true. Never touches a ticket a run holds now."""
-    if tickets.is_general(root, tid):
+    if tickets.is_general(root, tid) or tickets.is_manager(root, tid):
         return False
 
     def busy() -> bool:
@@ -1205,7 +1212,8 @@ def plan(
         sid = None  # the tool never saved that conversation: resuming it can only fail, start fresh
     cold_note = None
     folder = workdir_for(root, read(root, tid), tid)
-    if sid and ticket.get("general") is not True and _long_and_cold(root, name, sid, folder):
+    # the Chat and the Manager keep their conversation: a fresh start there is the person's choice (ORCH-147)
+    if sid and tickets.hidden_kind(ticket) is None and _long_and_cold(root, name, sid, folder):
         sid = None  # ORCH-149: its cache is gone, re-reading the long conversation costs more than the ticket
         cold_note = (
             "Started fresh from the ticket: the earlier conversation is long and was idle for over "
@@ -1248,6 +1256,10 @@ def plan(
                 from orch import chat
 
                 text = chat.helper_prompt(root, ticket, items, _items_text(items) if items else "")
+            elif ticket.get("manager") is True:
+                from orch import manager
+
+                text = manager.prompt(root, ticket, _items_text(items) if items else "")
             else:
                 text = fresh_prompt(ticket, items, root)
             if not (a.get("files") or {}).get("instructions_link"):  # this agent does not read the local file

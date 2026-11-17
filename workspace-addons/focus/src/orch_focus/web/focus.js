@@ -47,7 +47,7 @@
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
     els.stop.hidden = (asking && !running) || (!running && !hasStarted);
-    els.fresh.disabled = running || asking || !hasStarted;
+    els.fresh.disabled = t.manager ? asking : running || asking || !hasStarted;  /* the Manager starts fresh any time (ORCH-147) */
     els.review.hidden = !window.FocusHelpers.reviewBarShown(v);
     els.complete.hidden = v.state !== 'done';
     els.attachBtn.disabled = !(running && v.live);

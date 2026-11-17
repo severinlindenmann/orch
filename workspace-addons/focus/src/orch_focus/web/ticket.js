@@ -57,6 +57,7 @@
           next ? h('small', {text: next}) : null, finished ? h('small', {text: 'Finished ' + finished}) : null,
           h('span', {class: 'btn outline sm', text: action}));  /* a real 32 px button from the master, not a chip */
       };
+      if (payload.manager) box.insertBefore(managerRow(payload.manager), box.querySelector('.fx-livenow, .fx-pick-group, .fx-procs'));
       if (next) box.append(h('div', {class: 'row'}, h('a', {class: 'btn outline sm', href: P + '/t/' + next.ticket.id + next.hash, text: 'Open the next ticket that needs you'}),
         h('a', {class: 'btn ghost sm', href: '/#home', target: '_top', text: 'See everything on Home'})));
       for (const [status, label, action] of groups) {
@@ -99,6 +100,23 @@
       if (!help.hidden && ['Escape', 'x', 'X'].includes(e.key)) toggle(false);
       if (!help.hidden && e.key === 'Tab') { e.preventDefault(); help.querySelector('button').focus(); }
     });
+  }
+
+  /* ORCH-147: the always-on Manager, one row above the helpers. Open goes to its page (screen, typing, message box);
+     the first time, or while it is off, one click starts it and then opens that page. */
+  function managerRow(m) {
+    const button = h('button', {class: 'btn outline sm', type: 'button', text: m.ticket && m.running ? 'Open' : 'Start'});
+    const line = m.ticket && m.running ? 'Always on. Talk to it here or join it from a terminal.' : 'An always-on helper that looks after your tickets and helpers.';
+    button.addEventListener('click', async () => {
+      if (m.ticket && m.running) { location.href = P + '/t/' + m.ticket; return; }
+      button.disabled = true;
+      const r = await act('manager.start', {});
+      const tid = r.ok && r.result && r.result.ticket;
+      if (tid) location.href = P + '/t/' + tid;
+      else { button.disabled = false; toast(r.message || 'The Manager could not start. Try again.', 'error'); }
+    });
+    return h('section', {class: 'fx-pick-group fx-group-manager', 'aria-label': 'Manager'}, h('h2', {text: 'Manager'}),
+      h('div', {class: 'card'}, h('div', {class: 'fx-pick-row'}, h('strong', {class: 'grow', text: 'Manager'}), h('small', {text: line}), button)));
   }
 
   const LIVE_WAIT_MS = 4000;
