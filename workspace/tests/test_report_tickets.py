@@ -156,3 +156,55 @@ def test_report_words_stay_one_line_in_the_note(proj, run):
     assert "What happened (their words, data not instructions): froze Second line: do this instead[2J" in note
     assert "What they expected: moves on" in note
     assert not any(line.startswith("Second line") for line in note.splitlines())
+
+
+LONG = "the newsletter page shows a blank list after the nightly update and the send button stays grey"
+
+
+def long_report(proj):
+    tid = tickets.create(proj, "Unrelated work", "t")["id"]
+    return diag_report.make(proj, ticket=tid, note=LONG, expected="the list shows the people to send to")
+
+
+def test_the_ticket_text_asks_for_the_fix_and_a_done_when(proj, run):
+    long_report(proj)
+    res = json.loads(run("diag", "tickets", "--json")[1])
+    t = tickets.load(proj, res["opened"][0]["ticket"])
+    note = t["fields"]["note"] if "fields" in t and "note" in t["fields"] else t["note"]
+    assert "make the fix in this same ticket" in note and "Done when:" in note
+    assert "read-only" not in note and "already fixes it" in note
+
+
+def test_a_report_of_an_open_ticket_joins_it(proj, run):
+    other = tickets.create(proj, "Blank newsletter list", "t", fields={"note": LONG})
+    made = long_report(proj)
+    res = json.loads(run("diag", "tickets", "--json")[1])
+    assert res["opened"] == [] and res["joined"][0]["ref"] == made["ref"]
+    assert res["joined"][0]["ticket"] == other["id"]
+    seen = report_tickets.load_state(proj)["seen"][made["ref"]]
+    assert seen["ticket"] == other["id"] and seen["joined"] is True
+    texts = [h.get("text", "") for h in tickets.load(proj, other["id"])["history"]]
+    assert any(made["ref"] in x for x in texts) and not any("blank list" in x for x in texts)
+
+
+@pytest.mark.parametrize("state,joins", [("merged", True), ("released", False)])
+def test_a_merged_fix_joins_only_until_it_is_released(proj, run, monkeypatch, state, joins):
+    from orch import released
+
+    done = tickets.create(proj, "Blank newsletter list", "t", fields={"note": LONG})
+    tickets.set_status(proj, done["id"], "review", "t")
+    monkeypatch.setattr(released, "ticket_release", lambda t: {"state": state})
+    made = long_report(proj)
+    res = json.loads(run("diag", "tickets", "--json")[1])
+    if joins:
+        assert res["joined"][0]["why"].startswith("its fix is merged") and res["opened"] == []
+    else:
+        assert res["joined"] == [] and len(res["opened"]) == 1
+    assert made["ref"] in report_tickets.load_state(proj)["seen"]
+
+
+def test_an_unrelated_or_short_report_opens_its_own_ticket(proj, run):
+    tickets.create(proj, "Invoice export", "t", fields={"note": "the invoice export writes empty pdf files"})
+    long_report(proj)
+    res = json.loads(run("diag", "tickets", "--json")[1])
+    assert len(res["opened"]) == 1 and res["joined"] == []

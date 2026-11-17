@@ -1,7 +1,8 @@
 """`orch github`: the GitHub add-on's hourly write limit for helpers and scripts (no AI call).
 
     orch github wait <merge|pr|comment|other> [--for "<repo#n>"] [--max-wait <minutes>]
-        waits until one write of that kind fits this computer's limit and counts it; exit 0 = write now,
+        waits until one write of that kind fits this computer's limit and counts it (a merge with --for only
+        waits for room: `orch ref wait --merge` counts it when it really merges); exit 0 = write now,
         exit 2 = no room in time (do not write)
     orch github writes      the writes of the last hour per kind, the limit and when the next one fits
     orch github expert [--dry-run] [--known <problem>=<ticket>]
@@ -66,13 +67,22 @@ def dispatch(args, root: Path | None) -> bool:
     if args.sub == "wait":
         if args.max_wait < 0:
             raise Refused("--max-wait is a number of minutes, 0 or more.")
-        if not ghlimit.take(args.kind, args.what, wait=args.max_wait * 60):
+        # a merge of a named pull request is counted by `orch ref wait --merge` when it merges: here only wait
+        # for room, so waiting helpers and repeated runs never use up the hour
+        peek = args.kind == "merge" and bool(args.what)
+        secs = args.max_wait * 60
+        got = (
+            ghlimit.wait_room(args.kind, wait=secs) if peek else ghlimit.take(args.kind, args.what, wait=secs)
+        )
+        if not got:
             raise Refused(
                 f"No room for one of the {ghlimit.WHAT[args.kind]} within {args.max_wait} minutes "
                 "(see orch github writes). Do not write to GitHub now; try again later."
             )
-        data = {"kind": args.kind, "taken": True}
-        text = f"Room for one of the {ghlimit.WHAT[args.kind]}: write it now."
+        data = {"kind": args.kind, "taken": not peek}
+        text = f"Room for one of the {ghlimit.WHAT[args.kind]}: " + (
+            "merge it now (orch ref wait --merge counts it when it merges)." if peek else "write it now."
+        )
     else:
         rows = ghlimit.status()
         data = {"writes": rows}

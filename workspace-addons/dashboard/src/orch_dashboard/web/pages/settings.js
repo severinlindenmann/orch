@@ -10,7 +10,7 @@ const middleShort = (value, max = 48) => {
   return text.slice(0, head) + '…' + text.slice(-tail);
 };
 // The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
-const rowLabel = a => capitalise(a?.name || 'add-on');
+const rowLabel = a => capitalise(a?.label || a?.dashboard?.label || a?.name || 'add-on');
 // "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
 const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, a.active ? 'Turning off…' : 'Turning on…') : null;
 // A change of the add-ons restarts this page's server: nothing asks it (or an add-on's page) until it is back.
@@ -282,6 +282,7 @@ function syncReviewText(s) {
 // One click on the sync add-on's own verb; its answer comes back as state.act_answer.
 async function syncAct(verb, target, extra = {}) {
   const result = await act('addon.act', {addon:SYNC, verb, target, ...extra});
+  if (verb !== 'status' && verb !== 'check' && typeof addonViews === 'object') delete addonViews[SYNC];  // the Sync page's saved view is old now: it asks again, so Settings and the page agree (ORCH-184)
   const answer = result.ok && result.state?.act_answer?.addon === SYNC ? result.state.act_answer.answer : null;
   return {...result, answer};
 }
@@ -522,7 +523,7 @@ function everydayCard(settings, phoneAddon) {
   const row = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow set-ctl'}, value), snapshot ? null : action);
   return h('div', {className:'stack', 'data-key':'settings-everyday'}, h('h2', {className:'set-sub'}, 'Everyday settings'), h('div', {className:'card'},
     row('Helper', chosen ? chosen.label : 'No helper chosen yet', go('agent', 'Manage', 'settings-everyday-helper'), 'settings-everyday-helper-row'),
-    phoneAddon ? row('Phone questions', state.mobile_mode ? (state.mobile_mode.on ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
+    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
 }
 // Phone & workspaces (draft settings-phone): 1. the relay connection, 2. phones (paired on the relay admin page) + delivery,
 // then the workspaces this one may talk to. Everything comes from the relay add-on's saved connection (no network).
@@ -995,12 +996,14 @@ function shownAddon() {
   const r = route();
   return r.kind === 'addon' && !(r.id === SYNC && syncNative()) ? r.id : null;
 }
-// Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> without a navigation.
+// The address names a tab like its label: Helper is #settings/helper, Contacts is #settings/contacts.
+const SETTINGS_TAB_ADDRESS = {agent:'helper', phone:'contacts'};
+// Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> (one history entry, so Back returns to the tab before).
 function settingsGo(tab) {
   settingsTab = tab;
   settingsAddon = null;
   settingsReview = null;
-  history.replaceState(null, '', '#settings/' + tab);
+  if (location.hash !== '#settings/' + (SETTINGS_TAB_ADDRESS[tab] || tab)) history.pushState(null, '', '#settings/' + (SETTINGS_TAB_ADDRESS[tab] || tab));
   render();
 }
 function addonBody(a, res) {

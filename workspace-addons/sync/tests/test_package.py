@@ -15,7 +15,7 @@ def test_manifest_names_agents_block_and_plain_description():
     m = manifest()
     assert m["agents_block"] == "skills/orch-sync/AGENTS-block.md" and m["background"] is True
     d = m["description"]  # the core shows it when the person turns sync on (orch addon add sync)
-    assert len(d) <= 120 and "tickets" in d and "never secrets or private files" in d and "Off any time" in d
+    assert len(d) <= 120 and "tickets" in d and "Never secrets" in d and "your own storage" in d
     assert not PRODUCTS.search(d)
 
 

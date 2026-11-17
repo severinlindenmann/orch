@@ -12,7 +12,8 @@ import shlex
 import sys
 from pathlib import Path
 
-from orch import health, history, net, nextstep, renew
+from orch import health, history, net, nextstep, renew, tickets
+from orch.errors import Refused
 
 NONE_SET = "Nothing here tells orch whether it works."
 
@@ -76,8 +77,7 @@ def line(r: dict) -> str:
 RENEW_SAYS = {
     "none": "No sign-in was started for this login.",
     "starting": "The sign-in is starting.",
-    "link": "Open this link and sign in: {link}\n"
-    "If the page shows a code, paste it with: orch logins renew {name} --code -",
+    "link": "Open this link and sign in: {link}\nIf the page shows a code, paste it in the Renew window.",
     "checking": "orch is checking the login.",
     "done": "The login is renewed.",
     "failed": "The sign-in did not finish. Press Renew to try again.",
@@ -90,7 +90,7 @@ AGAIN = "The tool did not take that code. Copy the whole code from the sign-in p
 
 def renew_line(st: dict) -> str:
     if st.get("state") == "link" and st.get("again"):
-        return AGAIN + f"\nPaste it with: orch logins renew {st.get('name') or ''} --code -"
+        return AGAIN
     text = RENEW_SAYS.get(st.get("state"), RENEW_SAYS["failed"]).format(
         link=st.get("link") or "", name=st.get("name") or ""
     )
@@ -110,14 +110,18 @@ def dispatch(args, root: Path) -> bool:
     if action == "renew":
         if args.worker:
             raise SystemExit(renew.work(root, args.name))
+        by = tickets.acting_by(args)  # renew.person_only: only with the dashboard's one-time grant
         if args.code is not None:
-            st = renew.code(root, args.name, _stdin_line() if args.code == "-" else args.code)
+            renew.person_only(root, by)  # before anything is read
+            if args.code != "-":
+                raise Refused("The code goes on stdin, never on the command line: --code -")
+            st = renew.code(root, args.name, _stdin_line(), by=by)
         elif args.status:
-            st = renew.status(root, args.name)
+            st = renew.status(root, args.name, by=by)
         elif args.cancel:
-            st = renew.cancel(root, args.name)
+            st = renew.cancel(root, args.name, by=by)
         else:
-            st = renew.start(root, args.name)
+            st = renew.start(root, args.name, by=by)
         _out(args, st, renew_line(st))
         return True
     if action == "add":
@@ -138,7 +142,10 @@ def dispatch(args, root: Path) -> bool:
         _out(args, {"removed": args.name if gone else None}, text)
         return True
     if action == "replace":
-        res = renew.replace_key(root, args.name, sys.stdin.read().removesuffix("\n").removesuffix("\r"))
+        by = tickets.acting_by(args)
+        renew.person_only(root, by)  # before the value is read
+        value = sys.stdin.read(65537)
+        res = renew.replace_key(root, args.name, value, by=by)
         ok = res["state"] in ("works", "soon")
         text = "The new key is in and works." if ok else "The new key is in, but the check still fails."
         if res.get("went_on"):

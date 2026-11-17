@@ -19,7 +19,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | the suggested option | Suggested | `recommended` | Recommended |
 | evidence on a task | Evidence | `evidence` | Proof, Artifact |
 | repeating work | Repeats | `ext.scheduler` | Scheduler, Cron, Schedule |
-| an AI tool working | its adapter label (Claude, Codex, ...) | `agent:<tool>` | Bot |
+| an AI tool working | its adapter label (Claude, Codex, ...) | `agent:<tool>` | Bot, Agent, Agents (the screen word is helper; add-on texts are word-checked too) |
 | the person | You / first name | `human:<name>` | Human |
 | where it was done | dashboard, phone, terminal | `via` | CLI |
 | another workspace | its name (landing-site) | `ws_...` | Peer, Node |

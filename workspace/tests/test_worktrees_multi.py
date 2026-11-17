@@ -81,8 +81,9 @@ def test_each_project_gets_its_copy_in_one_folder_and_the_agent_starts_there(ws)
     assert [e["project"] for e in paths] == ["app", "kit"]
     assert worktrees.count(ws) == 1  # one copy folder, however many projects
     assert worktrees.is_orch_copy(folder) and worktrees.is_orch_copy(folder / "app")
-    # the workspace's own files are there as links; the store and the projects are not linked
-    assert os.readlink(folder / "AGENTS.md") == str(ws / "AGENTS.md")
+    # the workspace's own files are there as links (its rule files as files); the store and projects are not
+    assert (folder / "AGENTS.md").read_text() == "workspace rules\n"
+    assert not (folder / "AGENTS.md").is_symlink()
     assert os.readlink(folder / "notes") == str(ws / "notes")
     assert not os.path.lexists(folder / ".orch")
     assert not (folder / "app").is_symlink()
@@ -132,6 +133,63 @@ def test_the_copy_reads_the_workspace_instructions_and_says_where_the_projects_a
     assert (ws / ".claude" / "settings.json").is_file() and (ws / "AGENTS.md").is_file()
     assert (ws / "notes" / "n.txt").is_file() and (ws / "CLAUDE.local.md").is_file()
     assert (ws / ".orch" / "harness" / "skills" / "orch" / "SKILL.md").is_file()
+
+
+def test_the_rule_files_are_plain_files_so_no_import_leaves_the_copy(ws):
+    """A copy folder of several projects linked the workspace's CLAUDE.md and AGENTS.md: CLAUDE.md's
+    `@AGENTS.md` then resolved outside the folder, so Claude Code asked "Allow external CLAUDE.md file
+    imports?" (a live helper hung there) and an unattended run started without the workspace rules. They are
+    plain files of the copy now, with the top-level files they import, written again at each start."""
+    import re
+
+    (ws / "CLAUDE.md").write_text("@AGENTS.md\n@RULES.md\n@notes/n.txt\n@../outside.md\n")
+    (ws / "RULES.md").write_text("more rules\n")
+    t = ws.tids[0]
+    folder, notes = _route(ws, t)
+    assert notes == []
+    for name in ("CLAUDE.md", "AGENTS.md", "RULES.md"):
+        f = folder / name
+        assert f.is_file() and not f.is_symlink(), name
+        assert f.read_text() == (ws / name).read_text(), name
+    assert not os.path.lexists(folder / "outside.md")
+    for imp in re.findall(r"^@(\S+)", (folder / "CLAUDE.md").read_text(), re.M)[:2]:
+        assert (folder / imp).resolve().is_relative_to(folder.resolve()), imp
+    # the workspace's text wins at the next start
+    (ws / "AGENTS.md").write_text("workspace rules v2\n")
+    _route(ws, t)
+    assert (folder / "AGENTS.md").read_text() == "workspace rules v2\n"
+    # a copy made before (a link orch made) becomes a file; the workspace's file is never written through
+    (folder / "AGENTS.md").unlink()
+    os.symlink(ws / "AGENTS.md", folder / "AGENTS.md")
+    _route(ws, t)
+    assert not (folder / "AGENTS.md").is_symlink()
+    assert (folder / "AGENTS.md").read_text() == "workspace rules v2\n"
+    assert (ws / "AGENTS.md").read_text() == "workspace rules v2\n" and not (ws / "AGENTS.md").is_symlink()
+    # a link orch did not make stays as it is, with a note
+    other = folder.parent / "elsewhere.md"
+    other.write_text("not ours\n")
+    (folder / "RULES.md").unlink()
+    os.symlink(other, folder / "RULES.md")
+    _, notes = _route(ws, t)
+    assert os.readlink(folder / "RULES.md") == str(other) and other.read_text() == "not ours\n"
+    assert any("RULES.md" in n for n in notes)
+    (folder / "RULES.md").unlink()
+    other.unlink()
+    # closed with nothing to lose: the rule files never keep the copy folder
+    tickets.set_status(ws, t, "dropped", "human:test")
+    worktrees.sweep(ws)
+    assert not os.path.lexists(folder)
+    assert (ws / "CLAUDE.md").is_file() and (ws / "RULES.md").read_text() == "more rules\n"
+
+
+def test_a_linked_rule_file_in_the_workspace_stays_a_link(ws, tmp_path):
+    real = tmp_path / "shared-rules.md"
+    real.write_text("shared\n")
+    (ws / "AGENTS.md").unlink()
+    os.symlink(real, ws / "AGENTS.md")
+    folder, _ = _route(ws, ws.tids[0])
+    assert os.readlink(folder / "AGENTS.md") == str(ws / "AGENTS.md")  # linked as before, never copied
+    assert (folder / "CLAUDE.md").is_file() and not (folder / "CLAUDE.md").is_symlink()
 
 
 def test_a_folder_without_projects_still_gets_no_copy(proj, new_ticket):

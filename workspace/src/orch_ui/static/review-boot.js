@@ -3,7 +3,7 @@
    the page. External file on purpose: the page runs under a strict CSP (no inline script). */
 (()=>{'use strict';
 const host=document.getElementById('review-host');
-const start=()=>UI.reviewPage(host,UI.reviewFetchApi(''),{nav:document.getElementById('review-nav'),meta:document.getElementById('review-meta')});
+const start=()=>UI.reviewPage(host,UI.reviewFetchApi(''),{nav:document.getElementById('review-nav'),meta:document.getElementById('review-meta'),startId:new URLSearchParams(location.search).get('card')||undefined});
 const m=/[#&]k=([^&]+)/.exec(location.hash);
 if(!m)return start();
 let token='';try{token=decodeURIComponent(m[1])}catch{}

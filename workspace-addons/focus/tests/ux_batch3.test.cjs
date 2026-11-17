@@ -207,3 +207,11 @@ test('Tickets in focus lists running tickets first, then the most recently updat
     {id: 'run-old', status: 'active', updated_at: '2026-11-02T10:00:00Z'}, {id: 'run-new', status: 'active', updated_at: '2026-11-10T10:00:00Z'}];
   assert.deepEqual(H.listOrder(rows).map(t => t.id), ['run-new', 'run-old', 'new', 'old']);
 });
+
+test('ORCH-184: a ticket with an open question is in Needs you only, so the To do count matches the Tickets page', () => {
+  const list = [{id: 'a', status: 'open', question_count: 0}, {id: 'b', status: 'open', question_count: 1}, {id: 'c', status: 'review', question_count: 2}, {id: 'd', status: 'done', question_count: 0}];
+  assert.deepEqual(H.groupRows(list, 'open').map(t => t.id), ['a']);
+  assert.deepEqual(H.groupRows(list, 'waiting').map(t => t.id), ['b', 'c']);
+  assert.deepEqual(H.groupRows(list, 'review'), []);
+  assert.match(web('ticket.js'), /FocusHelpers\.groupRows\(list, status\)/);
+});

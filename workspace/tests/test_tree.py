@@ -21,7 +21,8 @@ def test_new_with_parent(proj, run, validate):
     assert code == 0 and "step of: Quarter close" in out
     c = [t for t in tickets.list_all(proj) if t["title"] == "Q3 invoices"][0]
     validate(c)
-    assert c["parent"] == p and c["history"][0]["text"] == f"Created under {p}"
+    key = read(proj, p)["key"]
+    assert c["parent"] == p and c["history"][0]["text"] == f"Created under {key} Quarter close"
     assert "parent" not in read(proj, p)
 
 
@@ -99,3 +100,15 @@ def test_closing_parent_warns_but_saves(proj, run):
     run("ticket", "status", k2, "dropped")
     run("ticket", "status", p, "active")
     assert "Warning" not in run("ticket", "status", p, "done")[2]
+
+
+def test_history_lines_have_no_internal_words():
+    cl = [{"id": "c3", "text": "Build it"}]
+    for raw, want in [
+        ("Recorded a check run for c3 (exit 0)", "Ran a check: Build it (passed)"),
+        ("Recorded a check run for c3 (exit 1)", "Ran a check: Build it (failed)"),
+        ("Moved c3 after c4", "Moved a task: Build it"),
+        ("Created under t_q7pi62", "Created as a sub-ticket"),
+        ("Edited done_when, note", "Changed the Done when line and note"),
+    ]:
+        assert tickets.history_line(raw, cl) == want

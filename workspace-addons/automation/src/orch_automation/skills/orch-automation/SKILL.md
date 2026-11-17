@@ -23,7 +23,8 @@ anything gives the ticket a question (Try again / Leave it) instead of a retry.
 
     orch wait <id> --until 2026-11-05T08:00:00+01:00     # use the user's time zone offset
 
-At that time the wait is cleared and a run starts.
+At that time the wait is cleared and a run starts. Waiting a while? Say it in plain words:
+`orch automation repeat <id> "in 2 hours"` (or `in 3 days`, `in 30 minutes`, `tomorrow 09:00`): one wake-up, no repeat.
 
 **Repeat, in plain words**
 

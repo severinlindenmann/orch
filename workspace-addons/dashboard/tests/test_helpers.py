@@ -38,11 +38,27 @@ def call(fn, *args):
         ("Check c2 done", "Finished a step"),
         ("Status active -> done", "Moved to Done"),
         ("Patched status (status done -> open)", "Moved to To do"),
+        ("Created under ORCH-46 Quarter close", "Created under ORCH-46 Quarter close"),
+        ("Edited done_when, note", "Changed the Done when line and the note"),
         ("Something the agent wrote", "Something the agent wrote"),
     ],
 )
 def test_history_lines_are_plain_words(raw, want):
     assert call("historyLine", {"text": raw}) == want
+
+
+@node
+@pytest.mark.parametrize(
+    "raw,want",
+    [
+        ("Recorded a check run for c3 (exit 0)", "Ran a check: Build it (passed)"),
+        ("Recorded a check run for c3 (exit 2)", "Ran a check: Build it (failed)"),
+        ("Recorded a check run for c3", "Ran a check: Build it"),
+        ("Moved c3 after c4", "Moved a task: Build it"),
+    ],
+)
+def test_check_run_and_move_lines_name_the_task(raw, want):
+    assert call("historyLine", {"text": raw}, [{"id": "c3", "text": "Build it"}]) == want
 
 
 @node

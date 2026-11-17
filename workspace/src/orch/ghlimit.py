@@ -196,6 +196,51 @@ def take(kind: str, what: str = "", wait: float = WAIT_SECS, sleep=time.sleep, c
         waited += nap
 
 
+def wait_room(kind: str, wait: float = WAIT_SECS, sleep=time.sleep, clock=time.time) -> bool:
+    """Wait until a write of `kind` would fit, WITHOUT counting it (the writer counts it when it writes:
+    `orch ref wait --merge` takes the merge place when it merges). False when no room came in time."""
+    kind = kind_of(kind)
+    waited = 0.0
+    while True:
+        try:
+            left = _room(_read_log(clock()), kind, limits()[kind], clock())
+        except (OSError, Refused):
+            return True
+        if left <= 0:
+            return True
+        if waited >= wait:
+            return False
+        nap = max(1.0, min(left, POLL_SECS, wait - waited))
+        sleep(nap)
+        waited += nap
+
+
+def give_back(kind: str, what: str, clock=time.time) -> bool:
+    """Take back the newest counted write of `kind` for `what` when it did not happen after all (a merge
+    GitHub refused). Never raises. True when a place was given back."""
+    kind = kind_of(kind)
+    for _ in range(20):
+        try:
+            if not _lock(clock):
+                time.sleep(0.05)
+                continue
+            try:
+                rows = _read_log(clock())
+                for i in range(len(rows) - 1, -1, -1):
+                    if rows[i]["kind"] == kind and rows[i].get("what") == str(what)[:200]:
+                        del rows[i]
+                        _write_atomic(
+                            _log_file(), "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+                        )
+                        return True
+                return False
+            finally:
+                _unlock()
+        except (OSError, Refused):
+            return False
+    return False
+
+
 def count(kind: str, what: str = "", clock=time.time) -> None:
     """Count a write that already happened or must not wait (a person's own Merge click). Never raises: a
     count that cannot be written must not undo the person's action."""

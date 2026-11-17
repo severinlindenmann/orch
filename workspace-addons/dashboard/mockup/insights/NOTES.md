@@ -48,4 +48,4 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 ## 17 Nov (no false numbers, ORCH-72)
 
-- insights.html: the Connected services tile says "Not measured yet" (normal text, no big number) while orch cannot see the list of connected services; the small line names how many your helpers used, when any. The first-day view does the same instead of a 0. Measured numbers (times helpers worked) stay. Master design system: no change.
+- insights.html: the Connected services tile says "Not measured yet" (normal text, no big number) while orch cannot see the list of connected services; the small line names how many your helpers used, when any. The first-day view does the same instead of a 0, also for times helpers worked ("No helper runs are recorded here yet"): the record can be empty although helpers worked (ORCH-139). Measured numbers (times helpers worked) stay. Master design system: no change.
