@@ -14,16 +14,17 @@ on:
   # Nightly on develop (the default branch): the mobile suite with UI tests, even when no push ran it to the end.
   schedule:
     - cron: "0 1 * * *"
-# one run per PR: a new push cancels the PR's older run. Pushes to develop/main: one group per branch, a newer push
-# cancels the older run, so only the newest commit is tested and the queue stays short (15 Nov: 24 queued runs). A
-# cancelled push run may have been the one that would have run the mobile UI tests; the nightly schedule run covers
-# that (it runs mobile in full). Schedule and manual runs keep their own group and are never cancelled.
+# one run per PR: a new push cancels the PR's older run. A push to develop is NEVER cancelled (ORCH-314): every
+# develop commit gets a group of its own (its sha) and runs to the end, so "last green develop commit" is a fact the
+# release keeper can read (before, the next merge cancelled the running macOS suite and no develop commit was known
+# green). A group with a cancel-free run still lets a newer PENDING run replace a waiting one, hence one group per sha.
+# Pushes to main keep one group per branch and cancel the older run. Schedule and manual runs keep their own group.
 # A re-run (run_attempt > 1) replays its ORIGINAL event, so it is not news about the PR: it gets a group of its own
 # and cancels nothing. Before, re-running the red job of a draft-time run joined the PR's group and cancelled the real
 # run that marking the PR ready had started (16 Nov, ORCH-7).
 concurrency:
-  group: ci-${{ (github.run_attempt > 1 && format('rerun-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.run_id) }}
-  cancel-in-progress: ${{ github.run_attempt == 1 && (github.event_name == 'pull_request' || github.event_name == 'push') }}
+  group: ci-${{ (github.run_attempt > 1 && format('rerun-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && format('develop-{0}', github.sha)) || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.run_attempt == 1 && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/develop')) }}
 permissions:
   contents: read
 jobs:

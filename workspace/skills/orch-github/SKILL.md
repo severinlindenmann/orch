@@ -88,6 +88,7 @@ One read-only pass over the repository's CI, pull requests and this workspace's 
 **The release keeper (a repeating automation, no AI call)**
 
     orch github release [--dry-run] [--known-red "<job>=<ticket>"]
+    orch github develop-green                # the last develop commit whose checks all passed; releases are cut only from it
     orch github release-hold "<why>"        # stop cutting new releases; off lifts it
     orch github release-deployed relay=<commit>   # after a production deploy: what runs there now
 
