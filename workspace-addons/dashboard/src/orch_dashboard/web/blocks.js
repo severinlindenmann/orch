@@ -357,7 +357,7 @@ const OrchBlocks = (() => {
       for (const r of arr(b.rows)) {
         const tr = el('tr');
         cols.forEach((c, i) => {
-          const td = cell(c, (r.cells || {})[c.key]);
+          const td = cell(c, (r.cells || {})[c.key]); td.dataset.label = c.label || '';
           if (i === 0 && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
             const a = linked('cell-link', r.link, [...td.childNodes]); td.replaceChildren(a);
           }
@@ -365,11 +365,11 @@ const OrchBlocks = (() => {
           tr.append(td);
         });
         if (hasActions) {
-          const td = el('td'), box = el('div', 'row');
+          const td = el('td', 'cell-actions'), box = el('div', 'row');
           for (const a of arr(r.actions)) { const btn = rowButton(a); if (btn) box.append(...openFirst(btn)); }
           td.append(box); tr.append(td);
         }
-        if (hasToggle) { const td = el('td'), sw = r.toggle ? toggleEl(r.toggle) : null; if (sw) td.append(sw); tr.append(td); }
+        if (hasToggle) { const td = el('td', 'cell-toggle'), sw = r.toggle ? toggleEl(r.toggle) : null; if (sw) td.append(sw); tr.append(td); }
         tb.append(tr);
       }
       t.append(tb); wrap.append(t); s.append(wrap);
