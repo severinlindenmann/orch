@@ -63,12 +63,17 @@
 
   /* A task finished by the agent is written twice (orch's own "Check c1 done" and the agent's own note): both read
      "Finished a task: ...". Within two minutes the longer of two equal-or-prefix lines stays, once. Original order kept. */
+  /* ORCH-185: the old and new text of a note edit, when the line carries them ("Edited note (was: ... | now: ...)"). */
+  function historyChange(entry) {
+    const m = /^Edited (note|done_when) \(was: ([\s\S]*) \| now: ([\s\S]*)\)$/.exec(String((entry && entry.text) || '').trim());
+    return m ? {field: m[1], was: m[2], now: m[3]} : null;
+  }
   function dedupeHistory(entries, checklist) {
     const list = Array.isArray(entries) ? entries : [], drop = new Set(), last = [];
     const order = list.map((e, i) => [e, i]).sort((a, b) => (Date.parse(a[0] && a[0].at) || 0) - (Date.parse(b[0] && b[0].at) || 0) || a[1] - b[1]);
     for (const [e] of order) {
       const line = historyLine(e, checklist), at = Date.parse(e && e.at) || 0;
-      const dup = last.find(p => Math.abs(at - p.at) <= 120000 && (p.line === line || line.startsWith(p.line + ':') || p.line.startsWith(line + ':')));
+      const dup = last.find(p => !(historyChange(e) && historyChange(p.e)) && Math.abs(at - p.at) <= 120000 && (p.line === line || line.startsWith(p.line + ':') || p.line.startsWith(line + ':')));
       if (!dup) { last.push({e, line, at}); continue; }
       if (line.length > dup.line.length) { drop.add(dup.e); Object.assign(dup, {e, line, at}); } else drop.add(e);
     }
@@ -99,7 +104,7 @@
     if ((m = /^Moved (c\d+) after c\d+$/.exec(text))) return 'Moved a task' + task(m[1]);
     if ((m = /^Created under (.+)$/.exec(text))) return 'Created under ' + m[1];
     if (/^Created/.test(text)) return /under /.test(text) ? 'Created as a sub-ticket' : 'Ticket created';
-    if ((m = /^Edited (.+)$/.exec(text))) {
+    if ((m = /^Edited ([a-z_, ]+?)(?: \(was: [\s\S]* \| now: [\s\S]*\))?$/.exec(text)) || (m = /^Edited (.+)$/.exec(text))) {
       const parts = m[1].split(/,\s*/).map(f => FIELD_WORD[f.trim()] || f.trim());
       return 'Changed ' + (parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]);
     }
@@ -670,5 +675,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  return {historyChange, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });
