@@ -27,7 +27,7 @@
 <div class="progress-labeled"><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="61" aria-label="Memory"><span style="width:61%"></span></div><div class="progress-text"><span>Memory</span><span>9.8 of 16 GB</span></div></div>
 <div class="progress-labeled"><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="54" aria-label="Disk"><span style="width:54%"></span></div><div class="progress-text"><span>Disk</span><span>108 of 200 GB</span></div></div>
 </div>
-<p class="meta">2 helper jobs running</p>
+<p class="meta">In use by ORCH-181 and ORCH-176 (helpers)</p>
 <div class="row"><button class="btn outline sm" data-dialog="detail">Open</button><button class="btn ghost sm" data-dialog="block">Block</button></div>
 </section>
 
@@ -39,7 +39,7 @@
 <div class="progress-labeled"><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="71" aria-label="Memory"><span style="width:71%"></span></div><div class="progress-text"><span>Memory</span><span>22.7 of 32 GB</span></div></div>
 <div class="progress-labeled"><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="24" aria-label="Disk"><span style="width:24%"></span></div><div class="progress-text"><span>Disk</span><span>41 GB free</span></div></div>
 </div>
-<p class="meta">Only 2 more jobs fit right now</p>
+<p class="meta">In use by ORCH-223 (helper) and you (login 3 min ago)</p>
 <div class="row"><button class="btn outline sm" data-dialog="detail">Open</button><button class="btn ghost sm" data-dialog="block">Block</button></div>
 </section>
 
@@ -81,10 +81,17 @@
 </div>
 
 <section class="card pad panel-stack" aria-label="Machine detail: Production server">
-<header class="row between"><h3>Production server · what it is doing</h3><span class="meta">Checked 2 s ago</span></header>
-<div class="table-wrap"><table class="table"><thead><tr><th>Job</th><th>Ticket</th><th>Started</th><th>Processor</th><th>Memory</th></tr></thead><tbody>
-<tr><td>Build the relay</td><td>ORCH-181</td><td>10 min ago</td><td>22%</td><td>3.1 GB</td></tr>
-<tr><td>Run the slow tests</td><td>ORCH-176</td><td>34 min ago</td><td>14%</td><td>2.4 GB</td></tr>
+<header class="row between"><h3>Production server · who is using it</h3><span class="meta">Checked 2 s ago</span></header>
+<h3>Who is using it now</h3>
+<div class="table-wrap"><table class="table"><thead><tr><th>Who</th><th>Ticket</th><th>What</th><th>Since</th><th>Processor</th><th>Memory</th></tr></thead><tbody>
+<tr><td>Helper (Claude)</td><td>ORCH-181</td><td>Build the relay</td><td>10 min ago</td><td>22%</td><td>3.1 GB</td></tr>
+<tr><td>Helper (Codex)</td><td>ORCH-176</td><td>Run the slow tests</td><td>34 min ago</td><td>14%</td><td>2.4 GB</td></tr>
+<tr><td>Severin</td><td>none</td><td>Logged in by hand</td><td>3 min ago</td><td>1%</td><td>0.2 GB</td></tr>
+</tbody></table></div>
+<h3>Earlier today</h3>
+<div class="table-wrap"><table class="table"><thead><tr><th>Who</th><th>Ticket</th><th>What</th><th>From to</th></tr></thead><tbody>
+<tr><td>Helper (Claude)</td><td>ORCH-170</td><td>Deploy the relay</td><td>08:12 to 08:31</td></tr>
+<tr><td>Helper (Claude)</td><td>ORCH-168</td><td>Read the logs</td><td>07:40 to 07:44</td></tr>
 </tbody></table></div>
 <div class="row"><span class="chip success">Connection works</span><span class="chip success">Can start jobs</span><span class="chip success">Files copy over</span><span class="chip attn">Disk over half full</span></div>
 </section>
