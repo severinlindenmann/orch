@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from orch import health, history, net, nextstep, renew, tickets
+from orch.errors import Refused
 
 NONE_SET = "Nothing here tells orch whether it works."
 
@@ -87,6 +88,13 @@ def _stdin_line() -> str:
     return sys.stdin.read(4096).strip()
 
 
+def _hidden(prompt: str) -> str:
+    """A person at a terminal: the value is typed hidden, never shown or kept in the shell history."""
+    import getpass
+
+    return getpass.getpass(prompt, stream=sys.stderr)
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "logins":
         return False
@@ -94,10 +102,17 @@ def dispatch(args, root: Path) -> bool:
     if action == "renew":
         if args.worker:
             raise SystemExit(renew.work(root, args.name))
-        by = tickets.acting_by(args)  # renew.person_only refuses an agent and a helper run on every path
+        by = tickets.acting_by(
+            args
+        )  # renew.person_only: a dashboard grant or a person at a terminal, else refused
         if args.code is not None:
-            renew.person_only(by)  # before anything is read from stdin
-            st = renew.code(root, args.name, _stdin_line() if args.code == "-" else args.code, by=by)
+            how = renew.person_only(root, by)  # before anything is read
+            if args.code != "-":
+                raise Refused(
+                    "Paste the code when asked, not on the command line: orch logins renew <name> --code -"
+                )
+            text = _hidden("Code from the sign-in page: ") if how == "terminal" else _stdin_line()
+            st = renew.code(root, args.name, text, by=by)
         elif args.status:
             st = renew.status(root, args.name, by=by)
         elif args.cancel:
@@ -108,8 +123,9 @@ def dispatch(args, root: Path) -> bool:
         return True
     if action == "replace":
         by = tickets.acting_by(args)
-        renew.person_only(by)  # before the value is read
-        res = renew.replace_key(root, args.name, sys.stdin.read(), by=by)
+        how = renew.person_only(root, by)  # before the value is read
+        value = _hidden("New key (hidden while you type): ") if how == "terminal" else sys.stdin.read(65537)
+        res = renew.replace_key(root, args.name, value, by=by)
         ok = res["state"] in ("works", "soon")
         text = "The new key is in and works." if ok else "The new key is in, but the check still fails."
         if res.get("went_on"):

@@ -1371,7 +1371,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             text=True,
             timeout=_op_timeout(op, args),
             stdin=subprocess.DEVNULL,
-            env=human_env(root, orch_bin),
+            env=_person_env(root, orch_bin, op, session),
         )
     except subprocess.TimeoutExpired:
         if op == "addon.set" and args.get("on") is True:  # the install may still finish on its own
@@ -1464,6 +1464,27 @@ def _logins_cancel(a):
     return ["logins", "renew", _login_name(a)], ["--cancel"], []
 
 
+PERSON_GRANT_OPS = frozenset(
+    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
+)
+
+
+def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> dict:
+    """The person's environment for one orch call; for Renew/Replace with a one-time grant that only a signed-in
+    page session gets (orch.renew.person_only refuses these calls without it, whatever --by says)."""
+    env = human_env(root, orch_bin)
+    if op in PERSON_GRANT_OPS:
+        if not session:
+            raise NeedsPerson(SIGNIN)
+        from orch import renew
+
+        try:
+            env[renew.GRANT_ENV] = renew.grant(root)
+        except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
+            raise Unavailable("orch cannot renew logins in this workspace.") from None
+    return env
+
+
 LOGIN_INPUT_OPS = {  # op: (argv after the name, what the value is called in a refusal)
     "logins.code": (["--code", "-"], "code"),
     "logins.replace": ([], "key"),
@@ -1495,7 +1516,7 @@ def login_input(
             text=True,
             input=value,
             timeout=90,
-            env=human_env(root, orch_bin),
+            env=_person_env(root, orch_bin, op, session),
         )
     except subprocess.TimeoutExpired:
         return 504, "That took too long. Please try again.", None

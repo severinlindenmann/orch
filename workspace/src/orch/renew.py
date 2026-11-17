@@ -40,6 +40,7 @@ import secrets
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -60,18 +61,68 @@ _NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 _BUF = 16384  # bytes of the tool's output looked at for the link; the rest is dropped unread
 BY = "orch"
 TOKEN_ENV = "ORCH_RENEW_TOKEN"  # the one-time token a person's start hands its worker
+GRANT_ENV = "ORCH_PERSON_GRANT"  # the one-time grant the dashboard's signed-in session hands one orch call
+GRANT_LIFE = 120  # seconds a grant stays good
 RUN_MARKS = ("ORCH_RUN", "ORCH_TICKET", "ORCH_JOB", "ORCH_AGENT")  # set inside a helper run
 PERSON_ONLY = (
-    "Only a person renews a login or replaces a key. Ask the person to press Renew or Replace on the warning."
+    "Only a person renews a login or replaces a key: press Renew or Replace on the warning, "
+    "or run it yourself in a terminal."
 )
+_GRANTED: set[str] = set()  # workspaces this process was granted for (one grant serves one orch call)
 
 
-def person_only(by: str | None = None) -> None:
-    """THE person check for renewing a login, pasting a code and replacing a key, on every path (the
-    dashboard runs orch with a person's environment and --by human:<name>; a helper's command has its tool's
-    environment and the run's ORCH_* marks). Refused for an agent actor or inside a helper run."""
+def person_only(root: Path, by: str | None = None) -> str:
+    """THE person check for renewing a login, pasting a code and replacing a key, on every path. Returns how
+    the person is here: "grant" (the dashboard's signed-in session handed this call a one-time grant kept in
+    the guarded orch home, see grant) or "terminal" (a person at a real terminal; values are asked hidden).
+    Refused for an agent actor, an agent tool's environment, a process inside a helper run, and every other
+    call: a piped or scripted call without a grant, whatever its --by says."""
     if (by or "").startswith("agent:") or tickets.agent_tool() or any(os.environ.get(k) for k in RUN_MARKS):
         raise Refused(PERSON_ONLY)
+    key = str(Path(root).resolve())
+    if key in _GRANTED or _take_grant(root):
+        _GRANTED.add(key)
+        return "grant"
+    from orch import term
+
+    if term.is_terminal(sys.stdin) and term.is_terminal(sys.stderr):
+        return "terminal"
+    raise Refused(PERSON_ONLY)
+
+
+def _grants(root: Path) -> Path:
+    from orch import home as orch_home
+
+    d = orch_home.key_dir(Path(root)) / "renew" / "grants"
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return d
+
+
+def grant(root: Path) -> str:
+    """A one-time grant for ONE orch call, for the dashboard after it checked the person's page session.
+    Only its hash is kept, in the guarded orch home; old ones are cleared."""
+    d = _grants(root)
+    now = time.time()
+    for f in d.iterdir():
+        with contextlib.suppress(OSError):
+            if now - f.stat().st_mtime > GRANT_LIFE:
+                f.unlink()
+    token = secrets.token_urlsafe(24)
+    os.close(os.open(d / _hash(token), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    return token
+
+
+def _take_grant(root: Path) -> bool:
+    token = os.environ.pop(GRANT_ENV, "")
+    if not token or len(token) > 100:
+        return False
+    try:
+        f = _grants(root) / _hash(token)
+        fresh = time.time() - f.stat().st_mtime <= GRANT_LIFE
+        f.unlink()  # used up, fresh or not
+    except (OSError, Refused):
+        return False
+    return fresh
 
 
 def _now() -> str:
@@ -147,7 +198,7 @@ def status(root: Path, name: str, by: str | None = None) -> dict:
     """The renew state for the page: {name, state, link?, ends_at?, went_on?}. A worker that stopped beating
     before it finished reads as failed. The link is checked against the adapter's allowed starts again here,
     where it leaves for the page: one that does not pass is never shown."""
-    person_only(by)
+    person_only(root, by)
     return _status(root, name)
 
 
@@ -167,7 +218,7 @@ def _status(root: Path, name: str) -> dict:
 def start(root: Path, name: str, by: str | None = None) -> dict:
     """Start the tool's own sign-in in a background worker (one per login). A sign-in still running from an
     earlier Renew is ended first."""
-    person_only(by)
+    person_only(root, by)
     s = spec(root, name)
     if not s:
         raise Refused("orch cannot start this sign-in. Sign in again with the tool itself, then check again.")
@@ -236,7 +287,7 @@ def _start_lock(root: Path, name: str):
 def code(root: Path, name: str, text: str, by: str | None = None) -> dict:
     """Pass the code the sign-in page shows to the waiting tool. Kept nowhere: the worker removes the file
     before it writes the code to the tool's input."""
-    person_only(by)
+    person_only(root, by)
     text = (text or "").strip()
     if not _CODE.fullmatch(text):
         raise Refused("That does not look like the code from the sign-in page. Copy it again and paste it.")
@@ -256,7 +307,7 @@ def code(root: Path, name: str, text: str, by: str | None = None) -> dict:
 
 def cancel(root: Path, name: str, by: str | None = None) -> dict:
     """The person closed the window: the worker ends the tool."""
-    person_only(by)
+    person_only(root, by)
     doc = _read(root, name)
     if _alive(doc):
         (_dir(root, name) / "stop").touch()
@@ -269,7 +320,7 @@ def replace_key(root: Path, name: str, value: str, by: str | None = None) -> dic
     name comes ONLY from the person's own recipes in the guarded orch home, never from a saved result."""
     from orch import keystore
 
-    person_only(by)
+    person_only(root, by)
     value = (value or "").strip()  # a pasted key often brings a space or a line end along
     row = next((r for r in health.workspace_recipes(root) if r["name"] == name), None)
     key = (row or {}).get("key")

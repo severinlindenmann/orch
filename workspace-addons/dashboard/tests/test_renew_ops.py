@@ -7,6 +7,21 @@ import pytest
 from orch_dashboard import actions, server
 
 
+@pytest.fixture
+def ws(ws, tmp_path, monkeypatch):
+    """The workspace where a guarded orch home pairs with it (the person grant is kept there)."""
+    import shutil
+    from pathlib import Path
+
+    from orch import addons
+
+    acct = tmp_path / "acct"
+    (acct / ".orch-test" / "home").mkdir(parents=True)
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))
+    return Path(shutil.copytree(ws, acct / ".orch-test" / ws.name))
+
+
 def test_renew_status_cancel_build_one_fixed_argv():
     assert actions.build_argv("logins.renew", {"name": "claude"})[:3] == ["logins", "renew", "claude"]
     assert actions.build_argv("logins.status", {"name": "claude"})[:4] == [
@@ -51,6 +66,9 @@ def test_code_and_key_go_on_stdin_only(ws, monkeypatch, op, words):
     i = seen["argv"].index("logins")
     assert seen["argv"][i : i + len(words)] == words
     assert secret not in json.dumps(seen["argv"]) and seen["kw"]["input"] == secret
+    from orch import renew
+
+    assert seen["kw"]["env"].get(renew.GRANT_ENV)  # a one-time person grant goes with the call
 
 
 @pytest.mark.parametrize(
@@ -118,3 +136,18 @@ def test_a_key_is_never_in_the_audit_or_the_request_log(ws, monkeypatch, capsys)
     actions.run_op(ws, SELF, "logins.replace", {"name": "payments", "value": secret}, session=True)
     cap = capsys.readouterr()
     assert secret not in cap.out + cap.err
+
+
+def test_the_status_poll_carries_a_grant_and_only_with_a_session(ws, monkeypatch):
+    from orch import renew
+    from orch.pagesession import SELF
+
+    seen = {}
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: seen.update(env=kw["env"]) or _R())
+    with pytest.raises(actions.NeedsPerson):
+        actions.run_op(ws, SELF, "logins.status", {"name": "claude"})
+    assert seen == {}
+    actions.run_op(ws, SELF, "logins.status", {"name": "claude"}, session=True)
+    assert seen["env"].get(renew.GRANT_ENV)
+    actions.run_op(ws, SELF, "logins.check", {}, session=True)
+    assert renew.GRANT_ENV not in seen["env"]  # a plain check needs no grant

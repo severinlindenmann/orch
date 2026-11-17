@@ -26,6 +26,12 @@ def _tool(tmp_path, body: str):
     return p
 
 
+@pytest.fixture(autouse=True)
+def person(proj, monkeypatch):
+    """These tests act as the person (as if the dashboard's signed-in session granted the call)."""
+    monkeypatch.setattr(renew, "_GRANTED", {str(proj.resolve())})
+
+
 @pytest.fixture
 def fake(proj, tmp_path, monkeypatch):
     """renew.spec points at a fake sign-in that prints a link and other text, then reads one line."""
@@ -544,3 +550,75 @@ def test_a_key_is_stripped_before_it_is_kept(proj, monkeypatch):
     monkeypatch.setattr(renew, "after", lambda root, name: {"state": "works", "ends_at": None, "went_on": []})
     renew.replace_key(proj, "payments", "  new-key-value \n")
     assert seen == ["new-key-value"]
+
+
+def test_a_piped_call_without_a_grant_is_refused_whatever_by_says(proj, run, monkeypatch):
+    """A helper that clears its environment and says --by human:x is still refused: the person is either
+    granted by the dashboard's signed-in session or sits at a real terminal."""
+    monkeypatch.setattr(renew, "_GRANTED", set())
+    for k in ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_JOB", "CLAUDECODE"):
+        monkeypatch.delenv(k, raising=False)
+    stdin = io.StringIO("attacker-value-123\n")
+    monkeypatch.setattr(sys, "stdin", stdin)
+    for argv in (
+        ["renew", "claude"],
+        ["renew", "claude", "--status"],
+        ["renew", "claude", "--code", "-"],
+        ["replace", "payments"],
+    ):
+        code, out, err = run("logins", *argv, "--by", "human:owner")
+        assert code == 2 and "Only a person" in out + err, argv
+    assert stdin.tell() == 0
+    with pytest.raises(Refused, match="Only a person"):
+        renew.person_only(proj, "human:owner")
+
+
+def test_a_grant_serves_once(proj, monkeypatch):
+    monkeypatch.setattr(renew, "_GRANTED", set())
+    token = renew.grant(proj)
+    assert len(list(renew._grants(proj).iterdir())) == 1 and token not in "".join(
+        p.name for p in renew._grants(proj).iterdir()
+    )  # only its hash is kept
+    monkeypatch.setenv(renew.GRANT_ENV, token)
+    assert renew.person_only(proj, "human:owner") == "grant"
+    assert renew.GRANT_ENV not in os.environ and not list(renew._grants(proj).iterdir())
+    monkeypatch.setattr(renew, "_GRANTED", set())
+    monkeypatch.setenv(renew.GRANT_ENV, token)  # the same grant again
+    with pytest.raises(Refused):
+        renew.person_only(proj, "human:owner")
+    monkeypatch.setenv(renew.GRANT_ENV, "made-up")
+    with pytest.raises(Refused):
+        renew.person_only(proj, "human:owner")
+
+
+def test_an_old_grant_is_refused(proj, monkeypatch):
+    monkeypatch.setattr(renew, "_GRANTED", set())
+    token = renew.grant(proj)
+    f = renew._grants(proj) / renew._hash(token)
+    old = time.time() - renew.GRANT_LIFE - 5
+    os.utime(f, (old, old))
+    monkeypatch.setenv(renew.GRANT_ENV, token)
+    with pytest.raises(Refused):
+        renew.person_only(proj, "human:owner")
+
+
+def test_a_person_at_a_terminal_types_the_key_hidden(proj, run, monkeypatch):
+    from orch import term
+
+    monkeypatch.setattr(renew, "_GRANTED", set())
+    keystore.record_write(
+        proj, "checks", {"checks": {"payments": {"label": "Payments key", "command": ["pay"], "key": "PAY"}}}
+    )
+    keystore.add(proj, "PAY", "token", "old-value-123")
+    monkeypatch.setattr(term, "is_terminal", lambda stream: True)
+    asked = []
+    import getpass
+
+    monkeypatch.setattr(
+        getpass, "getpass", lambda prompt, stream=None: asked.append(prompt) or "typed-value-456"
+    )
+    monkeypatch.setattr(renew, "after", lambda root, name: {"state": "works", "ends_at": None, "went_on": []})
+    code, out, err = run("logins", "replace", "payments")
+    assert code == 0, err
+    assert asked == ["New key (hidden while you type): "] and "typed-value" not in out + err
+    assert keystore.get_value(proj, "PAY") == "typed-value-456"
