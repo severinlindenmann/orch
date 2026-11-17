@@ -59,9 +59,7 @@ def ask(
             f"'{kind}' is not a kind of work. Pick from: " + ", ".join(store.KIND_WORDS.values()) + "."
         )
     if provider is not None and provider not in store.PROVIDERS:
-        raise store.Refused(
-            "Usage counts API credits of Claude API (anthropic) and OpenAI (openai) only."
-        )
+        raise store.Refused("Usage counts API credits of Claude API (anthropic) and OpenAI (openai) only.")
     word = store.KIND_WORDS[kind]
     with store.change(root) as (accounts, rows):
         store.expire(accounts, rows, at)

@@ -69,7 +69,8 @@
       const timer = setTimeout(() => finish({ok: false, error: 'The dashboard did not answer. Reload the page and try again.'}), 30000);
       function finish(r) { clearTimeout(timer); asked.delete(id); resolve(r); }
       asked.set(id, finish);
-      window.parent.postMessage({type: 'orch.act', id, verb, target}, location.origin);
+      // the dashboard's per-frame code (kit/frame.js, ORCH-186): the page runs in a sandboxed frame
+      window.parent.postMessage({type: 'orch.act', id, verb, target, chan: (window.OrchFrame || {}).chan}, location.origin);
     });
   }
   function say(text, kind) {

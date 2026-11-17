@@ -196,6 +196,18 @@ def test_no_room_waits_with_one_warning_and_one_needs_row(cli, fake_switcher, ws
     assert store.history(ws)[0]["what"] == "room again for Helpers"
 
 
+def test_a_weekly_limit_reached_waits_for_the_weekly_reset(cli, fake_switcher, ws):
+    # ORCH-307: the owner's 17 Nov rule (one subscription up to 100 % weekly) at its limit. The 5-hour window has
+    # room and resets first; waking then would only hold the start again.
+    fake_switcher.answer(switcher_data(first=(50.0, 100.0), second=(0.0, 10.0), third=(0.0, 10.0)))
+    jrun(cli, "list")
+    jrun(cli, "off", "second")
+    jrun(cli, "off", "TEAMCO")
+    ans = routing.decide(ws, req())
+    assert ans["go"] is False and ans["until"] == "2026-11-18T19:59:59Z"
+    assert ans["why"].startswith("No room for Helpers: first: week 100% of 100%")
+
+
 def _tool_account(ws, tool="tool-x", kinds=("code",)):
     p = ws / ".orch/addons/usage/accounts.json"
     data = json.loads(p.read_text())

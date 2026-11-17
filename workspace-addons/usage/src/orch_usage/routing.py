@@ -94,14 +94,28 @@ def _next(lim: dict, at: datetime) -> str | None:
 
 
 def _sub_resets(c: switching.Candidate) -> str | None:
-    times = [w.resets_at for w in c.use.windows.values() if w.resets_at]
-    norm = []
-    for t in times:
-        try:
-            norm.append(datetime.fromisoformat(t).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
-        except ValueError:
-            continue
-    return min(norm) if norm else None
+    """When the subscription has room again: the last reset of the windows at their limit (a weekly limit reached
+    waits for the weekly reset, not the next 5-hour one); none at a limit yet (only near it): the first reset."""
+    limits = dict(switching._limits(c.account))
+
+    def norm(ws):
+        out = []
+        for w in ws:
+            try:
+                out.append(datetime.fromisoformat(w.resets_at).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    reached = norm(
+        w
+        for name, w in c.use.windows.items()
+        if w.resets_at and w.pct is not None and name in limits and w.pct >= limits[name]
+    )
+    if reached:
+        return max(reached)
+    every = norm(w for w in c.use.windows.values() if w.resets_at)
+    return min(every) if every else None
 
 
 def _words_time(iso: str) -> str:

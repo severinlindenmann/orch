@@ -1,9 +1,11 @@
 """The Usage page: its model (GET /api/page), the clicks (`orch usage act`) and the page server's fence."""
 
 import json
+import re
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 from conftest import jrun, switcher_data
@@ -208,6 +210,17 @@ def test_server_serves_page_model_and_kit_only(served):
     assert _get(served, "/web/usage.js")[0] == 200
     assert _get(served, "/web/../server.py")[0] == 404
     assert _get(served, "/kit/gallery.html")[0] == 404
+
+
+def test_page_runs_in_the_dashboards_sandboxed_frame(served):
+    # ORCH-307: the dashboard shows pages orch ships in a sandboxed frame (ORCH-186). Without kit/frame.js, loaded
+    # before any other script, the page's own data call is refused there and the page shows "Failed to fetch".
+    code, body, _ = _get(served, "/", {"X-Forwarded-Prefix": "/addon/usage"})
+    scripts = re.findall(rb'<script src="([^"]+)"', body)
+    assert code == 200 and scripts[0] == b"/addon/usage/kit/frame.js"
+    assert _get(served, "/kit/frame.js")[0] == 200
+    js = (Path(page.__file__).parent / "web" / "usage.js").read_text(encoding="utf-8")
+    assert "type: 'orch.act', id, verb, target, chan: (window.OrchFrame || {}).chan" in js
 
 
 def test_server_only_reads_and_proves_its_start(served):
