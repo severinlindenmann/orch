@@ -712,6 +712,7 @@ test('ORCH-158: the edit button has a name, and a long note opens whole', () => 
   assert.match(ticket, /Shift\+Enter new line'\s*:\s*'Click to change'/);
   assert.match(ticket, /input\.rows = Math\.min\(20, Math\.max\(3,/);
   assert.match(ticket, /input\.addEventListener\('input', grow\)/);
+});
 
 test('ORCH-185: a sub-ticket shown as its own card in the column is not also listed inside its parent card', () => {
   const items = [{id:'p', key:'PIL-2', title:'Parent', status:'open'}, {id:'a', key:'PIL-10', title:'First', parent:'p', status:'open'},
