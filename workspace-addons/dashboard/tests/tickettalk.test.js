@@ -13,7 +13,7 @@ const plain = v => JSON.parse(JSON.stringify(v));
 function setup({status = 'active', alive = true, snapshot = false, results = {}} = {}) {
   const acts = [];
   const tickets = [{id:'t_talk0001', title:'Fix the toolbar', status}];
-  const ctx = {snapshot, mounts:new Map(), state:{runs:{t_talk0001:{running:alive}}}, array:v => Array.isArray(v) ? v : [],
+  const ctx = {snapshot, mounts:new Map(), artifactData:new Map(), state:{runs:{t_talk0001:{running:alive}}}, array:v => Array.isArray(v) ? v : [],
     ticketOf:id => tickets.find(t => t.id === id), render(){},
     h:(tag, attrs, ...kids) => ({tag, attrs, kids}),
     act:async (op, args) => {

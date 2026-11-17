@@ -1121,6 +1121,7 @@ async function ticketTalkSend(tid, message) {
   if (files.length) {
     const added = await act('ticket.attach', {ticket:tid, files:files.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)}))});
     if (!added.ok) return {ok:false, text:talkFailed(added)};
+    artifactData.delete(tid);  // the Files tab counts the new files on the next draw
   }
   const text = ticketTalkText(message.text, files.map(f => f.name));
   const partial = r => ({ok:false, dropFiles:files.length > 0, text:(files.length ? 'The files are on the ticket, but the helper was not told: ' : '') + talkFailed(r)});
