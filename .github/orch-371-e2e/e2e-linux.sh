@@ -8,7 +8,7 @@ export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 R=$(mktemp -d); W=$R/ws/svc-walk; mkdir -p "$W" "$R/home"
 if [ "$MODE" = sealed ]; then H=$R/home; else H=$HOME; fi
-OH=$R/orch-tool   # orch's own folder is always sealed
+OH=$(mktemp -d "$H/.orch-test-XXXX")/orch-tool   # orch's own folder is always sealed (must be under HOME)
 UVH=$R/uv
 E() {
   (cd "$W" && env -i HOME="$H" ORCH_HOME="$OH" ORCH_HOME_STRICT=1 ORCH_INSTALL_KIND=test ORCH_REF="$SHA" \
