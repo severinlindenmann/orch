@@ -1477,6 +1477,15 @@ def test_review_answer_argv_and_via(act_server, act_orch):
     assert "--by" not in a and "--proof-stdin" not in a
 
 
+def test_review_answer_text_option_with_spaces(act_server, act_orch):
+    label = "After update and rules change"  # a plain-text Choose option: the label is its id
+    args = {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "picked": label, "digest": D64}
+    code, text, _ = post(act_server, {"op": "review.answer", "args": args})
+    assert code == 200, text
+    a = acts(act_orch)[-1]
+    assert a[a.index("--picked") + 1] == label
+
+
 @pytest.mark.parametrize(
     "args",
     [
@@ -1484,7 +1493,9 @@ def test_review_answer_argv_and_via(act_server, act_orch):
         {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": "x"},
         {"ticket": "t_abcdef", "key": "q1; ls", "verdict": "ok", "digest": D64},
         {"ticket": "t_abcdef", "key": "q1", "verdict": "yes", "digest": D64},
-        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "C; rm"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "-C"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "a\nb"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "x" * 201},
         {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "note": "text"},
         {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "note": {"text": "x" * 9000}},
         {"ticket": "../x", "key": "q1", "verdict": "ok", "digest": D64},
