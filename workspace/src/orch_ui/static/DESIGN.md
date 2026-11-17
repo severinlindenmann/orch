@@ -6,7 +6,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 
 1. Build on the master. Use existing components and tokens; never write a page-local look, a copied kit file or a new "system" sheet.
 2. Need something missing? Add it here first: (a) the component in `widgets.css` / `widgets.js` (or the file it belongs to), (b) an entry in `gallery.html` / `gallery.js` with its states (default, loading, empty, error where they apply), (c) a test in `workspace/tests/test_orch_ui_kit.py` if it adds a file, then use it from the page.
-3. Mockup pages link these files by relative path (`../../../../workspace/src/orch_ui/static/...`); the mockup folder keeps no stylesheet of its own.
+3. Mockup pages link these files by relative path (`../../../../workspace/src/orch_ui/static/...`); the mockup folder keeps no stylesheet of its own One exception (owner 17 Nov, ORCH-267): a draft that needs new looks keeps them in one `draft.css` in its own draft folder (`mockup/<area>/draft-<ticket>/`), tokens only, every rule under the draft's own body class; product pages never link it. When the owner picks, the chosen looks move into the master (`widgets.css` plus a gallery entry) and every draft folder of that round is deleted in the same pull request. Never write draft rules into `mockup.css` or `widgets.css`.
 4. Owner wording rules: one click, no typed words; minimal plain words; no "Details" / "Technical details" toggles (show the detail plainly lower down); no "NetBird" (say "private network"). Old reference examples below that show a Details disclosure are legacy and must not be copied.
 5. Never change tokens in a page. Colour and size tokens come from `brand/tokens.json` via `brand/gen_tokens.py` (`tokens.css` is generated).
 
