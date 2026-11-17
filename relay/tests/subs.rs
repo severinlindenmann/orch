@@ -1136,3 +1136,49 @@ async fn push_checks_the_scope_again_before_each_delivery() {
     let texts: Vec<&str> = got.iter().map(|e| e["text"].as_str().unwrap()).collect();
     assert_eq!(texts, vec!["a0", "a1", "a2", "a3", "a4"]);
 }
+
+#[tokio::test]
+async fn a_question_the_workspace_closes_is_a_closed_event_and_no_longer_answerable() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let s = add_sub(
+        &t,
+        json!({"name": "Night monitor", "workspaces": [a.id], "can_answer": true}),
+    )
+    .await;
+    let u = add_sub(
+        &t,
+        json!({"name": "Updates only", "workspaces": [a.id], "kinds": {"questions": false}}),
+    )
+    .await;
+    let q = question(&t, &a).await;
+    let m = json!({"schema": "orch.msg/1", "id": mid(), "from": a.id, "to": "phones", "type": "text",
+        "created_at": "2026-11-06T09:45:00Z", "ticket": "t_7k3f9q", "key": "DM1-12", "reply_to": q,
+        "body": {"text": "Taken back: Answered in orch", "taken_back": {"reason": "Answered in orch"}}});
+    let (st, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
+    assert_eq!(st, 201, "{v}");
+    let (st, v) = events(&t, &s, "").await;
+    assert_eq!(st, 200, "{v}");
+    let items = v["items"].as_array().unwrap();
+    let qe = items.iter().find(|e| e["type"] == "question").unwrap();
+    assert_eq!(qe["answerable"], false, "{qe}");
+    let ce = items.iter().find(|e| e["type"] == "closed").unwrap();
+    assert_eq!(ce["question_id"], q.as_str());
+    assert_eq!(ce["reason"], "Answered in orch");
+    assert!(
+        !items.iter().any(|e| e["type"] == "text"),
+        "the close is not also a text: {v}"
+    );
+    let sc = schema();
+    assert!(sc.is_valid(ce), "{ce}");
+    // Without Questions the close is left out, like the question itself.
+    let (_, v) = events(&t, &u, "").await;
+    assert!(
+        !v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["type"] == "closed"),
+        "{v}"
+    );
+}
