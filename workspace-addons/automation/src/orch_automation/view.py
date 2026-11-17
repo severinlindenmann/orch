@@ -30,7 +30,11 @@ SCAN = 7 * 1440 + 1  # at most one run per minute for a week
 
 
 def clean(s: object, n: int = 80) -> str:
-    out = "".join(c for c in str(s) if c not in "<>").strip()[:n]
+    out = "".join(c for c in str(s) if c not in "<>").strip()
+    if len(out) > n:  # cut at a whole word and say so, never in the middle of one
+        cut = out[: n - 1]
+        head = cut if out[n - 1].isspace() or len(cut.split()) < 2 else cut.rsplit(None, 1)[0]
+        out = head.rstrip(" ,;:.-\u2013\u2014") + "\u2026"
     return out or "-"
 
 

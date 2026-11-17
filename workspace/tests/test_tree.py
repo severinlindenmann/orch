@@ -39,7 +39,7 @@ def test_show_counts_and_part_of(proj, run):
     for k in kids[:2]:
         run("ticket", "status", k, "dropped")
     assert "Sub-tickets: 2 of 4 closed" in run("ticket", "show", p)[1]
-    assert f"Step of: Quarter close ({p})" in run("ticket", "show", kids[0])[1]
+    assert f"Sub-ticket of: Quarter close ({p})" in run("ticket", "show", kids[0])[1]
 
 
 def test_list_json_children_and_missing_parent(proj, run):
@@ -53,7 +53,7 @@ def test_list_json_children_and_missing_parent(proj, run):
     (proj / ".orch" / "tickets" / f"{p}.json").unlink()
     text = run("ticket", "list")[1]
     assert "B" in text and "parent missing" in text
-    assert f"Step of: {p} (parent missing)" in run("ticket", "show", tickets.list_all(proj)[0]["id"])[1]
+    assert f"Sub-ticket of: {p} (parent missing)" in run("ticket", "show", tickets.list_all(proj)[0]["id"])[1]
 
 
 def test_tree(proj, run):

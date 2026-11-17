@@ -544,3 +544,13 @@ def test_clip_ends_at_a_word_with_an_ellipsis():
     assert long.startswith(out[:-1]) and long[len(out) - 1] == " "
     assert clip("Short title") == "Short title"
     assert clip("x" * 100) == "x" * 79 + "…"
+
+
+def test_long_calendar_titles_end_at_a_whole_word_with_an_ellipsis():
+    from orch_automation.view import clean
+
+    long = "Usage stage 1: test with owner's rules, screenshots, one-day side by side with the old page"
+    out = clean(long)
+    assert out.endswith("…") and len(out) <= 80 and long.startswith(out[:-1])
+    assert long[len(out) - 1] == " "
+    assert clean("Weekly report") == "Weekly report"
