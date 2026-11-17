@@ -5,12 +5,13 @@ step changed a file and every page request rebuilt the whole state). A change st
 open pages are told "changed" (Revisions.publish) only when the new copy is stored, so the answer they then fetch
 already holds it."""
 
+import hashlib
 import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .data import load_state
+from .data import load_state, start_line
 
 MAX_AGE = 2.0  # without a revision watcher the copy is this old at most
 # with a watcher: a poll that changed nothing costs no process; time-based values refresh this often
@@ -69,6 +70,11 @@ class StateCache:
             if note != state["auto_update_note"]:
                 out["auto_update_note"] = note
                 out["rev"] = f"{state.get('rev', '')}-u{note['at'] if note else 0}"
+        if state.get("start_line"):  # why the line does not move changes with the load, not with a file
+            line = start_line(self.root)
+            if line != state["start_line"]:
+                out["start_line"] = line
+                out["rev"] = f"{out.get('rev', '')}-l{hashlib.sha1(repr(line).encode()).hexdigest()[:8]}"
         return out, max(0.0, age)
 
     def get(self) -> tuple[dict, float]:

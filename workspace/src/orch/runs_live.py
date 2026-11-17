@@ -1815,6 +1815,22 @@ def start_waiting(root: Path) -> list[str]:
     return started
 
 
+def line_status(root: Path) -> dict | None:
+    """For Home (ORCH-266): the tickets waiting in line and why none starts now, or None when nothing waits.
+    {"waiting": [ticket ids in start order], "why": plain reason or None, "limit": the helper limit when
+    that is what holds them}. The short pause between two starts is not a reason: it passes within seconds."""
+    waiting = [tid for tid, _ in waiting_line(root)]
+    if not waiting:
+        return None
+    from orch import limitstop
+
+    why, limit = _pressure(root) or limitstop.held_words(root), None
+    if why is None:
+        limit = _full(root)
+        why = f"{limit} helpers are working at once, the most you allowed" if limit else None
+    return {"waiting": waiting, "why": why, "limit": limit}
+
+
 def hold_text(rec: dict) -> str | None:
     """The plain reason a live run waits before orch types into its window, or None when nothing holds it."""
     return HOLD_WORDS.get((rec.get("hold") or {}).get("why"))

@@ -438,6 +438,7 @@ function render(arrived = new Set()) {
     main.querySelectorAll('[data-need-row]').forEach(row => { if (arrived.has(row.dataset.needRow)) window.orch.needsIn(row); });
   }
   if (changed) window.orch.enter(main);
+  window.paintLiveBar?.();  // the live bar under every page while the Preview switch is on (pages/livebar.js)
   renderedRoute = r.hash;
   if (!active?.isConnected && activeKey && !document.querySelector('dialog[open]')) {
     [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
