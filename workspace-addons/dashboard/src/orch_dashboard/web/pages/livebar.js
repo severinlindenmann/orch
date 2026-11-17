@@ -4,7 +4,7 @@
 // wraps: when the row is too narrow it folds step by step into counts (kit .lbar, data-fold). The dashboard names no
 // add-on: the live page is found by its live_session capability (pages/live.js).
 //
-// Data: the helpers of the state API (runs + tickets, the same one state word as Home). Pinning is not stored by orch
+// Data: the live sessions API (pages/livesessions.js, window.LiveSessions; ORCH-359). Pinning is not stored by orch
 // yet (the wall builds it): until then the pinned ids are read from this browser only (LIVEBAR_PINS).
 //
 // Mount: the bar is one element (#live-bar). It goes into the dashboard's keep place ([data-keep], the mount point that
@@ -22,25 +22,9 @@ const LIVEBAR_LISTS = {
 };
 const LIVEBAR_SEARCH_FROM = 9;  // a list this long gets a search box (draft D)
 
-// One session per ticket with a helper: {id, key, title, s: wait|run|queue|idle, word, pin}. helperState is the
-// dashboard's one state word (helpers.js); a run that waits for a free place (hold) is "in line".
-function liveBarModel(tickets, runs, pins, helperState) {
-  const pinned = new Set(Array.isArray(pins) ? pins : []), out = [];
-  for (const t of Array.isArray(tickets) ? tickets : []) {
-    if (!t || !t.id || t.status === 'dropped') continue;
-    const run = runs && runs[t.id], hs = run ? helperState(run, t) : null;
-    let s = null, word = '';
-    if (hs) {
-      s = hs.state === 'you' ? 'wait' : hs.state === 'idle' ? 'idle' : hs.state === 'waiting' ? 'queue' : 'run';
-      word = s === 'wait' ? 'Needs you' : s === 'queue' ? 'In line' : hs.word;
-    } else if (run && run.hold) { s = 'queue'; word = 'In line'; }
-    if (!s) continue;
-    out.push({id:String(t.id), key:typeof t.key === 'string' ? t.key : '', title:String(t.title || ''), s, word, pin:pinned.has(String(t.id))});
-  }
-  const rank = {wait:0, run:1, queue:2, idle:3};
-  out.sort((a, b) => rank[a.s] - rank[b.s] || (b.pin ? 1 : 0) - (a.pin ? 1 : 0));
-  return out;
-}
+// One row per live session: {id, key, title, s: wait|run|queue|idle, word, pin}, from the live sessions API
+// (pages/livesessions.js, ORCH-359): the same list the panes and the wall read.
+const liveBarModel = typeof liveBarRows === 'function' ? liveBarRows : require('./livesessions.js').liveBarRows;
 // Which sessions a list (or a chip group) holds. Needs you wins over pinned; pinned is taken out of the counts.
 function liveBarIn(o, l) {
   const w = o.s === 'wait';
@@ -60,6 +44,7 @@ if (typeof module === 'object' && module.exports) {
   (() => {
     const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0};
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
+    const sessions = () => window.LiveSessions?.list || [];
     const pins = () => { try { return JSON.parse(localStorage.getItem(LIVEBAR_PINS) || '[]'); } catch (e) { return []; } };
     const phone = () => window.matchMedia('(max-width: 720px)').matches;
     const link = (a, o) => '#addon/' + encodeURIComponent(a.name) + '/t/' + encodeURIComponent(o.id);
@@ -139,7 +124,9 @@ if (typeof module === 'object' && module.exports) {
         delete document.body.dataset.liveBar;
         return;
       }
-      const all = liveBarModel(state.tickets, state.runs, pins(), window.DashHelpers.helperState);
+      window.LiveSessions?.sync();
+      if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
+      const all = liveBarModel(sessions(), pins());
       const sig = JSON.stringify([a.name, addonLabel(a), all, bar.list, bar.panes, bar.docked, phone(), window.innerWidth]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
@@ -185,10 +172,11 @@ if (typeof module === 'object' && module.exports) {
       if (!e.target.matches?.('[data-lbar-q]') || !bar.el?.contains(e.target)) return;
       bar.q = e.target.value;
       const a = liveAddon(), box = bar.el.querySelector('[data-lbar-rows]');
-      if (a && box) box.replaceChildren(...rows(a, liveBarModel(state.tickets, state.runs, pins(), window.DashHelpers.helperState)));
+      if (a && box) box.replaceChildren(...rows(a, liveBarModel(sessions(), pins())));
     });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && bar.list && bar.el?.contains(document.activeElement)) { e.stopPropagation(); close(true); } }, true);
     // the layer says which sessions are open ({mode, panes: ticket ids}); their chips are marked current
+    window.addEventListener('orch:live-sessions', () => paint());
     window.addEventListener('orch:live-layer', e => { const p = e.detail?.panes; bar.panes = Array.isArray(p) ? p.map(String) : []; paint(); });
     let frame = 0;
     window.addEventListener('resize', () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => paint(true)); });

@@ -218,3 +218,13 @@ Narrow panes (three at 1280, more than one on the right, a phone) fold pin and p
 phone shows only the selected session and has no add beside. The split and the selection are kept per browser and
 stay while the page changes. Pins are kept in this browser (the bar's key) until the wall stores them in orch.
 Master: `.live-*` in widgets.css (style guide: Live layer); click-through step 12.
+
+## Live data for every session, built (ORCH-359, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. The bar and the panes read one list of
+sessions (GET /api/sessions, pages/livesessions.js) instead of the tickets and runs: status (needs you, working, in
+line, idle, closed), what it waits on, the open question, the last lines of its screen, tool and model, open time and
+when it closes for being idle. A pane shows what the session does now, its last lines and draft D's meta line
+("Helper · Opus · open 38 min · stays warm while it works"), updated in place every 3 s. The wall builds on the same
+list and the same words (liveNow, liveMeta). Master: `.live-now`, `.live-lines`, `.live-meta` in widgets.css (style
+guide: Live layer); click-through step 16.

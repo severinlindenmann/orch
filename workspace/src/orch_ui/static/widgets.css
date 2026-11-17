@@ -989,6 +989,12 @@ button.live-pt:hover{color:var(--brand)}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
+/* a pane with a session (ORCH-359): what it does now, its last lines (the latest at the end), tool, model and open time */
+.live-pb[data-live-body]{align-items:stretch;justify-content:flex-start;gap:var(--s3);padding:var(--s3) var(--s4);color:var(--text);text-align:left}
+.live-pb[data-live-body]>.btn{align-self:flex-start}
+.live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
+.live-lines{flex:1 1 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
+.live-meta{margin:0}
 .live-grip{position:absolute;z-index:2;background:none;border:0;padding:0;touch-action:none}
 .live-grip::after{content:"";position:absolute;border-radius:2px;background:var(--border-strong);transition:background-color var(--dur-fast) var(--ease-move)}
 .live-grip:hover::after,.live-grip:focus-visible::after,.live-grip[data-drag]::after{background:var(--brand)}

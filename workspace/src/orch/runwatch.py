@@ -428,15 +428,68 @@ def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:
     )
     if r.returncode != 0:
         raise Refused(f"Could not read the screen of {name}: {r.stderr.strip() or 'unknown error'}")
-    raw = r.stdout.rstrip("\n").split("\n")
+    rows, hint = _rows(r.stdout, n)
+    out = {"ticket": tid, "key": name, "run": rec["run"], "lines": rows, **describe(root, tid, rec)}
+    if hint is not None:
+        out["suggestion"] = hint
+    return out
+
+
+def _rows(text: str, n: int) -> tuple[list[str], str | None]:
+    """The captured pane as plain lines: no colours or control characters, a greyed-out suggestion said as
+    such, no empty lines at the end, the last n. (rows, suggestion or None)."""
+    raw = text.rstrip("\n").split("\n")
     rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
     hint = _suggestion(raw, rows)
     while rows and not rows[-1].strip():
         rows.pop()
-    rows = rows[-n:]
-    out = {"ticket": tid, "key": name, "run": rec["run"], "lines": rows, **describe(root, tid, rec)}
-    if hint is not None:
-        out["suggestion"] = hint
+    return rows[-n:], hint
+
+
+_TAIL_MARK = "@@orch-tail "
+
+
+def tails(root: Path, tids: list[str], lines: int = SCREEN_LINES) -> dict[str, dict]:
+    """The last lines of several live sessions in ONE tmux call (the dashboard asks for every session every
+    few seconds; a process per session was the cost with 24 of them).
+    {ticket: {"lines": [...], "suggestion"?}} for each ticket whose live session exists; the others are left
+    out. Read-only, like screen()."""
+    n = max(1, min(int(lines), SCREEN_MAX_LINES))
+    todo = []
+    for tid in dict.fromkeys(tids):
+        if not tickets._ID_RE.fullmatch(tid or ""):
+            continue
+        rec = runs.read(root, tid)
+        if rec and rec.get("mode") == "live" and runs.state(rec) == "alive":
+            todo.append(tid)
+    out: dict[str, dict] = {}
+    if not todo or not shutil.which("tmux"):
+        return out
+    for _ in range(len(todo)):  # tmux stops a chain at the first session that is gone: drop it, read the rest
+        args: list[str] = []
+        for tid in todo:
+            args += ["display-message", "-p", _TAIL_MARK + tid, ";"]
+            args += ["capture-pane", "-e", "-p", "-J", "-S", f"-{n + 50}", "-t", runs_live.target(tid), ";"]
+        try:
+            r = runs_live.tmux(root, *args[:-1], timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            return out
+        got: list[str] = []
+        for part in r.stdout.split(_TAIL_MARK)[1:]:
+            tid, _, body = part.partition("\n")
+            if tid in todo:
+                got.append(tid)
+                rows, hint = _rows(body, n)
+                out[tid] = {"lines": rows, **({"suggestion": hint} if hint is not None else {})}
+        if r.returncode == 0:
+            break
+        # the last marked session failed (its capture printed nothing): it is gone; go on after it
+        if not got:  # no tmux server here (no session at all)
+            break
+        out.pop(got[-1], None)
+        todo = todo[len(got) :]
+        if not todo:
+            break
     return out
 
 
