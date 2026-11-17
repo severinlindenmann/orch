@@ -2288,6 +2288,36 @@ async function fileEmbedAsk(req) {
 }
 addEventListener('message', e => { const req = embedAskRequest(e); if (req) fileEmbedAsk(req); });
 
+// Start on a parked Factory order (ORCH-277): the shown shipped add-on page names one of ITS orders. The dashboard runs
+// that add-on's `start` act (a person's click with this page's session), which asks the same proposal again, then
+// opens that new question in its own card: the person's Start there is what starts the run, never this click.
+function embedStartRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.start') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.order !== 'string' || !EMBED_TICKET.test(data.order)) return null;
+  return {...shown, id:data.id, order:data.order, clicked:personClicked()};
+}
+let embedStartBusy = false;  // one start at a time
+async function startEmbedOrder(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.start.failed', error:NO_CLICK});
+  if (embedStartBusy) return;
+  embedStartBusy = true;
+  try {
+    const t = ticketOf(req.order);
+    if (t && (!t.ext || typeof t.ext !== 'object' || !t.ext[req.addon])) return reply({type:'orch.start.failed', error:'Only this page\u2019s own orders can be started here.'});
+    const result = await act('addon.act', {addon:req.addon, verb:'start', target:req.order});
+    const answer = result.ok ? result.state?.act_answer : null;
+    const question = answer && answer.addon === req.addon ? answer.answer?.question : null;
+    if (typeof question !== 'string' || !EMBED_QUESTION.test(question)) return reply({type:'orch.start.failed', error:result.ok ? '' : String(result.text || '').slice(0, 300)});
+    reply({type:'orch.start.done', question});
+    openEmbedQuestion({ticket:req.order, question, frame:req.frame});
+  } finally { embedStartBusy = false; }
+}
+addEventListener('message', e => { const req = embedStartRequest(e); if (req) startEmbedOrder(req); });
+
 // Plan the run / Ask for changes on a Factory draft: the shown shipped add-on page names a ticket of ITS OWN (one that
 // carries that add-on's data) and the words. The dashboard sends them as the person's message with its own proven op
 // (`run.send`, the same click as writing to the agent on the ticket page) and, when no agent works on it, starts one
