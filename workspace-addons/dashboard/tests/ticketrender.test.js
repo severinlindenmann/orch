@@ -155,25 +155,33 @@ test('status chip, shared folder line, copy line and agent bar all follow each n
   const work = {folders:[{branch:'orch/t_x', base:'abc', sub:'', host:'m'}]};
   await p.poll(state(ticket({work}), {rev:'b'}));
   assert.equal(p.count('work-copy'), 1);
-  assert.equal(p.count('agent-bar'), 1, 'the run/agent bar is there for a running ticket');
+  assert.equal(p.count('ticket-kicker'), 1, 'a running helper is named in the header line (ORCH-70)');
+  assert.equal(p.count('agent-bar'), 0, 'no second helper bar under the header');
   await p.poll(state(ticket({status:'review', work}), {rev:'c', runs:{}}));
   assert.ok(p.text().includes('Check'), 'the status chip follows the ticket');
   assert.equal(p.count('agent-bar'), 0, 'no agent bar in Review');
   await p.poll(state(ticket({status:'active'}), {rev:'d', runs:{t_x:{running:true, claim:{agent:'claude', mode:'run'}, shared_folder:{line:'"Other" is also changing this folder.'}}}}));
   assert.equal(p.count('work-copy'), 0, 'the copy line goes when the ticket no longer has one');
   assert.equal(p.count('shared-folder'), 1, 'the shared folder line follows state.runs');
-  assert.equal(p.count('agent-bar'), 1);
+  assert.equal(p.count('ticket-kicker'), 1);
 });
 
-test('a working ticket shows one Watch live and one filled button in the helper bar and Live session card (report r-1116-1748)', async () => {
+test('a working ticket: one header line, one Watch live, Stop and the commands in the menu (ORCH-70, report r-1116-1748)', async () => {
   const live = {addons:[{name:'focus', page:{path:'/', live_session:true}}], services:[{addon:'focus', running:true}],
-    runs:{t_x:{running:true, claim:{agent:'claude', mode:'live'}}}};
-  const p = page(state(ticket({status:'active'}), live));
+    runs:{t_x:{running:true, age_seconds:3120, claim:{agent:'claude', mode:'live'}}}};
+  const p = page(state(ticket({status:'active', key:'ORCH-56'}), live));
   await tick(); await tick();
-  assert.equal(p.count('agent-bar'), 1);
-  assert.equal(p.count('live-session'), 1, 'the Live session card is there for a live run');
+  const line = p.main.querySelector('[data-key="ticket-kicker"]');
+  assert.ok(line, 'one line above the title');
+  assert.match(line.textContent, /^ORCH-56·Working·.+·52 min$/, 'number, state, helper, minutes');
+  assert.equal(p.count('agent-bar'), 0, 'no helper bar');
+  assert.equal(p.count('live-session'), 0, 'no Live session card');
   assert.equal(p.count('watch-live') + p.count('live-open'), 1, 'Watch live once on the page');
-  assert.equal(p.count('live-open'), 0, 'the helper bar holds it, next to Stop');
+  const menu = p.main.querySelector('[data-key="ticket-menu-t_x"]');
+  assert.ok(menu && menu.querySelector('[data-key="ticket-stop"]'), 'Stop sits in the menu');
+  assert.equal(p.count('ticket-stop'), 1, 'Stop once, not next to Watch live');
+  assert.ok(menu.querySelector('[data-key="live-copy-watch"]') && menu.querySelector('[data-key="live-copy-take"]'), 'the two commands too');
+  assert.doesNotMatch(p.text(), /Owner/, 'no empty Owner row while a helper works');
   // the top bar paints outside this fake page: New ticket is always an outline (B2, one filled button per view)
   assert.match(read('app.js'), /newCls = 'btn outline sm'/);
 });
