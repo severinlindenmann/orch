@@ -3,7 +3,7 @@ const BASE = process.argv[2], OUT = process.argv[3], STEP = process.argv[4] || '
 const W = {d: [1280, 800], w: [1920, 1080], p: [390, 844]};
 const log = (...a) => console.log(...a);
 (async () => {
-  const b = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
+  const b = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic'], ...(process.env.CHROME ? {executablePath: process.env.CHROME} : {})});
   const errs = [];
   const ctx = await b.newContext();
   if (process.env.LAUNCH) { const p = await ctx.newPage(); await p.goto(BASE + '/#launch=' + process.env.LAUNCH); await p.waitForTimeout(2500); log('login', await p.evaluate(() => location.hash)); await p.close(); }

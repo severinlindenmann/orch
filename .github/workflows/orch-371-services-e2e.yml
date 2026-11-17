@@ -20,8 +20,8 @@ jobs:
           node-version: 22
       - name: Playwright
         run: |
-          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright@1.55.0 >/dev/null
-          npx playwright install --with-deps chromium >/dev/null
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright-core@1.55.0 >/dev/null
+          which google-chrome && google-chrome --version
       - name: User service manager
         run: |
           sudo loginctl enable-linger "$USER"
@@ -29,11 +29,12 @@ jobs:
           XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user show-environment > /dev/null
       - name: Walk
         env:
-          PW: /tmp/pw/node_modules/playwright
+          PW: /tmp/pw/node_modules/playwright-core
+          CHROME: /usr/bin/google-chrome
         run: bash .github/orch-371-e2e/e2e-linux.sh "${{ github.sha }}" "${{ matrix.mode }}" "$RUNNER_TEMP/out" 2>&1 | tee "$RUNNER_TEMP/walk.log"
       - name: Keep the results
         if: always()
-        run: mkdir -p "$RUNNER_TEMP/out" && cp "$RUNNER_TEMP/walk.log" "$RUNNER_TEMP/out/"
+        run: mkdir -p "$RUNNER_TEMP/out" && cp "$RUNNER_TEMP/walk.log" "$RUNNER_TEMP/out/" || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
