@@ -26,6 +26,7 @@
 - Unavailable helpers offer setup guidance instead of a misleading Test action (SN-19).
 - Your own helper uses a human label; existing unavailable states for each helper program are preserved (SN-19; BP-78).
 - Permission choices use a visible radio and strong teal selection; Full explains its consequence (SN-20; BP-13, BP-77).
+- A choice (permission, Helpers at once, phone Switch off after) moves at once and shows "Saving…" in small meta text beside its heading until the answer comes; a second click meanwhile is kept and saved after it, the last one wins (ORCH-227, report r-1117-1256-ws: the old choice stayed 4 to 12 s).
 - Product data: Needs installation capability and authoritative permission value. Auto is a proposed preview default; not verified in the provided snapshot. Tests and installation cannot run in static HTML.
 
 ### MOTION and performance
