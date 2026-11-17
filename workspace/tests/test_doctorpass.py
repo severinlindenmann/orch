@@ -241,10 +241,15 @@ def _git(*a, cwd):
     subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True)
 
 
+# Windows CPython has no lutimes: follow_symlinks=False raises NotImplementedError there, so a link's own time is
+# left alone and its target gets the age (the target is aged anyway when it sits inside the copy).
+_NOFOLLOW = {"follow_symlinks": False} if os.utime in os.supports_follow_symlinks else {}
+
+
 def _age(path: Path, hours: float):
     t = time.time() - hours * 3600
     for p in [path, *path.rglob("*")]:
-        os.utime(p, (t, t), follow_symlinks=False)
+        os.utime(p, (t, t), **_NOFOLLOW)
 
 
 @pytest.fixture
