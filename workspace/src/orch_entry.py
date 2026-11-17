@@ -126,7 +126,8 @@ def updating(home: Path) -> bool:
                 return False
             if sys.platform != "win32" and opened.st_uid != os.getuid():
                 return False
-            if not 0 <= time.time() - opened.st_mtime < MAX_AGE:
+            # a file just written can read a few microseconds ahead of the clock on Windows: allow 2 s
+            if not -2 <= time.time() - opened.st_mtime < MAX_AGE:
                 return False
             data = os.read(fd, 64)
         finally:
