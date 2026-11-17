@@ -1786,8 +1786,9 @@ const FIELD_LABEL = {title:'title', owner:'owner', due:'due date', note:'what yo
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 // The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
-// chooses one here; "Let orch decide" hands it back. Applies from the next start.
-const MODEL_NAMES = {sonnet:'Sonnet', opus:'Opus'};
+// chooses one here; "Let orch decide" hands it back. Haiku (fast) and Fable (drafts) only a person picks (owner
+// 17 Nov, ORCH-257). A running helper switches when its turn ends, else it applies from the next start.
+const MODEL_NAMES = {haiku:'Haiku', sonnet:'Sonnet', opus:'Opus', fable:'Fable'};
 function modelChoice(t) {
   const m = t.model && MODEL_NAMES[t.model.name] ? t.model : null;
   return m ? {name:m.name, auto:m.by === 'orch', why:m.why ? clean(String(m.why)) : ''} : null;
@@ -1827,7 +1828,9 @@ function modelField(t) {
   if (snapshot) return el('span', 'ed-ro', said);
   const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id, title:said},
     h('option', {value:'auto'}, m && m.auto ? 'Let orch decide (' + MODEL_NAMES[m.name] + ')' : 'Let orch decide'),
-    h('option', {value:'sonnet'}, 'Faster (Sonnet)'), h('option', {value:'opus'}, 'Stronger (Opus)'));
+    h('option', {value:'haiku'}, 'Fastest (Haiku)'), h('option', {value:'sonnet'}, 'Faster (Sonnet)'),
+    h('option', {value:'opus'}, 'Stronger (Opus)'),
+    h('option', {value:'fable'}, 'Drafts to pick from (Fable)'));
   select.value = m && !m.auto ? m.name : 'auto';
   select.onchange = async () => {
     const result = await act('ticket.model', {ticket:t.id, model:select.value});
