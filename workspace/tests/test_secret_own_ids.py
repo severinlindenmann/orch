@@ -3,7 +3,8 @@
 - orch's own report text never puts a ticket or run id where a label goes (an id followed by a colon), so a
   random id that spells pw, pin or key is never read as a password label; the scanner itself has no
   exemption for ids.
-- Pictures get the full rules on every byte, as before PR 1065: no input from the reviews gets through.
+- Pictures get the full rules on every byte, as before PR 1065, except a PNG's proven Huffman-coded pixel
+  bytes, which skip only the label rules (ORCH-303, test_secret_png_pixels.py): no review input gets through.
 Every input from review rounds 1 and 2 is a refused test here."""
 
 import random
