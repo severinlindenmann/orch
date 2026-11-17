@@ -253,8 +253,11 @@ def _age(path: Path, hours: float):
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, monkeypatch):
     """A repository with an origin/develop and three copies: merged and idle, changed, and merged but busy."""
+    # Windows: safegit trusts the running python as `true` only outside the current folder, and the test
+    # python sits in the project's .venv. Run from the temp folder (orch itself never runs from its venv).
+    monkeypatch.chdir(tmp_path)
     origin = tmp_path / "origin.git"
     _git("init", "-q", "--bare", "-b", "develop", str(origin), cwd=tmp_path)
     main = tmp_path / "main"
