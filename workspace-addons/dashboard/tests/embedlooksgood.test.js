@@ -7,11 +7,11 @@ const source = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/p
 const marker = source.slice(source.indexOf('// A shipped add-on page'));
 const ORIGIN = 'http://127.0.0.1:8000';
 // Factory "Looks good, all": every collaborator of the handler is faked.
-function setup({shipped = true, kind = 'page', snapshot = false, statuses = {t_aaaaaa:'review', t_bbbbbb:'review', t_cccccc:'active'}, failFor = []} = {}) {
+function setup({shipped = true, kind = 'page', snapshot = false, statuses = {t_aaaaaa:'review', t_bbbbbb:'review', t_cccccc:'active'}, failFor = [], foreign = [], clicked = true} = {}) {
   const calls = {moves:[], posts:[], toasts:[], undo:null};
   const frameWindow = {postMessage:(m, o) => calls.posts.push([m, o])};
   const frame = {contentWindow:frameWindow};
-  const tickets = Object.fromEntries(Object.entries(statuses).map(([id, status]) => [id, {id, status}]));
+  const tickets = Object.fromEntries(Object.entries(statuses).map(([id, status]) => [id, {id, status, ext:foreign.includes(id) ? {other:{}} : {factory:{}}}]));
   const toast = {remove(){}, querySelector:() => ({before:b => { calls.undo = b; }})};
   const ctx = {snapshot, location:{origin:ORIGIN}, array:v => Array.isArray(v) ? v : [], clean:v => String(v ?? ''),
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:id => tickets[id] || null,
@@ -19,7 +19,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, statuses = {t_a
     fetch:async () => ({ok:true, json:async () => ({})}),
     h:(tag, attrs, ...kids) => { const el = {tag, attrs, listeners:{}, addEventListener(n, f) { el.listeners[n] = f; }}; return el; },
     moveTicket:async (id, status, undoing, extra) => { calls.moves.push([id, status, !!undoing, {...extra}]); if (!failFor.includes(id)) tickets[id].status = status; },
-    window:{orch:{toast:(t, kind) => { calls.toasts.push([t, kind]); return toast; }}}};
+    window:{orch:{toast:(t, kind) => { calls.toasts.push([t, kind]); return toast; }}}, navigator:{userActivation:{isActive:clicked}}};
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow};
 }
@@ -70,4 +70,20 @@ test('a second batch while one runs does nothing', async () => {
   const req = ctx.embedLooksGoodRequest(msg(frameWindow));
   await Promise.all([ctx.looksGoodAll(req), ctx.looksGoodAll(req)]);
   assert.equal(calls.posts.length, 1);
+});
+
+
+// ORCH-186 review M2: only the add-on's own results, and only right after the person's click.
+test('Looks good on another add-on\'s ticket is refused and nothing moves', async () => {
+  const {ctx, calls, frameWindow} = setup({foreign:['t_bbbbbb']});
+  await ctx.looksGoodAll(ctx.embedLooksGoodRequest(msg(frameWindow)));
+  assert.equal(calls.moves.length, 0);
+  assert.equal(calls.posts[0][0].type, 'orch.looksgood.failed');
+});
+
+test('Looks good without a click of the person does nothing', async () => {
+  const {ctx, calls, frameWindow} = setup({clicked:false});
+  await ctx.looksGoodAll(ctx.embedLooksGoodRequest(msg(frameWindow)));
+  assert.equal(calls.moves.length, 0);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.looksgood.failed', error:'Click the button again to do this.', id:'abcdefgh1234'}, '*']]);
 });
