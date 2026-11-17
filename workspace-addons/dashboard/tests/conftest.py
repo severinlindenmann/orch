@@ -169,6 +169,9 @@ if mode == "refuse":
     print(json.dumps({{"error": "Nope, not allowed."}}))
     sys.stderr.write("Refused: Nope, not allowed.\\n")
     sys.exit(2)
+if a[:2] == ["ticket", "new"] and "--epic" in a:  # ORCH-185: an epic answers with its id
+    print(json.dumps({{"ok": True, "id": "t_epic001"}}))
+    sys.exit(0)
 print(json.dumps({{"ok": True}}))
 """)
     script.chmod(0o755)

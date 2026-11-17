@@ -142,6 +142,32 @@ final class TicketTests: XCTestCase {
         XCTAssertEqual(QuestionClosing.closedByTicket(questions: [q], updates: [upd("review", at: later)], answers: [:]), [q.id])
     }
 
+    /// A review round stays open only while its ticket is in Review: Accept or Ask for changes in orch moves the ticket on,
+    /// and the next status update closes the round (also with a relay that does not take review rounds back yet).
+    func testReviewRoundClosesWhenTheTicketLeavesReview() {
+        let q = Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_rv", from: "ws_a", to: "phones", type: "question",
+                                                  createdAt: "2026-11-05T10:00:00Z", ticket: "t_x",
+                                                  body: QuestionBody(questionId: "review-1", title: "Rename", text: "Is this done?",
+                                                                     options: ["accept", "changes"], recommended: nil, review: true)),
+                         workspaceName: "W")
+        XCTAssertTrue(q.isReview)
+        func upd(_ status: String, at: String) -> TicketUpdate {
+            TicketUpdate(id: "u_" + status + at, workspace: q.message.from, workspaceName: "W", ticket: "t_x", kind: "note", title: "Rename",
+                         text: "", replyTo: nil, at: at, ticketView: TicketSnapshot(title: "Rename", status: status, light: true))
+        }
+        let later = "2999-01-01T00:00:00Z", earlier = "2000-01-01T00:00:00Z"
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [upd("review", at: later)], answers: [:]).isEmpty, "still in Review")
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [upd("done", at: earlier)], answers: [:]).isEmpty, "an older update")
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [upd("blocked", at: later)], answers: [:]).isEmpty, "unknown status")
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [upd("done", at: later)], answers: [:], pending: [q.id]).isEmpty,
+                      "a swipe waiting in the Outbox is left alone")
+        for st in ["done", "active", "dropped", "waiting"] {
+            XCTAssertEqual(QuestionClosing.closedByTicket(questions: [q], updates: [upd(st, at: later)], answers: [:]), [q.id], st)
+        }
+        XCTAssertEqual(ReviewStackRules.stack(questions: [q], answers: [:]).count, 1)
+        XCTAssertTrue(ReviewStackRules.stack(questions: [q], answers: [q.id: ""]).isEmpty, "closed: the Review stack drops it")
+    }
+
     func testOpenQuestionWinsOverTheLastUpdateAndAnsweredGoesBack() {
         let q = MockRelayTestsFixtures.question
         let u = TicketUpdate(id: "m_u1", workspace: q.message.from, workspaceName: "W", ticket: q.message.ticket!, kind: "working", title: "Rename", text: "Working", replyTo: nil, at: "2026-11-05T10:00:00Z")

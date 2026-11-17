@@ -217,7 +217,7 @@ def test_codex_gets_the_workspace_sandbox_in_every_mode(proj):
     # exec cannot ask; a read-only default (no ~/.codex config) left orch-started codex unable to edit
     for perm in ("ask", "auto", "full"):  # `full` never widens codex
         assert adapters.render("codex", "fresh", "oneshot", {"prompt": "p", "permissions": perm}) == [
-            "codex", "exec", "--json", *SANDBOX, "--", "p",
+            "codex", "exec", "--skip-git-repo-check", "--json", *SANDBOX, "--", "p",
         ]  # fmt: skip
         assert adapters.permission_args("codex", proj, perm) == SANDBOX
     config.set_permissions(proj, "full")
@@ -456,7 +456,9 @@ def test_a_safe_setup_with_a_read_only_person_starts_without_flags(codex_home, p
     (codex_home / "config.toml").write_text('sandbox_mode = "read-only"\n')
     monkeypatch.setattr("orch.addons.home", lambda root=None: Path(sys.prefix))  # outside start and temp
     p = runs.plan(proj, new_ticket(), agent="codex")
-    assert p["argv"][:4] == ["codex", "exec", "--json", "--"] and p["argv"][-2] == "--"
+    assert (
+        p["argv"][:5] == ["codex", "exec", "--skip-git-repo-check", "--json", "--"] and p["argv"][-2] == "--"
+    )
     assert p["note"] == "Codex is set to read-only on this computer: it can't change files."
 
 
@@ -498,10 +500,10 @@ def test_no_blanket_orch_permission_in_any_argv(proj):
 def test_codex_snapshots():
     v = {"prompt": "Do it", "session": "01a1ac76-7c05-70d2-824d-4854e0c9c3f8"}
     assert adapters.render("codex", "fresh", "oneshot", v) == [
-        "codex", "exec", "--json", *SANDBOX, "--", "Do it",
+        "codex", "exec", "--skip-git-repo-check", "--json", *SANDBOX, "--", "Do it",
     ]  # fmt: skip
     assert adapters.render("codex", "resume", "oneshot", v) == [
-        "codex", "exec", "resume", "--json", v["session"], *SANDBOX, "--", "Do it",
+        "codex", "exec", "resume", "--skip-git-repo-check", "--json", v["session"], *SANDBOX, "--", "Do it",
     ]  # fmt: skip
     assert adapters.render("codex", "fresh", "live", v) is None  # no live mode
 
@@ -868,3 +870,19 @@ def test_windows_leaves_out_the_record_hooks_but_keeps_the_reminder_hooks(monkey
     assert all("record hook" not in c for e in doc["hooks"] for c in _orch_groups(doc, e))
     monkeypatch.setattr(adapters, "_is_windows", lambda: False)
     assert set(_RECORD_EVENTS) <= set(adapters.reminder_doc("claude")["hooks"])
+
+
+def test_find_binary_looks_in_nvm_when_the_path_is_clean(tmp_path, monkeypatch):
+    nvm = tmp_path / ".nvm" / "versions" / "node" / "v22.1.0" / "bin"
+    nvm.mkdir(parents=True)
+    exe = nvm / "codex-fake-orch153"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.delenv("NVM_DIR", raising=False)
+    assert adapters.find_binary("codex-fake-orch153") == str(exe)
+    assert adapters.find_binary("no-such-agent-orch153") is None
+    env = adapters.with_binary_dir({"PATH": "/usr/bin"}, [str(exe), "x"])
+    assert env["PATH"].split(":")[0] == str(nvm)
+    assert adapters.with_binary_dir({"PATH": "/usr/bin"}, ["codex"]) == {"PATH": "/usr/bin"}
