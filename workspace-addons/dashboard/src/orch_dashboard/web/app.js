@@ -338,6 +338,12 @@ globalThis.addEventListener?.('message', e => {
   if ((e.origin !== location.origin && !chan) || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
+// An add-on page moved inside itself (ORCH-241): the address follows it without a history entry of its own (the
+// frame's move made one, so Back goes back inside the frame) and without drawing the page again.
+function followAddress(hash) {
+  history.replaceState(null, '', hash);
+  renderedRoute = route().hash;
+}
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
