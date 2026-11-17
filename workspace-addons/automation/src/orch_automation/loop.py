@@ -125,14 +125,36 @@ def change_of(t: dict | None) -> str | None:
 
 
 HEX_RE = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
+SMALL, PACKED = 4096, 16 * 1024 * 1024  # most bytes read from a ref file / from packed-refs
 
 
-def _git_dir(folder: Path) -> tuple[Path, Path] | None:
-    """(this checkout's git folder, the shared one holding refs) of a project folder; read from files only."""
+def _read_small(f: Path, cap: int = SMALL) -> str | None:
+    """A regular file's text, at most `cap` bytes; never waits (a FIFO or device is refused, links are not followed)."""
+    import stat
+
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(f, flags)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > cap:
+            return None
+        return os.read(fd, cap).decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _git_dir(folder: Path, root: Path) -> tuple[Path, Path] | None:
+    """(this checkout's git folder, the shared one holding refs) of a project folder; read from files only, and both
+    must lie inside the workspace."""
     dot = folder / ".git"
     try:
         if dot.is_file():  # a worktree or submodule: "gitdir: <path>"
-            line = dot.read_text(encoding="utf-8", errors="replace").strip()
+            line = (_read_small(dot) or "").strip()
             if not line.startswith("gitdir:"):
                 return None
             gd = (folder / line[7:].strip()).resolve()
@@ -142,9 +164,13 @@ def _git_dir(folder: Path) -> tuple[Path, Path] | None:
             return None
         common = gd
         cf = gd / "commondir"
-        if cf.is_file():
-            common = (gd / cf.read_text(encoding="utf-8", errors="replace").strip()).resolve()
-        return (gd, common) if gd.is_dir() and common.is_dir() else None
+        if cf.exists():
+            text = _read_small(cf)
+            if text is None:
+                return None
+            common = (gd / text.strip()).resolve()
+        inside = all(d.is_dir() and d.is_relative_to(root) for d in (gd, common))
+        return (gd, common) if inside else None
     except (OSError, ValueError):
         return None
 
@@ -156,20 +182,17 @@ def _read_ref(gd: Path, common: Path, ref: str, depth: int = 0) -> str | None:
     for base in (gd, common) if ref == "HEAD" or not ref.startswith("refs/") else (common,):
         f = base / ref
         try:
-            if f.is_file() and f.resolve().is_relative_to(base):
-                text = f.read_text(encoding="utf-8", errors="replace").strip()
+            if f.exists() and f.resolve().is_relative_to(base):
+                text = (_read_small(f) or "").strip()
                 if text.startswith("ref: "):
                     return _read_ref(gd, common, text[5:].strip(), depth + 1)
                 return text if HEX_RE.match(text) else None
         except (OSError, ValueError):
             return None
-    try:
-        for line in (common / "packed-refs").read_text(encoding="utf-8", errors="replace").splitlines():
-            parts = line.split(" ", 1)
-            if len(parts) == 2 and parts[1].strip() == ref and HEX_RE.match(parts[0]):
-                return parts[0]
-    except OSError:
-        pass
+    for line in (_read_small(common / "packed-refs", PACKED) or "").splitlines():
+        parts = line.split(" ", 1)
+        if len(parts) == 2 and parts[1].strip() == ref and HEX_RE.match(parts[0]):
+            return parts[0]
     return None
 
 
@@ -183,7 +206,7 @@ def change_mark(root: Path, spec: str) -> str | None:
     folder = (root / m[1]).resolve()
     if not folder.is_dir() or not folder.is_relative_to(root.resolve()):
         return None
-    dirs = _git_dir(folder)
+    dirs = _git_dir(folder, root.resolve())
     if not dirs:
         return None
     ref = m[2]

@@ -128,3 +128,31 @@ def test_a_folders_git_settings_never_run_anything(ws, repo):
     git(repo, "config", "core.hooksPath", str(ws))
     assert change_mark(ws, "proj@develop")
     assert not hit.exists()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs on Windows")
+def test_a_fifo_or_huge_file_never_blocks_the_loop(ws, repo):
+    import threading
+
+    head = git(repo, "rev-parse", "develop").stdout.strip()
+    (repo / ".git/refs/heads/develop").unlink()
+    os.mkfifo(repo / ".git/refs/heads/develop")
+    os.mkfifo(repo / ".git/packed-refs")
+    out = {}
+    th = threading.Thread(target=lambda: out.setdefault("v", change_mark(ws, "proj@develop")), daemon=True)
+    th.start()
+    th.join(5)
+    assert not th.is_alive() and out["v"] is None
+    (repo / ".git/packed-refs").unlink()
+    (repo / ".git/packed-refs").write_text(f"{head} refs/heads/develop\n" + "x" * (17 * 1024 * 1024))
+    assert change_mark(ws, "proj@develop") is None  # over the cap: not read
+
+
+def test_a_git_folder_outside_the_workspace_is_not_read(ws, repo, tmp_path):
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    git(other, "init", "-q", "-b", "main")
+    git(other, "commit", "-q", "--allow-empty", "-m", "x")
+    (ws / "pointer").mkdir()
+    (ws / "pointer" / ".git").write_text(f"gitdir: {other / '.git'}\n")
+    assert change_mark(ws, "pointer@main") is None
