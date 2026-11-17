@@ -196,3 +196,56 @@ def test_config_key(tmp_path, monkeypatch):
     assert autoupdate.enabled() is True
     cli.main(["config", "set", "update.auto", "off"])
     assert autoupdate.enabled() is False
+
+
+# ------------------------------------------------------------- a development build follows its branch
+
+
+@pytest.fixture
+def branch(monkeypatch):
+    monkeypatch.setattr(autoupdate, "_ref", lambda: "develop")
+
+
+def test_a_branch_build_looks_every_15_minutes(ws, branch):
+    autoupdate.set_enabled(True)
+    ws.installed["sha"] = NEW
+    start = Starter()
+    assert autoupdate.tick(ws.root, start, now=NOW) == "current"
+    assert autoupdate.tick(ws.root, start, now=NOW + autoupdate.BRANCH_CHECK_EVERY - 10) == "later"
+    ws.installed["sha"] = OLD  # a new merge on the branch
+    assert autoupdate.tick(ws.root, start, now=NOW + autoupdate.BRANCH_CHECK_EVERY + 10) == "started"
+
+
+def test_a_release_build_still_looks_once_an_hour(ws):
+    autoupdate.set_enabled(True)
+    ws.installed["sha"] = NEW
+    start = Starter()
+    assert autoupdate.tick(ws.root, start, now=NOW) == "current"
+    assert autoupdate.tick(ws.root, start, now=NOW + autoupdate.BRANCH_CHECK_EVERY + 10) == "later"
+
+
+def test_a_branch_build_skips_a_failed_commit_and_takes_the_next_one(ws, branch, monkeypatch):
+    autoupdate.set_enabled(True)
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    assert autoupdate.tick(ws.root, Starter(pid=done.pid), now=NOW) == "started"
+    assert autoupdate.tick(ws.root, Starter(), now=NOW + 120) == "failed"
+    start = Starter()
+    # the same commit is not tried again, however often it looks
+    t = NOW + 120 + autoupdate.BRANCH_CHECK_EVERY + 10
+    assert autoupdate.tick(ws.root, start, now=t) == "later"
+    assert start.calls == 0
+    # a newer commit on the branch: tried at the next look, long before the six hours a release waits
+    newer = "c" * 40
+    monkeypatch.setattr(
+        updateinfo,
+        "info",
+        lambda use_cache=True: {
+            "installed": {"sha": OLD, "release": 16, "label": "orch 16"},
+            "newest": {"sha": newer, "release": 17, "label": "develop ccccccc"},
+            "update_available": True,
+            "changes": [],
+        },
+    )
+    assert autoupdate.tick(ws.root, start, now=t + autoupdate.BRANCH_CHECK_EVERY + 10) == "started"
+    assert start.calls == 1

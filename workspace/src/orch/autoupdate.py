@@ -8,6 +8,9 @@ under way and no click of a person still in progress. Not quiet: it looks again 
 (in the restarted dashboard) the outcome is kept as one note for Home: the new version and what changed, or
 why it failed (orch then stays on the old version, and tries again some hours later).
 
+A development build follows its branch closely (a demo kept on the newest develop): it looks every 15
+minutes, and a commit whose update failed is not tried again; the next newer commit is, at the next look.
+
 Machine-wide, in the orch home: one install serves every workspace. Files: auto-update.json (the setting),
 auto-update-state.json (next check, the update under way), auto-update-note.json (the note for Home)."""
 
@@ -22,6 +25,7 @@ from pathlib import Path
 from orch.errors import Refused
 
 CHECK_EVERY = 3600  # seconds between two looks at the install source
+BRANCH_CHECK_EVERY = 900  # a development build (a branch such as develop) looks every 15 minutes
 RETRY_BUSY = 300  # not a quiet moment: look again after five minutes
 RETRY_FAILED = 6 * 3600  # an update that failed: try again after six hours
 QUIET_AFTER_CLICK = 120  # a person clicked in the dashboard less than two minutes ago: not quiet yet
@@ -75,6 +79,11 @@ def set_enabled(on: bool, by: str = "human:owner") -> bool:
         st["next"] = 0
         _write("auto-update-state.json", st)
     return bool(on)
+
+
+def _every() -> float:
+    """Seconds between two looks: a development build follows its branch every 15 minutes."""
+    return BRANCH_CHECK_EVERY if _ref() != "main" else CHECK_EVERY
 
 
 # ------------------------------------------------------------------ a quiet moment
@@ -214,7 +223,8 @@ def _settle(root: Path, st: dict, now: float) -> str:
                 "changes": a.get("changes"),
             },
         )
-        st.update(next=now + CHECK_EVERY)
+        st.update(next=now + _every())
+        st.pop("failed_sha", None)
     else:
         _write(
             "auto-update-note.json",
@@ -226,7 +236,10 @@ def _settle(root: Path, st: dict, now: float) -> str:
                 "reason": _fail_reason(Path(a.get("root") or root)),
             },
         )
-        st.update(next=now + RETRY_FAILED)
+        if (a.get("ref") or "main") != "main":  # a branch: skip this commit, take the next newer one
+            st.update(next=now + BRANCH_CHECK_EVERY, failed_sha=a.get("to_sha"))
+        else:
+            st.update(next=now + RETRY_FAILED)
     st.pop("attempt", None)
     updateinfo.forget()
     return "updated" if ok else "failed"
@@ -259,9 +272,13 @@ def tick(
         return "later"
     info = updateinfo.info(use_cache=False)
     if info.get("update_available") is not True or not info.get("newest"):
-        st["next"] = now + CHECK_EVERY
+        st["next"] = now + _every()
         _write("auto-update-state.json", st)
         return "current" if info.get("newest") else "unknown"
+    if st.get("failed_sha") and info["newest"].get("sha") == st["failed_sha"]:
+        st["next"] = now + _every()  # this commit failed before: wait for a newer one
+        _write("auto-update-state.json", st)
+        return "later"
     why = busy_reason(root, last_click, clicking)
     if why:
         st["next"] = now + RETRY_BUSY

@@ -280,3 +280,34 @@ def build_overview(counts) -> dict:
         "first_day": counts["runs"] == 0 and not any(item["uses"] for item in counts["items"]),
         "lost": lost_view(counts),
     }
+
+
+FLAKY_AT = 3  # one check run again this many times in the window: it keeps failing, so the page says so
+
+
+def retries_view(data):
+    """Checks orch ran once more after a timeout or network error (`orch github retries --json`), for the
+    page's banner; None when there is nothing to say or the answer is not the expected shape."""
+    if not isinstance(data, dict) or not isinstance(data.get("checks"), list):
+        return None
+    total = data.get("total")
+    if not isinstance(total, int) or isinstance(total, bool) or total <= 0:
+        return None
+    rows = [
+        c
+        for c in data["checks"]
+        if isinstance(c, dict) and isinstance(c.get("check"), str) and isinstance(c.get("count"), int)
+    ]
+    if not rows:
+        return None
+    top = rows[0]
+    flaky = top["count"] >= FLAKY_AT
+    times = "time" if top["count"] == 1 else "times"
+    return {
+        "title": f"{total} {'check was' if total == 1 else 'checks were'} run again this month",
+        "text": (
+            f"{top['check']} was run again {top['count']} {times} after a timeout or network error."
+            + (" It keeps failing: look at it." if flaky else "")
+        )[:300],
+        "tone": "warn" if flaky else "info",
+    }

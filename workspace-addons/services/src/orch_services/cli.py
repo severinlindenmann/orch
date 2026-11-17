@@ -518,6 +518,9 @@ def run(args) -> int:
         from . import found
 
         items = found.scan(root)
+        note = found.note()
+        if note:
+            return _emit(args, {"found": items, "note": note}, note)
         return _emit(args, {"found": items}, _found_text(items))
     if cmd == "adopt":
         return cmd_adopt(args, root, args.found_id)

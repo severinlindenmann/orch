@@ -1,8 +1,9 @@
 """The real platform tool, once per platform: skipped unless on that platform AND ORCH_SERVICES_REAL=1.
 
 The plist lands under the test's HOME (a temp folder). The systemd unit lands in the real account's
-~/.config/systemd/user, the only folder the user service manager reads. Each test removes its file by its exact
-path at the end."""
+~/.config/systemd/user, the only folder the user service manager reads. The Windows task lands in the account's own
+\\orch\\ task folder and must run as a standard user signed in on the screen. Each test removes its file or task by
+its exact name at the end."""
 
 import json
 import os
@@ -14,7 +15,12 @@ import pytest
 from conftest import WID
 
 REAL = os.environ.get("ORCH_SERVICES_REAL") == "1"
-SLEEPER = ["python3", "-u", "-c", "print('hello from the service', flush=True); import time; time.sleep(600)"]
+SLEEPER = [
+    sys.executable if sys.platform == "win32" else "python3",
+    "-u",
+    "-c",
+    "print('hello from the service', flush=True); import time; time.sleep(600)",
+]
 
 
 def _wait(cond, seconds=15.0):
@@ -27,13 +33,9 @@ def _wait(cond, seconds=15.0):
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    from orch_services import winproc  # never os.kill(pid, 0) on Windows: it ends the process there
+
+    return winproc.started(pid) is not None
 
 
 @pytest.fixture
@@ -292,3 +294,35 @@ def test_real_found_and_adopt_on_linux(real, ws, monkeypatch):
         sc("daemon-reload")
         for d in reversed(made):
             d.rmdir()
+
+
+@pytest.mark.skipif(
+    not (REAL and sys.platform == "win32"), reason="real Task Scheduler test: Windows + ORCH_SERVICES_REAL=1"
+)
+def test_real_windows(real, ws):
+    import xml.etree.ElementTree as ET
+
+    task = f"\\orch\\orch-svc-{WID}-sleeper"
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+
+    def schtasks(*a):
+        return subprocess.run(["schtasks", *a], check=False, capture_output=True, creationflags=0x08000000)
+
+    def disabled():
+        raw = schtasks("/Query", "/TN", task, "/XML").stdout
+        # schtasks prints the XML in the console code page (or UTF-16): only ASCII tags are read here
+        text = raw.decode("utf-16") if b"\x00" in raw else raw.decode("latin-1")
+        root = ET.fromstring(text[text.index("<Task") :])
+        on = root.find(".//t:LogonTrigger/t:Enabled", ns)  # Task Scheduler leaves out the default (true)
+        return on is not None and on.text == "false"
+
+    try:
+        _cycle(real, ws, disabled)
+        assert schtasks("/Query", "/TN", task).returncode != 0  # the task is gone
+    finally:
+        from orch_services import keeper, winproc
+
+        run = keeper.read_run(ws / ".orch/addons/services/keeper/sleeper.json") or {}
+        winproc.end(run.get("keeper"), run.get("keeper_start"))
+        winproc.end(run.get("pid"), run.get("pid_start"))
+        schtasks("/Delete", "/TN", task, "/F")
