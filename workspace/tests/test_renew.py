@@ -1,5 +1,6 @@
 """Renew a tool login or replace a key from the warning (renew.py, `orch logins renew|replace`, ORCH-46)."""
 
+import contextlib
 import io
 import json
 import os
@@ -7,6 +8,7 @@ import stat
 import sys
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -499,26 +501,109 @@ def test_a_health_file_in_the_project_is_not_shown(proj):
 
 
 def test_two_quick_starts_leave_one_worker(proj, fake, monkeypatch):
+    """Two clicks at the same moment: ONE worker is started and stays; the other click is refused (the first
+    worker is alive, and a second would only end it)."""
     calls = []
     monkeypatch.setattr(renew.subprocess, "Popen", lambda argv, **kw: calls.append(argv))
-    monkeypatch.setattr(renew, "_alive", lambda doc: False)  # nothing running yet, both race for the start
     seen = []
+    gate = threading.Barrier(2)
 
     def go():
+        gate.wait()
         try:
             seen.append(renew.start(proj, "claude")["state"])
         except Refused as e:
             seen.append(str(e))
 
     ts = [threading.Thread(target=go) for _ in range(2)]
-    with renew._start_lock(proj, "claude"):  # hold the lock while both threads queue up
-        for t in ts:
-            t.start()
-        time.sleep(0.3)
-        assert calls == []
     for t in ts:
-        t.join(15)
-    assert len(calls) == 2 and seen == ["starting", "starting"]  # one after the other, never two at once
+        t.start()
+    for t in ts:
+        t.join(30)
+    assert len(calls) == 1  # one worker, not two
+    assert seen.count("starting") == 1 and any("still ending" in x for x in seen)
+    assert renew._alive(renew._read(proj, "claude"))  # and the one that started is the one that stays
+
+
+def test_a_killed_worker_does_not_leave_the_tool_running(proj, tmp_path, monkeypatch):
+    """A SIGKILL of the worker: the tool (own process group, pid in the state) is ended by the next status."""
+    import subprocess as sp
+
+    tool = tmp_path / "faketool"
+    tool.write_text("#!/bin/sh\nexec sleep 60\n")
+    tool.chmod(0o755)
+    p = sp.Popen([str(tool)], start_new_session=True)  # leads its own group, as the worker starts it
+    try:
+        one = {"binary": str(tool), "argv": [str(tool)], "links": [], "helper": "claude", "label": "x"}
+        monkeypatch.setattr(renew, "spec", lambda root, name: one)
+        old = (datetime.now(UTC) - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        renew._write(
+            proj,
+            "claude",
+            {
+                "state": "link",
+                "started_at": old,
+                "beat_at": old,
+                "tool_pid": p.pid,
+                "tool_started": renew._tool_started(p.pid),
+            },
+        )
+        monkeypatch.setattr(renew, "person_only", lambda *a, **k: None)
+        assert renew.status(proj, "claude")["state"] == "failed"
+        assert p.wait(5) is not None  # the group was ended
+        assert "tool_pid" not in renew._read(proj, "claude")
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            p.kill()
+
+
+def test_a_reused_pid_is_left_alone(proj, tmp_path, monkeypatch):
+    import subprocess as sp
+
+    p = sp.Popen(["sleep", "30"], start_new_session=True)  # some other process that now has the saved pid
+    try:
+        monkeypatch.setattr(renew, "spec", lambda root, name: {"binary": "x", "argv": ["x"], "links": []})
+        monkeypatch.setattr(renew, "person_only", lambda *a, **k: None)
+        old = (datetime.now(UTC) - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        renew._write(proj, "claude", {"state": "link", "started_at": old, "beat_at": old, "tool_pid": p.pid,
+                                      "tool_started": "Mon Jan  1 00:00:00 2001"})  # fmt: skip
+        renew.status(proj, "claude")
+        assert p.poll() is None  # not the tool: still running
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            p.kill()
+
+
+def test_a_secret_travels_in_a_pipe_not_the_environment(monkeypatch):
+    env: dict = {}
+    fd = renew.hand_over(env, renew.TOKEN_ENV, "s3cret-token")
+    assert renew.TOKEN_ENV not in env and "s3cret-token" not in "".join(
+        env.values()
+    )  # nothing to read in /proc
+    monkeypatch.setattr(renew.os, "environ", dict(env))
+    assert renew._take_secret(renew.TOKEN_ENV) == "s3cret-token"
+    assert renew.TOKEN_ENV + "_FD" not in renew.os.environ  # used up, not handed on to the tool
+    with pytest.raises(OSError):
+        os.fstat(fd)  # the descriptor was closed by the taker
+
+
+def test_a_status_grant_reads_only_and_makes_no_file(proj, monkeypatch):
+    monkeypatch.setattr(renew, "_GRANTED", set())
+    token = renew.grant(proj, reading=True)
+    assert not list(renew._grants(proj).iterdir())  # a poll leaves no file
+    monkeypatch.setenv(renew.GRANT_ENV, token)
+    renew.person_only(proj, "human:owner", reading=True)  # a status call passes ...
+    assert str(Path(proj).resolve()) not in renew._GRANTED  # ... and does not open the way for a second call
+    monkeypatch.setenv(renew.GRANT_ENV, token)
+    with pytest.raises(Refused):
+        renew.person_only(proj, "human:owner")  # a status grant never serves a start, code, stop or replace
+    stamp = str(int(time.time()) - renew.STATUS_LIFE - 5)
+    monkeypatch.setenv(renew.GRANT_ENV, f"s.{stamp}.{renew._sign(proj, stamp)}")
+    with pytest.raises(Refused):
+        renew.person_only(proj, "human:owner", reading=True)  # too old
+    monkeypatch.setenv(renew.GRANT_ENV, f"s.{int(time.time())}.{'0' * 64}")
+    with pytest.raises(Refused):
+        renew.person_only(proj, "human:owner", reading=True)  # forged
 
 
 def test_close_leaves_no_process(proj, tmp_path, monkeypatch):

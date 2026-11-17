@@ -3,7 +3,7 @@
 The phone shows the same warning as dashboard Home when a tool login, a connection or a key a helper needs runs out
 soon or stopped working, and names the tickets whose helpers it stops. Shapes: `message.schema.json`
 (`$defs/tool_alert`, the text rules), test vector `vectors/tool-alert-v1.json`. The last check comes from
-`orch logins` (`.orch/run/health.json`, `orch.health/1`, workspace/src/orch/health.py).
+`orch logins` (the guarded orch home, `orch.health/1`, workspace/src/orch/health.py). The workspace sends only rows of checks it really has, and takes `label` and `kind` from those checks (never from the saved row); an e-mail address or host name inside a label is removed before it is sent. The phone drops a warning that breaks the limits above (name pattern, label 1 to 60 without hidden characters, at most 20 distinct ticket keys, UTC end date).
 
 ## What travels, and what never does
 

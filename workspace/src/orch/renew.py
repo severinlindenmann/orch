@@ -67,10 +67,45 @@ PERSON_ONLY = (
     "Only a person renews a login or replaces a key, with Renew or Replace on the dashboard warning. "
     "In a terminal, sign in with the tool's own login command, then run orch logins."
 )
+STATUS_LIFE = 30  # seconds a read-only status grant stays good (it is signed, no file per poll)
 _GRANTED: set[str] = set()  # workspaces this process was granted for (one grant serves one orch call)
 
 
-def person_only(root: Path, by: str | None = None) -> None:
+def hand_over(env: dict, key: str, secret: str) -> int | None:
+    """Give a child a secret WITHOUT putting it in its environment (on Linux another process of the same user
+    reads /proc/<pid>/environ): the secret goes through a pipe the child inherits, and `env[key + "_FD"]` only
+    names the descriptor. Returns that descriptor (pass it in pass_fds, close it after the child started), or
+    None where descriptors are not inherited (Windows has no /proc: the plain variable is used there)."""
+    if os.name == "nt":
+        env[key] = secret
+        return None
+    r, w = os.pipe()
+    try:
+        os.write(w, secret.encode("utf-8"))  # a few dozen bytes: never blocks
+    finally:
+        os.close(w)
+    os.set_inheritable(r, True)
+    env[key + "_FD"] = str(r)
+    return r
+
+
+def _take_secret(key: str) -> str:
+    """Read (and use up) a secret handed over by hand_over; the variable is removed so the tool the worker
+    starts does not inherit it. Falls back to the plain variable (Windows)."""
+    fd = os.environ.pop(key + "_FD", "")
+    plain = os.environ.pop(key, "")
+    if fd.isdigit():
+        try:
+            return os.read(int(fd), 256).decode("utf-8", "replace")
+        except OSError:
+            return ""
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(int(fd))
+    return plain
+
+
+def person_only(root: Path, by: str | None = None, reading: bool = False) -> None:
     """THE person check for renewing a login, pasting a code and replacing a key, on every path. The one proof
     accepted: a one-time grant the dashboard's signed-in page session handed this call (kept as a hash in the
     guarded orch home, see grant). Refused for an agent actor, an agent tool's environment, a process inside
@@ -79,8 +114,13 @@ def person_only(root: Path, by: str | None = None) -> None:
     if (by or "").startswith("agent:") or tickets.agent_tool() or any(os.environ.get(k) for k in RUN_MARKS):
         raise Refused(PERSON_ONLY)
     key = str(Path(root).resolve())
-    if key in _GRANTED or _take_grant(root):
+    if key in _GRANTED:
+        return
+    kind = _take_grant(root, reading)
+    if kind == "once":
         _GRANTED.add(key)
+        return
+    if kind == "read":  # a status grant serves reading only, never another call of this process
         return
     raise Refused(PERSON_ONLY)
 
@@ -93,9 +133,13 @@ def _grants(root: Path) -> Path:
     return d
 
 
-def grant(root: Path) -> str:
-    """A one-time grant for ONE orch call, for the dashboard after it checked the person's page session.
-    Only its hash is kept, in the guarded orch home; old ones are cleared."""
+def grant(root: Path, reading: bool = False) -> str:
+    """A grant for the dashboard's orch call, made after it checked the person's page session.
+    Default: good for ONE call; only its hash is kept, in the guarded orch home; old ones are cleared.
+    reading=True (the 1.5 s status poll, which only reads): a short signed token, no file per poll."""
+    if reading:
+        stamp = str(int(time.time()))
+        return f"s.{stamp}.{_sign(root, stamp)}"
     d = _grants(root)
     now = time.time()
     for f in d.iterdir():
@@ -107,17 +151,45 @@ def grant(root: Path) -> str:
     return token
 
 
-def _take_grant(root: Path) -> bool:
-    token = os.environ.pop(GRANT_ENV, "")
+def _sign(root: Path, stamp: str) -> str:
+    """HMAC of a status grant's time with a key that lives in the guarded orch home (0600)."""
+    kf = _grants(root).parent / "grant.key"
+    if not kf.exists() or kf.stat().st_size != 32:
+        tmp = kf.with_name(f".grant.key.{os.getpid()}.{secrets.token_hex(4)}")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(fd, secrets.token_bytes(32))
+        finally:
+            os.close(fd)
+        try:
+            os.link(tmp, kf)  # whole or not there: a reader never sees a half-written key
+        except FileExistsError:
+            if kf.stat().st_size != 32:
+                os.replace(tmp, kf)
+        finally:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+    return hmac.new(kf.read_bytes(), b"status." + stamp.encode(), hashlib.sha256).hexdigest()
+
+
+def _take_grant(root: Path, reading: bool = False) -> str | None:
+    """'once' for a good one-time grant (used up), 'read' for a good status grant, else None."""
+    token = _take_secret(GRANT_ENV)
     if not token or len(token) > 100:
-        return False
+        return None
     try:
+        if token.startswith("s."):
+            _, stamp, mac = (token.split(".") + ["", ""])[:3]
+            fresh = stamp.isdigit() and 0 <= time.time() - int(stamp) <= STATUS_LIFE
+            if reading and fresh and hmac.compare_digest(mac, _sign(root, stamp)):
+                return "read"
+            return None
         f = _grants(root) / _hash(token)
         fresh = time.time() - f.stat().st_mtime <= GRANT_LIFE
         f.unlink()  # used up, fresh or not
     except (OSError, Refused):
-        return False
-    return fresh
+        return None
+    return "once" if fresh else None
 
 
 def _now() -> str:
@@ -193,7 +265,8 @@ def status(root: Path, name: str, by: str | None = None) -> dict:
     """The renew state for the page: {name, state, link?, ends_at?, went_on?}. A worker that stopped beating
     before it finished reads as failed. The link is checked against the adapter's allowed starts again here,
     where it leaves for the page: one that does not pass is never shown."""
-    person_only(root, by)
+    person_only(root, by, reading=True)
+    _reap(root, name)
     return _status(root, name)
 
 
@@ -221,6 +294,7 @@ def start(root: Path, name: str, by: str | None = None) -> dict:
         raise Refused(f"{s['label']} is not installed on this computer.")
     with _start_lock(root, name):
         d = _dir(root, name)
+        _reap(root, name, locked=True)
         if _alive(_read(root, name)):  # Renew again: a fresh sign-in (an old code fits only the old one)
             (d / "stop").touch()
             end = time.time() + 5
@@ -237,14 +311,22 @@ def start(root: Path, name: str, by: str | None = None) -> dict:
         )
         from orch import procs
 
-        subprocess.Popen(
-            procs.orch_python_argv("logins", "renew", name, "--worker"),
-            cwd=Path(os.path.realpath(tempfile.gettempdir())),
-            env={**os.environ, "ORCH_ROOT": str(root), TOKEN_ENV: token},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **procs.background_popen_kwargs(),
-        )
+        env = {**os.environ, "ORCH_ROOT": str(root)}
+        fd = hand_over(env, TOKEN_ENV, token)  # not in the environment: a pipe the worker inherits
+        extra = {"pass_fds": (fd,)} if fd is not None else {}
+        try:
+            subprocess.Popen(
+                procs.orch_python_argv("logins", "renew", name, "--worker"),
+                cwd=Path(os.path.realpath(tempfile.gettempdir())),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                **extra,
+                **procs.background_popen_kwargs(),
+            )
+        finally:
+            if fd is not None:
+                os.close(fd)
     return _status(root, name)
 
 
@@ -253,13 +335,13 @@ def _hash(token: str) -> str:
 
 
 @contextlib.contextmanager
-def _start_lock(root: Path, name: str):
+def _start_lock(root: Path, name: str, wait: float = 10):
     """One start at a time per login (two quick clicks start one worker). A lock older than a minute is from
     a start that died and is taken over."""
     d = _dir(root, name)
     d.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock = d / "start.lock"
-    end = time.time() + 10
+    end = time.time() + wait
     while True:
         try:
             os.close(os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
@@ -303,6 +385,7 @@ def code(root: Path, name: str, text: str, by: str | None = None) -> dict:
 def cancel(root: Path, name: str, by: str | None = None) -> dict:
     """The person closed the window: the worker ends the tool."""
     person_only(root, by)
+    _reap(root, name)
     doc = _read(root, name)
     if _alive(doc):
         (_dir(root, name) / "stop").touch()
@@ -382,10 +465,48 @@ def go_on(root: Path, helper: str | None) -> list[str]:
 # -------------------------------------------------------------------------------------------- the worker
 
 
+def _tool_started(pid: int) -> str:
+    """The start time of a process as ps tells it ('' when unknown): with the pid it names ONE process."""
+    try:
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+        return (r.stdout or "").strip() if isinstance(r.stdout, str) else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _reap(root: Path, name: str, locked: bool = False) -> None:
+    """The worker is gone (killed, no final state) but its tool may still run: end the tool's process group.
+    Only the pid the worker wrote in the guarded state, only while it still is that process (same start time),
+    or, when the tool itself is gone, the rest of its group. Under the start lock: never undoes a start."""
+    doc = _read(root, name)
+    pgid = (doc or {}).get("tool_pid")
+    if not isinstance(pgid, int) or pgid <= 1 or os.name == "nt" or _alive(doc):
+        return
+    try:
+        with contextlib.nullcontext() if locked else _start_lock(root, name, wait=0):
+            doc = _read(root, name)  # again, under the lock: a start may have run meanwhile
+            if not doc or _alive(doc) or doc.get("tool_pid") != pgid:
+                return
+            same = _tool_started(pgid)
+            if same and same != doc.get("tool_started"):
+                pass  # the pid was reused by another process: leave it alone
+            else:
+                with contextlib.suppress(OSError):
+                    os.killpg(pgid, 0)  # raises when nothing is left in the group
+                    runs.kill_tree(pgid, grace=1.0)
+            _write(
+                root,
+                name,
+                {k: v for k, v in doc.items() if k not in ("schema", "name", "tool_pid", "tool_started")},
+            )
+    except Refused:
+        return  # a start is running right now: it reaps for itself
+
+
 def _worker_allowed(root: Path, name: str) -> bool:
     """Only the worker a person's start launched: its one-time token matches the hash start kept in the
     guarded state, and is used up here (a second worker, or one a helper starts by hand, is refused)."""
-    token = os.environ.pop(TOKEN_ENV, "")
+    token = _take_secret(TOKEN_ENV)
     doc = _read(root, name)
     want = (doc or {}).get("token")
     if not (token and isinstance(want, str) and doc.get("state") == "starting"):
@@ -415,12 +536,16 @@ def work(root: Path, name: str) -> int:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=Path(os.path.realpath(tempfile.gettempdir())),
-            # the worker leads its own process group (started detached): the tool joins it, so ending the
-            # worker's group ends the tool too, and a SIGTERM to the worker ends the tool first (below)
+            # the tool leads its OWN process group, its pid is kept in the state: a SIGTERM to the worker ends
+            # the tool first (below), and when the worker was SIGKILLed the next start / status / close ends
+            # the group (_reap), so no sign-in is left running
+            start_new_session=os.name != "nt",
         )
     except OSError:
         _write(root, name, {"state": "failed", "started_at": started, "beat_at": _now()})
         return 1
+    tool = {"tool_pid": proc.pid, "tool_started": _tool_started(proc.pid)}
+    _write(root, name, {"state": "starting", "started_at": started, "beat_at": _now(), **tool})
     found: dict = {"n": 0, "at": 0.0}  # how many bytes the tool printed and when it last did (never the text)
     buf = bytearray()
 
@@ -472,7 +597,7 @@ def work(root: Path, name: str) -> int:
                 proc.stdin.write(text.strip() + b"\n")
                 proc.stdin.flush()
                 state, again = "checking", False
-        doc = {"state": state, "started_at": started, "beat_at": _now()}
+        doc = {"state": state, "started_at": started, "beat_at": _now(), **tool}
         if "link" in found:
             doc["link"] = found["link"]
         if again:
