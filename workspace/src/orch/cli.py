@@ -239,7 +239,7 @@ def _show(t: dict, root: Path) -> str:
                 out.append(f"{label}: {t['outcome'][k]}")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
-        out.append(f"Step of: {p['title']} ({p['id']})" if p else f"Step of: {t['parent']} (parent missing)")
+        out.append(f"Sub-ticket of: {p['title']} ({p['id']})" if p else f"Sub-ticket of: {t['parent']} (parent missing)")
     if root is not None:
         cc = tickets.children_counts(tickets.list_all(root), t["id"])
         if cc["total"]:

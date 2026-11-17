@@ -205,8 +205,10 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
          ("you", "Waits for you", "Your OK on the screen")),
         ("waiting", [{"kind": "person", "what": "x", "ref": "q1"}, {"kind": "person", "what": "y"}], None,
          ("you", "Waits for you", "Your answer and your OK on the screen")),
-        ("waiting", [{"kind": "command", "label": "pr-green.sh", "what": "pr-green.sh (running 6 min)"}], 60,
-         ("waiting", "On hold", "Waits on pr-green.sh (running 6 min)")),
+        ("waiting", [{"kind": "command", "label": "pr-green.sh", "seconds": 360, "what": "pr-green.sh (running 6 min)"}], 60,
+         ("waiting", "On hold", "Waiting for pr-green.sh · 6 min")),
+        ("waiting", [{"kind": "command", "label": "the pull request checks", "seconds": 1080, "what": "x"}], 60,
+         ("waiting", "On hold", "Waiting for the pull request checks · 18 min")),
         ("idle", [], 300, ("idle", "Idle", "Nothing running for 5 min")),
         ("idle", [], runwatch.STUCK_MINUTES * 60, ("stuck", "Stuck", "Nothing running for 20 min")),
         ("stale", [], None, ("stuck", "Stuck", "No update for a while")),
@@ -230,3 +232,9 @@ def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run
     assert rows[0]["helper"]["word"] == "Waits for you"  # orch run list says the same
     data = json.loads(run("run", "status", new_ticket("B"), "--json")[1])
     assert data["helper"] is None and data["last_activity"] is None
+
+
+def test_label_names_the_pull_request_wait_in_plain_words():
+    assert runwatch.label("orch ref wait ORCH-46 --merge") == "the pull request checks"
+    assert runwatch.label("/opt/bin/orch github wait merge --for a/b#1") == "the pull request checks"
+    assert runwatch.label("orch ticket show x") == "orch"

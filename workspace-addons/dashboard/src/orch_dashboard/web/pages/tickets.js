@@ -51,7 +51,7 @@ function ticketGroupOf(t) { return ticketWaitsOnly(t) ? 'blocked' : ticketColumn
 function ticketGroups(items) {
   const groups = ['waiting', 'active', 'blocked', 'open', 'review', 'done'].map(status => ({status, title:status === 'blocked' ? blockedTitle(items) : window.DashHelpers.STATUS_WORD[status], tickets:[]}));
   // ORCH-62: every ticket sits in the group of its OWN status, so a group's count is the rows it shows and equals its
-  // filter. A part whose parent is in another group stands alone with a "Step of <parent>" line.
+  // filter. A part whose parent is in another group stands alone with a "Sub-ticket of <parent>" line.
   for (const t of items) groups.find(group => group.status === ticketGroupOf(t))?.tickets.push(t);
   return groups;
 }
@@ -67,7 +67,7 @@ function waitsLine(t) {
 }
 function boardParentLine(t) {
   const parent = boardParent(tickets(), t);
-  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, (parent.epic ? 'Part of the epic ' : 'Step of ') + clean(parent.title))) : null;
+  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, (parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + clean(parent.title))) : null;
 }
 // `section`: the group or column the row sits in; its own status chip is left out there. Done shows when it finished.
 function ticketAttentionChip(t, section) {

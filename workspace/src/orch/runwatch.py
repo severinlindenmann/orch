@@ -97,10 +97,12 @@ def _is_tool_shell(cmd: str) -> bool:
 def label(cmd: str) -> str:
     """A short, safe name for a command: the program's file name, or the script's when the program is an
     interpreter (`bash ~/x/pr-green.sh 12 repo` -> pr-green.sh). Arguments are never shown (they may carry
-    tokens)."""
+    tokens). `orch ref wait` / `orch github wait` is the wait for the pull request checks."""
     words = [w for w in cmd.split() if "=" not in w or w.startswith("-")]  # drops leading VAR=value
     if not words:
         return "a command"
+    if _base(words[0]) == "orch" and words[1:3] in (["ref", "wait"], ["github", "wait"]):
+        return "the pull request checks"
     for (
         w
     ) in words:  # `uv run python -m pytest` -> pytest: interpreters, their flags and verbs are looked past
@@ -256,7 +258,14 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
             }[(answer, ok)]
         else:
             key = "waiting"
-            detail = "Waits on " + ", ".join(w["what"] for w in waits if w.get("what"))
+            parts = [
+                f"{w['label']} · {span(w.get('seconds'))}"
+                if w.get("kind") == "command" and w.get("label")
+                else w["what"]
+                for w in waits
+                if w.get("what")
+            ]
+            detail = "Waiting for " + ", ".join(parts)
     elif sig == "starting":
         key = "starting"
     else:
