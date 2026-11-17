@@ -159,11 +159,13 @@ def look2(e):
                 if a["addon"] == "dashboard":
                     urls[r["name"]] = a["url"]
         check(set(urls) >= {n, other}, f"both dashboards running: {urls}")
+        launch = next((x["url"] for x in e.orchj(n, "start", "--print-launch-url").get("launch") or [] if x.get("addon") == "dashboard"), "")
+        check("#launch=" in launch, "orch start printed no sign-in link for the dashboard")  # without a session every click is refused
         shots = os.environ.get("LOOK2_SHOTS", "")
         real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())  # the browsers live in the real home, not the test home
         cache = next((str(c) for c in (real / "Library/Caches/ms-playwright", real / ".cache/ms-playwright") if c.is_dir()), "")
         env = {**e.env, "PW_DIR": pw, **({"PLAYWRIGHT_BROWSERS_PATH": cache} if cache else {})}
-        rc, out, err = e.sh([node, str(Path(__file__).parent / "look_dash.cjs"), urls[n], shots, "Product work, now with a Wallet"], env=env, timeout=180)
+        rc, out, err = e.sh([node, str(Path(__file__).parent / "look_dash.cjs"), urls[n], shots, "Product work, now with a Wallet", launch], env=env, timeout=180)
         check(rc == 0, f"browser half failed: {(err or out)[-400:]}")
         got = json.loads(out.strip().splitlines()[-1])
     finally:
@@ -174,7 +176,7 @@ def look2(e):
     who = e.rapi(n, "GET", "/v1/whoami").json()
     check((who["icon"], who["color"]) == ("wallet", "amber"), f"relay whoami {who}")
     check((who.get("pending") or {}).get("description") == "Product work, now with a Wallet", f"pending {who.get('pending')}")
-    check("Waiting for approval" in got["pending"], f"pending text {got['pending']!r}")
+    check("Waiting for relay approval" in got["pending"], f"pending text {got['pending']!r}")
     check(got["shared"] == "false" and e.orchj(n, "look", "shared-pages")["on"] is False, f"shared-pages {got['shared']}")
     check(set(got["items"]) >= {n, other}, f"switcher items {got['items']}")
     check(["teal", True] in got["itemLooks"] and ["amber", True] in got["itemLooks"], f"badges {got['itemLooks']}")
