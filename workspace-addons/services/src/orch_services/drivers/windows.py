@@ -137,7 +137,7 @@ class Windows(Driver):
         finally:
             xml.unlink(missing_ok=True)
         if cp.returncode != 0:
-            raise tool_failed("save it in Task Scheduler", cp)
+            raise tool_failed("save it on this computer", cp)
 
     def _run_info(self, spec: Spec) -> dict | None:
         return keeper.read_run(settings_path(spec))
@@ -203,5 +203,5 @@ class Windows(Driver):
         self.stop(spec)
         cp = self._run("/Delete", "/TN", task_name(spec), "/F")
         if cp.returncode != 0 and self._run("/Query", "/TN", task_name(spec)).returncode == 0:
-            raise tool_failed("remove it from Task Scheduler", cp)
+            raise tool_failed("remove it from this computer", cp)
         settings_path(spec).unlink(missing_ok=True)
