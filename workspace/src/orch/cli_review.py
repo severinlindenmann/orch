@@ -13,7 +13,7 @@ from pathlib import Path
 from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
 CARD_KINDS = ("draft", "link", "plan", "choose")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
@@ -77,6 +77,14 @@ def add_parsers(sub, common) -> None:
     x.add_argument(
         "--point", action="append", default=[], metavar="TEXT", help="one point and what you saw (repeat)"
     )
+    x = s.add_parser(
+        "security",
+        parents=[common],
+        help="the security review of one pull request records its verdict (ok or problems)",
+    )
+    x.add_argument("pr", type=int, help="the pull request number")
+    x.add_argument("word", choices=("ok", "problems"), help="ok: nothing High or Medium left; else problems")
+    x.add_argument("why", help="one line: the worst finding, or what was checked")
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -556,6 +564,14 @@ def _verdict(args, root: Path) -> None:
     _out(args, res, f"{res['key']}: {lookreview.VERDICT_TEXT[res['verdict']]}: {res['why']}")
 
 
+def _security(args, root: Path) -> None:
+    from orch import secgate
+
+    res = _guard(secgate.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by))
+    words = "OK: the release may include it" if res["verdict"] == "ok" else "problems: releases wait"
+    _out(args, res, f"Pull request #{res['pr']}: security review {words}. {res['line']}")
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "review":
         return False
@@ -573,5 +589,6 @@ def dispatch(args, root: Path) -> bool:
         "tend-releases": _tend_releases,
         "accepted": _accepted,
         "verdict": _verdict,
+        "security": _security,
     }[args.sub](args, root)
     return True

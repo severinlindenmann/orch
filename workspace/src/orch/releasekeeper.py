@@ -23,6 +23,9 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            settings and data changes listed) and a deploy card asked (production: the owner's go; on "Deploy
            now" a helper ticket gets the prepared program), the highlights as a short note on the role ticket,
            the release worktree removed -> idle.
+Every pass also runs the security gate (secgate.py, ORCH-317): pull requests that touch the servers, sign-in,
+secrets or what leaves this computer get a security review helper by themselves, and the idle phase cuts
+nothing until each of them in the release has an OK.
 A release pull request the keeper did not cut is only watched. `orch github release-hold "<why>"` stops
 cutting (a running release goes on); `orch github release-hold off` lifts it.
 
@@ -47,7 +50,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import brake, config, runs, tickets
+from orch import brake, config, runs, secgate, tickets
 from orch.errors import Refused
 
 BY = "agent:release-keeper"
@@ -89,6 +92,8 @@ SETTINGS = {
     "github.release_deploy_host": "user@host of production, read only over ssh (program checksum)",
     "github.release_deploy_key": "the ssh key for that read",
     "github.release_deploy_script": "the install command the deploy helper runs after the owner's go",
+    "github.release_security_paths": "files whose change needs a security review before a release "
+    "(default: servers, sign-in, secrets, what leaves this computer, CI)",
 }
 SETTING_KEYS = tuple(SETTINGS)
 
@@ -151,6 +156,8 @@ def set_setting(root: Path, key: str, value: str) -> str | None:
         v = ",".join(parts)
     elif name == "release_deploy_script":
         v = _path_ok(v)
+    elif name == "release_security_paths":
+        v = secgate.check_patterns(v)
     config.set_key(root, "github", name, v)
     return v
 
@@ -187,6 +194,7 @@ class Cfg:
         self.deploy_host = g("deploy_host")
         self.deploy_key = Path(g("deploy_key")) if g("deploy_key") else None
         self.deploy_script = g("deploy_script")
+        self.security_paths = g("security_paths")
         self.run_dir = runs.run_dir(root) if root is not None else Path(over.get("run_dir") or ".")
 
     @property
@@ -426,6 +434,32 @@ class World:
                 "number,url,state,isDraft,headRefOid,statusCheckRollup,mergedAt,body,title",
             ]
         )
+
+    _PR_FIELDS = "number,title,url,headRefOid,isDraft,files"
+
+    def merged_prs(self) -> list[dict]:
+        """The pull requests merged into develop lately, with their files (security gate)."""
+        if self.sim is not None:
+            return list(self.sim.get("merged_prs") or [])
+        args = ["pr", "list", "--repo", self.cfg.repo, "--state", "merged", "--base", "develop"]
+        return self._gh_json([*args, "--limit", "60", "--json", self._PR_FIELDS]) or []
+
+    def open_prs(self) -> list[dict]:
+        """The open pull requests into develop, with their files (security gate)."""
+        if self.sim is not None:
+            return list(self.sim.get("open_prs") or [])
+        args = ["pr", "list", "--repo", self.cfg.repo, "--state", "open", "--base", "develop"]
+        return self._gh_json([*args, "--limit", "60", "--json", self._PR_FIELDS]) or []
+
+    def pr_files(self, num: int) -> dict:
+        if self.sim is not None:
+            return (self.sim.get("pr_files") or {}).get(str(num)) or {"number": num, "files": []}
+        return self._gh_json(["pr", "view", str(num), "--repo", self.cfg.repo, "--json", self._PR_FIELDS])
+
+    def security_verdicts(self) -> dict:
+        if self.sim is not None:
+            return dict(self.sim.get("security_verdicts") or {})
+        return secgate.read_verdicts(self.root)
 
     def required(self, branch: str) -> list[str] | None:
         """The required checks of `branch`'s rules ([] when it has none), None when GitHub did not say."""
@@ -1090,10 +1124,16 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     out: list[str] = []
     h = w.heads()
+    nums = {int(m[1]) for u in h["unreleased"] if (m := re.search(r"#(\d+)", u["subject"]))}
+    try:  # every pass, so a review starts while a pull request is still open
+        sec_lines, sec_holds = secgate.tend(w, st, role, sorted(nums))
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        sec_lines, sec_holds = [f"security check could not run: {e}"], ["the security check could not run"]
+    out += sec_lines
     rel = st.get("release")
     foreign = w.open_release()
     if foreign and not (rel and rel.get("pr") == foreign.get("number")):
-        return [f"release PR {foreign['number']} is open and was not cut by the keeper: watching only"]
+        return out + [f"release PR {foreign['number']} is open and was not cut by the keeper: watching only"]
 
     if rel and rel.get("phase") in ("gate", "card"):
         p = w.pr(rel["pr"])
@@ -1231,7 +1271,8 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + ["develop has nothing main does not have"]
     if hold:
         return out + [f"on hold: {hold}"]
-    nums = {int(m[1]) for u in un if (m := re.search(r"#(\d+)", u["subject"]))}
+    if sec_holds:
+        return out + ["waits for every security OK: " + ", ".join(sec_holds)]
     urgent = sorted(nums & w.urgent())
     last = max([x for x in (w.last_release_at(), ts(st.get("last_cut_at"))) if x], default=None)
     gap_h = (now() - last).total_seconds() / 3600 if last else 999
