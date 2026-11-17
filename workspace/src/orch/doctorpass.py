@@ -111,8 +111,10 @@ def clean_setup(doc) -> dict:
             ):
                 raise Refused(f"{key} {it['name']} needs a label and a {field}.")
             row = {"name": it["name"], "label": it["label"], field: it[field][:300]}
-            if key == "urls" and not re.match(r"^https?://", it["url"]):
-                raise Refused(f"urls {it['name']}: only http and https addresses.")
+            if key == "urls" and not re.match(r"^https?://[^/@?#\s]+(/[^?#@\s]*)?$", it["url"]):
+                raise Refused(
+                    f"urls {it['name']}: an http or https address without a name, password or query part."
+                )
             if key == "processes":
                 row["count"] = int(_num(it.get("count", 1), f"processes {it['name']} count", 0, 100))
             rows.append(row)
@@ -304,9 +306,8 @@ def checks(cfg: dict, p: Probes, mem: dict) -> list[dict]:
     for u in cfg.get("urls") or []:
         code = p.http(u["url"])
         if code != 200:
-            add(
-                f"url-{u['name']}", f"{u['label']} does not answer", f"{u['url']} gave {code or 'no answer'}."
-            )
+            where = u["url"].split("/")[2]  # the host only: a path can carry a token
+            add(f"url-{u['name']}", f"{u['label']} does not answer", f"{where} gave {code or 'no answer'}.")
 
     if cfg.get("processes"):
         lines = p.procs()
@@ -392,6 +393,19 @@ def _own(path: Path) -> bool:
         return False
 
 
+def _inside(base: Path, rel: str) -> bool:
+    """base/rel is a real folder inside base: no part of it is a link that leads elsewhere."""
+    p = base
+    for part in Path(rel).parts:
+        p = p / part
+        if p.is_symlink():
+            return False
+    try:
+        return p.resolve().is_relative_to(base.resolve())
+    except OSError:
+        return False
+
+
 def clean(cfg: dict, apply: bool, now: float | None = None) -> list[str]:
     """Finished copies of a repository (clean, in the base branch, untouched, no process inside: `git worktree
     remove` without --force, so git itself refuses anything unclean), build output of copies untouched for
@@ -441,7 +455,7 @@ def clean(cfg: dict, apply: bool, now: float | None = None) -> list[str]:
                 ):  # a kept copy, even a changed one: its build output can go
                     for rel in BUILD_DIRS:
                         b = wt / rel
-                        if b.is_dir() and not b.is_symlink() and (b / "CACHEDIR.TAG").is_file():
+                        if _inside(wt, rel) and b.is_dir() and (b / "CACHEDIR.TAG").is_file():
                             size = _du(b) // 2**20
                             if apply:
                                 shutil.rmtree(b)
@@ -699,17 +713,24 @@ def run_pass(
 # ------------------------------------------------------------------------------------------------ by itself
 
 
+def _last_at(root: Path) -> float | None:
+    at = (last(root).get("last_pass") or {}).get("at")
+    try:
+        return datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 def due(root: Path, now: float | None = None) -> bool:
     """True when the checks are set up here and the last pass is older than every_min."""
     cfg = setup(root)
     if cfg is None:
         return False
-    at = (last(root).get("last_pass") or {}).get("at")
-    try:
-        t = datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
-    except (TypeError, ValueError):
+    t = _last_at(root)
+    if t is None:
         return True
-    return (now if now is not None else time.time()) - t >= cfg["every_min"] * 60
+    age = (now if now is not None else time.time()) - t
+    return age < 0 or age >= cfg["every_min"] * 60  # a time in the future is not believed
 
 
 def soon(root: Path, now: float | None = None) -> bool:
@@ -724,7 +745,7 @@ def soon(root: Path, now: float | None = None) -> bool:
             return False
         mark = runs.run_dir(Path(root)) / "doctor-asked"
         try:
-            if now - mark.stat().st_mtime < ASK_EVERY:
+            if 0 <= now - mark.stat().st_mtime < ASK_EVERY:
                 return False
         except OSError:
             pass
@@ -754,13 +775,9 @@ def overdue_row(root: Path, now: float | None = None) -> dict | None:
     cfg = setup(root)
     if cfg is None:
         return None
-    at = (last(root).get("last_pass") or {}).get("at")
-    try:
-        t = datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
-    except (TypeError, ValueError):
-        t = None
+    t = _last_at(root)
     age = None if t is None else ((now if now is not None else time.time()) - t) / 60
-    ok = age is not None and age < cfg["every_min"] * 3
+    ok = age is not None and 0 <= age < cfg["every_min"] * 3
     fact = (
         f"The scheduled health checks ran {age:.0f} minutes ago."
         if age is not None

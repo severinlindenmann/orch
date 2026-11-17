@@ -390,6 +390,13 @@ def _doctor_sub(args, root: Path) -> None:
             args, {"started": started}, "A pass started in the background." if started else "No pass is due."
         )
     elif cmd == "setup":
+        if args.off or args.file:  # what orch checks and cleans by itself here: a person's choice
+            from orch import tickets
+
+            tickets.require_human(
+                "Change what the scheduled health checks watch and clean on this computer?",
+                "changing the scheduled health checks",
+            )
         if args.off:
             was = doctorpass.remove_setup(root)
             _out(args, {"on": False, "was_on": was}, "The scheduled health checks are off on this computer.")

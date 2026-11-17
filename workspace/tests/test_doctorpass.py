@@ -67,6 +67,8 @@ def test_setup_lives_in_the_guarded_home_not_the_project(ws):
         {"clean": {"test_roots": ["~"]}},
         {"clean": {"base": "--upload-pack=x"}},
         {"every_min": 1},
+        {"urls": [{"name": "a", "label": "A", "url": "https://user:pw@x/"}]},
+        {"urls": [{"name": "a", "label": "A", "url": "https://x/health?token=abc"}]},
     ],
 )
 def test_a_bad_setup_is_refused(ws, run, tmp_path, bad):
@@ -391,3 +393,44 @@ def test_stop_pids_kills_one_that_ignores_term():
 def test_at_is_utc_text(ws):
     at = _pass(ws)["at"]
     assert datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC) <= datetime.now(UTC)
+
+
+def test_a_failing_address_shows_only_its_host_on_the_ticket(ws):
+    doctorpass.save_setup(
+        ws, {**SETUP, "urls": [{"name": "h", "label": "Health", "url": "https://x.example/t0k3n/h"}]}
+    )
+    tid = _pass(ws, http={"https://x.example/t0k3n/h": 500})["opened"][0]["ticket"]
+    note = tickets.load(ws, tid)["note"]
+    assert "x.example gave 500" in note and "t0k3n" not in note
+
+
+def test_a_last_pass_in_the_future_is_not_believed(ws, run):
+    _pass(ws)
+    old = doctorpass.last(ws)
+    old["last_pass"]["at"] = "2099-01-01T00:00:00Z"
+    doctorpass.net.write_json(doctorpass._path(ws), old)
+    assert doctorpass.due(ws)
+    d = json.loads(run("doctor", "--json")[1])
+    assert not next(r for r in d["checks"] if r["name"] == "scheduled checks")["ok"]
+
+
+def test_setup_is_a_person_s_step(ws, run, tmp_path, monkeypatch):
+    f = tmp_path / "s.json"
+    f.write_text(json.dumps(SETUP))
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    assert run("doctor", "setup", str(f))[0] == 2
+    assert run("doctor", "setup", "--off")[0] == 2 and doctorpass.setup(ws)
+    assert run("doctor", "setup")[0] == 0  # showing it is fine
+
+
+def test_build_output_behind_a_link_is_never_removed(repo, tmp_path, monkeypatch):
+    main, copies = repo
+    outside = tmp_path / "elsewhere"
+    (outside / "target").mkdir(parents=True)
+    (outside / "target" / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55")
+    (copies / "dirty" / "relay").symlink_to(outside, target_is_directory=True)
+    _age(copies / "dirty", 30)
+    monkeypatch.setattr(doctorpass, "process_dirs", lambda: [])
+    cfg = doctorpass.clean_setup({"clean": {"repos": [str(main)], "worktree_roots": [str(copies)]}})
+    doctorpass.clean(cfg, apply=True)
+    assert (outside / "target" / "CACHEDIR.TAG").is_file()
