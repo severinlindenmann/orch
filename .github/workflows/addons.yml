@@ -110,12 +110,12 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
-  usage:
+  services:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     defaults:
       run:
-        working-directory: workspace-addons/usage
+        working-directory: workspace-addons/services
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -125,6 +125,15 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
+      - name: Real Linux run (a throwaway service of this CI machine's own user)
+        run: |
+          sudo loginctl enable-linger "$USER"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          for i in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          systemctl --user show-environment > /dev/null
+          ORCH_SERVICES_REAL=1 uv run pytest -q -rs tests/test_real_driver.py -k "systemd or linux" | tee real.txt
+          grep -q "2 passed" real.txt
   pull-requests:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -146,6 +155,21 @@ jobs:
     defaults:
       run:
         working-directory: workspace-addons/dashboard-tester
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q -n 2
+  usage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: workspace-addons/usage
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
