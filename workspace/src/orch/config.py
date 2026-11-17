@@ -650,6 +650,19 @@ def set_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+def reviewer_answers_on(root: Path | None) -> bool:
+    """[workflow] reviewer_answers (default off): the Reviewer answers small, routine questions for the owner
+    with the helper's recommended option (reviewer.answer_routine). Only a person turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "reviewer_answers", False) is True
+
+
+def set_reviewer_answers(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "reviewer_answers", value)
+    return value
+
+
 def release_merge_on(root: Path | None) -> bool:
     """[workflow] release_merge (default off): a release Merge card (`orch ask ... --merge --release`) merges
     by itself once every check of its pull request is green (`orch review tend-releases`). Owner's choice."""

@@ -1,6 +1,7 @@
 """An add-on's [page] is shown under /addon/<name>/ of the dashboard; both fences stay on."""
 
 import json
+import re
 import sys
 import threading
 import urllib.error
@@ -154,6 +155,8 @@ def test_post_passes_dashboard_fence_then_gets_the_addons_origin(stack):
     assert ok[0] == 200
     _, _, hd = SEEN[-1]
     assert hd["Origin"] == f"http://127.0.0.1:{port}" and hd["Host"] == f"127.0.0.1:{port}"
+    # the add-on's own same-origin rule holds: Insights refuses a POST without it (every action was refused)
+    assert hd["Sec-Fetch-Site"] == "same-origin"
     n = len(SEEN)
     for headers in (
         {**j},
@@ -763,3 +766,88 @@ def test_only_focus_makes_dashboard_calls_from_its_frame():
 
     assert set(framepass.FRAME_ROOT) == {"focus"}  # Insights and Factory get no dashboard call at all
     assert "/api/frame-pass" not in framepass.ALL_ROOT_PATHS and "/session" not in framepass.ALL_ROOT_PATHS
+
+
+# ORCH-186 review M1: a Focus pass runs only Focus's own list of the person's actions.
+def _act_with_pass(base, p, op, args, origin="null"):
+    h = {**FRAME, "Content-Type": "application/json", "X-Orch-Frame": p, "X-Orch-Op": op}
+    if origin is None:
+        h.pop("Origin")
+    return call(base + "/api/act", "POST", h, json.dumps({"op": op, "args": args}).encode())
+
+
+@pytest.mark.parametrize(
+    "op,args",
+    [
+        ("logins.renew", {}),
+        ("settings.set", {"key": "x", "value": "y"}),
+        ("update.start", {}),
+        ("run.start", {"ticket": "t_abcdef"}),
+        ("addon.set", {"name": "relay", "on": True}),
+        ("check.add", {"ticket": "t_abcdef", "text": "x"}),
+        ("ticket.patch", {"ticket": "t_abcdef", "data": {"title": "changed"}}),
+        ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "done"}, "extra": 1}),
+    ],
+)
+def test_a_focus_pass_trying_a_core_action_is_refused(stack, monkeypatch, op, args):
+    import orch_dashboard.server as srvmod
+
+    base, _ = stack
+    _with_person(monkeypatch)
+    ran = []
+    monkeypatch.setattr(
+        srvmod.Handler,
+        "_act_run",
+        lambda self, *a: ran.append(a) or self._send(200, b"{}", "application/json"),
+    )
+    p = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["pass"]
+    code, body, _ = _act_with_pass(base, p, op, args)
+    assert code == 403 and b"may not do that" in body and not ran
+
+
+def test_a_focus_pass_runs_focus_own_actions_and_needs_the_frame_origin(stack, monkeypatch):
+    import orch_dashboard.server as srvmod
+
+    base, _ = stack
+    _with_person(monkeypatch)
+    ran = []
+    monkeypatch.setattr(
+        srvmod.Handler,
+        "_act_run",
+        lambda self, *a: ran.append(a) or self._send(200, b"{}", "application/json"),
+    )
+    p = json.loads(_mint(base, headers={"X-Orch-Page": "secret"})[1])["pass"]
+    done = {"ticket": "t_abcdef", "data": {"status": "done"}, "if_revision": 3}
+    assert _act_with_pass(base, p, "ticket.patch", done)[0] == 200 and ran[-1][2] is True  # as the person
+    assert (
+        _act_with_pass(base, p, "answer", {"ticket": "t_abcdef", "question": "q1", "answer": "Yes"})[0] == 200
+    )
+    n = len(ran)
+    assert (
+        _act_with_pass(base, p, "answer", {"ticket": "t_abcdef"}, origin=None)[0] == 401
+    )  # no Origin: refused
+    assert len(ran) == n
+
+
+def test_frames_never_get_allow_same_origin():
+    """The fence itself: neither the frame attribute nor the page's own header may ever allow same-origin."""
+    from pathlib import Path
+
+    import orch_dashboard.server as srvmod
+
+    js = (Path(srvmod.__file__).parent / "web/pages/settings.js").read_text()
+    flags = re.search(r"const SHIPPED_SANDBOX = '([^']*)'", js).group(1)
+    for policy in (flags, srvmod.SHIPPED_SANDBOX, srvmod.FILE_CSP):
+        assert "allow-same-origin" not in policy and "allow-top-navigation" not in policy
+    assert srvmod.SHIPPED_SANDBOX == "sandbox " + flags  # frame and header say the same
+    assert "sandbox:shipped ? SHIPPED_SANDBOX : 'allow-scripts'" in js  # every add-on frame is sandboxed
+
+
+def test_a_revoked_sign_in_drops_every_pass(stack, monkeypatch):
+    base, _ = stack
+    person = _with_person(monkeypatch)
+    _mint(base, headers={"X-Orch-Page": "secret"})
+    assert LAST["srv"].frame_passes._passes
+    person.revoked = True
+    call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": "x" * 43})
+    assert not LAST["srv"].frame_passes._passes
