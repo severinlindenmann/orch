@@ -3,7 +3,7 @@
   "ticket": "ORCH-251",
   "title": "",
   "note": "make me a new mockup / draft of focus mode, it is overwhelming and overloaded and does not work as i need it\nchallenge it with other agents and suabganets nad also recherche web for best parctices\n\n1. from inside a ticket let me open focus mode \neither for a running, waiting or also tickets that have no sessio nactiv\n2. let me reopen old session again or new one with new context window\n3. let me either use chat mode or terminal mode, in terminal mode we have a real tmux terminal for e.g. claude cli with edit copy paste and everything that should work, same as if i would open claude cli trough a mac terminal for e.g.\n4. let me also open tmux sessions without a ticket, like for e.g. a manager or chat or whatever\n5. let me keep focus mode on the bottom of the page or right side of the page like a drawer that we can open or close\n6. add a \"focus focus\" mode or fullscreen mode, wheere we dont see all other information around it that is not needed\n7. let me open more then one ticket at once parallel or at least switch really fast between them without much load time and show me each status for e.g. if one is rnning or waiting on me\n8. show me the artifacts / files as links, small previews for the dfiferent files types, \nalso less text is more, rather show some visuells, some graphs, some charts, some links to a html or something isntead of overload text\n",
-  "want": "opus"
+  "want": "fable"
  },
  {
   "ticket": "ORCH-172",

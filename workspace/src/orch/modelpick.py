@@ -1,16 +1,18 @@
-"""Which model a ticket's helper runs on: Opus for hard work, Sonnet for the rest (moved up when hard).
+"""Which model a ticket's helper runs on: Fable for drafts, Opus for hard work, Sonnet for the rest.
 
 orch picks before every start while no person chose (ticket field `model`, by "orch"); a person's choice
 stays until they set it back to auto. Only adapters with `model_args` get the model passed; the others
-keep their own default. Never Fable (or any other model) by default: the pick is Sonnet or Opus.
+keep their own default. Fable only for mockup, redesign and concept drafts (owner 17 Nov, ORCH-257): such a
+ticket works the drafts way (runs.fresh_prompt: three or more drafts, each challenged on Opus, one card).
 """
 
 from __future__ import annotations
 
 import re
 
-MODELS = ("sonnet", "opus")
-LABELS = {"sonnet": "Sonnet", "opus": "Opus"}
+MODELS = ("sonnet", "opus", "fable")
+LABELS = {"sonnet": "Sonnet", "opus": "Opus", "fable": "Fable"}
+STRONG = ("opus", "fable")  # "up" never changes these (Fable is not below Opus; it is for drafts)
 BY_ORCH = "orch"
 
 # Which model (owner 16 Nov, ORCH-82; changed 17 Nov, ORCH-252): design, look, layout, UX, concept, security
@@ -22,6 +24,17 @@ _HARD = re.compile(
     r"layout\w*|look and feel|security|secure|secrets?|login|password\w*|auth|authenticat\w*|"
     r"authori[sz]\w*|tokens?|encrypt\w*|decrypt\w*|crypto\w*|migrat\w*|rewrite|refactor\w*|crash\w*|"
     r"race|flaky|deadlock\w*|epic|features?|add-?ons?)\b",
+    re.I,
+)
+# Draft work goes to Fable (owner 17 Nov, ORCH-257): a redesign, or a mockup, draft or concept asked for as
+# the result ("make me a new mockup of ...", "a concept for ..."). Not a mockup that only comes along with
+# built work ("mockup in the same pull request", "a proposal with a mockup"): Sonnet/Opus rules decide.
+_DRAFT_NOUN = r"(mock-?ups?|drafts?|concepts?)"
+_DRAFTS = re.compile(
+    r"\b(?:redesign\w*"
+    r"|(?:make|create|draw|sketch|build|design|want|need|new|several|three|some)\b"
+    rf"[^.\n]{{0,25}}?\b{_DRAFT_NOUN}"
+    rf"|{_DRAFT_NOUN}\s+(?:of|for)\b)",
     re.I,
 )
 # Areas that are hard unless the change is only words (the relay admin page's empty-state text is a word fix).
@@ -65,8 +78,13 @@ def _text(ticket: dict) -> str:
 
 
 def pick(ticket: dict) -> tuple[str, str]:
-    """(model, why in one plain line) from the ticket alone. Opus unless the work is clearly small."""
+    """(model, why in one plain line) from the ticket alone. Fable for drafts, else Opus unless the work is
+    clearly small."""
     text = _text(ticket)
+    drafts = _DRAFTS.search(text)
+    if drafts:
+        word = next((g for g in drafts.groups() if g), None) or drafts.group(0)
+        return "fable", f"it asks for {word.lower()}, so Fable makes drafts to pick from"
     hard = _HARD.search(text)
     if hard:
         return "opus", f"it mentions {hard.group(0).lower()}"
@@ -113,7 +131,7 @@ def by_person(ticket: dict) -> bool:
 
 
 def label(ticket: dict) -> str | None:
-    """'Opus (picked by orch)' / 'Sonnet (chosen by Severin)', or None when nothing was picked yet."""
+    """'Opus (picked by orch)' / 'Fable (chosen by Severin)', or None when nothing was picked yet."""
     m = chosen(ticket)
     if not m:
         return None

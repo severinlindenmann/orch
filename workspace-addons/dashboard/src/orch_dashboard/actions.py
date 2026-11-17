@@ -463,14 +463,14 @@ def _ticket_order(a):
     return ["ticket", "order", lane], [], [_tid(t) for t in ids]
 
 
-MODELS = ("sonnet", "opus", "auto")
+MODELS = ("sonnet", "opus", "fable", "auto")
 
 
 def _ticket_model(a):
     """A person picks the helper's model for this ticket (or lets orch pick again): `orch ticket model`."""
     _only(a, ("ticket", "model"))
     if a.get("model") not in MODELS:
-        raise BadRequest("Pick Sonnet, Opus or let orch pick.")
+        raise BadRequest("Pick Sonnet, Opus, Fable or let orch pick.")
     return ["ticket", "model", _tid(a.get("ticket")), a["model"]], [], []
 
 

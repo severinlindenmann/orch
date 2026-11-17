@@ -1,5 +1,6 @@
 """ORCH-49: orch picks Sonnet or Opus for a ticket's helper before it starts; a person can change it.
-ORCH-82: most tickets start on Sonnet, hard ones on Opus; a ticket moves up (helper or two failed checks)."""
+ORCH-82: most tickets start on Sonnet, hard ones on Opus; a ticket moves up (helper or two failed checks).
+ORCH-257: Fable for mockup, redesign and concept drafts; such a ticket works the drafts way."""
 
 import json
 import os
@@ -37,15 +38,20 @@ def _t(title, **kw):
         (_t("Fix the wording on the relay admin page"), "sonnet"),  # only words, also in the relay
         (_t("The relay drops messages"), "opus"),
         (_t("Add a new feature to the board"), "opus"),
-        (_t("Write a concept for the inbox"), "opus"),
+        (_t("Write a concept for the inbox"), "fable"),  # ORCH-257: concept work makes drafts
         (_t("Draft a new Home page"), "opus"),
+        (_t("Redesign the Home page"), "fable"),
+        (_t("Three drafts for the new settings page"), "fable"),
+        (_t("Fix the draft PR button"), "opus"),  # a draft PR is not draft work
+        (_t("Add the tile", note="UX checklist, mockup in the same pull request"), "opus"),  # ORCH-172
+        (_t("Plan it", note="write the proposal with a mockup and put it to the owner"), "opus"),  # ORCH-189
         (_t("Publish the report page"), "opus"),
         (_t("Migrate the ticket files"), "opus"),
         (_t("The export test is flaky"), "opus"),
         (_t("App crashes on start"), "opus"),
         (_t("Encrypt the backup"), "opus"),
         (_t("Write the architecture of sync"), "opus"),
-        (_t("Make me a new mockup of focus mode", note="edit copy paste should work"), "opus"),  # ORCH-251
+        (_t("Make me a new mockup of focus mode", note="edit copy paste should work"), "fable"),  # ORCH-251
         (_t("big visuell change of the dashboard"), "opus"),
         (_t("Layout of the inbox"), "opus"),
         (_t("Fix the build menu text"), "sonnet"),  # "ui" only as a word of its own
@@ -84,18 +90,18 @@ def test_the_ticket_says_in_one_line_why(proj, run):
     t = tickets.create(proj, "Make a new mockup of focus mode", "human:t")
     runs.plan(proj, t["id"], agent="claude", mode="live", hooks_file="h.json")
     t = tickets.load(proj, t["id"])
-    assert modelpick.why(t) == "it mentions mockup"
-    assert "Model: Opus (picked by orch): it mentions mockup" in run("ticket", "show", t["id"])[1]
+    assert modelpick.why(t) == "it asks for mockup, so Fable makes drafts to pick from"
+    assert "Model: Fable (picked by orch): it asks for mockup" in run("ticket", "show", t["id"])[1]
     assert modelpick.why(tickets.set_model(proj, t["id"], "sonnet", "human:severin")) is None
 
 
-def test_pick_is_only_ever_sonnet_or_opus():
+def test_pick_is_only_ever_a_known_model():
     for title in ("", "x", "Use Fable for this", "haiku please", "a" * 5000):
         assert modelpick.pick(_t(title))[0] in modelpick.MODELS
 
 
 def test_an_unknown_stored_model_counts_as_none():
-    assert modelpick.chosen(_t("x", model={"name": "fable", "by": "human:t"})) is None
+    assert modelpick.chosen(_t("x", model={"name": "gpt", "by": "human:t"})) is None
     assert modelpick.label(_t("x")) is None
 
 
@@ -125,7 +131,7 @@ def test_oneshot_puts_the_model_before_the_prompt_separator(proj):
 def test_orch_picks_again_while_no_person_chose(proj):
     t = tickets.create(proj, "Fix a typo", "human:t")
     runs.plan(proj, t["id"], agent="claude", mode="live", hooks_file="h.json")
-    tickets.edit(proj, t["id"], None, "human:t", fields={"note": "and redesign the whole page"})
+    tickets.edit(proj, t["id"], None, "human:t", fields={"note": "and rework the whole page layout"})
     assert runs.plan(proj, t["id"], agent="claude", mode="live", hooks_file="h.json")["model"] == "opus"
     assert tickets.load(proj, t["id"])["model"]["name"] == "opus"
 
@@ -267,12 +273,13 @@ def test_no_live_session_means_the_next_start_switches(proj):
     assert runs_live.switch_model(proj, tid, "fable", "orch") is False
 
 
-def test_only_a_person_sets_the_model_and_only_sonnet_or_opus(proj):
+def test_only_a_person_sets_the_model_and_only_a_known_one(proj):
     t = tickets.create(proj, "x", "human:t")
     with pytest.raises(Refused, match="Only a person"):
-        tickets.set_model(proj, t["id"], "opus", "agent:claude")
-    with pytest.raises(Refused, match="sonnet, opus or auto"):
-        tickets.set_model(proj, t["id"], "fable", "human:t")
+        tickets.set_model(proj, t["id"], "fable", "agent:claude")
+    with pytest.raises(Refused, match="sonnet, opus, fable or auto"):
+        tickets.set_model(proj, t["id"], "haiku", "human:t")
+    assert tickets.set_model(proj, t["id"], "fable", "human:t")["model"] == {"name": "fable", "by": "human:t"}
     with pytest.raises(Refused):
         tickets.edit(proj, t["id"], None, "human:t", fields={"model": "opus"})
 
@@ -308,3 +315,60 @@ def test_a_helper_moves_up_only_its_own_ticket(proj, run, monkeypatch):
     assert tickets.load(proj, other)["model"]["name"] == "sonnet"
     code, out = run("ticket", "model", mine, "up", "--why", "the plan needs a new design")[:2]
     assert code == 0 and tickets.load(proj, mine)["model"]["name"] == "opus"
+
+
+# ORCH-257: Fable as a ticket model, and the drafts way of working.
+
+
+def test_cli_fable_and_show(proj, run):
+    t = tickets.create(proj, "Fix the footer", "human:t")
+    code, out = run("ticket", "model", t["id"], "fable", "--by", "human:severin")[:2]
+    assert code == 0 and "Model: Fable (chosen by severin). It applies from the next start." in out
+    assert "Model: Fable (chosen by severin)" in run("ticket", "show", t["id"])[1]
+    p = runs.plan(proj, t["id"], agent="claude", mode="oneshot")
+    assert p["argv"][p["argv"].index("--model") + 1] == "fable"
+
+
+def test_up_never_changes_fable(proj, run):
+    t = tickets.create(proj, "Make a new mockup of the inbox", "human:t")
+    assert tickets.pick_model(proj, t["id"], "orch") == "fable"
+    t2, moved = tickets.move_up(proj, t["id"], "the plan needs a new design", "agent:claude")
+    assert not moved and t2["model"]["name"] == "fable"
+    code, out = run("ticket", "model", t["id"], "up", "--why", "hard work")[:2]
+    assert code == 0 and "already runs on Fable" in out
+    tickets.set_model(proj, t["id"], "fable", "human:t")
+    assert tickets.move_up(proj, t["id"], "hard work", "agent:claude")[1] is False  # a person's Fable stays
+
+
+def test_a_fable_ticket_starts_the_drafts_way(proj):
+    t = tickets.create(proj, "Make me a new mockup of focus mode", "human:t")
+    text = runs.plan(proj, t["id"], agent="claude", mode="oneshot")["argv"][-1]
+    assert "runs on Fable" in text and f"at least {runs.DRAFTS_MIN} clearly different drafts" in text
+    assert "realistic data" in text and "on Opus" in text and "side by side" in text
+    assert f'orch ask {t["id"]} "<question>" --choose' in text and "artifacts/<draft-c>.html" in text
+    other = tickets.create(proj, "Fix a typo on the Home page", "human:t")
+    assert "runs on Fable" not in runs.plan(proj, other["id"], agent="claude", mode="oneshot")["argv"][-1]
+
+
+def test_a_persons_fable_switches_a_live_session_with_the_drafts_way(proj, run, monkeypatch):
+    from orch import runs_live
+
+    tid = _sonnet_ticket(proj)
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    rec["live"] = {"state": "working", "since": tickets.now()}
+    runs._write(proj, rec)
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
+    monkeypatch.setattr(runs_live, "tmux", lambda root, *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(runs_live, "_hold_reason", lambda *a, **k: None)
+    code, out = run("ticket", "model", tid, "fable", "--by", "human:severin")[:2]
+    assert code == 0 and "The running helper switches when its turn ends." in out
+    assert runs.read(proj, tid)["model_switch"]["to"] == "fable"
+    (item,) = runs.undelivered(proj, tid)
+    assert item["text"].startswith("Model set to Fable. Go on with the ticket. This ticket runs on Fable")
+    assert runs_live._model_line(runs.read(proj, tid), proj) == "/model fable"
+
+
+def test_usage_counts_fable_as_its_own_family():
+    from orch import usage
+
+    assert usage.family("claude-fable-5-2") == "fable"

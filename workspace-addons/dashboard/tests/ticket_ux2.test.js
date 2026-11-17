@@ -101,7 +101,7 @@ test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, 
   vm.createContext(ctx); vm.runInContext(ticketSrc, ctx); ctx.snapshot = false;
   const picked = ctx.modelField({id:'t1', model:{name:'opus', by:'orch', why:'it mentions design'}});
   assert.equal(picked.tag, 'select');
-  assert.deepEqual(picked.children.map(o => o.attrs.value), ['auto', 'sonnet', 'opus']);
+  assert.deepEqual(picked.children.map(o => o.attrs.value), ['auto', 'sonnet', 'opus', 'fable']);
   assert.equal(text(picked.children[0]), 'Let orch decide (Opus)');
   assert.equal(picked.value, 'auto');
   assert.match(picked.attrs.title, /Opus \(picked by orch: it mentions design\)/);
@@ -109,7 +109,9 @@ test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, 
   assert.equal(mine.value, 'sonnet');
   mine.value = 'opus'; await mine.onchange();
   assert.equal(JSON.stringify(sent.pop()), JSON.stringify(['ticket.model', {ticket:'t1', model:'opus'}]));
-  assert.equal(ctx.modelField({id:'t1', model:{name:'fable', by:'human:x'}}).value, 'auto', 'an unknown model is not shown as chosen');
+  assert.equal(ctx.modelField({id:'t1', model:{name:'fable', by:'human:x'}}).value, 'fable', 'ORCH-257: Fable is a choice');
+  assert.equal(text(ctx.modelField({id:'t1', model:{name:'fable', by:'orch', why:'it mentions mockup'}}).children[0]), 'Let orch decide (Fable)');
+  assert.equal(ctx.modelField({id:'t1', model:{name:'gpt', by:'human:x'}}).value, 'auto', 'an unknown model is not shown as chosen');
   ctx.snapshot = true;
   assert.equal(text(ctx.modelField({id:'t1'})), 'orch picks it when work starts');
 });
