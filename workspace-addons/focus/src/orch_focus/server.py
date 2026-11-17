@@ -732,6 +732,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.tracker.status_cache.clear()
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
+        m = re.fullmatch(r"/api/t/(t_[a-z0-9]{6,16})/sessions", path)
+        if m:  # earlier chat sessions of the ticket, or one session's history (?session=<id>): read-only
+            sid = parse_qs(self.path.partition("?")[2]).get("session", [None])[0]
+            args = ["run", "history", m.group(1), "--json"] + (["--session", sid] if sid else [])
+            try:
+                code, out, err = actions.orch(self.root, self.orch_bin, args, timeout=15)
+            except actions.Unavailable as e:
+                return self._json(503, {"error": str(e)})
+            if code != 0:
+                return self._json(404, {"error": (err or out or "No earlier chat sessions.").strip()[:300]})
+            return self._send(200, out.encode() if isinstance(out, str) else out, "application/json")
         if path == "/api/file":  # one proof file of a ticket, read by orch.safefile only (proofs.py)
             q = parse_qs(self.path.partition("?")[2], keep_blank_values=True)
             one = lambda k: (q.get(k) or [""])[0]

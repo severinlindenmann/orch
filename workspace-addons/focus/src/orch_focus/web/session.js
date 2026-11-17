@@ -24,6 +24,9 @@
     const fact = (label, value) => h('div', {class: 'fx-session-fact'}, h('span', {class: 'muted', text: label}), h('span', {text: value}));
     els.session.replaceChildren(h('h2', {id: 'fx-session-title', text: 'This session'}),
       fact('Worked', duration(workedNow())), fact('Paused', duration(v.run.paused)), fact('Started', stamp(v.run.first) || '—'));
+    if (!S.state.earlierBox) S.state.earlierBox = h('section', {class: 'fx-saved-context', hidden: true});
+    els.session.append(S.state.earlierBox);
+    earlier(S.state.earlierBox);
     const context = v.board.context;
     if (context) {
       const reused = Math.max(0, Math.min(100, Number(context.reused) || 0));
@@ -33,6 +36,35 @@
         h('p', {class: 'meta', text: 'Refreshed ' + hhmm(context.at)})));
     }
   }
+  /* Earlier conversations: the ticket's other helper sessions; a click reads one back (read-only, plain turns) */
+  const TOOL = {claude: 'Claude', codex: 'Codex'};
+  let earlierAt = 0;
+  async function earlier(box) {
+    if (Date.now() - earlierAt < 30000) return;  /* the page re-renders often: ask at most every 30 s */
+    earlierAt = Date.now();
+    let d;
+    try { const r = await fetch(S.P + '/api/t/' + TID + '/sessions'); d = r.ok ? await r.json() : null; } catch (e) { d = null; }
+    const rows = (d && d.sessions) || [];
+    if (!rows.length) { box.hidden = true; return; }
+    box.replaceChildren(h('h3', {text: 'Earlier conversations'}));
+    for (const r of rows) {
+      const view = h('div', {class: 'meta', hidden: true});
+      const label = (TOOL[r.agent] || r.agent) + ' · ' + (stamp(r.last_used) || 'earlier') + (r.title ? ' · ' + r.title : '');
+      const btn = h('button', {class: 'btn ghost xs', text: r.readable ? 'Show' : 'Not on this computer', disabled: !r.readable, onclick: async () => {
+        if (!view.hidden) { view.hidden = true; btn.textContent = 'Show'; return; }
+        let x = null;
+        try { const q = await fetch(S.P + '/api/t/' + TID + '/sessions?session=' + encodeURIComponent(r.id)); x = q.ok ? await q.json() : null; } catch (e) { x = null; }
+        view.replaceChildren(...((x && x.turns) || []).map(t => h('p', {}, h('strong', {text: t.role === 'user' ? 'You: ' : 'Helper: '}), t.text)));
+        if (x && x.more) view.append(h('p', {class: 'muted', text: 'Only the first part is shown.'}));
+        if (!view.childNodes.length) view.append(h('p', {class: 'muted', text: 'This session has no messages.'}));
+        view.hidden = false; btn.textContent = 'Hide';
+      }});
+      box.append(h('div', {class: 'fx-session-fact'}, h('span', {class: 'muted', text: label}), btn), view);
+    }
+    box.hidden = false;
+  }
+  S.state.earlierBox = null;
+
   if (TID) setInterval(() => { if (S.state.view && S.state.clockWorking) tickTimer(); }, 1000);
 
   function showAttach() {
