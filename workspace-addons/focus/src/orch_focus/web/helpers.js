@@ -35,6 +35,12 @@
     return text[0].toUpperCase() + text.slice(1);
   }
   /* The ticket Focus opens on: the oldest question first, then the oldest result to check. Null when nothing waits. */
+  /* The tickets of one group on the list. A ticket with an open question is in Needs you only, the way the Tickets page
+     groups it, so a group's number is the same on both pages (ORCH-184). */
+  function groupRows(list, status) {
+    const rows = list || [];
+    return status === 'waiting' ? rows.filter(needsYou) : rows.filter(t => t.status === status && !needsYou(t));
+  }
   function nextNeeding(rows) {
     const at = t => Date.parse(t.updated_at) || Infinity;
     const oldest = list => list.map((t, i) => [t, i]).sort((a, b) => at(a[0]) - at(b[0]) || a[1] - b[1]).map(x => x[0])[0];
@@ -154,6 +160,6 @@
     const asking = (t.questions || []).some(q => q.answer == null) || (v && v.state === 'needs');
     return t.status === 'review' && !asking && !(v && v.run && v.run.running);
   }
-  root.FocusHelpers = {helperOf, ticketState, headerLine, resultLine, reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, dashCountText, attentionText, nextNeeding, listOrder, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
+  root.FocusHelpers = {helperOf, ticketState, headerLine, resultLine, reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, groupRows, dashCountText, attentionText, nextNeeding, listOrder, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);

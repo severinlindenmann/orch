@@ -18,8 +18,8 @@ function inView(t, view, nowMs = Date.now()) {
   if (view === 'needs-you') return (status !== 'done' && (questions(t).length > 0 || status === 'review')) || changesPending(t);
   if (view === 'working') return status === 'active';
   if (view === 'backlog') return status === 'open';
-  if (view === 'done-today') { const at = new Date(t.done_at || t.completed_at || t.updated_at); return status === 'done' && at.toDateString() === new Date(nowMs).toDateString(); }
-  if (view === 'done-week') { const at = Date.parse(t.done_at || t.updated_at); return status === 'done' && (!Number.isFinite(at) || nowMs - at <= 7 * 86400000); }
+  if (view === 'done-today') { const at = new Date(window.DashHelpers.doneAt(t)); return status === 'done' && at.toDateString() === new Date(nowMs).toDateString(); }
+  if (view === 'done-week') { const at = Date.parse(window.DashHelpers.doneAt(t)); return status === 'done' && (!Number.isFinite(at) || nowMs - at <= 7 * 86400000); }
   return true;
 }
 function filterTickets(items, query, mine, me = '', person = '', view = '', group = '') {
@@ -74,7 +74,7 @@ function boardParentLine(t) {
 function ticketAttentionChip(t, section) {
   const status = shown(t).status;
   if (questions(t).length && status !== 'done') return section === 'waiting' ? null : chip('Needs you', 'attn');
-  if (status === 'done') { const at = (typeof ticketDoneEvent === 'function' ? ticketDoneEvent(t)?.at : null) || t.done_at || t.updated_at; return at ? h('span', {className:'meta ticket-finished'}, 'Finished ' + localDay(at)) : null; }
+  if (status === 'done') { const at = window.DashHelpers.doneAt(t); return at ? h('span', {className:'meta ticket-finished'}, 'Finished ' + localDay(at)) : null; }
   if (section && window.DashHelpers.columnOf(status) === section) return null;
   return statusChip(t);
 }
@@ -178,7 +178,7 @@ function treeBranch(rows, index, section) {
   const next = ticketNext(t), nextText = next?.querySelector('.meta'), nextAction = next?.querySelector('.btn');
   const helper = helperChip(t);
   const sub = changesLine(t) || waitsLine(t) || (nextText ? h('p', {className:'meta ticket-sub'}, nextText.textContent) : null) || (helper?.line ? h('p', {className:'meta ticket-sub'}, helper.line) : null) || (row.parentMissing ? parentLine(t) : null);
-  const at = shown(t).status === 'done' ? t.done_at || t.updated_at : t.updated_at;
+  const at = shown(t).status === 'done' ? window.DashHelpers.doneAt(t) : t.updated_at;
   const node = h('tr', {className:'ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
     h('td', {className:'ticket-cell'}, h('div', {className:'ticket-line'},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
@@ -199,7 +199,7 @@ function quietLine(t) {
   return text ? h('span', {className:'meta quiet', 'data-key':'quiet-' + t.id}, text) : null;
 }
 function whenLine(t) {
-  const at = shown(t).status === 'done' ? t.done_at || t.updated_at : t.updated_at;
+  const at = shown(t).status === 'done' ? window.DashHelpers.doneAt(t) : t.updated_at;
   const text = at && window.DashHelpers.ago ? window.DashHelpers.ago(at, Date.now()) : '';
   return text ? h('span', {className:'meta when', title:String(at)}, text) : null;
 }
@@ -321,7 +321,7 @@ const PHONE_ROWS = 8, phoneMore = new Set();
 const SHORT_ICON = {waiting:'needs', review:'check', active:'working', blocked:'todo', open:'todo', done:'done'};
 function shortFact(t, row) {
   const ago = iso => iso && window.DashHelpers.ago ? window.DashHelpers.ago(iso, Date.now()) : '';
-  if (questions(t).length && shown(t).status !== 'done') return 'Question' + (ago(t.updated_at) ? ' · ' + ago(t.updated_at) : '');
+  if (questions(t).length && shown(t).status !== 'done') { const since = window.DashHelpers.askedAt(t, needsList()); return 'Question' + (ago(since) ? ' · ' + ago(since) : ''); }
   if (changesPending(t)) return 'Changes to add';
   const waits = waitsLine(t)?.textContent;
   if (waits) return waits;
@@ -329,7 +329,7 @@ function shortFact(t, row) {
   const helper = helperChip(t);
   if (helper?.line) return helper.line;
   if (row.parentMissing && typeof parentLine === 'function') { const step = parentLine(t)?.textContent; if (step) return step; }
-  const at = shown(t).status === 'done' ? t.done_at || t.updated_at : t.updated_at;
+  const at = shown(t).status === 'done' ? window.DashHelpers.doneAt(t) : t.updated_at;
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
 }
 function shortSide(t, row, status) {
