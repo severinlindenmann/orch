@@ -445,6 +445,7 @@ def run_one(url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | No
     done = _run([src.gh, "pr", "merge", url, "--merge", "--match-head-commit", head], 60)
     if done.returncode != 0:
         why = next((x.strip() for x in (done.stderr or done.stdout).splitlines() if x.strip()), "no reason")
+        ghlimit.give_back("merge", url)  # no merge happened: the place goes back
         line = f"Checks of {url} passed but GitHub did not merge it ({case}): {why[:200]}"
         return Outcome(url, False, "checks passed", line, verdict)
     took = f"; {base} taken in {rounds}x first" if rounds else ""
