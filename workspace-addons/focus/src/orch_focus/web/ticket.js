@@ -14,8 +14,8 @@
     const thumb = h('span', {class: 'thumb', text: kind});
     if (r && typeof r.preview === 'string' && r.preview.startsWith('/api/file?')) {
       const src = P + r.preview;
-      if (r.kind === 'image') {
-        const img = h('img', {alt: '', loading: 'lazy'}); img.src = src; thumb.replaceChildren(img);
+      if (r.kind === 'image') {  // in the dashboard's sandboxed frame a picture address carries the frame pass
+        const img = h('img', {alt: '', loading: 'lazy'}); img.src = window.OrchFrame ? window.OrchFrame.url(src) : src; thumb.replaceChildren(img);
       } else {
         fetch(src).then(x => x.ok && (x.headers.get('Content-Type') || '').startsWith('text/plain') ? x.text() : null)
           .then(txt => { if (txt) thumb.replaceChildren(h('pre', {text: txt.slice(0, 600).split('\n').slice(0, 8).join('\n')})); }).catch(() => {});
@@ -57,6 +57,7 @@
           next ? h('small', {text: next}) : null, finished ? h('small', {text: 'Finished ' + finished}) : null,
           h('span', {class: 'btn outline sm', text: action}));  /* a real 32 px button from the master, not a chip */
       };
+      if (payload.manager) box.insertBefore(managerRow(payload.manager), box.querySelector('.fx-livenow, .fx-pick-group, .fx-procs'));
       if (next) box.append(h('div', {class: 'row'}, h('a', {class: 'btn outline sm', href: P + '/t/' + next.ticket.id + next.hash, text: 'Open the next ticket that needs you'}),
         h('a', {class: 'btn ghost sm', href: '/#home', target: '_top', text: 'See everything on Home'})));
       for (const [status, label, action] of groups) {
@@ -100,6 +101,23 @@
     });
   }
 
+  /* ORCH-147: the always-on Manager, one row above the helpers. Open goes to its page (screen, typing, message box);
+     the first time, or while it is off, one click starts it and then opens that page. */
+  function managerRow(m) {
+    const button = h('button', {class: 'btn outline sm', type: 'button', text: m.ticket && m.running ? 'Open' : 'Start'});
+    const line = m.ticket && m.running ? 'Always on. Talk to it here or join it from a terminal.' : 'An always-on helper that looks after your tickets and helpers.';
+    button.addEventListener('click', async () => {
+      if (m.ticket && m.running) { location.href = P + '/t/' + m.ticket; return; }
+      button.disabled = true;
+      const r = await act('manager.start', {});
+      const tid = r.ok && r.result && r.result.ticket;
+      if (tid) location.href = P + '/t/' + tid;
+      else { button.disabled = false; toast(r.message || 'The Manager could not start. Try again.', 'error'); }
+    });
+    return h('section', {class: 'fx-pick-group fx-group-manager', 'aria-label': 'Manager'},
+      h('div', {class: 'card'}, h('div', {class: 'card-row'}, h('div', {class: 'grow'}, h('p', {class: 'title', text: 'Manager'}), h('p', {class: 'meta', text: line})), button)));  /* master card-row */
+  }
+
   const LIVE_WAIT_MS = 4000;
   /* the page's shape before the tickets arrive, so nothing jumps */
   function skeleton() {
@@ -128,7 +146,7 @@
       if (S.state.dashNeeds === d.count) return;
       S.state.dashNeeds = d.count; pickAttention();
     });
-    try { window.parent.postMessage({orch: 'needs-count'}, location.origin); } catch (e) { /* not framed */ }
+    try { window.parent.postMessage({orch: 'needs-count', chan: (window.OrchFrame || {}).chan}, location.origin); } catch (e) { /* not framed */ }
   }
 
   /* "2 agents are working. One question needs you." The agent count comes from the live cards, the rest from the tickets. */
@@ -234,7 +252,7 @@
   const DOT = {waiting: 'dot-warn', review: 'dot-warn', active: 'dot-work', done: 'dot-ok'};
   function buildShell(top, stepbar, rail, stage) {
     root.classList.add('fx-shell', 'fx-terminal');
-    try { parent.postMessage({orch: 'embed-shell', path: location.pathname}, location.origin); } catch (e) { /* not framed */ }
+    try { parent.postMessage({orch: 'embed-shell', path: location.pathname, chan: (window.OrchFrame || {}).chan}, location.origin); } catch (e) { /* not framed */ }
     els.ticketList = h('div', {class: 'fx-tickets', role: 'list', 'aria-label': 'Tickets in focus'});
     const left = h('aside', {class: 'focus-list fx-left', 'aria-label': 'Tickets in focus'},
       h('div', {class: 'card-h'}, h('h3', {text: 'Tickets in focus'})), els.ticketList,

@@ -204,6 +204,16 @@ def test_an_open_page_follows_the_workspace_without_disturbing_you(srv):
     assert "asked.size > 0" in js and "t.value.trim()" in js  # a request waiting / a box with your text
 
 
+def test_the_idea_box_never_cuts_text_silently_and_an_empty_draft_says_so(srv):
+    """Bug hunt 17 Nov: a 15000-character paste was cut to 500 without a word; a 0-byte draft showed an empty box."""
+    js = get(srv, "/web/factory.js")[1].decode()
+    box = js[js.index("function ideaBox()") : js.index("let idea = null")]
+    assert "field.maxLength" not in box  # the browser would cut the paste without a word
+    assert "go.disabled = !field.value.trim() || over" in box and "fallback.hidden = !over" in box
+    assert "'Too long for an idea here: ' + n + ' of ' + IDEA_MAX" in box
+    assert "draft.text.trim() ? node('pre', draft.text, 'card f-draft') : card('This draft is empty'" in js
+
+
 def test_draft_route(ws, run, srv):
     order = run("idea", "Idea", "--file", "-", data=b"# Hello <b>x</b>")["order"]
     code, body, _ = get(srv, f"/api/order/{order}/draft/1")
@@ -716,8 +726,9 @@ def test_page_decisions_only_post_the_open_question():
     assert sum("'orch.question'" in x for x in posts) == 1 and sum("'orch.say'" in x for x in posts) == 1
     # the idea box only NAMES the text: the dashboard files it as the person's click (orch.idea), the page writes nothing
     assert (
-        sum(x.startswith("{...message, id}") for x in posts) == 1
-    )  # askDashboard: orch.idea and orch.send only
+        sum(x.startswith("{...message, id, chan:") for x in posts) == 1
+    )  # askDashboard: orch.idea and orch.send only (with the per-frame code the dashboard checks, ORCH-186)
+    assert all("chan: (window.OrchFrame || {}).chan" in x for x in posts)
     assert "askDashboard({type: 'orch.idea', text: textValue})" in js
     assert "askDashboard({type: 'orch.send', ticket: order, text: words})" in js
     assert "d.type === 'orch.idea.done' && validId(d.order)" in js and "e.source !== window.parent" in js

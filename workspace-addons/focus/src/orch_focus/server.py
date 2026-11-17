@@ -55,7 +55,7 @@ TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
 }  # fmt: skip
-KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
+KIT_FILES = ("frame.js", "tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js", "widgets.css", "widgets.js")  # fmt: skip
 WEB_FILES = (
     "index.html",
@@ -498,6 +498,7 @@ class Tracker:
         return {
             "ticket": {
                 "id": ticket.get("id"), "key": ticket.get("key"), "title": ticket.get("title"),
+                "manager": ticket.get("manager") is True,  # ORCH-147: the always-on Manager, not a piece of work
                 "status": ticket.get("status"), "closed_at": ticket.get("closed_at"),
                 "started": bool(ticket.get("started") or (ticket.get("ticket_view") or {}).get("started") or claim.get("run")),
                 "revision": ticket.get("revision", 0), "checklist": checks,
@@ -552,6 +553,22 @@ class Tracker:
         if not agent:
             return True
         return adapterdata.events_kind(self.root, agent, mode or "oneshot") is None
+
+    def manager(self) -> dict | None:
+        """The always-on Manager (ORCH-147): {ticket, running} from `orch manager status`; None when this orch
+        has no Manager yet (an older core), so the start page shows no Manager row."""
+        try:
+            code, out, _ = actions.orch(self.root, self.orch_bin, ["manager", "status", "--json"], timeout=15)
+            d = json.loads(out) if code == 0 else None
+        except (actions.Unavailable, ValueError, RecursionError):
+            d = None
+        if not isinstance(d, dict):
+            return None
+        tid = d.get("ticket")
+        return {
+            "ticket": tid if isinstance(tid, str) and TID_RE.fullmatch(tid) else None,
+            "running": d.get("running") is True,
+        }
 
     def tickets_list(self) -> list[dict]:
         try:
@@ -703,7 +720,12 @@ class Handler(BaseHTTPRequestHandler):
             self._keep_session_for_restart()
         if path == "/api/tickets":
             return self._json(
-                200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()}
+                200,
+                {
+                    "workspace": self.tracker.workspace(),
+                    "tickets": self.tracker.tickets_list(),
+                    "manager": self.tracker.manager(),
+                },
             )
         if path == "/api/live":
             cards = livecards.cards(self.tracker)
@@ -732,6 +754,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.tracker.status_cache.clear()
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
+        m = re.fullmatch(r"/api/t/(t_[a-z0-9]{6,16})/sessions", path)
+        if m:  # earlier chat sessions of the ticket, or one session's history (?session=<id>): read-only
+            sid = parse_qs(self.path.partition("?")[2]).get("session", [None])[0]
+            args = ["run", "history", m.group(1), "--json"] + (["--session", sid] if sid else [])
+            try:
+                code, out, err = actions.orch(self.root, self.orch_bin, args, timeout=15)
+            except actions.Unavailable as e:
+                return self._json(503, {"error": str(e)})
+            if code != 0:
+                return self._json(404, {"error": (err or out or "No earlier chat sessions.").strip()[:300]})
+            return self._send(200, out.encode() if isinstance(out, str) else out, "application/json")
         if path == "/api/file":  # one proof file of a ticket, read by orch.safefile only (proofs.py)
             q = parse_qs(self.path.partition("?")[2], keep_blank_values=True)
             one = lambda k: (q.get(k) or [""])[0]

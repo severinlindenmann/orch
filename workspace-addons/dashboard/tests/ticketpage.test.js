@@ -102,6 +102,28 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   c.snapshot = true;
   assert.equal(nodes(c.ticketBringBackRow({id:'t_abc123', bring_back:b})).filter(n => n.tag === 'button').length, 0);
 });
+test('Send back on the ticket page opens a real text box: label above, no repeated placeholder, Ctrl+Enter sends (ORCH-183)', async () => {
+  const sent = [];
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), value:'', append(...kids) { this.children.push(...kids); }, replaceChildren(...kids) { this.children = kids; }, focus() {}, click() { this.onclick?.(); }});
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), render() {}, moveTicket:() => Promise.resolve(), ticketOf:() => ({revision:1}), act:async (op, args) => { sent.push(args.text); return {ok:true}; }});
+  const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
+  const editor = c.ticketChangesEditor({id:'t_abc123', status:'review'});
+  nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back')).onclick();
+  const box = nodes(editor).find(n => n.tag === 'textarea'), label = nodes(editor).find(n => n.tag === 'label');
+  assert.ok(box, 'a text box with room for a few lines');
+  assert.equal(box.attrs.rows, 3);
+  assert.equal(box.attrs.placeholder, undefined, 'the label is not repeated inside the box');
+  assert.equal(label.attrs.for, box.attrs.id, 'the label names the box');
+  assert.ok(label.children.includes('What should change?'));
+  const send = nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back') && n.attrs.className.includes('primary'));
+  box.value = 'Use the new logo'; box.oninput();
+  const key = (k, mods = {}) => box.onkeydown({key:k, preventDefault() {}, ...mods});
+  key('Enter');
+  assert.deepEqual(sent, [], 'Enter makes a new line');
+  key('Enter', {ctrlKey:true}); await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(sent, ['Use the new logo']);
+  assert.ok(send);
+});
 test('Accept shows the reviewed tip and sends the full tip with the Done (B13g)', () => {
   const moves = [];
   const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});
@@ -218,7 +240,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
-    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
+    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
   vm.createContext(ctx); vm.runInContext(source,ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
@@ -411,7 +433,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
-    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
+    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
   vm.createContext(ctx); vm.runInContext(source,ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
@@ -468,7 +490,7 @@ test('plan step dialogs rename with a revision and add under the parent', async 
   const calls = [], dialogs = [];
   const node = (tag, attrs = {}, ...children) => ({tag, attrs, children, value:attrs.value || '',
     append(...kids) { this.children.push(...kids); }, focus() {}});
-  const c = context({h:node, act:async (op,args) => { calls.push([op,args]); return {ok:true}; },
+  const c = context({h:node, act:async (op,args) => { calls.push([op,args]); return {ok:true}; }, tickets:() => [],
     dialog:() => { const value = {d:node('dialog'), actions:node('div')}; dialogs.push(value); return value; }});
   c.window.orch.open = () => {};
   c.window.orch.close = () => {};
@@ -479,11 +501,33 @@ test('plan step dialogs rename with a revision and add under the parent', async 
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.edit', {ticket:'child', title:'After', if_revision:7}]));
   c.ticketAddStep({id:'parent'});
   ({d, actions} = dialogs.pop());
-  d.children[0].value = 'New step';
+  d.children[0].children[0].value = 'New step';
   await actions.children[0].onclick();
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.new', {title:'New step', parent:'parent'}]));
 });
 
+test('ORCH-156: Add a ticket can move in a ticket that already exists; never itself, a ticket above it, a closed one or one already in it', async () => {
+  const calls = [], dialogs = [];
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), value:attrs.value || '', hidden:false,
+    append(...kids) { this.children.push(...kids); }, focus() {}});
+  const top = {id:'t_top', key:'WS-1', title:'Release', status:'open'};
+  const epic = {id:'t_epic', key:'WS-2', title:'Ticket flow', status:'open', epic:true, parent:'t_top'};
+  const lanes = {id:'t_lanes', key:'WS-3', title:'Board lanes', status:'active', revision:5};
+  const done = {id:'t_done', key:'WS-4', title:'Old', status:'done'};
+  const kid = {id:'t_kid', key:'WS-5', title:'Already in', status:'open', parent:'t_epic'};
+  const c = context({h:node, clean:v => String(v ?? ''), tickets:() => [top, epic, lanes, done, kid], act:async (op, args) => { calls.push([op, args]); return {ok:true}; },
+    dialog:() => { const value = {d:node('dialog'), actions:node('div')}; dialogs.push(value); return value; }});
+  c.window.orch.open = () => {}; c.window.orch.close = () => {};
+  c.ticketAddStep(epic);
+  const {d, actions} = dialogs.pop(), [input, pick] = d.children[0].children;
+  assert.equal(pick.tag, 'select');
+  assert.deepEqual(pick.children.slice(1).map(o => o.attrs.value), ['t_lanes']);
+  assert.equal(pick.children[1].children.join(''), 'WS-3 Board lanes');
+  pick.value = 't_lanes'; pick.onchange();
+  assert.equal(input.hidden, true);
+  await actions.children[0].onclick();
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.edit', {ticket:'t_lanes', parent:'t_epic', if_revision:5}]));
+});
 test('a parent lists its steps in creation order, whatever order the ticket list arrives in (every width)', () => {
   const parent = {id:'t_p', key:'WS-1', title:'Plan'};
   const mk = (id, key, title, status) => ({id, key, title, status, parent:'t_p', created_at:'2026-11-09T10:00:00Z'});
@@ -608,4 +652,22 @@ test('Looks good says when part of Done when has no task; nothing when all is co
   assert.match(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:['a', 'b']}})), /2 parts of “Done when” have no task/);
   assert.match(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:['a']}})), /1 part of “Done when” has no task/);
   assert.doesNotMatch(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:[]}})), /Done when/);
+});
+test('Answer in the header opens the answer window like the ticket list; without one it brings the card into view (ORCH-234)', () => {
+  const opened = [], trigger = {};
+  const needs = [{ticket:'t_other', kind:'question'}, {ticket:'t_one', kind:'stopped'}, {ticket:'t_one', kind:'question'}];
+  const DashHelpers = {...helpers, needAction:n => ({kind:n.kind === 'question' ? 'answer' : 'run'})};
+  const c = context({needsList:() => needs, openNeed:(row, t) => opened.push([row, t]), main:{querySelector:() => null}});
+  c.window.DashHelpers = DashHelpers;
+  assert.equal(c.focusTicketAnswer('t_one', trigger), 'window');
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][0], needs[2], 'the question of this ticket, never a stopped-helper row (that would restart it)');
+  assert.equal(opened[0][1], trigger);
+  const focused = [], log = [];
+  const card = {scrollIntoView:o => log.push('scroll ' + o.block), querySelector:() => ({focus:o => focused.push(o)})};
+  const lone = context({needsList:() => [], openNeed:() => assert.fail('no window without a need'), main:{querySelector:sel => sel === '.next-question' ? card : null}});
+  assert.equal(lone.focusTicketAnswer('t_one', trigger), 'card');
+  assert.deepEqual(log, ['scroll center']);
+  assert.equal(focused.length, 1);
+  assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
 });

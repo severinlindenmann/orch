@@ -163,7 +163,7 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const LIVE_MAX_CHOICES'), end = src.indexOf('function shareCard');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
-  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsPending:new Map(), settingsSaving:() => null, settingsText:(tag, a, t) => h(tag, a, t)});
   vm.runInContext(src.slice(start, end), c);
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
   const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join(' ');
@@ -177,6 +177,48 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   assert.match(text(four), /When 4 helpers are working, the next one waits in line/);
   assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:99}), n => n.tag === 'select')[0].value, 'none');
   assert.ok(src.includes("permissionsCard(settings), helpersAtOnceCard(settings)]"), 'sits on the Helper tab');
+});
+
+test('ORCH-227: a Settings choice shows at once with Saving…, a second click while it saves is sent after it', async () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  let renders = 0;
+  const c = vm.createContext({h, snapshot:false, render:() => { renders++; }});
+  vm.runInContext(src.slice(src.indexOf('const settingsBusy'), src.indexOf('const addonOpen')), c);
+  vm.runInContext(src.slice(src.indexOf('const FULL_WARNING'), src.indexOf('// What helpers need')), c);
+  vm.runInContext(src.slice(src.indexOf('const LIVE_MAX_CHOICES'), src.indexOf('function shareCard')), c);
+  const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+  const checked = card => all(card, n => n.tag === 'input' && n.checked)[0]?.attrs.value;
+  const saving = (card, key) => all(card, n => n.attrs?.['data-key'] === 'settings-saving-' + key).length;
+  const choose = vm.runInContext('settingsChoose', c), busy = vm.runInContext('settingsBusy', c);
+  // the server answers slowly: the clicked choice is drawn at once, with Saving…, never the old one
+  const sent = [];
+  let finish;
+  const send = mode => () => { busy.add('permissions'); sent.push(mode); return new Promise(done => { finish = () => { busy.delete('permissions'); done({ok:true}); }; }); };
+  const first = choose('permissions', 'ask', send('ask'));
+  const card = vm.runInContext('permissionsCard', c)({permissions:'auto'});
+  assert.equal(checked(card), 'ask', 'the click shows at once');
+  assert.equal(saving(card, 'permissions'), 1, 'with Saving…');
+  assert.equal(all(card, n => n.tag === 'input' && n.attrs.disabled).length, 0, 'a second click is possible');
+  // a second click while the first saves is kept and sent after it; the last click wins
+  assert.equal(await choose('permissions', 'full', send('full')), null);
+  assert.equal(checked(vm.runInContext('permissionsCard', c)({permissions:'auto'})), 'full');
+  finish();
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(sent, ['ask', 'full']);
+  finish();
+  await first;
+  const after = vm.runInContext('permissionsCard', c)({permissions:'full'});
+  assert.equal(checked(after), 'full'); assert.equal(saving(after, 'permissions'), 0, 'no Saving… once saved');
+  // a failed save falls back to what the server says
+  const failed = choose('live', 4, () => Promise.resolve({ok:false}));
+  await failed;
+  assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:null}), n => n.tag === 'select')[0].value, 'none');
+  // Helpers at once shows the picked number at once too
+  choose('live', 6, () => new Promise(() => {}));
+  const live = vm.runInContext('helpersAtOnceCard', c)({live_max:null});
+  assert.equal(all(live, n => n.tag === 'select')[0].value, '6'); assert.equal(saving(live, 'live'), 1);
+  assert.ok(renders > 0);
 });
 
 test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote shown plainly (no Details)', () => {
@@ -545,8 +587,35 @@ test('shell: quiet footer, one phone control while on, Ask the helper', () => {
   const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
   assert.match(web('style.css'), /\.side-foot:has\(#workspace-mode:empty\)\{display:none\}/);
   assert.doesNotMatch(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/, 'the sidebar switch stays while on; the chip is in the top bar');
-  assert.match(web('index.html'), />Ask the helper<\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
+  assert.match(web('index.html'), /aria-label="Ask the helper"[^>]*>.*<span class="btn-word-wide">Ask the helper<\/span><\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
   assert.doesNotMatch(web('app.js'), /tk\?\.key/); // no ticket key in the breadcrumb
+});
+// Report r-1117-1256-ws-2: phone width (390, 320) and 150% zoom. The rules are checked here; e2e/dash_page_health.cjs
+// measures the real pages at those sizes.
+test('phone and zoom layout: nothing pushes the page sideways or hides a menu item', () => {
+  const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
+  const kit = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/components.css'), 'utf8');
+  const source = web('app.js');
+  const style = web('style.css'), phone = style.slice(style.indexOf('@media(max-width:720px){\n  .shell{display:flex'));
+  const phoneBlock = phone.slice(0, phone.indexOf('\n}'));
+  // the ticket's action row may shrink and wrap on a narrow screen (it was flex:none, 490 px wide on a 390 px phone)
+  assert.match(web('pages/ticket.css'), /@media\(max-width:760px\)\{[^\n]*\.ticket-strip \.ticket-strip-actions\{flex:0 1 auto;min-width:0\}/);
+  // the phone top bar wraps instead of overlapping; the phone chip stays in the menu; both helpers' buttons show as icons
+  assert.match(phoneBlock, /\.topbar\{flex-wrap:wrap;/);
+  assert.match(phoneBlock, /\.topbar>#mm-chip\{display:none\}/);
+  assert.doesNotMatch(style, /#open-agent\{display:none\}/);
+  assert.match(web('index.html'), /id="report-problem"[^>]*aria-label="Report a problem"/);
+  assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Ask the helper"/);
+  // the open phone menu is the whole screen, with room for the bottom bar after its last row; any page change closes it
+  assert.match(phoneBlock, /\.shell:has\(>\.sidebar\[data-open=true\]\)>div>\.page\{display:none\}/);
+  assert.match(phoneBlock, /\.shell>\.sidebar\[data-open=true\]\{padding-bottom:calc\(var\(--touch\)/);
+  assert.match(source, /addEventListener\('hashchange', async \(\) => \{\n  if \(document\.querySelector\('\.sidebar'\)\?\.dataset\.open === 'true'\) setMenu\(false\);/);
+  assert.match(source, /closest\?\.\('#tabbar a'\)\) setMenu\(false\)/);
+  // the one-row top bar (900 px and more) lets the waiting line give way, so New ticket stays on screen at 150% zoom
+  assert.match(style, /\.topbar>\.topbar-wait\{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis\}/);
+  // the icon rail scrolls its list only when it does not fit above the foot
+  assert.match(kit, /\.sidebar:has\(\.nav-label\) \.sidebar-scroll\.cramped\{overflow-x:hidden;overflow-y:auto\}/);
+  assert.match(source, /classList\.toggle\('cramped', sideScroll\.scrollHeight > sideScroll\.clientHeight \+ 1\)/);
 });
 test('ticket saved views filter by status and the board shows Changes to add', () => {
   const items = [{id:'w',title:'W',status:'active',owner:'anna'}, {id:'r',title:'R',status:'review',owner:'ben'},
@@ -555,7 +624,7 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   const c = context(items);
   const ids = (view, person = '') => c.filterTickets(items, '', false, '', person, view).map(t => t.id).join();
   assert.equal(ids('working'), 'w');
-  assert.equal(ids('needs-you'), 'r,d');
+  assert.equal(ids('needs-you'), 'r', 'ORCH-236: a Done ticket with changes to add is not counted in Needs you, so it is not in the view either');
   assert.equal(ids('done-week'), 'd');
   assert.equal(ids('done-today'), 'd');
   assert.equal(ids('', 'ben'), 'r,o');
@@ -705,6 +774,16 @@ test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All
   assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
   assert.match(page({items:[]}).text, /All clear/);
 });
+
+test('ORCH-158: the edit button has a name, and a long note opens whole', () => {
+  const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+  assert.match(ticket, /setAttribute\('aria-label', 'Change ' \+ FIELD_LABEL\[field\]\)/);
+  assert.match(ticket, /Shift\+Enter new line'\s*:\s*'Click to change'/);
+  assert.match(ticket, /input\.rows = 3; else/);
+  assert.match(ticket, /button\('Show all', 'ghost xs'/);
+  assert.match(ticket, /open \? 'Show less' : 'Show all'/);
+});
+
 test('ORCH-185: a sub-ticket shown as its own card in the column is not also listed inside its parent card', () => {
   const items = [{id:'p', key:'PIL-2', title:'Parent', status:'open'}, {id:'a', key:'PIL-10', title:'First', parent:'p', status:'open'},
     {id:'c', key:'PIL-12', title:'Third', parent:'p', status:'waiting'}];
@@ -746,4 +825,11 @@ test('ORCH-184: a line recorded under the computer login names the person, not t
   assert.equal(helpers.personName('human:lume', {login:'lume'}), 'lume', 'nobody picked a name: nothing to show instead');
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(src, /checked by ' \+ ticketActor\(ev\.by\)/);
+});
+
+test('ORCH-158: the shared ticket word for a new ticket is Backlog, not To do', () => {
+  const { ticketState } = require('./kit_state.js');
+  assert.equal(ticketState({status:'open'}).word, 'Backlog');
+  assert.equal(ticketState({status:'ready'}).word, 'To do');
+  assert.equal(ticketState({status:'dropped'}).word, "Won't do");
 });

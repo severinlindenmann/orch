@@ -6,7 +6,7 @@
 .state-empty{min-height:380px}
 .insights-header .insights-health{display:table;margin-top:16px}
 .insights-header .actions{align-items:center;gap:12px;flex-wrap:nowrap}
-.insights-header .segmented,.insights-header .insights-settings{height:42px;box-sizing:border-box;border-color:var(--border);background:var(--sidebar)}
+.insights-header .insights-settings{height:42px;box-sizing:border-box;border-color:var(--border);background:var(--sidebar)}
 .insights-header .insights-settings{font-size:inherit;padding:4px 12px;white-space:nowrap}
 .insights-header .insights-settings:hover{background:var(--surface-3)}
 .sharing{margin-top:12px;font-size:12px;color:var(--text-muted)}

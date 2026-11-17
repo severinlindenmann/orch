@@ -99,6 +99,12 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("answer", {"ticket": "t_abcdef", "question": "q1", "digest": "x", "answer": "a"}),
         ("ticket.edit", {"ticket": "t_abcdef", "due": "tomorrow"}),
         ("ticket.edit", {"ticket": "t_abcdef"}),
+        ("ticket.edit", {"ticket": "t_abcdef", "parent": "--title=x"}),
+        ("ticket.edit", {"ticket": "t_abcdef", "parent": 7}),
+        ("ticket.order", {"lane": "To do", "tickets": ["t_abcdef"]}),
+        ("ticket.order", {"lane": "todo", "tickets": []}),
+        ("ticket.order", {"lane": "todo", "tickets": ["--json"]}),
+        ("ticket.order", {"lane": "todo", "tickets": "t_abcdef"}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"title": "x"}}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"id": "t_other1"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "weird"}, "if_revision": 1}),
@@ -226,6 +232,18 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         (
             {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": ""}},
             ["ticket", "edit", "t_abcdef", "--due=", *common],
+        ),
+        (  # ORCH-156: a lane put in order, first to last
+            {"op": "ticket.order", "args": {"lane": "todo", "tickets": ["t_bbbbbb", "t_abcdef"]}},
+            ["ticket", "order", "todo", *common, "--", "t_bbbbbb", "t_abcdef"],
+        ),
+        (  # ORCH-156: "Part of" puts the ticket under an epic; null takes it out
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "parent": "t_epic01", "if_revision": 4}},
+            ["ticket", "edit", "t_abcdef", "--parent=t_epic01", "--if-revision=4", *common],
+        ),
+        (
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "parent": None}},
+            ["ticket", "edit", "t_abcdef", "--parent=", *common],
         ),
         (
             {"op": "log", "args": {"ticket": "t_abcdef", "text": "-hello"}},
@@ -1439,6 +1457,23 @@ def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
         build_argv("copies.clean", {"path": "/"})
 
 
+def test_triage_start_takes_only_known_lanes():
+    from orch_dashboard.actions import BadRequest, build_argv, needs_session
+
+    argv = build_argv("triage.start", {"lanes": ["working", "backlog"]})
+    assert argv[:5] == ["triage", "--start", "--json", "--lanes", "backlog,working"]  # board order
+    assert needs_session("triage.start")  # a person's click only
+    for bad in (
+        {},
+        {"lanes": []},
+        {"lanes": ["all"]},
+        {"lanes": "backlog"},
+        {"lanes": ["backlog"], "ticket": "t_x"},
+    ):
+        with pytest.raises(BadRequest):
+            build_argv("triage.start", bad)
+
+
 def test_copies_remove_orphaned_takes_one_folder_name_only():
     from orch_dashboard.actions import BadRequest, build_argv
 
@@ -1700,3 +1735,12 @@ def test_epic_with_a_bad_ticket_makes_nothing(act_server, act_orch):
     s, _, _ = _post_raw(act_server, body)
     assert s == 400
     assert not [c for c in acts(act_orch) if c[:2] == ["ticket", "new"]]
+
+
+def test_check_move_argv_and_refusals():
+    """ORCH-236: the ticket page moves a task up or down with `orch check move <ticket> <task> --after <task>`."""
+    argv = actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3"})
+    assert argv == ["check", "move", "t_abcdef", "c2", "--after=c3", "--by", actions.actor(), "--json"]
+    for bad in ({"after": "--x"}, {"after": None}, {"check": "bad"}, {"extra": 1}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("check.move", {"ticket": "t_abcdef", "check": "c2", "after": "c3", **bad})

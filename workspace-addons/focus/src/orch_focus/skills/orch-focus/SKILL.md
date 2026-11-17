@@ -34,6 +34,14 @@ messages and stops agents only through `orch run start|send|stop`.
 - A one-shot agent refused a tool: the page asks "Allow and retry / Not now". Allow restarts that run with the tool
   allowed for this run only.
 
+**The Manager** (one per workspace): an always-on helper session with the full rights of a normal helper. The
+Focus start page has a Manager row: Start (the first time, or while it is off) or Open. Its page has the screen,
+typing and the message box; Start fresh begins an empty conversation, even while it runs. Nothing ends it by itself.
+
+    orch manager start [--fresh]    # made the first time, then started live; already on: nothing happens
+    orch manager status             # on or off, and the terminal command to join it (orch run attach <id>)
+    orch manager stop               # its conversation is kept for the next start
+
 Focus adds rows to `orch needs` only for a live run waiting for an OK and for a refused tool nobody answered yet.
 `orch focus view --json` feeds the Live tab of the dashboard.
 

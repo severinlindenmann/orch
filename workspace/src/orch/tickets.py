@@ -658,7 +658,8 @@ def save(root: Path, ticket: dict) -> None:
 
 def list_all(root: Path, include_general: bool = False) -> list[dict]:
     """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
-    `general: true`) is left out unless include_general: it is not a ticket anyone lists, counts or closes."""
+    `general: true`) and the hidden Manager ticket (flag `manager: true`) are left out unless include_general:
+    they are not tickets anyone lists, counts or closes."""
     d = tickets_dir(root)
     out = []
     if d.is_dir():
@@ -673,7 +674,7 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
                 continue
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten
-            if include_general or t.get("general") is not True:
+            if include_general or (t.get("general") is not True and t.get("manager") is not True):
                 out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
@@ -693,6 +694,57 @@ def general_id(root: Path) -> str | None:
         if isinstance(t, dict) and t.get("general") is True:
             return t["id"]
     return None
+
+
+def is_manager(root: Path, tid: str) -> bool:
+    """True for the hidden Manager ticket: the workspace's always-on helper session (ORCH-147)."""
+    try:
+        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("manager") is True
+    except (OSError, ValueError, Refused, AttributeError):
+        return False
+
+
+def manager_id(root: Path) -> str | None:
+    """The id of this workspace's hidden Manager ticket, or None before the Manager was first started."""
+    for t in list_all(root, include_general=True):
+        if isinstance(t, dict) and t.get("manager") is True and t.get("general") is not True:
+            return t["id"]
+    return None
+
+
+MANAGER_NOTE = (
+    "The Manager: an always-on helper the person talks to in Focus or joins in a terminal. It looks after "
+    "the workspace's tickets and helpers with the full rights of a normal helper. Nothing ends its session "
+    "by itself."
+)
+
+
+def ensure_manager(root: Path, by: str) -> str:
+    """The Manager ticket (flag manager: true, no display key so no number is used up), made once. Kept out of
+    git like the Chat ticket: it is this computer's own session."""
+    from orch import harness
+
+    if tid := manager_id(root):
+        return tid
+    t = now()
+    ticket = {
+        "schema": "orch.ticket/1",
+        "id": new_id(root),
+        "title": "Manager",
+        "manager": True,
+        "status": "open",
+        "note": MANAGER_NOTE,
+        "created_at": t,
+        "updated_at": t,
+        "checklist": [],
+        "refs": [],
+        "questions": [],
+        "history": [],
+    }
+    add_history(ticket, by, "Created", "cli", at=t)
+    save(root, ticket)
+    harness.protect_local(root)
+    return ticket["id"]
 
 
 def ensure_general(root: Path, by: str) -> str:
@@ -861,6 +913,7 @@ def create(
     title_auto: bool = False,
     plan_first: bool = False,
     epic: bool = False,
+    release: bool = False,
 ) -> dict:
     """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
@@ -872,7 +925,7 @@ def create(
         raise Refused("A title needs 1 to 200 characters.")
     parent_ticket = None
     if parent is not None:
-        # the parent must exist (cycles are impossible: it is set only here)
+        # the parent must exist (a new ticket has no children, so no loop; set_parent checks loops later)
         parent_ticket = load(root, parent)
     fields = fields or {}
     for k, v in fields.items():
@@ -901,6 +954,10 @@ def create(
         ticket["plan_first"] = True
     if epic:  # several tickets made at once: its sub-tickets are the work, one run goes through them in order
         ticket["epic"] = True
+    if (
+        release
+    ):  # ORCH-37: a release holds the epics and tickets that ship together (set_release changes it later)
+        ticket["release"] = True
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -1087,6 +1144,23 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
 
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
+MANAGER_REFUSAL = "The Manager is not a ticket: it is never finished, dropped or reopened."
+
+
+def hidden_kind(ticket: dict) -> str | None:
+    """'general' (Chat) or 'manager' for the two hidden tickets that hold a conversation, never a piece of
+    work: no status moves, never Working. None for every other ticket."""
+    if ticket.get("general") is True:
+        return "general"
+    if ticket.get("manager") is True:
+        return "manager"
+    return None
+
+
+def _hidden_refusal(ticket: dict) -> str:
+    return MANAGER_REFUSAL if hidden_kind(ticket) == "manager" else GENERAL_REFUSAL
+
+
 GENERAL_REFUSED = (
     "open",
     "review",
@@ -1097,10 +1171,8 @@ GENERAL_REFUSED = (
 
 
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
-    if (
-        ticket.get("general") is True and status in GENERAL_REFUSED
-    ):  # the ONE status guard (agent, person, wrapper)
-        raise Refused(GENERAL_REFUSAL)
+    if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
+        raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
@@ -1137,8 +1209,8 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
         raise Refused("Only a person can accept.")
 
     def op(ticket):
-        if ticket.get("general") is True:
-            raise Refused(GENERAL_REFUSAL)
+        if hidden_kind(ticket):
+            raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not waiting for your review.")
         ticket["status"] = "done"
@@ -1173,8 +1245,8 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
     why = _one_line(reasons)
 
     def op(ticket):
-        if ticket.get("general") is True:
-            raise Refused(GENERAL_REFUSAL)
+        if hidden_kind(ticket):
+            raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not in Review.")
         _check_can_finish(ticket)
@@ -1184,6 +1256,47 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
         ticket["waiting_on"] = None
         add_history(ticket, REVIEWER, "Status review -> done", REVIEWER_VIA)
         add_history(ticket, REVIEWER, ACCEPTED_LINE + why, REVIEWER_VIA)
+
+    return apply_op(root, tid, op, by=REVIEWER)[0]
+
+
+ANSWERED_LINE = "Answered for you by the Reviewer: "
+
+
+def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> dict:
+    """The Reviewer answers a small, routine question for the owner with the helper's recommended option,
+    only while the owner turned it on (`workflow.reviewer_answers`) and only for a plain question (no card, no
+    merge, not an add-on's) that is still exactly the one the Reviewer looked at (`digest`). The history says
+    who did it and why: a role acting for the owner (R4.1); the owner corrects it with a message on the
+    ticket."""
+    if not config.reviewer_answers_on(root):
+        raise Refused("The Reviewer does not answer questions here. Turn it on: orch config set "
+                      "workflow.reviewer_answers on")  # fmt: skip
+    line = _one_line(why)
+
+    def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused(GENERAL_REFUSAL)
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        if question_digest(q) != digest:
+            raise Refused(f"{qid} changed after the Reviewer looked at it.")
+        if q.get("card") is not None or q.get("action") is not None or q.get("kind") not in (None, "plain"):
+            raise Refused(f"{qid} waits for the owner.")
+        rec = q.get("recommended")
+        if not rec or rec not in q["options"]:
+            raise Refused(f"{qid} has no recommended answer.")
+        q["answer"], q["answered_by"], q["via"] = rec, REVIEWER, REVIEWER_VIA
+        q["answered_at"] = now()
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, REVIEWER, f"Answered {qid}: {rec}", REVIEWER_VIA)
+        add_history(ticket, REVIEWER, ANSWERED_LINE + f"{qid} = {rec} ({line})", REVIEWER_VIA)
+        history.created("answers", q)
+        return q
 
     return apply_op(root, tid, op, by=REVIEWER)[0]
 
@@ -1289,7 +1402,7 @@ def ask_for_changes(
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
-        if ticket.get("general") is True:
+        if hidden_kind(ticket):
             return NO_WRITE
         was_started = ticket.get("started") is True
         ticket["started"] = True
@@ -1318,7 +1431,7 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
     Returns True when the ticket was moved."""
 
     def op(ticket):
-        if ticket.get("general") is True:
+        if hidden_kind(ticket):
             return NO_WRITE
         if ticket["status"] != "active" or (still_running is not None and still_running()):
             return NO_WRITE
@@ -1382,7 +1495,7 @@ def recheck_hint(root: Path, tid: str, status: str, by: str) -> str | None:
     if status != "review" or not (agent_tool() or by.startswith("agent:")):
         return None
     t = load(root, tid)
-    if t.get("status") == "review" or t.get("general") is True:
+    if t.get("status") == "review" or hidden_kind(t):
         return None
     if not {"changed", "failed"} & set(proof_state(t, root)["per_item"].values()):
         return None
@@ -1447,7 +1560,7 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by", "model")
+PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "release", "description", "description_by", "model")
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1621,6 +1734,99 @@ def edit(
             add_history(ticket, by, text)
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+def set_release(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-37: mark a ticket as a release (the epics and tickets that ship together sit under it, put there
+    with set_parent) or take the mark off. Its sub-tickets stay where they are either way."""
+    me = load(root, tid)
+    if bool(me.get("release")) == on:
+        return me  # nothing changes: no write, no history line
+
+    def op(ticket):
+        if on:
+            ticket["release"] = True
+        else:
+            ticket.pop("release", None)
+        add_history(ticket, by, "Marked as a release" if on else "No longer a release")
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+PARENT_DEPTH = 50  # a parent chain longer than this is broken data: never followed further
+
+
+def set_parent(root: Path, tid: str, parent: str | None, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-156: put a ticket that already exists under another one (an epic, a release) or take it out
+    (`parent` None or empty). Refused: itself, a ticket that does not exist, or one of its own sub-tickets
+    (a loop). One history line on the ticket and one on each parent it joins or leaves."""
+    me = load(root, tid)
+    new = None
+    if isinstance(parent, str) and parent.strip():
+        if parent.strip() in (me["id"], me.get("key")):
+            raise Refused("A ticket cannot be part of itself.")
+        new = load(root, parent.strip())
+        by_id = {t["id"]: t for t in list_all(root)}
+        seen, cur = set(), new
+        while cur is not None and cur["id"] not in seen and len(seen) < PARENT_DEPTH:
+            if cur["id"] == me["id"]:
+                raise Refused(
+                    f"{_parent_words(new)} is inside this ticket already, so it cannot hold this ticket."
+                )
+            seen.add(cur["id"])
+            cur = by_id.get(str(cur.get("parent") or ""))
+    old_id = me.get("parent")
+    if (new["id"] if new else None) == (old_id or None):
+        return me  # nothing changes: no write, no history line
+    try:
+        old = load(root, old_id) if old_id else None
+    except (Refused, OSError, ValueError):
+        old = None  # a parent that is gone: taking the ticket out still works
+
+    def op(ticket):
+        if new is None:
+            ticket.pop("parent", None)
+            add_history(ticket, by, "Taken out of " + (_parent_words(old) if old else str(old_id)))
+        else:
+            ticket["parent"] = new["id"]
+            add_history(ticket, by, "Put under " + _parent_words(new))
+
+    t = apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+    me_words = _parent_words(t)
+    for other, words in ((old, f"{me_words} moved out"), (new, f"{me_words} added")):
+        if other is None:
+            continue
+        try:  # the parent's line is a courtesy: the ticket itself is already saved
+            apply_op(root, other["id"], lambda p, w=words: add_history(p, by, w), by=by)
+        except (Refused, OSError, ValueError):
+            pass
+    return t
+
+
+LANE_RE = re.compile(r"^[a-z][a-z_]{0,23}$")
+MAX_ORDER = 500
+
+
+def set_lane_order(root: Path, lane: str, ids: list[str], by: str) -> list[dict]:
+    """ORCH-156: the order of the tickets inside one board lane (To do, Backlog ...), first to last. Each
+    listed ticket keeps {lane, n}; the board uses it only while the ticket is still in that lane, so a ticket
+    that moves on needs no clean-up. Only tickets whose place changed are written (no history line: the order
+    is how the board shows them, not news about the work). Returns the tickets that changed."""
+    if not isinstance(lane, str) or not LANE_RE.match(lane):
+        raise Refused("A lane is a short name such as todo or backlog.")
+    if not ids:
+        raise Refused("Name the tickets of the lane, first to last.")
+    if len(ids) > MAX_ORDER:
+        raise Refused(f"At most {MAX_ORDER} tickets can be put in order at once.")
+    if len(set(ids)) != len(ids):
+        raise Refused("A ticket is named twice; name each ticket once.")
+    now_at = [load(root, tid).get("lane_order") for tid in ids]  # every ticket exists before any write
+    changed = []
+    for n, (tid, was) in enumerate(zip(ids, now_at, strict=True), start=1):
+        want = {"lane": lane, "n": n}
+        if was != want:
+            changed.append(apply_op(root, tid, lambda t, w=want: t.__setitem__("lane_order", w), by=by)[0])
+    return changed
 
 
 LONG_NOTE = (
@@ -2855,6 +3061,7 @@ def ask(
             "answer": None,
             "answered_by": None,
             "via": None,
+            "asked_at": now(),  # the Reviewer's routine answers wait from here (reviewer.routine)
         }
         if kind is not None:
             q["kind"] = kind
@@ -2914,7 +3121,7 @@ def _release_wait(root: Path, tid: str, ticket: dict, qid: str) -> None:
         else:
             ticket["waiting_on"] = None
             if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
-                chat = ticket.get("general") is True  # the Chat ticket is never Working
+                chat = hidden_kind(ticket) is not None  # the Chat and Manager tickets are never Working
                 ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
 
 
@@ -3314,6 +3521,13 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
         sessions = t.setdefault("sessions", [])
         for s in sessions:
             if s.get("agent") == agent and s.get("host") == host:
+                if s.get("id") != sid and valid_session_id(s.get("id")):
+                    # keep the replaced conversation so a person can read or continue it later
+                    old = [e for e in s.get("earlier") or [] if isinstance(e, dict) and e.get("id") != sid]
+                    old.insert(0, {"id": s["id"], "last_used": s.get("last_used")})
+                    s["earlier"] = old[:20]
+                elif s.get("earlier"):
+                    s["earlier"] = [e for e in s["earlier"] if e.get("id") != sid]
                 s["id"], s["last_used"] = sid, now()
                 break
         else:

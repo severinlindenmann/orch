@@ -7,12 +7,13 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 
 from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict")
 CARD_KINDS = ("draft", "link", "plan", "choose")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
@@ -65,6 +66,17 @@ def add_parsers(sub, common) -> None:
         help="merge green release cards for the owner when Settings allow it (workflow.release_merge)",
     )
     x.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    x = s.add_parser(
+        "verdict",
+        parents=[common],
+        help="the Reviewer's second look decides one ticket (accept, back, leave)",
+    )
+    x.add_argument("ticket")
+    x.add_argument("word", choices=("accept", "back", "leave"), help="accept, back or leave")
+    x.add_argument("why", help="one line why")
+    x.add_argument(
+        "--point", action="append", default=[], metavar="TEXT", help="one point and what you saw (repeat)"
+    )
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -215,11 +227,8 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
                 "e.g. --open https://github.com/owner/repo/pull/12."
             )
         head = args.merge_head = ghmerge.head_of(args.open)  # the click merges exactly this commit
-        card["preview"] = {
-            "type": "doc",
-            "heading": "Pull request",
-            "paras": [args.open, f"Commit {head[:7]}"],
-        }
+        # what the person decides on, read for the pinned commit; never a helper's own file in its place
+        card["preview"] = merge_preview(root, args.open, head, ghmerge.summary(args.open, head))
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
         card.setdefault(
             "why",
@@ -235,6 +244,69 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     if args.suggest is not None and kind != "choice" and args.suggest not in SUGGEST_VERDICTS:
         raise Refused("On this card --suggest is ok (approve) or no (don't do).")
     return card, options, args.suggest, title
+
+
+def _pr_tickets(root: Path, repo_url: str) -> dict[int, list[str]]:
+    """{pull request number: [ticket keys]} for this repository's pull requests the tickets link (shown after
+    GitHub's own title, never in its place)."""
+    out: dict[int, list[str]] = {}
+    for t in tickets.list_all(root):
+        name = t.get("key") if isinstance(t.get("key"), str) else ""
+        for r in t.get("refs") or []:
+            url = r.get("url") if isinstance(r, dict) else None
+            if isinstance(url, str) and url.startswith(repo_url + "/pull/") and name:
+                tail = url[len(repo_url) + 6 :]
+                if tail.isdigit():
+                    keys = out.setdefault(int(tail), [])
+                    if name not in keys:
+                        keys.append(name)
+    return out
+
+
+def merge_preview(root: Path, url: str, head: str, info: dict | None) -> dict:
+    """A merge card's box (ORCH-183, owner 17 Nov, after a design challenge): the checks as a status line,
+    "What goes out · N changes" with one row per pull request (GitHub's title first, its ticket key and
+    number beside it), the commits that are no pull request merge, and the exact version as a small footer.
+    The address itself is the card's Open link, not its content. Without GitHub's answer only the version."""
+    foot = f"Exact version: {head[:7]}"
+    if not info:
+        return {"type": "doc", "heading": "Pull request", "foot": foot}
+    when = datetime.now().strftime("%H:%M")
+    tone, words = info["checks"]
+    names = _pr_tickets(root, url.rsplit("/pull/", 1)[0])
+    rows = []
+    for i in info["items"]:
+        row = {"title": i["title"] or "Pull request", "n": i["pr"]}
+        keys = names.get(i["pr"], [])
+        if keys:
+            row["key"] = " ".join(keys[:2])[:20]
+        rows.append(row)
+    if info.get("more"):
+        rows.append({"title": f"and {info['more']} more"})
+    if rows and info.get("other"):
+        n = info["other"]
+        rows.append({"title": f"and {n} other commit{'' if n == 1 else 's'}"})
+    paras = []
+    if tone == "working":
+        paras.append("Safer to wait: choose Later and this card stays.")
+    elif tone == "failed":
+        paras.append("Merging now would put work live that failed a check.")
+    if tone != "done":
+        paras.append(f"Checked at {when}; it may have changed. Open shows the latest.")
+    n = len(info["items"]) + info.get("more", 0)
+    pv: dict = {
+        "type": "doc",
+        "heading": (
+            f"What goes out · {n} change{'' if n == 1 else 's'}" if n else info.get("title") or "Pull request"
+        )[:200],
+        "status": {"tone": tone, "text": f"{words} · checked {when}"},
+        "foot": foot,
+    }
+    if paras:
+        pv["paras"] = paras
+    if rows:
+        pv["rows"] = rows
+    return pv
 
 
 def has_card_flags(args) -> bool:
@@ -445,6 +517,14 @@ def _accepted(args, root: Path) -> None:
     _out(args, data, text)
 
 
+def _verdict(args, root: Path) -> None:
+    from orch import lookreview
+
+    tid = _ticket(root, args)["id"]
+    res = _guard(lookreview.verdict, root, tid, args.word, args.why, args.point)
+    _out(args, res, f"{res['key']}: {lookreview.VERDICT_TEXT[res['verdict']]}: {res['why']}")
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "review":
         return False
@@ -461,5 +541,6 @@ def dispatch(args, root: Path) -> bool:
         "tend": _tend,
         "tend-releases": _tend_releases,
         "accepted": _accepted,
+        "verdict": _verdict,
     }[args.sub](args, root)
     return True

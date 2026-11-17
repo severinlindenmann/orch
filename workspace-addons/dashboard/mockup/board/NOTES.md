@@ -79,6 +79,18 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 - Under the files: "＋ Split into parts". Each click adds a "Ticket N" box with its own text, files and Remove; the button then reads "＋ Add another part" and a line says the ticket becomes an epic. On Start the epic is made first, then one ticket inside it per box; one helper run goes through them in order. The epic page lists them under "Tickets in this epic"; the board card says "Epic · N of M done"; a ticket inside says "Part of the epic …".
 
+## ORCH-156 (17 Nov): existing tickets under an epic, no empty epic box, order inside a lane
+
+### new.html
+- An empty "Ticket N" box stops the save with "Ticket N is empty. Write what needs doing in it, or remove it." (it used to drop out silently, and an epic with only empty boxes became a plain ticket). Nothing is made until it is filled or removed.
+
+### Ticket page (Properties, Add a ticket)
+- Properties has "Part of" (it replaces the "Sub-ticket of" line): a select with "Not part of another ticket" or any open ticket, epics first (marked "(epic)"), never the ticket itself or one inside it. The header line "Part of the epic …" follows it.
+- An epic's "+ Add a ticket" window keeps the title box and adds "Or pick a ticket that already exists"; picking one hides the title box, Add moves that ticket in.
+
+### board.html
+- Inside a lane the person drags a card above another to put them in order (a drop on empty space puts it last); the order is kept per lane. Cards that came into the lane since stay on top. The card's ⋯ menu adds "Move up" and "Move down" under the lanes (by keyboard, no dragging), only where the card can move.
+
 ## Revised after the owner's answer (16 Nov, ORCH-62)
 
 ### list.html
@@ -101,3 +113,15 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - Date picker (kit): today is marked with a ring and `aria-current="date"`; it opens as a small 340 px popup, not the 480 px dialog width.
 - `new.html` and `new.js` show the draft line with Discard and the picture thumbnail.
 - Board: a sub-ticket that has its own card in the same column is no longer listed again inside its parent's card; sub-tickets in other columns still are.
+
+## Releases (ORCH-37, owner picked "a release is a parent ticket", 17 Nov)
+
+- `list.html`: a release is its own group above the status groups ("Release 26 · 1 of 4 done", Open release), with its epic, the epic's tickets and its other tickets as one tree; each row carries its status chip. Finished releases start folded.
+- `../ticket/ticket-working.html`: Properties has a Release switch under Part of; Part of offers releases first, marked "(release)".
+## Triage button (ORCH-151, 17 Nov)
+
+- `board.html`, `list.html`: a Triage button beside the page title. It opens a small menu that says what happens and lists the lanes with their counts as tick boxes (Backlog to Check ticked, Done, Won't do and Superseded not); Start triage opens a dated Triage ticket and starts one
+  helper that goes through every open ticket (brings it up to date, groups related ones, closes what is no longer
+  needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
+  says so in a notice.
+- Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).
