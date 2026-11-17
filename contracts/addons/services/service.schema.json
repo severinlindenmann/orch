@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addons/services/service.schema.json",
+  "title": "orch services record v1 (.orch/addons/services/services/<id>.json)",
+  "description": "One background service the Services add-on keeps running with the computer's own service tool (launchd on macOS, systemd user units on Linux). One plain JSON file per service, written atomically (new file + rename). Fields this version does not know are kept when the file is rewritten. See addons/services/README.md.",
+  "type": "object",
+  "required": ["schema", "id", "name", "command", "cwd", "auto", "created_at"],
+  "properties": {
+    "schema": { "const": "orch.services.service/1" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+      "description": "Slug, also the file name. Names the platform entry (ch.orch.svc.<workspace id>.<id> / orch-svc-<workspace id>-<id>.service)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$",
+      "description": "Plain words the person reads."
+    },
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000\\n\\r]+$" },
+      "description": "Program and its arguments as typed (argv). The platform entry holds the program's full path, found when the service was added."
+    },
+    "cwd": {
+      "type": "string",
+      "default": ".",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))[^\\u0000\\n\\r\\\\]+$",
+      "description": "Working folder relative to the workspace root; stays inside it."
+    },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "auto": { "type": "boolean", "description": "Starts by itself after this computer restarts (or the person logs in)." },
+    "made_by": {
+      "description": "Who asked for this service.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ticket"],
+          "additionalProperties": false,
+          "properties": { "ticket": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,40}$" } }
+        },
+        {
+          "type": "object",
+          "required": ["addon"],
+          "additionalProperties": false,
+          "properties": { "addon": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" } }
+        },
+        {
+          "type": "object",
+          "required": ["found"],
+          "additionalProperties": false,
+          "properties": {
+            "found": { "const": true },
+            "ticket": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,40}$" }
+          }
+        }
+      ]
+    },
+    "adopted": {
+      "description": "Only on a found service the person chose to manage with orch: the existing entry it points at. orch acts on that entry and never writes, moves or renames it; remove only forgets the record.",
+      "type": "object",
+      "required": ["kind", "entry"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["launchd", "systemd"] },
+        "entry": { "type": "string", "pattern": "^[A-Za-z0-9@._-]{1,200}$", "description": "The launchd label or the systemd user unit name." },
+        "path": { "type": ["string", "null"], "pattern": "^/", "description": "The plist or unit file, absolute." }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time", "pattern": "Z$" }
+  },
+  "additionalProperties": true
+}
