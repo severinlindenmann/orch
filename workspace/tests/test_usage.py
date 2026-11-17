@@ -215,7 +215,7 @@ def test_session_folders_are_remembered_and_misses_retried_later(proj, env, monk
 
 
 def test_team_finished_open_and_stuck(proj, env):
-    """ORCH-189: per owner finished (in the window), open, helper time and money; stuck counts the open ones."""
+    """ORCH-189: per owner finished (in the window), open, helper time and money; stuck counts open ones."""
     a = make(proj, "Anna works", [SID])
     raw = tickets.load(proj, a["id"])
     raw["owner"], raw["due"] = "anna", "2020-01-01"  # past due: stuck
