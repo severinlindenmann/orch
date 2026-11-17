@@ -175,3 +175,14 @@ def test_cli_lanes(proj, run, started):
     assert code == 0 and "Tickets: 1 in Working" in out
     code, _, err = run("triage", "--lanes", "nope")
     assert code == 2 and "Unknown lane" in err
+
+
+def test_note_fits_and_names_the_commands(proj, started):
+    """Every lane picked gives the longest note: it stays inside the 2000-character limit and names the
+    commands the helper uses (they exist since the lanes and epic changes)."""
+    _mk(proj, "Something open", description="x")
+    r = triage.start(proj, "human:tester", T, tuple(triage.LANES))
+    note = tickets.load(proj, r["id"])["note"]
+    assert len(note) <= 2000
+    for cmd in ("--superseded-by", "ticket edit ID --parent", "--epic", "orch log ID"):
+        assert cmd in note, cmd
