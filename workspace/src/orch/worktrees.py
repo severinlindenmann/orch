@@ -998,10 +998,10 @@ _IMPORT_LINE = re.compile(r"^[ \t]*@(\S+)[ \t]*$", re.M)
 
 
 def _rule_names(root: Path) -> list[str]:
-    """The workspace's own top-level instruction files (CLAUDE.md, AGENTS.md) and the top-level files they
+    """The workspace's own top-level instruction files (adapters.GUIDE_FILES) and the top-level files they
     import (`@RULES.md`): plain files, never links. A copy folder gets them as files of its own, not as links:
-    an import whose real path is outside the folder the tool runs in is an external import to Claude Code (it
-    asks "Allow external CLAUDE.md file imports?", and an unattended run drops the import without a word)."""
+    an import whose real path is outside the folder the tool runs in is an external import to the agent tool
+    (a live run asks whether to allow it and hangs there; an unattended run drops the import silently)."""
     names: list[str] = []
 
     def plain(name: str) -> bool:
