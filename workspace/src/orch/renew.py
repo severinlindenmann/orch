@@ -65,7 +65,7 @@ GRANT_LIFE = 120  # seconds a grant stays good
 RUN_MARKS = ("ORCH_RUN", "ORCH_TICKET", "ORCH_JOB", "ORCH_AGENT")  # set inside a helper run
 PERSON_ONLY = (
     "Only a person renews a login or replaces a key, with Renew or Replace on the dashboard warning. "
-    "In a terminal, sign in with the tool itself (for example claude auth login), then run orch logins."
+    "In a terminal, sign in with the tool's own login command, then run orch logins."
 )
 _GRANTED: set[str] = set()  # workspaces this process was granted for (one grant serves one orch call)
 

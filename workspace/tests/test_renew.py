@@ -611,4 +611,4 @@ def test_a_terminal_is_no_proof(proj, run, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO("typed-value-456\n"))
     for argv in (["renew", "claude"], ["replace", "payments"], ["renew", "claude", "--code", "-"]):
         code, out, err = run("logins", *argv, "--by", "human:owner")
-        assert code == 2 and "Only a person" in out + err and "claude auth login" in out + err, argv
+        assert code == 2 and "Only a person" in out + err and "own login command" in out + err, argv
