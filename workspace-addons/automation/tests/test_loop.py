@@ -599,3 +599,88 @@ def test_with_sync_on_an_unknown_ticket_is_refused_but_the_chat_ticket_is_not(ws
     res = orchcli.run_start(ws, "t_other001", "hi")
     assert res["result"] == "failed" and "local approval" in res["reason"]
     assert orchcli.run_start(ws, "t_chat0001", "hi")["result"] == "started"
+
+
+# -- problem reports become tickets (core setting diag.report_tickets, ORCH-103) --------------------------------
+
+
+def report_setting(ws, on=True, every=None):
+    lines = ["[diag]", f"report_tickets = {'true' if on else 'false'}"]
+    if every:
+        lines += ["[automation]", f"reports_every = {every}"]
+    (ws / ".orch" / "config.toml").write_text("\n".join(lines) + "\n")
+
+
+def new_reports(ws, *rows):
+    """What the next `orch diag tickets` says it opened (the fake orch answers it once)."""
+    for tid, start in rows:
+        add_ticket(ws, tid)
+    (ws / "diag-tickets.json").write_text(
+        json.dumps({"opened": [{"ticket": tid, "start": start} for tid, start in rows]})
+    )
+
+
+def diag_calls(ws):
+    return [c for c in calls(ws) if c["args"][:2] == ["diag", "tickets"]]
+
+
+def test_reports_need_the_setting(ws):
+    new_reports(ws, ("t_rep0001", True))
+    assert Scheduler(ws).tick(T(8)) == [] and diag_calls(ws) == []
+    report_setting(ws, on=False)
+    assert Scheduler(ws).tick(T(8)) == [] and diag_calls(ws) == []
+
+
+def test_a_new_report_ticket_gets_one_helper_and_a_wish_none(ws):
+    report_setting(ws)
+    new_reports(ws, ("t_rep0001", True), ("t_wish001", False))
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == ["t_rep0001"]
+    assert diag_calls(ws)[0]["by"] is None  # core opens the tickets; no AI is asked
+    assert s.tick(T(8, 5)) == [] and runs_started(ws) == ["t_rep0001"]
+    assert load_state(ws)["t_rep0001"]["report_start"] == "tried"
+    assert "t_wish001" not in load_state(ws)
+
+
+def test_report_passes_are_spaced_by_reports_every(ws):
+    report_setting(ws, every=600)
+    s = Scheduler(ws)
+    s.tick(T(8))
+    s.tick(T(8, 5))
+    assert len(diag_calls(ws)) == 1
+    s.tick(T(8, 11))
+    assert len(diag_calls(ws)) == 2
+
+
+def test_at_most_two_report_helpers_per_pass_the_rest_next_pass(ws):
+    report_setting(ws, every=1)
+    new_reports(ws, ("t_rep0001", True), ("t_rep0002", True), ("t_rep0003", True))
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == ["t_rep0001", "t_rep0002"]
+    assert s.tick(T(8, 1)) == ["t_rep0003"]
+    assert runs_started(ws) == ["t_rep0001", "t_rep0002", "t_rep0003"]
+
+
+def test_a_waiting_report_ticket_survives_a_restart_and_a_closed_one_is_left(ws):
+    report_setting(ws, every=1)
+    new_reports(ws, ("t_rep0001", True), ("t_rep0002", True), ("t_rep0003", True))
+    s = Scheduler(ws)
+    s.tick(T(8))
+    t = tk(ws, "t_rep0003")
+    t["status"] = "dropped"
+    (ws / ".orch/tickets/t_rep0003.json").write_text(json.dumps(t))
+    assert Scheduler(ws).tick(T(8, 1)) == []  # a new scheduler (restart) reads what still waits
+    assert load_state(ws)["t_rep0003"]["report_start"] == "skipped"
+    assert runs_started(ws) == ["t_rep0001", "t_rep0002"]
+
+
+def test_loop_asks_core_for_the_health_checks_once_a_minute_without_a_ticket(ws):
+    """ORCH-104: the machine's health checks belong to no ticket. The loop asks core (`orch doctor soon`) on its
+    own clock, also with no ticket at all, and at most once a minute; core decides whether a pass is due."""
+    s = Scheduler(ws)
+    s.tick(T(10, 0))
+    s.tick(T(10, 0).replace(second=30))
+    asked = [c for c in calls(ws) if c["args"][:2] == ["doctor", "soon"]]
+    assert len(asked) == 1 and asked[0]["by"] is None
+    s.tick(T(10, 1))
+    assert len([c for c in calls(ws) if c["args"][:2] == ["doctor", "soon"]]) == 2

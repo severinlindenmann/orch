@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 
+from orch import ghlimit
 from orch.errors import Refused
 
 PR_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}")
@@ -153,6 +154,43 @@ def checks(url: str) -> dict | None:
     return {"state": data["state"], "head": head, "green": green}
 
 
+RELEASE_PREFIX = "release/"
+RELEASE_FROM = "develop"  # a release only carries what is on this branch already (reviewed there)
+
+
+def release_problem(url: str, head: str) -> str | None:
+    """Why a pull request is not a release that may merge without a click (None = it is one): it must
+    come from a release/... branch into the repository's default branch, and change nothing that is not on
+    develop already (GitHub's compare develop...<commit> lists no file). Read-only, with any login."""
+    repo, _ = _parts(url)
+    gh = shutil.which("gh")
+    if gh is None or not SHA.fullmatch(str(head or "")):
+        return "GitHub could not be read"
+    try:
+        v = _gh_plain(gh, ["pr", "view", url, "--json", "baseRefName,headRefName,isCrossRepository"], 15)
+        pr = json.loads(v.stdout) if v.returncode == 0 else None
+        d = _gh_plain(gh, ["api", f"repos/{repo}", "--jq", ".default_branch"], 15)
+        # the branch's own commit (a tag of that name cannot stand in), then compare commit to commit
+        b = _gh_plain(gh, ["api", f"repos/{repo}/branches/{RELEASE_FROM}", "--jq", ".commit.sha"], 15)
+        base = b.stdout.strip() if b.returncode == 0 else ""
+        if not SHA.fullmatch(base):
+            return "GitHub could not be read"
+        c = _gh_plain(gh, ["api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".files | length"], 20)
+    except (Refused, ValueError):
+        return "GitHub could not be read"
+    if not isinstance(pr, dict) or v.returncode != 0 or d.returncode != 0:
+        return "GitHub could not be read"
+    if pr.get("isCrossRepository") is not False:
+        return "it comes from another repository"
+    if not str(pr.get("headRefName") or "").startswith(RELEASE_PREFIX):
+        return f"it does not come from a {RELEASE_PREFIX}... branch"
+    if pr.get("baseRefName") != d.stdout.strip():
+        return "it does not go into the default branch"
+    if c.returncode != 0 or c.stdout.strip() != "0":
+        return f"it changes files that are not on {RELEASE_FROM}"
+    return None
+
+
 def head_of(url: str) -> str:
     """The newest commit of an open pull request, read when the card is made: the click merges exactly it."""
     _parts(url)
@@ -199,4 +237,5 @@ def merge(url: str, head: str, add_review: bool = True) -> dict:
     done = _gh(gh, ["pr", "merge", url, "--merge", "--match-head-commit", head], 25)
     if done.returncode != 0:
         raise Refused(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
+    ghlimit.count("merge", url)  # the person's own click never waits, but it uses up the hour too
     return {"login": login, "already": False}

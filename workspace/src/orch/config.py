@@ -650,6 +650,19 @@ def set_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+def release_merge_on(root: Path | None) -> bool:
+    """[workflow] release_merge (default off): a release Merge card (`orch ask ... --merge --release`) merges
+    by itself once every check of its pull request is green (`orch review tend-releases`). Owner's choice."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "release_merge", False) is True
+
+
+def set_release_merge(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "release_merge", value)
+    return value
+
+
 def set_live_idle_minutes(root: Path, value: str) -> int:
     if not value.isdigit() or not 1 <= int(value) <= 10080:
         raise Refused("Give a whole number of minutes, from 1 to 10080 (one week).")

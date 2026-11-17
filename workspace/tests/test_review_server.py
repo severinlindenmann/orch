@@ -232,7 +232,7 @@ def test_answer_input_is_checked_before_anything_runs(srv, ws, card):
         answer_body(tid, qid, d, extra=1),  # unknown field
         answer_body(tid, qid, d, verdict="maybe"),
         answer_body(tid, qid, "xyz"),
-        answer_body(tid, qid, d, picked="a b"),
+        answer_body(tid, qid, d, picked="a\nb"),
         answer_body(tid, qid, d, picked=["A"]),
         answer_body(tid, qid, d, note="text"),
         {**answer_body(tid, qid, d), "id": "core:q:../../etc:q1"},

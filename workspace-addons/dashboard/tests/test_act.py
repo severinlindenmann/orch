@@ -899,6 +899,17 @@ def test_reviewer_switch_is_one_config_set_by_a_human():
         build_argv("reviewer.set", {"on": "yes"})
 
 
+def test_release_merge_switch_is_one_config_set_by_a_human():
+    from orch_dashboard.actions import build_argv
+
+    for on in (True, False):
+        argv = build_argv("release_merge.set", {"on": on})
+        assert argv[:4] == ["config", "set", "workflow.release_merge", "on" if on else "off"]
+        assert argv[argv.index("--by") + 1].startswith("human:")
+    with pytest.raises(actions.BadRequest):
+        build_argv("release_merge.set", {"on": "yes"})
+
+
 def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypatch):
     from orch.adapters import detect_env
 
@@ -1466,6 +1477,15 @@ def test_review_answer_argv_and_via(act_server, act_orch):
     assert "--by" not in a and "--proof-stdin" not in a
 
 
+def test_review_answer_text_option_with_spaces(act_server, act_orch):
+    label = "After update and rules change"  # a plain-text Choose option: the label is its id
+    args = {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "picked": label, "digest": D64}
+    code, text, _ = post(act_server, {"op": "review.answer", "args": args})
+    assert code == 200, text
+    a = acts(act_orch)[-1]
+    assert a[a.index("--picked") + 1] == label
+
+
 @pytest.mark.parametrize(
     "args",
     [
@@ -1473,7 +1493,9 @@ def test_review_answer_argv_and_via(act_server, act_orch):
         {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": "x"},
         {"ticket": "t_abcdef", "key": "q1; ls", "verdict": "ok", "digest": D64},
         {"ticket": "t_abcdef", "key": "q1", "verdict": "yes", "digest": D64},
-        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "C; rm"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "-C"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "a\nb"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "x" * 201},
         {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "note": "text"},
         {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "note": {"text": "x" * 9000}},
         {"ticket": "../x", "key": "q1", "verdict": "ok", "digest": D64},

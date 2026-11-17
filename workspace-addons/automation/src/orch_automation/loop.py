@@ -1,4 +1,4 @@
-"""One scheduler pass: waiting_on time, cron, relay inbox. Time is passed in, so tests use a fake clock.
+"""One scheduler pass: waiting_on time, cron, relay inbox, problem reports (core setting diag.report_tickets). Time is passed in, so tests use a fake clock.
 
 The scheduler never runs an agent itself: every run is `orch run start` (core decides resume / fresh / busy). A repeat
 that names a script (scripts.py) runs that command from the local config of the machine orch runs on instead, through `orch automation script run`."""
@@ -21,6 +21,7 @@ from .plain import daily_or_slower, workspace_tz, zone
 from .runner import history, load_config, load_state, sdir, update_state
 
 OPEN = ("open", "ready", "active", "waiting", "review")
+REPORT_STARTS = 2  # helpers started on new problem-report tickets per pass (the old watcher: 2)
 
 
 def scheduled(t: dict) -> bool:
@@ -35,6 +36,7 @@ KIND = "automation:failure"
 KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
 GENERAL_NOTE = "General conversation"  # `orch relay inbox` note of a phone text in General
+DOCTOR_EVERY = 60  # seconds between two asks for the scheduled health checks (core runs them every 15 min)
 BUSY_TEXT = "More work arrived for this ticket: read the newest note on it."
 
 
@@ -97,6 +99,8 @@ class Scheduler:
         self.root = root
         self.cfg = load_config(root)
         self.last_inbox: datetime | None = None
+        self.last_reports: datetime | None = None
+        self.last_doctor: datetime | None = None
         self.wake = threading.Event()  # the listener sets it when something arrived
         self.watch: dict[str, dict] = {}  # tid -> {t0, at, log, hist} for runs started in the last moments
         sdir(root)
@@ -410,13 +414,63 @@ class Scheduler:
                 nxt = next_after(cron, now, tz)
                 upd["next_run"] = fmt(nxt) if nxt else None
                 update_state(self.root, tid, **upd)
+        self.doctor_soon(now)
         force = self.wake.is_set()
         self.wake.clear()
         if self._inbox_due(now, force):
             started += self.inbox(now)
             # a new phone text made its ticket in this inbox pass: start it now, not one interval later (fb6)
             started += [t for t in self.phone_tickets(now) if t not in started]
+        started += self.report_tickets(now, skip=started)
         return started
+
+    # -- problem reports ----------------------------------------------------
+    def report_tickets(self, now: datetime, skip: list[str] | None = None) -> list[str]:
+        """Core's setting diag.report_tickets: every reports_every s, `orch diag tickets` opens one ticket per new
+        problem report (no AI); a helper is started on each, at most REPORT_STARTS per pass. Which tickets still
+        wait for their helper is saved before any start, so a crash never loses one and never starts one twice."""
+        if not self.cfg.get("report_tickets"):
+            return []
+        if self.last_reports and now - self.last_reports < timedelta(seconds=self.cfg["reports_every"]):
+            return []
+        self.last_reports = now
+        res = orchcli.call(self.root, "diag", "tickets", by=False)
+        opened = res.get("opened") if isinstance(res, dict) else None
+        for r in opened if isinstance(opened, list) else []:
+            tid = r.get("ticket") if isinstance(r, dict) else None
+            if isinstance(tid, str) and orchcli.ID_RE.match(tid) and r.get("start") is True:
+                update_state(self.root, tid, report_start="waiting", report_at=fmt(now))
+        started: list[str] = []
+        state = load_state(self.root)
+        waiting = sorted(
+            (
+                tid
+                for tid, row in state.items()
+                if isinstance(row, dict) and row.get("report_start") == "waiting"
+            ),
+            key=lambda tid: str(state[tid].get("report_at") or ""),
+        )
+        for tid in waiting[:REPORT_STARTS]:
+            if tid in (skip or []):
+                continue
+            t = orchcli.ticket(self.root, tid)
+            if t is None or t.get("status") not in OPEN or not self.may_start(t):
+                update_state(self.root, tid, report_start="skipped")
+                continue
+            update_state(self.root, tid, report_start="tried")  # first: never twice
+            if self.start_run(tid, "a new problem report", now) == "started":
+                started.append(tid)
+        return started
+
+    def doctor_soon(self, now: datetime) -> None:
+        """The machine's health checks and clean-up (core `orch doctor pass`) belong to no ticket: once a minute
+        the loop asks core to start a pass in the background when one is due. Core decides whether the checks are
+        set up here and due, and never waits for the pass. A pause does not stop them: they are what lifts the
+        hold on a full disk."""
+        if self.last_doctor and now - self.last_doctor < timedelta(seconds=DOCTOR_EVERY):
+            return
+        self.last_doctor = now
+        orchcli.call(self.root, "doctor", "soon", by=False)
 
     # -- relay inbox --------------------------------------------------------
     def _inbox_due(self, now: datetime, force: bool = False) -> bool:

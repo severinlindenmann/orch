@@ -44,7 +44,7 @@ ID_RE = re.compile(r"core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]+)|review:(t_[a-z0-9]{6
 TID_RE = re.compile(r"t_[a-z0-9]{6,16}")
 SHA12 = re.compile(r"[0-9a-f]{12}")
 SHA64 = re.compile(r"[0-9a-f]{64}")
-PICK_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+PICK_RE = re.compile(r"[^\x00-\x1f\x7f\s-][^\x00-\x1f\x7f]{0,199}")  # a plain-text option's label is its id
 ANSWER_FIELDS = {"id", "digest", "verdict", "picked", "note"}
 CSP = (
     "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-src 'self'; "

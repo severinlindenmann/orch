@@ -12,7 +12,7 @@ from pathlib import Path
 from orch import ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link", "tend", "accepted")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted")
 CARD_KINDS = ("draft", "link", "plan", "choose")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
@@ -57,6 +57,12 @@ def add_parsers(sub, common) -> None:
     s.add_parser("link", parents=[common], help="the address of the review page")
     x = s.add_parser(
         "tend", parents=[common], help="the Reviewer's pass: accept small finished work for the owner"
+    )
+    x.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    x = s.add_parser(
+        "tend-releases",
+        parents=[common],
+        help="merge green release cards for the owner when Settings allow it (workflow.release_merge)",
     )
     x.add_argument("--dry-run", action="store_true", help="only say what it would do")
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
@@ -215,7 +221,15 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
             "paras": [args.open, f"Commit {head[:7]}"],
         }
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
-        card.setdefault("why", "Your click merges it on GitHub with your own GitHub login.")
+        card.setdefault(
+            "why",
+            "Your click merges it on GitHub with your own GitHub login."
+            + (
+                " When you allowed it in Settings, it merges by itself once every check is green."
+                if getattr(args, "release", False)
+                else ""
+            ),
+        )
     if args.suggest is not None and kind == "choice" and args.suggest not in options:
         raise Refused("--suggest must be one of the --option ids.")
     if args.suggest is not None and kind != "choice" and args.suggest not in SUGGEST_VERDICTS:
@@ -236,7 +250,10 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
     card, shown = _guard(review.prepare_card, root, tid, card)
     action = None
     if getattr(args, "merge", False):
-        action = json.dumps({"merge": args.open, "head": args.merge_head})
+        act = {"merge": args.open, "head": args.merge_head}
+        if getattr(args, "release", False):
+            act["release"] = True  # review.tend_releases may merge it for the owner (workflow.release_merge)
+        action = json.dumps(act)
     return _guard(
         tickets.ask,
         root,
@@ -397,6 +414,11 @@ def _tend(args, root: Path) -> None:
     _out(args, res, reviewer.text(res, args.dry_run))
 
 
+def _tend_releases(args, root: Path) -> None:
+    res = review.tend_releases(root, dry_run=args.dry_run)
+    _out(args, res, review.tend_releases_text(res, args.dry_run))
+
+
 def _accepted(args, root: Path) -> None:
     from orch import relay, reviewer
 
@@ -429,7 +451,13 @@ def dispatch(args, root: Path) -> bool:
         if rc:
             raise SystemExit(rc)
         return True
-    {"list": _list, "answer": _answer, "wait": _wait, "link": _link, "tend": _tend, "accepted": _accepted}[
-        args.sub
-    ](args, root)
+    {
+        "list": _list,
+        "answer": _answer,
+        "wait": _wait,
+        "link": _link,
+        "tend": _tend,
+        "tend-releases": _tend_releases,
+        "accepted": _accepted,
+    }[args.sub](args, root)
     return True

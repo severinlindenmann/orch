@@ -31,7 +31,7 @@ def sdir(root: Path) -> Path:
 
 
 def load_config(root: Path) -> dict:
-    """The [automation] table of .orch/config.toml: interval, inbox_every. The agent is [workspace] agent (core)."""
+    """The [automation] table of .orch/config.toml: interval, inbox_every, reports_every; and core's [diag] report_tickets. The agent is [workspace] agent (core)."""
     p = root / ".orch" / "config.toml"
     cfg: dict = {}
     if p.is_file():
@@ -40,7 +40,12 @@ def load_config(root: Path) -> dict:
             cfg = dict(t) if isinstance(t, dict) else {}
         except (tomllib.TOMLDecodeError, OSError):
             cfg = {}
-    for k, d in (("interval", 60), ("inbox_every", 60)):
+    try:  # core's [diag] report_tickets: new problem reports become tickets (orch diag tickets each reports_every s)
+        core = tomllib.loads(p.read_text()).get("diag") if p.is_file() else None
+    except (tomllib.TOMLDecodeError, OSError):
+        core = None
+    cfg["report_tickets"] = isinstance(core, dict) and core.get("report_tickets") is True
+    for k, d in (("interval", 60), ("inbox_every", 60), ("reports_every", 120)):
         try:
             cfg[k] = max(1, int(cfg.get(k, d)))
         except (TypeError, ValueError):

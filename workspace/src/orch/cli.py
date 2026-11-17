@@ -18,6 +18,7 @@ from orch import (
     cli_config,
     cli_conn,
     cli_diag,
+    cli_github,
     cli_health,
     cli_job,
     cli_leave,
@@ -328,7 +329,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -680,6 +681,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help="with --link and a GitHub pull request in --open: the person's Merge click merges it "
         "with their own GitHub login",
     )
+    g.add_argument(
+        "--release",
+        action="store_true",
+        help="with --merge: a release; when the owner allowed it in Settings (workflow.release_merge) it "
+        "merges by itself once every check is green (orch review tend-releases)",
+    )
     x = sub.add_parser("answer", parents=[common], help="answer a question")
     x.add_argument("id")
     x.add_argument("question")
@@ -750,6 +757,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_secret.add_parsers(sub, common)
     cli_screen.add_parsers(sub, common)
     cli_config.add_parsers(sub, common)
+    cli_github.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
     cli_chat.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
@@ -946,6 +954,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_job.dispatch(args, root)
         or cli_record.dispatch(args, root)
         or cli_secret.dispatch(args, root)
+        or cli_github.dispatch(args, root)
     ):
         pass
     elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root):
@@ -1222,6 +1231,8 @@ def run(args: argparse.Namespace) -> None:
             )
         if args.merge and not card:
             raise Refused("--merge goes with a link card: --link TITLE --open <pull request address>.")
+        if args.release and not args.merge:
+            raise Refused("--release goes with --merge.")
         if card:  # the card goes where every question goes; a phone shows it from the stack
             t, q = cli_review.ask_card(
                 args, root, tickets.resolve_cli(root, args.id, json_output=args.json), by()

@@ -208,6 +208,9 @@ def _answer(a):
 
 
 REVIEW_KEY = re.compile(r"review|q[0-9]{1,4}")
+# An option id is short, but a plain-text option (orch ask --option "After the update") uses its whole label as id:
+# any printable text up to 200 characters, not starting with "-" (it is one argv item, never a shell string).
+PICKED = re.compile(r"[^\x00-\x1f\x7f\s-][^\x00-\x1f\x7f]{0,199}")
 REVIEW_VERDICTS = ("ok", "no", "talk")
 MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
 
@@ -225,7 +228,7 @@ def _review_answer(a):
     flags = ["--verdict", verdict]
     picked = a.get("picked")
     if picked is not None:
-        if not (isinstance(picked, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,20}", picked)):
+        if not (isinstance(picked, str) and PICKED.fullmatch(picked)):
             raise BadRequest("That is not an option.")
         flags += ["--picked", picked]
     note = a.get("note")
@@ -518,6 +521,14 @@ def _reviewer_set(a):
     if type(a.get("on")) is not bool:
         raise BadRequest("Say on or off.")
     return ["config", "set", "workflow.reviewer", "on" if a["on"] else "off"], [], []
+
+
+def _release_merge_set(a):
+    """Settings > Merge releases without my click: `orch config set workflow.release_merge` (only a person)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.release_merge", "on" if a["on"] else "off"], [], []
 
 
 def _live_set(a):
@@ -1029,6 +1040,7 @@ OPS = {
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
+    "release_merge.set": _release_merge_set,
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
@@ -1380,6 +1392,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "workspace.set",
             "workflow.set",
             "reviewer.set",
+            "release_merge.set",
             "live.set",
             "copies.set",
             "copies.clean",

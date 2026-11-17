@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, autoupdate, config, diag, history, nextstep, tickets
+from orch import adapters, autoupdate, config, diag, ghlimit, history, nextstep, report_tickets, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -28,13 +28,16 @@ KEYS = (
     "workspace.live_max",
     "workflow.agents_may_finish",
     "workflow.reviewer",
+    "workflow.release_merge",
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
     "diag.enabled",
+    "diag.report_tickets",
     "focus.session_typing",
     "update.auto",
     *config.INSIGHTS_KEYS,
+    *ghlimit.SETTING_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
@@ -271,16 +274,19 @@ def _config(args, root: Path) -> None:
             "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
+            "workflow.release_merge": lambda: config.release_merge_on(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
             "diag.enabled": lambda: config.diag_enabled(root),
+            "diag.report_tickets": lambda: report_tickets.enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
             "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
             "insights.keep_days": lambda: config.record_keep_days(root),
             "insights.max_mb": lambda: config.record_max_mb(root),
+            **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
         }
         if args.key:
             key = args.key
@@ -296,6 +302,10 @@ def _config(args, root: Path) -> None:
             )
     elif args.sub == "set" and args.key in config.INSIGHTS_KEYS:
         _insights_set(args, root)
+    elif args.sub == "set" and args.key in ghlimit.SETTING_KEYS:
+        kind = ghlimit.SETTING_KEYS[args.key]
+        v = ghlimit.set_limit(kind, args.value)
+        _out(args, {args.key: v}, f"Saved: at most {v} {ghlimit.WHAT[kind]} per hour on this computer.")
     elif args.sub == "set" and args.if_current is not None:
         raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
@@ -311,6 +321,21 @@ def _config(args, root: Path) -> None:
             args,
             {"workflow.reviewer": value},
             f"The Reviewer accepts small finished work for you: {args.value}.",
+        )
+    elif args.sub == "set" and args.key == "workflow.release_merge":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # merges into main with the owner's login
+            raise Refused(
+                "Only the owner turns this on: in Settings, or orch config set in their own terminal."
+            )
+        value = config.set_release_merge(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.release_merge": value},
+            "Saved: a release merges "
+            + ("by itself once every check is green." if value else "only when you click Merge."),
         )
     elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
         if args.key == "workflow.copies":
@@ -341,6 +366,24 @@ def _config(args, root: Path) -> None:
             {"update.auto": value},
             "Saved: orch updates by itself " + ("at a quiet moment." if value else "no more."),
         )
+    elif args.sub == "set" and args.key == "diag.report_tickets":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        got = report_tickets.set_enabled(root, args.value == "on")
+        if args.value == "on":
+            text = (
+                "Saved: new problem reports, made here or shared through the relay, "
+                "become tickets with a helper."
+                + (
+                    f" The {got['marked_seen']} report(s) already here stay as they are."
+                    if got["marked_seen"]
+                    else ""
+                )
+                + " It needs the automation add-on turned on."
+            )
+        else:
+            text = "Saved: problem reports no longer become tickets by themselves."
+        _out(args, got, text)
     elif args.sub == "set" and args.key == "diag.enabled":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")

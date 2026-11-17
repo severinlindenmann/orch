@@ -50,3 +50,39 @@ def test_no_function_reimports_a_module_level_orch_name():
                         if (a.asname or a.name) in top and key not in KNOWN:
                             bad.append(f"{f.relative_to(src)}:{node.lineno} {fn.name}: {a.asname or a.name}")
     assert not bad, "local import shadows a module-level import:\n" + "\n".join(bad)
+
+
+def test_print_launch_url_names_this_computer_as_other_computers_reach_it(tmp_path, monkeypatch, capsys):
+    """Remote listening on (ORCH-106): the printed sign-in link uses the [dashboard] listen name and port,
+    read from the settings file (never a link the add-on hands back); other pages keep their local link."""
+    (tmp_path / ".orch").mkdir()
+    (tmp_path / ".orch" / "config.toml").write_text(
+        '[dashboard]\nlisten = "0.0.0.0"\nlisten_port = 8791\nlisten_name = "Dev.Example"\n'
+    )
+    rows = [
+        {"addon": "dashboard", "url": "http://127.0.0.1:8421"},
+        {"addon": "focus", "url": "http://127.0.0.1:8422"},
+    ]
+    monkeypatch.setattr(services, "start", lambda root: rows)
+    monkeypatch.setattr(worktrees, "schedule_sweep", lambda root: None)
+    monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda root: True)
+    monkeypatch.setattr(pagelaunch, "write_launch_token", lambda root, server, life=0: "tok123")
+    args = argparse.Namespace(cmd="start", print_launch_url=True, json=False, no_open=False)
+    cli_status._services_cmd(args, tmp_path)
+    out = capsys.readouterr().out
+    assert "launch dashboard: http://dev.example:8791/#launch=tok123" in out
+    assert "launch focus: http://127.0.0.1:8422/#launch=tok123" in out
+
+
+def test_no_remote_link_for_a_bad_or_missing_setting(tmp_path):
+    (tmp_path / ".orch").mkdir()
+    cfg = tmp_path / ".orch" / "config.toml"
+    assert pagelaunch.remote_base(tmp_path, "dashboard") is None
+    for bad in (
+        'listen = "0.0.0.0"\nlisten_port = 8791\nlisten_name = "evil.example/x"\n',
+        'listen = "0.0.0.0"\nlisten_port = 80\nlisten_name = "ok.example"\n',
+        'listen_port = 8791\nlisten_name = "ok.example"\n',  # off: no listen
+        'listen = "0.0.0.0"\nlisten_port = 8791\n',  # no name
+    ):
+        cfg.write_text("[dashboard]\n" + bad)
+        assert pagelaunch.remote_base(tmp_path, "dashboard") is None, bad

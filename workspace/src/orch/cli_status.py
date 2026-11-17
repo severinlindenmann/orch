@@ -109,6 +109,8 @@ def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
     for r in rows:
         base = services.local_url(r.get("url"))
         if base and r.get("addon") in pagelaunch.LAUNCH_SERVERS:
+            # listening for other computers: the link names this computer as they reach it
+            base = pagelaunch.remote_base(root, r["addon"]) or base
             out.append((r["addon"], pagelaunch.printable_launch_url(root, r["addon"], base)))
     return out
 
