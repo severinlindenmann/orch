@@ -980,6 +980,13 @@ def _addon_uninstall(a):
     return (["addon", "uninstall", name], [], [])
 
 
+def _logins_check(a):
+    """Check again (Home, Settings > Helper): `orch logins --json` runs every check of the tool logins,
+    connections and keys now and keeps the result the page then shows. It reads no secret."""
+    _only(a, ())
+    return ["logins"], [], []
+
+
 def _link(a, extend=False):
     _only(a, ("id", "days") if extend else ("id",))
     fid = a.get("id")
@@ -1053,6 +1060,7 @@ OPS = {
     "copies.approve": _copies_approve,
     "copies.ask-update": _copies_ask_update,
     "ticket.field": _ticket_field,
+    "logins.check": _logins_check,
 }
 
 
@@ -1077,7 +1085,11 @@ def build_argv(op, args, root: Path | None = None) -> list[str]:
     if not isinstance(args, dict):
         raise BadRequest("The arguments must be an object.")
     words, flags, tail = fn(args)
-    if op in ("config.agent.test", "workspace.propose"):  # read-only answers: nothing changes, so no --by
+    if op in (
+        "config.agent.test",
+        "workspace.propose",
+        "logins.check",
+    ):  # read-only answers: nothing changes, so no --by
         return [*words, "--json"]
     if op == "review.answer":  # a card answer is the current person's plain answer: no proof, no --by
         return [*words, *flags, "--json"]
