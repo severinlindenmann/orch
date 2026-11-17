@@ -201,6 +201,23 @@ def _write(root: Path, data: dict) -> None:
         runs._atomic(_path(root), json.dumps(data, indent=1) + "\n")
 
 
+@contextlib.contextmanager
+def _locked(root: Path):
+    """One writer at a time: helpers stopped by the limit end within the same second (17 Nov: six in one)."""
+    from orch import relay
+
+    lock = relay.locked(root, wait=5.0, name="run/limit-stop.lock")
+    try:
+        lock.__enter__()
+    except relay.Refused:  # busy for 5 s: write anyway rather than lose the note
+        lock = None
+    try:
+        yield
+    finally:
+        if lock is not None:
+            lock.__exit__(None, None, None)
+
+
 def until(data: dict) -> float | None:
     """When starting again makes sense (the reset plus GRACE), or None when nothing is noted."""
     if not data.get("tickets"):
@@ -214,6 +231,11 @@ def until(data: dict) -> float | None:
 def note(root: Path, tid: str, info: dict, now: float | None = None) -> bool:
     """Note a ticket as stopped on the limit. True when it was not noted yet (say it once in the history)."""
     now = time.time() if now is None else now
+    with _locked(root):
+        return _note(root, tid, info, now)
+
+
+def _note(root: Path, tid: str, info: dict, now: float) -> bool:
     data = read(root)
     ticks = data.get("tickets") or {}
     fresh = tid not in ticks
@@ -250,12 +272,13 @@ def due(root: Path, now: float | None = None) -> list[str]:
 
 
 def forget(root: Path, tids: Iterable[str]) -> None:
-    data = read(root)
-    ticks = data.get("tickets") or {}
-    for tid in tids:
-        ticks.pop(tid, None)
-    data["tickets"] = ticks
-    _write(root, data)
+    with _locked(root):
+        data = read(root)
+        ticks = data.get("tickets") or {}
+        for tid in tids:
+            ticks.pop(tid, None)
+        data["tickets"] = ticks
+        _write(root, data)
 
 
 def clock(ts: object) -> str:

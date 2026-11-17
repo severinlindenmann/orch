@@ -100,6 +100,19 @@ def test_noting_twice_says_it_once_and_keeps_the_later_reset(proj, new_ticket):
     assert not (runs.run_dir(proj) / limitstop.FILE).exists()
 
 
+def test_helpers_noted_at_the_same_moment_are_all_kept(proj, new_ticket):
+    import threading
+
+    tids = [new_ticket() for _ in range(8)]
+    threads = [threading.Thread(target=limitstop.note, args=(proj, t, {"until": RESET})) for t in tids]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert sorted(limitstop.read(proj)["tickets"]) == sorted(tids)
+    assert not (proj / ".orch" / "run" / "limit-stop.lock").exists()
+
+
 def test_automatic_starts_wait_in_line_while_the_limit_holds(proj, new_ticket, monkeypatch):
     monkeypatch.setattr(runs_live, "_pressure", lambda root: None)
     monkeypatch.setattr(runs_live, "_too_soon", lambda root: False)
