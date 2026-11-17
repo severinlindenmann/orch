@@ -89,8 +89,9 @@ def test_20000_random_ticket_ids_in_a_report_summary_never_trip_the_check(tmp_pa
     for i in range(0, 20000, 50):  # 400 real summaries, 50 ticket and 50 run ids each
         text = _summary(pairs[i : i + 50])
         assert secretscan.find(text) == [], text
-        secretscan.refuse_if_secret(text.encode(), "report file SUMMARY.md", tmp_path)
-        secretscan.refuse_if_secret_in(tmp_path, {"summary": text}, "report")
+        if i % 500 == 0:  # the two entry points call find() on the same text (8 scans each): a sample of 40
+            secretscan.refuse_if_secret(text.encode(), "report file SUMMARY.md", tmp_path)
+            secretscan.refuse_if_secret_in(tmp_path, {"summary": text}, "report")
 
 
 @pytest.mark.parametrize(

@@ -33,9 +33,10 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# One hanging test fails after 120 s with its stack instead of eating the 40-minute CI job (ORCH-260);
-# a test that needs longer sets @pytest.mark.timeout(N). --durations names the slowest tests in every CI log.
-timeout = 120
+# One hanging test fails after 300 s with its stack instead of eating the 40-minute CI job (ORCH-260; the
+# slowest test takes ~95 s on a slow macOS runner); a test that needs longer sets @pytest.mark.timeout(N).
+# --durations names the slowest tests in every CI log.
+timeout = 300
 addopts = "--durations=30 --durations-min=2"
 markers = [
     "slow: starts a local server",
