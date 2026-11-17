@@ -31,7 +31,7 @@
  <div class="dstate st-form stack-sm">
   <!-- ORCH-81 (owner pick A, 16 Nov): the same dialog takes a feature wish -->
   <div class="segmented" role="radiogroup" aria-label="What is it?"><label><input type="radio" name="about" value="problem" checked><span>A problem</span></label><label><input type="radio" name="about" value="feature"><span>A feature wish</span></label></div>
-  <p class="muted" style="margin:0" data-w="intro">orch saves what happened around <strong>DT-41</strong> since the helper started, on this computer. Nothing is sent unless you tick the last box.</p>
+  <p class="muted" style="margin:0" data-w="intro">orch saves what happened around <strong>DT-41</strong> since the helper started, on this computer. It stays on this computer unless you tick the last box.</p>
   <label class="field"><span><span data-w="happened">What happened?</span> <span class="meta">(optional)</span></span>
    <input class="input" data-w="happenedIn" placeholder="For example: stuck since 10:00, nothing happens" value="Stuck on checking links since 10:00"></label>
   <label class="field"><span><span data-w="expected">What did you expect?</span> <span class="meta">(optional)</span></span>
@@ -96,8 +96,8 @@ function show(s){if(s==='settings'){location.href='../settings/settings.html';re
 }
 document.querySelectorAll('.segmented [data-s]').forEach(b=>b.onclick=()=>show(b.dataset.s));
 document.getElementById('reportBtn').onclick=()=>show('form');
-const W={problem:{intro:'orch saves what happened around <strong>DT-41</strong> since the helper started, on this computer. Nothing is sent unless you tick the last box.',happened:'What happened?',expected:'What did you expect?',happenedIn:'For example: stuck since 10:00, nothing happens',expectedIn:'For example: the newsletter is sent'},
- feature:{intro:'orch saves your wish on this computer. Nothing is sent unless you tick the last box.',happened:'What do you want?',expected:'Why would it help?',happenedIn:'For example: a dark look for the dashboard',expectedIn:'For example: easier to read at night'}};
+const W={problem:{intro:'orch saves what happened around <strong>DT-41</strong> since the helper started, on this computer. It stays on this computer unless you tick the last box.',happened:'What happened?',expected:'What did you expect?',happenedIn:'For example: stuck since 10:00, nothing happens',expectedIn:'For example: the newsletter is sent'},
+ feature:{intro:'orch saves your wish on this computer. It stays on this computer unless you tick the last box.',happened:'What do you want?',expected:'Why would it help?',happenedIn:'For example: a dark look for the dashboard',expectedIn:'For example: easier to read at night'}};
 function about(a){const w=W[a];document.querySelectorAll('[data-w]').forEach(n=>{const k=n.dataset.w;if(n.tagName==='INPUT'){n.placeholder=w[k];n.value=a==='feature'?'':n.defaultValue}else n.innerHTML=w[k]});
  document.querySelectorAll('[data-p]').forEach(n=>n.hidden=a==='feature');document.querySelector('input[name=about][value='+a+']').checked=true;
  document.getElementById('doneWish').hidden=a!=='feature';document.getElementById('doneProblem').hidden=a==='feature';
