@@ -68,7 +68,7 @@ function helperNeedsCard() {
     return h('div', {className:'setting-row', 'data-key':key, 'data-state':item.state},
       h('div', {className:'row-label'}, settingsText('span', {}, D.needListName(item)), settingsText('p', {className:'meta'}, D.needKindWord(item))),
       h('div', {className:'row-value'}, h('span', {className:'badge ' + st.tone}, st.word), stops ? settingsText('p', {className:'meta'}, stops) : null,
-        D.needHow(item) ? settingsText('p', {className:'meta', 'data-key':key + '-how'}, D.needHow(item)) : null),
+        typeof loginHow === 'function' ? loginHow(item, key + '-how') : D.needHow(item) ? settingsText('p', {className:'meta', 'data-key':key + '-how'}, D.needHow(item)) : null),
       h('div', {className:'row-action'}, action));
   });
   return h('section', {className:'card', id:'needs', 'data-key':'settings-needs'},

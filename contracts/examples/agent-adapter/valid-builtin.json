@@ -77,7 +77,7 @@
       "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id" },
-      "login": { "status": ["login", "status"], "how": "Open a terminal on this computer and run: codex login" },
+      "login": { "status": ["login", "status"], "sign_in": "codex login" },
       "mcp_settings": [
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],

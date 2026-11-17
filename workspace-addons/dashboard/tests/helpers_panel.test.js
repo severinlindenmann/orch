@@ -119,3 +119,16 @@ test('ticket page: the state pill, the last activity line and a Stop that says w
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
   assert.match(app, /const helper = window\.DashHelpers\.helperState\(run, t\)/);  // the ticket chip reads the same state
 });
+
+// ORCH-218: the master widget for a terminal command to copy.
+test('commandCopy: the command as text, a lead line and one Copy button named for the command', () => {
+  const UI = kit();
+  const box = UI.commandCopy('az login', {lead: 'Open a terminal on this computer and run:', dataKey: 'k'});
+  assert.equal(box.className, 'cmd-copy');
+  assert.equal(box.dataset.key, 'k');
+  assert.deepEqual(texts(box), ['Open a terminal on this computer and run:', 'az login', 'Copy']);
+  const b = box.children[1].children[1];
+  assert.equal(b.tagName, 'button');
+  assert.equal(b.attrs['aria-label'], 'Copy az login');
+  assert.deepEqual(texts(UI.commandCopy('gh auth login')), ['gh auth login', 'Copy']);
+});

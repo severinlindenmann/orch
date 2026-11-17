@@ -1138,7 +1138,7 @@ function ticketQuestion(t, q, next = false) {
   const card = q.card && typeof q.card === 'object' ? q.card : null;
   return h('section', {className:next ? 'card next-step next-question' : 'ticket-question'},
     h('div', {className:'meta ticket-eyeline'}, (next ? 'Next step · ' : '') + clean((card && card.title) || q.title || 'Your answer'), ticketPhone(q)),
-    h('h2', {}, clean(q.text)), card ? ticketCardShown(t, q, card) : snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
+    h('h2', {}, clean(window.DashHelpers.questionWords ? window.DashHelpers.questionWords(q.text) : q.text)), typeof questionCommandRows === 'function' ? questionCommandRows(q.text, 'question-' + q.id) : null, card ? ticketCardShown(t, q, card) : snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
 }
 // A question with a card (orch ask --draft/--choose/...): the text and the card's pictures together, answered on the
 // card itself (Review opens at this card), so the answer keeps what was picked, the comment and the marked spots.
@@ -1346,7 +1346,7 @@ function ticketStripModel(t, run, fresh) {
     return m('Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + ticketActor(ev.by) : '') + '.');
   }
   if (q) {
-    const ask = clean(q.text || '').replace(/\s+/g, ' ').trim();
+    const ask = clean(window.DashHelpers.questionWords ? window.DashHelpers.questionWords(q.text || '') : q.text || '').replace(/\s+/g, ' ').trim();
     // who asked: the agent on the ticket by its own name (as Home says it), "Helper" only when none is known
     const asker = window.DashHelpers?.agentLabel ? window.DashHelpers.agentLabel(state?.settings, (run || state?.runs?.[t.id])?.claim) : 'Helper';
     return m(asker + ' asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask));

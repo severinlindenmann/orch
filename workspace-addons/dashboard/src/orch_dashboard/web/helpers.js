@@ -564,7 +564,16 @@
   const needStopsWord = n => n ? 'Stops ' + n + (n === 1 ? ' ticket' : ' tickets') : '';
   /* What the person does to renew when orch cannot start it (ORCH-48): the check's own plain step; none when a Renew
      or Replace button is there or it works. */
-  const needHow = item => item && item.state !== 'works' && !item.renew && !item.key && typeof item.how === 'string' ? item.how : '';
+  /* Terminal commands a helper wrote in backticks in a question (ORCH-218: "Sign in again with `az login`"): at most two,
+     each a tool name and at least one more word in plain characters, so a quoted name or `c1` is never one. */
+  const questionCommands = text => [...new Set([...String(text || '').matchAll(/`([^`\n]{3,120})`/g)].map(m => m[1].trim())
+    .filter(c => /^[a-z][a-z0-9._-]{0,31}( [A-Za-z0-9._:=\/@,'"+-]+)+$/.test(c)))].slice(0, 2);
+  /* The question as shown: the backticks around those commands dropped (the command itself stays in the words). */
+  const questionWords = text => { const cmds = questionCommands(text); return cmds.reduce((t, c) => t.split('`' + c + '`').join(c), String(text ?? '')); };
+  const needOwnStep = item => item && item.state !== 'works' && !item.renew && !item.key;
+  /* The terminal command that signs in again (ORCH-218: 'az login'), shown with a Copy button under the words. */
+  const needSignIn = item => needOwnStep(item) && typeof item.sign_in === 'string' && /^[A-Za-z0-9][A-Za-z0-9 ._:=\/@,'"+-]{0,119}$/.test(item.sign_in) ? item.sign_in : '';
+  const needHow = item => !needOwnStep(item) ? '' : typeof item.how === 'string' && item.how ? item.how : needSignIn(item) ? 'Open a terminal on this computer and run:' : '';
   /* The rows of the last check, cleaned: [{name, label, kind, state, ends_at, chosen, stops:[{id, key, title}]}]. */
   function needItems(logins) {
     return arr(logins && logins.items).filter(i => i && ['works', 'soon', 'renew', 'unreachable'].includes(i.state))
@@ -702,5 +711,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {historyChange, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needItems, needWarnings, needTickets};
+  return {historyChange, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });
