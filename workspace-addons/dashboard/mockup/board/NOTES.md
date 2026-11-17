@@ -97,7 +97,7 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 ## Triage button (ORCH-151, 17 Nov)
 
-- `board.html`, `list.html`: a Triage button beside the page title. It opens a small menu that says what happens; Start triage opens a dated Triage ticket and starts one
+- `board.html`, `list.html`: a Triage button beside the page title. It opens a small menu that says what happens and lists the lanes with their counts as tick boxes (Backlog to Check ticked, Done, Won't do and Superseded not); Start triage opens a dated Triage ticket and starts one
   helper that goes through every open ticket (brings it up to date, groups related ones, closes what is no longer
-  needed). Shown only while open tickets exist, never on a shared copy; a second click while a Triage ticket is open
+  needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
   says so in a notice.

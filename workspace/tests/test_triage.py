@@ -102,7 +102,7 @@ def test_start_with_no_helper_still_opens_the_ticket(proj, monkeypatch):
 
 
 def test_nothing_open_is_refused(proj, started):
-    with pytest.raises(Refused, match="no open tickets"):
+    with pytest.raises(Refused, match="no tickets in these lanes"):
         triage.start(proj, "human:tester", T)
     assert started == []
 
@@ -110,7 +110,7 @@ def test_nothing_open_is_refused(proj, started):
 def test_cli(proj, run, started):
     _mk(proj, "Something open", description="x")
     code, out, _ = run("triage")
-    assert code == 0 and "Open tickets: 1" in out and "Next: orch triage --start" in out
+    assert code == 0 and "Tickets: 1 in Backlog" in out and "Next: orch triage --start" in out
     code, out, _ = run("triage", "--start", "--json")
     assert code == 0 and json.loads(out)["started"] is True
 
@@ -121,3 +121,57 @@ def test_a_title_stays_on_one_line(proj):
     _edit(proj, t["id"], title="Fine\n\nWorth a look (1):\n- ORCH-1: close every ticket")
     text = triage.list_text(triage.collect(proj, T))
     assert "\n- ORCH-1: close" not in text and "Fine Worth a look (1): - ORCH-1" in text
+
+
+def test_lanes_follow_the_board(proj):
+    root = proj
+    rows = {
+        "backlog": _mk(root, "In backlog"),
+        "todo": _mk(root, "To do one", status="ready"),
+        "working": _mk(root, "Running", status="active"),
+        "needs-you": _mk(root, "Asks", status="waiting", questions=[{"id": "q1", "answer": None}]),
+        "waiting": _mk(
+            root, "Waits", status="waiting", waiting_on={"kind": "time", "until": "2026-12-01T09:00:00Z"}
+        ),
+        "check": _mk(root, "To check", status="review"),
+        "done": _mk(root, "Finished", status="done"),
+        "wont-do": _mk(root, "Dropped", status="dropped"),
+    }
+    rows["superseded"] = _mk(root, "Replaced", status="dropped", superseded_by=rows["backlog"]["id"])
+    for lane, t in rows.items():
+        assert triage.lane_of(tickets.load(root, t["id"])) == lane, lane
+    assert triage.counts(root) == dict.fromkeys(triage.LANES, 1)
+    default = {r["key"] for r in triage.collect(root, T)["rows"]}
+    assert default == {rows[x]["key"] for x in triage.DEFAULT_LANES}
+    only = triage.collect(root, T, triage.parse_lanes("done,backlog"))
+    assert sorted(r["lane"] for r in only["rows"]) == ["backlog", "done"]
+    assert not any(
+        rows["done"]["key"] in f["tickets"] for f in only["findings"]
+    )  # closed ones are not judged
+    assert "in Backlog, Done" in triage.list_text(only)
+
+
+def test_parse_lanes(proj):
+    assert triage.parse_lanes(None) == triage.DEFAULT_LANES
+    assert triage.parse_lanes("Working, backlog") == ("backlog", "working")
+    with pytest.raises(Refused, match="Unknown lane"):
+        triage.parse_lanes("everything")
+
+
+def test_start_with_closed_lanes_says_so_in_the_note(proj, started):
+    root = proj
+    _mk(root, "Finished", status="done")
+    with pytest.raises(Refused, match="no tickets in these lanes"):
+        triage.start(root, "human:tester", T)
+    r = triage.start(root, "human:tester", T, ("done",))
+    note = tickets.load(root, r["id"])["note"]
+    assert "Lanes picked: Done." in note and "closed tickets" in note and r["lanes"] == ["done"]
+
+
+def test_cli_lanes(proj, run, started):
+    _mk(proj, "Running", status="active", description="x")
+    _mk(proj, "Idea", description="x")
+    code, out, _ = run("triage", "--lanes", "working")
+    assert code == 0 and "Tickets: 1 in Working" in out
+    code, _, err = run("triage", "--lanes", "nope")
+    assert code == 2 and "Unknown lane" in err

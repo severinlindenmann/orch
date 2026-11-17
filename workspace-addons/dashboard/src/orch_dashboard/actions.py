@@ -610,10 +610,28 @@ def _copies_clean(a):
     return ["copy", "clean", "--json"], [], []
 
 
+TRIAGE_LANES = (
+    "backlog",
+    "todo",
+    "working",
+    "needs-you",
+    "waiting",
+    "check",
+    "done",
+    "wont-do",
+    "superseded",
+)
+
+
 def _triage_start(a):
-    """Tickets > Triage: `orch triage --start` opens one Triage ticket with the list and starts a helper on it."""
-    _only(a, ())
-    return ["triage", "--start", "--json"], [], []
+    """Tickets > Triage: `orch triage --start --lanes <picked>` opens one Triage ticket with the list of the
+    picked lanes and starts a helper on it (core checks the lanes again)."""
+    _only(a, ("lanes",))
+    lanes = a.get("lanes")
+    if not isinstance(lanes, list) or not lanes or any(x not in TRIAGE_LANES for x in lanes):
+        raise BadRequest("Pick at least one lane.")
+    picked = [x for x in TRIAGE_LANES if x in lanes]
+    return ["triage", "--start", "--json", "--lanes", ",".join(picked)], [], []
 
 
 def _copies_remove_orphaned(a):
