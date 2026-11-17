@@ -231,6 +231,18 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
                     "seconds": c["seconds"],
                 }
             )
+        from orch import bgwork
+
+        for a in bgwork.subagents(root, rec):  # ORCH-267: its own helpers in the background, prompt idle
+            out.append(
+                {
+                    "kind": "command",
+                    "what": f"a helper of its own: {a['what']} (running {span(a['seconds'])})",
+                    "label": f"helper: {a['what']}",
+                    "seconds": a["seconds"],
+                    "subagent": True,
+                }
+            )
     return out
 
 

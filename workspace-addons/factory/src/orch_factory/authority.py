@@ -16,77 +16,93 @@ FOLDERS = {
 }
 
 
-def _too_long(label, value, cap):
-    if len(clean(value, None)) > cap:
-        raise Refused(
-            f"{label} is longer than {cap} characters; the owner would not see all of it.", "invalid"
-        )
+def _too_long(label, value, cap, problems):
+    n = len(clean(value, None))
+    if n > cap:
+        problems.append(f"{label} has {n} characters, at most {cap}; the owner would not see all of it.")
 
 
 def _caps(d, kind):
-    """Refuse any owner-visible field longer than its render cap, so render never has to cut frozen text."""
+    """Refuse any owner-visible field longer than its render cap, so render never has to cut frozen text. Every
+    long field is named in one refusal (ORCH-267)."""
+    problems: list[str] = []
+
+    def one(label, value, cap=120):
+        _too_long(label, value, cap, problems)
 
     def each(label, items, cap=120):
-        for x in items or []:
-            _too_long(label, x, cap)
+        for n, x in enumerate(items or [], 1):
+            one(f"{label} {n}", x, cap)
 
     if kind == "run":
-        _too_long("The title", d["title"], 120)
-        _too_long("The goal", d["goal"], 120)
-        each("A done-means point", d["done_means"])
-        each("A won't-do point", d.get("wont_do"))
-        _too_long("What shipping does", d["ship"]["does"], 120)
-        _too_long("How to undo shipping", d["ship"]["undo"], 120)
-        for a in d.get("assumptions", []):
-            _too_long("An assumption", a["text"], 120)
+        one("The title", d["title"])
+        one("The goal", d["goal"])
+        each("Done-means point", d["done_means"])
+        each("Won't-do point", d.get("wont_do"))
+        one("What shipping does", d["ship"]["does"])
+        one("How to undo shipping", d["ship"]["undo"])
+        each("Assumption", [a["text"] for a in d.get("assumptions", [])])
         for t in d["tasks"]:
-            _too_long("A task title", t["title"], 120)
+            one(f"The title of task {t.get('slug')}", t["title"])
     elif kind == "change":
-        _too_long("The title", d["title"], 120)
-        _too_long("What the change does", d["what"], 120)
+        one("The title", d["title"])
+        one("What the change does", d["what"])
         if d.get("asked_by_owner"):
-            _too_long("The owner's words", d["asked_by_owner"], 120)
-        each("A done-means point", d.get("adds_done_means"))
+            one("The owner's words", d["asked_by_owner"])
+        each("Done-means point", d.get("adds_done_means"))
         for t in d.get("adds_tasks", []):
-            _too_long("A task title", t["title"], 120)
+            one(f"The title of task {t.get('slug')}", t["title"])
         if d.get("new_eta"):
-            _too_long("The new ETA", d["new_eta"], 40)
+            one("The new ETA", d["new_eta"], 40)
     elif kind == "stop":
-        for i in d["items"]:
-            _too_long("A stop item title", i["title"], 120)
-            _too_long("A suggested answer", i.get("recommend", ""), 40)
-            _too_long("A before reference", i.get("before", ""), 80)
-            _too_long("An after reference", i.get("after", ""), 80)
-            _too_long("A preview address", i.get("preview", ""), 300)
+        for n, i in enumerate(d["items"], 1):
+            one(f"The title of stop item {n}", i["title"])
+            one(f"The suggested answer of stop item {n}", i.get("recommend", ""), 40)
+            one(f"The before reference of stop item {n}", i.get("before", ""), 80)
+            one(f"The after reference of stop item {n}", i.get("after", ""), 80)
+            one(f"The preview address of stop item {n}", i.get("preview", ""), 300)
             if "preview" in i and not re.fullmatch(r"https?://[^\s]+", i["preview"]):
-                raise Refused("A preview address must be a web address (http or https).", "invalid")
+                problems.append(
+                    f"The preview address of stop item {n} must be a web address (http or https)."
+                )
         for key in ("checked", "not_checked", "changed_during_run"):
-            each("A stop note", d.get(key))
+            each("Stop note", d.get(key))
     elif kind == "autopilot":
-        _too_long("The title", d["title"], 120)
-        _too_long("The goal", d["goal"], 120)
-        each("An example", d.get("examples"))
-        each("A done-means point", d["done_means"])
+        one("The title", d["title"])
+        one("The goal", d["goal"])
+        each("Example", d.get("examples"))
+        each("Done-means point", d["done_means"])
+    _refuse(problems)
+
+
+def _refuse(problems):
+    if len(problems) == 1:
+        raise Refused(problems[0], "invalid")
+    if problems:
+        raise Refused(f"{len(problems)} problems, fix them all at once: " + " ".join(problems), "invalid")
 
 
 def check_run(value):
-    """Invariants of a run proposal (schema checked first)."""
+    """Invariants of a run proposal (schema checked first). Every broken one is named in one refusal."""
     validate(value, "proposal")
+    problems = []
     names = [x["stage"] for x in value["line"]]
     if value["line"][-1]["stage"] != "ship" or value["line"][-1]["stop"] is not True:
-        raise Refused("The last stage must be ship, with a stop for you.", "invalid")
+        problems.append("The last stage must be ship, with a stop for you.")
     if len(set(names)) != len(names):
-        raise Refused("Every stage name must be used only once.", "invalid")
+        problems.append("Every stage name must be used only once.")
     for i, x in enumerate(value["line"]):
         if any(a not in names[:i] for a in x.get("after", [])):
-            raise Refused("A stage can only wait for stages before it in the line.", "invalid")
+            problems.append("A stage can only wait for stages before it in the line.")
+            break
     if any(t["stage"] not in names for t in value["tasks"]):
-        raise Refused("Every task must belong to a stage in the line.", "invalid")
+        problems.append("Every task must belong to a stage in the line.")
     if any(i >= len(value["done_means"]) for t in value["tasks"] for i in t.get("proves", [])):
-        raise Refused("A task refers to a done-means point that does not exist.", "invalid")
+        problems.append("A task refers to a done-means point that does not exist.")
     slugs = [t["slug"] for t in value["tasks"]]
     if len(set(slugs)) != len(slugs):
-        raise Refused("Every task needs its own name.", "invalid")
+        problems.append("Every task needs its own name.")
+    _refuse(problems)
 
 
 def check_frozen(file_kind, value):

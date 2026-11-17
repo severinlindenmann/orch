@@ -110,6 +110,9 @@
  "workspace/src/orch/addons.py": {
   "agents": 1
  },
+ "workspace/src/orch/bgwork.py": {
+  "agent": 1
+ },
  "workspace/src/orch/chat.py": {
   "agent": 1
  },
