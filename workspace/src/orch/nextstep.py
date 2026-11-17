@@ -87,6 +87,12 @@ def _new(data, args) -> str:
     return f'add one task per step: orch check add {n} "<step>"'
 
 
+def _triage(data, args) -> str:
+    if (data or {}).get("ticket"):
+        return f"watch it: orch run status {data['ticket']}"
+    return "orch triage --start  (a helper goes through the list and tidies the tickets)"
+
+
 def _check_add(data, args) -> str:
     c = (data or {}).get("id", "<task>")
     return f'do the step, then record its evidence: orch check done {_tid(args)} {c} --note "<evidence>"'
@@ -252,6 +258,7 @@ HINTS = {
     "ext unset": _on_ticket,
     "needs": "keep working on what does not wait: orch ticket list",
     "usage": "keep working: orch ticket list",
+    "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
     "review answer": "orch needs",
     "review wait": _on_ticket,

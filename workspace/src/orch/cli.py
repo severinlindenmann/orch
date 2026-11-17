@@ -427,6 +427,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     x = sub.add_parser("usage", parents=[common], help="tokens per model and per ticket (read-only)")
     x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
+    x = sub.add_parser(
+        "triage", parents=[common], help="list every open ticket that needs a look (read-only)"
+    )
+    x.add_argument(
+        "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
+    )
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
@@ -922,6 +928,20 @@ def run(args: argparse.Namespace) -> None:
 
         data = usage.workspace_usage(root, max(args.days, 1))
         _out(args, data, usage.text(data))
+    elif cmd == "triage":
+        from orch import triage
+
+        if args.start:
+            r = triage.start(root, tickets.acting_by(args))
+            how = "a helper started on it" if r["started"] else f"it waits for a helper ({r['why']})"
+            _out(
+                args,
+                r,
+                f"Opened {r['ticket']} with {r['open']} open tickets, {r['findings']} worth a look: {how}.",
+            )
+        else:
+            res = triage.collect(root)
+            _out(args, res, triage.list_text(res))
     elif cmd == "update":
         if not args.project_only:  # first: with another ORCH_HOME there is nothing to update
             addons.tool_env_change_ok()
