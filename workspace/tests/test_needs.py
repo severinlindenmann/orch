@@ -8,6 +8,7 @@ from jsonschema import Draft202012Validator
 from test_addons import install, make_addon, uv_calls  # noqa: F401  (fixture)
 
 from orch import addons, tickets
+from orch.needs import _option_labels
 from orch.needs import needs as compute
 
 SCHEMA = json.loads(
@@ -57,7 +58,12 @@ def test_open_question_row_and_answered_one_gone(proj, run):
     (row,) = _rows(run)
     assert row["id"] == f"core:q:{tid}:q1" and row["kind"] == "question" and row["tone"] == "needs-you"
     assert row["answer"].pop("digest") == tickets.question_digest(tickets.load(proj, tid)["questions"][0])
-    assert row["answer"] == {"question": "q1", "options": ["Yes", "No"], "recommended": "Yes"}
+    assert row["answer"] == {
+        "question": "q1",
+        "options": ["Yes", "No"],
+        "labels": ["Yes", "No"],
+        "recommended": "Yes",
+    }
     assert "Needs you (1)" in run("needs")[1]
     run("answer", tid, "q1", "Yes")
     assert _rows(run) == []
@@ -195,3 +201,16 @@ def test_stopped_background_addon_is_a_row(proj, run, tmp_path, monkeypatch, uv_
     (row,) = _rows(run)
     assert row["id"] == "core:down:hello" and row["tone"] == "bad" and row["cli"] == "orch start"
     assert compute(proj)[0]["id"] == "core:down:hello"
+
+
+def test_option_labels_name_card_options_by_title():
+    q = {
+        "options": ["A", "B"],
+        "card": {
+            "preview": {
+                "type": "options",
+                "options": [{"id": "A", "title": "Big button"}, {"id": "B", "title": "B"}],
+            }
+        },
+    }
+    assert _option_labels(q) == ["A Big button", "B"]

@@ -1,5 +1,6 @@
 """Done criteria follow the optional note field through writes and agent prompts."""
 
+import io
 import json
 
 import pytest
@@ -45,8 +46,25 @@ def test_too_long_is_rejected(proj, run, new_ticket, operation):
         args = (tid, json.dumps({"done_when": "x" * 2001}), "--if-revision", str(before["revision"]))
     code, _, err = run("ticket", operation, *args)
     assert code == 2
-    assert "The done criteria are at most 2000 characters." in err
+    assert "The done criteria are at most 2000 characters; these have 2001." in err
     assert tickets.load(proj, tid) == before
+
+
+def test_long_note_on_new_is_refused_with_length_and_next_step(proj, run, monkeypatch):
+    """r-1117-1006-ws: a 3500-character --note made no ticket. The refusal says the limit, the length and how
+    to keep the long text, and the command it names works."""
+    before = {t["id"] for t in tickets.list_all(proj)}
+    code, out, err = run("ticket", "new", "Export", "--note", "y" * 3500)
+    assert code == 2
+    assert "A note is at most 2000 characters; this one has 3500." in err
+    assert "orch ticket attach <ticket> --name note.md < note.md" in err
+    assert {t["id"] for t in tickets.list_all(proj)} == before
+    code, out, err = run("ticket", "new", "Export", "--note", "Short note.", "--json")
+    assert code == 0, err
+    tid = json.loads(out)["id"]
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(b"y" * 3500)))
+    code, _, err = run("ticket", "attach", tid, "--name", "note.md")
+    assert code == 0, err
 
 
 @pytest.mark.parametrize("value", [1, [], {}])

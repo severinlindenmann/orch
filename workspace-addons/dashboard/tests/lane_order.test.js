@@ -14,9 +14,9 @@ test('ORCH-156: placed tickets keep their place in their lane; new arrivals stay
   assert.deepEqual(helpers.laneSorted(list, 'backlog').map(t => t.id), ['new1', 'b', 'a', 'c', 'other']);
   assert.deepEqual(helpers.laneSorted([], 'todo'), []);
 });
-test('ORCH-156: laneMove puts a card right before another, or at the end', () => {
-  assert.deepEqual(helpers.laneMove(['a', 'b', 'c', 'd'], 'd', 'b'), ['a', 'd', 'b', 'c']);
-  assert.deepEqual(helpers.laneMove(['a', 'b', 'c'], 'a', null), ['b', 'c', 'a']);
-  assert.deepEqual(helpers.laneMove(['a', 'b', 'c'], 'b', 'b'), ['a', 'b', 'c']);  // onto itself: nothing moves
-  assert.deepEqual(helpers.laneMove(['a', 'b'], 'x', 'a'), ['x', 'a', 'b']);  // a card from outside joins the lane
+test('ORCH-156: laneReorder puts a card right before another, or at the end', () => {
+  assert.deepEqual(helpers.laneReorder(['a', 'b', 'c', 'd'], 'd', 'b'), ['a', 'd', 'b', 'c']);
+  assert.deepEqual(helpers.laneReorder(['a', 'b', 'c'], 'a', null), ['b', 'c', 'a']);
+  assert.deepEqual(helpers.laneReorder(['a', 'b', 'c'], 'b', 'b'), ['a', 'b', 'c']);  // onto itself: nothing moves
+  assert.deepEqual(helpers.laneReorder(['a', 'b'], 'x', 'a'), ['x', 'a', 'b']);  // a card from outside joins the lane
 });

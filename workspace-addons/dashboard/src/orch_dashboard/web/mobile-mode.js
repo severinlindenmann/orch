@@ -101,7 +101,14 @@
     if (label) label.textContent = mm.on ? 'Phone' + (hm(mm.ends_at) ? ' · until ' + hm(mm.ends_at) : '') : 'Phone';
   }
 
+  // A mode whose end time has passed is over, whatever the last state said: the chip, the switch and the bar all go quiet
+  // at the end time (the server ends it at its next read), so nothing says "until 08:46" at 10:10 (ORCH-184).
+  const settleLocal = () => {
+    const end = mm?.on && mm.ends_at ? Date.parse(mm.ends_at) : NaN;
+    if (Number.isFinite(end) && end <= Date.now()) mm = {...mm, on: false, ends_at: null, since: null, awake: null};
+  };
   function paint() {
+    settleLocal();
     document.body.classList.toggle('mobile-mode-on', !!mm?.on);
     if (!mm) { toggle.hidden = true; bar.hidden = true; if (chip) chip.hidden = true; return; }
     paintBar();
@@ -140,6 +147,7 @@
     }
   });
 
+  if (typeof setInterval === 'function') setInterval(() => { if (mm?.on) paint(); }, 30000);  // the end time can pass between two states
   window.addEventListener('orch:state', event => {
     mm = event.detail?.mobile_mode || null;
     if (mm?.on) asking = false;

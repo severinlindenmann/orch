@@ -251,3 +251,10 @@ def test_month_end_last_due_and_plain():
     assert last_due("0 9 31 * *", datetime(2026, 3, 15, tzinfo=UTC)) == datetime(2026, 2, 28, 9, tzinfo=UTC)
     assert last_due("0 9 31 * *", datetime(2026, 5, 15, tzinfo=UTC)) == datetime(2026, 4, 30, 9, tzinfo=UTC)
     assert plain.parse("monthly 31 09:00", "UTC").cron == "0 9 31 * *"
+
+
+def test_in_a_while_is_one_wake_up():
+    now = datetime(2026, 11, 4, 9, 0, tzinfo=UTC)
+    assert plain.parse("in 2 hours", "UTC", now).until == "2026-11-04T11:00:00Z"
+    assert plain.parse("in 3 days", "UTC", now).until == "2026-11-07T09:00:00Z"
+    assert plain.parse("in 90 minutes", "UTC", now).cron is None

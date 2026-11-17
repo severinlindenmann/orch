@@ -29,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, brake, diag, history, procs, runhooks, services, tickets
+from orch import adapters, addons, brake, config, diag, history, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -798,7 +798,7 @@ def start_failure_reason(root: Path, rec: dict) -> str:
     name = str(rec.get("agent") or "")
     with contextlib.suppress(Exception):
         binary = (adapters.load(name, root).get("detect") or {}).get("binary")
-        if binary and not shutil.which(binary):
+        if binary and not adapters.find_binary(binary):
             return "agent command not found"
     tail = ""
     log = rec.get("log")
@@ -1203,6 +1203,14 @@ def plan(
         is False
     ):
         sid = None  # the tool never saved that conversation: resuming it can only fail, start fresh
+    cold_note = None
+    folder = workdir_for(root, read(root, tid), tid)
+    if sid and ticket.get("general") is not True and _long_and_cold(root, name, sid, folder):
+        sid = None  # ORCH-149: its cache is gone, re-reading the long conversation costs more than the ticket
+        cold_note = (
+            "Started fresh from the ticket: the earlier conversation is long and was idle for over "
+            f"{config.live_idle_minutes(root)} minutes, so its cache is gone."
+        )
     model = None
     if a.get("model_args") and ticket.get("general") is not True:  # Chat keeps the tool's own setting
         model = tickets.pick_model(root, tid, "orch")  # a person's choice, else orch's pick (never Fable)
@@ -1253,6 +1261,11 @@ def plan(
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
     argv = store_access(argv, name, root, workdir_for(root, read(root, tid), tid))
+    binary = (a.get("detect") or {}).get("binary")
+    if (
+        argv and binary and argv[0] == binary and not shutil.which(binary)
+    ):  # not on the PATH of a clean start: use where it really is
+        argv = [adapters.find_binary(binary) or binary, *argv[1:]]
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1265,8 +1278,28 @@ def plan(
         "stdin": v["prompt"] if a["prompt_via"] == "stdin" and mode == "oneshot" else None,
         "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
-        "note": adapters.permission_note(name, root, None, person),
+        "fresh_why": cold_note,
+        "note": " ".join(n for n in (cold_note, adapters.permission_note(name, root, None, person)) if n)
+        or None,
     }
+
+
+LONG_CONVERSATION_BYTES = 2_000_000  # a saved conversation this big is long: well over 100k tokens
+
+
+def _long_and_cold(root: Path, name: str, sid: str, folder: Path) -> bool:
+    """ORCH-149: the saved conversation is long and nothing wrote to it for longer than the idle limit
+    (workspace.live_idle_minutes, an hour): the tool's prompt cache is gone, so resuming it would re-read
+    all of it at full price while a fresh start reads only the ticket. A short or recent one is resumed.
+    A helper the watcher found stuck is started fresh anyway (tend). Unknown size or time: resume."""
+    f = adapters.transcript_path(name, sid, root, folder=folder)
+    try:
+        st = f.stat() if f is not None else None
+    except OSError:
+        return False
+    if st is None or st.st_size < LONG_CONVERSATION_BYTES:
+        return False
+    return time.time() - st.st_mtime > config.live_idle_minutes(root) * 60
 
 
 def store_access(argv: list[str] | None, name: str, root: Path, work: Path) -> list[str] | None:
@@ -1383,6 +1416,9 @@ def start(
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
         if p.get("note"):
             notes.append(p["note"])
+        if p.get("fresh_why"):
+            with contextlib.suppress(Exception):
+                tickets.log(root, tid, p["fresh_why"], "orch")
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
         cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)
@@ -1477,15 +1513,16 @@ def _run_turn(
             proc = subprocess.Popen(
                 argv,
                 cwd=root,
-                env=env,
+                env=adapters.with_binary_dir(env, argv),
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                 stdout=out,
                 stderr=subprocess.STDOUT,
                 start_new_session=os.name != "nt",  # its own group: stop can end it with its helpers
             )
         except OSError as e:
-            out.write(f"orch could not start the agent: {e}\n".encode())
-            return 127, ""
+            said = f"orch could not start the agent: {e}\n"
+            out.write(said.encode())
+            return 127, said
         if on_proc:
             on_proc(proc)
         if on_started:
