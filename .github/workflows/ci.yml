@@ -42,10 +42,24 @@ jobs:
       brand: ${{ steps.f.outputs.brand }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # main compares with the previous release (below), so it needs the history
+          fetch-depth: ${{ github.ref == 'refs/heads/main' && 0 || 1 }}
+      # On main (release push or manual run) compare with the previous release, not with develop: after a release
+      # main equals develop, so the default found 0 changed files and relay/publish built no binaries (ORCH-370).
+      - id: base
+        if: github.ref == 'refs/heads/main' && github.event_name != 'schedule'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          sha="$(bash scripts/ci_changes_base.sh "$BEFORE")"
+          echo "changes since: ${sha:-default}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - id: f
         if: github.event_name != 'schedule'
         uses: dorny/paths-filter@v3
         with:
+          base: ${{ steps.base.outputs.sha }}
           filters: |
             contracts: ['contracts/**', '.github/workflows/contracts.yml']
             workspace: ['workspace/**', 'workspace-addons/*/src/**', 'contracts/**', 'install.ps1', 'install.sh', 'e2e/windows/**', '.github/workflows/workspace.yml']
@@ -55,7 +69,7 @@ jobs:
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
-            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py']
+            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/ci_changes_base.sh']
   contracts:
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
