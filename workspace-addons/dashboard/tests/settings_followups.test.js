@@ -28,7 +28,7 @@ test('the report dialog keeps what was typed when it closes without a report, an
 
 test('the workspace profile names its limits: name 60, description 280, tags 4 of 24', () => {
   const look = read('look.js');
-  assert.ok(look.includes('up to 60 characters') && look.includes('up to 280 characters'));
+  assert.ok(look.includes('up to 60 characters') && look.includes('Up to 280 characters'));
   assert.ok(look.includes('Up to four short words') && look.includes('Each up to 24 characters'));
 });
 

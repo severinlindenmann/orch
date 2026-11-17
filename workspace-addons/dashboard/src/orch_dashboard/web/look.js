@@ -196,7 +196,7 @@
           n('p', {className: 'meta'}, 'The name shown for this workspace, up to 60 characters. Your folder keeps its own name.')], 'name'),
         profileRow('Description', n('p', {className: shownDescription() ? '' : 'meta', 'data-key': 'pf-description-value'}, shownDescription() || 'Not set'),
           [n('input', {className: 'input', type: 'text', maxlength: 280, 'data-key': 'pf-description', 'data-lk-input': 'description', 'aria-label': 'Description', value: pd.description, placeholder: 'For example: our website and newsletter'}),
-            n('p', {className: 'meta'}, 'One short line about what this workspace is for, up to 280 characters.' + (svc ? ' It is sent to the ' + (svc === 'publish' ? 'publish' : 'relay') + ' too, for your phone and shared pages.' : ''))], 'description'),
+            n('p', {className: 'meta'}, 'One short line about what this workspace is for. Up to 280 characters.' + (svc ? ' It is sent to the ' + (svc === 'publish' ? 'publish' : 'relay') + ' too, for your phone and shared pages.' : ''))], 'description'),
         profileRow('Tags', tagsNow.length ? chips(tagsNow, false) : n('p', {className: 'meta'}, 'None'),
           [chips(pd.tags, true), pd.tags.length < TAGMAX ? n('div', {className: 'row'}, n('input', {className: 'input', type: 'text', maxlength: 24, 'data-key': 'pf-tag', 'data-lk-input': 'tag', 'aria-label': 'New tag', value: pd.tag, placeholder: 'tag'}),
             n('button', {type: 'button', className: 'btn sm', 'data-lk': 'tag-add', 'data-key': 'pf-tag-add'}, 'Add')) : null,
