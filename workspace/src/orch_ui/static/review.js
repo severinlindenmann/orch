@@ -22,6 +22,7 @@
                   {id, ticket, key, card:{kind,title,why,need,then,ok_label,open,preview}, digest, since,
                    text (the question, shown on the card), group (cards that belong together), recommended}
                   card.files: [{name, type:'img'|'page'|'file', ref}] the result's own files (a Check card); api.fileUrl gives their URL
+                  answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start)
                   preview refs are "reviewed/<sha12>/<name>" files; the page asks api.fileUrl for them
      answered() -> Promise<[entry]>     entry = {id, ticket, ticket_key, ticket_title, text, key, card, shown:{digest,copy,files}, at, by, via,
                   decision:{action:approve|use|use_with_changes|send_back|dont|none_of_these, picked, allows,
@@ -56,7 +57,7 @@ const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
   why:k.why,okLabel:k.ok_label,then:k.then,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
-  text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
+  text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
 
 /* ---------- Answers: words, pill, record ---------- */
 const verdictWord=e=>{const d=e.decision||{},k=e.card||{},n=(d.changes||[]).length;
@@ -80,7 +81,7 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
    if(pv.type==='img'){const i=el('img');i.src=u;i.alt=pv.alt||label||'';i.draggable=false;w.append(i)}
    else{const f=el('iframe');f.src=u;f.title=pv.title||label||k.title||'Reviewed page';f.setAttribute('sandbox','');f.tabIndex=-1;f.loading='lazy';w.append(f)}}
   else if(pv.type==='table'){const t=el('div','doc');t.append(el('h4','',(pv.cols||[]).join(' · ')));(pv.rows||[]).slice(0,3).forEach(r=>t.append(el('p','',r.join(' · '))));w.append(t)}
-  else{const t=el('div','doc');if(pv.heading)t.append(el('h4','',pv.heading));(pv.paras||[]).slice(0,2).forEach(x=>t.append(el('p','',x)));w.append(t)}
+  else{const t=el('div','doc');if(pv.status&&pv.status.text)t.append(el('p','',pv.status.text));if(pv.heading)t.append(el('h4','',pv.heading));(pv.paras||[]).slice(0,2).forEach(x=>t.append(el('p','',x)));(pv.rows||[]).slice(0,3).forEach(r=>r&&r.title&&t.append(el('p','',r.title)));w.append(t)}
   return w};
  /* every tile is a button: a click or Enter opens the picture large (UI.reviewViewer), with the card's other tiles a step away */
  const shot=(label,pv,on,taken,dim)=>{const b=el('button','decision-shot'+(taken?' taken':'')+(dim?' dim':''));b.type='button';b.dataset.on=on;
@@ -114,6 +115,7 @@ UI.reviewViewer=(shots,index,o)=>{o=o||{};shots=(shots||[]).filter(Boolean);if(!
   if(pv.type==='page'){const f=el('iframe');f.src=s.src||'';f.title=s.label||'Reviewed page';f.setAttribute('sandbox','');return f}
   const t=el('div','doc');
   if(pv.type==='table'){const tb=el('table','mini-table'),hr=el('tr');(pv.cols||[]).forEach(c=>hr.append(el('th','',c)));tb.append(hr);(pv.rows||[]).forEach(r=>{const tr=el('tr');r.forEach(c=>tr.append(el('td','',c)));tb.append(tr)});t.append(tb);return t}
+  if(UI.docBox)return UI.docBox(pv,'h3');/* the same words box as the card: status, steps, rows and footer too (ORCH-183) */
   if(pv.heading)t.append(el('h3','',pv.heading));(pv.paras||[]).forEach(x=>t.append(el('p','',x)));return t};
  const draw=()=>{const s=shots[i];cap.textContent=s.label||o.title||'Picture';pos.textContent=[o.title&&o.title!==s.label?o.title:'',shots.length>1?(i+1)+' of '+shots.length:''].filter(Boolean).join(' · ');
   prev.hidden=next.hidden=shots.length<2;prev.disabled=i===0;next.disabled=i===shots.length-1;body.replaceChildren(big(s));body.scrollTop=0;d.dataset.kind=(s.preview||{}).type||'doc'};

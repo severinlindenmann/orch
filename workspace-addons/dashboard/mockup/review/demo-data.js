@@ -44,6 +44,10 @@ window.SWIPE_ITEMS=[
    {id:'A',title:'Plain',preview:{type:'doc',heading:'November news from the café',paras:['Short and safe.']}},
    {id:'B',title:'Question',suggested:true,preview:{type:'doc',heading:'Sunday coffee? You asked, we listened',paras:['Picks up the survey result.']}},
    {id:'C',title:'Offer',preview:{type:'doc',heading:'Free oat milk all November ☕',paras:['Promises an offer. Picking C asks you about the offer itself first.']}}]}},
+ /* a Factory start: Home's short form and Home's buttons, none filled (ORCH-183, owner choice B) */
+ {id:'f1',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-49',ticketId:'DT-49',ticketTitle:'Loyalty card',when:'today 10:00',title:"Start 'Loyalty card for regular customers'?",
+  text:'Regular customers collect stamps and get a free coffee after ten visits.\nRuns about 1 h 30 min · needs you for about 10 min · up to 2 h of helper time',preview:{type:'doc'},
+  answers:[{label:'Not now',picked:'Not now'},{label:'Change it',picked:'Edit'},{label:'Start',picked:'Start'}]},
  /* a plain question with no pictures (orch ask --option ...): plain rows, whole titles (ORCH-110) */
  {id:'o3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-48',ticketId:'DT-48',ticketTitle:'Export button',task:'o3',when:'today 10:40',title:'Which name for the export button?',
   then:'The helper uses the name you pick.',
