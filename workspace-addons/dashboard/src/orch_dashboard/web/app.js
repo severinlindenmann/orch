@@ -547,9 +547,17 @@ async function refresh() {
   const version = mutation;
   const connection = document.getElementById('connection');
   try {
-    const res = await fetch('/api/state', {cache:'no-store'});
+    // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
+    const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
     const next = await res.json();
+    if (next.unchanged && state) {
+      if (writing || version !== mutation) { refreshAgain = true; return; }
+      connection.hidden = true;
+      lastOk = Date.now();
+      paintUpdated();
+      return;
+    }
     if (writing || version !== mutation) { refreshAgain = true; return; }
     connection.hidden = true;
     lastOk = Date.now();
