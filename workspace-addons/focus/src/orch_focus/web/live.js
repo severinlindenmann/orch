@@ -6,6 +6,7 @@
   /* the core's "The agent stopped … Continue goes on where it left off" line repeats at every stop: not shown here */
   const NOISE = /Continue goes on where it left off|^(?:The )?helper started\b|^Updated .+ settings$/i;
 
+  const FIELD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary', status: 'the status', done_when: 'the Done when line'};
   // The ticket lines orch writes itself, in the same plain words as the CLI and the dashboard.
   function plainLine(text, checklist) {
     const task = id => { const c = (checklist || []).find(x => x.id === id); return c && c.text ? ': ' + c.text : ''; };
@@ -14,6 +15,12 @@
     if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a step' + task(m[1]);
     if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a step' + task(m[1]);
     if ((m = /^Marked (c\d+) as won't do$/.exec(text))) return "Marked as won't do" + task(m[1]);
+    if (/^Created under t_\w+$/.test(text)) return 'Created as a sub-ticket';
+    if ((m = /^Recorded a check run for (c\d+)(?: \(exit (\d+)\))?$/.exec(text))) return 'Ran a check' + task(m[1]) + (m[2] == null ? '' : m[2] === '0' ? ' (passed)' : ' (failed)');
+    if ((m = /^Moved (c\d+) after c\d+$/.exec(text))) return 'Moved a task' + task(m[1]);
+    if ((m = /^Created under (.+)$/.exec(text))) return 'Created under ' + m[1];
+    if (text === 'Created') return 'Ticket created';
+    if ((m = /^Edited ([a-z_, ]+)$/.exec(text)) && !/[A-Z]/.test(m[1])) return 'Changed ' + m[1].split(/,\s*/).map(f => FIELD[f] || f).join(', ');
     if (/^Asked q\d+, waiting$/.test(text)) return 'Asked a question';
     if ((m = /^Answered q\d+: ([\s\S]*)$/.exec(text))) return 'Answered a question: ' + m[1];
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
