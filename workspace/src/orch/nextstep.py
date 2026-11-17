@@ -231,6 +231,7 @@ HINTS = {
     "review wait": _on_ticket,
     "review link": "orch needs",
     "review tend": "orch review accepted  (what was accepted for you today)",
+    "review tend-releases": "orch review list  (what still waits for the owner)",
     "review accepted": "orch needs",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',

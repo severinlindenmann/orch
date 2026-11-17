@@ -930,6 +930,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         diag_enabled,
         focus_session_typing,
         live_max,
+        release_merge_on,
         reviewer_on,
         workspace_description,
         workspace_name,
@@ -946,6 +947,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         share = False
     return {
         "agents_may_finish": agents_may_finish(root),
+        "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         "copies": copies_mode(root),
         "copies_max": copies_max(root),

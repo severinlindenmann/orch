@@ -28,6 +28,7 @@ KEYS = (
     "workspace.live_max",
     "workflow.agents_may_finish",
     "workflow.reviewer",
+    "workflow.release_merge",
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
@@ -271,6 +272,7 @@ def _config(args, root: Path) -> None:
             "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
+            "workflow.release_merge": lambda: config.release_merge_on(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
@@ -311,6 +313,21 @@ def _config(args, root: Path) -> None:
             args,
             {"workflow.reviewer": value},
             f"The Reviewer accepts small finished work for you: {args.value}.",
+        )
+    elif args.sub == "set" and args.key == "workflow.release_merge":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # merges into main with the owner's login
+            raise Refused(
+                "Only the owner turns this on: in Settings, or orch config set in their own terminal."
+            )
+        value = config.set_release_merge(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.release_merge": value},
+            "Saved: a release merges "
+            + ("by itself once every check is green." if value else "only when you click Merge."),
         )
     elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
         if args.key == "workflow.copies":
