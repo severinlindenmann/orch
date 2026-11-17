@@ -506,10 +506,10 @@ def test_two_quick_starts_leave_one_worker(proj, fake, monkeypatch):
     calls = []
     monkeypatch.setattr(renew.subprocess, "Popen", lambda argv, **kw: calls.append(argv))
     seen = []
-    gate = threading.Barrier(2)
+    together = threading.Barrier(2)
 
     def go():
-        gate.wait()
+        together.wait()
         try:
             seen.append(renew.start(proj, "claude")["state"])
         except Refused as e:
@@ -598,7 +598,7 @@ def test_a_status_grant_reads_only_and_makes_no_file(proj, monkeypatch):
     with pytest.raises(Refused):
         renew.person_only(proj, "human:owner")  # a status grant never serves a start, code, stop or replace
     stamp = str(int(time.time()) - renew.STATUS_LIFE - 5)
-    monkeypatch.setenv(renew.GRANT_ENV, f"s.{stamp}.{renew._sign(proj, stamp)}")
+    monkeypatch.setenv(renew.GRANT_ENV, f"s.{stamp}.{renew._mac(proj, stamp)}")
     with pytest.raises(Refused):
         renew.person_only(proj, "human:owner", reading=True)  # too old
     monkeypatch.setenv(renew.GRANT_ENV, f"s.{int(time.time())}.{'0' * 64}")

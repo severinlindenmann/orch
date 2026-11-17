@@ -67,7 +67,7 @@ PERSON_ONLY = (
     "Only a person renews a login or replaces a key, with Renew or Replace on the dashboard warning. "
     "In a terminal, sign in with the tool's own login command, then run orch logins."
 )
-STATUS_LIFE = 30  # seconds a read-only status grant stays good (it is signed, no file per poll)
+STATUS_LIFE = 30  # seconds a read-only status grant stays good (a keyed stamp, no file per poll)
 _GRANTED: set[str] = set()  # workspaces this process was granted for (one grant serves one orch call)
 
 
@@ -136,10 +136,10 @@ def _grants(root: Path) -> Path:
 def grant(root: Path, reading: bool = False) -> str:
     """A grant for the dashboard's orch call, made after it checked the person's page session.
     Default: good for ONE call; only its hash is kept, in the guarded orch home; old ones are cleared.
-    reading=True (the 1.5 s status poll, which only reads): a short signed token, no file per poll."""
+    reading=True (the 1.5 s status poll, which only reads): a short keyed token, no file per poll."""
     if reading:
         stamp = str(int(time.time()))
-        return f"s.{stamp}.{_sign(root, stamp)}"
+        return f"s.{stamp}.{_mac(root, stamp)}"
     d = _grants(root)
     now = time.time()
     for f in d.iterdir():
@@ -151,7 +151,7 @@ def grant(root: Path, reading: bool = False) -> str:
     return token
 
 
-def _sign(root: Path, stamp: str) -> str:
+def _mac(root: Path, stamp: str) -> str:
     """HMAC of a status grant's time with a key that lives in the guarded orch home (0600)."""
     kf = _grants(root).parent / "grant.key"
     if not kf.exists() or kf.stat().st_size != 32:
@@ -181,7 +181,7 @@ def _take_grant(root: Path, reading: bool = False) -> str | None:
         if token.startswith("s."):
             _, stamp, mac = (token.split(".") + ["", ""])[:3]
             fresh = stamp.isdigit() and 0 <= time.time() - int(stamp) <= STATUS_LIFE
-            if reading and fresh and hmac.compare_digest(mac, _sign(root, stamp)):
+            if reading and fresh and hmac.compare_digest(mac, _mac(root, stamp)):
                 return "read"
             return None
         f = _grants(root) / _hash(token)
