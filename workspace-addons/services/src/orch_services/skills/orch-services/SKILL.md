@@ -12,7 +12,8 @@ description: Use when a ticket needs something to keep running in the background
 A service is a command that should keep running: orch writes one small record for it and hands it to this computer's
 own service tool (on a Mac the login items list, on Linux the user's service manager). It runs under the person's own
 account, writes its output to a log file in this workspace and comes back after a crash. "Starts by itself" means it
-also starts after the computer restarts.
+also starts after the computer restarts. On Linux the first add or adopt also lets the person's services keep running
+after they log out (their own account only, no admin rights) and says so in one line.
 
 ## Recipes
 

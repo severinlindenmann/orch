@@ -345,7 +345,17 @@ def cmd_add(args, root: Path) -> int:
         if row["state"] == "running"
         else f"Added {rec['name']}. Start it: orch services start {sid}"
     )
-    return _emit(args, {"service": row, "next": nxt}, nxt)
+    return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
+
+
+def _emit_kept(args, drv, data: dict, text: str) -> int:
+    """Linux: services keep running after logout (owner 17 Nov, ORCH-328); the one line it says, if any."""
+    keep = getattr(drv, "keep_running", None)
+    line = keep() if keep else None
+    if line:
+        data["note"] = line
+        text = f"{text}\n{line}"
+    return _emit(args, data, text)
 
 
 def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
@@ -499,7 +509,7 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     store.save(root, rec)
     row = _state(root, drv, rec, wid)
     nxt = f"{name} is now managed by orch (id {sid}); it was not moved, changed or restarted."
-    return _emit(args, {"service": row, "next": nxt}, nxt)
+    return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
 
 
 def cmd_check(args, root: Path) -> int:

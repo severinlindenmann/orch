@@ -98,6 +98,20 @@ class Systemd(Driver):
         if self._run("show-environment").returncode != 0:
             raise Unavailable("the service manager of your account is not running")
 
+    def keep_running(self) -> str | None:
+        """Owner 17 Nov (ORCH-328 q2): without linger the person's service manager stops at logout and starts again
+        only at their next login, so their services stop too. Switch it on for the person's own account (no admin
+        rights needed) and say so in one line; None when it is already on or this computer has no loginctl."""
+        tool = shutil.which("loginctl")
+        if not tool:
+            return None
+        cp = run_tool([tool, "show-user", str(os.getuid()), "--property=Linger", "--value"])
+        if cp.returncode == 0 and cp.stdout.strip() == "yes":
+            return None
+        if run_tool([tool, "enable-linger"]).returncode == 0:
+            return "Your services now keep running after you log out and start again after a restart."
+        return "This computer did not allow it: your services stop when you log out."
+
     def entry_path(self, spec: Spec) -> Path:
         if spec.external_path:
             return spec.external_path
