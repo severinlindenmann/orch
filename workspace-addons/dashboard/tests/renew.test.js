@@ -22,7 +22,7 @@ function context(answers) {
   const h = (tag, attrs = {}, ...kids) => { const n = node(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'className' || k === 'hidden') n[k] = v; else n.attrs[k] = v; } n.append(...kids.flat().map(k => typeof k === 'string' ? Object.assign(node('#text'), {textContent:k}) : k)); return n; };
   const button = (text, cls, click) => { const b = node('button'); b.textContent = text; b.className = 'btn ' + cls; b.addEventListener('click', click); return b; };
   const dialogs = [];
-  const dialog = title => { const d = node('dialog'); d.title = title; const actions = node('div'); actions.append(button('Cancel', 'ghost', () => { d.open = false; (d.listeners.close || []).forEach(f => f()); })); dialogs.push(d); return {d, actions}; };
+  const dialog = (title, cls) => { const d = node('dialog'); d.title = title; d.className = cls; const actions = node('div'); actions.append(button('Cancel', 'ghost', () => { d.open = false; (d.listeners.close || []).forEach(f => f()); })); dialogs.push(d); return {d, actions}; };
   const fetch = async (url, opts) => {
     const body = JSON.parse(opts.body);
     calls.push(body);
@@ -60,6 +60,7 @@ test('Renew starts the sign-in, shows its link, passes a code and says when it i
   await flush();
   const d = dialogs[0];
   assert.equal(d.title, 'Renew the Claude Code login');
+  assert.equal(d.className, 'dialog ui-bottom-close');  // one way out: Cancel or Done, no second × Close
   assert.match(d.text, /orch never sees or keeps your password/);
   const find = (n, t) => n.tag === t.tag && (!t.text || n.text === t.text) ? n : n.children.map(k => typeof k === 'object' && find(k, t)).find(Boolean);
   const open = find(d, {tag:'a', text:'Open the sign-in page'});
@@ -87,6 +88,7 @@ test('Replace sends the key once and never keeps it', async () => {
   c.renewButton({name:'payments', label:'Payments key', key:'PAY'}).click();
   const d = dialogs[0];
   assert.equal(d.title, 'Replace the Payments key');
+  assert.equal(d.className, 'dialog ui-bottom-close');
   const find = (n, t) => n.tag === t.tag && (!t.text || n.text === t.text) ? n : n.children.map(k => typeof k === 'object' && find(k, t)).find(Boolean);
   const input = find(d, {tag:'input'});
   assert.equal(input.attrs.type, 'password');
@@ -96,4 +98,22 @@ test('Replace sends the key once and never keeps it', async () => {
   assert.deepEqual(calls[0], {op:'logins.replace', args:{name:'payments', value:'new-key-value'}});
   assert.equal(input.value, '');
   assert.match(d.text, /Payments key replaced\./);
+});
+
+test('a code the tool did not take brings the code field back with one plain line', async () => {
+  const seq = [{state:'checking', link:'https://claude.com/x'}, {state:'link', link:'https://claude.com/x', again:true}];
+  const {c, dialogs} = context(b => b.op === 'logins.status' ? (seq.length ? seq.shift() : {state:'link', link:'https://claude.com/x', again:true})
+    : b.op === 'logins.code' ? {state:'link', link:'https://claude.com/x', again:true} : {state:'link', link:'https://claude.com/x'});
+  c.renewButton({name:'claude', label:'Claude Code', renew:true}).click();
+  await flush();
+  const d = dialogs[0];
+  const find = (n, t) => n.tag === t.tag && (!t.text || n.text === t.text) ? n : n.children.map(k => typeof k === 'object' && find(k, t)).find(Boolean);
+  (find(d, {tag:'a', text:'Open the sign-in page'}).listeners.click || []).forEach(f => f());
+  find(d, {tag:'input'}).value = 'half';
+  find(d, {tag:'button', text:'Continue'}).click();
+  await flush();
+  assert.match(d.text, /Checking the login/);
+  // the stale 'again' in the code answer is ignored; it counts only after the tool took the new code
+  await c.renewCall('logins.status', {name:'claude'});
+  assert.doesNotMatch(d.text, /not taken/);
 });

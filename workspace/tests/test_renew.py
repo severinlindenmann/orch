@@ -7,6 +7,7 @@ import stat
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -37,15 +38,17 @@ def fake(proj, tmp_path, monkeypatch):
     monkeypatch.setattr(
         renew,
         "spec",
-        lambda root, name: {
-            "binary": str(tool),
-            "argv": [str(tool)],
-            "links": ["https://claude.com/"],
-            "helper": "claude",
-            "label": "Main helper",
-        }
-        if name == "claude"
-        else None,
+        lambda root, name: (
+            {
+                "binary": str(tool),
+                "argv": [str(tool)],
+                "links": ["https://claude.com/"],
+                "helper": "claude",
+                "label": "Main helper",
+            }
+            if name == "claude"
+            else None
+        ),
     )
     seen = []
 
@@ -150,8 +153,19 @@ def test_start_spawns_one_worker(proj, fake, monkeypatch):
     st = renew.start(proj, "claude")
     assert st["state"] == "starting" and calls[0][0][-4:] == ["logins", "renew", "claude", "--worker"]
     assert calls[0][1]["stdout"] == renew.subprocess.DEVNULL
-    renew.start(proj, "claude")  # still beating: no second worker
-    assert len(calls) == 1
+    st = renew.status(proj, "claude")
+    assert st["state"] == "starting" and len(calls) == 1
+
+
+def test_renew_again_ends_the_older_sign_in_first(proj, fake, monkeypatch):
+    t = threading.Thread(target=renew.work, args=(proj, "claude"), daemon=True)
+    t.start()
+    _wait(proj, {"link"})
+    calls = []
+    monkeypatch.setattr(renew.subprocess, "Popen", lambda argv, **kw: calls.append(argv))
+    assert renew.start(proj, "claude")["state"] == "starting" and len(calls) == 1
+    t.join(5)
+    assert not t.is_alive()  # the older worker ended its tool and stopped
 
 
 # ---------------------------------------------------------------------------------------------- helpers go on
@@ -184,7 +198,11 @@ def test_after_checks_again_and_goes_on_only_when_it_works(proj, monkeypatch):
     monkeypatch.setattr(renew, "go_on", lambda root, helper: went.append(helper) or ["X-1"])
     assert renew.after(proj, "claude")["went_on"] == [] and went == []
     rows["items"][0].update(state="works", ends_at="2026-12-17T00:00:00Z")
-    assert renew.after(proj, "claude") == {"state": "works", "ends_at": "2026-12-17T00:00:00Z", "went_on": ["X-1"]}
+    assert renew.after(proj, "claude") == {
+        "state": "works",
+        "ends_at": "2026-12-17T00:00:00Z",
+        "went_on": ["X-1"],
+    }
 
 
 # ---------------------------------------------------------------------------------------------- a key
@@ -192,7 +210,9 @@ def test_after_checks_again_and_goes_on_only_when_it_works(proj, monkeypatch):
 
 def test_replace_a_key_through_the_key_store_and_check_again(proj, run, monkeypatch, capsys):
     keystore.record_write(
-        proj, "checks", {"checks": {"payments": {"label": "Payments key", "command": ["pay", "ping"], "key": "PAY"}}}
+        proj,
+        "checks",
+        {"checks": {"payments": {"label": "Payments key", "command": ["pay", "ping"], "key": "PAY"}}},
     )
     keystore.add(proj, "PAY", "token", "old-value-123")
     monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}" if b == "pay" else None)
@@ -257,9 +277,96 @@ def test_no_worker_left_in_the_state_after_a_dead_one(proj):
     d.mkdir(parents=True)
     old = "2020-01-01T00:00:00Z"
     (d / "state.json").write_text(
-        json.dumps({"schema": renew.SCHEMA, "name": "claude", "state": "link", "started_at": old, "beat_at": old}),
+        json.dumps(
+            {"schema": renew.SCHEMA, "name": "claude", "state": "link", "started_at": old, "beat_at": old}
+        ),
         encoding="utf-8",
     )
     assert renew.status(proj, "claude")["state"] == "failed"
     if os.name != "nt":
         assert stat.S_IMODE(d.stat().st_mode) in (0o700, 0o755)
+
+
+# ------------------------------------------------------------------------------------------ R5.2: never again
+
+
+def _every_file(*tops):
+    for top in tops:
+        for p in top.rglob("*"):
+            if p.is_file() and not p.is_symlink():
+                yield p
+
+
+def test_a_replaced_key_and_a_code_are_kept_only_in_the_key_store(proj, run, fake, monkeypatch, capsys):
+    """R5.2 (ORCH-46): after Replace and a pasted code, the values are in no ticket, debug log, run file,
+    problem report or output; the new key lives only in the key store's own file."""
+    from orch import home as orch_home
+
+    key_value, code_value = "replaced-key-VALUE-7f3a9c", "pasted-CODE-41b8e2"
+    keystore.record_write(
+        proj,
+        "checks",
+        {"checks": {"payments": {"label": "Payments key", "command": ["pay", "ping"], "key": "PAY"}}},
+    )
+    keystore.add(proj, "PAY", "token", "old-value-123")
+    which = health.shutil.which  # the same module renew uses: keep the real lookup for the fake sign-in
+    monkeypatch.setattr(health.shutil, "which", lambda b: "/bin/pay" if b == "pay" else which(b))
+    monkeypatch.setattr(
+        health.subprocess, "run", lambda argv, **kw: health.subprocess.CompletedProcess(argv, 0, None, None)
+    )
+    out = ""
+    monkeypatch.setattr(sys, "stdin", io.StringIO(key_value + "\n"))
+    code, o, e = run("logins", "replace", "payments", "--json")
+    assert code == 0, e
+    out += o + e
+    t = threading.Thread(target=renew.work, args=(proj, "claude"), daemon=True)
+    t.start()
+    _wait(proj, {"link"})
+    monkeypatch.setattr(sys, "stdin", io.StringIO(code_value + "\n"))
+    code, o, e = run("logins", "renew", "claude", "--code", "-")
+    assert code == 0, e
+    out += o + e
+    _wait(proj, {"done"})
+    t.join(5)
+    assert fake["got"].read_text(encoding="utf-8") == code_value + "\n"  # it did reach the tool
+    code, o, e = run("diag", "report")  # a problem report for whoever helps
+    out += o + e
+    assert key_value not in out and code_value not in out
+    store = orch_home.key_dir(proj) / "keys.json"
+    home = Path(os.environ["ORCH_HOME"])
+    holders = [p for p in _every_file(proj, home) if key_value.encode() in p.read_bytes()]
+    assert holders == [store]
+    # the fake tool's own capture file is the tool receiving it; nothing of orch's holds the code
+    assert [p for p in _every_file(proj, home) if code_value.encode() in p.read_bytes()] == [fake["got"]]
+
+
+def test_a_code_the_tool_does_not_take_asks_for_it_again(proj, tmp_path, monkeypatch):
+    """An incomplete code: Claude Code answers with a line and waits; the state goes back to link (again)."""
+    got = tmp_path / "got2.txt"
+    tool = _tool(
+        tmp_path,
+        f"print('visit: {LINK}', flush=True)\nsys.stdin.readline()\n"
+        f"print({HIDDEN!r}, flush=True)\nopen({str(got)!r}, 'w').write(sys.stdin.readline())\n",
+    )
+    monkeypatch.setattr(
+        renew,
+        "spec",
+        lambda root, name: {"binary": str(tool), "argv": [str(tool)], "links": ["https://claude.com/"],
+                            "helper": "claude", "label": "Main helper"},
+    )  # fmt: skip
+    monkeypatch.setattr(renew, "after", lambda root, name: {"state": "works", "ends_at": None, "went_on": []})
+    monkeypatch.setattr(renew, "ASKS_AGAIN", 0.5)
+    t = threading.Thread(target=renew.work, args=(proj, "claude"), daemon=True)
+    t.start()
+    _wait(proj, {"link"})
+    renew.code(proj, "claude", "half-a-code")
+    end = time.time() + 10
+    while time.time() < end and not renew.status(proj, "claude").get("again"):
+        time.sleep(0.1)
+    st = renew.status(proj, "claude")
+    assert (st["state"], st.get("again")) == ("link", True)
+    assert HIDDEN not in _all_text(proj)  # what the tool said is not kept
+    renew.code(proj, "claude", "whole#code")
+    assert _wait(proj, {"done", "failed"})["state"] == "done"
+    t.join(5)
+    assert got.read_text(encoding="utf-8") == "whole#code\n"

@@ -6,7 +6,8 @@
 // Words: docs/wording.md (Renew, Replace, Needs renewing). Mockup: proposals/login-warning (3a-3e).
 
 const RENEW_POLL_MS = 1500;
-const RENEW_FINAL = ['done', 'failed', 'stopped', 'none'];
+const RENEW_AGAIN = 'That code was not taken. Copy the whole code from the sign-in page and paste it again.';
+const RENEW_DIALOG = 'dialog ui-bottom-close';  // one way out: the window's own Cancel or Done (Esc and a click outside still close it)
 
 // One call to the server, without the page's busy state or a full re-render (it is polled while the sign-in runs).
 async function renewCall(op, args) {
@@ -50,10 +51,10 @@ function renewFailed(body, actions, text, retry) {
 
 // A tool login: orch starts the tool's own sign-in, the person opens its page and signs in there.
 function renewLogin(item) {
-  const {d, actions} = dialog(`Renew the ${item.label} login`);
+  const {d, actions} = dialog(`Renew the ${item.label} login`, RENEW_DIALOG);
   const body = h('div', {className:'stack'});
   d.append(body, actions);
-  let timer = null, opened = false, ended = false;
+  let timer = null, opened = false, ended = false, checking = false, took = false, link = '';
   const stop = () => { clearTimeout(timer); timer = null; };
   d.addEventListener('close', () => {
     stop();
@@ -79,9 +80,10 @@ function renewLogin(item) {
     actions.replaceChildren(cancel, copy, open);
     open.focus();
   };
-  const showCode = link => {
+  const showCode = (link, problem) => {
+    checking = false;
     const input = h('input', {className:'input', id:'renew-code-' + item.name, autocomplete:'off', spellcheck:'false', autocapitalize:'off'});
-    const error = h('p', {className:'meta bad', role:'alert', hidden:true});
+    const error = h('p', {className:'meta bad', role:'alert', hidden:!problem}, problem || '');
     const go = button('Continue', 'primary', async () => {
       if (!input.value.trim()) { error.textContent = 'Paste the code from the sign-in page first.'; error.hidden = false; input.focus(); return; }
       go.disabled = true;
@@ -90,6 +92,7 @@ function renewLogin(item) {
       go.disabled = false;
       if (!r.ok) { error.textContent = r.text; error.hidden = false; return; }
       error.hidden = true;
+      checking = true; took = false;
       body.replaceChildren(h('p', {className:'meta', role:'status'}, h('span', {className:'spinner', 'aria-hidden':'true'}), ' Checking the login…'));
       actions.replaceChildren(cancel);
     });
@@ -115,7 +118,10 @@ function renewLogin(item) {
       renewFailed(body, actions, 'The sign-in did not finish. Nothing was changed.', begin);
       return;
     }
+    if (a.link) link = a.link;
+    if (a.state === 'checking') took = true;  // the tool has the new code (an older 'again' no longer counts)
     if (a.state === 'link' && a.link && !opened) showLink(a.link);
+    else if (a.state === 'link' && a.again && checking && took) showCode(link, RENEW_AGAIN);  // the tool wants the code once more
     timer = setTimeout(tick, RENEW_POLL_MS);
   };
   async function begin() {
@@ -134,7 +140,7 @@ function renewLogin(item) {
 
 // A key: typed hidden, saved in orch's key store on this computer, checked again. Never shown again.
 function renewKey(item) {
-  const {d, actions} = dialog(`Replace the ${item.label}`);
+  const {d, actions} = dialog(`Replace the ${item.label}`, RENEW_DIALOG);
   const input = h('input', {className:'input', id:'renew-key-' + item.name, type:'password', autocomplete:'off', spellcheck:'false'});
   const error = h('p', {className:'meta bad', role:'alert', hidden:true});
   const body = h('div', {className:'stack'},

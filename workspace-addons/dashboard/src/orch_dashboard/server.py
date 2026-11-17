@@ -1028,6 +1028,8 @@ def _renew_answer(extra) -> dict | None:
         out["link"] = link
     if isinstance(extra.get("name"), str):
         out["name"] = extra["name"][:32]
+    if extra.get("again") is True:  # the tool did not take the last code and waits for it once more
+        out["again"] = True
     if isinstance(extra.get("ends_at"), str):
         out["ends_at"] = extra["ends_at"][:20]
     went = extra.get("went_on")

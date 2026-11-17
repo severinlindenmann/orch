@@ -14,7 +14,8 @@ A key: the person puts the new value in through the existing safe way (keystore.
     <run dir>/renew/<name>/code        0600, at most a second: the pasted code on its way to the tool
     <run dir>/renew/<name>/stop        the person pressed Close: the worker ends the tool
 
-States: starting | link (the link is ready) | checking (a code went in) | done | failed | stopped.
+States: starting | link (the link is ready; again=true when the tool did not take the last code and waits for
+it once more) | checking (a code went in) | done | failed | stopped.
 Nothing else the tool prints is kept, shown or logged (R5.2).
 """
 
@@ -38,6 +39,7 @@ SCHEMA = "orch.renew/1"
 FINAL = ("done", "failed", "stopped")
 LIMIT = 15 * 60  # seconds a sign-in may take before the worker ends the tool
 BEAT = 10  # seconds without a heartbeat: the worker is gone
+ASKS_AGAIN = 2.0  # quiet seconds after the tool answered a code and still runs: it asks for the code again
 _LINK = re.compile(r"https://[^\s\"'<>\x00-\x1f\x7f]{1,2000}")
 _CODE = re.compile(r"[A-Za-z0-9#_.~+/=-]{4,512}")
 _NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
@@ -118,19 +120,25 @@ def status(root: Path, name: str) -> dict:
         return {"name": name, "state": "none"}
     if doc.get("state") not in FINAL and not _alive(doc) and _age(doc.get("started_at")) > BEAT:
         doc = {**doc, "state": "failed"}
-    return {k: doc[k] for k in ("name", "state", "link", "ends_at", "went_on") if k in doc}
+    return {k: doc[k] for k in ("name", "state", "link", "again", "ends_at", "went_on") if k in doc}
 
 
 def start(root: Path, name: str) -> dict:
-    """Start the tool's own sign-in in a background worker (one per login), or return the running one."""
+    """Start the tool's own sign-in in a background worker (one per login). A sign-in still running from an
+    earlier Renew is ended first."""
     s = spec(root, name)
     if not s:
         raise Refused("orch cannot start this sign-in. Sign in again with the tool itself, then check again.")
     if not shutil.which(s["binary"]):
         raise Refused(f"{s['label']} is not installed on this computer.")
-    if _alive(_read(root, name)):
-        return status(root, name)
     d = _dir(root, name)
+    if _alive(
+        _read(root, name)
+    ):  # Renew again: the person wants a fresh sign-in (an old code fits only the old one)
+        (d / "stop").touch()
+        end = time.time() + 5
+        while time.time() < end and _alive(_read(root, name)):
+            time.sleep(0.2)
     for f in ("code", "stop"):
         with contextlib.suppress(OSError):
             (d / f).unlink()
@@ -269,7 +277,7 @@ def work(root: Path, name: str) -> int:
     except OSError:
         _write(root, name, {"state": "failed", "started_at": started, "beat_at": _now()})
         return 1
-    found: dict = {}
+    found: dict = {"n": 0, "at": 0.0}  # how many bytes the tool printed and when it last did (never the text)
     buf = bytearray()
 
     def read() -> None:
@@ -278,6 +286,7 @@ def work(root: Path, name: str) -> int:
             chunk = proc.stdout.read1(4096) if hasattr(proc.stdout, "read1") else proc.stdout.read(4096)
             if not chunk:
                 return
+            found["n"], found["at"] = found["n"] + len(chunk), time.time()
             if "link" not in found and len(buf) < _BUF:
                 buf.extend(chunk[: _BUF - len(buf)])
                 url = link_in(buf.decode("utf-8", "replace"), s["links"])
@@ -286,7 +295,7 @@ def work(root: Path, name: str) -> int:
 
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
-    state, end = "starting", time.time() + LIMIT
+    state, end, sent, again = "starting", time.time() + LIMIT, None, False
     while proc.poll() is None:
         if (d / "stop").exists() or time.time() > end:
             proc.kill()
@@ -297,6 +306,9 @@ def work(root: Path, name: str) -> int:
             return 1
         if state == "starting" and "link" in found:
             state = "link"
+        quiet = time.time() - found["at"] > ASKS_AGAIN
+        if state == "checking" and sent is not None and found["n"] > sent and quiet:
+            state, sent, again = "link", None, True  # the tool answered and still waits: it wants the code
         cf = d / "code"
         if cf.exists():
             try:
@@ -305,12 +317,15 @@ def work(root: Path, name: str) -> int:
                 with contextlib.suppress(OSError):
                     cf.unlink()
             with contextlib.suppress(OSError, ValueError):
+                sent = found["n"]
                 proc.stdin.write(text.strip() + b"\n")
                 proc.stdin.flush()
-                state = "checking"
+                state, again = "checking", False
         doc = {"state": state, "started_at": started, "beat_at": _now()}
         if "link" in found:
             doc["link"] = found["link"]
+        if again:
+            doc["again"] = True  # the last code was not taken: the window asks for it once more
         _write(root, name, doc)
         time.sleep(0.4)
     reader.join(timeout=2)

@@ -68,7 +68,12 @@ RENEW_SAYS = {
 }
 
 
+AGAIN = "The tool did not take that code. Copy the whole code from the sign-in page and paste it again."
+
+
 def renew_line(st: dict) -> str:
+    if st.get("state") == "link" and st.get("again"):
+        return AGAIN + f"\nPaste it with: orch logins renew {st.get('name') or ''} --code -"
     text = RENEW_SAYS.get(st.get("state"), RENEW_SAYS["failed"]).format(
         link=st.get("link") or "", name=st.get("name") or ""
     )

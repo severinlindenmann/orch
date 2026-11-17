@@ -106,3 +106,15 @@ def test_every_script_the_page_loads_is_served(server):
     for src in srcs:
         with urllib.request.urlopen(f"{server}/{src}") as r:
             assert r.status == 200, src
+
+
+def test_a_key_is_never_in_the_audit_or_the_request_log(ws, monkeypatch, capsys):
+    """R5.2: logins.replace writes no audit entry; the server's request line names the op only."""
+    from orch.pagesession import SELF
+
+    monkeypatch.setattr(actions, "_audit", lambda *a, **k: pytest.fail("audited"))
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: _R())
+    secret = "replaced-key-VALUE-7f3a9c"
+    actions.run_op(ws, SELF, "logins.replace", {"name": "payments", "value": secret}, session=True)
+    cap = capsys.readouterr()
+    assert secret not in cap.out + cap.err
