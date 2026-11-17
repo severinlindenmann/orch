@@ -1231,6 +1231,7 @@ def plan(
     agent: str | None = None,
     items: list[dict] | None = None,
     hooks_file: str | None = None,
+    model_hint: str | None = None,
 ) -> dict:
     """Resume or fresh, decided here once: resume only when the adapter can, this ticket has a session for
     this agent on this machine, and --fresh is not set."""
@@ -1263,7 +1264,8 @@ def plan(
         )
     model = None
     if a.get("model_args") and ticket.get("general") is not True:  # Chat keeps the tool's own setting
-        model = tickets.pick_model(root, tid, "orch")  # a person's choice, else orch's pick
+        # a person's choice, else an add-on's answer for this start (startask), else orch's pick
+        model = model_hint or tickets.pick_model(root, tid, "orch")
     # a one-shot run streams its steps into its log (Focus shows them; the log is never empty until the end)
     v = {
         "model": model,
@@ -1390,6 +1392,29 @@ def store_access(argv: list[str] | None, name: str, root: Path, work: Path) -> l
 # ---------------------------------------------------------------- start
 
 
+def _ask_addons(
+    root: Path, tid: str, by: str, mode: str | None, name: str, given: bool, notes: list[str]
+) -> tuple[str, str | None]:
+    """Ask the add-ons with `before_start` (contracts/before-start.schema.json). Returns the tool and the
+    model hint for this start. A wait answer holds an automatic start (the ticket shows why) and is only a
+    note for a person's own start. No such add-on: (name, None), nothing called."""
+    from orch import brake, startask
+
+    try:
+        out, said = startask.ask(root, tid, by, mode, name, given)
+    except startask.Wait as w:
+        if brake.is_person(by):
+            notes.append(f"Started anyway: {w.why}")
+            return name, None
+        startask.hold(root, tid, w)
+        raise Refused(f"Not started: {w.why}") from None
+    notes += said
+    if out.get("agent"):
+        adapters.load(out["agent"], root)
+        name = out["agent"]
+    return name, out.get("model")
+
+
 def start(
     root: Path,
     tid: str,
@@ -1417,9 +1442,10 @@ def start(
     health.soon(root)  # ORCH-44: tool logins checked again in the background when the result is stale
     name = agent or adapters.chosen(root)
     adapters.load(name, root)  # refuses a name nobody knows
+    notes = []
+    name, model_hint = _ask_addons(root, tid, by, mode, name, agent is not None, notes)
     a = adapters.load(name, root)
     adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
-    notes = []
     live_ok = runs_live.available(a)
     if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
         mode = "oneshot"  # a live session did not take this input (check_submit): one step at a time now
@@ -1446,6 +1472,7 @@ def start(
             take_over=take_over,
             busy_text=text or f"{by} asked for more work on this ticket.",
             priority=priority,
+            model_hint=model_hint,
         )
         r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
         return r
@@ -1467,7 +1494,7 @@ def start(
     )
     notes += copy_notes
     try:
-        p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
+        p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name, model_hint=model_hint)
         if p.get("note"):
             notes.append(p["note"])
         if p.get("fresh_why"):

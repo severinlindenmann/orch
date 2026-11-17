@@ -66,6 +66,7 @@
       "description": "Add-on names that must be active first. `orch addon add` refuses with the missing names; nothing is turned on by itself."
     },
     "needs": { "type": "boolean", "default": false, "description": "true = the add-on has `orch <name> needs --json` (rows of needs.schema.json) for `orch needs`." },
+    "before_start": { "type": "boolean", "default": false, "description": "true = the add-on has `orch <name> before-start --json` (before-start.schema.json): the core asks it before every helper start which tool, model and account to use, or to wait." },
     "ticket_links": {
       "type": "array", "maxItems": 16,
       "description": "Reference types this add-on knows (ticket refs, workspace/src/orch/refs.py). While the add-on is on, `orch ref add` gives a matching address this kind, and its references show with label, icon and status; off, they show as known site or plain Reference. Kinds are unique; url, ticket, artifact and file are reserved.",

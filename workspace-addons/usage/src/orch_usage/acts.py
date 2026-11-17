@@ -8,6 +8,7 @@ the rules, refusals and history lines are the CLI's own:
     order      <account>:up | <account>:down | <account>:<place>   (place: 1 is used first)
     on, off    <account>
     end        <account>:<YYYY-MM-DD> | <account>:none
+    for        <account>:<kind>[,<kind>...] | <account>:any      kinds: lead code reviews builds scripts helpers
     switching  on | off
 """
 
@@ -19,10 +20,11 @@ from pathlib import Path
 from . import store
 from .store import Refused
 
-VERBS = ("limit", "period", "order", "on", "off", "end", "switching")
+VERBS = ("limit", "period", "order", "on", "off", "end", "switching", "for")
 _ACC = r"a_[a-z0-9]{6}"
 _PERIOD = r"5h|week|month|until"
 _DAY = r"\d{4}-\d\d-\d\d"
+_KIND = r"(?:lead|code|reviews|builds|scripts|helpers)"
 _VALUE = r"none|\$?\d{1,7}(?:\.\d{1,4})?[%$]?"
 PATTERNS = {
     "limit": re.compile(rf"({_ACC}):({_PERIOD}):({_VALUE})(?::({_DAY}))?"),
@@ -32,6 +34,7 @@ PATTERNS = {
     "off": re.compile(rf"({_ACC})"),
     "end": re.compile(rf"({_ACC}):({_DAY}|none)"),
     "switching": re.compile(r"(on|off)"),
+    "for": re.compile(rf"({_ACC}):(any|{_KIND}(?:,{_KIND}){{0,5}})"),
 }
 NOT_THIS = "That is not something Usage can change. Reload the page and try again."
 
@@ -63,4 +66,6 @@ def argv_for(root: Path, verb: str, target: str, by: str | None) -> list[str]:
         return [verb, g[0], *who]
     if verb == "end":
         return ["end", g[0], g[1], *who]
+    if verb == "for":
+        return ["for", g[0], *g[1].split(","), *who]
     return ["switching", g[0], *who]

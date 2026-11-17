@@ -37,7 +37,9 @@ KINDS = (
     "builds",
     "scripts",
     "helpers",
-)  # stage 2 fills "for"; kept in the schema now
+)  # kinds of work; the owner picked the words
+KIND_WORDS = {k: k.capitalize() for k in KINDS}
+ANY = ("any", "all", "every", "none")  # `orch usage for <account> any`: no kinds = every kind of work
 PERIOD_WORDS = {"5h": "5 hours", "week": "week", "month": "month", "until": "until a date"}
 MAX_LIMITS = 2
 USAGE = "usage"
@@ -324,6 +326,32 @@ def _rule_change(a: dict, rows: list[dict], who: str, what: str, new_rule: dict,
         a["prev"] = old  # the rule before this change; a temporary rule falls back to it
     a["rule"] = new_rule
     rows.append(_line(who, what, a, old, copy.deepcopy(new_rule)))
+
+
+def parse_kinds(words: list[str]) -> list[str]:
+    """Kind words (any case, commas allowed) to the stored list in the fixed order; 'any' = [] (every kind)."""
+    flat = [w.strip().lower() for x in words for w in x.split(",") if w.strip()]
+    if not flat:
+        raise Refused("Say which kinds of work: " + ", ".join(KIND_WORDS.values()) + ", or any.")
+    if any(w in ANY for w in flat):
+        if len(flat) > 1:
+            raise Refused("Say 'any' alone, or name the kinds of work.")
+        return []
+    bad = [w for w in flat if w not in KINDS]
+    if bad:
+        raise Refused(f"'{bad[0]}' is not a kind of work. Pick from: " + ", ".join(KIND_WORDS.values()) + ".")
+    return [k for k in KINDS if k in flat]
+
+
+def kinds_text(kinds: list[str]) -> str:
+    return ", ".join(KIND_WORDS[k] for k in kinds) if kinds else "every kind of work"
+
+
+def set_for(a: dict, rows: list[dict], who: str, kinds: list[str], end: str | None) -> None:
+    """Which kinds of work may use the account; [] = every kind (as before stage 2)."""
+    rule = copy.deepcopy(a["rule"])
+    rule["for"] = [k for k in KINDS if k in kinds]
+    _rule_change(a, rows, who, f"for {kinds_text(rule['for'])}", rule, end)
 
 
 def default_unit(a: dict) -> str:

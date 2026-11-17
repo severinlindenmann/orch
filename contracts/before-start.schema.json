@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "orch.before-start/1",
+  "title": "The question the core asks before a helper starts, and the answer",
+  "description": "An active add-on with `before_start = true` gets `request` on stdin of `orch <name> before-start --json` and prints one `answer`. Any add-on can offer it; the core names none (contracts/addon-manifest.md, Before a helper starts).",
+  "$defs": {
+    "time": { "type": "string", "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ$" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+    "request": {
+      "type": "object",
+      "required": ["schema", "ticket", "title", "manager", "chat", "ext", "by", "agent", "agents", "chosen"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "orch.before-start/1" },
+        "ticket": { "type": "string", "description": "Ticket id (t_…)." },
+        "key": { "type": ["string", "null"] },
+        "title": { "type": "string" },
+        "parent": { "type": ["string", "null"] },
+        "manager": { "type": "boolean", "description": "The Manager ticket." },
+        "chat": { "type": "boolean", "description": "The Chat ticket." },
+        "ext": { "type": "object", "description": "ext.<name> of the ACTIVE add-ons only." },
+        "by": { "type": "string", "description": "Who starts it: human:<name>, agent:<name>." },
+        "mode": { "enum": ["live", "oneshot", null] },
+        "agent": { "$ref": "#/$defs/name", "description": "The helper tool this start would use." },
+        "agents": { "type": "array", "items": { "$ref": "#/$defs/name" }, "description": "Helper tools found on this machine." },
+        "model": { "type": ["string", "null"], "description": "The ticket's model as it is now (null: not picked yet)." },
+        "chosen": {
+          "type": "object", "required": ["agent", "model"], "additionalProperties": false,
+          "properties": {
+            "agent": { "type": "boolean", "description": "A tool was given for this start: an answer cannot change it." },
+            "model": { "type": "boolean", "description": "A person set the model: an answer cannot change it." }
+          }
+        }
+      }
+    },
+    "answer": {
+      "oneOf": [
+        {
+          "type": "object", "required": ["go"],
+          "properties": {
+            "go": { "const": true },
+            "agent": { "$ref": "#/$defs/name", "description": "Use this helper tool (only when one of `agents` and not chosen)." },
+            "model": { "enum": ["haiku", "sonnet", "opus", "fable"], "description": "Use this model (only when a person did not set one)." },
+            "account": { "type": "string", "maxLength": 64, "description": "The account LABEL the start uses. Never a key or login." },
+            "say": { "type": "string", "maxLength": 200, "description": "One plain line shown with the start." }
+          }
+        },
+        {
+          "type": "object", "required": ["go", "why"],
+          "properties": {
+            "go": { "const": false },
+            "why": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Plain words the ticket shows while it waits." },
+            "until": { "$ref": "#/$defs/time", "description": "When it can start again; the ticket then waits for that time." }
+          }
+        }
+      ]
+    }
+  }
+}

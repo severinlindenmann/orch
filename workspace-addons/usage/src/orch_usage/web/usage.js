@@ -159,6 +159,23 @@
       a.limits.length ? null : h('span', {className: 'meta', text: 'Set a limit first.'}));
   }
 
+  const KINDS = [['lead', 'Lead'], ['code', 'Code'], ['reviews', 'Reviews'], ['builds', 'Builds'], ['scripts', 'Scripts'], ['helpers', 'Helpers']];
+
+  function kindsRow(a) {
+    // no kind picked = every kind of work may use it (as before kinds of work existed)
+    const picked = new Set(a.for || []);
+    const chips = KINDS.map(([k, word]) => h('button', {type: 'button', className: 'chip-btn' + (picked.has(k) ? ' sel' : ''),
+      'aria-pressed': picked.has(k) ? 'true' : 'false', 'data-kind': k,
+      onclick: e => {
+        const next = new Set(picked);
+        if (next.has(k)) next.delete(k); else next.add(k);
+        const list = KINDS.map(x => x[0]).filter(x => next.has(x));
+        act('for', a.id + ':' + (list.length ? list.join(',') : 'any'), e.currentTarget);
+      }}, word));
+    return h('div', {className: 'row'}, h('span', {className: 'meta', text: 'For'}), chips,
+      picked.size ? null : h('span', {className: 'meta', text: 'every kind of work'}));
+  }
+
   function card(a, i, list) {
     const [stateText, stateClass] = STATE[a.state] || STATE.ready;
     const move = (way, to) => h('button', {type: 'button', className: 'btn ghost sm', disabled: !to || null,
@@ -180,6 +197,7 @@
       a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: 'No use read yet.'}),
       h('div', {className: 'row between'}, h('div', {className: 'row'}, rows, addLimit),
         h('label', {className: 'row'}, h('span', {className: 'meta', text: 'On'}), on)),
+      kindsRow(a),
       endRow(a));
   }
 
@@ -210,6 +228,11 @@
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
         h('h3', {text: 'Every account is at or near its limit'}),
         h('p', {text: 'Helpers wait when the last one reaches its limit. Raise a limit or turn an account on.'}))));
+    }
+    for (const w of m.waiting || []) {
+      parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
+        h('h3', {text: 'Work for ' + w.kind + ' waits'}),
+        h('p', {text: w.why + ' Raise a limit or allow another account for ' + w.kind + ' below.'}))));
     }
     for (const w of m.warnings || []) if (w && !/switcher is not installed/.test(w)) parts.push(h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w})));
     if (!m.accounts.length) {

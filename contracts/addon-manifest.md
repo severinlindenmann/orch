@@ -31,6 +31,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `runs_agents` | `true` = the add-on starts agent runs; it does so only through `orch run start` (one claim per ticket, the workspace's agent) |
 | `requires` | Add-on names that must be active first; `orch addon add` refuses and names the missing ones (nothing is turned on by itself) |
 | `needs` | `true` = implements `orch <name> needs --json` → rows of `needs.schema.json` for `orch needs` (only rows that are not ticket questions: those come from the tickets) |
+| `before_start` | `true` = implements `orch <name> before-start --json`: the core asks it before every helper start which tool, model and account to use, or to wait (Before a helper starts, below) |
 | `[page]` | `path` (starts with `/`), optional `label`, optional `live_session = true` (its page shows one ticket's live session: the dashboard's Watch live opens it): the add-on serves its own local page; needs `background = true`. Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
 | `[[ticket_links]]` | Link types the add-on knows: `kind` (letters, digits, dashes and an optional add-on prefix, e.g. `github:pr`; not `url`, `ticket`, `artifact` or `file`), `label` (≤ 24), `icon` (a key), `match` (one or a list of `https://` patterns; `*` = one part of the address, a `*` at the end takes the rest), optional `statuses`, `preview = "thumb"`. Ticket references, below |
 | `[ticket_fields]` | `section` (heading under the ticket's Details), `schema` (JSON Schema of `ext.<name>`; the same file as `ticket_ext` when both are set), `show_on_card` (≤ 3 field keys shown as a chip on board cards). Ticket references, below |
@@ -181,6 +182,27 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
   `orch` on PATH). Tests point it at the fake (`workspace/tests/fakes/orch_fake.py`, slice 0.8), which replays the contract
   vectors (`vectors/activity-v1.json`, `examples/screen/`, `vectors/jobs-v1.json`, `examples/counts/`) for `record tail`,
   `record counts`, `job`, `run screen`, so add-on code does not change when the real commands arrive.
+
+## Before a helper starts (`before_start = true`)
+
+Any add-on can say which helper tool, model and account a start uses, or that the work waits. Schema:
+`before-start.schema.json` (`request`, `answer`). Core: `workspace/src/orch/startask.py`, tests `test_startask.py`.
+
+- `orch run start` (live or one turn at a time, every caller) runs, before anything is claimed, for each active add-on
+  with the key, in name order: `<orch's python> -m <run> before-start --json`, stdin = one `request` (the ticket's
+  plain facts without history or note, `ext` of active add-ons only, who starts it, the tool it would use, the tools
+  found here, the ticket's model, and `chosen`: what a person or the caller set). 15 seconds at most.
+- Answer `{"go": true, "agent"?, "model"?, "account"?, "say"?}`: the core uses `agent` only when no tool was given for
+  this start and it is one of the tools found here, `model` only when a person did not set the ticket's model, shows
+  `say` as a note. The first add-on that names a tool or model wins. `account` is a label, never a key or login.
+- Answer `{"go": false, "why", "until"?}`: an automatic start does not happen and is refused with "Not started: <why>";
+  the ticket shows Waiting with `why` (`waiting_on` kind `time` with `until`, so the usual time wake starts it again;
+  without `until` kind `external`), one history line per reason. A person's own start goes ahead with
+  "Started anyway: <why>" as a note.
+- No answer in time, exit not 0, or not an answer: the start goes on as before, with one note. No add-on with the key:
+  nothing is called and nothing changes.
+- The add-on does any switching itself before it answers. It cannot change a running session: an answer counts for
+  this start only.
 
 ## Act (the buttons and switches of a dashboard tab)
 

@@ -28,7 +28,12 @@ def test_every_kit_file_a_page_links_exists_in_the_master():
 
 
 def test_add_on_servers_serve_what_their_pages_link():
-    for name, mod in (("focus", "orch_focus"), ("insights", "orch_insights"), ("factory", "orch_factory"), ("usage", "orch_usage")):
+    for name, mod in (
+        ("focus", "orch_focus"),
+        ("insights", "orch_insights"),
+        ("factory", "orch_factory"),
+        ("usage", "orch_usage"),
+    ):
         server = (ADDONS / name / "src" / mod / "server.py").read_text()
         table = server.split("KIT_FILES", 1)[1].split(")", 1)[0]
         listed = set(re.findall(r'"([a-z0-9-]+\.(?:css|js))"', table))

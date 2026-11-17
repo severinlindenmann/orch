@@ -209,6 +209,7 @@ def _rule_text(rule: dict) -> str:
             else f"{store.fmt_value(lim['value'], lim['unit'])} {p}"
         )
     text = ", ".join(parts) or "no limit"
+    text += f", for {store.kinds_text(rule.get('for') or [])}"
     if rule.get("ends"):
         text += f" (ends {rule['ends'][:16].replace('T', ' ')} UTC)"
     return text
@@ -264,7 +265,7 @@ def run(args) -> int:
         if not lines:
             lines = ["No accounts yet."]
         lines += [f"Warning: {w}" for w in data["warnings"]]
-        lines.append("Next: orch usage limit <account> <number>  (or period / order / on / off / end)")
+        lines.append("Next: orch usage limit <account> <number>  (or for / period / order / on / off / end)")
         print("\n".join(lines))
         return 0
     if cmd == "history":
@@ -286,6 +287,22 @@ def run(args) -> int:
 
     if cmd in ("run", "start", "stop", "status", "switching"):
         return _loop_cmd(args, root)
+    if cmd == "before-start":  # the core's start question (contracts/before-start.schema.json)
+        from . import routing
+
+        try:
+            req = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            raise Refused("The start question was not JSON.") from None
+        if not isinstance(req, dict):
+            raise Refused("The start question was not a JSON object.")
+        print(json.dumps(routing.decide(root, req), ensure_ascii=False))
+        return 0
+    if cmd == "needs":
+        from . import routing
+
+        print(json.dumps(routing.needs_rows(root), ensure_ascii=False))
+        return 0
 
     who = _actor(args.by)
     end = parse_time(args.end) if getattr(args, "end", None) else None
@@ -310,6 +327,8 @@ def run(args) -> int:
             for lim in a["rule"]["limits"]:
                 if lim["period"] == "until" and "since" not in lim:
                     lim["since"] = store.now()
+        elif cmd == "for":
+            store.set_for(a, rows, who, store.parse_kinds(args.kinds), end)
         elif cmd == "order":
             store.set_order(accounts, a, rows, who, args.place)
         elif cmd in ("on", "off"):
@@ -322,7 +341,7 @@ def run(args) -> int:
         changed = bool(rows)
         result = {k: v for k, v in a.items() if k != "source"}
     nxt = SAVED if changed else "Already like that. Nothing changed."
-    if changed and cmd in ("limit", "period", "end") and result["rule"].get("ends"):
+    if changed and cmd in ("limit", "period", "end", "for") and result["rule"].get("ends"):
         nxt = SAVED + " The rule falls back to the one before it when it ends."
     return _emit(
         args,
@@ -452,6 +471,8 @@ def main(argv=None) -> int:
         return s
 
     p("list")
+    p("before-start")
+    p("needs")
     s = p("history")
     s.add_argument("--account")
     s = p("limit")
@@ -466,6 +487,11 @@ def main(argv=None) -> int:
     s.add_argument("new")
     s.add_argument("--of")
     s.add_argument("--until")
+    s.add_argument("--end")
+    s.add_argument("--by")
+    s = p("for")
+    s.add_argument("account")
+    s.add_argument("kinds", nargs="+")
     s.add_argument("--end")
     s.add_argument("--by")
     s = p("order")

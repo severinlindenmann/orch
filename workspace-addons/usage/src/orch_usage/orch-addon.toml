@@ -9,6 +9,8 @@ skill = "skills/orch-usage"
 agents_block = "skills/orch-usage/AGENTS-block.md"
 gitignore = [".orch/addons/usage/"]
 background = true
+before_start = true
+needs = true
 
 [dashboard]
 label = "Usage"
@@ -42,6 +44,10 @@ who = "people"
 
 [acts.end]
 summary = "End an account's rule on a date, then go back to the rule before it"
+who = "people"
+
+[acts.for]
+summary = "Say which kinds of work may use an account"
 who = "people"
 
 [acts.switching]

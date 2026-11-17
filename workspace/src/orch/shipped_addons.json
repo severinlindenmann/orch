@@ -3,6 +3,7 @@
   "acts": {},
   "agents_block": "skills/orch-automation/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "clock",
    "label": "Automation",
@@ -47,6 +48,7 @@
   "acts": {},
   "agents_block": "skills/orch-dashboard/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "description": "Shows your tickets in a web page, with a tab for each add-on that is turned on.",
   "gitignore": [],
   "name": "dashboard",
@@ -68,6 +70,7 @@
   "acts": {},
   "agents_block": "skills/orch-dashboard-tester/AGENTS-block.md",
   "background": false,
+  "before_start": false,
   "description": "Looks at every dashboard page once a day and reports what is broken, without clicking anything.",
   "gitignore": [
    ".orch/addons/dashboard-tester/"
@@ -109,6 +112,7 @@
   },
   "agents_block": "skills/orch-factory/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "hammer",
    "label": "Factory",
@@ -151,6 +155,7 @@
   "acts": {},
   "agents_block": "skills/orch-focus/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "target",
    "label": "Focus",
@@ -189,6 +194,7 @@
   "acts": {},
   "agents_block": "skills/orch-insights/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "chart",
    "label": "Insights",
@@ -219,6 +225,7 @@
   "acts": {},
   "agents_block": "skills/orch-lessons/AGENTS-block.md",
   "background": false,
+  "before_start": false,
   "dashboard": {
    "icon": "book",
    "label": "Lessons",
@@ -248,6 +255,7 @@
   "acts": {},
   "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "description": "Merge queue: pull requests wait in line and are merged in groups after one run of the checks.",
   "gitignore": [
    ".orch/addons/pull-requests/"
@@ -299,6 +307,7 @@
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "dashboard": {
    "icon": "cloud",
    "label": "Sync",
@@ -324,16 +333,67 @@
   "version": "0.1.0"
  },
  "usage": {
-  "acts": {},
+  "acts": {
+   "end": {
+    "summary": "End an account's rule on a date, then go back to the rule before it",
+    "who": "people",
+    "writes": []
+   },
+   "for": {
+    "summary": "Say which kinds of work may use an account",
+    "who": "people",
+    "writes": []
+   },
+   "limit": {
+    "summary": "Set or remove one limit of an account",
+    "who": "people",
+    "writes": []
+   },
+   "off": {
+    "summary": "Stop using an account",
+    "who": "people",
+    "writes": []
+   },
+   "on": {
+    "summary": "Use an account again",
+    "who": "people",
+    "writes": []
+   },
+   "order": {
+    "summary": "Use an account earlier or later",
+    "who": "people",
+    "writes": []
+   },
+   "period": {
+    "summary": "Change what a limit counts over: 5 hours, a week, a month or until a date",
+    "who": "people",
+    "writes": []
+   },
+   "switching": {
+    "summary": "Switch accounts by itself, or only show and warn",
+    "who": "people",
+    "writes": []
+   }
+  },
   "agents_block": "skills/orch-usage/AGENTS-block.md",
   "background": true,
+  "before_start": true,
+  "dashboard": {
+   "icon": "bolt",
+   "label": "Usage",
+   "order": 35
+  },
   "description": "Every account the helpers spend on, its limits, its order and a history of every change.",
   "gitignore": [
    ".orch/addons/usage/"
   ],
   "name": "usage",
-  "needs": false,
+  "needs": true,
   "orch_api": 1,
+  "page": {
+   "label": "Open Usage",
+   "path": "/"
+  },
   "recommended": false,
   "requires": [],
   "run": "orch_usage",

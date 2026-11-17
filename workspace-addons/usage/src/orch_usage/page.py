@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store, switching
+from . import routing, store, switching
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
@@ -98,6 +98,7 @@ def build(data: dict, root: Path) -> dict:
                 "periods": list(store.allowed_periods(row)),
                 "unit": store.default_unit(row),
                 "ends": rule.get("ends"),
+                "for": list(rule.get("for") or []),
                 "falls_back": bool(row.get("prev")),
                 "fetched_at": row.get("fetched_at"),
             }
@@ -113,6 +114,11 @@ def build(data: dict, root: Path) -> dict:
         "all_at_limit": bool(memory.get("all_at_limit")) and len(on_subs) > 0,
         "one_account": len(subs) <= 1,
         "warnings": list(data["warnings"]),
+        # kinds of work whose starts wait now (routing): one line each, in the kinds' order
+        "waiting": [
+            {"kind": store.KIND_WORDS[k], "why": h.get("why") or "", "tickets": len(h.get("tickets") or [])}
+            for k, h in sorted(routing.held(root).items(), key=lambda kv: store.KINDS.index(kv[0]))
+        ],
         "accounts": accounts,
         "history": history_rows(root),
     }
