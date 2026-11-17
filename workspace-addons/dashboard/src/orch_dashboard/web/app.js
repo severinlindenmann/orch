@@ -281,8 +281,8 @@ function route() {
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|agent|phone|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
-  if (settingsHash && !snapshot && state?.settings) { const [tab, addon] = (settingsHash[1] || 'general').split('/'); return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
+  const settingsHash = /^#settings(?:\/(general|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
@@ -583,6 +583,20 @@ function dialog(title, cls = 'dialog', lock = '') {
 }
 document.getElementById('new-ticket').hidden = snapshot;
 document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
+// Keyboard shortcuts (persona test F6): "/" goes to the ticket search, "n" opens New ticket. Never while typing or with a window open.
+function shortcutFor(e, typing, windowOpen) {
+  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || typing || windowOpen) return '';
+  return e.key === '/' ? 'search' : e.key === 'n' ? 'new' : '';
+}
+document.addEventListener('keydown', e => {
+  const t = e.target, typing = !!(t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || '')));
+  const what = shortcutFor(e, typing, !!document.querySelector('dialog[open]'));
+  if (!what || snapshot) return;
+  e.preventDefault();
+  if (what === 'new') { ticketForm(); return; }
+  const focusSearch = () => document.querySelector('[data-key="ticket-search"]')?.focus();
+  if (route().kind !== 'tickets') { location.hash = '#tickets'; setTimeout(focusSearch, 0); } else focusSearch();
+});
 document.getElementById('open-agent').hidden = snapshot;
 document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
 document.getElementById('report-problem').hidden = snapshot;
@@ -822,6 +836,7 @@ main.addEventListener('click', async event => {
   if (action === 'view') {
     ticketView = control.dataset.view === 'board' ? 'board' : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
+    writeTicketAddress();
     render(); return;
   }
   if (action === 'board-more') { if (boardMore.has('done')) boardMore.delete('done'); else boardMore.add('done'); render(); return; }

@@ -331,6 +331,8 @@ function ticketForm(t) {
   };
   form.append(fields, error, reload, actions); d.append(form);
   let created = null, creationUnresolved = false, epicMade = false, epicProblems = [], togetherDone = false;
+  // Cmd+Enter (Ctrl+Enter) saves from any field, like the Save button.
+  form.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.defaultPrevented) { event.preventDefault(); form.requestSubmit(); } });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     await reading;

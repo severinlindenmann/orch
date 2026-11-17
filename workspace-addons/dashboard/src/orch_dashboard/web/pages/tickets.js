@@ -12,6 +12,36 @@ function savedView() {
   const view = at < 0 ? '' : new URLSearchParams(full.slice(at + 1)).get('view') || '';
   return [...TICKET_VIEWS, ...LINK_VIEWS].some(([id]) => id && id === view) ? view : '';
 }
+// The address also holds the search words and the board: #tickets?view=working&q=invoice&layout=board.
+// ticketAddress builds it from the shown state (one place), syncTicketAddress adopts it when it was changed from outside (reload, Back, a shared link).
+function ticketAddress(over = {}) {
+  const view = 'view' in over ? over.view : savedView(), q = 'q' in over ? over.q : String(ticketSearch).trim(), layout = 'layout' in over ? over.layout : ticketView;
+  const p = new URLSearchParams();
+  if (view) p.set('view', view);
+  if (q) p.set('q', q);
+  if (layout === 'board') p.set('layout', 'board');
+  const text = p.toString();
+  return '#tickets' + (text ? '?' + text : '');
+}
+let ticketAddressKey = null;
+function writeTicketAddress() {
+  const next = ticketAddress();
+  ticketAddressKey = ticketAddressPart();
+  if (typeof history === 'object' && location.hash !== next && (location.hash || '#home').split('?')[0] === '#tickets') history.replaceState(null, '', next);
+}
+function ticketAddressPart() {
+  const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
+  return (p.get('q') || '') + '|' + (p.get('layout') === 'board' ? 'board' : '');
+}
+function syncTicketAddress() {
+  const key = ticketAddressPart();
+  if (key === ticketAddressKey) return;
+  ticketAddressKey = key;
+  const full = String(location.hash || ''), at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
+  if (ticketSearch !== (p.get('q') || '')) { ticketSearch = p.get('q') || ''; searchFolds.clear(); }
+  if (p.get('layout') === 'board') ticketView = 'board';
+  else if (at < 0 || !p.has('layout')) { try { ticketView = localStorage.getItem('orch.tickets.view') === 'board' ? 'board' : 'list'; } catch (_) { ticketView = 'list'; } }
+}
 const changesPending = t => t?.bring_back?.state === 'waiting';
 function inView(t, view, nowMs = Date.now()) {
   const status = window.DashHelpers.columnOf(shown(t).status);
@@ -93,7 +123,7 @@ function ticketSelect(label, key, choices, value, onChange) {
 const SAVED_VIEWS = 'orch.tickets.saved';
 function savedViews() { try { const v = JSON.parse(localStorage.getItem(SAVED_VIEWS) || '[]'); return Array.isArray(v) ? v.filter(x => x && typeof x.label === 'string') : []; } catch (_) { return []; } }
 function writeSavedViews(list) { try { localStorage.setItem(SAVED_VIEWS, JSON.stringify(list.slice(0, 6))); } catch (_) { /* no storage: nothing is kept */ } }
-function applySaved(v) { ticketSearch = v.search || ''; ticketPerson = v.person || ''; ticketMine = false; location.hash = v.view ? '#tickets?view=' + v.view : '#tickets'; render(); }
+function applySaved(v) { ticketSearch = v.search || ''; ticketPerson = v.person || ''; ticketMine = false; location.hash = ticketAddress({view:v.view || '', q:ticketSearch.trim()}); render(); }
 function viewChips() {
   const current = savedView(), filtered = !!(ticketSearch || ticketPerson);
   const chip = (label, active, attrs) => h('a', Object.assign({className:'chip view-chip' + (active ? ' active' : ''), 'aria-current':active ? 'true' : null}, attrs), label);
@@ -102,11 +132,11 @@ function viewChips() {
   const save = h('button', {type:'button', className:'chip view-chip add', 'data-key':'save-view', disabled:filtered || current ? null : '', 'aria-label':'Save this view'}, '+ Save view');
   save.addEventListener('click', () => { if (!label) return; const list = savedViews().filter(v => v.label !== label); list.push({label, view:current, search:ticketSearch, person:ticketPerson}); writeSavedViews(list); render(); });
   return h('div', {className:'view-chips row', role:'group', 'aria-label':'Ticket views', 'data-key':'view-chips'},
-    TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered, {href:id ? '#tickets?view=' + id : '#tickets', 'data-key':'view-chip-' + (id || 'all')})), own, save);
+    TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered, {href:ticketAddress({view:id}), 'data-key':'view-chip-' + (id || 'all')})), own, save);
 }
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search by number or words', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
-  input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); render(); });
+  input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); writeTicketAddress(); render(); });
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
   const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; render(); }) : null;
   const all = tickets(), heads = all.filter(t => all.some(c => c.parent === t.id || (c.parent && c.parent === t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
@@ -115,7 +145,7 @@ function ticketFilters() {
 }
 function clearTicketFilters() {
   ticketSearch = ''; ticketMine = false; ticketPerson = ''; ticketGroup = '';
-  if (savedView()) location.hash = '#tickets';
+  if (savedView()) location.hash = ticketAddress({view:''}); else writeTicketAddress();
   const input = document.querySelector('[data-key="ticket-search"]');
   if (input) input.value = '';
   render(); input?.focus();
@@ -372,6 +402,7 @@ function phoneList(visible) {
   return h('div', {className:'phone-only short-list', 'data-key':'ticket-short'}, out);
 }
 function list() {
+  syncTicketAddress();
   const visible = filteredTickets();
   const needN = typeof needsYouTotal === 'function' ? needsYouTotal() : 0;
   const top = [heading('Tickets', 'Every ticket, from To do to Done.', {actions:needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null}), viewToggle()];
