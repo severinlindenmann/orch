@@ -1,5 +1,5 @@
 {
-  "about": "Question taken back (relay-api.md 'Question taken back'). valid / invalid: texts that pass / fail message.schema.json. body.text is REQUIRED and is exactly 'Taken back: <reason>' (reason 1-200 chars, one line, no control or bidi characters); the body is only {text, taken_back:{reason}}. questions: what the relay already holds in every relay test (id, sender, question_id, ticket, key; kind plain|review|proposal). relay: what the relay answers (expect = HTTP status; 200 = identical duplicate; error = the error code when given) given state: answered = question message ids a phone answered, taken_back = taken_back messages already stored. ws_pilatus001 is the sender, ws_other00001 another workspace, m_tt00000000000001 a plain text of the sender. Entries with `call` POST /v1/phone/answer are replayed as that phone request, entries with `request` and stored_body_lacks as POST /v1/phone/send. cases: what the workspace sends after `orch ask <ticket> --take-back` (asked_on_phones = it sent that question to phones, relay_on = the relay add-on is on, changed = the take-back changed the ticket, reason_in = what the ticket holds, send = the body or null, to/reply_to routing). inbound: messages that arrive over the relay and must NEVER take a question back (the ticket stays as is). late: answers that reach the workspace after the take-back. phone: the cards a phone shows after the events. A relay implementation replays every relay entry against the relay itself. open_questions: the questions a paired phone lists (and open_questions counts) for the workspace in the given state.",
+  "about": "Question taken back (relay-api.md 'Question taken back'). valid / invalid: texts that pass / fail message.schema.json. body.text is REQUIRED and is exactly 'Taken back: <reason>' (reason 1-200 chars, one line, no control or bidi characters); the body is only {text, taken_back:{reason}}. questions: what the relay already holds in every relay test (id, sender, question_id, ticket, key; kind plain|review|proposal). relay: what the relay answers (expect = HTTP status; 200 = identical duplicate; error = the error code when given) (a review-<n> round can be taken back too) given state: answered = question message ids a phone answered, taken_back = taken_back messages already stored. ws_pilatus001 is the sender, ws_other00001 another workspace, m_tt00000000000001 a plain text of the sender. Entries with `call` POST /v1/phone/answer are replayed as that phone request, entries with `request` and stored_body_lacks as POST /v1/phone/send. cases: what the workspace sends after `orch ask <ticket> --take-back` (asked_on_phones = it sent that question to phones, relay_on = the relay add-on is on, changed = the take-back changed the ticket, reason_in = what the ticket holds, send = the body or null, to/reply_to routing). inbound: messages that arrive over the relay and must NEVER take a question back (the ticket stays as is). late: answers that reach the workspace after the take-back. phone: the cards a phone shows after the events. A relay implementation replays every relay entry against the relay itself. open_questions: the questions a paired phone lists (and open_questions counts) for the workspace in the given state.",
   "phone_ids": {
     "ph_iphone0001": "iPhone"
   },
@@ -1439,7 +1439,7 @@
       "expect": 404
     },
     {
-      "name": "review-question",
+      "name": "review-round",
       "state": {},
       "message": {
         "schema": "orch.msg/1",
@@ -1451,14 +1451,43 @@
         "ticket": "t_7k3f9q",
         "created_at": "2026-11-15T10:00:00Z",
         "body": {
-          "text": "Taken back: plans changed",
+          "text": "Taken back: Review finished in orch",
           "taken_back": {
-            "reason": "plans changed"
+            "reason": "Review finished in orch"
           }
         },
         "key": "DM1-12"
       },
-      "expect": 403
+      "expect": 201,
+      "why": "a review round closes when the ticket left Review on the workspace (Accept or Ask for changes in orch)"
+    },
+    {
+      "name": "review-round-answered-first",
+      "state": {
+        "answered": [
+          "m_rv00000000000001"
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000033",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_rv00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: Review finished in orch",
+          "taken_back": {
+            "reason": "Review finished in orch"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 409,
+      "error": "already_answered",
+      "why": "a phone answered the round first"
     },
     {
       "name": "proposal-question",
