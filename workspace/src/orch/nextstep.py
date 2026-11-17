@@ -186,6 +186,7 @@ HINTS = {
     "update": _update,
     "start": "keep working; the dashboard link is above. orch ticket list",
     "stop": "orch ticket list",
+    "shot": "look at the pictures, then attach them: orch check done <id> <step> --file <picture>",
     "status": _status_cmd,
     "addon add": "orch addon list",
     "addon remove": "orch addon list",

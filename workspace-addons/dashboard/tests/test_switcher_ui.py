@@ -12,12 +12,12 @@ def test_switcher_only_lists_local_workspaces_current_first():
     assert "w.here || !w.url || /^http:\\/\\/(127\\.0\\.0\\.1|localhost)[:/]/.test(w.url)" in js
     assert "Number(!!b.here) - Number(!!a.here)" in js
     assert "attrs.href = w.url" in js  # a running local workspace stays a link
-    assert "'Current'" in js and "'✓ '" in js
+    assert "'Current'" in js and "'✓'" in js
 
 
 def test_optional_workspace_details_and_safe_text():
     js = (WEB / "switcher.js").read_text()
-    assert "L.badge(w, w.name, 32)" in js
+    assert "L.badge(w, label, 32)" in js
     assert "typeof w.type === 'string' && w.type.trim()" in js
     assert "Number.isInteger(w.needs)" in js
     assert "w.needs === 1 ? ' needs you' : ' need you'" in js
