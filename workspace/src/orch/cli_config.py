@@ -343,6 +343,12 @@ def _config(args, root: Path) -> None:
             f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
         )
     elif args.sub == "set" and args.key in releasekeeper.SETTING_KEYS:
+        # the release keeper pushes, dispatches, sources github.release_env and reads production: only a
+        # person points it somewhere (turning a setting off is fine for anyone)
+        if args.value.strip().lower() not in ("off", "none", "") and not _actor(args).startswith("human:"):
+            raise Refused(
+                f"Only a person sets {args.key}. Ask the owner to run: orch config set {args.key} ..."
+            )
         v = releasekeeper.set_setting(root, args.key, args.value)
         _out(args, {args.key: v}, f"Saved: {args.key} = {v}." if v else f"Cleared: {args.key}.")
     elif args.sub == "set" and args.if_current is not None:

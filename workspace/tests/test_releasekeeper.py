@@ -259,6 +259,7 @@ def test_deploy_go_opens_a_helper_ticket(tmp_path, capsys):
             {
                 "text": "Release 31 changed the relay server. Deploy it to production now?",
                 "answer": "Deploy now",
+                "answered_by": "human:t",
             }
         ]
     }
@@ -563,6 +564,7 @@ def test_deploy_now_after_a_hand_deploy_opens_no_ticket(tmp_path, capsys):
             {
                 "text": "Release 31 changed the relay server. Deploy it to production now?",
                 "answer": "Deploy now",
+                "answered_by": "human:t",
             }
         ]
     }
@@ -584,6 +586,7 @@ def test_already_deployed_answer_writes_the_record(tmp_path, capsys):
             {
                 "text": "Release 31 changed the relay and publish server. Deploy it to production now?",
                 "answer": "Already deployed",
+                "answered_by": "human:t",
             }
         ]
     }
@@ -609,6 +612,7 @@ def test_deploy_ticket_says_how_to_write_down_the_deploy(tmp_path, capsys, monke
             {
                 "text": "Release 31 changed the relay server. Deploy it to production now?",
                 "answer": "Deploy now",
+                "answered_by": "human:t",
             }
         ]
     }
@@ -724,6 +728,7 @@ def test_deploy_go_hands_the_helper_the_prepared_program(tmp_path, capsys, monke
             {
                 "text": "Release 31 changed the relay server. Deploy it to production now? x",
                 "answer": "Deploy now",
+                "answered_by": "human:t",
             }
         ]
     }
@@ -903,3 +908,40 @@ def test_needs_lines_name_new_settings_data_and_service_files():
         "data changes: 0004_reach.sql",
         "service files: orch-relay.service",
     ]
+
+
+def test_only_the_asked_question_answered_by_a_person_counts():
+    q = {"id": "q7", "text": "Release 31 changed the relay server. Deploy?", "answer": "Deploy now"}
+    t = {"questions": [{**q, "answered_by": "agent:claude"}]}
+    assert rk.deploy_answer(t, 31, "q7") is None  # an agent's answer never leads to production
+    t = {"questions": [{**q, "id": "q8", "answered_by": "human:t"}]}
+    assert rk.deploy_answer(t, 31, "q7") is None  # a look-alike question is not the card
+    t = {"questions": [{**q, "answered_by": "human:t"}]}
+    assert rk.deploy_answer(t, 31, "q7") == "Deploy now"
+    assert rk.deploy_answer(t, 31, "q7", proven=lambda tk, qq: False) is None  # a synced answer
+
+
+def test_an_agents_deploy_now_opens_no_ticket(tmp_path):
+    t = {
+        "questions": [
+            {
+                "text": "Release 31 changed the relay server. Deploy it to production now?",
+                "answer": "Deploy now",
+                "answered_by": "agent:codex",
+            }
+        ]
+    }
+    out = go(
+        tmp_path,
+        state={"deploy": {"n": 31, "what": "relay", "sha": DEV}},
+        heads={"develop": MAIN, "main": MAIN, "unreleased": []},
+        ticket={"ORCH-79": t},
+    )
+    assert out["did"] == [] and out["state"]["deploy"]["n"] == 31
+
+
+def test_a_helper_cannot_point_the_keeper_elsewhere(proj, run_cli, monkeypatch):
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    code, _, err = run_cli("config", "set", "github.release_env", "/tmp/x.sh")
+    assert code == 2 and "Only a person" in err
+    assert run_cli("config", "set", "github.release_env", "off")[0] == 0

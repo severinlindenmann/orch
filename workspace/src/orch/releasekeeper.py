@@ -800,6 +800,14 @@ class World:
 
         self.act(f"note:{text[:80]}", go)
 
+    def proven(self, ticket: dict, q: dict) -> bool:
+        """The answer was made on this computer (never a synced one): history.answer_proven."""
+        if self.sim is not None:
+            return q.get("proven", True) is True
+        from orch import history
+
+        return history.answer_proven(self.root, ticket, q)
+
     def ask(self, args: list[str]):
         """A question on the role ticket through `orch ask` (the same card a helper makes)."""
         return self.orch(["ask", *args, "--by", BY])
@@ -1311,7 +1319,7 @@ def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
     if parts:
         what = " and ".join(parts)
         ready = "; ".join(prep_line(x, prep[x]) for x in parts)
-        w.act(
+        r = w.act(
             f"deploy-card:{what}",
             lambda: w.ask(
                 [
@@ -1325,10 +1333,14 @@ def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
                     "Later",
                     "--recommend",
                     "Deploy now",
+                    "--json",
                 ]
             ),
         )
         st["deploy"] = {"n": n, "what": what, "sha": rel["sha"], "prep": {x: prep[x] for x in parts}}
+        qid = _asked_id(r)
+        if qid:
+            st["deploy"]["qid"] = qid
     un = rel.get("unreleased") or []
     if un:
         items = highlights(un, w.tickets(), w.cfg.repo)
@@ -1355,8 +1367,17 @@ def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
     ]
 
 
+def _asked_id(r) -> str | None:
+    """The question id `orch ask --json` printed, or None."""
+    try:
+        qid = json.loads(getattr(r, "stdout", "") or "{}").get("id")
+    except (ValueError, AttributeError):
+        return None
+    return qid if isinstance(qid, str) and qid else None
+
+
 def deploy_answered(w: World, st: dict, role: str, dep: dict) -> list[str]:
-    ans = deploy_answer(w.ticket(role), dep["n"])
+    ans = deploy_answer(w.ticket(role), dep["n"], dep.get("qid"), w.proven)
     parts = dep["what"].split(" and ")
     if ans == "Deploy now" and dep.get("sha") and all(w.running(x, dep["sha"]) for x in parts):
         st["deploy"] = None  # deployed by hand between the card and the answer: no second production deploy
@@ -1453,10 +1474,20 @@ def helper_steps(prep: dict, script: str | None = None) -> str:
     return "".join(lines)
 
 
-def deploy_answer(ticket: dict, n: int) -> str | None:
+def deploy_answer(ticket: dict, n: int, qid: str | None = None, proven=None) -> str | None:
+    """A person's answer to the deploy card: the very question the keeper asked (its id; the words only for a
+    card asked before ids were kept), answered by a human: on this computer. Anything else is no answer:
+    "Deploy now" leads to production, so an agent's or a synced answer never counts."""
     for q in ticket.get("questions") or []:
-        if f"Release {n} {DEPLOY_ASK}" in (q.get("text") or "") and q.get("answer"):
-            return q["answer"]
+        if qid is not None and q.get("id") != qid:
+            continue
+        if qid is None and f"Release {n} {DEPLOY_ASK}" not in (q.get("text") or ""):
+            continue
+        if not q.get("answer") or not str(q.get("answered_by") or "").startswith("human:"):
+            continue
+        if proven is not None and not proven(ticket, q):
+            continue
+        return q["answer"]
     return None
 
 
