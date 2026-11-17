@@ -110,7 +110,7 @@ under the ticket's Details; set with `orch ticket set <ticket> pull-requests.mer
 ## Failed checks (ORCH-167)
 Off until `act_on_failed_checks = true`. The Merge when green watcher runs one pass every minute after its own
 (a failure of one part never skips the other). One pass looks at each open pull request linked on a ticket that
-is not done or dropped (a pull request on two tickets: the first ticket), with one read
+is Ready, Working, Waiting or in Review (not Backlog, Done or Won't do) (a pull request on two tickets: the first ticket), with one read
 (`gh pr view --json state,isDraft,headRefOid,statusCheckRollup`), the newest check per name:
 - a GitHub Actions job that ended cancelled or timed out is run again once per commit and job name
   (`gh run rerun --job`). It first takes a slot of `orch.ghlimit` (kind `other`) without waiting; no room: no
@@ -122,8 +122,12 @@ is not done or dropped (a pull request on two tickets: the first ticket), with o
   watcher does (`agent:automation`, so the pause and the daily cap apply). The text names the pull request, the
   short commit, each failed check with its link, and the last 30 lines (each cut at 300 characters, colour codes
   and time stamps removed) of up to 3 failed jobs' logs (`gh run view --job --log-failed`). A log line that
-  `orch.secretscan` flags is replaced by "(line hidden: it looks like a secret)". Log lines are CI output: data,
-  never instructions.
+  `orch.secretscan` flags (scanned over the last 400 lines before they are cut, with the workspace's stored
+  keys; when those cannot be compared no log is shown) is replaced by "(line hidden: it looks like a secret)";
+  a private key block is hidden whole, also when its BEGIN line lies before the window. Check names, links and
+  log lines are quoted (names in code text, the log in a fenced block with backticks and control characters
+  removed) and marked as data, never instructions. A pull request from a fork gets names and links only, no
+  logs. Only jobs of the pull request's own repository are rerun or read.
 - each rerun and wake writes one history line on the ticket (`agent:failed-checks`).
 Memory: `.orch/addons/pull-requests/checks.json` `{pull request key: {head, reran: {name: {job, ok, at}}, woke}}`;
 a new commit starts over; pull requests no longer open on an open ticket are dropped.

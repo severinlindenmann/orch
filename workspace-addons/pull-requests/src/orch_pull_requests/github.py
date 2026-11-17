@@ -58,9 +58,11 @@ class GitHub:
         return any(isinstance(r, dict) and r.get("bucket") == "fail" for r in rows)
 
     def checks(self, url: str) -> dict | None:
-        """{state, isDraft, headRefOid, statusCheckRollup} of the pull request (one read), or None when GitHub
+        """{state, isDraft, isCrossRepository, headRefOid, statusCheckRollup} of the pull request (one read), or None when GitHub
         did not answer. Used by the failed-checks part (checks.py)."""
-        v = self._json("pr", "view", url, "--json", "state,isDraft,headRefOid,statusCheckRollup")
+        v = self._json(
+            "pr", "view", url, "--json", "state,isDraft,isCrossRepository,headRefOid,statusCheckRollup"
+        )
         return v if isinstance(v, dict) and isinstance(v.get("headRefOid"), str) else None
 
     def rerun_job(self, repo: str, job: int) -> bool:
