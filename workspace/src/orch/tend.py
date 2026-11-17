@@ -264,9 +264,8 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
             open_steps = _open_steps(t)
             soon = OPEN_STEPS_SECONDS if open_steps else (EARLY_IDLE_MINUTES if early else IDLE_MINUTES) * 60
             if quiet >= soon:
-                out.append(
-                    {**row, "action": "nudge", "since": info.get("idle_since"), "early": early, "open": open_steps}
-                )
+                since = info.get("idle_since")
+                out.append({**row, "action": "nudge", "since": since, "early": early, "open": open_steps})
             continue
         helper = f"agent:{rec.get('agent')}"
         moved = any(
@@ -441,7 +440,7 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
                 ", right after its start." if early else "."
             )
             if row.get("open"):
-                line = f"Sent the helper on: it stopped with open tasks (idle for {quiet}, stop number {n})." + up
+                line = f"Sent the helper on: it stopped with open tasks (idle for {quiet}, stop {n})." + up
         elif action == "forget":
             state.pop(tid, None)
         elif action == "wake":

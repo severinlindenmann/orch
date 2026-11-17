@@ -551,4 +551,4 @@ def test_the_second_stop_moves_the_ticket_up_to_opus(proj, run, new_ticket, chil
     assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
     t = tickets.load(proj, tid)
     assert t["model"]["name"] == "opus"
-    assert "moved up to Opus" in _history(proj, tid)[-1] or "moved up to Opus" in " ".join(_history(proj, tid))
+    assert "moved up to Opus" in " ".join(_history(proj, tid))
