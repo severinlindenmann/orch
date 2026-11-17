@@ -119,7 +119,7 @@ def _now():
 
 
 def _standstill(root, store, ticket, tickets):
-    """A signature of the order's state when a started run stands still: no helper works on it and nothing waits (no
+    """A short key of the order's state when a started run stands still: no helper works on it and nothing waits (no
     question, result, timed or other wait, refused start), ORCH-277. None while it moves or waits for something."""
     from . import pageapi
 
