@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -170,15 +171,39 @@ def test_cli_report(proj, hid, run):
     assert not (Path(res["path"]) / "content").exists()
 
 
-def test_old_reports_go_first_with_a_diag_event(proj, hid, monkeypatch):
+def _mark_ticketed(proj, *refs):
+    d = proj / ".orch" / "diag"
+    (d / diag_report.TICKETS_STATE).write_text(json.dumps({"seen": {r: {"ticket": "t_x"} for r in refs}}))
+
+
+def test_a_full_debug_log_never_costs_a_report(proj, hid, monkeypatch):
+    refs = [Path(diag_report.make(proj, now=time.time() + 120 * i)["path"]) for i in range(4)]
+    (proj / ".orch" / "diag" / "2026-11-17-0.jsonl").write_bytes(b"x" * 5000)
+    monkeypatch.setattr(diag, "MAX_TOTAL_BYTES", 100)  # the log is over its budget
+    assert diag_report.prune(proj) == []
+    assert all(r.exists() for r in refs)
+
+
+def test_over_the_report_room_only_ticketed_reports_go_oldest_first(proj, hid, monkeypatch):
     refs = []
-    for i in range(3):
-        refs.append(diag_report.make(proj, now=time.time() + 120 * i)["path"])
+    for i in range(4):
+        refs.append(Path(diag_report.make(proj, now=time.time() + 120 * i)["path"]))
         os.utime(refs[-1], (time.time() + i, time.time() + i))
-    monkeypatch.setattr(diag, "MAX_TOTAL_BYTES", sum(diag_report._size(Path(r)) for r in refs[1:]) + 1000)
-    gone = diag_report.prune(proj)
-    assert gone == [Path(refs[0]).name] and not Path(refs[0]).exists() and Path(refs[2]).exists()
+    monkeypatch.setattr(diag_report, "REPORT_BYTES", 1)  # everything is over the room
+    assert diag_report.prune(proj) == []  # no ticket yet: nothing may go
+    _mark_ticketed(proj, refs[0].name, refs[2].name)
+    assert diag_report.prune(proj) == [refs[0].name, refs[2].name]
+    assert not refs[0].exists() and refs[1].exists() and refs[3].exists()
     assert [e for e in diag.read_events(proj) if e["ev"] == "diag.report_pruned"]
+
+
+def test_a_name_that_has_a_ticket_is_not_given_out_again(proj, hid):
+    now = time.time()
+    first = Path(diag_report.make(proj, now=now)["path"])
+    _mark_ticketed(proj, first.name)
+    shutil.rmtree(first)
+    again = Path(diag_report.make(proj, now=now)["path"])
+    assert again.name != first.name
 
 
 # ------------------------------------------------------------ incidents
