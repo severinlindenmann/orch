@@ -40,12 +40,9 @@ test('a paired phone, or an unknown count, leaves the switch usable; an On switc
 const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join('');
 const find = (n, f) => typeof n === 'string' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(k => find(k, f))];
 const soon = ms => new Date(Date.now() + ms).toISOString();
-// A time later today (never past midnight, so the chip has no day word whatever the clock says) and noon on a later day.
-const laterToday = () => { const d = new Date(Date.now() + 60000), e = new Date(d); e.setHours(23, 58, 0, 0); return (e > d ? e : d).toISOString(); };
-const noonIn = days => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(12, 0, 0, 0); return d.toISOString(); };
 test('on: the chip shows "Phone until HH:MM" with the menu, and the banner stays hidden', () => {
   const c = load();
-  c.state({...base, phones:1, on:true, ends_at:laterToday(), awake:'awake'});
+  c.state({...base, phones:1, on:true, ends_at:soon(3 * 3600000), awake:'awake'});
   assert.equal(c.chip.hidden, false);
   assert.equal(c.bar.hidden, true);
   assert.match(text(c.chip.children[0]), /^Phone until \d\d:\d\d$/);
@@ -59,7 +56,7 @@ test('on: the chip shows "Phone until HH:MM" with the menu, and the banner stays
 });
 test('on but could not keep the computer awake: the chip uses the warning tone and the menu says why', () => {
   const c = load();
-  c.state({...base, phones:1, on:true, ends_at:laterToday(), awake:'could_not_keep_awake'});
+  c.state({...base, phones:1, on:true, ends_at:soon(3 * 3600000), awake:'could_not_keep_awake'});
   assert.match(c.chip.children[0].className, /attn/);
   assert.match(text(c.chip.children[1]), /Could not keep this computer awake/);
 });
@@ -114,11 +111,11 @@ test('ORCH-184: a mode whose end time has passed is shown as ended, not "Phone u
 });
 test('ORCH-286: an end time on another day says the day, in the chip, the menu and the sidebar label', () => {
   const c = load();
-  c.state({...base, phones:1, on:true, ends_at:noonIn(1), awake:'ok'});
+  c.state({...base, phones:1, on:true, ends_at:soon(26 * 3600 * 1000), awake:'ok'});
   assert.match(text(c.chip.children[0]), /^Phone until tomorrow \d\d:\d\d$/);
   assert.match(c.label.textContent, /^Phone · until tomorrow \d\d:\d\d$/);
   assert.match(text(c.chip.children[1]), /Questions go to your phone until tomorrow \d\d:\d\d/);
   const c2 = load();
-  c2.state({...base, phones:1, on:true, ends_at:noonIn(4), awake:'ok'});
+  c2.state({...base, phones:1, on:true, ends_at:soon(4 * 24 * 3600 * 1000), awake:'ok'});
   assert.match(text(c2.chip.children[0]), /^Phone until (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d\d:\d\d$/);
 });
