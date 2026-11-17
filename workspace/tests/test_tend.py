@@ -315,3 +315,44 @@ def test_a_time_wait_names_the_time(proj, run, new_ticket):
     waits = runwatch.waiting_on(proj, None, tickets.load(proj, tid))
     assert waits[0]["kind"] == "time" and waits[0]["ref"] == "2030-01-02T08:00:00Z"
     assert waits[0]["what"] != "until "
+
+
+# ---------------------------------------------------------------- a ceiling even with no limit set
+
+
+def test_no_limit_twenty_waiting_start_in_steps(proj, new_ticket, monkeypatch):
+    ids = [new_ticket(f"t{n}") for n in range(20)]
+    for t in ids:
+        _queue(proj, t)
+    started = []
+    monkeypatch.setattr(runs_live, "max_live", lambda root: None)  # "no limit" in Settings
+    monkeypatch.setattr(runs_live, "_pressure", lambda root: None)
+    monkeypatch.setattr(
+        runs_live, "live_all", lambda root: [{"live": {"since": tickets.now()}}] if started else []
+    )
+    monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
+    assert len(runs_live.start_waiting(proj)) == 1  # one new helper per pass
+    assert runs_live.start_waiting(proj) == []  # the next waits until it is up
+    assert len(started) == 1
+
+
+def test_no_new_helper_while_load_or_disk_says_stop(proj, new_ticket, monkeypatch):
+    a = new_ticket("a")
+    _queue(proj, a)
+    started = []
+    monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (45.0, 40.0, 30.0))
+    assert runs_live.start_waiting(proj) == []
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (1.0, 1.0, 1.0))
+    monkeypatch.setattr(runs_live.shutil, "disk_usage", lambda p: type("U", (), {"free": 2 * 2**30})())
+    assert runs_live.start_waiting(proj) == []
+    assert started == []
+
+
+def test_a_start_handed_over_by_a_script_queues_under_load(proj, new_ticket, monkeypatch):
+    tid = new_ticket()
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (45.0, 40.0, 30.0))
+    with pytest.raises(runs.Busy) as e:
+        runs_live.start_live(proj, tid, "agent:x", "claude", fresh=False, take_over=False, busy_text="wait")
+    assert e.value.extra["pending"] and "very busy" in str(e.value)
+    assert runs_live.waiting_line(proj) == [(tid, "normal")]

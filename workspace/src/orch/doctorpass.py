@@ -17,7 +17,16 @@ without a setup nothing runs on a schedule.
      "services":  [{"name": "fwd", "label": "Port forwarder", "launch_agent": "<launchd label>"}],
      "clean": {"repos": ["~/code/app"], "worktree_roots": ["~/copies"], "base": "origin/develop",
                "worktree_idle_h": 3, "build_idle_h": 24, "test_roots": ["~/.app-test"], "test_idle_h": 24},
+     "repeats": {"late_min": 30},
+     "accounts": {"command": ["cswap", "list", "--json"], "cap_pct": 95},
      "parent": "ORCH-75"}
+
+Repeats are always checked: a repeat (any add-on's ticket data that carries a planned next run,
+ext.<add-on>.next_run) whose next_run is more than max(late_min, one interval, at most a day) in the past
+has stopped. Accounts are checked only with a command: it prints JSON, never text for people, either
+orch's own shape
+{"accounts": [{"week_pct": 97, "week_resets_at": "<ISO time>"}]} or the switcher shape (usage.sevenDay.pct);
+one ticket when every account that has a reading is at cap_pct or more of its week.
 
 One pass: clean up by exact path, run the checks, open one ticket per problem (never a second while the
 first is open, none when all is fine), and hold back automatic helper starts while the disk is almost full
@@ -26,6 +35,7 @@ first is open, none when all is fine), and hold back automatic helper starts whi
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -55,6 +65,10 @@ _NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _LABEL = re.compile(r"^[^\x00-\x1f\x7f]{1,60}$")
 LIST_KEYS = {"urls": "url", "processes": "match", "services": "launch_agent"}
 CLOSED = ("done", "dropped")
+REPEAT_OPEN = ("open", "ready", "active", "waiting", "review")  # and done: the next run opens it again
+LATE_MIN = 30
+CAP_PCT = 95.0
+DAY = 86400
 
 
 # ------------------------------------------------------------------------------------------------ setup
@@ -84,7 +98,7 @@ def clean_setup(doc) -> dict:
     """The setup as stored: only known keys, checked values. Refused with a plain reason otherwise."""
     if not isinstance(doc, dict):
         raise Refused("The setup is a JSON object.")
-    known = {"every_min", "disk", "load_max", "parent", "clean", *LIST_KEYS}
+    known = {"every_min", "disk", "load_max", "parent", "clean", "repeats", "accounts", *LIST_KEYS}
     extra = set(doc) - known
     if extra:
         raise Refused(f"The setup has unknown keys: {', '.join(sorted(extra))}.")
@@ -147,6 +161,27 @@ def clean_setup(doc) -> dict:
         "build_idle_h": _num(clean.get("build_idle_h", 24), "clean build_idle_h", 1, 10000),
         "test_idle_h": _num(clean.get("test_idle_h", 24), "clean test_idle_h", 1, 10000),
     }
+    reps = doc.get("repeats") or {}
+    if not isinstance(reps, dict) or set(reps) - {"late_min"}:
+        raise Refused("The setup's repeats takes late_min.")
+    out["repeats"] = {"late_min": _num(reps.get("late_min", LATE_MIN), "repeats late_min", 5, 10080)}
+    acc = doc.get("accounts")
+    if acc is not None:
+        if not isinstance(acc, dict) or set(acc) - {"command", "cap_pct"}:
+            raise Refused("The setup's accounts takes command and cap_pct.")
+        cmd = acc.get("command")
+        if (
+            not isinstance(cmd, list)
+            or not 1 <= len(cmd) <= 20
+            or not all(isinstance(a, str) and a and len(a) <= 300 and "\x00" not in a for a in cmd)
+        ):
+            raise Refused(
+                'The setup\'s accounts command is a list of words, such as ["cswap", "list", "--json"].'
+            )
+        out["accounts"] = {
+            "command": list(cmd),
+            "cap_pct": _num(acc.get("cap_pct", CAP_PCT), "accounts cap_pct", 1, 100),
+        }
     parent = doc.get("parent")
     if parent is not None and (not isinstance(parent, str) or not re.match(r"^[A-Za-z0-9_-]{1,40}$", parent)):
         raise Refused("The setup's parent is a ticket id or key.")
@@ -187,11 +222,13 @@ def remove_setup(root: Path) -> bool:
 
 class Probes:
     """What the checks read from the machine. Tests pass `sim` ({"disk_free_gb", "load", "http": {url: code},
-    "procs": [command lines], "launch_agents": {label: bool}, "logins": [rows]}) instead."""
+    "procs": [command lines], "launch_agents": {label: bool}, "logins": [rows], "repeats": [tickets],
+    "accounts": <the command's JSON>}) instead."""
 
-    def __init__(self, root: Path, sim: dict | None = None):
+    def __init__(self, root: Path, sim: dict | None = None, now: datetime | None = None):
         self.root = Path(root)
         self.sim = sim
+        self.now = now or datetime.now(UTC)
 
     def _has(self, key: str) -> bool:
         return self.sim is not None and key in self.sim
@@ -250,6 +287,115 @@ class Probes:
             return health.check(self.root)["items"]
         except Exception:  # noqa: BLE001  a check that cannot run is not a problem of the machine
             return []
+
+    def repeats(self) -> list[dict]:
+        """The tickets that carry a repeat."""
+        if self._has("repeats"):
+            return list(self.sim["repeats"])
+        from orch import tickets
+
+        try:
+            return [t for t in tickets.list_all(self.root) if _sched(t)]
+        except (Refused, OSError):
+            return []
+
+    def accounts(self, command: list[str]):
+        """The account command's JSON, or None when it cannot be read now (then nothing is known)."""
+        if self._has("accounts"):
+            return self.sim["accounts"]
+        exe = shutil.which(os.path.expanduser(command[0]))
+        if not exe:
+            return None
+        try:
+            r = subprocess.run(
+                [exe, *command[1:]],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                stdin=subprocess.DEVNULL,
+                cwd=Path(os.path.realpath(tempfile.gettempdir())),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if r.returncode != 0:
+            return None
+        try:
+            return json.loads(r.stdout)
+        except ValueError:
+            return None
+
+
+def _sched(t: dict) -> dict:
+    """The ticket data of the add-on that repeats this ticket: the first ext entry with a next_run."""
+    ext = t.get("ext") if isinstance(t, dict) else None
+    for a in ext.values() if isinstance(ext, dict) else []:
+        if isinstance(a, dict) and a.get("next_run"):
+            return a
+    return {}
+
+
+def _when(ts) -> datetime | None:
+    if not isinstance(ts, str) or not ts:
+        return None
+    try:
+        d = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d.astimezone(UTC) if d.tzinfo else None
+
+
+def _utc(d: datetime) -> str:
+    return d.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def overdue_repeats(rows: list[dict], now: datetime, late_min: float) -> list[dict]:
+    """Repeats that stopped: [{ticket, key, title, planned, last}]. A repeat is late when its planned next
+    run lies more than max(late_min, one interval, at most a day) in the past. Paused repeats, closed
+    tickets and repeats without a planned time (set before orch saved one; they get it with their next
+    run) are left out."""
+    out = []
+    for t in rows:
+        a = _sched(t)
+        if not a or a.get("paused") is True:
+            continue
+        if t.get("status") not in (*REPEAT_OPEN, "done"):
+            continue
+        planned, last_run = _when(a.get("next_run")), _when(a.get("last_run"))
+        if planned is None:
+            continue
+        gap = (planned - last_run).total_seconds() if last_run and last_run < planned else 0
+        late = (now - planned).total_seconds()
+        if late >= max(late_min * 60, min(gap, DAY)):
+            out.append(
+                {
+                    "ticket": str(t.get("id", "")),
+                    "key": str(t.get("key") or t.get("id") or ""),
+                    "title": str(t.get("title") or "")[:120],
+                    "planned": planned,
+                    "last": last_run,
+                }
+            )
+    return out
+
+
+def week_use(doc) -> list[dict]:
+    """[{pct, resets}] of every account with a weekly reading, from the account command's JSON: orch's
+    own shape (week_pct, week_resets_at) or the switcher shape (usage.sevenDay.pct / resetsAt).
+    Anything else is skipped."""
+    rows = doc.get("accounts") if isinstance(doc, dict) else doc if isinstance(doc, list) else None
+    out = []
+    for a in rows if isinstance(rows, list) else []:
+        if not isinstance(a, dict) or a.get("disabled") is True:
+            continue
+        pct, resets = a.get("week_pct"), a.get("week_resets_at")
+        if pct is None:
+            week = (a.get("usage") or {}).get("sevenDay") if isinstance(a.get("usage"), dict) else None
+            if isinstance(week, dict):
+                pct, resets = week.get("pct"), week.get("resetsAt")
+        if isinstance(pct, bool) or not isinstance(pct, int | float) or not 0 <= pct <= 1000:
+            continue
+        out.append({"pct": float(pct), "resets": _when(resets)})
+    return out
 
 
 # ------------------------------------------------------------------------------------------------ checks
@@ -329,6 +475,32 @@ def checks(cfg: dict, p: Probes, mem: dict) -> list[dict]:
                 f"svc-{s['name']}",
                 f"{s['label']} is not running",
                 f"The launch agent {s['launch_agent']} is not running.",
+            )
+
+    late_min = (cfg.get("repeats") or {}).get("late_min", LATE_MIN)
+    for r in overdue_repeats(p.repeats(), p.now, late_min):
+        last_s = f"It last ran {_utc(r['last'])}." if r["last"] else "It has not run yet."
+        add(
+            f"repeat-{r['ticket']}",
+            f"Repeat stopped: {r['title'] or r['key']}",
+            f"The repeat on {r['key']} ({r['title']}) should have run at {_utc(r['planned'])}. {last_s} "
+            "Look whether the add-on that starts repeats still runs and whether the repeat is still "
+            "wanted; pause or turn it off when it is not.",
+        )
+
+    acc = cfg.get("accounts")
+    if acc:
+        weeks = week_use(p.accounts(acc["command"]))
+        if weeks and min(w["pct"] for w in weeks) >= acc["cap_pct"]:
+            pcts = ", ".join(f"{w['pct']:.0f}%" for w in weeks)
+            resets = sorted(w["resets"] for w in weeks if w["resets"])
+            when = f" The first one starts a new week at {_utc(resets[0])}." if resets else ""
+            add(
+                "accounts-week",
+                "Every account has used up its week",
+                f"All {len(weeks)} accounts are at {acc['cap_pct']:.0f}% or more of their weekly use "
+                f"({pcts}). Helpers stop when the last one runs "
+                f"out.{when} Add an account or hold back helper starts until then.",
             )
     return out
 
@@ -658,7 +830,7 @@ def run_pass(
     mem = last(root)
     known = mem.get("problems") if isinstance(mem.get("problems"), dict) else {}
     cleaned = clean(cfg, apply) if cleanup and sim is None else []
-    found = checks(cfg, Probes(root, sim), mem)
+    found = checks(cfg, Probes(root, sim, now), mem)
     hold = _hold(root, cfg, mem["disk_free_gb"], mem) if apply else None
     opened, kept = [], []
     now_s = _now_s(now)

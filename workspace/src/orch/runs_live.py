@@ -39,6 +39,9 @@ from orch.errors import Refused
 CROWDED_AT = 4  # with no limit set: this many open sessions make idle ones on finished tickets close early
 IDLE_SECONDS = 60 * 60
 FINISHED_IDLE_SECONDS = 10 * 60  # a session on a ticket in Review, Done or Dropped closes after this
+LOAD_STOP = 30.0  # no new helper while the 1-minute load average is above this (also with no limit set)
+DISK_STOP_GB = 5.0  # ... or while less than this much disk is free
+PACE_SECONDS = 30  # with no limit set: at most one new helper in this time, the rest wait in line
 HARD_EXTRA = 4  # most sessions over a set limit that finished tickets may keep open
 WHERE_TO_CHANGE = "Settings > Helper > Helpers at once"
 FINISHED = ("review", "done", "dropped")
@@ -172,6 +175,44 @@ def _full(root: Path) -> int | None:
     return None
 
 
+def _pressure(root: Path) -> str | None:
+    """Plain reason the machine cannot take another helper now (load or disk), else None."""
+    with contextlib.suppress(OSError, AttributeError):
+        if os.getloadavg()[0] > LOAD_STOP:
+            return "the computer is very busy"
+    with contextlib.suppress(OSError):
+        if shutil.disk_usage(root).free / 2**30 < DISK_STOP_GB:
+            return "the disk is almost full"
+    return None
+
+
+def _too_soon(root: Path) -> bool:
+    """No limit set: a helper that started a moment ago holds the next one back (one new helper per pass)."""
+    if max_live(root) is not None:
+        return False
+    from datetime import datetime
+
+    now = time.time()
+    for r in live_all(root):
+        since = (r.get("live") or {}).get("since")
+        with contextlib.suppress(ValueError, TypeError, AttributeError):
+            t = datetime.fromisoformat(since.replace("Z", "+00:00")).timestamp()
+            if 0 <= now - t < PACE_SECONDS:
+                return True
+    return False
+
+
+def _held(root: Path, by: str = "agent:tend") -> str | None:
+    """Why a new helper must wait in line right now, although no limit was reached; None = go ahead.
+    A person's own start is not paced (R8.6), but a machine that is out of load or disk holds every start."""
+    why = _pressure(root)
+    if why:
+        return why
+    if by.startswith("human:"):
+        return None
+    return "other helpers are just starting" if _too_soon(root) else None
+
+
 def busy_words(n: int, ticket: str) -> str:
     return (
         f"{n} helpers are working at once, the most you allowed. {ticket} waits in line and starts when one "
@@ -222,6 +263,13 @@ def start_live(
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
     hit = None if mine else _full(root)
+    held = None if (mine or hit) else _held(root, by)
+    if held:
+        _queue_for_slot(root, tid, by, busy_text, priority)
+        raise runs.Busy(
+            f"{ref(root, tid)} waits in line: {held}. It starts by itself when that passes.",
+            {"pending": True, "held": held},
+        )
     if hit:
         _queue_for_slot(root, tid, by, busy_text, priority)
         extra = {"pending": True, "limit": hit, "change": WHERE_TO_CHANGE}
@@ -1641,7 +1689,7 @@ def start_waiting(root: Path) -> list[str]:
     """Slots opened: start the tickets waiting in line, in priority order, while slots are free."""
     started: list[str] = []
     for tid, _ in waiting_line(root):
-        if _full(root):
+        if _full(root) or _held(root):
             break
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
         if not items or runs.read(root, tid):

@@ -382,6 +382,9 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .card-row>.btn{margin-left:24px}
 .card-row time{margin-left:24px}
 .card-row time+.btn{margin-left:auto}
+.file-row{flex-wrap:wrap}
+.file-row>.grow{flex:1 1 calc(100% - 52px)}
+.file-row>.file-actions{flex:1 0 100%}
 .card-row>.chip{margin-left:24px}
 .toasts{left:16px;right:16px;width:auto}
 .input{font-size:16px;min-height:44px}

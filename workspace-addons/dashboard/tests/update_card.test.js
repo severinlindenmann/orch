@@ -52,7 +52,7 @@ test('up to date: no button; unknown newest says so plainly', async () => {
   ({c} = context({installed:{label:'orch main f093f5c5', sha:'f093f5c5'.padEnd(40, '0'), release:null}, newest:null, update_available:false, changes:[], ref:'main'}));
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   const branch = text(c.aboutPanel());
-  assert.match(branch, /build from the \u201cmain\u201d branch/); assert.doesNotMatch(branch, /Could not/);
+  assert.match(branch, /This is a development build, so there is no release/); assert.doesNotMatch(branch.replace('orch main f093f5c5', ''), /branch|\bmain\b|\bdevelop\b/i); assert.doesNotMatch(branch, /Could not/);
 });
 
 test('click posts update.start once, then steps, restart and "Updated 15 → 16"', async () => {
@@ -81,4 +81,36 @@ test('a failed update says why in plain words and offers Try again', () => {
   const t = text(c.aboutPanel());
   assert.match(t, /The update did not finish: The download stopped\. orch is still the old version\./);
   assert.deepEqual(all(c.aboutPanel(), n => n.tag === 'button').map(b => text(b)), ['Try again']);
+});
+
+// issue 957: Release / Development build on the Installed line, one click to switch (the same update.start)
+test('a release says so and offers the development build in one click', async () => {
+  const {c, posts} = context({...INFO, build:'release'});
+  c.aboutPanel(); await new Promise(r => setImmediate(r));
+  const view = c.aboutPanel(), t = text(view);
+  assert.match(t, /Installed orch 15 Release/);
+  assert.match(t, /Switch to development build Installs the newest changes, not yet tested as a release, and restarts\. Your helpers keep their work\./);
+  const btn = all(view, n => n.tag === 'button').find(b => text(b) === 'Switch to development build');
+  assert.ok(btn);
+  await btn.listeners.click[0]();
+  assert.deepEqual(posts, [{op:'update.start', args:{to:'development'}}]);
+});
+
+test('a development build says so plainly and switches back to the release', async () => {
+  const {c, posts} = context({...INFO, build:'development'});
+  c.aboutPanel(); await new Promise(r => setImmediate(r));
+  const view = c.aboutPanel(), t = text(view);
+  assert.match(t, /Development build The newest changes, not yet tested as a release\. Switch to release Installs the newest release and restarts\./);
+  assert.doesNotMatch(t, /Installed orch 15 Release|branch/);
+  const btn = all(view, n => n.tag === 'button').find(b => text(b) === 'Switch to release');
+  await btn.listeners.click[0]();
+  assert.deepEqual(posts, [{op:'update.start', args:{to:'release'}}]);
+  // while it runs: no switch button
+  assert.equal(all(c.aboutPanel(), n => n.tag === 'button' && /Switch/.test(text(n))).length, 0);
+});
+
+test('no build known: no badge and no switch', async () => {
+  const {c} = context(INFO);
+  c.aboutPanel(); await new Promise(r => setImmediate(r));
+  assert.doesNotMatch(text(c.aboutPanel()), /Release|Development build|Switch/);
 });

@@ -448,6 +448,7 @@ ACT_ARGS = {
     "diag.delete_reports": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},
+    "logins.check": {},
     "copies.approve": {"ticket": TID, "tip": "a" * 40, "control_paths": 0, "paths_hash": "12345678"},
     "look.set": {"icon": "bolt", "color": "auto"},
     "look.shared": {"on": False},
@@ -463,6 +464,11 @@ ACT_ARGS = {
     "relay.reply": {"to": "peer", "message": "m_abcdefghijklmnop", "text": "ok"},
     "relay.topic": {"message": "m_abcdefghijklmnop", "title": "A topic"},
     "message.send": {"workspace": "peer", "text": "hi"},
+    "logins.renew": {"name": "claude"},
+    "logins.status": {"name": "claude"},
+    "logins.cancel": {"name": "claude"},
+    "logins.code": {"name": "claude", "value": "abc#def"},
+    "logins.replace": {"name": "payments", "value": "new-key-value"},
 }
 
 
@@ -880,6 +886,48 @@ def test_settings_update_button_needs_a_session_and_starts_the_detached_update(l
     st, _, body = post(port, "/api/act", {"op": "update.start", "args": {}}, {"Cookie": ck})
     assert st == 202 and b"Update started" in body
     assert started["argv"] == ["update"]
+
+
+def test_switch_build_is_one_click_through_the_same_update(live, monkeypatch):
+    # issue 957: Switch to release / development build runs the same detached `orch update`, with --to
+    root, port = live
+    from orch_dashboard import update
+
+    started = {}
+    monkeypatch.setattr(update, "start_detached", lambda argv, **kw: started.update(argv=argv) or 4344)
+    st, _, _ = post(port, "/api/act", {"op": "update.start", "args": {"to": "development"}})
+    assert st == 403 and not started  # a person's click only
+    ck = session(root, port)
+    st, _, _ = post(port, "/api/act", {"op": "update.start", "args": {"to": "feat/evil"}}, {"Cookie": ck})
+    assert st == 400 and not started
+    st, _, _ = post(port, "/api/act", {"op": "update.start", "args": {"to": "development"}}, {"Cookie": ck})
+    assert st == 202 and started["argv"] == ["update", "--to", "development"]
+
+
+def test_release_endpoint_gives_the_line_of_a_finished_ticket(live, monkeypatch):
+    root, port = live
+    from orch import released, tickets
+
+    t = tickets.create(root, "Suggest button", "human:t")
+    seen = []
+
+    def line(ticket):
+        seen.append(ticket.get("id"))
+        return {"state": "installed", "release": 30, "text": "In release 30 (installed here)"}
+
+    monkeypatch.setattr(released, "ticket_release", line)
+
+    def get(q):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.request("GET", "/api/release" + q, headers={"Host": f"127.0.0.1:{port}"})
+        r = c.getresponse()
+        return r.status, json.loads(r.read())
+
+    assert get("?ticket=" + t["id"]) == (200, line({"id": t["id"]}))
+    assert get("?ticket=../../etc") == (200, None)  # only a ticket id is looked up
+    assert get("?ticket=t_missing00") == (200, None)  # no such ticket: no line, no error
+    assert get("") == (200, None)
+    assert seen == [t["id"], t["id"]]
 
 
 def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):

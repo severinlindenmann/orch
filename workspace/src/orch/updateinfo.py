@@ -143,9 +143,18 @@ def current_label() -> str:
     """What `orch --version` and `orch status` print."""
     try:
         got = installed()
-        return label(got["release"], got["sha"], addons.ref())
+        text = label(got["release"], got["sha"], addons.ref())
     except Exception:  # noqa: BLE001
-        return f"orch {addons._orch_version()}"
+        text = f"orch {addons._orch_version()}"
+    return text + build_words()
+
+
+def build_words() -> str:
+    """' (development build)' when this orch is not a release, so nobody mistakes one for the other."""
+    try:
+        return "" if addons.build() == "release" else " (development build)"
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def release_now(sha: str | None) -> int | None:
@@ -195,11 +204,20 @@ def forget() -> None:
         _cache.update(at=-1e9, value=None)
 
 
+def _ticket_lines(root, messages: list[str] | None, heading: str) -> list[str]:
+    """'<heading>' and one line per ticket of this workspace whose pull request these commits merged."""
+    from orch import released
+
+    got = released.tickets_arrived(root, messages or [])
+    return [heading, *[f"  - {t}" for t in got]] if got else []
+
+
 def after_update(
-    old_sha: str | None, old_release: int | None, new_sha: str | None
+    old_sha: str | None, old_release: int | None, new_sha: str | None, root=None
 ) -> tuple[int | None, list[str]]:
     """After an update: the new release number and the lines to print under the update text
-    ('Updated orch 15 → 16', then 'What changed:' and the list). Nothing when the commit did not change."""
+    ('Updated orch 15 → 16', then 'What changed:' and the list, then the tickets of this workspace that
+    arrived). Nothing when the commit did not change."""
     if not new_sha:
         return None, []
     if old_sha == new_sha:
@@ -210,15 +228,18 @@ def after_update(
         lines.append(f"Updated orch {old_release} → {new_release}")
     elif new_release:
         lines.append(f"Updated orch to {new_release}")
-    changes = changes_from(_fetch_messages("between", old_sha, new_sha) or []) if old_sha else []
+    msgs = _fetch_messages("between", old_sha, new_sha) if old_sha else None
+    changes = changes_from(msgs or [])
     if changes:
         lines += ["What changed:", *[f"  - {c}" for c in changes]]
+    lines += _ticket_lines(root, msgs, "Tickets that arrived:")
     return new_release, lines
 
 
-def announce_lines() -> list[str]:
-    """What `orch update` says before it waits for the click: 'Updating orch 15 → orch 16' and what changed.
-    Nothing when it is up to date or unknown (best effort, never an error)."""
+def announce_lines(root=None) -> list[str]:
+    """What `orch update` says before it waits for the click: 'Updating orch 15 → orch 16', what changed and
+    the tickets of this workspace that come with it. Nothing when it is up to date or unknown (best effort,
+    never an error)."""
     try:
         data = info()
         if data.get("update_available") is not True:
@@ -226,6 +247,9 @@ def announce_lines() -> list[str]:
         lines = [f"Updating {data['installed']['label']} → {data['newest']['label']}"]
         if data.get("changes"):
             lines += ["What changed:", *[f"  - {c}" for c in data["changes"]]]
+        if root is not None:
+            msgs = _fetch_messages("between", data["installed"]["sha"], data["newest"]["sha"])
+            lines += _ticket_lines(root, msgs, "Tickets that come with it:")
         return lines
     except Exception:  # noqa: BLE001
         return []

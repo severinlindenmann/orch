@@ -145,9 +145,26 @@ def _doctor(data, args) -> str:
 
 
 def _logins(data, args) -> str:
-    if any(r.get("state") == "renew" for r in (data or {}).get("items") or []):
+    rows = [r for r in (data or {}).get("items") or [] if r.get("state") == "renew"]
+    if any(r.get("renew") or r.get("key") for r in rows):
+        return "the person presses Renew or Replace on the dashboard warning (person only)"
+    if rows:
         return "renew it with the tool's own login, then run orch logins again"
     return "orch ticket list"
+
+
+def _logins_replace(data, args) -> str:
+    return "orch ticket list" if (data or {}).get("state") in ("works", "soon") else "orch logins"
+
+
+def _logins_renew(data, args) -> str:
+    """The dashboard reads these calls; their hint stays plain (a person renews in the Renew window)."""
+    st = (data or {}).get("state")
+    if st == "done":
+        return "orch ticket list"
+    if st in ("starting", "link", "checking"):
+        return "the person goes on in the Renew window on the dashboard"
+    return "orch logins"
 
 
 def _status_cmd(data, args) -> str:
@@ -206,6 +223,8 @@ HINTS = {
     "doctor remove-temp": "orch ticket list",
     "doctor stop-pids": "orch ticket list",
     "logins": _logins,
+    "logins renew": _logins_renew,
+    "logins replace": _logins_replace,
     "pause": "turn it back on with: orch resume",
     "resume": "orch needs",
     "wait": "keep working on other tickets: orch ticket list",
@@ -240,6 +259,7 @@ HINTS = {
     "review tend": "orch review accepted  (what was accepted for you today)",
     "review tend-releases": "orch review list  (what still waits for the owner)",
     "review accepted": "orch needs",
+    "github expert": "orch ticket list  (a red run opened a top ticket)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",

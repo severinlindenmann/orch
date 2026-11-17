@@ -16,7 +16,7 @@
   // "Move to" offers four places; Waiting is decided by the agent.
   const MOVE_CHOICES = STATUS_CHOICES.filter(([s]) => s !== 'waiting');
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
-    status: 'the status'};
+    status: 'the status', done_when: 'the Done when line'};
 
   /* Due dates (G1). `due` is "YYYY-MM-DD" (a day) or "YYYY-MM-DDTHH:MM" (local wall time, no zone). Only a due with a
      time gets words here: "Due 18:30" (today), "Due Mon 18:30" (within a week), "Due 14 Nov 2026, 18:30" (further),
@@ -94,6 +94,10 @@
     if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a step' + task(m[1]);
     if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
     if ((m = /^Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?$/.exec(text))) return 'Removed ' + addon(m[1]) + ' settings';
+    if (/^Created under t_\w+$/.test(text)) return 'Created as a sub-ticket';
+    if ((m = /^Recorded a check run for (c\d+)(?: \(exit (\d+)\))?$/.exec(text))) return 'Ran a check' + task(m[1]) + (m[2] == null ? '' : m[2] === '0' ? ' (passed)' : ' (failed)');
+    if ((m = /^Moved (c\d+) after c\d+$/.exec(text))) return 'Moved a task' + task(m[1]);
+    if ((m = /^Created under (.+)$/.exec(text))) return 'Created under ' + m[1];
     if (/^Created/.test(text)) return /under /.test(text) ? 'Created as a sub-ticket' : 'Ticket created';
     if ((m = /^Edited (.+)$/.exec(text))) {
       const parts = m[1].split(/,\s*/).map(f => FIELD_WORD[f.trim()] || f.trim());
@@ -472,6 +476,51 @@
     return out;
   }
 
+  /* What helpers need (ORCH-45; look and words chosen by the owner on ORCH-43): the last check of every tool login,
+     connection and key (state.logins = orch.health.last). States: works | soon | renew | unreachable. */
+  const NEED_KINDS = ['login', 'connection', 'key'];
+  const needKind = item => NEED_KINDS.includes(item && item.kind) ? item.kind : 'login';
+  /* "GitHub login", "Company wiki connection", "Payments key" (a label that already ends in its kind keeps it). */
+  function needName(item) {
+    const label = String((item && (item.label || item.name)) || '').trim(), kind = needKind(item);
+    return label.toLowerCase() === kind || label.toLowerCase().endsWith(' ' + kind) ? label : (label + ' ' + kind).trim();
+  }
+  /* The name in the list: a login says so ("GitHub login"); a connection or key shows its own name, the kind is below. */
+  const needListName = item => needKind(item) === 'login' ? needName(item) : String((item && (item.label || item.name)) || '').trim();
+  const needKindWord = item => ({login:'Login', connection:'Connection', key:'Key'})[needKind(item)];
+  const LONG_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const LONG_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const endOf = item => { const d = item && item.ends_at ? new Date(item.ends_at) : null; return d && !isNaN(d) ? d : null; };
+  /* "Monday 16 November at 22:24" (local time), '' without an end time. */
+  function needEnds(item) {
+    const d = endOf(item);
+    return d ? LONG_DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + LONG_MONTHS[d.getMonth()] + ' at ' + dueClock(d) : '';
+  }
+  /* The state chip: {word, tone} with the kit badge tone. */
+  function needState(item) {
+    const d = endOf(item), short = d ? ' · ' + DUE_DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + DUE_MONTHS[d.getMonth()] : '';
+    const s = item && item.state;
+    return s === 'works' ? {word:'✓ Works', tone:'done'} : s === 'soon' ? {word:'Runs out soon' + short, tone:'needs'}
+      : s === 'renew' ? {word:'Needs renewing', tone:'error'} : {word:'Cannot be reached', tone:'error'};
+  }
+  const needStopsWord = n => n ? 'Stops ' + n + (n === 1 ? ' ticket' : ' tickets') : '';
+  /* The rows of the last check, cleaned: [{name, label, kind, state, ends_at, chosen, stops:[{id, key, title}]}]. */
+  function needItems(logins) {
+    return arr(logins && logins.items).filter(i => i && ['works', 'soon', 'renew', 'unreachable'].includes(i.state))
+      .map(i => ({...i, kind:needKind(i), stops:arr(i.stops).filter(t => t && t.id)}));
+  }
+  /* Home: what runs out soon (a row in Needs you) and what stopped working (the red banner). */
+  function needWarnings(logins) {
+    const items = needItems(logins);
+    return {soon:items.filter(i => i.state === 'soon'), stopped:items.filter(i => i.state === 'renew' || i.state === 'unreachable')};
+  }
+  /* The tickets a set of items stops, each once. */
+  function needTickets(items) {
+    const seen = new Map();
+    for (const i of arr(items)) for (const t of arr(i.stops)) if (!seen.has(t.id)) seen.set(t.id, t);
+    return [...seen.values()];
+  }
+
   /* "just now" under a minute, else "5 min ago" / "2 h ago" / "3 days ago"; "" for no date. */
   function ago(iso, nowMs) {
     const when = Date.parse(iso);
@@ -592,5 +641,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });

@@ -102,7 +102,7 @@
       } else if (phase === 'sending') {
         status.textContent = "Sending '" + s.answer + "'...";
       } else if (phase === 'sent') {
-        status.textContent = ["Answered '" + s.answer + "'", s.who, s.via].filter(Boolean).join(' · ');
+        status.textContent = ["Answered '" + s.answer + "'", root.QuestionCardState.whoWord(s.who), root.QuestionCardState.viaWord(s.via)].filter(Boolean).join(' · ');
       } else if (phase === 'conflict') {
         status.textContent = 'Someone answered first: ' + root.QuestionCardState.otherLine(s.other);
       } else {

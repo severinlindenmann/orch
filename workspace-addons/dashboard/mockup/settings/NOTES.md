@@ -243,6 +243,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ### settings-about.html (owner feedback 14 Nov, fb1)
 - New tab "About & updates": installed release, newest release, "What changed" (max 5 plain lines), one Update button, steps (Downloading / Installing / Restarting / Done) and "Updated 16 → 17". Click the button to see the steps.
 - 16 Nov (ORCH-89): the About card (Style guide row) moved here from General, below Automatic.
+- 17 Nov (ORCH-5, issue 957): the Installed line says plainly where this orch came from: a quiet "Release" badge, or an amber "Development build" badge with the branch. Under a development build's name: "The newest changes, not yet tested as a release." One outline button switches ("Switch to development build" / "Switch to release") with the what-happens line beside it (manager, 17 Nov: no branch names, button words by the button); it runs the same `orch update` as the Update button. A development build also shows the amber "Development build" badge in the top bar (a link to this tab). Click the switch button to see both states.
 
 - Owner 14 Nov (fb11/fb24): Set up relay is no longer a button/dialog; when no relay is connected the card lists the 3 plain steps (admin page, paste the orch relay connect line, Check again); Pair a phone shows only once connected.
 
@@ -258,3 +259,12 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - `place = "settings"`: Lessons has no nav entry. Its row in Settings › Add-ons (`settings-addons.html`, now 7 installed) leads to its settings page, whose "Open Lessons →" opens this page (the mockup links the row straight to it).
 - The list is drawn exactly as the dashboard draws it: the add-on list rows (accordion; the page's own `style.css` is linked, no new CSS). The first row is open and shows Edit and Delete; the others open with one click. Edit dialog: `?dialog=edit` (one text line prefilled, Save disabled when empty or over 200 characters with a plain hint, Cancel). Empty state: `?state=empty`. Delete is one click, no confirm (routine step).
 - Follow-up: the master kit has no list row with visible actions (issue filed).
+
+## What helpers need (17 Nov 2026, ORCH-45; drawn and chosen on ORCH-43)
+
+- `settings-helper.html#needs`, built in the product as drawn: card "What helpers need" in Settings › Helper, above
+  "What a helper may do", "Checked <when>" in its head. One row per tool login, connection and key orch checks here:
+  the name with Login / Connection / Key under it, the state chip (Works, Runs out soon · <day>, Needs renewing,
+  Cannot be reached) and "Stops N tickets" when it stops any. No card before the first check or when nothing is set.
+- `Renew` / `Replace` come with the renew step (ORCH-46). Until then a row that needs renewing shows `Check again`, a
+  connection that cannot be reached `Try again`, and a row that works no button.

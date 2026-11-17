@@ -350,6 +350,9 @@ function render(arrived = new Set()) {
     const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
   }
+  // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
+  const buildMark = document.getElementById('topbar-build');
+  if (buildMark) buildMark.hidden = state.build !== 'development';
   // New ticket is always an outline (design guide, UX checklist B2): every page keeps its own one filled button, Home's
   // Review all included (report r-1116-1748, ORCH-61)
   const newTicket = document.querySelector('#new-ticket'), newCls = 'btn outline sm';

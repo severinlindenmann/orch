@@ -203,6 +203,46 @@ def _n(text: str, n: int) -> str:
     return f"{n} {text}" if n == 1 else f"{n} {text}s"
 
 
+_SKIP = {
+    "with",
+    "that",
+    "this",
+    "from",
+    "when",
+    "have",
+    "does",
+    "must",
+    "only",
+    "then",
+    "them",
+    "into",
+    "also",
+}
+
+
+def _words(text: str) -> list[str]:
+    return list(dict.fromkeys(w for w in tickets._norm_words(text).split() if len(w) >= 4 and w not in _SKIP))
+
+
+def part_match(part: str, items: list[dict]) -> tuple[list[str], list[str]]:
+    """(words looked for, words found) for one Done when part: its longer words against the title, covers,
+    proofs and one-line results of the finished tasks."""
+    seen: set[str] = set()
+    for c in items:
+        if c.get("done") and c.get("evidence"):
+            bits = [c.get("text"), c.get("covers"), *(c.get("proves") or [])]
+            for e in c["evidence"]:
+                if isinstance(e, dict):
+                    bits += [
+                        e.get("summary"),
+                        e.get("title"),
+                        e.get("ref") if e.get("type") == "note" else None,
+                    ]
+            seen.update(_words(" ".join(b for b in bits if isinstance(b, str))))
+    want = _words(part)
+    return want, [w for w in want if w in seen]
+
+
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
@@ -211,7 +251,19 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
-    gaps += [f"Done when part '{p}' has no task" for p in proof["uncovered"]]
+    # a part no task links to: with related work in the finished tasks it only gets a note (the owner can send
+    # the ticket back); with none it is a real gap, sent back with the words looked for and the question.
+    unmatched = []
+    for p in proof["uncovered"]:
+        want, found = part_match(p, items)
+        if want and len(found) * 5 >= len(want) * 2:
+            unmatched.append(p)
+            continue
+        looked = ", ".join(want[:6]) or "none"
+        gaps.append(
+            f"Done when part '{p}' has no task (looked for: {looked}; "
+            'which task proves it? orch check done <ticket> <task> --proves "<part>")'
+        )
     gaps += [
         f"the check on '{c['text']}' failed" for c in items if proof["per_item"].get(c["id"]) == "failed"
     ]
@@ -249,6 +301,7 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         why.append(f"too big for a small fix ({files} files, {lines} lines)")
     if why:
         return {"verdict": "leave", "why": "; ".join(dict.fromkeys(why)) + "."}
+    note = "".join(f" Could not match: {p}" for p in unmatched[:3])
     prs = ", ".join(f"#{f['number']}" for f in facts)
     checks = sum(f["checks"] for f in facts)
     done = sum(1 for c in items if c.get("done") and c.get("evidence"))
@@ -257,7 +310,7 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         "why": (
             f"{'pull request' if len(facts) == 1 else 'pull requests'} {prs} merged, "
             f"{_n('check', checks)} green, {done} of {len(items)} tasks with evidence, "
-            f"small fix ({_n('file', files)}, {_n('line', lines)})."
+            f"small fix ({_n('file', files)}, {_n('line', lines)})." + note
         ),
     }
 
@@ -293,7 +346,10 @@ def _write_state(root: Path, state: dict) -> None:
 
 
 def _send_back(root: Path, tid: str, why: str) -> dict:
-    note = f"The Reviewer found work missing: {why}. Finish it and send the ticket to Review again."
+    if "which task proves it?" in why:  # a question, not missing work: name the task, then send it again
+        note = f"The Reviewer has a question: {why}. Answer it and send the ticket to Review again."
+    else:
+        note = f"The Reviewer found work missing: {why}. Finish it and send the ticket to Review again."
     t = tickets.ask_for_changes(root, tid, note, BY)
     from orch import runs_live
 

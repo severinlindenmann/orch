@@ -156,3 +156,11 @@ A feature wish (ORCH-81, owner pick A, 16 Nov; `&about=feature`): the button kee
 
 - Properties: **Model** (ORCH-49). orch picks Sonnet or Opus before each start (shown as "Let orch pick (Opus)", the reason in the tooltip); a person picks Sonnet or Opus, or hands it back. Applies from the next start. Shown in `ticket-working.html`.
 - A question with a card (16 Nov, ORCH-65; `ticket-question.html#card-question`): the question text and the card's pictures together (Today first on a choice, the suggested option marked), "Look and answer" opens Review at that card; the top line names the agent that asked ("Manager asks: …", the agent's own name), "Helper" only when none is known.
+
+## Released or only merged (ORCH-87, 17 Nov)
+
+### ticket-done.html
+
+- A finished ticket with a merged pull request shows one line at the top: "In release 30 (installed here)" (green ✓),
+  "In release 31, not installed here yet" (amber !) or "Merged, not released yet" (grey –). orch works it out from the
+  merge commit and the installed release; no line when it cannot tell.

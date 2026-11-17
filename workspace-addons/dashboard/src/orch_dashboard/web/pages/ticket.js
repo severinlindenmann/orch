@@ -475,6 +475,27 @@ function loadArtifacts(t, selected) {
     if (JSON.stringify(data) !== before && route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) render();
   });
 }
+// A finished ticket with a merged pull request: is the change in the orch installed here? (ORCH-87) orch works it
+// out from the merge commit and the installed release (GET /api/release); no answer = no line.
+const releaseData = new Map();
+const RELEASE_MARK = {installed:['ok', '✓'], released:['warn', '!'], merged:['none', '–']};
+function loadRelease(t) {
+  if (snapshot || typeof fetch !== 'function' || !['review', 'done'].includes(t.status)) return;
+  const hit = releaseData.get(t.id);
+  if (hit?.busy || (hit && Date.now() - hit.at < 60000)) return;
+  releaseData.set(t.id, {...hit, busy:true});
+  fetch('/api/release?ticket=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    const before = JSON.stringify(releaseData.get(t.id)?.data);
+    releaseData.set(t.id, {at:Date.now(), data});
+    if (JSON.stringify(data) !== before && route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) render();
+  });
+}
+function ticketReleaseLine(t) {
+  const r = ['review', 'done'].includes(t.status) ? releaseData.get(t.id)?.data : null;
+  if (!r || typeof r.text !== 'string' || !RELEASE_MARK[r.state]) return null;
+  const [cls, glyph] = RELEASE_MARK[r.state];
+  return h('p', {className:'ticket-proof-line ticket-release', 'data-key':'ticket-release-' + t.id}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', h('span', {className:'grow'}, clean(r.text)));
+}
 const proofRows = t => array(t.checklist).flatMap(task => array(task.evidence).map(ev => ({task, ev})))
   .sort((a, b) => (Date.parse(b.ev.at) || 0) - (Date.parse(a.ev.at) || 0));
 const referenceRows = t => array(t.refs).filter(r => r && (['ticket', 'artifact', 'file'].includes(r.kind) || webLinks(t).includes(r))).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
@@ -1346,7 +1367,7 @@ function ticketProgress(t, run) {
   const current = run?.running ? list.find(c => !c.done && !c.wont_do && c.state === 'doing') : null;
   return h('section', {className:'card progress-card', 'data-key':'progress'}, h('div', {className:'section-head'}, h('h2', {}, 'Progress'), h('span', {className:'meta'}, ticketProgressCounts(t))),
     h('ol', {className:'task-list'}, list.map((c, i) => c === current
-      ? h('li', {className:'current-task', 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark working', 'aria-hidden':'true'}, '◉'), h('div', {className:'grow'}, h('h3', {}, taskTitle(c)), h('p', {className:'meta'}, ['working', 'starting'].includes(window.DashHelpers.helperState(run, t)?.state) ? 'Your helper is working on this task.' : 'Your helper is on this task.')))
+      ? h('li', {className:'current-task', 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark working', 'aria-hidden':'true'}, '◉'), h('div', {className:'grow'}, h('h3', {}, taskTitle(c)), h('p', {className:'meta'}, (hs => ['working', 'starting'].includes(hs?.state) ? 'Your helper is working on this task.' : (hs?.state === 'waiting' && hs.detail ? hs.detail : 'Your helper is on this task.'))(window.DashHelpers.helperState(run, t)))))
       : h('li', {className:'task-row' + (c.wont_do ? ' skipped' : ''), 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark' + (c.done && !c.wont_do ? ' good' : ''), 'aria-hidden':'true'}, c.wont_do ? '–' : c.done ? '✓' : '○'),
         h('div', {className:'grow'}, h('p', {className:'task-title'}, taskTitle(c)), c.wont_do && c.reason ? h('p', {className:'task-note meta'}, clean(c.reason)) : null), h('span', {className:'meta'}, taskWord(c))))));
 }
@@ -1428,7 +1449,7 @@ function ticketProperties(t, parent) {
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = ev?.at || t.done_at || t.updated_at;
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, parent ? field('Step of', h('a', {href:href(parent.id)}, partName(parent))) : null,
+    h('dl', {className:'ticket-details ed-list'}, parent ? field('Sub-ticket of', h('a', {href:href(parent.id)}, partName(parent))) : null,
       ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Model', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
@@ -1525,6 +1546,7 @@ function detail(t) {
   const run = state.runs?.[t.id], sessions = array(t.sessions);
   const parent = window.DashHelpers.parentOf(tickets(), t), children = window.DashHelpers.childrenOf(tickets(), t);
   loadArtifacts(t, selected === 'files');
+  loadRelease(t);
   const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
@@ -1543,6 +1565,7 @@ function detail(t) {
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
+    ticketReleaseLine(t),
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
     working && !helperLive ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,
@@ -1558,7 +1581,7 @@ function detail(t) {
     addonRows(t), ticketLinks(t),
     answered.length ? h('section', {className:'card answered', 'data-key':'answered'}, h('h2', {}, 'Earlier answers'), answered) : null];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
-    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.epic ? 'Part of the epic ' : 'Step of ') + partName(parent)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + partName(parent)) : null,
     ticketStrip(t, run, fresh, planQ, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))), selected),

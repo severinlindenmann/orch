@@ -485,6 +485,13 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if path == "/api/release":  # a finished ticket: is its merged change in the installed release?
+            from . import update
+
+            tid = (parse_qs(query).get("ticket") or [""])[0]
+            return self._send(
+                200, json.dumps(update.ticket_release(self.root, tid)).encode(), "application/json"
+            )
         if path == "/api/update-status":  # only a page with a session (a finished result is read once)
             from . import update
 
@@ -630,7 +637,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/review\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -880,11 +887,16 @@ class Handler(BaseHTTPRequestHandler):
 
                 if not session:
                     raise actions.NeedsPerson(actions.SIGNIN)
+                args = body.get("args") or {}
+                to = args.get("to") if isinstance(args, dict) else None
+                if to is not None and to not in update.BUILDS:
+                    raise actions.BadRequest("Choose release or development build.")
                 code, text = update.start_update(
                     self.root,
                     self.orch_bin,
                     actions.human_env(self.root, self.orch_bin),
                     session=self.session,
+                    to=to,
                 )
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
             if body.get("op") in RESTARTING_OPS and session:
@@ -906,11 +918,21 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(extra, dict) and body.get("op") in ("ticket.new", "ticket.paste"):
             tid = extra.get("id")  # the new ticket
         state = None
-        if body.get("op") in LEAN_OPS:
+        renew = _renew_answer(extra) if str(body.get("op")).startswith("logins.") else None
+        if renew is not None and renew["state"] not in RENEWED:
+            state = dict(
+                self.server.state_cache.get()[0]
+            )  # polled while the sign-in runs: nothing else changed
+        if state is None and body.get("op") in LEAN_OPS:
             # A workspace text changes no ticket: answer with the cached state at once (a full rebuild took 10 s on a
             # big workspace and kept "Sending…" on screen), never as the new cache.
             state = dict(self.server.state_cache.get()[0])
-        elif isinstance(tid, str) and actions.TID.fullmatch(tid) and body.get("op") not in WIDE_OPS:
+        elif (
+            state is None
+            and isinstance(tid, str)
+            and actions.TID.fullmatch(tid)
+            and body.get("op") not in WIDE_OPS
+        ):
             # A click on one ticket (accept, answer, save, a task ...): the cached state with that ticket read again,
             # at once; the full build runs in the background (ORCH-102: a click waited seconds for it).
             state = patch_ticket(self.root, self.orch_bin, self.server.state_cache.get()[0], tid)
@@ -919,6 +941,8 @@ class Handler(BaseHTTPRequestHandler):
         if state is None:
             state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
             self.server.state_cache.invalidate(state)  # before the reply's own keys are added
+        if renew is not None:  # the Renew window's answer (ORCH-46): a few plain facts, never a code or a key
+            state["renew_result"] = renew
         if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
             state["chat_dm_result"] = extra
         if body.get("op") == "workspace.propose" and isinstance(extra, dict):
@@ -972,6 +996,45 @@ class Handler(BaseHTTPRequestHandler):
                 "failed": [str(x)[:100] for x in att.get("failed", [])[:10]],
             }
         self._send(200, json.dumps(state).encode(), "application/json")
+
+
+RENEWED = (
+    "done",
+    "works",
+    "soon",
+)  # the login works again: the page reads the whole state (the warning goes)
+_RENEW_STATES = (
+    "none",
+    "starting",
+    "link",
+    "checking",
+    "done",
+    "failed",
+    "stopped",
+    "works",
+    "soon",
+    "renew",
+)
+
+
+def _renew_answer(extra) -> dict | None:
+    """`orch logins renew|replace --json` reduced to what the Renew window shows."""
+    if not isinstance(extra, dict):
+        return None
+    st = extra.get("state")
+    out: dict = {"state": st if st in _RENEW_STATES else "failed"}
+    link = extra.get("link")
+    if isinstance(link, str) and link.startswith("https://") and len(link) <= 2048:
+        out["link"] = link
+    if isinstance(extra.get("name"), str):
+        out["name"] = extra["name"][:32]
+    if extra.get("again") is True:  # the tool did not take the last code and waits for it once more
+        out["again"] = True
+    if isinstance(extra.get("ends_at"), str):
+        out["ends_at"] = extra["ends_at"][:20]
+    went = extra.get("went_on")
+    out["went_on"] = [str(x)[:40] for x in went[:20]] if isinstance(went, list) else []
+    return out
 
 
 class _Server(ThreadingHTTPServer):

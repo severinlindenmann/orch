@@ -239,7 +239,11 @@ def _show(t: dict, root: Path) -> str:
                 out.append(f"{label}: {t['outcome'][k]}")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
-        out.append(f"Step of: {p['title']} ({p['id']})" if p else f"Step of: {t['parent']} (parent missing)")
+        out.append(
+            f"Sub-ticket of: {p['title']} ({p['id']})"
+            if p
+            else f"Sub-ticket of: {t['parent']} (parent missing)"
+        )
     if root is not None:
         cc = tickets.children_counts(tickets.list_all(root), t["id"])
         if cc["total"]:
@@ -427,6 +431,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
+    u.add_argument(
+        "--to",
+        choices=("release", "development"),
+        help="switch to the release or to the development build (the official source)",
+    )
 
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
@@ -606,6 +615,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--title", help="short name of the evidence")
     x.add_argument("--role", help="result, check or support")
     x.add_argument("--summary", help="one line: what came out of this step (shown on the task)")
+    x.add_argument(
+        "--proves", action="append", default=[], metavar="TEXT", help='the part of "Done when" this proves'
+    )
 
     x = sub.add_parser("log", parents=[common], help="add a history entry")
     x.add_argument("id")
@@ -913,10 +925,14 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "update":
         if not args.project_only:  # first: with another ORCH_HOME there is nothing to update
             addons.tool_env_change_ok()
+        if args.to:
+            if args.project_only or args.after_install:
+                raise Refused("--to goes with a plain orch update.")
+            addons.switch_to(args.to)
         if not args.project_only and not args.after_install and not args.json:
             from orch import updateinfo
 
-            for line in updateinfo.announce_lines():  # the versions, before the install starts
+            for line in updateinfo.announce_lines(root):  # the versions, before the install starts
                 print(line, file=sys.stderr)
         report, notes = [], []
         done = addons.update(
@@ -1185,7 +1201,7 @@ def run(args: argparse.Namespace) -> None:
                 root, args.id, args.file, args.title, args.role, args.summary, by=by()
             )
             shorthand.append(json.dumps(attached))
-        t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by())
+        t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by(), args.proves)
         ev = c["evidence"][-1]
         copied = args.file and tickets.proof_present(root, ev)
         _out(

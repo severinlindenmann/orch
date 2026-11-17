@@ -433,7 +433,7 @@ iframe.loading{opacity:0}
 /* A design review on cards (16 Nov, ORCH-65): the question text on the card, a marked suggestion, pictures that fill
    their pane on a dark ground with a zoom per side, a Today tile on a choice, groups in the list beside the deck. */
 .swipe-desk{--swipe-card-h:clamp(560px,calc(100vh - 300px),1000px)}
-.swipe-head{max-height:45%;overflow:auto}
+.swipe-head{min-height:0;overflow:auto}.swipe-head:has(+ .swipe-preview:not(.plain)){max-height:45%}/* a picture below keeps its room; text and plain answers give the question all the space left (ORCH-137) */
 .swipe-head .swipe-text{color:var(--text);white-space:pre-line}
 .swipe-sug{font-size:12px;line-height:16px;font-weight:500;color:var(--brand);border:1px solid var(--brand);border-radius:999px;padding:0 6px;white-space:nowrap}
 .swipe-act .act-sug{justify-self:center;margin-top:-2px}
@@ -618,7 +618,7 @@ dialog.report-dialog .actions{margin-top:12px}
 .sync-options label{display:flex;gap:12px;align-items:center;padding:16px;border-top:1px solid var(--border);cursor:pointer}
 .sync-options label:hover{background:var(--surface-2)}
 @media(max-width:1000px){.blk-pair{grid-template-columns:1fr}.blk-settings .setting-row{grid-template-columns:112px minmax(0,1fr)}.setting-row .row-action{grid-column:2;justify-content:flex-start}}
-@media(max-width:600px){.blk-settings .setting-row{grid-template-columns:1fr}.setting-row .row-action{grid-column:1}}
+@media(max-width:600px){.setting-row{grid-template-columns:112px minmax(0,1fr)}.blk-settings .setting-row{grid-template-columns:1fr}.setting-row .row-action{grid-column:1}}
 .blk-settings .setting-row{border-top:1px solid var(--border)}
 
 /* from Insights (#795 B1): metric card, chart, bar rows, notes, loading mask, settings rows. Tokens only. */
@@ -848,3 +848,15 @@ a.helper-title:hover{text-decoration:underline}
 .short-row.child{padding-left:var(--s7)}
 a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-decoration:underline}
 .short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
+/* phone width (ORCH-136): a table block row is a card: first cell is the name line, the other cells show "label: value" below, the buttons sit in one row at the end */
+@media(max-width:720px){
+.blk-table,.blk-table tbody,.blk-table tr,.blk-table td{display:block;min-width:0}
+.blk-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.blk-table tr{padding:12px 16px;border-bottom:1px solid var(--border)}
+.blk-table.data-table td{padding:2px 0;border:0;white-space:normal;overflow-wrap:anywhere;width:auto;height:auto;min-height:0;line-height:20px}
+.blk-table.data-table td:first-child{font-weight:500;padding-bottom:4px}
+.blk-table.data-table td[data-label]:not(:first-child):before{content:attr(data-label) ": ";color:var(--text-muted)}
+.blk-table.data-table td.cell-actions,.blk-table.data-table td.cell-toggle{display:inline-flex;align-items:center;margin:8px 8px 0 0;padding:0;vertical-align:middle}
+.blk-table.data-table td.cell-actions .row{flex-wrap:wrap}
+.table-wrap table.blk-table{min-width:0}
+}

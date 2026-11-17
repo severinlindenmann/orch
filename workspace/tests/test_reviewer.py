@@ -290,3 +290,107 @@ def test_what_may_leave_the_machine_stays_for_the_owner(proj, run, new_ticket, f
     reviewer.run(proj)
     assert tickets.load(proj, tid)["status"] == "review"
     assert _lines(proj, tid)[-1] == "Left for you by the Reviewer: security: needs a second look (1 file)."
+
+
+# ---- ORCH-128: evidence decides, not the wording of the Done when sentence
+
+REAL = {  # ORCH-112 / ORCH-113 as the Reviewer saw them: no task carries `covers`, the work is in other words
+    "orch112": (
+        "With 20 queued tickets and no limit set, helpers start in steps and stop on high load, disk or "
+        "subscription limits.",
+        [
+            (
+                "Find the cause in the report and the code",
+                "Cause found: with no limit set the start line let all 20 queued tickets go",
+            ),
+            (
+                "Give start line a default ceiling: one new helper per pass, none while load or disk is high",
+                "Always-on ceiling: no start while load is high",
+            ),
+            (
+                "Add a test: 20 queued tickets, no limit set, they start in steps",
+                "3 new tests, helpers start in steps",
+            ),
+        ],
+    ),
+    "orch113": (
+        "A Choose card with text options (labels with spaces) can be answered from the page, and a refused "
+        "click says why in plain words.",
+        [
+            (
+                "Find the cause of the refused Choose click",
+                "Cause: the servers only accept short ids, text options were refused",
+            ),
+            (
+                "Fix it, show a plain message when a click is refused, add a test",
+                "Regex relaxed, tests added, card options answered from the page",
+            ),
+        ],
+    ),
+    "unbuilt": (
+        "The weekly export is sent to the owner by email.",
+        [("Fix the stale record", "stale record fixed")],
+    ),
+}
+
+
+def _real(proj, run, new_ticket, name, proves=None):
+    done_when, tasks = REAL[name]
+    tid = new_ticket("Fix " + name)
+    assert run("ticket", "tidy", tid, "Fix " + name, "--description", "d", "--done-when", done_when,
+               "--by", "human:tester")[0] == 0  # fmt: skip
+    for i, (text, said) in enumerate(tasks, 1):
+        assert run("check", "add", tid, text, "--by", "human:tester")[0] == 0
+        extra = ["--proves", proves] if proves and i == 1 else []
+        args = ["--pr", PR, "--summary", said, *extra, "--by", "human:tester"]
+        assert run("check", "done", tid, f"c{i}", *args)[0] == 0
+    tickets.set_status(proj, tid, "review", "human:tester")
+    return tid
+
+
+@pytest.mark.parametrize("name", ["orch112", "orch113"])
+def test_work_in_other_words_is_accepted_with_a_could_not_match_note(proj, run, new_ticket, facts, on, name):
+    tid = _real(proj, run, new_ticket, name)
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "accept", res
+    assert "Could not match:" in res["why"] and REAL[name][0] in res["why"]
+    assert tickets.load(proj, tid)["status"] == "done"
+
+
+def test_the_question_wording_is_kept_for_a_part_with_no_work(proj, run, new_ticket, facts, on):
+    tid = _real(proj, run, new_ticket, "unbuilt")
+    assert reviewer.run(proj)["actions"][0]["verdict"] == "back"
+    assert "The Reviewer has a question:" in tickets.load(proj, tid)["checklist"][-1]["text"]
+
+
+def test_proves_links_a_part_to_a_finished_task_and_no_note_is_left(proj, run, new_ticket, facts, on):
+    tid = _real(proj, run, new_ticket, "orch113", proves=REAL["orch113"][0])
+    assert tickets.proof_state(tickets.load(proj, tid))["uncovered"] == []
+    assert reviewer.run(proj)["actions"][0]["verdict"] == "accept"
+
+
+def test_proves_counts_only_with_a_finished_task(proj, run, new_ticket):
+    tid = new_ticket("Open one")
+    run(
+        "ticket",
+        "tidy",
+        tid,
+        "Open one",
+        "--description",
+        "d",
+        "--done-when",
+        "It works.",
+        "--by",
+        "human:tester",
+    )
+    run("check", "add", tid, "Do it", "--by", "human:tester")
+    assert tickets.proof_state(tickets.load(proj, tid))["uncovered"] == ["It works."]
+    run("check", "done", tid, "c1", "--note", "ok", "--proves", "It works.", "--by", "human:tester")
+    assert tickets.proof_state(tickets.load(proj, tid))["uncovered"] == []
+
+
+def test_a_part_with_no_work_at_all_is_still_refused_and_names_its_words(proj, run, new_ticket, facts, on):
+    _real(proj, run, new_ticket, "unbuilt")
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "back"
+    assert "looked for: weekly, export, sent, owner, email" in res["why"] and "--proves" in res["why"]

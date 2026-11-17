@@ -118,7 +118,7 @@ def repeat(
         raise Refused(f"There is no ticket {tid}.")
     tid = t["id"]
     if off:
-        if not orchcli.set_ext(root, t, remove=("each_run",), by=by, recurring=False):
+        if not orchcli.set_ext(root, t, remove=("each_run", "next_run"), by=by, recurring=False):
             raise Refused("The ticket changed or the change was not accepted. Try again.")
         return {"ticket": tid, "recurring": False}
     if not phrase:
@@ -140,6 +140,9 @@ def repeat(
     if plain.zone(zone_name) is None:
         raise Refused(f"'{zone_name}' is not a time zone. Use a name like Europe/Zurich.")
     changes = {"recurring": True, "cron": plan.cron, "tz": zone_name}
+    nxt = next_after(plan.cron, datetime.now(UTC), plain.zone(zone_name))
+    if nxt:  # read by core's scheduled health checks: a repeat whose planned time passed long ago stopped
+        changes["next_run"] = fmt(nxt)
     if each_run and not plain.daily_or_slower(plan.cron):
         raise Refused('Each run as its own ticket needs a repeat daily or slower, like "daily 07:30".')
     remove = [] if each_run else ["each_run"]
@@ -170,7 +173,8 @@ def repeat(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="orch automation", description="Starts agent runs: at a time, on a repeat, from the relay inbox."
+        prog="orch automation",
+        description="Starts helper runs: at a time, on a repeat, from the relay inbox.",
     )
     ap.add_argument(
         "--dir",

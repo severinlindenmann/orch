@@ -193,7 +193,46 @@ def ignored_source_note() -> str | None:
     return "Note: ORCH_REPO / ORCH_REF are ignored on this install; orch installs from its official source."
 
 
+# Where this orch came from, in the words a person sees: a Release (the official source's "main") or a
+# Development build (any other branch, repository or folder). `orch update --to` switches between the two.
+RELEASE_REF = "main"
+DEVELOP_REF = "develop"
+BUILDS = {"release": RELEASE_REF, "development": DEVELOP_REF}
+_SWITCH_TO: str | None = (
+    None  # set by `orch update --to <build>` for this one update: the official source at that ref
+)
+
+
+def switch_to(build: str) -> None:
+    """`orch update --to release|development`: this update installs from the official source at that build's
+    branch (never from ORCH_REPO / ORCH_REF or a folder). uv records the new source, so every later update and
+    add-on stays on it."""
+    global _SWITCH_TO
+    if build not in BUILDS:
+        raise Refused("Choose release or development.")
+    _SWITCH_TO = BUILDS[build]
+
+
+def build() -> str:
+    """'release' when orch comes from the official source's release branch, else 'development'. Read from the
+    source uv recorded at install time (direct_url.json), so it holds for every install path."""
+    try:
+        r, f = repo(), ref()
+    except Refused:
+        return "development"
+    if _SWITCH_TO is None and not _install_origin():
+        from orch import home as orch_home
+
+        if orch_home._source_tree():  # an editable checkout: no install source at all
+            return "development"
+    if _is_local(r) or r.removesuffix(".git").rstrip("/") != DEFAULT_REPO:
+        return "development"
+    return "release" if f == RELEASE_REF else "development"
+
+
 def repo() -> str:
+    if _SWITCH_TO is not None:
+        return DEFAULT_REPO
     return _src_env("ORCH_REPO") or _install_origin().get("repo") or DEFAULT_REPO
 
 
@@ -203,7 +242,7 @@ _REF_OK = re.compile(r"[A-Za-z0-9._/-]+")
 def ref() -> str:
     """The branch, tag or commit to install. Checked like a git ref name: in a zip URL a '../' or '#' could
     point at another repository or folder (git+ took it as a revision only)."""
-    r = _src_env("ORCH_REF") or _install_origin().get("ref") or "main"
+    r = _SWITCH_TO or _src_env("ORCH_REF") or _install_origin().get("ref") or RELEASE_REF
     if not _REF_OK.fullmatch(r) or ".." in r or r.startswith(("-", "/")) or r.endswith((".lock", "/")):
         raise Refused(f"'{r}' is not a branch, tag or commit name orch can install from (check ORCH_REF).")
     return r
@@ -213,6 +252,8 @@ def _is_local(r: str) -> bool:
     """A source is a folder ONLY when ORCH_REPO is set explicitly to an absolute existing folder, or orch
     itself was installed from that folder. The default GitHub URL is never a path (a relative folder named
     like it must not count)."""
+    if _SWITCH_TO is not None:
+        return False  # a switch always installs from the official source
     if _src_env("ORCH_REPO") is not None:
         return r == os.environ["ORCH_REPO"] and Path(r).is_absolute() and Path(r).is_dir()
     o = _install_origin()
@@ -2753,7 +2794,7 @@ def update(
         lines, _changed = _update_lines(before, found, sha)
         from orch import updateinfo
 
-        new_release, more = updateinfo.after_update(before.get("sha"), before.get("release"), sha)
+        new_release, more = updateinfo.after_update(before.get("sha"), before.get("release"), sha, root)
         lines += more  # "Updated orch 15 → 16", then what changed
         if not json_output:
             _say("\n".join(lines))

@@ -980,6 +980,13 @@ def _addon_uninstall(a):
     return (["addon", "uninstall", name], [], [])
 
 
+def _logins_check(a):
+    """Check again (Home, Settings > Helper): `orch logins --json` runs every check of the tool logins,
+    connections and keys now and keeps the result the page then shows. It reads no secret."""
+    _only(a, ())
+    return ["logins"], [], []
+
+
 def _link(a, extend=False):
     _only(a, ("id", "days") if extend else ("id",))
     fid = a.get("id")
@@ -1053,6 +1060,7 @@ OPS = {
     "copies.approve": _copies_approve,
     "copies.ask-update": _copies_ask_update,
     "ticket.field": _ticket_field,
+    "logins.check": _logins_check,
 }
 
 
@@ -1077,7 +1085,11 @@ def build_argv(op, args, root: Path | None = None) -> list[str]:
     if not isinstance(args, dict):
         raise BadRequest("The arguments must be an object.")
     words, flags, tail = fn(args)
-    if op in ("config.agent.test", "workspace.propose"):  # read-only answers: nothing changes, so no --by
+    if op in (
+        "config.agent.test",
+        "workspace.propose",
+        "logins.check",
+    ):  # read-only answers: nothing changes, so no --by
         return [*words, "--json"]
     if op == "review.answer":  # a card answer is the current person's plain answer: no proof, no --by
         return [*words, *flags, "--json"]
@@ -1292,6 +1304,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
     request that carries the page session; False = watch-only (the click is refused)."""
     if op == "link.share":
         return share_file(root, orch_bin, args, session)
+    if op in LOGIN_INPUT_OPS:  # a pasted code or a new key: on stdin only (ORCH-46)
+        return login_input(root, orch_bin, op, args, session)
     if op in ("person.set", "person.add"):  # "You: <name>": a name only, kept here, nothing runs
         if not isinstance(args, dict):
             raise BadRequest("The arguments must be an object.")
@@ -1357,7 +1371,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             text=True,
             timeout=_op_timeout(op, args),
             stdin=subprocess.DEVNULL,
-            env=human_env(root, orch_bin),
+            env=_person_env(root, orch_bin, op, session),
         )
     except subprocess.TimeoutExpired:
         if op == "addon.set" and args.get("on") is True:  # the install may still finish on its own
@@ -1422,6 +1436,105 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
     return (409 if conflict else 422), str(msg)[:500], out if conflict else None
 
 
+# Renew from the warning (ORCH-46): the tool's own sign-in, and a key put in through the key store. A pasted code
+# and a new key go to orch on stdin only: never in an argv, a log line, an audit entry or an answer.
+LOGIN_NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
+LOGIN_INPUT_MAX = 8192  # a pasted code or a key; the request body itself is at most 16 KB
+
+
+def _login_name(a) -> str:
+    v = a.get("name")
+    if not isinstance(v, str) or not LOGIN_NAME.fullmatch(v):
+        raise BadRequest("That is not a login orch checks here.")
+    return v
+
+
+def _logins_renew(a):
+    _only(a, ("name",))
+    return ["logins", "renew", _login_name(a)], [], []
+
+
+def _logins_status(a):
+    _only(a, ("name",))
+    return ["logins", "renew", _login_name(a)], ["--status"], []
+
+
+def _logins_cancel(a):
+    _only(a, ("name",))
+    return ["logins", "renew", _login_name(a)], ["--cancel"], []
+
+
+PERSON_GRANT_OPS = frozenset(
+    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
+)
+
+
+def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> dict:
+    """The person's environment for one orch call; for Renew/Replace with a one-time grant that only a signed-in
+    page session gets (orch.renew.person_only refuses these calls without it, whatever --by says)."""
+    env = human_env(root, orch_bin)
+    if op in PERSON_GRANT_OPS:
+        if not session:
+            raise NeedsPerson(SIGNIN)
+        from orch import renew
+
+        try:
+            env[renew.GRANT_ENV] = renew.grant(root)
+        except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
+            raise Unavailable("orch cannot renew logins in this workspace.") from None
+    return env
+
+
+LOGIN_INPUT_OPS = {  # op: (argv after the name, what the value is called in a refusal)
+    "logins.code": (["--code", "-"], "code"),
+    "logins.replace": ([], "key"),
+}
+
+
+def login_input(
+    root: Path, orch_bin: str | None, op: str, args, session: bool
+) -> tuple[int, str, dict | None]:
+    """`orch logins renew <name> --code -` / `orch logins replace <name>` with the value on stdin."""
+    if not isinstance(args, dict):
+        raise BadRequest("The arguments must be an object.")
+    _only(args, ("name", "value"))
+    if not session:
+        raise NeedsPerson(SIGNIN)
+    name, value = _login_name(args), args.get("value")
+    tail, what = LOGIN_INPUT_OPS[op]
+    if not isinstance(value, str) or not value.strip() or len(value) > LOGIN_INPUT_MAX or "\x00" in value:
+        raise BadRequest(f"Paste the {what} first.")
+    if not orch_bin:
+        raise Unavailable("The orch command is not available here.")
+    words = ["logins", "renew", name, *tail] if op == "logins.code" else ["logins", "replace", name]
+    try:
+        r = _run(
+            [*argv0(orch_bin), *words, "--by", actor(root), "--json"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            input=value,
+            timeout=90,
+            env=_person_env(root, orch_bin, op, session),
+        )
+    except subprocess.TimeoutExpired:
+        return 504, "That took too long. Please try again.", None
+    except OSError:
+        raise Unavailable("The orch command could not be started.") from None
+    forget_static()
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        out = None
+    if r.returncode == 0:
+        return 200, "", out if isinstance(out, dict) else None
+    msg = out.get("error") if isinstance(out, dict) else None
+    if not msg:
+        msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
+    return 422, str(msg)[:500], None
+
+
 # Workspace direct messages: a separate operation from phone/group chat.
 def _chat_send_ws(a):
     _only(a, ("workspace", "text", "retry", "client_id"))
@@ -1453,6 +1566,9 @@ def _chat_sync_ws(a):
     return ["chat", "sync", ws], [], []
 
 
+OPS["logins.renew"] = _logins_renew
+OPS["logins.status"] = _logins_status
+OPS["logins.cancel"] = _logins_cancel
 OPS["chat.send_ws"] = _chat_send_ws
 
 OPS["chat.sync_ws"] = _chat_sync_ws

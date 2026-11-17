@@ -10,7 +10,7 @@ const middleShort = (value, max = 48) => {
   return text.slice(0, head) + '…' + text.slice(-tail);
 };
 // The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
-const rowLabel = a => capitalise(a?.name || 'add-on');
+const rowLabel = a => capitalise(a?.label || a?.dashboard?.label || a?.name || 'add-on');
 // "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
 const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, a.active ? 'Turning off…' : 'Turning on…') : null;
 // A change of the add-ons restarts this page's server: nothing asks it (or an add-on's page) until it is back.
@@ -54,6 +54,25 @@ function permissionsCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-permissions'}, h('h2', {className:'set-sub'}, 'What a helper may do'),
     h('div', {className:'card'}, h('div', {className:'permission-choices', role:'radiogroup', 'aria-label':'What a helper may do'}, rows),
       current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
+}
+// What helpers need (ORCH-45, drawn and chosen on ORCH-43): every tool login, connection and key a helper needs here,
+// with whether it works, when it runs out and how many tickets it stops. The buttons are Home's (loginAction): Renew
+// from the renew step when it is there, else Check again / Try again. Never checked yet or nothing set: no card.
+function helperNeedsCard() {
+  const D = window.DashHelpers, items = D.needItems(snapshot ? null : state.logins);
+  if (!items.length) return null;
+  const at = state.logins.checked_at, when = typeof age === 'function' ? age(at) : '';
+  const rows = items.map(item => {
+    const key = 'settings-need-' + item.name, st = D.needState(item), stops = D.needStopsWord(item.state === 'works' ? 0 : item.stops.length);
+    const action = typeof loginAction === 'function' ? loginAction(item, key, item.state === 'works') : null;
+    return h('div', {className:'setting-row', 'data-key':key, 'data-state':item.state},
+      h('div', {className:'row-label'}, settingsText('span', {}, D.needListName(item)), settingsText('p', {className:'meta'}, D.needKindWord(item))),
+      h('div', {className:'row-value'}, h('span', {className:'badge ' + st.tone}, st.word), stops ? settingsText('p', {className:'meta'}, stops) : null),
+      h('div', {className:'row-action'}, action));
+  });
+  return h('section', {className:'card', id:'needs', 'data-key':'settings-needs'},
+    h('header', {className:'card-h row between'}, h('h3', {}, 'What helpers need'), when ? settingsText('span', {className:'meta', 'data-key':'settings-needs-when'}, 'Checked ' + when) : null),
+    rows);
 }
 // Share with team: off by default; on writes one short entry into the team's AGENTS.md (the orch files stay local).
 // Helpers at once (ORCH-16): no limit by default; a number makes the next helper wait in line until one is
@@ -630,7 +649,7 @@ function settingsPage() {
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), reviewerCard(settings), releaseMergeCard(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
-      permissionsCard(settings), helpersAtOnceCard(settings)]),
+      helperNeedsCard(), permissionsCard(settings), helpersAtOnceCard(settings)]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
     panel('addons', addonsPanel),
     panel('about', aboutPanel())))
@@ -651,12 +670,12 @@ function updLoad(force = false) {
     if (route().kind === 'settings') render();
   });
 }
-async function updStart() {
+async function updStart(to) {
   const was = updUi.info?.installed;
   updUi.from = was?.release || was?.label || null; updUi.phase = 'running'; updUi.reason = ''; render();
   try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
   let res = null;
-  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:{}})}); } catch (e) { /* the server may already be restarting */ }
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' ? {to} : {}})}); } catch (e) { /* the server may already be restarting */ }
   if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }
@@ -672,6 +691,19 @@ if (typeof window !== 'undefined' && window.addEventListener) window.addEventLis
   if (d.state === 'finished') updLoad(true);
 });
 function updButton(text, key, fn) { const b = button(text, 'primary', fn); b.dataset.key = key; return b; }
+// Where this orch came from (issue 957): "Release" or "Development build" on the Installed line, and one click to switch.
+// The switch is the same detached `orch update` as the Update button, with --to (the official source at that branch).
+function buildLine(info, phase) {
+  const dev = info?.build === 'development';
+  if (info?.build !== 'release' && !dev) return null;
+  const idle = phase === 'idle' || phase === 'failed';
+  return [
+    h('span', {className:dev ? 'badge needs' : 'badge', 'data-key':'update-build'}, dev ? 'Development build' : 'Release'),
+    // What the build is sits under its name; what the button does sits beside the button (manager, 17 Nov).
+    dev ? settingsText('p', {className:'meta', 'data-key':'update-build-note'}, 'The newest changes, not yet tested as a release.') : null,
+    idle && !snapshot ? h('div', {className:'row'}, (() => { const b = button(dev ? 'Switch to release' : 'Switch to development build', 'outline sm', () => updStart(dev ? 'release' : 'development')); b.dataset.key = 'update-switch'; return b; })(),
+      settingsText('span', {className:'meta', 'data-key':'update-switch-note'}, (dev ? 'Installs the newest release' : 'Installs the newest changes, not yet tested as a release,') + ' and restarts. Your helpers keep their work.')) : null];
+}
 function updNum(v) { return typeof v === 'number' ? 'orch ' + v : String(v || ''); }
 function aboutPanel() {
   if (settingsTab === 'about') updLoad();  // the check runs when the tab is open, not on every Settings page
@@ -699,7 +731,7 @@ function aboutPanel() {
     const ready = info.update_available === true && newest;
     body = [
       // A build from a branch (no release number, a commit) is a normal case, not an error: say what it is, skip the check.
-      !newest && have?.sha && !have.release && info.ref ? settingsText('p', {className:'meta', 'data-key':'update-branch'}, 'This is a build from the \u201c' + clean(info.ref) + '\u201d branch, so there is no release to compare it with. Update checks are skipped.')
+      !newest && have?.sha && !have.release && info.ref ? settingsText('p', {className:'meta', 'data-key':'update-branch'}, 'This is a development build, so there is no release to compare it with. Update checks are skipped.')
         : !newest ? settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.')
         : ready ? h('div', {className:'upd-ready'}, settingsText('strong', {}, updNum(newest.release) || newest.label), settingsText('span', {className:'meta'}, ' is ready to install'))
         : settingsText('p', {className:'meta', 'data-key':'update-current'}, 'You have the newest version.'),
@@ -708,7 +740,7 @@ function aboutPanel() {
         info.source ? settingsText('span', {className:'meta'}, 'From ' + info.source) : null) : null];
   }
   return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
-    line('Installed', settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…'))),
+    line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…')), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
     // About sits with the version (ORCH-89: it was under General)
@@ -722,7 +754,7 @@ function autoUpdateCard(info) {
   return h('div', {className:'card', 'data-key':'settings-auto-update'}, h('div', {className:'card-row'},
     h('div', {className:'grow'}, settingsText('h3', {}, 'Update automatically when a new release is out'),
       settingsText('p', {}, 'orch installs it by itself at a quiet moment, never while a helper is working, and shows on Home what changed.'),
-      auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a development build: it follows the \u201c' + clean(auto.ref) + '\u201d branch, so it updates to every new version there, not only to releases.') : null),
+      auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a development build: it gets every new change as soon as it is ready, not only releases.') : null),
     h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':auto.on, 'aria-label':'Update automatically when a new release is out', 'data-key':'settings-switch-auto-update', 'data-action':'auto-update-set', disabled:snapshot || settingsBusy.has('auto-update')})));
 }
 async function autoUpdateSwitch() {

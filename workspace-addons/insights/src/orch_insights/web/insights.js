@@ -67,13 +67,14 @@ function metric(label, value, small) {
 function servicesTile(view, small) {
   const {count, known} = view.tabs.connections;
   if (known) return metric('Connected services', String(count), small || (count ? 'Used by your helpers' : 'None connected'));
-  return metric('Connected services', null, count ? `${plural(count, 'service')} used by your helpers` : 'Orch can’t see this list yet');
+  return metric('Connected services', null, count ? `${plural(count, 'service')} used by your helpers` : 'orch can’t see this list yet');
 }
 
 // First day, nothing recorded yet: the same tiles as the overview, each saying when it fills.
 function emptyTiles(view) {
   const note = 'Fills after the first helper run';
-  return [metric('Times helpers worked', '0', note), servicesTile(view, note)];
+  // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139).
+  return [metric('Times helpers worked', null, 'No helper runs are recorded here yet'), servicesTile(view, note)];
 }
 
 function fillMetrics() {

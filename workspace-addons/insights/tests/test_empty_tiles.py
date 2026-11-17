@@ -44,9 +44,17 @@ def run(connections):
 def test_first_day_shows_two_tiles():
     tiles = run({"count": 0, "known": True})["tiles"]
     assert len(tiles) == 2
-    for tile, label in zip(tiles, ("Times helpers worked", "Connected services"), strict=True):
-        assert label in tile and "|0|" in tile + "|"
-        assert "Fills after the first helper run" in tile
+    runs, services = tiles
+    # no recorded run is "not measured", never a 0 (the record can be empty while helpers worked)
+    assert "Times helpers worked" in runs and "Not measured yet" in runs and "|0|" not in runs + "|"
+    assert "No helper runs are recorded here yet" in runs
+    assert "Connected services" in services and "|0|" in services + "|"
+    assert "Fills after the first helper run" in services
+
+
+def test_orch_is_lower_case_mid_sentence():
+    js = JS.read_text()
+    assert "'orch can’t see this list yet'" in js and "'Orch can" not in js
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node missing")

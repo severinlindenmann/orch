@@ -295,7 +295,7 @@ const OrchBlocks = (() => {
         for (const it of arr(day.items)) {
           if (!it.every) continue;
           const last = bands.find(x => x.link === it.link && x.every === it.every && x.to === i);
-          if (last) last.to = i + 1; else bands.push({link: it.link, every: it.every, title: it.title, tone: it.tone, from: i, to: i + 1});
+          if (last) last.to = i + 1; else bands.push({link: it.link, every: it.every, title: it.title, full: it.full, tone: it.tone, from: i, to: i + 1});
         }
       });
       const banded = it => it.every && bands.some(x => x.link === it.link && x.every === it.every);
@@ -303,6 +303,7 @@ const OrchBlocks = (() => {
         const row = el('div', 'week-bands');
         for (const x of bands) {
           const a = linked('run band t-' + tone(x.tone), x.link, [el('time', 'every', x.every), el('span', '', x.title)]);
+          if (x.full) a.title = x.full;
           a.style.gridColumn = (x.from + 1) + ' / ' + (x.to + 1);
           row.append(a);
         }
@@ -317,7 +318,9 @@ const OrchBlocks = (() => {
         for (const it of items) {
           const parts = [el('time', '', it.time || ''), el('span', '', it.title)];
           if (it.note) parts.push(el('small', 'run-note', it.note));
-          li.append(linked('run t-' + tone(it.tone), it.link, parts));
+          const a = linked('run t-' + tone(it.tone), it.link, parts);
+          if (it.full) a.title = it.full;
+          li.append(a);
         }
         strip.append(li);
       }
@@ -354,7 +357,7 @@ const OrchBlocks = (() => {
       for (const r of arr(b.rows)) {
         const tr = el('tr');
         cols.forEach((c, i) => {
-          const td = cell(c, (r.cells || {})[c.key]);
+          const td = cell(c, (r.cells || {})[c.key]); td.dataset.label = c.label || '';
           if (i === 0 && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
             const a = linked('cell-link', r.link, [...td.childNodes]); td.replaceChildren(a);
           }
@@ -362,11 +365,11 @@ const OrchBlocks = (() => {
           tr.append(td);
         });
         if (hasActions) {
-          const td = el('td'), box = el('div', 'row');
+          const td = el('td', 'cell-actions'), box = el('div', 'row');
           for (const a of arr(r.actions)) { const btn = rowButton(a); if (btn) box.append(...openFirst(btn)); }
           td.append(box); tr.append(td);
         }
-        if (hasToggle) { const td = el('td'), sw = r.toggle ? toggleEl(r.toggle) : null; if (sw) td.append(sw); tr.append(td); }
+        if (hasToggle) { const td = el('td', 'cell-toggle'), sw = r.toggle ? toggleEl(r.toggle) : null; if (sw) td.append(sw); tr.append(td); }
         tb.append(tr);
       }
       t.append(tb); wrap.append(t); s.append(wrap);

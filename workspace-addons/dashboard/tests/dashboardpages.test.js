@@ -29,8 +29,8 @@ test('board parts span columns, accept keys, and ignore children summaries and a
     const card = c.boardCard(items[0]);
     assert.match(JSON.stringify(card), /Steps · 0 of 3 done/);
     assert.equal(nodes(card, n => n.attrs?.className === 'board-part').length, 3);
-    assert.match(JSON.stringify(c.boardCard(items[1])), /Step of Parent/);
-    assert.doesNotMatch(JSON.stringify(c.boardCard(items[3], true)), /Step of Parent/);
+    assert.match(JSON.stringify(c.boardCard(items[1])), /Sub-ticket of Parent/);
+    assert.doesNotMatch(JSON.stringify(c.boardCard(items[3], true)), /Sub-ticket of Parent/);
     const rows = helpers.treeRows(c.ticketParents(items.filter(t => t.status === 'waiting')));
     assert.equal(rows[1].depth, 1);
     const board = c.board();
@@ -99,7 +99,7 @@ test('ORCH-14: an epic says Epic on its board card; a ticket inside it says Part
   const c = context(items);
   assert.match(JSON.stringify(c.boardCard(items[0])), /Epic · 1 of 2 done/);
   assert.match(JSON.stringify(c.boardCard(items[2])), /Part of the epic Dashboard fixes/);
-  assert.doesNotMatch(JSON.stringify(c.boardCard(items[2])), /Step of/);
+  assert.doesNotMatch(JSON.stringify(c.boardCard(items[2])), /Sub-ticket of/);
 });
 test('parts on the real /api/state shape: each part sits in its OWN status group (ORCH-62), standing alone with its parent named', () => {
   const real = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/state-pilatus-parts.json'), 'utf8'));
@@ -114,7 +114,7 @@ test('parts on the real /api/state shape: each part sits in its OWN status group
   assert.ok(['PIL-10', 'PIL-11'].every(k => open.tickets.some(t => t.key === k)), 'To do parts sit in To do');
   const rows = helpers.treeRows(open.tickets).filter(r => /PIL-1[01]/.test(r.ticket.key));
   assert.equal(rows.map(r => r.depth).join(), '0,0');
-  assert.ok(rows.every(r => r.parentMissing), 'each names its parent on a Step of line');
+  assert.ok(rows.every(r => r.parentMissing), 'each names its parent on a Sub-ticket of line');
   for (const g of groups) assert.equal(g.tickets.filter(t => c.ticketGroupOf(t) !== g.status).length, 0, 'a group holds only its own status');
 });
 
@@ -486,6 +486,23 @@ test('home (read-only copy, no run data): Working now and Finished are side card
   assert.doesNotMatch(JSON.stringify(right), /steps|segments|progressbar/);
   assert.match(text, /Nothing finished today\. Last: “Old sign”/);
 });
+test('home: Finished shows the 5 newest finished today and one link to all of them (report r-1116-2215-ws)', () => {
+  const day = new Date(); day.setHours(12, 0, 0, 0);
+  const at = m => new Date(day.getTime() - m * 60000).toISOString();
+  const done = Array.from({length:12}, (_, i) => ({id:'d' + i, title:'Done ' + i, status:'done', done_at:at(i * 5)}));
+  const items = [{id:'w', title:'Plan', status:'active'}, ...done.slice().reverse()];
+  const c = context(items, {parse:v => v ? new Date(v) : null, now:() => day, time:d => String(d), state:{runs:{}, settings:{}}});
+  const fin = nodes(c.home(), n => n.tag === 'section' && n.children?.[0] === 'Finished')[0];
+  const rows = nodes(fin, n => String(n.attrs?.['data-key'] || '').startsWith('ticket-')).map(n => n.attrs['data-key']);
+  assert.deepEqual(rows, ['ticket-d0', 'ticket-d1', 'ticket-d2', 'ticket-d3', 'ticket-d4'], 'newest first, five rows');
+  const row = nodes(fin, n => n.attrs?.['data-key'] === 'ticket-d0')[0];
+  assert.equal(row.children[1].attrs.className, 'meta', 'the time is a line under the title, not inside the title row');
+  assert.doesNotMatch(JSON.stringify(row.children[0]), /Finished/);
+  const link = nodes(fin, n => n.tag === 'a' && n.attrs?.href === '#tickets?view=done-today')[0];
+  assert.ok(link, 'link to the finished-today view'); assert.match(JSON.stringify(link), /All finished today \(12\)/);
+  const few = context(items.slice(0, 4), {parse:v => v ? new Date(v) : null, now:() => day, time:d => String(d), state:{runs:{}, settings:{}}});
+  assert.doesNotMatch(JSON.stringify(few.home()), /All finished today/, 'no link when all fit');
+});
 test('home needs: a failed answer on stacked questions says how many were answered', async () => {
   let n = 0;
   const {c, toasts} = sameNeeds(3, async () => ++n === 2 ? {ok:false, status:409, text:'Nope'} : {ok:true});
@@ -539,6 +556,7 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   assert.equal(ids('working'), 'w');
   assert.equal(ids('needs-you'), 'r,d');
   assert.equal(ids('done-week'), 'd');
+  assert.equal(ids('done-today'), 'd');
   assert.equal(ids('', 'ben'), 'r,o');
   assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
@@ -671,4 +689,18 @@ test('tickets list: number before the title, and a search hit is visible without
   assert.match(JSON.stringify(table), /1 ticket matches “31”/);
   vm.runInContext("ticketSearch = ''", c);
   assert.deepEqual(titles(c.ticketTable(c.filteredTickets())), ['ORCH-63 Open one'], 'clearing the search folds Done again');
+});
+test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All clear"; one that runs out soon counts on Home only', () => {
+  const stop = {name:'gh', label:'GitHub', kind:'login', state:'renew', chosen:false, stops:[]};
+  const soon = {name:'claude', label:'Claude Code', kind:'login', state:'soon', ends_at:'2026-11-19T08:00:00Z', chosen:true, stops:[]};
+  const page = logins => { const c = context([], {snapshot:false, state:{logins}, locks:new Set(), button:label => ({tag:'button', children:[label], dataset:{}})}); return {c, text:JSON.stringify(c.home())}; };
+  const stopped = page({items:[stop]});
+  assert.match(stopped.text, /The GitHub login stopped working/);
+  assert.match(stopped.text, /1 thing needs you/);
+  assert.doesNotMatch(stopped.text, /All clear|Nothing needs you/);
+  const runs = page({items:[soon]});
+  assert.match(runs.text, /1 thing needs you/);
+  assert.match(runs.text, /The Claude Code login ends on/);
+  assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
+  assert.match(page({items:[]}).text, /All clear/);
 });

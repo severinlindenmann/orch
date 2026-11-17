@@ -708,7 +708,7 @@ _FIELD_WORDS = {
     "owner": "owner",
     "due": "due date",
     "note": "note",
-    "done_when": "done criteria",
+    "done_when": "Done when line",
     "summary": "summary",
     "status": "status",
     "waiting_on": "wait",
@@ -721,6 +721,13 @@ def _fields_text(raw: str) -> str | None:
         return None  # free text someone logged by hand: shown as written
     words = [_FIELD_WORDS[k] for k in keys]
     return "the " + (", ".join(words[:-1]) + " and " + words[-1] if len(words) > 1 else words[0])
+
+
+def _parent_words(parent: dict) -> str:
+    """The parent in a "Created under ..." line: its key and title (never its internal id)."""
+    title = " ".join(str(parent.get("title") or "").split())
+    title = title[:77] + "..." if len(title) > 80 else title
+    return f"{parent.get('key') or parent['id']}" + (f" {title}" if title else "")
 
 
 def history_line(text: str, checklist: list[dict] | None = None) -> str:
@@ -736,6 +743,13 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     def addon(key: str) -> str:
         return key.replace("-", " ").capitalize()
 
+    if re.fullmatch(r"Created under t_\w+", t):
+        return "Created as a sub-ticket"  # an older line: it holds only the internal id
+    if m := re.fullmatch(r"Recorded a check run for (c\d+)(?: \(exit (\d+)\))?", t):
+        result = "" if m.group(2) is None else " (passed)" if m.group(2) == "0" else " (failed)"
+        return "Ran a check" + task(m.group(1)) + result
+    if m := re.fullmatch(r"Moved (c\d+) after c\d+", t):
+        return "Moved a task" + task(m.group(1))
     if re.fullmatch(r"Asked q\d+, waiting", t):
         return "Asked a question"
     if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
@@ -837,8 +851,10 @@ def create(
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
+    parent_ticket = None
     if parent is not None:
-        load(root, parent)  # the parent must exist (cycles are impossible: it is set only here)
+        # the parent must exist (cycles are impossible: it is set only here)
+        parent_ticket = load(root, parent)
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
@@ -856,7 +872,8 @@ def create(
         "questions": [],
         "history": [],
     }
-    add_history(ticket, by, "Created" + (f" under {parent}" if parent else ""), at=t)
+    under = f" under {_parent_words(parent_ticket)}" if parent_ticket else ""
+    add_history(ticket, by, "Created" + under, at=t)
     if parent is not None:
         ticket["parent"] = parent
     if title_auto:
@@ -923,6 +940,15 @@ def _covered(part: str, cover: str) -> bool:
     return len(short) >= 3 and f" {short} " in f" {long_} "
 
 
+def _loosely_named(part: str, texts: list[str]) -> bool:
+    """A task text names a Done when part by meaning, not link: at least 70% of the part's words (3+ letters,
+    at least 3 of them) are in that one task's text. Lets a reworded Done when keep its finished tasks."""
+    words = {w for w in _norm_words(part).split() if len(w) >= 3}
+    if len(words) < 3:
+        return False
+    return any(len(words & set(_norm_words(t).split())) * 10 >= len(words) * 7 for t in texts)
+
+
 def done_when_parts(done_when: str) -> list[str]:
     """done_when split into its parts: one per line, ';' or sentence end. Plain and cheap on purpose."""
     parts = []
@@ -941,7 +967,8 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
     (a stored flag is never trusted). The current signature is computed at most once per call, only when a
     recorded signature exists; `cache` reuses it for a few seconds (polled pages).
     uncovered: the parts of done_when that no task `covers` (a part is covered when a task's covers text
-    and the part contain one another, ignoring case and punctuation); one hint when done_when cannot be
+    and the part contain one another, ignoring case and punctuation, or when one task's own text holds
+    70% of the part's words); one hint when done_when cannot be
     split and nothing is linked. level: ok | note | warn | fail, so views never parse `line`."""
     from orch import filesig
 
@@ -971,11 +998,18 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
             per[c["id"]] = "note" if evs else "missing"
     done_when = ticket.get("done_when")
     covers = [_norm_words(c["covers"]) for c in items if isinstance(c.get("covers"), str)]
+    # a finished task with evidence that the helper linked to a part proves it, in any words
+    for c in items:
+        if c.get("done") and c.get("evidence") and isinstance(c.get("proves"), list):
+            covers += [_norm_words(q) for q in c["proves"] if isinstance(q, str)]
     covers = [c for c in covers if c]
     uncovered: list[str] = []
     if isinstance(done_when, str) and done_when.strip():
         parts = done_when_parts(done_when)
-        uncovered = [p for p in parts if not any(_covered(p, c) for c in covers)]
+        texts = [c["text"] for c in items if isinstance(c.get("text"), str) and not c.get("wont_do")]
+        uncovered = [
+            p for p in parts if not any(_covered(p, c) for c in covers) and not _loosely_named(p, texts)
+        ]
         if not parts and not covers:
             uncovered = ["Done when isn't linked to tasks"]
     n = {k: list(per.values()).count(k) for k in ("passed", "failed", "changed", "note")}
@@ -2012,7 +2046,11 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
         secretscan.refuse_if_secret_in(root, body, "evidence", verb="saved")
 
 
-def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> tuple[dict, dict]:
+def check_done(
+    root: Path, tid: str, cid: str, evidence: list[str], by: str, proves: list[str] | None = None
+) -> tuple[dict, dict]:
+    """`proves`: quoted parts of Done when this finished task shows; the evidence decides, not the wording."""
+    proved = [q for q in (_clean_covers(p) for p in proves or []) if q]
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
         raise Refused(
@@ -2032,6 +2070,8 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
             ev.setdefault("at", now())
         add_evidence(item, evs)
         item["done"] = True
+        if proved:
+            item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
         add_history(t, by, f"Check {cid} done")
         return item
