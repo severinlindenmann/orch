@@ -90,7 +90,13 @@ const href = id => '#ticket/' + encodeURIComponent(id);
 const questions = t => array(t.questions).filter(q => q.answer == null);
 const activeTicket = t => !['done', 'dropped'].includes(t.status);
 const overdue = t => window.DashHelpers.dueLate(t.due, t.status, now());
-const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.due ? date(t.due) : '');  // "Due 18:30" / "Late since 18:30", else the day
+// ORCH-185: a day-only due says which day: "Fri 20 Nov" (the year only when it is not this year), never a bare "Fri".
+const dueDay = value => {
+  const d = parse(value); if (!d) return '';
+  if (String(value).slice(0, 10) === today()) return 'today';
+  return d.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short', ...(d.getFullYear() !== now().getFullYear() ? {year:'numeric'} : {})}).replace(',', '');
+};
+const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.due ? dueDay(t.due) : '');  // "Due 18:30" / "Late since 18:30", else the day
 const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
 const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
 const statusWord = t => window.DashHelpers.statusWord(t.status, t.started);
