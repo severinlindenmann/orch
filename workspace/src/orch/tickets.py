@@ -913,6 +913,7 @@ def create(
     title_auto: bool = False,
     plan_first: bool = False,
     epic: bool = False,
+    release: bool = False,
 ) -> dict:
     """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
@@ -953,6 +954,10 @@ def create(
         ticket["plan_first"] = True
     if epic:  # several tickets made at once: its sub-tickets are the work, one run goes through them in order
         ticket["epic"] = True
+    if (
+        release
+    ):  # ORCH-37: a release holds the epics and tickets that ship together (set_release changes it later)
+        ticket["release"] = True
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -1255,6 +1260,47 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
     return apply_op(root, tid, op, by=REVIEWER)[0]
 
 
+ANSWERED_LINE = "Answered for you by the Reviewer: "
+
+
+def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> dict:
+    """The Reviewer answers a small, routine question for the owner with the helper's recommended option,
+    only while the owner turned it on (`workflow.reviewer_answers`) and only for a plain question (no card, no
+    merge, not an add-on's) that is still exactly the one the Reviewer looked at (`digest`). The history says
+    who did it and why: a role acting for the owner (R4.1); the owner corrects it with a message on the
+    ticket."""
+    if not config.reviewer_answers_on(root):
+        raise Refused("The Reviewer does not answer questions here. Turn it on: orch config set "
+                      "workflow.reviewer_answers on")  # fmt: skip
+    line = _one_line(why)
+
+    def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused(GENERAL_REFUSAL)
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        if question_digest(q) != digest:
+            raise Refused(f"{qid} changed after the Reviewer looked at it.")
+        if q.get("card") is not None or q.get("action") is not None or q.get("kind") not in (None, "plain"):
+            raise Refused(f"{qid} waits for the owner.")
+        rec = q.get("recommended")
+        if not rec or rec not in q["options"]:
+            raise Refused(f"{qid} has no recommended answer.")
+        q["answer"], q["answered_by"], q["via"] = rec, REVIEWER, REVIEWER_VIA
+        q["answered_at"] = now()
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, REVIEWER, f"Answered {qid}: {rec}", REVIEWER_VIA)
+        add_history(ticket, REVIEWER, ANSWERED_LINE + f"{qid} = {rec} ({line})", REVIEWER_VIA)
+        history.created("answers", q)
+        return q
+
+    return apply_op(root, tid, op, by=REVIEWER)[0]
+
+
 RELEASE_KEEPER = "agent:release-keeper"  # merges a green release for the owner (review.tend_releases)
 RELEASE_VIA = "release-keeper"
 RELEASE_MERGED_LINE = "Merged for you (Settings: merge releases without my click): "
@@ -1514,7 +1560,7 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by", "model")
+PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "release", "description", "description_by", "model")
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1686,6 +1732,23 @@ def edit(
                 k = next(iter(fields))
                 text += f" (was: {_edit_snip(was[k])} | now: {_edit_snip(ticket.get(k))})"  # ORCH-185
             add_history(ticket, by, text)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+def set_release(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-37: mark a ticket as a release (the epics and tickets that ship together sit under it, put there
+    with set_parent) or take the mark off. Its sub-tickets stay where they are either way."""
+    me = load(root, tid)
+    if bool(me.get("release")) == on:
+        return me  # nothing changes: no write, no history line
+
+    def op(ticket):
+        if on:
+            ticket["release"] = True
+        else:
+            ticket.pop("release", None)
+        add_history(ticket, by, "Marked as a release" if on else "No longer a release")
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
@@ -2998,6 +3061,7 @@ def ask(
             "answer": None,
             "answered_by": None,
             "via": None,
+            "asked_at": now(),  # the Reviewer's routine answers wait from here (reviewer.routine)
         }
         if kind is not None:
             q["kind"] = kind
