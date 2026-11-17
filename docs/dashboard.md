@@ -20,12 +20,12 @@ action works there exactly as on the computer orch runs on.
 
 **Without a proxy:** `orch dashboard remote on --port 8791 --name <this computer's name>` lets the dashboard answer
 other computers itself (off by default; `--listen <address>` limits it to one network, default all). Restart it
-(`orch stop`, `orch start`). The printed sign-in link then names `http://<name>:8791`. Before signing in, another
+(`orch stop`, `orch start`). The printed sign-in link then names `http://<name>:8791`. Before the sign-in, another
 computer gets only the empty page: no tickets, no actions, whatever address it uses. `orch dashboard remote off` turns
 it off again.
 
 **A sign-in bookmark** for when you are usually on another computer: `orch dashboard remote link` (in your own
-terminal) prints `http://<name>:<port>/go/<secret>`. Opening it signs that browser in (30 days). Keep it private like a
+terminal) prints `http://<name>:<port>/go/<secret>`. Opening it logs that browser in (30 days). Keep it private like a
 password. `--new` makes a new one (the old one stops working), `--remove` removes it.
 
 - **Home:** Needs you first (questions, failed runs), then your tickets, then which agents are working.

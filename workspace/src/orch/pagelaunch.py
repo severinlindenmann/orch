@@ -11,6 +11,7 @@ import contextlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -68,6 +69,10 @@ def printable_launch_url(root: Path, server: str, base_url: str) -> str:
     return f"{base_url.rstrip('/')}/#launch={token}"
 
 
+_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+_HOST_NAME = re.compile(rf"{_LABEL}(?:\.{_LABEL})*")  # a computer name or IPv4 address, no port, no path
+
+
 def remote_base(root: Path, server: str) -> str | None:
     """The address other computers use for this page server when it listens for them (the dashboard's
     [dashboard] listen, listen_port and listen_name settings), read from the settings file here and never
@@ -75,7 +80,6 @@ def remote_base(root: Path, server: str) -> str | None:
     if server != "dashboard":
         return None
     from orch import config
-    from orch_ui.origin import any_host_ok
 
     try:
         table = config.read(root).get("dashboard")
@@ -84,7 +88,7 @@ def remote_base(root: Path, server: str) -> str | None:
     if not isinstance(table, dict) or not table.get("listen"):
         return None
     name, port = table.get("listen_name"), table.get("listen_port")
-    if not isinstance(name, str) or ":" in name or not any_host_ok(name):
+    if not isinstance(name, str) or len(name) > 253 or not _HOST_NAME.fullmatch(name.lower()):
         return None
     if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
         return None

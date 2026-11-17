@@ -154,7 +154,7 @@ def _remote(args, root: Path) -> int:
     else:
         where = remote.url(s) or f"port {s['port']} of this computer"
         text = (
-            f"Other computers can open the dashboard at {where} after signing in."
+            f"Other computers can open the dashboard at {where} after the sign-in."
             " A sign-in link: orch start --print-launch-url (in your own terminal)."
         )
     if args.action != "status":
@@ -164,7 +164,7 @@ def _remote(args, root: Path) -> int:
 
 
 def _link(args, root: Path, out) -> int:
-    """The standing sign-in link (a bookmark that signs this browser in again; a person only)."""
+    """The standing sign-in link (a bookmark that logs this browser in again; a person only)."""
     from orch import pagelaunch
     from orch.errors import Refused
 
@@ -191,7 +191,7 @@ def _link(args, root: Path, out) -> int:
     link = f"{base}/go/{secret}"
     out(
         {"url": link},
-        f"Sign-in bookmark: {link}\nOpening it signs that browser in (30 days). Keep it private like a password;"
+        f"Sign-in bookmark: {link}\nOpening it logs that browser in (30 days). Keep it private like a password;"
         " a new one: orch dashboard remote link --new.",
     )
     return 0

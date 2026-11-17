@@ -182,7 +182,7 @@ def test_off_by_default_no_second_socket(ws):
 
 def test_the_setting_turns_on_and_off(ws, capsys):
     assert cli.main(["--dir", str(ws), "remote", "on", "--port", "8791", "--name", "My-Server.example"]) == 0
-    assert "after signing in" in capsys.readouterr().out
+    assert "after the sign-in" in capsys.readouterr().out
     assert remote.settings(ws) == {"listen": "0.0.0.0", "port": 8791, "name": "my-server.example"}
     assert cli._listen(ws) == (("0.0.0.0", 8791), None)
     assert pagelaunch.remote_base(ws, "dashboard") == "http://my-server.example:8791"
