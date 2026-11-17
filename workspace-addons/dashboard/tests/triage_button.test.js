@@ -47,7 +47,7 @@ test('the menu shows each lane with tickets and its count; closed lanes start un
   assert.equal(find(menu, 'triage-lane-working').checked, true);
   assert.equal(find(menu, 'triage-lane-done').checked, false);
   assert.equal(find(menu, 'triage-lane-todo'), null);  // no tickets in To do: no box
-  assert.match(find(menu, 'triage-title').kids[0], /4 tickets/);  // backlog, working, needs you, check
+  assert.match(find(menu, 'triage-title').kids[0], /Triage · 4 tickets/);  // backlog, working, needs you, check
   assert.equal(typeof find(menu, 'triage-start').click, 'function');
 });
 
@@ -58,7 +58,7 @@ test('ticking Done counts it in; unticking every lane disables Start triage', ()
   assert.match(find(menu, 'triage-title').textContent, /5 tickets/);
   for (const id of ['backlog', 'working', 'needs-you', 'check', 'done']) { const b = find(menu, 'triage-lane-' + id); b.checked = false; b.listeners.change(); }
   assert.equal(find(menu, 'triage-start').disabled, true);
-  assert.match(find(menu, 'triage-title').textContent, /Pick at least one lane/);
+  assert.match(find(menu, 'triage-title').textContent, /Pick a lane/);
 });
 
 test('hidden on a shared copy and with no tickets', () => {

@@ -101,3 +101,4 @@ Save without starting shows "Saving…" on the button at once and then opens the
   helper that goes through every open ticket (brings it up to date, groups related ones, closes what is no longer
   needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
   says so in a notice.
+- Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).

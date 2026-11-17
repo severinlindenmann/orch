@@ -396,11 +396,11 @@ function triageCounts() {
   return n;
 }
 const triageTotal = n => [...triagePicked].reduce((sum, id) => sum + (n[id] || 0), 0);
-const triageTitle = total => total ? 'A helper goes through ' + (total === 1 ? '1 ticket' : total + ' tickets') : 'Pick at least one lane with tickets';
+const triageTitle = total => total ? 'Triage · ' + (total === 1 ? '1 ticket' : total + ' tickets') : 'Pick a lane with tickets';
 function triageButton() {
   const n = triageCounts();
   if (snapshot || !tickets().length) return null;
-  const title = h('p', {className:'menu-title', 'data-key':'triage-title'}, triageTitle(triageTotal(n)));
+  const title = h('strong', {'data-key':'triage-title'}, triageTitle(triageTotal(n)));
   const start = triageStart(); start.disabled = !triageTotal(n);
   const boxes = TRIAGE_LANES.filter(([id]) => n[id]).map(([id, label]) => {
     const box = h('input', {type:'checkbox', 'data-key':'triage-lane-' + id});
@@ -412,11 +412,13 @@ function triageButton() {
     });
     return h('label', {className:'check-label'}, box, label + ' · ' + n[id]);
   });
+  // Owner pick 17 Nov (draft B): count and Start triage on one line, lanes in two columns, one short line under.
   // Starting a helper is never a one-click accident (UX D2/M1): the menu says what happens, then Start triage.
   return h('details', {className:'menu', 'data-key':'triage'}, h('summary', {className:'btn outline sm'}, iconEl('spark'), 'Triage'),
-    h('div', {className:'menu-pop', role:'dialog', 'aria-label':'Triage'}, title,
-      h('p', {className:'meta'}, 'It brings each one up to date, groups related ones and closes what is no longer needed. Every change gets a line on its ticket.'),
-      h('div', {className:'stack-sm', role:'group', 'aria-label':'Lanes to go through'}, boxes), start));
+    h('div', {className:'menu-pop menu-pop-wide', role:'dialog', 'aria-label':'Triage'},
+      h('div', {className:'row between'}, title, start),
+      h('div', {className:'grid-2', role:'group', 'aria-label':'Lanes to go through'}, boxes),
+      h('p', {className:'meta'}, 'A helper updates, groups and closes them. Each change gets a line.')));
 }
 function triageStart() {
   const node = button('Start triage', 'outline sm', startTriage);

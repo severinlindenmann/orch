@@ -320,6 +320,9 @@ details.menu>summary,.dropdown summary{list-style:none}
 details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-marker{display:none}
 .menu:not(details),.menu-pop{padding:4px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface-2);box-shadow:var(--lift-shadow);min-width:192px}
 .menu-pop{position:absolute;right:0;top:calc(100% + 4px);z-index:40;display:grid}
+/* A menu that holds a short form (a title, choices, one action): wide enough for one-line choices, never past the screen. */
+.menu-pop.menu-pop-wide{min-width:320px;max-width:min(380px,calc(100vw - 32px));padding:8px;gap:8px}
+.menu-pop-wide .grid-2{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px}
 .dropdown>.menu{position:absolute;right:0;top:calc(100% + 8px);z-index:40}
 .menu-item{display:flex;align-items:center;gap:8px;min-height:36px;width:100%;padding:8px 12px;border:0;border-radius:4px;background:none;color:var(--text);font-size:14px;text-decoration:none;text-align:left}
 .menu-item:hover,.menu-item:focus-visible{background:var(--surface-3)}
