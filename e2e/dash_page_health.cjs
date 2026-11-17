@@ -1,4 +1,4 @@
-// Page health (ORCH-80): every main dashboard page at 1280, 1920, 390 and 320 px and at 150% zoom (960x600), on fake
+// Page health (ORCH-80; ORCH-310 adds tap size and the one-row top bar; CI job page-smoke runs it on every pull request): every main dashboard page at 1280, 1920, 390 and 320 px and at 150% zoom (960x600), on fake
 // data, before a release.
 // The same checks the daily Dashboard tester role runs on the real workspace: no page error, the page shows its
 // content (the loading shape goes away), nothing scrolls sideways at phone width, no button or link is cut off at
@@ -26,7 +26,12 @@ const BASE = 'http://dash.test';
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
 const WIDTHS = [{name: 'desktop', width: 1280, height: 800}, {name: 'wide', width: 1920, height: 1080}, {name: 'phone', width: 390, height: 844},
-  {name: 'small phone', width: 320, height: 700}, {name: 'zoom 150%', width: 960, height: 600}];
+  {name: 'small phone', width: 320, height: 700}, {name: 'zoom 150%', width: 960, height: 600}].map(v => ({...v, label: `${v.name} ${v.width}px`}));
+// Smallest tap target at phone width, in CSS px (WCAG 2.2 level AA, 2.5.8: 24 x 24).
+const TAP_MIN = 24;
+// Known faults with an open issue: ticket links on the Tickets page are 20 px high at phone width (issue #1368). Remove
+// this line when it is fixed; any other small tap target fails the check.
+const KNOWN_TAP = /^(phone 390px|small phone 320px) #tickets: tap target too small: PIL-\d+ /;
 const PHONE = vp => vp.width <= 720;
 // The never-list comes from its one source, docs/wording.md (last column of the table). Entries that only make sense
 // in a sentence (with a note in brackets, quotes or a placeholder) are left to the wording test in brand/.
@@ -46,13 +51,13 @@ const LEAK = String.raw`\b(undefined|NaN|null)\b|\[object Object\]`;
 
 function pages(state) {
   const by = s => state.tickets.find(t => t.status === s)?.id;
-  return ['#home', '#tickets', '#review', '#chat', '#settings', '#settings/agent', '#settings/about',
+  return ['#home', '#tickets', '#review', '#chat', '#settings', '#settings/agent', '#settings/phone', '#settings/addons', '#settings/about',
     '#ticket/' + by('active'), '#ticket/' + by('review'), '#ticket/' + by('waiting'), '#addon/lessons'];
 }
 
 // Runs in the page: what a person would see as broken.
-function look({never, leak}) {
-  const vw = window.innerWidth, out = {sideways: document.documentElement.scrollWidth - vw, cut: [], words: [], leaks: [], text: 0};
+function look({never, leak, phone, tapMin}) {
+  const vw = window.innerWidth, out = {tiny: [], rows: 0, sideways: document.documentElement.scrollWidth - vw, cut: [], words: [], leaks: [], text: 0};
   const main = document.querySelector('main');
   out.text = main ? main.innerText.trim().length : 0;
   const shown = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
@@ -60,6 +65,19 @@ function look({never, leak}) {
   for (const el of document.querySelectorAll('main button, main a, main h1, main h2, main h3, main label, main input, main [role=tab], header button, header a')) {
     if (!shown(el)) continue;
     if (el.getBoundingClientRect().right > vw + 2 && !inScroller(el)) out.cut.push((el.innerText || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 40));
+  }
+  // The top bar stays on one row: every shown item sits at about the same height.
+  const bar = [...document.querySelectorAll('.topbar > *, .topbar-actions > *')].filter(e => !e.matches('.topbar-actions') && shown(e)).map(e => { const r = e.getBoundingClientRect(); return (r.top + r.bottom) / 2; });
+  if (bar.length) out.rows = Math.max(...bar) - Math.min(...bar);
+  // Tap size at phone width: buttons, tabs and form fields (a link inside running text is exempt, as in WCAG 2.5.8).
+  if (phone) for (const el of document.querySelectorAll('main button, main a, main input:not([type=hidden]), main select, main [role=tab], header button, header a, #tabbar button, #tabbar a')) {
+    if (!shown(el)) continue;
+    if (el.matches('a') && el.closest('p, li, td, dd') && el.parentElement && el.parentElement.childNodes.length > 1 && !el.matches('.btn, [role=button]')) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 2) continue;  // a native select kept behind its own control
+    // a checkbox or radio is tapped through its label or row: that is the target
+    if (el.matches('input[type=checkbox], input[type=radio]')) { const t = el.closest('label, li, tr, .row') ; if (t && t.getBoundingClientRect().height >= tapMin) continue; }
+    if (r.width < tapMin - 0.5 || r.height < tapMin - 0.5) out.tiny.push(`${(el.innerText || el.getAttribute('aria-label') || el.tagName).trim().replace(/\s+/g, ' ').slice(0, 30)} (${Math.round(r.width)}x${Math.round(r.height)})`);
   }
   const chrome = [...document.querySelectorAll('button, [role=tab], nav a, h1, h2, h3, label, th')].filter(shown).map(e => (e.innerText || '').trim()).filter(Boolean);
   for (const w of never) {
@@ -140,7 +158,7 @@ test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}
       });
       const page = await context.newPage();
       let here = '';
-      page.on('pageerror', e => problems.push(`${vp.name} ${here}: page error ${String(e).slice(0, 120)}`));
+      page.on('pageerror', e => problems.push(`${vp.label} ${here}: page error ${String(e).slice(0, 120)}`));
       for (const hash of pages(state)) {
         here = hash;
         await page.goto('about:blank');
@@ -151,28 +169,30 @@ test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}
         }, null, {timeout: 15_000}).then(() => true, () => false);
         await page.waitForTimeout(300);
         await page.screenshot({path: path.join(OUT, `${vp.name.replace(/\W+/g, "-")}-${hash.replace(/\W+/g, '-').replace(/^-/, '')}.png`)});
-        if (!ready) { problems.push(`${vp.name} ${hash}: shows nothing within 15 s`); continue; }
-        const o = await page.evaluate(look, {never, leak: LEAK});
-        if (PHONE(vp) && o.sideways > 4) problems.push(`${vp.name} ${hash}: scrolls sideways (${o.sideways} px too wide)`);
-        for (const c of o.cut) problems.push(`${vp.name} ${hash}: cut off at the right edge: ${c}`);
-        for (const w of o.words) problems.push(`${vp.name} ${hash}: never-list word ${w}`);
-        for (const l of o.leaks) problems.push(`${vp.name} ${hash}: program value on screen: ${l}`);
-        if (vp.name === 'zoom 150%') for (const n of (await page.evaluate(railLook)).under) problems.push(`${vp.name} ${hash}: menu item under the menu foot: ${n}`);
+        if (!ready) { problems.push(`${vp.label} ${hash}: shows nothing within 15 s`); continue; }
+        const o = await page.evaluate(look, {never, leak: LEAK, phone: PHONE(vp), tapMin: TAP_MIN});
+        if (PHONE(vp) && o.sideways > 4) problems.push(`${vp.label} ${hash}: scrolls sideways (${o.sideways} px too wide)`);
+        if (o.rows > 12) problems.push(`${vp.label} ${hash}: top bar on two rows (${Math.round(o.rows)} px apart)`);
+        for (const t of o.tiny) problems.push(`${vp.label} ${hash}: tap target too small: ${t}`);
+        for (const c of o.cut) problems.push(`${vp.label} ${hash}: cut off at the right edge: ${c}`);
+        for (const w of o.words) problems.push(`${vp.label} ${hash}: never-list word ${w}`);
+        for (const l of o.leaks) problems.push(`${vp.label} ${hash}: program value on screen: ${l}`);
+        if (vp.name === 'zoom 150%') for (const n of (await page.evaluate(railLook)).under) problems.push(`${vp.label} ${hash}: menu item under the menu foot: ${n}`);
         if (PHONE(vp) && hash === '#home') {
           await page.click('#tabbar [data-tab="more"]');
           await page.waitForTimeout(300);
           await page.screenshot({path: path.join(OUT, `${vp.name.replace(/\W+/g, '-')}-menu.png`)});
           const m = await page.evaluate(menuLook);
-          if (m.sideways > 4) problems.push(`${vp.name} menu: scrolls sideways (${m.sideways} px too wide)`);
-          for (const x of m.overlap) problems.push(`${vp.name} menu: top-bar items overlap: ${x}`);
-          for (const x of m.covered) problems.push(`${vp.name} menu: behind the bottom bar: ${x}`);
+          if (m.sideways > 4) problems.push(`${vp.label} menu: scrolls sideways (${m.sideways} px too wide)`);
+          for (const x of m.overlap) problems.push(`${vp.label} menu: top-bar items overlap: ${x}`);
+          for (const x of m.covered) problems.push(`${vp.label} menu: behind the bottom bar: ${x}`);
           const report = await page.locator('#report-problem').isVisible();
-          if (!report) problems.push(`${vp.name} menu: no Report a problem`);
+          if (!report) problems.push(`${vp.label} menu: no Report a problem`);
           await page.click('#tabbar [data-tab="more"]');
         }
       }
       await context.close();
     }
   } finally { await browser.close(); }
-  assert.deepEqual([...new Set(problems)], [], 'screenshots in ' + OUT);
+  assert.deepEqual([...new Set(problems)].filter(p => !KNOWN_TAP.test(p)), [], 'screenshots in ' + OUT);
 });

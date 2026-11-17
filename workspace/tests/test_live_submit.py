@@ -415,7 +415,7 @@ def test_reading_the_input_ends_the_check(proj, run, monkeypatch):
 def test_only_the_run_holding_the_ticket_may_read_and_mark(proj, run, monkeypatch, who):
     tid, rn, _, _, _ = _stuck(proj, run, monkeypatch)
     before = runs.read(proj, tid)
-    with pytest.raises(Exception, match="Only the live run"):
+    with pytest.raises(Exception, match="Only the run working on"):
         runs_live.read_input(proj, tid, who, True)
     assert runs.read(proj, tid) == before and len(runs.undelivered(proj, tid)) == 1  # nothing changed
 
@@ -423,7 +423,7 @@ def test_only_the_run_holding_the_ticket_may_read_and_mark(proj, run, monkeypatc
 def test_an_agent_gets_nothing_from_a_ticket_without_a_run(proj, run):
     tid = _ticket(run)
     runs.pending_add(proj, tid, "human:lume", "message", "for the next start")
-    with pytest.raises(Exception, match="Only the live run"):
+    with pytest.raises(Exception, match="Only the run working on"):
         runs_live.read_input(proj, tid, "r_abcdefgh", True)
     assert len(runs.undelivered(proj, tid)) == 1
 
