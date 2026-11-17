@@ -40,9 +40,12 @@ test('a paired phone, or an unknown count, leaves the switch usable; an On switc
 const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join('');
 const find = (n, f) => typeof n === 'string' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(k => find(k, f))];
 const soon = ms => new Date(Date.now() + ms).toISOString();
+// Clock-proof (ORCH-297): later today (never past midnight) and tomorrow at noon, whatever time the test runs.
+const laterToday = () => { const end = new Date(); end.setHours(23, 59, 0, 0); return new Date(Math.min(Date.now() + 3 * 3600000, end.getTime() - 30000)).toISOString(); };
+const tomorrowNoon = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(12, 0, 0, 0); return d.toISOString(); };
 test('on: the chip shows "Phone until HH:MM" with the menu, and the banner stays hidden', () => {
   const c = load();
-  c.state({...base, phones:1, on:true, ends_at:soon(3 * 3600000), awake:'awake'});
+  c.state({...base, phones:1, on:true, ends_at:laterToday(), awake:'awake'});
   assert.equal(c.chip.hidden, false);
   assert.equal(c.bar.hidden, true);
   assert.match(text(c.chip.children[0]), /^Phone until \d\d:\d\d$/);
@@ -111,7 +114,7 @@ test('ORCH-184: a mode whose end time has passed is shown as ended, not "Phone u
 });
 test('ORCH-286: an end time on another day says the day, in the chip, the menu and the sidebar label', () => {
   const c = load();
-  c.state({...base, phones:1, on:true, ends_at:soon(26 * 3600 * 1000), awake:'ok'});
+  c.state({...base, phones:1, on:true, ends_at:tomorrowNoon(), awake:'ok'});
   assert.match(text(c.chip.children[0]), /^Phone until tomorrow \d\d:\d\d$/);
   assert.match(c.label.textContent, /^Phone · until tomorrow \d\d:\d\d$/);
   assert.match(text(c.chip.children[1]), /Questions go to your phone until tomorrow \d\d:\d\d/);
