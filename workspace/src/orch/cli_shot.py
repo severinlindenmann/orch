@@ -196,6 +196,14 @@ def page_url(url: str, part: str) -> str:
     return url.split("#", 1)[0] + "#" + part
 
 
+BUSY_JS = "!!document.querySelector('[aria-busy=\"true\"]')"
+
+
+def _busy(pipe, session: str) -> bool:
+    r = pipe.call("Runtime.evaluate", {"expression": BUSY_JS, "returnByValue": True}, session=session)
+    return bool((r.get("result") or {}).get("value"))
+
+
 def capture(pipe: _Pipe, url: str, width: int, height: int, wait: int) -> bytes:
     """One picture in a fresh tab. The viewport is set through the protocol, not the window: new
     headless Chrome never makes a window narrower than 500, so a 390 window was laid out 500 wide
@@ -216,6 +224,13 @@ def capture(pipe: _Pipe, url: str, width: int, height: int, wait: int) -> bytes:
         deadline = time.monotonic() + wait
         pipe.wait_event("Page.loadEventFired", s, wait)
         pipe.settle(s, QUIET_SEC, deadline)
+        # A page that says it is still loading (aria-busy) is waited for; still busy at the end of --wait:
+        # no picture, never one of a loading shape (CI pictures on a slow runner, ORCH-312).
+        while _busy(pipe, s):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("the page was still loading")
+            time.sleep(0.2)
+            pipe.settle(s, QUIET_SEC, min(deadline, time.monotonic() + QUIET_SEC))
         shot = pipe.call("Page.captureScreenshot", {"format": "png"}, session=s, timeout=60)
         return base64.b64decode(shot["data"])
     finally:

@@ -208,3 +208,25 @@ def test_only_the_ci_workflow_runs_count_and_own_machinery_is_said(tmp_path, mon
     assert m["own_machinery"] is True
     _fake_github(monkeypatch, d, files=[dashshots.WEB + "app.js"])
     assert dashshots.fetch(PR, tmp_path / "dest2")[0]["own_machinery"] is False
+
+
+def test_shot_waits_while_the_page_says_it_is_loading(monkeypatch):
+    from test_shot import FakePipe
+
+    class Busy(FakePipe):
+        def __init__(self, busy_for):
+            super().__init__()
+            self.left = busy_for
+
+        def call(self, method, params=None, session=None, timeout=30):
+            if method == "Runtime.evaluate":
+                self.left -= 1
+                return {"result": {"value": self.left >= 0}}
+            return super().call(method, params, session, timeout)
+
+    monkeypatch.setattr(cli_shot.time, "sleep", lambda s: None)
+    pipe = Busy(2)
+    assert cli_shot.capture(pipe, "http://x/", 1280, 800, 5) == b"png"
+    assert [m for m, _, _ in pipe.calls][-2:] == ["Page.captureScreenshot", "Target.closeTarget"]
+    with pytest.raises(TimeoutError):
+        cli_shot.capture(Busy(10**9), "http://x/", 1280, 800, 0)
