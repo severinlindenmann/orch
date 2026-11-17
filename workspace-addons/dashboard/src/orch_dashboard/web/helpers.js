@@ -6,15 +6,39 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'To do', ready: 'To do', active: 'Working', waiting: 'Needs you', review: 'Check', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'Backlog', ready: 'To do', active: 'Working', waiting: 'Needs you', review: 'Check', done: 'Done', dropped: "Won't do"};
   /* The ONE source of status words and order (board columns, Home, ticket page, Move to, history, lists).
-     Lifecycle order. "ready" is the same place as "open" (no separate word); "waiting" shows as "Needs you". */
-  const STATUS_ORDER = ['open', 'active', 'waiting', 'review', 'done'];
-  const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'To do';
-  const columnOf = status => status === 'ready' ? 'open' : status;
+     Lifecycle order. New tickets land in Backlog ("open"); To do ("ready") is what comes next, and paused or sent-back
+     work; "waiting" shows as "Needs you". ORCH-152 (owner, 17 Nov): Backlog, To do, Waiting, Won't do, Superseded. */
+  const STATUS_ORDER = ['open', 'ready', 'active', 'waiting', 'review', 'done'];
+  const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'Backlog';
+  const columnOf = status => status;
   const STATUS_CHOICES = STATUS_ORDER.map(s => [s, STATUS_WORD[s]]);
-  // "Move to" offers four places; Waiting is decided by the agent.
-  const MOVE_CHOICES = STATUS_CHOICES.filter(([s]) => s !== 'waiting');
+  // "Move to" offers these places; Needs you and Waiting are decided by the agent (or the board's Waiting lane).
+  const MOVE_CHOICES = [...STATUS_CHOICES.filter(([s]) => s !== 'waiting'), ['dropped', STATUS_WORD.dropped]];
+  /* The board's lanes, left to right. "blocked" = Waiting: waits for a date, another ticket or the outside, with no
+     open question. "superseded" = Won't do because another ticket replaces it (superseded_by). */
+  const LANES = [['open', 'Backlog'], ['ready', 'To do'], ['active', 'Working'], ['waiting', 'Needs you'], ['blocked', 'Waiting'],
+    ['review', 'Check'], ['done', 'Done'], ['dropped', "Won't do"], ['superseded', 'Superseded']];
+  /* The lane of a ticket. `status` is the status as shown (a live helper that needs the person shows as waiting);
+     `asks` is true while the ticket has an open question. */
+  function laneOf(t, status, asks) {
+    const s = status || (t && t.status) || 'open';
+    if (s === 'dropped') return t && t.superseded_by ? 'superseded' : 'dropped';
+    if (s === 'done') return 'done';
+    if (asks) return 'waiting';
+    if (s === 'waiting') return ((t && t.waiting_on) || {}).kind === 'question' ? 'waiting' : 'blocked';
+    return STATUS_WORD[s] ? s : 'open';
+  }
+  /* What a move to a lane writes: {status[, waiting_on | superseded_by]}, or null when the lane needs more first
+     (Waiting asks for a date, Superseded for the ticket that replaces it). */
+  function laneMove(lane, extra) {
+    const x = extra || {};
+    if (lane === 'blocked') return x.until ? {status: 'waiting', waiting_on: {kind: 'time', until: x.until}} : null;
+    if (lane === 'superseded') return x.by ? {status: 'dropped', superseded_by: x.by} : null;
+    if (lane === 'dropped') return {status: 'dropped', superseded_by: null};
+    return STATUS_WORD[lane] ? {status: lane} : null;
+  }
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status'};
 
@@ -637,5 +661,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });

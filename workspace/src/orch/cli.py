@@ -202,6 +202,15 @@ def _lookup(root: Path | None, tid: str) -> dict | None:
         return None
 
 
+def _ticket_name(root: Path, tid: str) -> str:
+    """KEY title, or the id alone when that ticket cannot be read here."""
+    try:
+        o = tickets.load(root, tid)
+    except (Refused, OSError, ValueError, KeyError):
+        return tid
+    return (f"{o['key']} " if o.get("key") else "") + str(o.get("title") or tid)
+
+
 def _show(t: dict, root: Path) -> str:
     t = history.shown_ticket(root, t)  # every person field as this machine can prove it (idempotent)
     open_q = [q for q in t["questions"] if q["answer"] is None]
@@ -210,9 +219,9 @@ def _show(t: dict, root: Path) -> str:
     if t.get("summary"):
         out.append(t["summary"])
     d, n = tickets.checks_done(t)
-    out.append(
-        f"Status: {tickets.STATUS_WORDS[t['status']]}" + (f" - {_progress(t)}" if _progress(t) else "")
-    )
+    out.append(f"Status: {tickets.status_word(t)}" + (f" - {_progress(t)}" if _progress(t) else ""))
+    if t["status"] == "dropped" and t.get("superseded_by"):
+        out.append(f"Replaced by: {_ticket_name(root, t['superseded_by'])}")
     if n and d == n:
         out.append(
             f"✓ All done · {_progress(t)}"
@@ -482,6 +491,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("status", parents=[common])
     x.add_argument("id")
     x.add_argument("status", choices=tickets.STATUSES)
+    x.add_argument(
+        "--superseded-by",
+        metavar="TICKET",
+        help="with dropped: the ticket that replaces this one (Superseded)",
+    )
     x.add_argument("--shown-tip", help=argparse.SUPPRESS)  # the review tip the person's page showed
     x = t.add_parser("edit", parents=[common])
     x.add_argument("id")
@@ -1023,7 +1037,7 @@ def run(args: argparse.Namespace) -> None:
         who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
         looked = _looked_at_this(root, args, args.id, args.status, person)
         hint = tickets.recheck_hint(root, args.id, args.status, who)
-        t = tickets.set_status(root, args.id, args.status, who)
+        t = tickets.set_status(root, args.id, args.status, who, superseded_by=args.superseded_by)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         if not hint and who.startswith("agent:"):
@@ -1035,7 +1049,7 @@ def run(args: argparse.Namespace) -> None:
         text = (
             tickets.REVIEW_MESSAGE
             if args.status == "done" and t["status"] == "review"
-            else shown.get("notice") or f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}"
+            else shown.get("notice") or f"{t['title']} - {tickets.status_word(t)}"
         )
         _out(args, shown, text)
     elif cmd == "ticket" and sub == "edit":

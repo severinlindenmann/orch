@@ -99,7 +99,7 @@ test('phone list: groups as short rows, Answer where the person is needed, steps
   const {c, groups} = listCtx(list);
   const out = c.phoneList(list);
   assert.match(out.attrs.className, /phone-only/);
-  assert.deepEqual(groups.map(g => g.title), ['Needs you', 'Working', 'To do']);
+  assert.deepEqual(groups.map(g => g.title), ['Needs you', 'Working', 'Backlog']);
   const need = groups[0].rows[0];
   assert.equal(need.key, 'WS-1');
   assert.match(need.fact, /^Question/);

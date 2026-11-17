@@ -37,7 +37,7 @@ def call(fn, *args):
         ("Status open -> active", "Moved to Working"),
         ("Check c2 done", "Finished a step"),
         ("Status active -> done", "Moved to Done"),
-        ("Patched status (status done -> open)", "Moved to To do"),
+        ("Patched status (status done -> open)", "Moved to Backlog"),
         ("Something the agent wrote", "Something the agent wrote"),
     ],
 )
@@ -371,7 +371,7 @@ def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     assert "ticketAttentionChip(t)" not in tree
     chip = src[src.index("function ticketAttentionChip") : src.index("const localDay")]
     assert "section === 'waiting' ? null" in chip  # Needs you is left out in the waiting section
-    assert "columnOf(status) === section) return null" in chip  # the status word is left out where it matches
+    assert "boardLane(t) === section)) return null" in chip  # the status word is left out where it matches
     nxt = src[src.index("function ticketNext") : src.index("function ticketMenu")]
     assert "'Question: '" in nxt and "text = 'Paused'" in nxt  # text only when it adds something
     assert (
@@ -478,7 +478,7 @@ def test_first_run_note_is_not_shown_as_an_answer():
 @pytest.mark.parametrize(
     "status,word",
     [
-        ("open", "To do"),
+        ("open", "Backlog"),
         ("ready", "To do"),
         ("active", "Working"),
         ("waiting", "Needs you"),
@@ -542,17 +542,19 @@ def test_one_chip_while_a_question_is_open(ticket, live, want):
 
 
 def test_the_move_to_control_is_a_visible_labelled_button():
-    """6A: one visible "Move to" button with four places; no chevron-only summary, no jargon in the choices."""
+    """6A: one visible "Move to" button; no chevron-only summary, no jargon in the choices. ORCH-152: Backlog and
+    Won't do join (owner's words)."""
     src = webjs.all_js()
     assert "status-sum-icon" not in src
     assert "'Move to'" in src
     assert [w for _, w in node_value("MOVE_CHOICES")] == [
+        "Backlog",
         "To do",
         "Working",
         "Check",
         "Done",
+        "Won't do",
     ]
-    assert "Backlog" not in src
 
 
 @node
@@ -647,6 +649,7 @@ def test_needs_you_count_words_match_the_phone(n, want):
 def test_groups_follow_the_lifecycle_and_old_phrases_are_gone():
     src = webjs.all_js()
     assert [w for _, w in node_value("STATUS_CHOICES")] == [
+        "Backlog",
         "To do",
         "Working",
         "Needs you",
@@ -675,17 +678,17 @@ def node_value(name):
 def test_one_label_per_status_single_sourced():
     """fb12: every label site reads the words from helpers.js; no second map of status words in app.js."""
     src = webjs.all_js()
-    for word in ("Ready to start", "Backlog"):
+    for word in ("Ready to start",):
         assert word not in src and word not in (WEB / "helpers.js").read_text()
-    for pair in ("open:'To do'", "active:'Working'", "review:'Check'", "done:'Done'"):
+    for pair in ("open:'Backlog'", "ready:'To do'", "active:'Working'", "review:'Check'", "done:'Done'"):
         assert pair not in src.replace(" ", "")
     words = node_value("STATUS_WORD")
-    assert words["ready"] == words["open"] == "To do" and words["waiting"] == "Needs you"
+    assert words["open"] == "Backlog" and words["ready"] == "To do" and words["waiting"] == "Needs you"
     assert all(
         w in src for w in ("DashHelpers.statusWord", "DashHelpers.STATUS_CHOICES", "DashHelpers.MOVE_CHOICES")
     )
     assert [s for s, _ in node_value("STATUS_CHOICES")] == node_value("STATUS_ORDER")
-    assert call("columnOf", "ready") == "open" and call("columnOf", "review") == "review"
+    assert call("columnOf", "ready") == "ready" and call("columnOf", "review") == "review"
 
 
 def test_home_row_is_one_link_and_the_review_chip_shows_once():
@@ -774,20 +777,90 @@ def test_footer_shows_the_relay_connection():
 @pytest.mark.parametrize(
     "status,word",
     [
-        ("open", "To do"),
+        ("open", "Backlog"),
         ("ready", "To do"),
         ("active", "Working"),
         ("waiting", "Needs you"),
         ("review", "Check"),
         ("done", "Done"),
-        ("dropped", "Dropped"),
+        ("dropped", "Won't do"),
     ],
 )
 @pytest.mark.parametrize("started", [None, False, True, 1])
 def test_status_words_started(status, word, started):
     expected = "Paused" if status in ("open", "ready") and started is True else word
     assert call("statusWord", status, started) == expected
-    assert call("columnOf", "ready") == "open"
+    assert call("columnOf", "ready") == "ready"
+
+
+@node
+def test_board_lanes_in_the_owners_words():
+    """ORCH-152 (owner, 17 Nov): Backlog, To do, Waiting, Won't do and Superseded join the board."""
+    assert [w for _, w in node_value("LANES")] == [
+        "Backlog",
+        "To do",
+        "Working",
+        "Needs you",
+        "Waiting",
+        "Check",
+        "Done",
+        "Won't do",
+        "Superseded",
+    ]
+
+
+@node
+@pytest.mark.parametrize(
+    "ticket,status,asks,lane",
+    [
+        ({"status": "open"}, None, False, "open"),
+        ({"status": "ready"}, None, False, "ready"),
+        ({"status": "active"}, None, False, "active"),
+        (
+            {"status": "active"},
+            "waiting",
+            False,
+            "blocked",
+        ),  # a live helper needs the person, no question: shown waiting
+        ({"status": "active"}, None, True, "waiting"),
+        ({"status": "waiting", "waiting_on": {"kind": "question", "ref": "q1"}}, None, False, "waiting"),
+        (
+            {"status": "waiting", "waiting_on": {"kind": "time", "until": "2030-01-01T09:00:00Z"}},
+            None,
+            False,
+            "blocked",
+        ),
+        ({"status": "waiting", "waiting_on": {"kind": "ticket", "ref": "t_abcdef"}}, None, False, "blocked"),
+        (
+            {"status": "waiting", "waiting_on": {"kind": "time", "until": "2030-01-01T09:00:00Z"}},
+            None,
+            True,
+            "waiting",
+        ),
+        ({"status": "review"}, None, False, "review"),
+        ({"status": "done"}, None, True, "done"),
+        ({"status": "dropped"}, None, False, "dropped"),
+        ({"status": "dropped", "superseded_by": "t_abcdef"}, None, False, "superseded"),
+    ],
+)
+def test_lane_of_a_ticket(ticket, status, asks, lane):
+    assert call("laneOf", ticket, status, asks) == lane
+
+
+@node
+def test_a_move_to_waiting_or_superseded_needs_its_detail_first():
+    assert call("laneMove", "blocked") is None and call("laneMove", "superseded") is None
+    assert call("laneMove", "blocked", {"until": "2030-01-01T08:00:00Z"}) == {
+        "status": "waiting",
+        "waiting_on": {"kind": "time", "until": "2030-01-01T08:00:00Z"},
+    }
+    assert call("laneMove", "superseded", {"by": "t_abcdef"}) == {
+        "status": "dropped",
+        "superseded_by": "t_abcdef",
+    }
+    assert call("laneMove", "dropped") == {"status": "dropped", "superseded_by": None}
+    assert call("laneMove", "ready") == {"status": "ready"}
+    assert call("laneMove", "nonsense") is None
 
 
 @node

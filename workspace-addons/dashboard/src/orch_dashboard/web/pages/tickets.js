@@ -49,7 +49,7 @@ function ticketParents(items) {
 const ticketWaitsOnly = t => window.DashHelpers.columnOf(shown(t).status) === 'waiting' && !questions(t).length;
 function ticketGroupOf(t) { return ticketWaitsOnly(t) ? 'blocked' : ticketColumn(t); }
 function ticketGroups(items) {
-  const groups = ['waiting', 'active', 'blocked', 'open', 'review', 'done'].map(status => ({status, title:status === 'blocked' ? blockedTitle(items) : window.DashHelpers.STATUS_WORD[status], tickets:[]}));
+  const groups = ['waiting', 'active', 'blocked', 'ready', 'open', 'review', 'done'].map(status => ({status, title:status === 'blocked' ? blockedTitle(items) : window.DashHelpers.STATUS_WORD[status], tickets:[]}));
   // ORCH-62: every ticket sits in the group of its OWN status, so a group's count is the rows it shows and equals its
   // filter. A part whose parent is in another group stands alone with a "Sub-ticket of <parent>" line.
   for (const t of items) groups.find(group => group.status === ticketGroupOf(t))?.tickets.push(t);
@@ -74,7 +74,7 @@ function ticketAttentionChip(t, section) {
   const status = shown(t).status;
   if (questions(t).length && status !== 'done') return section === 'waiting' ? null : chip('Needs you', 'attn');
   if (status === 'done') { const at = (typeof ticketDoneEvent === 'function' ? ticketDoneEvent(t)?.at : null) || t.done_at || t.updated_at; return at ? h('span', {className:'meta ticket-finished'}, 'Finished ' + localDay(at)) : null; }
-  if (section && window.DashHelpers.columnOf(status) === section) return null;
+  if (section && (window.DashHelpers.columnOf(status) === section || ticketGroupOf(t) === section || boardLane(t) === section)) return null;
   return statusChip(t);
 }
 const localDay = at => window.UI?.stamp ? window.UI.stamp(at, {time:false}) : '';
@@ -148,8 +148,8 @@ function ticketMenu(t, scope) {
   summary.className = 'btn ghost icon sm move-button';
   return menu;
 }
-// Status badge of a table row: icon + the shared word (To do, Working, Needs you, Check, Done).
-const STATUS_BADGE = {open:['○', 'todo'], active:['◉', 'working'], waiting:['!', 'needs'], blocked:['○', 'todo'], review:['◇', 'review'], done:['✓', 'done']};
+// Status badge of a table row: icon + the shared word (Backlog, To do, Working, Needs you, Waiting, Check, Done, ...).
+const STATUS_BADGE = {open:['○', 'todo'], ready:['○', 'todo'], active:['◉', 'working'], waiting:['!', 'needs'], blocked:['◷', 'todo'], review:['◇', 'review'], done:['✓', 'done'], dropped:['–', 'todo'], superseded:['→', 'todo']};
 function ticketColumn(t) { const status = shown(t).status; return questions(t).length && status !== 'done' ? 'waiting' : window.DashHelpers.columnOf(status); }
 // ORCH-62: the group says the status; a row carries a chip only when its helper is Idle or Stuck.
 function helperChip(t) {
@@ -210,8 +210,8 @@ function boardCard(t, nested = false, column = '') {
   const parts = boardChildren(tickets(), t);
   return h('article', {className:'card ticket-card' + (nested ? ' board-child' : ''), 'data-col':column || null, draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
     h('div', {className:'row'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t)),
-      snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', STATUS_CHOICES)))),
-    ticketAttentionChip(t, column),
+      snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', BOARD_MOVES)))),
+    ticketAttentionChip(t, column), waitsLine(t), replacedLine(t),
     !nested ? boardParentLine(t) : null,
     parts.length ? h('div', {className:'board-parts'},
       h('p', {className:'meta'}, (t.epic ? 'Epic · ' : 'Steps · ') + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
@@ -220,21 +220,91 @@ function boardCard(t, nested = false, column = '') {
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Steps done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length))) : null,
     ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'who'}, h('span', {className:'avatar', 'aria-hidden':'true'}, initials(t.owner)), name(t.owner)) : null, t.due ? h('span', {className:'due' + (overdue(t) && String(t.due).includes('T') ? ' bad' : '')}, dueText(t)) : null, quietLine(t), whenLine(t)));
 }
-const COLUMN_EMPTY = {open:'Nothing to start', active:'No helper is working right now', waiting:'No questions for you. All clear', review:'Nothing to check', done:'Finished tickets land here'};
+const COLUMN_EMPTY = {open:'New tickets land here', ready:'Nothing picked to do next', active:'No helper is working right now', waiting:'No questions for you. All clear',
+  blocked:'Nothing waits for a date', review:'Nothing to check', done:'Finished tickets land here', dropped:'Nothing set aside', superseded:'Nothing replaced by another ticket'};
+// ORCH-152: the lanes a card can move to from its menu (Needs you comes only from a helper's question).
+const BOARD_MOVES = window.DashHelpers.LANES.filter(([lane]) => lane !== 'waiting');
+const CAPPED_LANES = ['done', 'dropped', 'superseded'];  // long lanes at the end: 3 cards, then "Show N more"
+const boardLane = t => window.DashHelpers.laneOf(t, shown(t).status, questions(t).length > 0);
 function board() {
-  const visible = sorted(filteredTickets());
-  const cols = STATUS_CHOICES.map(([status, label]) => {
-    const mine = visible.filter(t => window.DashHelpers.columnOf(shown(t).status) === status);
+  // Won't do and Superseded tickets are hidden everywhere else; the board shows them in their own lanes.
+  const dropped = filterTickets(ticketParents(array(state?.tickets).filter(t => t.status === 'dropped')), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView());
+  const visible = sorted([...filteredTickets(), ...dropped]);
+  const cols = window.DashHelpers.LANES.map(([status, label]) => {
+    const mine = visible.filter(t => boardLane(t) === status);
     const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth);
-    const cap = status === 'done' && !boardMore.has('done') && !String(ticketSearch).trim() ? 3 : roots.length;  // a search shows every hit
+    const capped = CAPPED_LANES.includes(status) && roots.length > 3 && !String(ticketSearch).trim();  // a search shows every hit
+    const cap = capped && !boardMore.has(status) ? 3 : roots.length;
     const branch = row => h('div', {className:'board-family', 'data-key':'family-' + row.ticket.id}, boardCard(row.ticket, row.depth > 0, status),
       rows.filter(child => child.depth === row.depth + 1 && [row.ticket.id, row.ticket.key].includes(child.ticket.parent)).map(branch));
     return h('section', {className:'kanban-col' + (mine.length ? '' : ' col-collapsed'), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
       h('div', {className:'col-head'}, h('h2', {className:'grow'}, (STATUS_BADGE[status] || STATUS_BADGE.open)[0] + ' ' + label), h('span', {className:'status-count'}, String(mine.length))),
       h('div', {className:'col-body', 'data-key':'col-body-' + status}, roots.slice(0, cap).map(branch), !mine.length ? h('p', {className:'meta board-none', title:COLUMN_EMPTY[status]}, COLUMN_EMPTY[status]) : null,
-        status === 'done' && roots.length > 3 && !String(ticketSearch).trim() ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-key':'board-more'}, boardMore.has('done') ? 'Show fewer' : 'Show ' + (roots.length - 3) + ' more') : null));
+        capped ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-lane':status, 'data-key':'board-more-' + status}, boardMore.has(status) ? 'Show fewer' : 'Show ' + (roots.length - 3) + ' more') : null));
   });
   return h('div', {className:'board', 'data-key':'board'}, h('div', {className:'board-track', title:snapshot ? null : 'Drag a card to move it, or use its ⋯ menu'}, cols));
+}
+// "Replaced by ORCH-60" on a Superseded card.
+function replacedLine(t) {
+  if (t.status !== 'dropped' || !t.superseded_by) return null;
+  const other = ticketOf(t.superseded_by);
+  return h('p', {className:'meta ticket-sub', 'data-key':'replaced-' + t.id}, 'Replaced by ', other ? h('a', {href:href(other.id)}, other.key || clean(other.title)) : 'another ticket');
+}
+/* ORCH-152: a move to a lane. Waiting asks for the date it waits until, Superseded for the ticket that replaces it;
+   every other lane moves at once (with Undo). */
+function moveToLane(id, lane, from) {
+  const t = ticketOf(id);
+  if (!t || snapshot) return Promise.resolve();
+  if (lane === 'blocked') return askWaitUntil(t, from);
+  if (lane === 'superseded') return askReplacedBy(t, from);
+  const data = window.DashHelpers.laneMove(lane);
+  if (!data) return Promise.resolve();
+  const {status, ...more} = data;
+  if (lane === 'dropped' && t.status === 'dropped' && !t.superseded_by) return Promise.resolve();
+  return moveTicket(id, status, false, lane === 'dropped' && !t.superseded_by ? {} : {data:more});
+}
+// Quick choices for Waiting, all at 09:00 local time: one click each.
+function waitChoices(now = new Date()) {
+  const at = days => { const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days, 9, 0); return d; };
+  const monday = (8 - now.getDay()) % 7 || 7;
+  return [['Tomorrow', at(1)], ['Next Monday', at(monday)], ['In a week', at(7)]];
+}
+const utcStamp = d => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+function askWaitUntil(t, from) {
+  const {d, actions} = dialog('Wait until when?');
+  const done = until => { window.orch.close(d); return moveTicket(t.id, 'waiting', false, {data:{waiting_on:{kind:'time', until:utcStamp(until)}}}); };
+  const input = h('input', {className:'input', type:'datetime-local', id:'wait-until-' + t.id, 'data-key':'wait-until'});
+  const error = h('p', {className:'meta bad', role:'alert', hidden:true});
+  const quick = h('div', {className:'row wrap'}, waitChoices().map(([label, at]) => button(label + ' ' + (window.UI?.stamp ? window.UI.stamp(at) : ''), 'outline sm', () => done(at))));
+  const save = button('Wait', 'primary', () => {
+    const at = input.value ? new Date(input.value) : null;
+    if (!at || Number.isNaN(at.getTime()) || at <= new Date()) { error.textContent = 'Pick a day and time in the future.'; error.hidden = false; input.focus(); return; }
+    done(at);
+  });
+  actions.append(save);
+  d.append(h('div', {className:'stack'}, h('p', {className:'meta'}, clean(t.title)), quick,
+    h('label', {className:'field', for:input.id}, 'Or pick a day and time', input), error,
+    h('p', {className:'meta'}, 'On that day it shows on Home again.')), actions);
+  d.showModal();
+  return Promise.resolve();
+}
+function askReplacedBy(t, from) {
+  const {d, actions} = dialog('Which ticket replaces it?');
+  const others = sorted(tickets().filter(o => o.id !== t.id && activeTicket(o)));
+  const select = h('select', {className:'input', id:'replaced-by-' + t.id, 'data-key':'replaced-by'},
+    h('option', {value:''}, 'Choose a ticket'), others.map(o => h('option', {value:o.id}, (o.key ? o.key + ' ' : '') + clean(o.title))));
+  const error = h('p', {className:'meta bad', role:'alert', hidden:true});
+  const save = button('Move to Superseded', 'primary', () => {
+    if (!select.value) { error.textContent = 'Choose the ticket that replaces it.'; error.hidden = false; select.focus(); return; }
+    window.orch.close(d);
+    moveTicket(t.id, 'dropped', false, {data:{superseded_by:select.value}});
+  });
+  actions.append(save);
+  d.append(h('div', {className:'stack'}, h('p', {className:'meta'}, clean(t.title)),
+    h('label', {className:'field', for:select.id}, 'Replaced by', select), error), actions);
+  d.showModal();
+  select.focus();
+  return Promise.resolve();
 }
 const movePending = new Map();
 // Optimistic: the card moves and the notice (with Undo) shows at once; a failed save puts the card back.
@@ -243,29 +313,35 @@ function moveTicket(id, status, undoing = false, extra = {}) {
   const quiet = extra.quiet === true;  // the caller shows one toast for a whole batch
   if ('quiet' in extra) { extra = {...extra}; delete extra.quiet; }
   if (status === 'done' && !extra.review_tip) extra = {...extra, review_tip:'none'}; // this view showed no review tip
+  const more = extra.data || {};  // ORCH-152: a wait date or the replacing ticket, written with the status
+  if ('data' in extra) { extra = {...extra}; delete extra.data; }
   const t = ticketOf(id), lock = 'status-' + id;
-  if (!t || t.status === status || snapshot || locks.has(lock) || changeUnavailable()) return Promise.resolve();
+  const same = t && t.status === status && Object.keys(more).every(k => JSON.stringify(t[k] ?? null) === JSON.stringify(more[k]));
+  if (!t || same || snapshot || locks.has(lock) || changeUnavailable()) return Promise.resolve();
   const previous = t.status, revision = t.revision;
+  // Undo puts back what the lane needed: the wait of a waiting ticket, the replacing ticket of a Superseded one.
+  const before = previous === 'waiting' && t.waiting_on ? {waiting_on:t.waiting_on} : previous === 'dropped' && t.superseded_by ? {superseded_by:t.superseded_by} : {};
   locks.add(lock);
-  const set = value => { state.tickets = state.tickets.map(x => x.id === id ? {...x, status:value} : x); };
+  const set = (value, fields = {}) => { state.tickets = state.tickets.map(x => x.id === id ? {...x, status:value, ...(value !== 'waiting' ? {waiting_on:null} : {}), ...(value !== 'dropped' ? {superseded_by:undefined} : {}), ...fields} : x); };
   document.querySelectorAll('[data-key="ticket-' + id + '"],[data-key="family-' + id + '"]').forEach(n => n.classList.add('status-leaving'));
-  set(status);
+  set(status, more);
   const unfade = () => document.querySelectorAll('.status-leaving').forEach(n => n.classList.remove('status-leaving'));
   const fade = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160)).then(() => { unfade(); render(); });
-  const label = STATUS_CHOICES.find(([value]) => value === status)?.[1] || status;
+  const lanes = window.DashHelpers?.LANES, lane = lanes && window.DashHelpers.laneOf({...t, status, ...more}, status, false);
+  const label = (lanes && lanes.find(([id]) => id === lane)?.[1]) || STATUS_CHOICES.find(([value]) => value === status)?.[1] || status;
   const toast = quiet ? null : window.orch.toast(undoing ? 'Moved back' : 'Moved to ' + label, 'ok');
   if (!undoing && toast?.querySelector) {
     const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
-    undo.addEventListener('click', async () => { toast.remove(); await movePending.get(id); moveTicket(id, previous, true); });
+    undo.addEventListener('click', async () => { toast.remove(); await movePending.get(id); moveTicket(id, previous, true, {data:before}); });
     toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
   }
   const run = (async () => {
     let result;
-    try { result = await actRetry('ticket.patch', () => ({...extra, ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision}), () => { const now = ticketOf(id); return !!now && now.status === previous; }); }
+    try { result = await actRetry('ticket.patch', () => ({...extra, ticket:id, data:{status, ...more}, if_revision:(ticketOf(id) || t).revision || revision}), () => { const now = ticketOf(id); return !!now && now.status === previous; }); }
     catch (err) { result = {ok:false, status:0, text:String(err?.message || err)}; }
     await fade;
     locks.delete(lock);
-    if (!result.ok) { set(previous); toast?.remove?.(); window.orch.toast(changeError(result), 'error'); }
+    if (!result.ok) { set(previous, before); toast?.remove?.(); window.orch.toast(changeError(result), 'error'); }
     unfade();
     render();
   })();
@@ -273,7 +349,7 @@ function moveTicket(id, status, undoing = false, extra = {}) {
   run.finally(() => { if (movePending.get(id) === run) movePending.delete(id); });
   return run;
 }
-const GROUP_ORDER = ['waiting', 'review', 'active', 'blocked', 'open', 'done'];
+const GROUP_ORDER = ['waiting', 'review', 'active', 'blocked', 'ready', 'open', 'done'];
 const foldedGroups = new Set(), searchFolds = new Set();
 let foldSeen = false;
 // The group's main action for all its tickets: "Answer 2 questions" opens the first question, "Check 3 results" the first result.
@@ -315,7 +391,7 @@ function ticketTable(visible) {
 // One row: number and title, one fact, one thing on the right (Answer where the person is needed, else steps n/m or an
 // Idle/Stuck chip). A group shows its first PHONE_ROWS rows, then "n more".
 const PHONE_ROWS = 5, phoneMore = new Set();
-const SHORT_ICON = {waiting:'needs', review:'check', active:'working', blocked:'todo', open:'todo', done:'done'};
+const SHORT_ICON = {waiting:'needs', review:'check', active:'working', blocked:'todo', ready:'todo', open:'todo', done:'done'};
 function shortFact(t, row) {
   const ago = iso => iso && window.DashHelpers.ago ? window.DashHelpers.ago(iso, Date.now()) : '';
   if (questions(t).length && shown(t).status !== 'done') return 'Question' + (ago(t.updated_at) ? ' · ' + ago(t.updated_at) : '');
@@ -370,7 +446,7 @@ function phoneList(visible) {
 function list() {
   const visible = filteredTickets();
   const needN = typeof needsYouTotal === 'function' ? needsYouTotal() : 0;
-  const top = [heading('Tickets', 'Every ticket, from To do to Done.', {actions:needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null}), viewToggle()];
+  const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null}), viewToggle()];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {className:'wide-only', 'data-key':'board-wide'}, board()), window.UI?.shortGroup ? phoneList(visible) : null);
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),

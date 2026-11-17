@@ -34,8 +34,17 @@ STATUS_WORDS = {
     "waiting": "Waiting",
     "review": "Review",
     "done": "Done",
-    "dropped": "Dropped",
+    "dropped": "Won't do",
 }
+
+
+def status_word(t: dict) -> str:
+    """The word for a ticket's status; a dropped ticket another ticket replaces says Superseded."""
+    if t.get("status") == "dropped" and t.get("superseded_by"):
+        return "Superseded"
+    return STATUS_WORDS.get(t.get("status"), str(t.get("status")))
+
+
 OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 TAIL_MAX = 2048
@@ -47,7 +56,17 @@ RUNS_PER_CHECK = 45  # notes are not capped: only people write them, orch writes
 SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
-PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
+PATCH_FIELDS = (
+    "title",
+    "status",
+    "waiting_on",
+    "superseded_by",
+    "owner",
+    "due",
+    "note",
+    "done_when",
+    "summary",
+)
 VIA_RE = re.compile(r"^[a-z][a-z0-9-]{1,15}$")
 KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
 DOING_STALE_SECONDS = 2 * 3600
@@ -1353,12 +1372,44 @@ def recheck_hint(root: Path, tid: str, status: str, by: str) -> str | None:
     return RECHECK_HINT
 
 
-def set_status(root: Path, tid: str, status: str, by: str) -> dict:
+def superseded_value(root: Path, tid: str, other) -> str | None:
+    """The ticket that replaces `tid` (Superseded: Won't do because another ticket does the work). Its id,
+    from an id or a key; None clears. Refused for the ticket itself or a ticket that does not exist."""
+    if other is None or other == "":
+        return None
+    if not isinstance(other, str):
+        raise Refused("superseded_by is a ticket id or key, or null.")
+    oid = resolve(root, other.strip())
+    if not isinstance(oid, str) or not _ID_RE.fullmatch(oid) or not ticket_path(root, oid).is_file():
+        raise Refused(f"Ticket {other} doesn't exist. Run `orch ticket list` to see your tickets.")
+    if oid == tid:
+        raise Refused("A ticket cannot replace itself.")
+    return oid
+
+
+def _keep_superseded(ticket: dict, status: str, other: str | None, given: bool) -> None:
+    """superseded_by lives only on a dropped ticket: any other status clears it."""
+    if status != "dropped":
+        ticket.pop("superseded_by", None)
+    elif given:
+        if other:
+            ticket["superseded_by"] = other
+        else:
+            ticket.pop("superseded_by", None)
+
+
+def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | None = None) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
+    if superseded_by is not None and status != "dropped":
+        raise Refused("--superseded-by goes with the status dropped (Won't do).")
+    other = superseded_value(root, tid, superseded_by) if superseded_by is not None else None
 
     def op(ticket):
         target, actor = _finish_status(root, ticket, status, by)
+        _keep_superseded(ticket, target, other, superseded_by is not None)
+        if other and target == "dropped":
+            add_history(ticket, actor, f"Superseded by {other}")
         if target in ("open", "ready") and not actor.startswith("agent:"):
             ticket.pop("started", None)
         if target != "waiting":
@@ -3070,8 +3121,13 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         if not isinstance(w, dict) or set(w) - {"kind", "until", "ref"}:
             raise Refused("waiting_on is {kind, until} or {kind, ref}, or null.")
         w = waiting_value(str(w.get("kind")), w.get("ref"), w.get("until"))
+    if obj.get("superseded_by") and obj.get("status", "dropped") != "dropped":
+        raise Refused("superseded_by goes with the status dropped (Won't do).")
+    other = superseded_value(root, tid, obj.get("superseded_by")) if "superseded_by" in obj else None
 
     def op(ticket):
+        if other and "status" not in obj and ticket["status"] != "dropped":
+            raise Refused("superseded_by goes with the status dropped (Won't do).")
         if "title" in obj:
             if obj["title"].strip() != ticket.get("title"):
                 ticket.pop("title_auto", None)
@@ -3091,6 +3147,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             ticket["waiting_on"] = w
         if status != "waiting":
             ticket["waiting_on"] = None
+        _keep_superseded(ticket, status, other, "superseded_by" in obj)
         old, ticket["status"] = ticket["status"], status
         note = f" (status {old} -> {status})" if old != status else ""
         add_history(ticket, actor, "Patched " + ", ".join(sorted(obj)) + note)

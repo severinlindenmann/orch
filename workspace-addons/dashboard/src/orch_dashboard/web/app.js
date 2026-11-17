@@ -85,7 +85,8 @@ const age = value => {
 };
 const tickets = () => array(state?.tickets).filter(t => t.status !== 'dropped');
 const addons = () => array(state?.addons);
-const ticketOf = id => tickets().find(t => String(t.id) === String(id) || (typeof t.key === 'string' && t.key.toUpperCase() === String(id).toUpperCase()));
+// Every ticket, Won't do and Superseded too: their board cards open the ticket page and can move back.
+const ticketOf = id => array(state?.tickets).find(t => String(t.id) === String(id) || (typeof t.key === 'string' && t.key.toUpperCase() === String(id).toUpperCase()));
 const href = id => '#ticket/' + encodeURIComponent(id);
 const questions = t => array(t.questions).filter(q => q.answer == null);
 const activeTicket = t => !['done', 'dropped'].includes(t.status);
@@ -93,13 +94,15 @@ const overdue = t => window.DashHelpers.dueLate(t.due, t.status, now());
 const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.due ? date(t.due) : '');  // "Due 18:30" / "Late since 18:30", else the day
 const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
 const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
-const statusWord = t => window.DashHelpers.statusWord(t.status, t.started);
+// A ticket that only waits (a date, another ticket, the outside) says Waiting, not Needs you; Superseded says so.
+const statusWord = t => { const lane = window.DashHelpers.laneOf(t, t.status, questions(t).length > 0); return lane === 'blocked' ? 'Waiting' : lane === 'superseded' ? 'Superseded' : window.DashHelpers.statusWord(t.status, t.started); };
 const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
 const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
 const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };
 // Lifecycle order, one word per status: all from helpers.js.
 const STATUS_CHOICES = window.DashHelpers.STATUS_CHOICES, MOVE_CHOICES = window.DashHelpers.MOVE_CHOICES;
 const moveHome = status => status === 'waiting' ? 'active' : window.DashHelpers.columnOf(status);
+const laneHere = t => window.DashHelpers.laneOf(t, shown(t).status, questions(t).length > 0);
 const starting = new Set();
 // The one chip of a ticket: what the agent or the person has to do now ('' when nothing).
 function activityInfo(t) {
@@ -140,7 +143,8 @@ function activity(t, where = '') {
     open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
 }
 const reviewActions = t => !snapshot && t.status === 'review' ? h('div', {className:'row'}, [['done', 'Looks good'], ['active', 'Send back']].map(([status, label]) => h('button', {type:'button', className:'btn outline xs', 'data-action':'status-set', 'data-ticket':t.id, 'data-status':status}, label))) : null;
-const statusItems = (t, scope, choices = MOVE_CHOICES) => choices.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (moveHome(t.status) === value || t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':moveHome(t.status) === value || t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value}, label));
+const statusSel = (t, value) => value === 'blocked' || value === 'superseded' || (t.status === 'dropped' && value === 'dropped') ? laneHere(t) === value : t.status !== 'dropped' && (moveHome(t.status) === value || t.status === value);
+const statusItems = (t, scope, choices = MOVE_CHOICES) => choices.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (statusSel(t, value) ? ' sel' : ''), role:'menuitemradio', 'aria-checked':statusSel(t, value), 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value}, label));
 // The visible "Move to" control: a labelled button (Apple HIG: a control says what it does; WCAG 2.5.3 label in name).
 const statusControl = (t, scope) => {
   if (snapshot) return statusChip(t);
@@ -638,7 +642,7 @@ main.addEventListener('drop', event => {
   const id = dragging;
   dragging = '';
   main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target'));
-  moveTicket(id, col.dataset.status);
+  moveToLane(id, col.dataset.status, col);
 });
 main.addEventListener('change', async event => {
   const cap = event.target.closest('[data-key="settings-copies-max"]');
@@ -812,13 +816,13 @@ main.addEventListener('click', async event => {
     return;
   }
   if (action === 'task-toggle') { await toggleTask(control.dataset.ticket, control.dataset.check); return; }
-  if (action === 'status-set') { await moveTicket(control.dataset.ticket, control.dataset.status); return; }
+  if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
   if (action === 'view') {
     ticketView = control.dataset.view === 'board' ? 'board' : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
     render(); return;
   }
-  if (action === 'board-more') { if (boardMore.has('done')) boardMore.delete('done'); else boardMore.add('done'); render(); return; }
+  if (action === 'board-more') { const lane = control.dataset.lane || 'done'; if (boardMore.has(lane)) boardMore.delete(lane); else boardMore.add(lane); render(); return; }
   if (action === 'file-preview') { previewFile(control.dataset.ticket, control.dataset.kind, control.dataset.name); return; }
   if (action === 'new') ticketForm();
   if (action === 'inline') startInline(control);

@@ -99,8 +99,19 @@ AGENT = re.compile(r"[a-z][a-z0-9-]{1,31}")
 MAX_COMMAND = 500
 MAX_TASK = 500
 PERMISSIONS = ("ask", "auto", "full")
-PATCH_KEYS = ("title", "status", "owner", "due", "note", "done_when", "summary")
-STATUSES = ("open", "ready", "active", "waiting", "review", "done")
+PATCH_KEYS = (
+    "title",
+    "status",
+    "waiting_on",
+    "superseded_by",
+    "owner",
+    "due",
+    "note",
+    "done_when",
+    "summary",
+)
+STATUSES = ("open", "ready", "active", "waiting", "review", "done", "dropped")
+TICKET_REF = re.compile(r"t_[a-z0-9]{6,16}|[A-Za-z][A-Za-z0-9]{0,15}-[0-9]{1,9}")
 
 
 class BadRequest(Exception):
@@ -377,6 +388,23 @@ def _ticket_patch(a):
             raise BadRequest("That is not a status.")
         if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
             raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
+        # ORCH-152: the board's Waiting lane waits until a time; Superseded names the ticket that replaces it.
+        # The core checks the rest (a real time, a ticket that exists, only with dropped).
+        if (
+            k == "waiting_on"
+            and v is not None
+            and not (
+                isinstance(v, dict)
+                and set(v) == {"kind", "until"}
+                and v["kind"] == "time"
+                and isinstance(v["until"], str)
+            )
+        ):
+            raise BadRequest("A wait from the board is a time.")
+        if k == "superseded_by" and v is not None and not (isinstance(v, str) and TICKET_REF.fullmatch(v)):
+            raise BadRequest("That is not a ticket.")
+        if k in ("waiting_on", "superseded_by"):
+            continue
         if k not in ("status", "due"):
             _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)

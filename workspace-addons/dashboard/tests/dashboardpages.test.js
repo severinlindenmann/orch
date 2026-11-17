@@ -48,8 +48,9 @@ test('list groups have owner order and every ticket belongs to exactly one group
   items.push({id:'question',status:'active',questions:[{text:'Choose?'}]});
   const groups = context(items).ticketGroups(items);
   // ORCH-62: a waiting ticket without an open question is in its own group, not Needs you
-  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','Waiting','To do','Check','Done']);
-  assert.deepEqual(Array.from(groups, g => Array.from(g.tickets, t => t.id)), [['question'],['active'],['waiting'],['ready','open'],['review'],['done']]);
+  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','Waiting','To do','Backlog','Check','Done']);
+  // ORCH-152: To do (ready) and Backlog (open, where new tickets land) are two groups
+  assert.deepEqual(Array.from(groups, g => Array.from(g.tickets, t => t.id)), [['question'],['active'],['waiting'],['ready'],['open'],['review'],['done']]);
 });
 test('home renders one need card per ticket with question count and yellow chip', () => {
   const t = {id:'p',title:'Pick a plan',status:'active',questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
