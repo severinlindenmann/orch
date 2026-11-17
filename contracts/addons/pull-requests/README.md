@@ -42,7 +42,8 @@ set `login`; it takes only entries added by its own login. Per round: up to 5 wa
 one's repository and base branch, in line order. Merged already -> merged; closed, draft, base branch not allowed,
 changes requested or review required, own checks failed -> out with the reason; GitHub did not show it -> a
 counted try, unless GitHub does not answer at all (no view and no login): an outage uses up no tries, and the
-runner pauses instead of stopping when its login lookup gets no answer. An entry without a login leaves with the
+runner pauses instead of stopping when its login lookup gets no answer (after 30 minutes without one it stops
+with a log line; the next `queue add` or `--wait` starts a runner). An entry without a login leaves with the
 reason. A member whose own checks still run or are missing can still join: the checks of the group run on its code.
 
 Every member is looked at again (state open, not a draft, same base branch and allowed, same head commit, no
@@ -51,11 +52,14 @@ group pull request is opened, and right before the merge: the core waiter asks t
 before `gh pr merge`, after the wait for room. That last check also needs the group pull request itself still
 open, on the same head and the same allowed base branch, and gh still on the runner's login; a check that fails
 with an error stops the merge. Changes requested count from `reviewDecision` and from each reviewer's latest
-review (`reviewDecision` is empty when the base branch's rules require no reviews). A member that changed is taken out (closed, draft, base not allowed, review, Merge card) or
+decision in `reviews` (approved, changes requested or dismissed; a later comment does not take a change request
+back), because `reviewDecision` is empty when the base branch's rules require no reviews. A hold whose members
+did not change counts as a try. A member that changed is taken out (closed, draft, base not allowed, review, Merge card) or
 put back in line (new commit, another allowed base branch); a group that was stopped this way is closed and the
 rest wait again. One left: the core waiter
 (`orch.prwait.run_one`, merge on green). Several: a group commit built in a bare blobless copy
-(`git merge-tree --write-tree` + `git commit-tree`, nothing checked out), pushed to `orch-queue/<base>-<unix time>`,
+(`git merge-tree --write-tree` + `git commit-tree`, nothing checked out), pushed to `orch-queue/<base>-<unix time>-<workspace mark>` (6 hex characters of the workspace path, so two
+workspaces never share a branch),
 one pull request "Merge queue: #a, #b" whose body lists them and repeats their `Closes` references, merged by the
 core waiter with a merge commit; GitHub then marks the included pull requests merged. A conflicting one, a fork
 pull request, and one whose head moved since it was looked at never join a group (the first two run alone, the
@@ -71,3 +75,6 @@ next round; a branch that could not be deleted 5 times is left to a person with 
 deletes `orch-queue/*` branches it did not write down: two workspaces on one repository each keep their own. Group titles are
 written as code text, so words in a title never close issues; only GitHub's own closing references are repeated. Each verdict goes on the entry's ticket (history line and reference state). Every GitHub
 write takes a slot of `orch.ghlimit`.
+
+Known limit: a base branch whose rules require an approving review never merges a group pull request (nobody
+reviews it); its members end after 3 tries. The queue is meant for base branches without that rule.

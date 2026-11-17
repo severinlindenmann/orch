@@ -228,7 +228,8 @@ def test_a_green_group_merges_all_with_one_check_run(ws):
     r.run()
     assert len(calls) == 1 and gh.groups[calls[0]] == [1, 2, 3]
     assert states(ws) == {1: "merged", 2: "merged", 3: "merged"}
-    assert git.pushed == ["orch-queue/develop-1000"] and gh.deleted == ["orch-queue/develop-1000"]
+    assert len(git.pushed) == 1 and git.pushed[0].startswith("orch-queue/develop-1000-")
+    assert gh.deleted == git.pushed
     assert "Closes #101" in gh.bodies[0] and "#3 `Change 3`" in gh.bodies[0]
     assert all("with the group" in x["why"] for x in store.read(ws))
 

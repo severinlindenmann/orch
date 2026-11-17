@@ -115,7 +115,13 @@ def _run(root: Path) -> int:
         finally:
             store._drop_lock(_runner_lock(root))
         if not more:
-            print("Nothing waits in the merge queue for this runner.", flush=True)
+            other = len(store.waiting(root))
+            print(
+                f"Nothing waits for this runner; {other} wait for a runner on the GitHub login that added them."
+                if other
+                else "Nothing waits in the merge queue.",
+                flush=True,
+            )
             return 0
     if not ran:
         print("The merge queue runs already.")

@@ -29,6 +29,7 @@ goes on its ticket when it has one.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import time
 from pathlib import Path
 
@@ -39,6 +40,7 @@ MAX_GROUP = 5
 MAX_TRIES = 3
 PAUSE_SECS = 120  # before a group that hit trouble is tried again
 MARK_SECS = 60  # how long GitHub may take to mark the members of a merged group merged
+SILENT_SECS = 1800  # a login lookup without an answer this long: the runner stops (the next add starts one)
 TIDY_TRIES = 5  # failed deletes of one group branch before it is left to a person
 BY = "agent:merge-queue"
 NO_ROOM = "this computer's GitHub write limit had no room for the group"
@@ -67,13 +69,22 @@ class Runner:
         if not self.sign_in():
             return 0
         self.recover()
-        rounds = 0
+        rounds, silent = 0, 0
         while True:
             if rounds:  # the login is checked again before every round
                 now = self.gh.login()
                 if now is None:  # GitHub does not answer: wait, the entries keep their tries
+                    silent += PAUSE_SECS
+                    if silent >= SILENT_SECS:
+                        self.log(
+                            "GitHub has not said which login gh uses for 30 minutes; the merge queue stops."
+                        )
+                        return rounds
+                    if silent == PAUSE_SECS:
+                        self.log("GitHub does not say which login gh uses; the merge queue waits.")
                     self.sleep(PAUSE_SECS)
                     continue
+                silent = 0
                 if not settings.same_login(now, self.me):
                     self.log(f"gh now uses the login {now}, not {self.me}; the merge queue stops.")
                     self.me = None
@@ -292,8 +303,8 @@ class Runner:
         if o.ok and o.status == "merged":
             self.finish(e, MERGED, line, o.status)
         elif o.status == "held":
-            if self.check_members([dict(e, head=None)], base):  # fine again by now: next round
-                self.retry([e], o.line, count=False)
+            if self.check_members([dict(e, head=None)], base):  # held for another reason: a counted try
+                self.retry([e], o.line)
         elif o.status == "changed":
             store.back_to_front(
                 self.root, [e["url"]], "it got a new commit while its checks ran; waits again"
@@ -352,11 +363,13 @@ class Runner:
         return red
 
     def _check_group(self, repo: str, base: str, sha: str, inside: list[dict]) -> list[dict]:
-        branch = f"orch-queue/{base}-{int(self.clock())}"
+        # the workspace's own mark: two workspaces on one repository never share a group branch
+        mark = hashlib.sha256(str(self.root.resolve()).encode("utf-8")).hexdigest()[:6]
+        branch = f"orch-queue/{base}-{int(self.clock())}-{mark}"
         used = {g["branch"] for g in store.groups(self.root) if g["repo"] == repo}
         n = 2
         while branch in used:  # a group built again within the same second gets a branch of its own
-            branch, n = f"orch-queue/{base}-{int(self.clock())}-{n}", n + 1
+            branch, n = f"orch-queue/{base}-{int(self.clock())}-{mark}-{n}", n + 1
         if not self.take("other", f"{repo} push {branch}"):
             self.retry(inside, NO_ROOM, count=False)
             return []
@@ -403,7 +416,9 @@ class Runner:
             return []
         if o.status == "held":
             good = self.check_members(inside, base)
-            if good:
+            if len(good) == len(inside):  # no member changed: held for another reason, a counted try
+                self.retry(good, f"the group {url} was not merged: {o.line}")
+            elif good:
                 why = f"a pull request of the group {url} changed before the merge; waits again"
                 store.back_to_front(self.root, [e["url"] for e in good], why)
             return []
@@ -533,10 +548,15 @@ def admit(root: Path, gh, url: str) -> dict:
 
 def review_problem(v: dict) -> str | None:
     """Why the reviews stop a merge, or None. reviewDecision is set only when the base branch's rules require
-    reviews, so each reviewer's latest review counts too."""
+    reviews, so each reviewer's latest decision counts too: their last approving, change-requesting or dismissed
+    review (a later comment or reply does not take a change request back)."""
     bad = BAD_REVIEW.get(str(v.get("reviewDecision") or ""))
-    latest = v.get("latestReviews") or []
-    if bad is None and any(isinstance(r, dict) and r.get("state") == "CHANGES_REQUESTED" for r in latest):
+    last: dict[str, str] = {}
+    for r in v.get("reviews") or []:  # oldest first, as GitHub lists them
+        if isinstance(r, dict) and r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            who = str((r.get("author") or {}).get("login") or "") if isinstance(r.get("author"), dict) else ""
+            last[who.lower()] = r["state"]
+    if bad is None and "CHANGES_REQUESTED" in last.values():
         bad = BAD_REVIEW["CHANGES_REQUESTED"]
     return bad
 

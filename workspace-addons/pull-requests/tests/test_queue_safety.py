@@ -105,7 +105,7 @@ class World:
         n = int(u.rsplit("/", 1)[1])
         p = self.prs[n]
         return {"state": p["state"], "isDraft": p["isDraft"], "baseRefName": p["base"],
-                "reviewDecision": p["review"], "latestReviews": p.get("latest", []), "headRefOid": self.head(n), "number": n,
+                "reviewDecision": p["review"], "reviews": p.get("reviews", []), "headRefOid": self.head(n), "number": n,
                 "title": f"Change {n}", "isCrossRepository": False}  # fmt: skip
 
     def own_checks_failed(self, u):
@@ -232,13 +232,20 @@ def nothing_left_behind(ws: Path, w: World) -> None:
     assert w.open_groups() == [] and w.queue_branches() == [] and store.groups(ws) == []
 
 
+def _review(who: str, state: str) -> dict:
+    return {"author": {"login": who}, "state": state}
+
+
 # -- H1 / M4 / M5: a member that changed while its group ran ------------------------------------------------
 CHANGES = {
     "closed": lambda w, ws, cards: w.prs[1].update(state="CLOSED"),
     "draft": lambda w, ws, cards: w.prs[1].update(isDraft=True),
     "retargeted": lambda w, ws, cards: w.prs[1].update(base="release"),
     # develop's rules require no reviews: GitHub leaves reviewDecision empty, only the review itself says it
-    "changes requested": lambda w, ws, cards: w.prs[1].update(latest=[{"state": "CHANGES_REQUESTED"}]),
+    # and a later reply in a thread (a COMMENTED review of the same person) does not take it back
+    "changes requested": lambda w, ws, cards: w.prs[1].update(
+        reviews=[_review("x", "CHANGES_REQUESTED"), _review("x", "COMMENTED"), _review("y", "APPROVED")]
+    ),
     "review required": lambda w, ws, cards: w.prs[1].update(review="CHANGES_REQUESTED"),
     "merge card": lambda w, ws, cards: cards.update({runner.pr_key(url(1)): "ORCH-7"}),
 }
@@ -329,9 +336,9 @@ def test_the_queue_add_command_refuses_main_and_requested_changes(ws, world, mon
     world.prs[1]["base"] = "main"
     world.prs[2]["review"] = "CHANGES_REQUESTED"
     world.prs[3]["review"] = "REVIEW_REQUIRED"
-    world.prs[4]["latest"] = [{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}]
+    world.prs[4]["reviews"] = [_review("x", "CHANGES_REQUESTED"), _review("x", "COMMENTED")]
     assert cli.main(["queue", "add", url(4)]) == 2
-    world.prs[4]["latest"] = [{"state": "APPROVED"}]
+    world.prs[4]["reviews"] = [_review("x", "CHANGES_REQUESTED"), _review("x", "APPROVED")]
     assert cli.main(["queue", "add", url(1)]) == 2
     assert cli.main(["queue", "add", url(2)]) == 2
     assert cli.main(["queue", "add", url(3)]) == 2
@@ -416,7 +423,7 @@ def test_the_group_branch_is_written_down_before_its_push(ws, world, monkeypatch
 
     monkeypatch.setattr(Git, "push", push)
     make(ws, world).run()
-    assert seen == [["orch-queue/develop-1000"]]
+    assert len(seen) == 1 and len(seen[0]) == 1 and seen[0][0].startswith("orch-queue/develop-1000-")
     nothing_left_behind(ws, world)
 
 
@@ -518,6 +525,47 @@ def test_an_entry_without_a_login_leaves_with_the_reason(ws, world):
     add(ws, 2)
     make(ws, world).run()
     assert states(ws) == {1: "out", 2: "merged"} and "without a login" in why(ws, 1)
+
+
+def test_a_login_that_never_answers_again_stops_the_runner_with_a_line(ws, world):
+    add(ws, 1)
+    world.on_wait = lambda u: add(ws, 2) if u == url(1) else None
+    real = world.merge
+
+    def merge(u, head):
+        done = real(u, head)
+        if done and u == url(1):
+            world.down = 10**6  # gh is signed out for good
+        return done
+
+    world.merge = merge
+    logs: list[str] = []
+    make(ws, world, logs=logs).run()
+    assert states(ws) == {1: "merged", 2: "waiting"}
+    assert any("for 30 minutes" in x for x in logs)
+
+
+def test_a_hold_that_never_clears_uses_up_the_tries(ws, world, monkeypatch):
+    add(ws, 1, 2)
+    real = runner.Runner.why_not_group
+    monkeypatch.setattr(runner.Runner, "why_not_group", lambda self, u, b, h: "the group looks wrong")
+    make(ws, world).run()
+    monkeypatch.setattr(runner.Runner, "why_not_group", real)
+    assert states(ws) == {1: "out", 2: "out"} and f"after {runner.MAX_TRIES} tries" in why(ws, 1)
+    assert not world.landed(1) and not world.landed(2)
+    nothing_left_behind(ws, world)
+
+
+def test_two_workspaces_never_share_a_group_branch(tmp_path, world):
+    for name in ("ws-a", "ws-b"):  # both build their group in the same second (the fake clock)
+        root = tmp_path / name
+        (root / ".orch" / "tickets").mkdir(parents=True)
+        for n in (1, 2):
+            world.prs[n]["state"] = "OPEN"
+            store.add(root, url(n), None, "agent:t", base="develop", login="bot")
+        make(root, world).run()
+    branches = [g["branch"] for g in world.groups.values()]
+    assert len(branches) == 2 and len(set(branches)) == 2
 
 
 def test_a_real_red_member_still_leaves(ws, world):
