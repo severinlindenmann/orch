@@ -476,7 +476,7 @@
      connection and key (state.logins = orch.health.last). States: works | soon | renew | unreachable. */
   const NEED_KINDS = ['login', 'connection', 'key'];
   const needKind = item => NEED_KINDS.includes(item && item.kind) ? item.kind : 'login';
-  /* "Claude Code login", "Company wiki connection", "Payments key" (a label that already ends in its kind keeps it). */
+  /* "GitHub login", "Company wiki connection", "Payments key" (a label that already ends in its kind keeps it). */
   function needName(item) {
     const label = String((item && (item.label || item.name)) || '').trim(), kind = needKind(item);
     return label.toLowerCase() === kind || label.toLowerCase().endsWith(' ' + kind) ? label : (label + ' ' + kind).trim();
