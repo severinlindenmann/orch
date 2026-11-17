@@ -864,7 +864,8 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
                 raise Refused(f"{dest} holds files that are not orch's; orch will not replace it.")
             dest.rmdir()
         elif _is_legacy_orch_skill(dest, root):
-            _set_aside_legacy(dest, root)  # an older orch copied it without a marker: keep a copy, then replace
+            # an older orch copied it without a marker: keep a copy, then replace
+            _set_aside_legacy(dest, root)
         else:
             raise Refused(f"{dest} is not orch's; orch will not replace it. Nothing was changed there.")
     _link_dir(dest, target)
