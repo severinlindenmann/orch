@@ -2492,9 +2492,60 @@ def check_done(
 
 
 WONT_DO_AGENT = (
-    "Only a person marks a step as won't do. Ask them: orch ask {tid} \"Mark step {cid} as won't do?\" "
-    "--option yes --option no --check {cid}"
+    "Only a person marks a step as won't do. Ask them, and say where the step would run if they say no: "
+    'orch ask {tid} "Mark step {cid} as won\'t do?" --option "Yes, skip it" '
+    '--option "No, run it in CI" --check {cid}'
 )
+
+_WONT_DO_Q_RE = re.compile(r"\bwon'?t do\b|\bskip\b", re.IGNORECASE)
+_TEST_WORD_RE = re.compile(
+    r"\b(test|tests|tested|testing|pytest|try[- ]?out|trial|experiment)\b", re.IGNORECASE
+)
+
+
+def _guard_question(
+    root: Path, text: str, options: list[str], recommended: str | None, check: str | None
+) -> None:
+    """Two plain refusals (ORCH-332). A question never offers a protected (production) machine for a test.
+    A question that asks whether to skip a step must name where it would run if the answer is no (a bare
+    yes/no was once read as "run it now, on production")."""
+    parts = [text, *options, *([recommended] if recommended else [])]
+    machines = config.protected_machines(root)
+    if machines:
+        from orch import protected
+
+        names = protected.expand(machines)
+
+        def find(blob: str) -> str | None:
+            blob = blob.lower()
+            return next(
+                (
+                    n
+                    for n in sorted(names)
+                    if re.search(rf"(?<![a-z0-9.-]){re.escape(n)}(?![a-z0-9.-])", blob)
+                ),
+                None,
+            )
+
+        offered = find(" ".join(parts[1:]))  # an option or the recommended answer
+        mentioned = find(text) if _TEST_WORD_RE.search(text) else None
+        deploy = re.search(r"\b(release|deploy|deployment|ship)\b", text, re.IGNORECASE)
+        hit = mentioned or (offered if not deploy else None)
+        if hit:
+            raise Refused(
+                f"{hit} is a protected machine (production): a question never offers it for a test or as a "
+                "place to run something. Offer the CI job or a throwaway server, or skip the step."
+            )
+    if (
+        check is not None
+        and _WONT_DO_Q_RE.search(text)
+        and options
+        and all(o.strip().lower() in {"yes", "no", "y", "n"} for o in options)
+    ):
+        raise Refused(
+            "A question about skipping a step must say where it would run if the answer is no. "
+            'Use options such as "Yes, skip it" and "No, run it in CI", not a bare yes or no.'
+        )
 
 
 def _refuse_if_wont_do(item: dict, tid: str, cid: str) -> None:
@@ -3168,6 +3219,7 @@ def ask(
                 "A merge goes with a link card: orch ask --link TITLE --open <pull request> --merge."
             )
 
+    _guard_question(root, text, options, recommended, check)
     for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
         if _asks_for_secret(part):
             with contextlib.suppress(Exception):  # the attempt stays visible in the history

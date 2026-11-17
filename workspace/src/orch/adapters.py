@@ -462,9 +462,10 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     not_provable (#547); the reminder hooks stay."""
     a = load(name, root)
     rh, rec = a.get("reminder_hooks") or {}, a.get("record_hooks") or {}
+    guard = a.get("guard_hooks") or {}
     if _is_windows():
         rec = {}
-    if not rh and not rec:
+    if not rh and not rec and not guard:
         return None
     from orch import reminder_settings
 
@@ -483,6 +484,8 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     hooks: dict[str, list] = {event: [group(reminder)] for event in rh}
     for event in rec:  # every tool ("*"); its own group next to any other on the same event
         hooks.setdefault(event, []).append(group(recorder, "*"))
+    for event, matcher in guard.items():  # the protected-machines guard: only the shell tool, before it runs
+        hooks.setdefault(event, []).append(group(reminder_settings.guard_hook_command(name), matcher))
     return {"hooks": hooks}
 
 

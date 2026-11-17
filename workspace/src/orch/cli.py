@@ -1713,6 +1713,10 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
             s_.reconfigure(encoding="utf-8")
+    if argv[:1] == ["protected-check"] and "--hook" in argv:  # a tool's before-tool hook: always exit 0
+        from orch import protected
+
+        return protected.hook_main(argv, watchdog)
     if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
         return workcheck.hook_main(argv, watchdog)
     show_all = "--help-all" in argv
