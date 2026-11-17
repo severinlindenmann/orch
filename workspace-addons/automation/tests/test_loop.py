@@ -709,7 +709,7 @@ def test_failed_wake_start_is_retried_a_few_times_then_left(ws):
     assert load_state(ws)["t_wake021"]["wake_tries"] == 0
     s.tick(T(8, 3))  # too soon
     assert load_state(ws)["t_wake021"]["wake_tries"] == 0
-    (ws / 'ended-t_wake021').write_text('')  # no run holds the ticket
+    (ws / "ended-t_wake021").write_text("")  # no run holds the ticket
     for minute in (6, 12, 18, 24, 30):
         s.tick(T(8, minute))
     assert load_state(ws)["t_wake021"]["wake_tries"] == 3  # three retries, then only Try again / Continue

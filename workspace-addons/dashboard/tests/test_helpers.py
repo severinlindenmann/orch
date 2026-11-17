@@ -81,7 +81,8 @@ def test_need_action_per_kind():
     a = lambda r: call("needAction", r)["label"]
     assert a({"kind": "question", "answer": {"options": []}}) == "Answer"
     assert a({"kind": "x-addon:ask", "answer": {"options": ["Yes"]}}) == "Review"
-    assert a({"kind": "overdue-wait", "ticket": "t_a"}) == "Open"
+    assert a({"kind": "overdue-wait", "ticket": "t_a"}) == "Continue"  # ORCH-255
+    assert a({"kind": "overdue-wait"}) == "Open"
     assert a({"kind": "x-addon:stopped", "tone": "bad", "ticket": "t_a"}) == "Run again"
 
 

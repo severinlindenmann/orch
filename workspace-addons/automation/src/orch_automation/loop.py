@@ -400,7 +400,10 @@ class Scheduler:
             if until and until <= now and (fresh or again):
                 res = self.start_due(tid, "wait time reached", now)
                 update_state(
-                    self.root, tid, last_wake=w.get("until"), wake_at=fmt(now),
+                    self.root,
+                    tid,
+                    last_wake=w.get("until"),
+                    wake_at=fmt(now),
                     wake_tries=0 if fresh else mine.get("wake_tries", 0) + 1,
                 )  # also after a failure: retried WAKE_RETRIES times, then only "Try again"
                 if res != "failed":  # clear the wait only after core took the run (SA-15)
