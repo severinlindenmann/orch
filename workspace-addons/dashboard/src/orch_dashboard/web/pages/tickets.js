@@ -16,9 +16,11 @@ function savedView() {
 // ticketAddress builds it from the shown state (one place), syncTicketAddress adopts it when it was changed from outside (reload, Back, a shared link).
 function ticketAddress(over = {}) {
   const view = 'view' in over ? over.view : savedView(), q = 'q' in over ? over.q : String(ticketSearch).trim(), layout = 'layout' in over ? over.layout : ticketView;
+  const who = 'who' in over ? over.who : ticketPerson;
   const p = new URLSearchParams();
   if (view) p.set('view', view);
   if (q) p.set('q', q);
+  if (who) p.set('who', who);
   if (layout === 'board') p.set('layout', 'board');
   const text = p.toString();
   return '#tickets' + (text ? '?' + text : '');
@@ -31,7 +33,7 @@ function writeTicketAddress() {
 }
 function ticketAddressPart() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
-  return (p.get('q') || '') + '|' + (p.get('layout') === 'board' ? 'board' : '');
+  return (p.get('q') || '') + '|' + (p.get('who') || '') + '|' + (p.get('layout') === 'board' ? 'board' : '');
 }
 function syncTicketAddress() {
   const key = ticketAddressPart();
@@ -39,13 +41,16 @@ function syncTicketAddress() {
   ticketAddressKey = key;
   const full = String(location.hash || ''), at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
   if (ticketSearch !== (p.get('q') || '')) { ticketSearch = p.get('q') || ''; searchFolds.clear(); }
+  ticketPerson = p.get('who') || '';
   if (p.get('layout') === 'board') ticketView = 'board';
   else if (at < 0 || !p.has('layout')) { try { ticketView = localStorage.getItem('orch.tickets.view') === 'board' ? 'board' : 'list'; } catch (_) { ticketView = 'list'; } }
 }
 const changesPending = t => t?.bring_back?.state === 'waiting';
 function inView(t, view, nowMs = Date.now()) {
   const status = window.DashHelpers.columnOf(shown(t).status);
-  if (view === 'needs-you') return (status !== 'done' && (questions(t).length > 0 || status === 'review')) || changesPending(t);
+  // ORCH-236: exactly what the one Needs you number counts (open questions and results to check), so the header and the
+  // filter agree; changes waiting to be added show on Home and on the card, not here.
+  if (view === 'needs-you') return status !== 'done' && (questions(t).length > 0 || status === 'review');
   if (view === 'working') return status === 'active';
   if (view === 'backlog') return status === 'open';
   if (view === 'done-today') { const at = new Date(window.DashHelpers.doneAt(t)); return status === 'done' && at.toDateString() === new Date(nowMs).toDateString(); }
@@ -59,9 +64,10 @@ function filterTickets(items, query, mine, me = '', person = '', view = '', grou
     (!needle || keyMatch(t, needle) || [t.title, /^#?\d+$/.test(needle) ? '' : t.key, t.owner, t.note].some(value => String(value || '').toLowerCase().includes(needle))));
 }
 // ORCH-58: "58" or "ORCH-58" finds that ticket by its number (exact, so 58 is not ORCH-158); words search the text.
+// ORCH-236: the key typed without its dash ("orch58", "orch 58") finds it too.
 function keyMatch(t, needle) {
-  const key = String(t.key || '').toLowerCase(), digits = needle.replace(/^#/, '');
-  return !!key && (/^\d+$/.test(digits) ? key.split('-').pop() === String(Number(digits)) : key === needle);
+  const key = String(t.key || '').toLowerCase(), digits = needle.replace(/^#/, ''), flat = v => v.replace(/[\s-]+/g, '');
+  return !!key && (/^\d+$/.test(digits) ? key.split('-').pop() === String(Number(digits)) : key === needle || flat(key) === flat(needle));
 }
 function boardChildren(all, t) {
   return window.DashHelpers.childrenOf ? window.DashHelpers.childrenOf(all, t) : all.filter(child => child.id !== t.id && child.parent && (child.parent === t.id || child.parent === t.key));
@@ -123,22 +129,53 @@ function ticketSelect(label, key, choices, value, onChange) {
 const SAVED_VIEWS = 'orch.tickets.saved';
 function savedViews() { try { const v = JSON.parse(localStorage.getItem(SAVED_VIEWS) || '[]'); return Array.isArray(v) ? v.filter(x => x && typeof x.label === 'string') : []; } catch (_) { return []; } }
 function writeSavedViews(list) { try { localStorage.setItem(SAVED_VIEWS, JSON.stringify(list.slice(0, 6))); } catch (_) { /* no storage: nothing is kept */ } }
-function applySaved(v) { ticketSearch = v.search || ''; ticketPerson = v.person || ''; ticketMine = false; location.hash = ticketAddress({view:v.view || '', q:ticketSearch.trim()}); render(); }
+function applySaved(v) { ticketSearch = v.search || ''; ticketPerson = v.person || ''; ticketGroup = v.group || ''; ticketMine = false; location.hash = ticketAddress({view:v.view || '', q:ticketSearch.trim(), who:ticketPerson}); render(); }
+// ORCH-236: what a saved view keeps, compared to what is shown now (the active saved chip, a second save of the same view).
+const viewState = () => ({view:savedView(), search:String(ticketSearch).trim(), person:ticketPerson, group:ticketGroup});
+const sameView = (v, now) => (v.view || '') === now.view && String(v.search || '').trim() === now.search && (v.person || '') === now.person && (v.group || '') === now.group;
+// A name the person types (never a copy of a chip's name): new, or a rename of saved view `old`. Refused: empty or taken.
+function nameSavedView(suggest, old = null) {
+  const {d, actions} = dialog(old ? 'Rename view' : 'Save this view');
+  const input = h('input', {className:'input', id:'saved-view-name', maxlength:40, 'data-key':'saved-view-name', placeholder:'For example: My open work'});
+  input.value = suggest || '';
+  const error = h('p', {className:'meta bad', role:'alert', hidden:true});
+  const save = button(old ? 'Rename' : 'Save', 'primary', () => {
+    const label = input.value.trim().replace(/\s+/g, ' ');
+    const taken = TICKET_VIEWS.some(([, text]) => text.toLowerCase() === label.toLowerCase()) || savedViews().some(v => (!old || v.label !== old.label) && v.label.toLowerCase() === label.toLowerCase());
+    if (!label || taken) { error.textContent = label ? 'A view with this name exists. Choose another name.' : 'Give the view a name.'; error.hidden = false; input.focus(); return; }
+    const list = savedViews();
+    if (old) { const at = list.findIndex(v => v.label === old.label); if (at >= 0) list[at] = {...list[at], label}; }
+    else list.push({label, ...viewState()});
+    writeSavedViews(list); window.orch.close(d); window.orch.toast((old ? 'Renamed: ' : 'Saved: ') + label, 'ok'); render();
+  });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } });
+  actions.append(save);
+  d.append(h('div', {className:'stack'}, h('label', {className:'field', for:input.id}, 'Name', input), error), actions);
+  window.orch.open(d); input.focus(); input.select?.();
+}
+function deleteSavedView(v) {
+  writeSavedViews(savedViews().filter(x => x.label !== v.label));
+  window.orch.toast('Deleted: ' + v.label, 'ok'); render();
+}
 function viewChips() {
-  const current = savedView(), filtered = !!(ticketSearch || ticketPerson);
+  const current = savedView(), now = viewState(), filtered = !!(now.search || now.person || now.group);
   const chip = (label, active, attrs) => h('a', Object.assign({className:'chip view-chip' + (active ? ' active' : ''), 'aria-current':active ? 'true' : null}, attrs), label);
-  const own = savedViews().map((v, i) => { const c = chip(v.label, false, {href:'#tickets', 'data-key':'saved-view-' + i}); c.addEventListener('click', e => { e.preventDefault(); applySaved(v); }); return c; });
-  const label = ticketSearch || (ticketPerson && (name(ticketPerson) || ticketPerson)) || ([...TICKET_VIEWS, ...LINK_VIEWS].find(([id]) => id === current) || [])[1] || '';
-  const save = h('button', {type:'button', className:'chip view-chip add', 'data-key':'save-view', disabled:filtered || current ? null : '', 'aria-label':'Save this view'}, '+ Save view');
-  save.addEventListener('click', () => { if (!label) return; const list = savedViews().filter(v => v.label !== label); list.push({label, view:current, search:ticketSearch, person:ticketPerson}); writeSavedViews(list); render(); });
+  const mine = savedViews(), activeSaved = mine.find(v => sameView(v, now));
+  const own = mine.map((v, i) => { const c = chip(v.label, v === activeSaved, {href:'#tickets', 'data-key':'saved-view-' + i}); c.addEventListener('click', e => { e.preventDefault(); applySaved(v); }); return c; });
+  // The name offered is only a start (the search words or the person); a chip's own name is never copied.
+  const suggest = now.search || (now.person && (name(now.person) || now.person)) || '';
+  const save = activeSaved || !(filtered || current) ? null : h('button', {type:'button', className:'chip view-chip add', 'data-key':'save-view', 'aria-label':'Save this view'}, '+ Save view');
+  save?.addEventListener('click', () => nameSavedView(suggest));
+  const manage = activeSaved && !snapshot ? [button('Rename', 'ghost sm', () => nameSavedView(activeSaved.label, activeSaved)), button('Delete', 'ghost sm', () => deleteSavedView(activeSaved))] : null;
+  manage?.forEach((b, i) => { b.setAttribute('data-key', i ? 'saved-view-delete' : 'saved-view-rename'); b.setAttribute('aria-label', (i ? 'Delete view ' : 'Rename view ') + activeSaved.label); });
   return h('div', {className:'view-chips row', role:'group', 'aria-label':'Ticket views', 'data-key':'view-chips'},
-    TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered, {href:ticketAddress({view:id}), 'data-key':'view-chip-' + (id || 'all')})), own, save);
+    TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered && !activeSaved, {href:ticketAddress({view:id}), 'data-key':'view-chip-' + (id || 'all')})), own, save, manage);
 }
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); writeTicketAddress(); render(); });
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
-  const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; render(); }) : null;
+  const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
   const all = tickets(), heads = all.filter(t => all.some(c => c.parent === t.id || (c.parent && c.parent === t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
   const group = heads.length || ticketGroup ? ticketSelect('Group', 'ticket-group', [['', 'All groups'], ...heads.map(t => [t.id, clean(t.title).slice(0, 40)])], ticketGroup, value => { ticketGroup = value; render(); }) : null;
   return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];

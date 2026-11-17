@@ -228,3 +228,75 @@ test('ORCH-156: a failed save puts the cards back and says why', async () => {
   assert.deepEqual(c.laneTickets('ready').map(t => t.id), ['a', 'b']);
   assert.deepEqual(toasts[0], ['Saving did not work.', 'error']);
 });
+
+// ---- ORCH-236 (bug hunt round 2 on the Tickets page and the ticket page)
+test('ORCH-236: the Needs you view lists exactly what the Needs you number counts', () => {
+  const items = [{id:'q', status:'waiting', questions:[{id:'q1', text:'Which?'}]}, {id:'r', status:'review'},
+    {id:'d', status:'done', bring_back:{state:'waiting'}}, {id:'a', status:'active', bring_back:{state:'waiting'}}, {id:'w', status:'active'}];
+  const c = listCtx({tickets:() => items});
+  const rows = [{id:'core:q', ticket:'q', answer:{question:'q1'}}];
+  const counted = helpers.needsYouCount(rows, items.filter(t => t.status === 'review'));
+  assert.equal(items.filter(t => c.inView(t, 'needs-you')).length, counted, 'header number = filter rows');
+});
+test('ORCH-236: a key typed without its dash finds the ticket ("dem36", "dem 36"); 36 is still exact', () => {
+  const c = listCtx();
+  const items = [{id:'a', key:'DEM-36', title:'Big'}, {id:'b', key:'DEM-136', title:'Other'}];
+  const hits = q => c.filterTickets(items, q, false).map(t => t.id).join();
+  assert.equal(hits('dem36'), 'a');
+  assert.equal(hits('DEM 36'), 'a');
+  assert.equal(hits('dem-36'), 'a');
+  assert.equal(hits('36'), 'a');
+});
+function savedCtx(stored = [], hash = '#tickets') {
+  const store = {'orch.tickets.saved':JSON.stringify(stored)}, dialogs = [], toasts = [];
+  const node = (tag, attrs = {}, ...kids) => { const n = h(tag, attrs, ...kids); n.listeners = {}; n.addEventListener = (k, f) => { n.listeners[k] = f; }; n.append = (...more) => n.children.push(...more.flat(Infinity).filter(Boolean)); n.focus = () => {}; n.select = () => {}; return n; };
+  const c = listCtx({h:node, URLSearchParams, location:{hash}, history:{replaceState(_, __, next) { c.location.hash = next; }},
+    localStorage:{getItem:k => store[k] ?? null, setItem:(k, v) => { store[k] = v; }},
+    dialog:title => { const d = node('dialog', {}, title), actions = node('div'); dialogs.push(d); return {d, actions}; },
+    button:(label, cls, fn) => { const b = node('button', {className:'btn ' + cls}, label); b.onclick = fn; b.click = () => fn(); return b; }});
+  c.window.orch = {open() {}, close() {}, toast:(t) => toasts.push(t)};
+  return {c, store, dialogs, toasts, saved:() => JSON.parse(store['orch.tickets.saved'] || '[]')};
+}
+const find = (n, key) => nodes(n).find(x => x.attrs?.['data-key'] === key);
+test('ORCH-236: + Save view asks for a name (never copies a chip name) and refuses a taken one', () => {
+  const {c, dialogs, saved} = savedCtx([], '#tickets?view=working');
+  const save = find(c.viewChips(), 'save-view');
+  save.listeners.click();
+  assert.equal(dialogs.length, 1, 'a name dialog opens; nothing is saved yet');
+  assert.deepEqual(saved(), []);
+  const input = find(dialogs[0], 'saved-view-name'), ok = nodes(dialogs[0]).find(n => n.tag === 'button' && text(n) === 'Save');
+  assert.equal(input.value, '', 'the chip name "Working" is not offered as the name');
+  input.value = 'Working'; ok.click();
+  assert.deepEqual(saved(), [], 'a built-in chip name is refused');
+  input.value = '  My open work '; ok.click();
+  assert.deepEqual(saved().map(v => [v.label, v.view]), [['My open work', 'working']]);
+});
+test('ORCH-236: the active saved view can be renamed and deleted; no second Save of the same view', () => {
+  const {c, dialogs, saved} = savedCtx([{label:'Invoices', view:'', search:'invoice', person:''}], '#tickets?q=invoice');
+  c.syncTicketAddress();
+  const chips = c.viewChips();
+  assert.equal(find(chips, 'saved-view-0').attrs.className.includes('active'), true);
+  assert.equal(find(chips, 'save-view'), undefined);
+  find(chips, 'saved-view-rename').click();
+  const input = find(dialogs[0], 'saved-view-name');
+  assert.equal(input.value, 'Invoices');
+  input.value = 'Bills'; nodes(dialogs[0]).find(n => n.tag === 'button' && text(n) === 'Rename').click();
+  assert.deepEqual(saved().map(v => v.label), ['Bills']);
+  find(c.viewChips(), 'saved-view-delete').click();
+  assert.deepEqual(saved(), []);
+});
+test('ORCH-236: the Person filter is kept in the address and read back from it', () => {
+  const {c} = savedCtx();
+  assert.match(vm.runInContext("ticketPerson = 'anna'; ticketAddress()", c), /who=anna/);
+  c.location.hash = '#tickets?who=ben';
+  vm.runInContext('syncTicketAddress()', c);
+  assert.equal(vm.runInContext('ticketPerson', c), 'ben');
+});
+test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an empty Add says so', () => {
+  assert.match(ticketSrc, /act\('check\.edit', \{ticket:t\.id, check:task\.id, text, was:task\.text\}\)/);
+  assert.match(ticketSrc, /taskAct\('check\.move', \{ticket:t\.id, check:before\.id, after:task\.id\}\)/, 'up = the one above moves after this one');
+  assert.match(ticketSrc, /taskAct\('check\.move', \{ticket:t\.id, check:task\.id, after:after\.id\}\)/);
+  assert.match(ticketSrc, /taskAct\('check\.remove', \{ticket:t\.id, check:task\.id\}\)/);
+  assert.match(ticketSrc, /if \(!text\) \{ window\.orch\.toast\('Type the task first\.', 'error'\)/);
+  assert.match(ticketSrc, /\['activity', 'Activity', ticketHistoryEntries\(t, 'All'\)\.length\]/, 'the tab count is every entry, not the People/Helper choice');
+});

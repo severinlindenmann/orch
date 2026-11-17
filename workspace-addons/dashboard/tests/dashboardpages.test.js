@@ -555,7 +555,7 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   const c = context(items);
   const ids = (view, person = '') => c.filterTickets(items, '', false, '', person, view).map(t => t.id).join();
   assert.equal(ids('working'), 'w');
-  assert.equal(ids('needs-you'), 'r,d');
+  assert.equal(ids('needs-you'), 'r', 'ORCH-236: a Done ticket with changes to add is not counted in Needs you, so it is not in the view either');
   assert.equal(ids('done-week'), 'd');
   assert.equal(ids('done-today'), 'd');
   assert.equal(ids('', 'ben'), 'r,o');

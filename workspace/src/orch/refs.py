@@ -304,7 +304,9 @@ def detect(root: Path, tid: str, value: str, kind=None, title=None, kinds=(), *,
         if data is None:
             raise Refused("That artifact does not exist as a regular file.")
         return dict(kind="artifact", ticket=owner, name=name)
-    if "://" in value:
+    # "javascript:alert(1)", "mailto:x" or "ftp://x" are web-style addresses this field does not take (ORCH-236); a
+    # one-letter drive ("C:/x") and a file line ("notes.md:12") are still files.
+    if "://" in value or re.match(r"[a-z][a-z0-9+.-]+:(?![0-9]+$)", value, re.I):
         raise Refused("A web reference starts with https:// or http://.")
     value = value.replace("\\", "/")
     line = None
