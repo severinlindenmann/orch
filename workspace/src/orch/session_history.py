@@ -114,7 +114,11 @@ def read(agent: str, sid: str, environ: dict | None = None) -> dict:
 def sessions(ticket: dict, environ: dict | None = None) -> list[dict]:
     """The ticket's recorded sessions, newest first, each with its first line."""
     out = []
+    entries = []
     for s in ticket.get("sessions") or []:
+        entries.append({**s, "current": True})
+        entries += [{**e, "agent": s.get("agent"), "host": s.get("host")} for e in s.get("earlier") or []]
+    for s in entries:
         sid, agent = s.get("id"), s.get("agent")
         if not valid_session_id(sid) or not isinstance(agent, str):
             continue
@@ -129,6 +133,7 @@ def sessions(ticket: dict, environ: dict | None = None) -> list[dict]:
                 "title": " ".join(first.split())[:100],
                 "turns": len(h["turns"]),
                 "readable": h["found"],
+                "current": bool(s.get("current")),
             }
         )
     out.sort(key=lambda x: x.get("last_used") or "", reverse=True)

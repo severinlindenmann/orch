@@ -3237,6 +3237,13 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
         sessions = t.setdefault("sessions", [])
         for s in sessions:
             if s.get("agent") == agent and s.get("host") == host:
+                if s.get("id") != sid and valid_session_id(s.get("id")):
+                    # keep the replaced conversation so a person can read or continue it later
+                    old = [e for e in s.get("earlier") or [] if isinstance(e, dict) and e.get("id") != sid]
+                    old.insert(0, {"id": s["id"], "last_used": s.get("last_used")})
+                    s["earlier"] = old[:20]
+                elif s.get("earlier"):
+                    s["earlier"] = [e for e in s["earlier"] if e.get("id") != sid]
                 s["id"], s["last_used"] = sid, now()
                 break
         else:

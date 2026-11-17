@@ -84,6 +84,9 @@ def add_parsers(sub, common) -> None:
             x.add_argument("--session-id", help="the tool's session id")
         if name == "history":
             x.add_argument("--session", help="show this earlier session (default: list the earlier sessions)")
+            x.add_argument(
+                "--continue", dest="resume", action="store_true", help="the next run continues --session"
+            )
         if name in ("claim", "session", "argv", "start"):
             x.add_argument("--agent", help="which agent (default: the one chosen for this folder)")
         if name == "claim":
@@ -403,9 +406,20 @@ def _history(args, root: Path, tid: str) -> None:
         ]
         _out(args, {"sessions": rows}, "\n".join(lines) or "No earlier chat sessions on this ticket.")
         return
-    rec = next((s for s in t.get("sessions") or [] if s.get("id") == args.session), None)
+    rec = next((r for r in session_history.sessions(t) if r["id"] == args.session), None)
     if rec is None:
         raise Refused("That session does not belong to this ticket. List them: orch run history <ticket>")
+    if args.resume:
+        if not str(args.by or tickets.current_actor()).startswith("human:"):
+            raise Refused("Only a person can pick the conversation a helper continues.")
+        run = runs.read(root, tid)
+        if run and isinstance(run.get("pid"), int) and runs.state(run) == "alive":
+            raise Refused("A helper is working on this ticket. Stop it first, then continue the other chat.")
+        if not rec["readable"]:
+            raise Refused("That conversation is not on this computer, so it cannot be continued.")
+        tickets.record_session(root, tid, rec["agent"], args.session, runs.host())
+        _out(args, {"continued": args.session}, "The next run continues that conversation.")
+        return
     h = session_history.read(rec["agent"], args.session)
     if not h["found"]:
         raise Refused("The history of that session is not on this computer.")

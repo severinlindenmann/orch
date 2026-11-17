@@ -126,6 +126,14 @@ def _run_start(a):
     return ["run", "start", _t(a)], (["--fresh"] if _flag(a.get("fresh")) else []), []
 
 
+def _session_continue(a):
+    _only(a, ("ticket", "session"))
+    sid = a.get("session")
+    if not isinstance(sid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", sid):
+        raise BadRequest("That is not a session id.")
+    return ["run", "history", _t(a)], ["--session", sid, "--continue"], []
+
+
 def _run_stop(a):
     _only(a, ("ticket",))
     return ["run", "stop", _t(a)], [], []
@@ -279,6 +287,7 @@ OPS = {
     "answer": _answer,
     "run.start": _run_start,
     "run.stop": _run_stop,
+    "session.continue": _session_continue,
     "run.send": _run_send,
     "run.take_back": _run_take_back,
     "check.add": _check_add,

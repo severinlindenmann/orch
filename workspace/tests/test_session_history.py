@@ -76,3 +76,27 @@ def test_sessions_list_newest_first(tmp_path):
     rows = session_history.sessions(t, _env(tmp_path))
     assert [r["id"] for r in rows] == ["gone-1", CODEX, SID]
     assert rows[0]["readable"] is False and rows[2]["title"] == "Fix the login"
+
+
+def test_record_session_keeps_and_continue_switches(proj, run, new_ticket, tmp_path, monkeypatch):
+    from orch import runs, tickets
+
+    root = tmp_path
+    tid = new_ticket()
+    for sid in ("s-one", "s-two"):
+        tickets.record_session(root, tid, "claude", sid, runs.host())
+    s = tickets.load(root, tid)["sessions"][0]
+    assert s["id"] == "s-two" and [e["id"] for e in s["earlier"]] == ["s-one"]
+    code, out, _ = run("run", "history", tid, "--json")
+    assert code == 0 and [r["id"] for r in json.loads(out)["sessions"]] == ["s-two", "s-one"]
+    # a helper may not pick; a person may, but only a conversation that is on this computer
+    code, _, err = run("run", "history", tid, "--session", "s-one", "--continue", "--by", "agent:x")
+    assert code == 2
+    code, _, err = run("run", "history", tid, "--session", "s-one", "--continue", "--by", "human:p")
+    assert code == 2 and "not on this computer" in err
+    _w(tmp_path / "cfg" / "projects" / "-p" / "s-one.jsonl", [{"type": "mode"}])
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    code, out, err = run("run", "history", tid, "--session", "s-one", "--continue", "--by", "human:p")
+    assert code == 0, err
+    s = tickets.load(root, tid)["sessions"][0]
+    assert s["id"] == "s-one" and [e["id"] for e in s["earlier"]] == ["s-two"]

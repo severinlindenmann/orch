@@ -59,7 +59,11 @@
         if (!view.childNodes.length) view.append(h('p', {class: 'muted', text: 'This session has no messages.'}));
         view.hidden = false; btn.textContent = 'Hide';
       }});
-      box.append(h('div', {class: 'fx-session-fact'}, h('span', {class: 'muted', text: label}), btn), view);
+      const go = r.current || !r.readable ? null : h('button', {class: 'btn ghost xs', text: 'Continue this one', onclick: async () => {
+        const a = await S.act('session.continue', {ticket: TID, session: r.id});
+        if (a.ok) { toast('Your next message continues this conversation.', 'ok'); earlierAt = 0; earlier(box); } else toast(a.message || 'Could not switch.', 'err');
+      }});
+      box.append(h('div', {class: 'fx-session-fact'}, h('span', {class: 'muted', text: label + (r.current ? ' (in use)' : '')}), h('span', {}, btn, go)), view);
     }
     box.hidden = false;
   }

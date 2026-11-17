@@ -19,3 +19,15 @@ def test_one_session_passes_its_id_after_a_flag(server, fake_orch):
 def test_bad_ticket_id_is_not_a_route(server):
     st, _, _ = req(server, "GET", "/api/t/x;rm/sessions")
     assert st == 404
+
+
+def test_continue_builds_one_fixed_argv():
+    from orch_focus import actions
+
+    argv = actions.build_argv("session.continue", {"ticket": TID, "session": "abc-1"})
+    assert argv[:6] == ["run", "history", TID, "--session", "abc-1", "--continue"]
+    import pytest
+
+    for bad in ("../x", "a b", "", None):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("session.continue", {"ticket": TID, "session": bad})
