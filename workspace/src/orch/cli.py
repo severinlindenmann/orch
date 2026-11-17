@@ -335,7 +335,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
