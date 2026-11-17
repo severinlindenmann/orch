@@ -848,3 +848,15 @@ a.helper-title:hover{text-decoration:underline}
 .short-row.child{padding-left:var(--s7)}
 a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-decoration:underline}
 .short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
+/* phone width (ORCH-136): a table block row is a card: first cell is the name line, the other cells show "label: value" below, the buttons sit in one row at the end */
+@media(max-width:720px){
+.blk-table,.blk-table tbody,.blk-table tr,.blk-table td{display:block;min-width:0}
+.blk-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.blk-table tr{padding:12px 16px;border-bottom:1px solid var(--border)}
+.blk-table.data-table td{padding:2px 0;border:0;white-space:normal;overflow-wrap:anywhere;width:auto;height:auto;min-height:0;line-height:20px}
+.blk-table.data-table td:first-child{font-weight:500;padding-bottom:4px}
+.blk-table.data-table td[data-label]:not(:first-child):before{content:attr(data-label) ": ";color:var(--text-muted)}
+.blk-table.data-table td.cell-actions,.blk-table.data-table td.cell-toggle{display:inline-flex;align-items:center;margin:8px 8px 0 0;padding:0;vertical-align:middle}
+.blk-table.data-table td.cell-actions .row{flex-wrap:wrap}
+.table-wrap table.blk-table{min-width:0}
+}
