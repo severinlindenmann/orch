@@ -368,6 +368,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     from orch import lookreview
 
     look = lookreview.on(root)
+    own = lookreview.own(root) if look else set()
     state = _read_state(root)
     actions = []
     in_review = set()
@@ -381,7 +382,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             continue  # decided already and nothing changed since
         facts = [facts_of(u) for u in pr_urls(root, t)]
         res = decide(root, t, facts, int(mine.get("back") or 0))
-        if look and res["verdict"] == "leave":  # bigger work: the second look may take it (ORCH-175)
+        if look and res["verdict"] == "leave" and tid not in own:  # bigger work: a second look (ORCH-175)
             res = lookreview.triage(t, facts, res, int(mine.get("back") or 0)) or res
         row = {"ticket": tid, "key": t.get("key") or tid, **res, "done": False}
         if res["verdict"] == "wait" or dry_run:

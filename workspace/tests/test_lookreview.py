@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pytest
 
-from orch import lookreview, reviewer, runs, tickets
+from orch import lookreview, reviewer, runs, tickets, worktrees
 
 PR = "https://github.com/acme/app/pull/12"
 CSS = "workspace-addons/dashboard/src/orch_dashboard/web/pages/home.css"
@@ -151,7 +151,8 @@ def test_only_a_person_turns_it_on(proj, run):
 def test_accept_marks_done_for_the_owner_with_the_points(proj, run, new_ticket, facts, on, monkeypatch):
     tid = _finished(proj, run, new_ticket)
     reviewer.run(proj)
-    monkeypatch.setenv("ORCH_TICKET", lookreview.read_state(proj)["open"]["ticket"])
+    helper = lookreview.read_state(proj)["open"]["ticket"]
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda root: helper)  # the helper's live run
     code, out, _ = run("review", "verdict", tid, "accept", "top bar fits at 1280, 1920 and 390",
                        "--point", "the top bar fits one row: shown")  # fmt: skip
     assert code == 0 and "accepted for you" in out
@@ -207,13 +208,17 @@ def test_verdict_refusals(proj, run, new_ticket, facts, on, monkeypatch):
         lookreview.verdict(proj, tid, "accept", "fine", ["the top bar fits one row: missing at 390"])
     with pytest.raises(tickets.Refused, match="one line"):
         lookreview.verdict(proj, tid, "accept", "  ")
-    monkeypatch.setenv("ORCH_TICKET", tid)
-    with pytest.raises(tickets.Refused, match="its own ticket"):
-        lookreview.verdict(proj, tid, "accept", "x")
-    monkeypatch.setenv("ORCH_TICKET", other)
-    with pytest.raises(tickets.Refused, match="Only the second-look helper"):
+    monkeypatch.setenv("ORCH_TICKET", lookreview.read_state(proj)["open"]["ticket"])
+    with pytest.raises(tickets.Refused, match="Only the second-look helper"):  # forged: no live run
         lookreview.verdict(proj, tid, "accept", "x")
     monkeypatch.delenv("ORCH_TICKET")
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda root: tid)
+    with pytest.raises(tickets.Refused, match="its own ticket"):
+        lookreview.verdict(proj, tid, "accept", "x")
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda root: other)
+    with pytest.raises(tickets.Refused, match="Only the second-look helper"):
+        lookreview.verdict(proj, tid, "accept", "x")
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda root: None)
     run("config", "set", "workflow.reviewer_look", "off", "--by", "human:tester")
     with pytest.raises(tickets.Refused, match="off here"):
         lookreview.verdict(proj, tid, "accept", "x")
@@ -242,3 +247,16 @@ def test_dry_run_starts_nothing(proj, run, new_ticket, facts, on, starts):
     assert code == 0 and "would be in line for a second look" in out
     assert starts == [] and lookreview.read_state(proj)["line"] == {}
     assert tickets.load(proj, tid)["status"] == "review"
+
+
+def test_its_own_second_look_ticket_is_never_queued(proj, run, new_ticket, facts, on, starts):
+    tid = _finished(proj, run, new_ticket)
+    reviewer.run(proj)
+    helper = lookreview.read_state(proj)["open"]["ticket"]
+    lookreview.verdict(proj, tid, "leave", "x")
+    assert run("check", "done", helper, "c1", "--note", "gave the verdict", "--by", "human:tester")[0] == 0
+    tickets.set_status(proj, helper, "review", "human:tester")
+    reviewer.run(proj)
+    assert helper not in lookreview.read_state(proj)["line"]
+    assert _lines(proj, helper)[-1].startswith("Left for you by the Reviewer: ")
+    assert len(starts) == 1

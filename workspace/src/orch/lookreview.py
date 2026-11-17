@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from orch.errors import Refused
 BATCH = 5  # tickets per second-look helper
 PER_DAY = 4  # second-look helpers a day at most
 STATE_MAX = 256 * 1024
+MINE_MAX = 50  # second-look tickets remembered as its own
 PICTURE = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 VERDICTS = ("accept", "back", "leave")
 QUEUED_LINE = "Waits for a second look by the Reviewer: "
@@ -110,7 +110,8 @@ def _state_path(root: Path) -> Path:
 
 
 def read_state(root: Path) -> dict:
-    """{"line": {tid: {why, at}}, "open": {ticket, items: [tid]} | None, "starts": {day: n}}"""
+    """{"line": {tid: {why, at}}, "open": {ticket, items: [tid]} | None, "starts": {day: n}, "mine": [tid]}
+    (mine: the second-look tickets it opened, never looked at again by the second look itself)"""
     try:
         p = _state_path(root)
         data = json.loads(p.read_text(encoding="utf-8")) if p.stat().st_size <= STATE_MAX else {}
@@ -121,7 +122,18 @@ def read_state(root: Path) -> dict:
     line = data.get("line") if isinstance(data.get("line"), dict) else {}
     opened = data.get("open") if isinstance(data.get("open"), dict) else None
     starts = data.get("starts") if isinstance(data.get("starts"), dict) else {}
-    return {"line": {k: v for k, v in line.items() if isinstance(v, dict)}, "open": opened, "starts": starts}
+    mine = (
+        [x for x in data.get("mine") or [] if isinstance(x, str)]
+        if isinstance(data.get("mine"), list)
+        else []
+    )
+    line = {k: v for k, v in line.items() if isinstance(v, dict)}
+    return {"line": line, "open": opened, "starts": starts, "mine": mine[-MINE_MAX:]}
+
+
+def own(root: Path) -> set[str]:
+    """The second-look tickets this role opened (they come to Review too, with no pull request)."""
+    return set(read_state(root)["mine"])
 
 
 def _write_state(root: Path, st: dict) -> None:
@@ -211,6 +223,7 @@ def tend(root: Path, dry_run: bool = False, now: datetime | None = None) -> list
     except Exception as e:  # noqa: BLE001 - busy, paused or no agent: the ticket waits in line
         how = f"helper not started yet ({' '.join(str(e).split())[:100]})"
     st["open"] = {"ticket": rid, "ticket_key": t.get("key") or rid, "items": todo}
+    st["mine"] = [*st["mine"], rid][-MINE_MAX:]
     st["starts"] = {day: started + 1}
     _write_state(root, st)
     return [*out, f"opened second look {t.get('key') or rid} on {', '.join(keys)}; {how}"]
@@ -235,12 +248,17 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
     st = read_state(root)
     if tid not in st["line"]:
         raise Refused("This ticket is not waiting for a second look.")
-    me = os.environ.get("ORCH_TICKET")
-    mine = (st["open"] or {}).get("ticket")
-    if me and me == tid:
+    from orch import worktrees
+
+    nobody = "Only the second-look helper or a person gives a verdict."
+    try:  # a person (no agent signs at all), or an agent tied to its live run record: never forged variables
+        me = worktrees._agent_ticket(root)
+    except Refused:
+        raise Refused(nobody) from None
+    if me is not None and me == tid:
         raise Refused("A helper cannot give its own ticket a verdict.")
-    if me and me != mine:
-        raise Refused("Only the second-look helper or a person gives a verdict.")
+    if me is not None and me != (st["open"] or {}).get("ticket"):
+        raise Refused(nobody)
     if _status(root, tid) != "review":
         raise Refused("This ticket is not in Review.")
     if pts:
