@@ -443,6 +443,7 @@ iframe.loading{opacity:0}
 .swipe-head{min-height:0;overflow:auto}.swipe-head:has(+ .swipe-preview:not(.plain)){max-height:45%}/* a picture below keeps its room; text and plain answers give the question all the space left (ORCH-137) */
 .swipe-head .swipe-text{color:var(--text);white-space:pre-line;max-width:75ch;overflow-wrap:anywhere}
 .swipe-head .swipe-about,.swipe-head h3{max-width:75ch}
+.swipe-preview .doc>*,.swipe-zoomed .doc>*{max-width:75ch;overflow-wrap:anywhere}
 .swipe-sug{font-size:12px;line-height:16px;font-weight:500;color:var(--brand);border:1px solid var(--brand);border-radius:999px;padding:0 6px;white-space:nowrap}
 .swipe-act .act-sug{justify-self:center;margin-top:-2px}
 .swipe-act.suggested .ring{box-shadow:0 0 0 3px var(--bg),0 0 0 5px var(--brand)}
