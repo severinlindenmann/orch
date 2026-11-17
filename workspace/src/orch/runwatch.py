@@ -439,8 +439,8 @@ SUGGESTION = "(greyed-out suggestion from the tool, not typed: {text})"
 
 
 def _suggestion(raw: list[str], rows: list[str]) -> str | None:
-    """ORCH-190: a tool may show a greyed-out suggestion for the next message in its empty prompt box (Claude
-    Code: "go ahead", "check if the PR merged"). Without its colour it reads like a message typed but never
+    """ORCH-190: a tool may show a greyed-out suggestion for the next message in its empty prompt box (for
+    example "go ahead", "check if the PR merged"). Without its colour it reads like a message typed but never
     sent. When the last prompt row holds only such hint-styled text, that row is rewritten in place (rows) to
     say so, and the suggestion is returned; None when there is none or any doubt."""
     for i in range(len(raw) - 1, -1, -1):
