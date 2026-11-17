@@ -21,8 +21,8 @@ without a setup nothing runs on a schedule.
      "accounts": {"command": ["cswap", "list", "--json"], "cap_pct": 95},
      "parent": "ORCH-75"}
 
-Repeats are always checked: a repeat (ext.automation of a ticket, written by the automation add-on)
-whose planned next run (next_run) is more than max(late_min, one interval, at most a day) in the past
+Repeats are always checked: a repeat (any add-on's ticket data that carries a planned next run,
+ext.<add-on>.next_run) whose next_run is more than max(late_min, one interval, at most a day) in the past
 has stopped. Accounts are checked only with a command: it prints JSON, never text for people, either
 orch's own shape
 {"accounts": [{"week_pct": 97, "week_resets_at": "<ISO time>"}]} or the switcher shape (usage.sevenDay.pct);
@@ -295,7 +295,7 @@ class Probes:
         from orch import tickets
 
         try:
-            return [t for t in tickets.list_all(self.root) if _sched(t).get("recurring") is True]
+            return [t for t in tickets.list_all(self.root) if _sched(t)]
         except (Refused, OSError):
             return []
 
@@ -326,8 +326,12 @@ class Probes:
 
 
 def _sched(t: dict) -> dict:
-    a = (t.get("ext") or {}).get("automation") if isinstance(t, dict) else None
-    return a if isinstance(a, dict) else {}
+    """The ticket data of the add-on that repeats this ticket: the first ext entry with a next_run."""
+    ext = t.get("ext") if isinstance(t, dict) else None
+    for a in ext.values() if isinstance(ext, dict) else []:
+        if isinstance(a, dict) and a.get("next_run"):
+            return a
+    return {}
 
 
 def _when(ts) -> datetime | None:
@@ -352,7 +356,7 @@ def overdue_repeats(rows: list[dict], now: datetime, late_min: float) -> list[di
     out = []
     for t in rows:
         a = _sched(t)
-        if a.get("recurring") is not True or a.get("paused") is True:
+        if not a or a.get("paused") is True:
             continue
         if t.get("status") not in (*REPEAT_OPEN, "done"):
             continue
@@ -480,7 +484,7 @@ def checks(cfg: dict, p: Probes, mem: dict) -> list[dict]:
             f"repeat-{r['ticket']}",
             f"Repeat stopped: {r['title'] or r['key']}",
             f"The repeat on {r['key']} ({r['title']}) should have run at {_utc(r['planned'])}. {last_s} "
-            "Look whether the automation runs (orch automation status) and whether the repeat is still "
+            "Look whether the add-on that starts repeats still runs and whether the repeat is still "
             "wanted; pause or turn it off when it is not.",
         )
 

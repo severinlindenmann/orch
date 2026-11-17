@@ -475,7 +475,7 @@ def test_paused_closed_unplanned_and_not_repeating_are_left_out():
         _rep("t_p", old, paused=True),
         _rep("t_d", old, status="dropped"),
         _rep("t_n", None),
-        _rep("t_r", old, recurring=False),
+        {"id": "t_r", "status": "open", "ext": {"automation": {"cron": "* * * * *", "last_run": old}}},
         _rep("t_f", "not a time"),
         {"id": "t_plain", "status": "open"},
         _rep("t_done", old, status="done"),  # a finished repeat still runs again: counted
