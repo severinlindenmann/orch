@@ -475,6 +475,27 @@ function loadArtifacts(t, selected) {
     if (JSON.stringify(data) !== before && route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) render();
   });
 }
+// A finished ticket with a merged pull request: is the change in the orch installed here? (ORCH-87) orch works it
+// out from the merge commit and the installed release (GET /api/release); no answer = no line.
+const releaseData = new Map();
+const RELEASE_MARK = {installed:['ok', '✓'], released:['warn', '!'], merged:['none', '–']};
+function loadRelease(t) {
+  if (snapshot || typeof fetch !== 'function' || !['review', 'done'].includes(t.status)) return;
+  const hit = releaseData.get(t.id);
+  if (hit?.busy || (hit && Date.now() - hit.at < 60000)) return;
+  releaseData.set(t.id, {...hit, busy:true});
+  fetch('/api/release?ticket=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    const before = JSON.stringify(releaseData.get(t.id)?.data);
+    releaseData.set(t.id, {at:Date.now(), data});
+    if (JSON.stringify(data) !== before && route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) render();
+  });
+}
+function ticketReleaseLine(t) {
+  const r = ['review', 'done'].includes(t.status) ? releaseData.get(t.id)?.data : null;
+  if (!r || typeof r.text !== 'string' || !RELEASE_MARK[r.state]) return null;
+  const [cls, glyph] = RELEASE_MARK[r.state];
+  return h('p', {className:'ticket-proof-line ticket-release', 'data-key':'ticket-release-' + t.id}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', h('span', {className:'grow'}, clean(r.text)));
+}
 const proofRows = t => array(t.checklist).flatMap(task => array(task.evidence).map(ev => ({task, ev})))
   .sort((a, b) => (Date.parse(b.ev.at) || 0) - (Date.parse(a.ev.at) || 0));
 const referenceRows = t => array(t.refs).filter(r => r && (['ticket', 'artifact', 'file'].includes(r.kind) || webLinks(t).includes(r))).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
@@ -1525,6 +1546,7 @@ function detail(t) {
   const run = state.runs?.[t.id], sessions = array(t.sessions);
   const parent = window.DashHelpers.parentOf(tickets(), t), children = window.DashHelpers.childrenOf(tickets(), t);
   loadArtifacts(t, selected === 'files');
+  loadRelease(t);
   const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
@@ -1543,6 +1565,7 @@ function detail(t) {
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
+    ticketReleaseLine(t),
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
     working && !helperLive ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,

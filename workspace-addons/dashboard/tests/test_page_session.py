@@ -882,6 +882,32 @@ def test_settings_update_button_needs_a_session_and_starts_the_detached_update(l
     assert started["argv"] == ["update"]
 
 
+def test_release_endpoint_gives_the_line_of_a_finished_ticket(live, monkeypatch):
+    root, port = live
+    from orch import released, tickets
+
+    t = tickets.create(root, "Suggest button", "human:t")
+    seen = []
+
+    def line(ticket):
+        seen.append(ticket.get("id"))
+        return {"state": "installed", "release": 30, "text": "In release 30 (installed here)"}
+
+    monkeypatch.setattr(released, "ticket_release", line)
+
+    def get(q):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.request("GET", "/api/release" + q, headers={"Host": f"127.0.0.1:{port}"})
+        r = c.getresponse()
+        return r.status, json.loads(r.read())
+
+    assert get("?ticket=" + t["id"]) == (200, line({"id": t["id"]}))
+    assert get("?ticket=../../etc") == (200, None)  # only a ticket id is looked up
+    assert get("?ticket=t_missing00") == (200, None)  # no such ticket: no line, no error
+    assert get("") == (200, None)
+    assert seen == [t["id"], t["id"]]
+
+
 def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
     _, port = live
     from orch import updateinfo
