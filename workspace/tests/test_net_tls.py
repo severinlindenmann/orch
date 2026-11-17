@@ -8,6 +8,7 @@ import ipaddress
 import ssl
 import sys
 import threading
+import time
 
 import pytest
 from cryptography import x509
@@ -77,7 +78,15 @@ def untrusted_server(tmp_path):
 def test_an_untrusted_certificate_is_refused_before_the_token_is_sent(untrusted_server, monkeypatch):
     url, seen = untrusted_server
     sleeps = []
-    monkeypatch.setattr(net.time, "sleep", sleeps.append)
+    mine, real_sleep = threading.get_ident(), time.sleep
+
+    def sleep(seconds):  # time.sleep is global: a thread an earlier test left must not land in this list
+        if threading.get_ident() == mine:
+            sleeps.append(seconds)
+        else:
+            real_sleep(seconds)
+
+    monkeypatch.setattr(net.time, "sleep", sleep)
     net._tls.cache_clear()
     with pytest.raises(Refused, match="security certificate is not valid for 127.0.0.1") as e:
         net.call("GET", url + "/health", headers={"Authorization": "Bearer tok_secret"}, timeout=10)

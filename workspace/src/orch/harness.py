@@ -210,7 +210,7 @@ def _git_exclude(root: Path) -> tuple[Path, str] | None:
         if sg.git_on_path():
             print("orch: git excludes skipped: no git that orch trusts was found.", file=sys.stderr)
         return None
-    rc, raw, _ = sg.run_bytes(["rev-parse", "--show-toplevel", "--git-path", "info/exclude"], root, 10)
+    rc, raw, _ = _rev_parse(sg, root, ("rev-parse", "--show-toplevel", "--git-path", "info/exclude"))
     if rc != 0:
         return None
     out = raw.decode("utf-8", "surrogateescape").splitlines()
@@ -362,6 +362,58 @@ def _safegit():
 is_tracked = _tracked  # public: other modules ask whether git tracks a file
 
 
+_REV_PARSE: dict = {}  # folder -> (state key, answer): git is asked again whenever the key changes
+_REV_PARSE_MAX = 256
+
+
+def _git_state_key(root: Path):
+    """What decides git's answer to "is this inside a work tree", read with plain stats (no process): for the
+    folder and every parent, the .git entry (a real folder only) with its config and HEAD. None = cannot tell
+    cheaply (a .git file or link, an odd entry, a GIT_ variable): then git is asked every time."""
+    key = [tuple(sorted((k, v) for k, v in os.environ.items() if k.startswith("GIT_")))]
+    try:
+        base = root.absolute()
+        for d in (base, *base.parents):
+            try:
+                st = os.lstat(d / ".git")
+            except FileNotFoundError:
+                key.append(None)
+                continue
+            if not os.path.isdir(d / ".git") or os.path.islink(d / ".git"):
+                return None
+            parts = [st.st_ino, st.st_mode]
+            for name in ("config", "HEAD"):
+                try:
+                    f = os.lstat(d / ".git" / name)
+                    parts += [f.st_ino, f.st_mtime_ns, f.st_size]
+                except FileNotFoundError:
+                    parts.append(None)
+            key.append((str(d), *parts))
+    except OSError:
+        return None
+    return tuple(key)
+
+
+def _rev_parse(sg, root: Path, argv=("rev-parse", "--is-inside-work-tree")):
+    """A git rev-parse question about this folder. A definite answer (success, or "not a git repository") is
+    kept while the stat key of the repository files is unchanged: a new `git init`, a removed .git or a changed
+    config (core.bare) asks git again. A timeout, a refusal or any other failure is never kept."""
+    key = _git_state_key(root)
+    name = (str(root.absolute()), argv)
+    if key is not None:
+        hit = _REV_PARSE.get(name)
+        if hit and hit[0] == key:
+            return hit[1]
+    got = sg.run_bytes(list(argv), root, 10)
+    rc, _, err = got
+    definite = rc == 0 or (rc not in (124, 125, 126, 127) and "not a git repository" in err.lower())
+    if key is not None and definite:
+        if len(_REV_PARSE) >= _REV_PARSE_MAX:
+            _REV_PARSE.clear()
+        _REV_PARSE[name] = (key, got)
+    return got
+
+
 def _in_git_repo(root: Path) -> bool:
     """True inside a git work tree, False when there is none. Any other git failure (dubious ownership, a broken
     index, ...) refuses: an unknown state is never treated as "no repo"."""
@@ -376,7 +428,7 @@ def _in_git_repo(root: Path) -> bool:
                 "orch found no git it trusts here, so it cannot tell what is ignored. Nothing was stored."
             )
     else:
-        rc, out, err = sg.run_bytes(["rev-parse", "--is-inside-work-tree"], root, 10)
+        rc, out, err = _rev_parse(sg, root)
     if rc == 127:
         # no git program: fine in a plain folder, but a folder that has .git cannot be checked, so refuse
         for d in (root.absolute(), *root.absolute().parents):

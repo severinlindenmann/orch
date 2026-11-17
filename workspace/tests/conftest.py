@@ -132,6 +132,17 @@ def _no_bundled_catalogue(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_git_answers():
+    """harness keeps git's "is this a work tree" answers while the repository files are unchanged; a test that
+    fakes git must never meet an answer an earlier test left."""
+    from orch import harness
+
+    harness._REV_PARSE.clear()
+    yield
+    harness._REV_PARSE.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_secret_commands_on_windows(monkeypatch):
     """Windows: orch secret commands that start programs refuse there by design (secretrun.WINDOWS, "not on
     Windows yet"). A test that reaches that refusal is skipped with that reason instead of failing. A test of

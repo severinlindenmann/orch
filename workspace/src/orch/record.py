@@ -680,8 +680,9 @@ def _lock_check(ws, rel, fd, *, fallback=False):
 
 
 def _touch(fd):
-    """Set the open file's mtime to now (the fallback lock's sign of life). Windows has no utime on an fd: the
-    time is set through the same handle (SetFileTime), never by the path, which could name another file."""
+    """Set the open file's mtime to now (the fallback lock's mark that its writer lives). Windows has no utime
+    on an fd: the time is set through the same handle (SetFileTime), never by the path, which could name
+    another file."""
     if os.utime in os.supports_fd:
         os.utime(fd)
         return
