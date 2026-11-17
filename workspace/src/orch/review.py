@@ -106,6 +106,52 @@ def _drop_empty(d: dict, keys: tuple) -> None:
             del d[k]
 
 
+# A doc box may carry a little structure (ORCH-183, a merge card): a status line with a tone, rows with a
+# short key and a number, and a small footer. The phone gets them as plain paras and steps (wire_card), so
+# its schema stays unchanged.
+DOC_EXTRA = {"status", "rows", "foot"}
+STATUS_TONES = ("done", "working", "failed")
+
+
+def _doc_extra(pv: dict, where: str) -> None:
+    st = pv.get("status")
+    if st is not None:
+        if not isinstance(st, dict) or set(st) != {"tone", "text"} or st["tone"] not in STATUS_TONES:
+            raise Refused(f"{where}.status is {{tone: {'|'.join(STATUS_TONES)}, text}}.")
+        _text(st["text"], "status", 200, required=True)
+    rows = pv.get("rows", [])
+    if not isinstance(rows, list) or len(rows) > 50:
+        raise Refused(f"{where}.rows is a list of at most 50 rows.")
+    for r in rows:
+        if not isinstance(r, dict) or not set(r) <= {"title", "key", "n"} or "title" not in r:
+            raise Refused(f"{where}.rows: each row is {{title, key?, n?}}.")
+        _text(r["title"], "rows.title", 300, required=True)
+        if "key" in r:
+            _text(r["key"], "rows.key", 20, required=True)
+        if "n" in r and (not isinstance(r["n"], int) or isinstance(r["n"], bool) or not 0 < r["n"] < 10**9):
+            raise Refused(f"{where}.rows: n is a positive number.")
+    if "foot" in pv:
+        _text(pv["foot"], "foot", 200, required=True)
+
+
+def _plain_doc(p: dict) -> dict:
+    """A doc box with status, rows or foot as the phone schema knows it: those become paras and steps."""
+    if not DOC_EXTRA & set(p):
+        return p
+    q = {k: v for k, v in p.items() if k not in DOC_EXTRA}
+    paras = ([p["status"]["text"]] if isinstance(p.get("status"), dict) else []) + list(p.get("paras") or [])
+    rows = [
+        r["title"] + (f" (#{r['n']}" + (f", {r['key']}" if r.get("key") else "") + ")" if r.get("n") else "")
+        for r in p.get("rows") or []
+    ]
+    paras += [p["foot"]] if p.get("foot") else []
+    if paras:
+        q["paras"] = paras[:50]
+    if rows or p.get("steps"):
+        q["steps"] = (rows + list(p.get("steps") or []))[:50]
+    return q
+
+
 def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) -> dict:
     """Check one preview; every file reference found is appended to refs as (dict, key)."""
     if depth > 2 or not isinstance(pv, dict):
@@ -113,8 +159,8 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
     t = pv.get("type")
     if t not in PREVIEW_TYPES:
         raise Refused(f"{where}: preview type must be one of {', '.join(PREVIEW_TYPES)}.")
-    _only(pv, _PV_KEYS[t], where)
-    _drop_empty(pv, ("alt", "heading", "note"))
+    _only(pv, _PV_KEYS[t] | (DOC_EXTRA if t == "doc" else set()), where)
+    _drop_empty(pv, ("alt", "heading", "note", "foot"))
     if t in ("page", "img"):
         _file_name(pv.get("src"), f"{where}.src")
         refs.append((pv, "src"))
@@ -122,6 +168,7 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
             _text(pv.get("alt"), "alt", 200)
     elif t == "doc":
         _text(pv.get("heading"), "heading", 200)
+        _doc_extra(pv, where)
         for key in ("paras", "steps"):
             items = pv.get(key, [])
             if not isinstance(items, list) or len(items) > 50:
@@ -403,6 +450,8 @@ def wire_card(card: dict, refs: dict) -> dict:
         return {"file": None, "why": r if r in _WHY else "held_back"}
 
     def pv(p):
+        if p.get("type") == "doc":
+            p = _plain_doc(p)
         o = {}
         for k, v in p.items():
             if v is None or v == "" or (k == "before" and p.get("type") == "options"):
@@ -753,6 +802,51 @@ def _check_open(ticket: dict) -> str | None:
     return None
 
 
+_CHECK_FILE_TYPES = {
+    ".png": "img", ".jpg": "img", ".jpeg": "img", ".webp": "img", ".gif": "img",
+    ".html": "page", ".htm": "page", ".pdf": "file",
+}  # fmt: skip
+_CHECK_FILE_NAME = re.compile(r"[^/\\\x00-\x1f\x7f]{1,200}(/[^/\\\x00-\x1f\x7f]{1,200}){0,3}")
+MAX_CHECK_FILES = 6
+
+
+def _check_files(ticket: dict, root: Path | None) -> list[dict]:
+    """The result's own files a person wants to see on the card (ORCH-183): pictures, web pages and PDFs
+    from the steps' evidence (with the helper's title), then from the artifacts folder (with `root`). Each is
+    {name, type: img|page|file, ref: evidence/<name> | artifacts/<name>, stamp}; the stamp (size, time) puts
+    a changed file into check_digest. Files are named, never read here; the page asks for them like the Files
+    tab."""
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(folder: str, name: str, label: str, stamp: str) -> None:
+        kind = _CHECK_FILE_TYPES.get(os.path.splitext(name)[1].lower())
+        ref = f"{folder}/{name}"
+        if not kind or ref in seen or len(out) >= MAX_CHECK_FILES or not _CHECK_FILE_NAME.fullmatch(name):
+            return
+        if any(p in ("", ".", "..") or p.startswith(".") for p in name.split("/")) or _NAME_BAD.search(label):
+            return
+        seen.add(ref)
+        out.append({"name": _clip(label, 80), "type": kind, "ref": ref, "stamp": _clip(stamp, 60)})
+
+    head = f".orch/tickets/{ticket['id']}/evidence/"
+    for c in ticket.get("checklist") or []:
+        for ev in (c.get("evidence") if isinstance(c, dict) else None) or []:
+            ref = ev.get("ref") if isinstance(ev, dict) else None
+            if ev.get("type") == "file" and isinstance(ref, str) and ref.startswith(head):
+                name = ref[len(head) :]
+                title = ev.get("title") if isinstance(ev.get("title"), str) and ev["title"].strip() else name
+                add("evidence", name, title.strip(), str(ev.get("text") or ""))
+    if root is not None:
+        try:
+            rows = tickets.artifacts_list(root, ticket["id"])
+        except (Refused, OSError, ValueError):
+            rows = []
+        for a in rows:
+            add("artifacts", a["name"], a["name"].rsplit("/", 1)[-1], f"{a['size']} {a['mtime']}")
+    return out
+
+
 def _parent_line(ticket: dict, root: Path | None) -> str:
     """'Part of: ORCH-49 Factory follow-ups' for a sub-ticket (needs `root`); "" without a parent."""
     pid = ticket.get("parent")
@@ -784,6 +878,11 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     paras += [x for x in (_parent_line(ticket, root),) if x]
     uncovered = tickets.proof_state(ticket)["uncovered"]
     paras += [_clip(f"No task covers: “{p}”", 600) for p in uncovered[:10]]
+    if uncovered:  # what the person can do about it (ORCH-183)
+        paras.append(
+            "What to do: send it back and say which part is missing,"
+            " or approve it if that part does not matter."
+        )
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
@@ -796,6 +895,9 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     url = _check_open(ticket)
     if url:
         card["open"] = url
+    files = _check_files(ticket, root)
+    if files:
+        card["files"] = files
     if steps or paras:
         card["preview"] = {"type": "doc", "heading": "What was done"}
         if paras:
