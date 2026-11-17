@@ -87,6 +87,45 @@ def idea_act(root, text, by):
     return {"order": ticket["id"], "started": started, "text": words}
 
 
+def start_act(root, order, by):
+    """Start on a parked order's page (`orch factory act start --by human:<name> -- <order>`, run by the dashboard for
+    the person who pressed it, ORCH-277): the person's Not now is history, so Factory asks the same frozen proposal
+    again as a new question. The page then opens it in the dashboard's own question card, where the person presses
+    Start; nothing here answers it or starts a run. Returns {"order", "question"}."""
+    from . import flow
+
+    if not isinstance(by, str) or not PERSON.fullmatch(by):
+        raise Refused("Only a person's click starts a parked order here.", "refused")
+    store = Store(root)
+    with store.locked():
+        ticket = order_ticket(root, order)
+        order = ticket["id"]
+        d = flow.derive(root, store, ticket)
+        if d["phase"] != "parked" or not d["lead"]:
+            raise Refused("This order is not saved for later any more. Look at it again.", "conflict")
+        lead = d["lead"]
+        q, row = lead["q"], lead["row"]
+        options = list(q.get("options") or [])
+        new = orchcli.call(
+            root,
+            "ask",
+            order,
+            q["text"],
+            "--kind",
+            row["kind"],
+            *[x for o in options for x in ("--option", o)],
+            "--action",
+            json.dumps(q["action"]),
+            write=True,
+            by=by,
+        )
+        if new.get("kind") != row["kind"] or new.get("action") != q["action"]:
+            raise Refused("Orch returned a question for a different proposal.", "conflict")
+        keep = {k: v for k, v in row.items() if k not in ("id", "at", "q")}
+        store.journal_append({**keep, "q": new["id"]})
+    return {"order": order, "question": new["id"]}
+
+
 def _adopt(root, store, ticket_id, data):
     ticket = orchcli.ticket(root, ticket_id)
     ext = ticket.get("ext", {}).get("factory")
