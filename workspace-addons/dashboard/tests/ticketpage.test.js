@@ -240,7 +240,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
-    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
+    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
   vm.createContext(ctx); vm.runInContext(source,ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
@@ -433,7 +433,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
-    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
+    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
   vm.createContext(ctx); vm.runInContext(source,ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
@@ -652,4 +652,17 @@ test('Looks good says when part of Done when has no task; nothing when all is co
   assert.match(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:['a', 'b']}})), /2 parts of “Done when” have no task/);
   assert.match(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:['a']}})), /1 part of “Done when” has no task/);
   assert.doesNotMatch(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:[]}})), /Done when/);
+});
+test('Answer in the header plays the needs-you fade and shows a focus ring on the first answer (ORCH-234)', () => {
+  const focused = [], scrolled = [], classes = new Set(['card', 'next-question', 'needs-in']), log = [];
+  const card = {scrollIntoView:o => scrolled.push(o), get offsetWidth() { log.push('reflow'); return 1; }, querySelector:() => ({focus:o => focused.push(o)}),
+    classList:{remove:c => { log.push('remove ' + c); classes.delete(c); }, add:c => { log.push('add ' + c); classes.add(c); }}};
+  const c = context({main:{querySelector:sel => sel === '.next-question' ? card : null}});
+  assert.equal(c.focusTicketAnswer(), true);
+  assert.equal(scrolled[0].block, 'center');
+  assert.deepEqual(log, ['remove needs-in', 'reflow', 'add needs-in'], 'the fade restarts on every press');
+  assert.equal(focused[0].focusVisible, true, 'the focus ring shows after a mouse click');
+  assert.equal(focused[0].preventScroll, true);
+  const none = context({main:{querySelector:() => null}});
+  assert.equal(none.focusTicketAnswer(), false);
 });

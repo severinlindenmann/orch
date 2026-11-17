@@ -805,13 +805,6 @@ function ticketTaskOutcome(task) {
   const ev = array(task.evidence).slice(-1)[0];
   return window.DashHelpers.outcome(task) + (ev?.at ? ' · ' + window.DashHelpers.stamp(ev.at, Date.now()) : '') + (ev?.by ? ' — ' + ticketActor(ev.by) : '');
 }
-function focusTicketAnswer() {
-  const card = main.querySelector('.next-question');
-  if (!card) return;
-  card.scrollIntoView({block:'center', behavior:'smooth'});
-  const target = card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button');
-  target?.focus({preventScroll:true});
-}
 // A small chip per proof worth opening: a file opens its preview, a PR or web address opens in a new tab.
 function taskProofChips(t, task) {
   const chips = uniqueBy(array(task.evidence), ev => proofKey(t, ev)).map(ev => {
@@ -949,6 +942,19 @@ function phoneEntry(tid, entry) {
   return h('div', {className:'phone-entry'}, p.text ? h('p', {}, clean(p.text)) : null, body);
 }
 // Ticket-only controls bind properties: the shared h() serializes attributes.
+// The header Answer button (ORCH-234): the question card stands above every tab, so it is mostly in view already and a
+// plain scroll and script focus (no ring after a mouse click) did nothing a person could see. It now brings the
+// question to the middle, plays the soft "needs you" fade on it once and puts a visible focus ring on the first
+// (suggested) answer.
+function focusTicketAnswer() {
+  const card = main.querySelector('.next-question');
+  if (!card) return false;
+  card.scrollIntoView({block:'center', behavior:'smooth'});
+  card.classList.remove('needs-in'); void card.offsetWidth; card.classList.add('needs-in');
+  const target = card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button');
+  target?.focus({preventScroll:true, focusVisible:true});
+  return true;
+}
 function ticketButton(label, cls, click, attrs = {}) {
   const node = h('button', {type:'button', className:'btn ' + cls, 'data-key':'ticket-button-' + label, ...attrs}, label);
   node.onclick = click;
