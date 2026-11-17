@@ -31,6 +31,7 @@ def scheduled(t: dict) -> bool:
 
 
 FAST_FAIL_SECONDS = 10
+WAKE_RETRIES, WAKE_RETRY_MINUTES = 3, 5  # a wake-time start that failed: tries after the first, minutes apart
 QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
 KIND = "automation:failure"
 KINDS = (KIND,)
@@ -386,11 +387,22 @@ class Scheduler:
                 continue
             w = t.get("waiting_on") or {}
             until = parse(w.get("until")) if w.get("kind") == "time" else None
-            if until and until <= now and state.get(tid, {}).get("last_wake") != w.get("until"):
+            mine = state.get(tid, {})
+            fresh = mine.get("last_wake") != w.get("until")
+            # ORCH-255: a start that failed left the wait standing; look again a few times (5 min apart) before the
+            # person's Try again / Continue is the only way, so a passed wake time never leaves a ticket without a helper
+            again = (
+                not fresh
+                and mine.get("wake_tries", 0) < WAKE_RETRIES
+                and (parse(mine.get("wake_at")) or now) + timedelta(minutes=WAKE_RETRY_MINUTES) <= now
+                and orchcli.run_running(self.root, tid) is not True
+            )
+            if until and until <= now and (fresh or again):
                 res = self.start_due(tid, "wait time reached", now)
                 update_state(
-                    self.root, tid, last_wake=w.get("until")
-                )  # also after a failure: only "Try again" retries
+                    self.root, tid, last_wake=w.get("until"), wake_at=fmt(now),
+                    wake_tries=0 if fresh else mine.get("wake_tries", 0) + 1,
+                )  # also after a failure: retried WAKE_RETRIES times, then only "Try again"
                 if res != "failed":  # clear the wait only after core took the run (SA-15)
                     orchcli.call(self.root, "wait", tid, "--clear")
                     if t["status"] != "active" and not script_of(t):  # a script leaves the status alone

@@ -107,3 +107,7 @@ test('ORCH-255: Continue is on the ticket page in every state while no helper ru
   assert.ok(todo.includes('Start helper') && !todo.includes('Continue'), 'To do keeps Start helper only');
   assert.ok(!label({status:'active', sessions:[{id:'s'}]}, {runs:{t_one:{running:true}}}).includes('Continue'), 'no Continue while a helper runs');
 });
+test('ORCH-255: a passed wake time on Home has a Continue button, not a command', () => {
+  assert.deepEqual(helpers.needAction({kind:'overdue-wait', ticket:'t_one', tone:'warn'}), {label:'Continue', kind:'run'});
+  assert.equal(helpers.needAction({kind:'overdue-wait'}).label, 'Open');
+});
