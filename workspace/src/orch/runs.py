@@ -1742,6 +1742,12 @@ def wrap(
                     )
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
+            with contextlib.suppress(Exception):  # ORCH-179: the watcher starts it again after the reset
+                from orch import limitstop
+
+                hit = limitstop.from_output(out, why)
+                if hit is not None and limitstop.note(root, tid, hit):
+                    tickets.log(root, tid, limitstop.stopped_text(hit), "agent:helper-watcher")
         drain = turns <= MAX_DRAIN_TURNS and not flags.get("hung") and brake.paused(root) is None
         if release(root, tid, run, keep_if_pending=drain)["released"]:
             # ended without finishing or asking: not Working any more (anything still waiting stays queued)
