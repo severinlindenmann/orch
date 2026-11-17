@@ -14,12 +14,13 @@ LABELS = {"sonnet": "Sonnet", "opus": "Opus"}
 BY_ORCH = "orch"
 
 # Hard work starts on Opus at once (owner 16 Nov, ORCH-82): design, security, relay or publish, a migration
-# or rewrite, a crash, race or flaky test, or part of a bigger plan. Everything else starts on Sonnet, also
+# or rewrite, a crash, race or flaky test, a visual/UI change (mockup, layout; ORCH-252), or part of a bigger plan. Everything else starts on Sonnet, also
 # when its size is unclear; the helper (or orch, after two failed checks) moves it up when it turns hard.
 _HARD = re.compile(
     r"\b(design\w*|architect\w*|redesign\w*|security|secure|secret\w*|login|password\w*|auth|"
     r"authenticat\w*|authori[sz]\w*|encrypt\w*|decrypt\w*|crypto\w*|relay|publish\w*|migrat\w*|"
-    r"rewrite|crash\w*|race|flaky|deadlock\w*|epic)\b",
+    r"rewrite|crash\w*|race|flaky|deadlock\w*|epic|"
+    r"mock-?ups?|visual\w*|visuell\w*|ui|ux|layout\w*|look and feel)\b",
     re.I,
 )
 # Signals for small, clear work (only for the plain reason shown with the pick).

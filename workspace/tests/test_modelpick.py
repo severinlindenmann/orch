@@ -37,6 +37,10 @@ def _t(title, **kw):
         (_t("App crashes on start"), "opus"),
         (_t("Encrypt the backup"), "opus"),
         (_t("Write the architecture of sync"), "opus"),
+        (_t("Make me a new mockup of focus mode", note="edit copy paste should work"), "opus"),  # ORCH-251
+        (_t("big visuell change of the dashboard"), "opus"),
+        (_t("Layout of the inbox"), "opus"),
+        (_t("Fix the build menu"), "sonnet"),  # "ui" only as a word of its own
         (_t("Author list on the about page"), "sonnet"),  # "auth" only as a word of its own
     ],
 )
