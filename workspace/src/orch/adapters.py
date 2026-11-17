@@ -697,11 +697,11 @@ def history_file(
     name: str, sid: str, root: Path | None = None, environ: Mapping[str, str] | None = None
 ) -> tuple[Path, str] | None:
     """The saved conversation file of session `sid` and its line format ("chat" | "items"), read from the
-    adapter's session.history (<home> + glob); None when none is declared or the file is not there."""
+    adapter's session.chat_files (<home> + glob); None when none is declared or the file is not there."""
     if not valid_session_id(sid):
         return None
     try:
-        h = (load(name, root).get("session") or {}).get("history")
+        h = (load(name, root).get("session") or {}).get("chat_files")
     except Refused:
         return None
     if not h:
