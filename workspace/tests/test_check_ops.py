@@ -867,3 +867,25 @@ def test_a_persons_yes_to_the_wont_do_question_marks_the_step(proj, run, new_tic
     run("ask", tid, "mark step c3 as won\u2019t do", "--option", "Yes", "--option", "No", "--check", "c3")
     run("answer", tid, "q8", "yes", "--by", "human:tester")
     assert read(proj, tid)["checklist"][2]["wont_do"] is True
+
+
+def test_an_answer_given_in_the_conversation_closes_the_card(proj, run, new_ticket):
+    """ORCH-267, owner 17 Nov: the person answered in the helper's window, not on the card; the helper writes
+    their words on the card and it closes, shown as answered in the conversation (never as their click)."""
+    tid = with_checks(proj, run, new_ticket)
+    run("ask", tid, "Which colour?", "--option", "red", "--option", "blue")
+    code, out, _ = run("ask", tid, "Blue, the darker one", "--in-conversation", "q1", "--by", "agent:claude")
+    assert code == 0 and "answered in the conversation" in out
+    t = read(proj, tid)
+    q = t["questions"][0]
+    assert q["answer"] == "Answered in the conversation: Blue, the darker one"
+    assert q["via"] == "conversation" and not q["answered_by"].startswith("human:")
+    assert t["status"] != "waiting"
+    assert run("ask", tid, "again", "--in-conversation", "q1")[0] == 2  # already answered
+    # a card that does something on its answer is answered on the card only
+    run("ask", tid, "Start it?", "--option", "yes", "--option", "no")
+    tickets.apply_op(proj, tid, lambda t: t["questions"][1].update(action={"merge": "x"}), by="agent:x")
+    code, _, err = run("ask", tid, "yes", "--in-conversation", "q2")
+    assert code == 2 and "on the card" in err and read(proj, tid)["questions"][1]["answer"] is None
+    assert run("ask", tid, "x", "--in-conversation", "q9")[0] == 2
+    assert run("ask", tid, "x", "--in-conversation", "q1", "--option", "a")[0] == 2

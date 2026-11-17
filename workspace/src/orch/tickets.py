@@ -3350,6 +3350,48 @@ def take_back(root: Path, tid: str, qid: str, reason: str, by: str) -> tuple[dic
     return t, q, True
 
 
+IN_CONVERSATION = "Answered in the conversation: "
+IN_CONVERSATION_VIA = "conversation"
+
+
+def answered_in_conversation(root: Path, tid: str, qid: str, words: str, by: str) -> dict:
+    """The person answered the helper in its own window instead of on the open card (owner, ORCH-267): the
+    helper writes their words on the card and it closes. It is shown as theirs only through the helper: the
+    answer reads "Answered in the conversation: <words>", answered_by stays the helper, via is "conversation".
+    A card that does something on its answer (merge, start a run, release) is refused: the person answers that
+    one on the card. Returns the question."""
+    words = " ".join(str(words or "").split())
+    if not words:
+        raise Refused(
+            'Write down what the person said: orch ask <ticket> --in-conversation q3 "<their words>".'
+        )
+    if len(words) > MAX_TAKE_BACK_REASON:
+        raise Refused(f"Keep it to one short line (at most {MAX_TAKE_BACK_REASON} characters).")
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}. See the open ones: orch needs.")
+        refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        if q.get("action"):
+            raise Refused(f"{qid} does something when it is answered: the person answers it on the card.")
+        at = now()
+        q["in_conversation"] = {"at": at, "by": by}
+        q["answer"], q["answered_by"], q["via"], q["answered_at"] = (
+            IN_CONVERSATION + words,
+            by,
+            IN_CONVERSATION_VIA,
+            at,
+        )
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, by, f"{qid} answered in the conversation: {words}")
+        return q
+
+    return apply_op(root, tid, op, by=by)[1]
+
+
 def answer(
     root: Path,
     tid: str,
