@@ -90,11 +90,19 @@ def _together(data: dict, accounts: list[dict]) -> list[dict]:
     out = []
     for p in providers:
         t = have.get(p)
-        row = {"provider": p, "label": store.together_label(p), "limit": None, "spent": None, "resets_at": None}
+        row = {
+            "provider": p,
+            "label": store.together_label(p),
+            "limit": None,
+            "spent": None,
+            "resets_at": None,
+        }
         if t:
             row.update(limit=t["limit"]["value"], period=t["limit"]["period"], spent=t["spent"])
             row["resets_at"] = t.get("resets_at")
-        row["accounts"] = [a["label"] for a in accounts if a["type"] in store.MONEY_TYPES and a["provider"] == p]
+        row["accounts"] = [
+            a["label"] for a in accounts if a["type"] in store.MONEY_TYPES and a["provider"] == p
+        ]
         out.append(row)
     return out
 
@@ -113,6 +121,7 @@ def build(data: dict, root: Path) -> dict:
                 "on": row["on"],
                 "order": row["order"],
                 "state": _state(row),
+                "missing": bool(row.get("missing")),  # gone from the switcher, also while it is off
                 "bars": _bars(row),
                 "limits": [dict(lim) for lim in rule["limits"]],
                 "periods": list(store.allowed_periods(row)),

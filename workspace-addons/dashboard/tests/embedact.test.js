@@ -41,13 +41,14 @@ test("the person's click runs the shown add-on's act and tells the page", async 
   const {ctx, calls, frameWindow} = setup();
   await ctx.runEmbedAct(ctx.embedActRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.acts), [['addon.act', {addon:'usage', verb:'limit', target:'a_abc123:week:90%'}]]);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.act.done', answer:{changed:true}, id:'abcdefgh1234'}, ORIGIN]]);
+  // to '*': the shipped page runs in a sandboxed frame (origin "null"); an answer sent to this origin is dropped
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.act.done', answer:{changed:true}, id:'abcdefgh1234'}, '*']]);
 });
 
 test('a refused act tells the page why, in the add-on’s words', async () => {
   const {ctx, calls, frameWindow} = setup({result:{ok:false, status:400, text:'A percent limit is at most 100%.'}});
   await ctx.runEmbedAct(ctx.embedActRequest(msg(frameWindow)));
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.act.failed', error:'A percent limit is at most 100%.', id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.act.failed', error:'A percent limit is at most 100%.', id:'abcdefgh1234'}, '*']]);
 });
 
 test('a second click while saving runs nothing twice and says so', async () => {

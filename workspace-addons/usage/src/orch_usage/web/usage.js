@@ -192,7 +192,7 @@
   }
 
   function useText(a) {
-    if (a.state === 'missing') return 'No longer in the account switcher.';
+    if (a.state === 'missing' || a.missing) return 'No longer in the account switcher.';  // off ones too
     return 'No use read yet.';
   }
 
