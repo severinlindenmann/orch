@@ -14,7 +14,18 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, autoupdate, config, diag, ghlimit, history, nextstep, report_tickets, tickets
+from orch import (
+    adapters,
+    autoupdate,
+    config,
+    devexpert,
+    diag,
+    ghlimit,
+    history,
+    nextstep,
+    report_tickets,
+    tickets,
+)
 from orch.errors import Refused
 
 KEYS = (
@@ -38,6 +49,8 @@ KEYS = (
     "update.auto",
     *config.INSIGHTS_KEYS,
     *ghlimit.SETTING_KEYS,
+    "github.dev_expert",
+    "github.dev_expert_repo",
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
@@ -287,6 +300,8 @@ def _config(args, root: Path) -> None:
             "insights.keep_days": lambda: config.record_keep_days(root),
             "insights.max_mb": lambda: config.record_max_mb(root),
             **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
+            "github.dev_expert": lambda: devexpert.role(root),
+            "github.dev_expert_repo": lambda: devexpert.repo(root),
         }
         if args.key:
             key = args.key
@@ -306,6 +321,20 @@ def _config(args, root: Path) -> None:
         kind = ghlimit.SETTING_KEYS[args.key]
         v = ghlimit.set_limit(kind, args.value)
         _out(args, {args.key: v}, f"Saved: at most {v} {ghlimit.WHAT[kind]} per hour on this computer.")
+    elif args.sub == "set" and args.key == "github.dev_expert":
+        v = devexpert.set_role(root, args.value)
+        _out(
+            args,
+            {args.key: v},
+            f"The Development expert writes to {v}." if v else "The Development expert is off.",
+        )
+    elif args.sub == "set" and args.key == "github.dev_expert_repo":
+        v = devexpert.set_repo(root, args.value)
+        _out(
+            args,
+            {args.key: v},
+            f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
+        )
     elif args.sub == "set" and args.if_current is not None:
         raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
