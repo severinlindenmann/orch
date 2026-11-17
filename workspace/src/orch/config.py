@@ -474,6 +474,22 @@ def set_focus_session_typing(root: Path, value: bool) -> bool:
     return bool(value)
 
 
+FOCUS_PREVIEW_KEY = "focus.preview"  # the `orch config` key of the setting below
+
+
+def focus_preview_on(root: Path | None) -> bool:
+    """[focus] preview (default off): the dashboard's Focus page shows the new Focus, still being built,
+    instead of today's Focus. Off, or an unreadable config file: today's Focus, exactly as before."""
+    if root is None:
+        return False
+    return file_switch(root, "focus", "preview", False) is True
+
+
+def set_focus_preview(root: Path, value: bool) -> bool:
+    set_key(root, "focus", "preview", bool(value))
+    return bool(value)
+
+
 def record_keep_days(root: Path | None) -> int:
     """[record] keep_days as the file says it (snapped to the allowed list, default 90)."""
     return file_value(root, "record", "keep_days")

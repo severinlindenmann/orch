@@ -22,7 +22,7 @@
   function when(iso) {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return '';
-    return date.toLocaleString(undefined, {weekday: 'short', hour: '2-digit', minute: '2-digit'});
+    return date.toLocaleString(undefined, {weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false});
   }
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 

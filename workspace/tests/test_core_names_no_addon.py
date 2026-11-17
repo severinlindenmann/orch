@@ -14,8 +14,9 @@ ADDONS = sorted(d.name for d in (ROOT / "workspace-addons").iterdir() if (d / "s
 _MANIFEST = "manifest field of contracts/addon-manifest.md, not a package name"
 _FOLLOW_UP = "follow-up: core still names this add-on's setting/marker (see #837)"
 _GONE = "removed by #799"
+_KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), not the add-on"
 ALLOW = {
-    "orch/addons.py": {"dashboard": _MANIFEST},
+    "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
     "orch/cli.py": {"dashboard": _MANIFEST},
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
@@ -27,6 +28,12 @@ ALLOW = {
     "orch/pagesession.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/pagelaunch.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/syncgate.py": {"sync": _GONE},
+    "orch/cli_look.py": {"services": _KEY},
+    "orch/diag_collect.py": {"services": _KEY},
+    "orch/diag_report.py": {"services": _KEY},
+    "orch/doctorpass.py": {"services": _KEY},
+    "orch/look.py": {"services": _KEY},
+    "orch/winfinish.py": {"services": _KEY},
 }
 
 

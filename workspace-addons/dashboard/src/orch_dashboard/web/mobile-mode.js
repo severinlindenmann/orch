@@ -16,10 +16,17 @@
     get: () => { try { return localStorage.getItem(ASK_OFF_KEY) === '1'; } catch (_) { return false; } },
     set: on => { try { on ? localStorage.setItem(ASK_OFF_KEY, '1') : localStorage.removeItem(ASK_OFF_KEY); } catch (_) { /* no storage: ask every time */ } },
   };
-  const hm = iso => {
+  // The end time with its day once it is not today: "16:31", "tomorrow 16:31", or "Thu 16:31" (ORCH-286).
+  const hm = (iso, nowMs) => {
     const d = iso ? new Date(iso) : null;
-    return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) : '';
+    if (!d || Number.isNaN(d.getTime())) return '';
+    const clock = d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+    const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((day(d) - day(new Date(nowMs == null ? Date.now() : nowMs))) / 86400000);
+    if (diff <= 0) return clock;
+    return (diff === 1 ? 'tomorrow' : d.toLocaleDateString('en-GB', {weekday: 'short'})) + ' ' + clock;
   };
+  window.mobileEndWords = hm;
   const node = (tag, attrs = {}, ...kids) => {
     const n = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {

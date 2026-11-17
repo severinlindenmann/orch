@@ -411,7 +411,7 @@ function syncCard(settings) {
   const paused = card?.shown === 'paused', blocked = paused || !!card?.public;
   const radios = SYNC_WHERE.map(([value, label, says]) => {
     const radio = h('input', {type:'radio', name:'sync-where', value, 'data-sync-where':value, 'data-key':'sync-where-' + value, disabled:off});
-    radio.checked = cur.where === value;
+    radio.checked = !!card && cur.where === value;  // no choice is shown before the real status is read (ORCH-287)
     radio.addEventListener('change', () => { syncUi.draft = {...syncNow(), where:value}; render(); });
     return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio,
       h('span', {className:'radio-text'}, h('span', {}, label), h('span', {className:'meta', 'data-key':'sync-where-says-' + value}, says)));
@@ -471,6 +471,7 @@ function syncCard(settings) {
     paused && card.mode !== 'off' ? syncPausedHelp(card) : null,
     warn,
     h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
+    card ? null : h('p', {className:'meta', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…'),
     remoteBox, review, details]);
 }
 async function syncSave() {
@@ -550,7 +551,7 @@ function everydayCard(settings, phoneAddon) {
   const row = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow set-ctl'}, value), snapshot ? null : action);
   return h('div', {className:'stack', 'data-key':'settings-everyday'}, h('h2', {className:'set-sub'}, 'Everyday settings'), h('div', {className:'card'},
     row('Helper', chosen ? chosen.label : 'No helper chosen yet', go('agent', 'Manage', 'settings-everyday-helper'), 'settings-everyday-helper-row'),
-    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
+    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' + (window.mobileEndWords && state.mobile_mode.ends_at ? ' · until ' + window.mobileEndWords(state.mobile_mode.ends_at) : '') : 'Off · switches off by itself after ' + state.mobile_mode.default_hours + ' h') : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
 }
 // Phone & workspaces (draft settings-phone): 1. the relay connection, 2. phones (paired on the relay admin page) + delivery,
 // then the workspaces this one may talk to. Everything comes from the relay add-on's saved connection (no network).
@@ -608,6 +609,8 @@ function addonDetailPage(addon) {
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
+    addon.page?.live_session === true && addon.active && typeof state.settings?.focus_preview_on === 'boolean' ? row('Preview', h('div', {}, settingsText('p', {}, 'Try the new ' + label), settingsText('p', {className:'meta'}, 'Still being built. Turn it off to go back to today\u2019s ' + label + '.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.focus_preview_on, 'aria-label':'Try the new ' + label, 'data-action':'live-preview', 'data-key':'addon-detail-live-preview', disabled:snapshot || settingsBusy.has('live-preview')}, state.settings.focus_preview_on ? 'On' : 'Off'), 'addon-detail-live-preview-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,

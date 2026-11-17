@@ -211,3 +211,13 @@ test('the All cards list names an own answer by its button word', () => {
   const it = {answers:[{label:'Change it', picked:'Edit'}]};
   assert.equal(c.reviewWord({verdict:'ok', item:it, note:{picked:'Edit'}}), 'Change it');
 });
+
+test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle say one number', () => {
+  const base = {settings:{}, runs:{}, services:[], review:{cards:[CARD, CARD], answered:[]}};
+  const rows = [{id:'n1', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'A', answer:{question:'q1', digest:ID, options:[]}}];
+  const tickets = [{id:'t_abcdef', title:'News', status:'waiting', questions:[{id:'q1', text:'A'}]}, {id:'t_ghijkl', title:'Done work', status:'review'}];
+  const c = home(base, tickets, rows), total = c.needsYouTotal();
+  assert.equal(total, 2);  // one question + one result to check, not the two cards
+  assert.match(text(c.reviewAllButton()), new RegExp('^Review all' + total + '$'));
+  assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
+});
