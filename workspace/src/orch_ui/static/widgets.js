@@ -40,6 +40,31 @@ UI.helperList=(rows,o)=>{o=o||{};rows=rows||[];const box=el('section','card help
  return box};
 /* Status icon: UI.statusIcon('needs') -> <svg class="st needs"> (todo | working | needs | check | done) */
 UI.statusIcon=name=>svg('st '+(ST[name]?name:'todo'),ST[name]||ST.todo);
+/* Phone bottom bar (ORCH-73): UI.tabbar(items) -> <nav class="tabbar">. items: {label, href | onClick, current, count,
+   countLabel, icon (an svg node or markup from icon()), testid}. A count shows only when it is above 0. A button item (no href) is a toggle:
+   o.expanded sets aria-expanded, o.controls its aria-controls. Same item keys update in place via UI.tabbar.update(nav, items). */
+const tabItem=it=>{const n=it.href!=null?el('a'):el('button');if(it.href!=null)n.href=it.href;else{n.type='button';if(it.controls)n.setAttribute('aria-controls',it.controls)}
+ n.dataset.tab=it.key||it.label;if(it.testid)n.dataset.testid=it.testid;fillTab(n,it);if(it.onClick)n.addEventListener('click',it.onClick);return n};
+const fillTab=(n,it)=>{const kids=[];if(it.icon){const i=el('span','tab-ic');i.setAttribute('aria-hidden','true');if(typeof it.icon==='string')i.innerHTML=it.icon;else i.append(it.icon);kids.push(i)}
+ kids.push(el('span','tab-label',it.label));const c=Number(it.count)||0;
+ if(c>0){const b=el('span','count',String(c));kids.push(b)}
+ n.replaceChildren(...kids);n.setAttribute('aria-label',c>0?it.label+', '+(it.countLabel||String(c)):it.label);
+ if(it.href!=null){if(it.current)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current')}
+ else n.setAttribute('aria-expanded',String(!!it.expanded))};
+UI.tabbar=(items,o)=>{o=o||{};const nav=el('nav','tabbar'+(o.sample?' tabbar-sample':''));nav.setAttribute('aria-label',o.label||'Main');if(o.id)nav.id=o.id;
+ (items||[]).forEach(it=>nav.append(tabItem(it)));return nav};
+UI.tabbar.update=(nav,items)=>{(items||[]).forEach(it=>{const n=[...nav.children].find(x=>x.dataset.tab===(it.key||it.label));if(n)fillTab(n,it)})};
+/* Short rows (ORCH-73): UI.shortGroup({title, icon:'needs'|'working'|..., count, folded, onToggle, rows, more, key}) -> <section class="card short-group">.
+   rows: {key (the ticket number), title, href, fact, side (a node: pill, chip or button), child}. more: {label, onClick}. */
+UI.shortRow=r=>{const row=el('div','short-row'+(r.child?' child':''));const g=el('span','grow');const t=r.href?el('a','short-title'):el('span','short-title');
+ if(r.href)t.href=r.href;if(r.key){const k=el('span','key',r.key);t.append(k,document.createTextNode(' '))}t.append(document.createTextNode(r.title||''));g.append(t);
+ if(r.fact)g.append(el('span','short-fact',r.fact));row.append(g);if(r.side){const s=el('span','short-side');s.append(r.side);row.append(s)}
+ if(r.dataKey)row.dataset.key=r.dataKey;return row};
+UI.shortGroup=o=>{o=o||{};const sec=el('section','card short-group');if(o.key)sec.dataset.key=o.key;const h=el('header','card-h');const b=el('button');b.type='button';
+ b.setAttribute('aria-expanded',String(!o.folded));if(o.icon)b.append(UI.statusIcon(o.icon));b.append(el('span','',o.title||''));
+ if(o.count!=null)b.append(el('span','count',String(o.count)));b.append(UI.chevron());if(o.onToggle)b.addEventListener('click',o.onToggle);h.append(b);sec.append(h);
+ if(!o.folded){(o.rows||[]).forEach(r=>sec.append(UI.shortRow(r)));if(o.more){const m=el('div','short-more');const mb=el('button','btn ghost sm',o.more.label);mb.type='button';if(o.more.onClick)mb.addEventListener('click',o.more.onClick);m.append(mb);sec.append(m)}}
+ return sec};
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
 /* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';

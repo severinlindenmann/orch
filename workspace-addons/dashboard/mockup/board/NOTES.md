@@ -88,3 +88,8 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 ## ORCH-69 (owner picked A, 16 Nov)
 - Board and list cards carry no Start helper or Resume button: starting a helper costs budget, so it is never the easiest click. A To do card shows its title, its line and its meta only; a paused card keeps its "Paused" line. A helper starts from the ticket page (Start helper / Resume) or from Home. New ticket keeps Start and Save.
+
+## Phone (17 Nov, ORCH-73)
+
+- `list.html`: up to 720 px the table gives way to grouped short rows (master `.short-group`): number and title, one fact, Answer where you are needed, else steps n/m or an Idle chip. The List/Board switch shows only on wide screens.
+- `list.html`, `../home/home.html`, `../review/review.html`, `../ticket/ticket-working.html`: the phone bottom bar (master `.tabbar`) Home, Tickets, Review with the one needs-you number, More opens the side menu.

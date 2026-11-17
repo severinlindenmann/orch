@@ -807,3 +807,44 @@ a.helper-title:hover{text-decoration:underline}
 .helper-key{color:var(--text-muted);font-weight:400}
 .helper-side{display:flex;align-items:center;gap:var(--s2);flex:none}
 @media (max-width:480px){.card-row.helper-row{flex-wrap:wrap}.helper-side{width:100%}}
+
+/* Phone bottom bar (ORCH-73, owner 16 Nov): below 721 px the side menu and top bar give way to one bar at the bottom,
+   Home · Tickets · Review · More, with the one needs-you number on Review. More opens the side menu (data-open=true on
+   .sidebar), which brings the top bar back with it. UI.tabbar builds it; .tabbar-sample shows it inline in the gallery. */
+.tabbar{display:none}
+.tabbar>a,.tabbar>button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:var(--touch);padding:var(--s3) var(--s1) var(--s2);border:0;background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);text-decoration:none;cursor:pointer}
+.tabbar>a:hover,.tabbar>button:hover{color:var(--text)}
+.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true]{color:var(--text);font-weight:500}
+.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
+.tabbar .tab-ic{display:inline-flex}.tabbar .tab-ic svg{width:20px;height:20px}
+.tabbar .count{position:absolute;top:4px;left:calc(50% + 6px);min-width:16px;min-height:16px;padding:0 4px;font-size:11px;line-height:16px}
+.tabbar.tabbar-sample{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));max-width:390px;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
+@media(max-width:720px){
+  .tabbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--surface);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom)}
+  .tabbar.tabbar-sample{position:static;z-index:auto}
+  body:has(>.tabbar) .sidebar:not([data-open=true]),body:has(>.tabbar):not(:has(.sidebar[data-open=true])) .topbar,body:has(>.tabbar) .btn.mobile-menu{display:none}
+  body:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s7) + env(safe-area-inset-bottom))}
+  body:has(>.tabbar) .toasts{bottom:calc(var(--touch) + var(--s4) + env(safe-area-inset-bottom))}
+}
+
+/* Show one of two layouts by screen width (ORCH-73): .wide-only from 721 px, .phone-only up to 720 px. */
+@media(min-width:721px){.phone-only{display:none!important}}
+@media(max-width:720px){.wide-only{display:none!important}}
+
+/* Short rows (ORCH-73, phone ticket list): a group card of one-line rows, number and title, one fact, one thing on the
+   right (a steps pill, a chip or an Answer button). UI.shortGroup builds it. */
+.short-group{margin-bottom:var(--s4)}
+.short-group>.card-h{gap:var(--s2);padding:0}
+.short-group>.card-h>button{display:flex;align-items:center;gap:var(--s2);width:100%;min-height:var(--touch);padding:0 var(--s4);border:0;background:none;color:var(--text);font:inherit;font-weight:600;text-align:left;cursor:pointer}
+.short-group>.card-h .count{font-weight:500}
+.short-group>.card-h .chev{margin-left:auto}
+.short-group>.card-h>button[aria-expanded=false] .chev{transform:rotate(-90deg)}
+.short-row{display:flex;align-items:center;gap:var(--s3);min-height:var(--touch);padding:var(--s3) var(--s4);border-top:1px solid var(--border);color:var(--text);text-decoration:none}
+.short-group>.card-h+.short-row{border-top:0}
+.short-row>.grow{display:grid;gap:2px;flex:1;min-width:0}
+.short-row .short-title{font-weight:500;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.short-row .short-fact{font-size:var(--fs-meta);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.short-row .short-side{flex:none;display:flex;align-items:center;gap:var(--s2)}
+.short-row.child{padding-left:var(--s7)}
+a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-decoration:underline}
+.short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
