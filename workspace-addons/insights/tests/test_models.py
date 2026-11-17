@@ -142,7 +142,12 @@ def test_page_has_the_team_section():
 
 
 def _acct(unit, value, use, on=True, label="Team"):
-    return {"on": on, "label": label, "rule": {"limits": [{"period": "week", "unit": unit, "value": value}]}, "use": {"week": use}}
+    return {
+        "on": on,
+        "label": label,
+        "rule": {"limits": [{"period": "week", "unit": unit, "value": value}]},
+        "use": {"week": use},
+    }
 
 
 def test_week_bar_dollar_budget():
@@ -159,6 +164,10 @@ def test_week_bar_subscription_percent_and_skips():
 
     assert build_week({"accounts": [_acct("%", 100, {"pct": 62})]})["label"] == "62% used this week · Team"
     assert build_week({"accounts": [_acct("%", 80, {"pct": 40})]})["percent"] == 50
-    skipped = [_acct("$", 100, {"spent": 5}, on=False), _acct("$", 100, {"note": "no reading"}), _acct("$", 0, {"spent": 1})]
+    skipped = [
+        _acct("$", 100, {"spent": 5}, on=False),
+        _acct("$", 100, {"note": "no reading"}),
+        _acct("$", 0, {"spent": 1}),
+    ]
     assert build_week({"accounts": skipped}) is None  # off, no reading, no budget: no bar, never a fake zero
     assert build_week(None) is None and build_week({"accounts": "x"}) is None and build_week({}) is None

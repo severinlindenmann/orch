@@ -160,7 +160,7 @@ def test_no_hider_refuses_and_writes_nothing(proj, monkeypatch):
     def refuse(root):
         raise errors.Refused("key store refuses")
 
-    monkeypatch.setattr(secretrun, "record_writer", refuse)  # a key store that really refuses: recording is off
+    monkeypatch.setattr(secretrun, "record_writer", refuse)  # a key store that refuses: recording is off
     with pytest.raises(record_hook.NotRecorded, match="key hiding"):
         record_hook.hook(proj, line())
     assert not (proj / ".orch/record/runs").exists()

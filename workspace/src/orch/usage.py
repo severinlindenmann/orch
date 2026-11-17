@@ -392,7 +392,8 @@ def _round_minutes(m: float) -> int:
 def estimate_range(root: Path, environ: Mapping[str, str] | None = None) -> dict | None:
     """ORCH-297: the range shown before Start, a program's answer from this workspace's own finished tickets
     (no AI call): the middle half (25th to 75th percentile) of helper time and of cost. None while fewer than
-    MIN_FOR_RANGE finished tickets have a recorded time. {"minutes": [lo, hi], "cost": [lo, hi] | None, "n": n}."""
+    MIN_FOR_RANGE finished tickets have a recorded time.
+    {"minutes": [lo, hi], "cost": [lo, hi] | None, "n": n}."""
     root = Path(root)
     cache = _load_cache(root)
     before = json.dumps(cache, sort_keys=True)

@@ -8,7 +8,9 @@ from orch_dashboard import data
 def test_range_only_on_tickets_not_started(monkeypatch, tmp_path):
     from orch import usage
 
-    monkeypatch.setattr(usage, "estimate_range", lambda root: {"minutes": [20, 40], "cost": [2.0, 4.0], "n": 5})
+    monkeypatch.setattr(
+        usage, "estimate_range", lambda root: {"minutes": [20, 40], "cost": [2.0, 4.0], "n": 5}
+    )
     items = [
         {"id": "a", "status": "open"},
         {"id": "b", "status": "ready", "range": "stale"},

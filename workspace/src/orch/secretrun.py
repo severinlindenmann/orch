@@ -167,9 +167,9 @@ def record_writer(root):
 
     needles = keystore.all_needles(root)
     if not needles:
-        # ORCH-297: a workspace with no stored key has nothing to hide, but an empty hider counts as "key hiding
-        # not ready" and recording stayed off for good (issue 1200). A random value nobody holds keeps the
-        # hider non-empty, so recording works and still never writes a raw key (there is none to leak).
+        # ORCH-297: a workspace with no stored key has nothing to hide, but an empty hider counts as "key
+        # hiding not ready" and recording stayed off for good (issue 1200). A random value nobody holds keeps
+        # the hider non-empty, so recording works and still never writes a raw key (there is none to leak).
         needles = {"orch-no-keys": secrets.token_urlsafe(24)}
     return record.RecordWriter(root, hider=hider.Hider(needles))
 
