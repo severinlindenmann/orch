@@ -129,7 +129,16 @@ def _file_preview(root: Path, src: str, where: str) -> dict:
         text = data.decode("utf-8", "replace")
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()][:50]
         return {"type": "doc", "heading": Path(src).name, "paras": [p[:2000] for p in paras]}
-    raise Refused(f"{where}: show an image, a page (.html) or a text file (.md, .txt).")
+    if ext == ".json":  # a glance card (ORCH-329): headline, progress, chips, flow, chart, diff, details
+        data = safefile.open_file_ref(root, src, 64 * 1024) if not src.startswith("artifacts/") else None
+        try:
+            pv = json.loads(data.decode("utf-8")) if data is not None else None
+        except ValueError:
+            pv = None
+        if not isinstance(pv, dict):
+            raise Refused(f"{where}: '{src}' was not found or is not a JSON object.")
+        return {"type": "doc", **pv}
+    raise Refused(f"{where}: show an image, a page (.html), a text file (.md, .txt) or a card (.json).")
 
 
 def _option(root: Path, spec: str) -> dict:
