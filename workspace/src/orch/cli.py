@@ -347,7 +347,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager", "triage"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -441,6 +441,15 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     x = sub.add_parser("usage", parents=[common], help="tokens per model and per ticket (read-only)")
     x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
+    x = sub.add_parser("triage", parents=[common], help="list the tickets that need a look (read-only)")
+    x.add_argument(
+        "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
+    )
+    x.add_argument(
+        "--lanes",
+        help="lanes to go through, e.g. backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded "
+        "(default: every lane except Done, Won't do and Superseded)",
+    )
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
@@ -958,6 +967,20 @@ def run(args: argparse.Namespace) -> None:
 
         data = usage.workspace_usage(root, max(args.days, 1))
         _out(args, data, usage.text(data))
+    elif cmd == "triage":
+        from orch import triage
+
+        if args.start:
+            r = triage.start(root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes))
+            how = "a helper started on it" if r["started"] else f"it waits for a helper ({r['why']})"
+            _out(
+                args,
+                r,
+                f"Opened {r['ticket']} with {r['open']} tickets, {r['findings']} worth a look: {how}.",
+            )
+        else:
+            res = triage.collect(root, lanes=triage.parse_lanes(args.lanes))
+            _out(args, res, triage.list_text(res))
     elif cmd == "update":
         if not args.project_only:  # first: with another ORCH_HOME there is nothing to update
             addons.tool_env_change_ok()
