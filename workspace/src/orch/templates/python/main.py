@@ -6,6 +6,7 @@ without the /{{slug}} prefix; use relative links in pages (style.css, items), no
 
 import html
 import os
+import socketserver
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -66,6 +67,11 @@ class App(BaseHTTPRequestHandler):
 
 class _Server(ThreadingHTTPServer):
     request_queue_size = 128  # the default backlog of 5 resets connections when a page loads many files
+
+    def server_bind(self):
+        # The stock bind also looks the host name up in DNS (unused here); that took 35 s on some machines.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
 
 
 def make_server(port: int) -> ThreadingHTTPServer:

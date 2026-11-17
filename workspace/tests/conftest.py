@@ -1,8 +1,10 @@
 import contextlib
 import hashlib
+import http.server
 import json
 import os
 import re
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -13,6 +15,16 @@ import pytest
 from orch import addons, cli, winfinish
 
 _REAL_HOME_FN = addons.real_home  # the true one, before any test fakes it
+
+
+def _bind_without_dns(self):
+    """http.server's bind looks the host name up in DNS for a field nothing reads; on the macOS CI runners the
+    first lookup in each process took 35 s (ORCH-260). Test servers skip it."""
+    socketserver.TCPServer.server_bind(self)
+    self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
+
+
+http.server.HTTPServer.server_bind = _bind_without_dns
 _TRACE_LOG = addons._trace_log_path()  # the true fallback trace file (temp folder), before any test fakes it
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
