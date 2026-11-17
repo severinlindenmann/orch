@@ -21,7 +21,7 @@
     {type: 'table', name: 'price-list.csv', meta: 'Table · 3 columns · 6 rows', text: CSV, numeric: [1, 2], download: S + 'sample-responses.csv'},
     {type: 'page', name: 'phone-widths.html', meta: 'Web page', src: S + 'sample-page.html', href: S + 'sample-page.html'},
     {type: 'pdf', name: 'offer-acme.pdf', meta: 'PDF · 1 page', pages: 1, src: S + 'sample-summary.pdf', href: S + 'sample-summary.pdf', download: S + 'sample-summary.pdf'},
-    {type: 'picture', name: 'invoices-october.svg', meta: 'Picture · 680 × 380', width: 680, height: 380, src: 'demo-image.svg', alt: 'October invoices with the Export CSV button', href: 'demo-image.svg', download: 'demo-image.svg'},
+    {type: 'picture', name: 'invoices-october.svg', meta: 'Picture · 680 × 380', width: 680, height: 380, src: S + 'sample-poster.svg', alt: 'October invoices with the Export CSV button', href: S + 'sample-poster.svg', download: S + 'sample-poster.svg'},
     {type: 'video', name: 'walkthrough.webm', meta: 'Video · 0:02', duration: '0:02', src: S + 'sample-clip.webm', poster: S + 'sample-poster.svg', download: S + 'sample-clip.webm'},
     {type: 'audio', name: 'voice-note.wav', meta: 'Audio · 0:01', duration: '0:01', src: S + 'sample-tone.wav', transcript: 'Please keep the old file name, and add a note for the support team.', download: S + 'sample-tone.wav'},
     {type: 'chart', name: 'Uses by day', meta: 'Chart · 7 days', labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], values: [41, 56, 38, 72, 88, 12, 9], labelName: 'Day', unit: 'Uses'},
