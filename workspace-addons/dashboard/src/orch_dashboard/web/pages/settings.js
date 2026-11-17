@@ -2,6 +2,23 @@
 // Settings, add-on pages and add-on actions.
 let settingsTab = 'general', settingsAddon = null;
 const settingsBusy = new Set();
+// ORCH-227: a choice shows at once, with "Saving…", while it is saved; a click while one saves is sent after it (the
+// last click wins). settingsPending holds the picked value per key, settingsQueued the next send.
+const settingsPending = new Map(), settingsQueued = new Map();
+async function settingsChoose(key, value, send) {
+  settingsPending.set(key, value);
+  if (settingsBusy.has(key)) { settingsQueued.set(key, send); render(); return null; }
+  let result = await send();
+  while (settingsQueued.has(key)) {
+    const next = settingsQueued.get(key);
+    settingsQueued.delete(key);
+    result = await next();
+  }
+  settingsPending.delete(key);
+  render();
+  return result;
+}
+const settingsSaving = key => settingsPending.has(key) ? settingsText('span', {className:'meta', role:'status', 'data-key':'settings-saving-' + key}, 'Saving…') : null;
 // A long path keeps its start and its end: "/Users/me/…/team/pilatus". The full path is in the row's title.
 const middleShort = (value, max = 48) => {
   const text = String(value ?? '');
@@ -44,14 +61,15 @@ function addonFacts(addon) {
 const FULL_WARNING = 'Never asks: a helper can change or delete anything in this folder and run any command without asking.';
 const PERMISSION_CHOICES = [['ask', 'Asks first', 'Before it changes anything. Example: it asks before editing a file.'], ['auto', 'Asks for risky things', 'It works on its own and asks only when something is risky. Example: it asks before deleting.'], ['full', 'Never asks', 'It changes things without asking. Example: it deletes a file straight away. Only use this if you trust it.']];
 function permissionsCard(settings) {
-  const current = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
+  const saved = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
+  const current = settingsPending.has('permissions') ? settingsPending.get('permissions') : saved;
   const rows = PERMISSION_CHOICES.map(([value, label, hint]) => {
-    const radio = h('input', {type:'radio', name:'settings-permissions', value, 'data-key':'settings-permissions-' + value, 'data-settings-permissions':value, disabled:snapshot || settingsBusy.has('permissions')});
+    const radio = h('input', {type:'radio', name:'settings-permissions', value, 'data-key':'settings-permissions-' + value, 'data-settings-permissions':value, disabled:snapshot});
     radio.checked = value === current;
     return h('label', {className:'card-row agent-opt' + (value === current ? ' sel' : ''), 'data-key':'settings-permissions-row-' + value}, radio,
       h('div', {className:'grow'}, settingsText('h3', {}, label), settingsText('p', {className:'meta'}, hint)));
   });
-  return h('div', {className:'stack', 'data-key':'settings-permissions'}, h('h2', {className:'set-sub'}, 'What a helper may do'),
+  return h('div', {className:'stack', 'data-key':'settings-permissions'}, h('h2', {className:'set-sub'}, 'What a helper may do', ' ', settingsSaving('permissions')),
     h('div', {className:'card'}, h('div', {className:'permission-choices', role:'radiogroup', 'aria-label':'What a helper may do'}, rows),
       current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
 }
@@ -80,12 +98,13 @@ function helperNeedsCard() {
 // finished. Saved on change, like the copies cap (a select, no typed words).
 const LIVE_MAX_CHOICES = [2, 3, 4, 5, 6, 7, 8, 9, 10];
 function helpersAtOnceCard(settings) {
-  const n = LIVE_MAX_CHOICES.includes(settings.live_max) ? settings.live_max : null;
-  const pick = h('select', {className:'input copies-max', 'aria-label':'Helpers at once', 'data-key':'settings-live-max', disabled:snapshot || settingsBusy.has('live')},
+  const want = settingsPending.has('live') ? settingsPending.get('live') : settings.live_max;
+  const n = LIVE_MAX_CHOICES.includes(want) ? want : null;
+  const pick = h('select', {className:'input copies-max', 'aria-label':'Helpers at once', 'data-key':'settings-live-max', disabled:snapshot},
     h('option', {value:'none'}, 'No limit'), LIVE_MAX_CHOICES.map(v => h('option', {value:String(v)}, String(v))));
   pick.value = n ? String(n) : 'none';
   return h('div', {className:'stack', 'data-key':'settings-live'}, h('div', {className:'card'}, h('div', {className:'card-row'},
-    h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers at once'),
+    h('div', {className:'grow'}, h('h3', {}, 'Helpers at once', ' ', settingsSaving('live')),
       settingsText('p', {}, n ? 'When ' + n + ' helpers are working, the next one waits in line and starts when one is finished.' : 'Any number of helpers can work at the same time.'),
       settingsText('p', {className:'meta'}, 'Pick a number if your computer gets slow with many helpers.')),
     pick)));
@@ -961,13 +980,20 @@ globalThis.orchFrameChan = () => { const r = route(); return r.kind === 'page' ?
 // its files, pictures, answers or ticket pages (api/, page/, kit/, web/, or any name with a dot): those can carry
 // content an agent made (ORCH-186 review H1).
 const frameEntry = path => /^[A-Za-z0-9_\/-]{0,300}$/.test(path) && !/^(api|page|kit|web)(\/|$)/i.test(path) && !path.includes('//');
+// The shown page moved inside itself (frame-at, ORCH-241): while the address is the one it moved to, the frame keeps
+// the address it was opened with, so drawing the page again never reloads it. {id, hash, pass, src}
+// Only while that same frame is still on screen: a new frame (back from another page) opens at the address's place.
+let frameKeep = null;
+const frameShown = () => document.querySelector('iframe.embed[data-key="embed"]');
 function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
   const shipped = !!addons().find(a => a.name === r.id)?.shipped, base = '/addon/' + r.id + '/' + r.path;
   const entry = shipped && frameEntry(r.path), p = entry ? framePass(r.id) : null;
   if (entry && !p) { const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; return wait; }
-  const src = entry ? base + '#orch-frame=' + p.pass + '&orch-file=' + p.file + '&orch-chan=' + p.chan + (r.inner ? '&' + r.inner : '') : base + (r.inner ? '#' + r.inner : '');
+  const kept = entry && frameKeep && frameKeep.id === r.id && frameKeep.hash === r.hash && frameKeep.pass === p.pass && frameShown()?.getAttribute('src') === frameKeep.src ? frameKeep.src : null;
+  if (!kept) frameKeep = null;
+  const src = kept || (entry ? base + '#orch-frame=' + p.pass + '&orch-file=' + p.file + '&orch-chan=' + p.chan + (r.inner ? '&' + r.inner : '') : base + (r.inner ? '#' + r.inner : ''));
   const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', sandbox:shipped ? SHIPPED_SANDBOX : 'allow-scripts'});  // allow alone: both log a warning (ORCH-186)
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
@@ -976,9 +1002,10 @@ function pageFrame(r) {
 }
 // The shown shipped add-on page asks to open another of its places (a link, or a fresh pass after a reload or an
 // expired one): the dashboard opens it, so the new page gets a pass. A link to the dashboard's own page moves it.
+// A move inside the page itself (frame-at) only changes the address: the frame is not loaded again.
 globalThis.addEventListener?.('message', e => {
   const d = e.data, r = route();
-  if (snapshot || e.origin !== 'null' || !d || (d.orch !== 'frame-go' && d.orch !== 'frame-top') || r.kind !== 'page') return;
+  if (snapshot || e.origin !== 'null' || !d || !['frame-go', 'frame-top', 'frame-at'].includes(d.orch) || r.kind !== 'page') return;
   const frame = document.querySelector('iframe.embed[data-key="embed"]');
   if (!frame || e.source !== frame.contentWindow || !addons().find(a => a.name === r.id)?.shipped) return;
   const hash = typeof d.hash === 'string' && /^[A-Za-z0-9_\/-]{0,200}$/.test(d.hash) ? d.hash : null;
@@ -986,6 +1013,15 @@ globalThis.addEventListener?.('message', e => {
   if (d.orch === 'frame-top') { if (hash && d.chan && d.chan === globalThis.orchFrameChan()) location.hash = '#' + hash; return; }
   const prefix = '/addon/' + r.id + '/', rel = typeof d.path === 'string' && d.path.startsWith(prefix) ? d.path.slice(prefix.length) : null;
   if (rel === null || rel.startsWith('/') || !frameEntry(rel)) return;  // only the add-on's own page gets opened with a pass
+  if (d.orch === 'frame-at') {  // only the page that had the code, and only a place on the page that is shown
+    if (!d.chan || d.chan !== globalThis.orchFrameChan() || rel !== r.path) return;
+    const at = '#addon/' + r.id + (rel ? '/' + rel : '') + (hash ? '#' + hash : '');
+    if (location.hash === at) return;
+    const src = frame.getAttribute('src') || '';
+    try { followAddress(at); } catch (_) { return; }  // the browser may refuse many address changes in a row
+    frameKeep = {id:r.id, hash:at, pass:/#orch-frame=([A-Za-z0-9_-]+)&/.exec(src)?.[1] || null, src};  // the pass the frame really has
+    return;
+  }
   if (d.fresh && d.chan && d.chan === globalThis.orchFrameChan()) {  // new passes only for the page that had the code
     if (Date.now() - (frameFresh.get(r.id) || 0) < 5000) return;
     frameFresh.set(r.id, Date.now()); framePasses.delete(r.id);

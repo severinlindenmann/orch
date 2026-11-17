@@ -323,6 +323,12 @@ globalThis.addEventListener?.('message', e => {
   if ((e.origin !== location.origin && !chan) || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
+// An add-on page moved inside itself (ORCH-241): the address follows it without a history entry of its own (the
+// frame's move made one, so Back goes back inside the frame) and without drawing the page again.
+function followAddress(hash) {
+  history.replaceState(null, '', hash);
+  renderedRoute = route().hash;
+}
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
@@ -393,6 +399,7 @@ function render(arrived = new Set()) {
   reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (r.kind === 'review') mountReview(main);
+  if (r.kind === 'ticket') mountTicketTalk(main);
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
@@ -547,9 +554,17 @@ async function refresh() {
   const version = mutation;
   const connection = document.getElementById('connection');
   try {
-    const res = await fetch('/api/state', {cache:'no-store'});
+    // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
+    const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
     const next = await res.json();
+    if (next.unchanged && state) {
+      if (writing || version !== mutation) { refreshAgain = true; return; }
+      connection.hidden = true;
+      lastOk = Date.now();
+      paintUpdated();
+      return;
+    }
     if (writing || version !== mutation) { refreshAgain = true; return; }
     connection.hidden = true;
     lastOk = Date.now();
@@ -687,19 +702,19 @@ main.addEventListener('change', async event => {
   if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
   const most = event.target.closest('[data-key="settings-live-max"]');
   if (most) {
-    if (snapshot || settingsBusy.has('live')) return;
+    if (snapshot) return;
     const v = most.value === 'none' ? null : Number(most.value);
-    const result = await settingsSend('live.set', {max:v}, 'live');
-    if (result.ok) window.orch.toast(v ? 'Up to ' + v + ' helpers at once.' : 'No limit: any number of helpers at once.', 'ok');
+    const result = await settingsChoose('live', v, () => settingsSend('live.set', {max:v}, 'live'));
+    if (result?.ok) window.orch.toast(v ? 'Up to ' + v + ' helpers at once.' : 'No limit: any number of helpers at once.', 'ok');
     return;
   }
   const perm = event.target.closest('[data-settings-permissions]');
   if (perm) {
-    if (snapshot || settingsBusy.has('permissions')) return;
+    if (snapshot) return;
     const mode = perm.dataset.settingsPermissions;
     const send = async () => {
-      const result = await settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions');
-      if (result.ok) window.orch.toast('Saved. New helper runs use ' + capitalise(mode) + '.', 'ok');
+      const result = await settingsChoose('permissions', mode, () => settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions'));
+      if (result?.ok) window.orch.toast('Saved. New helper runs use ' + capitalise(mode) + '.', 'ok');
     };
     if (mode !== 'full') { await send(); return; }
     perm.checked = false;  // stays on the old choice until the person says Yes

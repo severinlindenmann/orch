@@ -164,7 +164,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const sendsBack=it=>!!it&&it.kind==='check';/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
  const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
  const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
- const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?'Sent back for changes':'Later';
+ const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
  /* previews */
  const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||(p.paras||[]).length||(p.steps||[]).length);return true};
  const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');fr.addEventListener('load',()=>fr.classList.remove('loading'),{once:true});return fr};
@@ -337,12 +337,12 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   let about=null;const hint=el('p','meta');hint.style.margin='0';
   if(isOpt(it)){about=el('div','segmented');about.setAttribute('role','group');about.setAttribute('aria-label','About');
    about.append(el('span','meta about-label','About'));[...(it.preview.options||[]).map(x=>[x.id,x.id]),['all','All']].forEach(([v,l])=>{const b=btn('btn sm',[l],v==='all'?'About all options':'About option '+v);b.dataset.v=v;b.onclick=()=>setAbout(v);about.append(b)})}
-  const foot=el('div','swipe-sheet-foot'),cancel=btn('btn',['Cancel']),back=btn('btn',['Send back for changes']),use=btn('btn primary',['']);
+  const foot=el('div','swipe-sheet-foot'),cancel=btn('btn',['Cancel']),back=btn('btn',[it.kind==='choice'?'Send my answer':'Send back for changes']),use=btn('btn primary',['']);
   const setAbout=v=>{about.v=v;about.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)));sync()};
   const sync=()=>{const has=!!ta.value.trim()||(o.voice&&dr.clips.length);dr.text=ta.value;back.disabled=use.disabled=!has;
    const opt=about&&about.v!=='all'?about.v:null;use.hidden=!opt;if(opt)use.textContent='Use '+opt+' with these changes';
    back.className=opt?'btn':'btn primary';
-   hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):'The helper gets your words and makes a new version. Nothing is approved.'};
+   hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):it.kind==='choice'?'The helper gets your words as the answer.':'The helper gets your words and makes a new version. Nothing is approved.'};
   ta.addEventListener('input',sync);
   const close=()=>{closeOverlay();reset(cur)};cancel.onclick=close;
   const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');

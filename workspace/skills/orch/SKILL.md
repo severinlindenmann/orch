@@ -42,9 +42,10 @@ ask; its list replaces the one above.
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
-    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" [--owner <name>] [--due YYYY-MM-DD]
+    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> [--owner <name>] [--due YYYY-MM-DD]
                                         # a NEW ticket, first thing, no asking: fix typos, short clear title, a description and a
-                                        # done-when line from the person's note (kept when they wrote one); owner / due only where
+                                        # done-when line from the person's note (kept when they wrote one); your estimate of the
+                                        # helper time and cost at list price for the whole ticket; owner / due only where
                                         # their text says them (their title stays in the history)
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
@@ -120,8 +121,9 @@ To keep a text file or picture with a ticket yourself: `orch ticket attach <id> 
 
 **The work needs a bigger model**
 
-orch starts most tickets on Sonnet and hard ones (design, security, a migration, a crash or
-flaky test, part of a bigger plan) on Opus. When your plan shows design, security or several parts, or you
+orch starts a ticket on Opus unless it is clearly a small, mechanical fix (a typo, a word, a label, one
+line), which starts on Sonnet; design, look, layout, concept, security and feature work always start on
+Opus, and the ticket shows in one line why. When your plan shows design, security or several parts, or you
 failed twice at the same problem, move the ticket up; one history line says why:
 
     orch ticket model <id> up --why "<what makes it hard, a few plain words>"
