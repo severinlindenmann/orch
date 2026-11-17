@@ -9,7 +9,7 @@ import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import ask, authority, autopilot, flow, handover, orchcli, render, service
+from . import ask, authority, autopilot, flow, handover, orchcli, render, service, watch
 from .render import clean
 from .store import Refused, Store, clock, no_links
 
@@ -95,8 +95,67 @@ def _starting(d):
     started = [d["crew"][slug] for slug in mine if slug in d["crew"]]
     if any(t.get("status") not in (None, "open") for t in started):
         return None
-    done_before = any(x["state"] == "done" for x in d["line"])
-    return d["stage"] if done_before else None
+    return d["stage"]  # also the first stage (ORCH-277): right after Start nothing else says what comes
+
+
+def _open_asks(t):
+    return any(
+        isinstance(q, dict) and q.get("answer") is None and not q.get("taken_back")
+        for q in t.get("questions") or []
+    )
+
+
+def _waits_on(t):
+    w = t.get("waiting_on") if t.get("status") == "waiting" else None
+    return w if isinstance(w, dict) else None
+
+
+TICKET_REF = re.compile(r"\b(?:t_[a-z0-9]{6,16}|[A-Z][A-Z0-9]{0,9}-[0-9]{1,6})\b")
+
+
+def _held_words(why):
+    """Core's refusal without ticket ids: "ORCH-9 waits in line: the computer is very busy. It starts ..." -> "the
+    computer is very busy. It starts ..."; any other id becomes "it"."""
+    text = _text(why, 200)
+    text = re.sub(r"^\S+ waits in line: ", "", text)
+    return TICKET_REF.sub("it", text)
+
+
+def _waiting(ticket, d, held=None, watcher=True):
+    """Why no helper works on a started run right now (ORCH-277), or None while one works (the order or a crew
+    ticket is Working) or when the order is no started run. {"kind", "task"?, "until"?, "why"?}; the page words it:
+    you (a question or a result waits for the person), time (a ticket waits until a time), ticket (a crew ticket waits
+    on something else), held (core did not start the manager: the computer is busy, the helper limit ...), watcher
+    (Factory's watcher is off, so nothing wakes the manager), starting (the next stage is about to start), idle."""
+    if d["phase"] != "started" or d["kind"] != "run" or d["shipped"] or ticket.get("status") == "dropped":
+        return None
+    crew = [(slug, t) for slug, t in d["crew"].items() if t.get("status") not in ("done", "dropped")]
+    if ticket.get("status") == "active" or any(t.get("status") == "active" for _, t in crew):
+        return None
+
+    def title(slug):
+        return _text(d["tasks"].get(slug, {}).get("title")) or None
+
+    if d["open"] or _results(d) or _plain_questions(ticket):  # Factory's own superseded asks do not count
+        return {"kind": "you"}
+    for slug, t in crew:
+        if _open_asks(t):
+            return {"kind": "you", "task": title(slug)}
+    for task, t in [(None, ticket), *crew]:
+        w = _waits_on(t)
+        if w is None:
+            continue
+        name = title(task) if task else None
+        if w.get("kind") == "time" and isinstance(w.get("until"), str):
+            return {"kind": "time", "task": name, "until": w["until"]}
+        return {"kind": "ticket", "task": name}
+    if held:
+        return {"kind": "held", "why": _held_words(held.get("why")), "since": held.get("at")}
+    if not watcher:
+        return {"kind": "watcher"}
+    if _starting(d):
+        return {"kind": "starting"}
+    return {"kind": "idle"}
 
 
 def _labelled(line, proposal):
@@ -118,8 +177,9 @@ def _eta(d, proposal):
     return eta
 
 
-def _summary(ticket, d, root=None):
-    """One order summary from a derived state `d`."""
+def _summary(ticket, d, root=None, held=None, watcher=True):
+    """One order summary from a derived state `d`. `held`: the watcher's kept reason why core did not start the
+    manager; `watcher`: whether the Factory watcher runs."""
     leads = _lead(d)
     proposal = d.get("proposal") or (leads[-1]["data"] if leads else None)
     kind, phase = d["kind"], "draft"
@@ -171,6 +231,7 @@ def _summary(ticket, d, root=None):
         "questions": _plain_questions(ticket),
         "results": _results(d) if started_run else [],
         "starting": _starting(d) if started_run else None,
+        "waiting": _waiting(ticket, d, held, watcher) if started_run else None,
     }
 
 
@@ -229,6 +290,7 @@ def _broken(ticket, error):
         "questions": [],
         "results": [],
         "starting": None,
+        "waiting": None,
         "problem": _text(str(error), 200),
     }
 
@@ -275,15 +337,20 @@ def _all(root):
     tickets = orchcli.tickets(root)
     journal = store.journal_read()
     summaries, ok = [], set()
+    held, on = watch.held(store), _watcher_on(root)
     for t in _order_tickets(tickets):
         try:
             d = _derive(root, store, t, tickets)
         except Refused as error:
             summaries.append(_broken(t, error))
             continue
-        summaries.append(_summary(t, d, root))
+        summaries.append(_summary(t, d, root, held.get(t["id"]), on))
         ok |= d["decided_ok"]
     return summaries, ok, store, tickets, journal
+
+
+def _watcher_on(root):
+    return service.running_pid(root, clean=False) is not None
 
 
 def _day_limit(root, store, tickets, journal):
@@ -311,7 +378,7 @@ def home(root):
         "orders": summaries,
         "autopilot": auto,
         "day_limit": _day_limit(root, store, tickets, journal),
-        "watcher": service.running_pid(root, clean=False) is not None,
+        "watcher": _watcher_on(root),
     }
 
 
@@ -479,7 +546,7 @@ def order(root, order_id):
     leads = _lead(d)
     proposal = d.get("proposal") or (leads[-1]["data"] if leads else None)
     return {
-        **_summary(ticket, d, root),
+        **_summary(ticket, d, root, watch.held(store).get(order_id), _watcher_on(root)),
         "proposal": proposal,
         "drafts": _drafts(store, order_id),
         "crew": _crew(d, root, store),
