@@ -46,7 +46,16 @@ def test_gallery_links_exist_and_use_only_the_master():
     assert "<style" not in html.lower()
     # no inline handlers: the page's Content-Security-Policy blocks them (ORCH-67, the column picker)
     assert not re.search(r"\son[a-z]+=", html), "inline event handler in gallery.html"
-    for sect in ("kit", "foundations", "controls", "results", "states", "overlays", "motion"):
+    for sect in (
+        "kit",
+        "foundations",
+        "controls",
+        "results",
+        "result-widgets",
+        "states",
+        "overlays",
+        "motion",
+    ):
         assert f'id="{sect}"' in html, sect
     # loading, empty and error each have an example
     for word in ("Loaded", "Loading", "Empty", "Error"):

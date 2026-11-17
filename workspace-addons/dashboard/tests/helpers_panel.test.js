@@ -57,6 +57,9 @@ test('helperRows: one row per running helper, working first, stuck last, with st
   assert.deepEqual(rows.map(r => r.ticket.key), ['ORCH-1', 'ORCH-3', 'ORCH-2']);
   assert.deepEqual({...rows[0].step}, {n:2, of:3});
   assert.equal(rows[0].minutes, 52);
+  // ORCH-288: a skipped task counts in the total, like the "3/4" of the Tickets list
+  const skip = helpers.helperRows([{id:'e', status:'active', checklist:[{done:true}, {done:true}, {wont_do:true}, {state:'doing'}]}], {e:{running:true, helper:{state:'working'}}});
+  assert.deepEqual({...skip[0].step}, {n:4, of:4});
   assert.equal(rows[2].finished, true);
 });
 

@@ -5,6 +5,8 @@ Wake reasons (all decided through authority/flow, never from the ext cache or ra
   b) a crew sub-ticket of a started order became done or failed since the last pass;
   c) autopilot: a live grant covers an open stop the manager could decide (once per stop);
   d) a task handed to another workspace was denied, failed or done there (once per task and reason, no timer).
+  e) a started run stood still for STILL_AFTER seconds: no helper works on it and nothing waits for a person, a time,
+     another ticket or a refused start (ORCH-277); the same standstill again after STILL_AGAIN, at most STILL_MAX.
 When the only news is that a stage is done (the crew's last result is OK, or a person said Continue at its stop) and the
 next stage is a plain stage of the plan the person accepted, Factory starts that stage's crew itself at once (#47): no
 manager run, no new question. The manager is woken only when something does not fit the plan.
@@ -44,13 +46,18 @@ def ready_stage(d):
     handed to another workspace)."""
     if d["phase"] != "started" or d["kind"] != "run" or d["shipped"] or d["finished"]:
         return None
-    if d["open"] or d["edit"] or not d["stage"] or not any(x["state"] == "done" for x in d["line"]):
+    if d["open"] or d["edit"] or not d["stages"] or not any(x["state"] == "done" for x in d["line"]):
         return None
-    mine = [t for t in d["tasks"].values() if t["stage"] == d["stage"]]
     handed = {h["task"] for h in d["proposal"].get("handovers", [])}
-    if not mine or any(t["slug"] in d["crew"] or t["slug"] in handed or not t.get("agent") for t in mine):
-        return None
-    return d["stage"]
+    for stage in d["stages"]:  # several stages can be current at once (ORCH-277): the first fresh one
+        mine = [t for t in d["tasks"].values() if t["stage"] == stage]
+        if mine and not any(
+            t["slug"] in d["crew"] or t["slug"] in handed or not t.get("agent") for t in mine
+        ):
+            return stage
+        if any(t["slug"] not in d["crew"] for t in mine):
+            return None  # an earlier stage is not fully started: the plan's next step is that one
+    return None
 
 
 def _reasons(root, store, ticket, tickets, entry, granted, decided):
@@ -107,6 +114,44 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
 
 
 MEASURE_EVERY = 60  # seconds between two measurements of an order's active time
+STILL_AFTER = 120  # an order that stands still this long with nothing waiting gets its manager started again
+STILL_AGAIN = 1800  # the same standstill again only after this long (the manager may have had nothing to do)
+STILL_MAX = 3  # at most this many starts for one and the same standstill
+
+
+def _now():
+    return time.time()
+
+
+def _standstill(root, store, ticket, tickets):
+    """A short key of the order's state when a started run stands still: no helper works on it and nothing waits (no
+    question, result, timed or other wait, refused start), ORCH-277. None while it moves or waits for something."""
+    from . import pageapi
+
+    d = flow.derive(root, store, ticket, tickets)
+    w = pageapi._waiting(ticket, d)
+    if not w or w["kind"] not in ("idle", "starting"):
+        return None
+    crew = sorted((slug, t.get("status") or "") for slug, t in d["crew"].items())
+    return json.dumps([d["stages"], crew, ticket.get("status")])
+
+
+def _still(entry, sig):
+    """(new "still" record or None, wake now). Waits STILL_AFTER on a new standstill, then wakes once; the same
+    standstill wakes again after STILL_AGAIN, at most STILL_MAX times."""
+    if sig is None:
+        return None, False
+    old = entry.get("still") if isinstance(entry.get("still"), dict) else {}
+    now = _now()
+    if old.get("sig") != sig:
+        return {"sig": sig, "since": now, "woke": 0}, False
+    woke, at = old.get("woke", 0), old.get("at")
+    due = (woke == 0 and now - old.get("since", now) >= STILL_AFTER) or (
+        0 < woke < STILL_MAX and isinstance(at, (int, float)) and now - at >= STILL_AGAIN
+    )
+    if not due:
+        return old, False
+    return {**old, "woke": woke + 1, "at": now}, True
 
 
 def _keep_budget(root, store, ticket, tickets, entry):
@@ -152,6 +197,9 @@ def once(root):
                     continue
                 entry = orders.get(t["id"], {})
                 why, ids, crew, stage = _reasons(root, store, t, tickets, entry, granted, decided)
+                still, wake = _still(entry, None if why else _standstill(root, store, t, tickets))
+                if wake:
+                    why = ["the order stood still with nothing waiting"]
                 measured = _keep_budget(root, store, t, tickets, entry)
                 live = run_live(root, t["id"]) if why else False
             except Refused:
@@ -164,6 +212,8 @@ def once(root):
             new = {"crew": crew, "woken": sorted(set(entry.get("woken", [])) | set(ids))}
             if measured is not None:
                 new["measured"] = measured
+            if still is not None:
+                new["still"] = still
             if why and entry.get("held"):
                 new["held"] = entry["held"]  # kept until a start goes through or nothing waits for one
             if new != entry:
@@ -215,6 +265,16 @@ def held(store):
         for o, e in _load(store).items()
         if isinstance(e, dict) and isinstance(e.get("held"), dict)
     }
+
+
+def stuck(store):
+    """Order ids whose standstill already had STILL_MAX manager starts that did not move it on."""
+    out = set()
+    for o, e in _load(store).items():
+        still = e.get("still") if isinstance(e, dict) else None
+        if isinstance(still, dict) and isinstance(still.get("woke"), int) and still["woke"] >= STILL_MAX:
+            out.add(o)
+    return out
 
 
 def start_stage(root, order, stage):
