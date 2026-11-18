@@ -105,5 +105,7 @@ module.exports = {
     await page.getByText(/voice-note-\d{4}\.webm/).first().waitFor({ timeout: 10000 }).catch(() => {});
     t = await text();
     must(/voice-note-\d{4}\.webm/.test(t), 'the voice note from Add note is not on the ticket');
+    // leave no extra card in Check: later click-throughs (b-answer) expect the seeded cards only
+    await act('ticket.patch', () => page.getByRole('button', { name: 'Looks good' }).first().click());
   },
 };
