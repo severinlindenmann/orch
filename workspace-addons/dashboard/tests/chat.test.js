@@ -340,3 +340,14 @@ test('orch.say from the shown add-on frame fills the draft; a URL does not; a ty
   assert.equal(c.chatSayRequest(msg('hi', {origin:'http://evil'})), null);
   assert.equal(c.chatSayRequest(msg('hi', {source:{}})), null);
 });
+
+test('the heading counts helpers like Home: the same helper rows and words, not the raw run count', () => {
+  const c = context();
+  c.state.chat = {day:'2026-11-11', activity:{running:15}, messages:[]};
+  c.window.DashHelpers = {helperRows:() => [{state:'working'}, {state:'working'}, {state:'waiting'}, {state:'idle'}]};
+  c.window.UI = {helperSummary:rows => '2 working · 1 on hold · 1 idle'};
+  c.tickets = () => [];
+  const head = JSON.stringify(c.chatHeading());
+  assert.match(head, /Your helper · 2 working · 1 on hold · 1 idle/);
+  assert.doesNotMatch(head, /15/);
+});

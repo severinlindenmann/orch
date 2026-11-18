@@ -643,9 +643,10 @@ class Scheduler:
                         orchcli.log(self.root, tid, "Opened again for the next run of this repeat.")
                     res = self.start_due(run_tid, repeat_words(cron, tz), now) if run_tid else "failed"
                     if run_tid:  # a sub-ticket that could not be made is tried again next pass
-                        record_last_run(
-                            self.root, t, now
-                        )  # also after a failure: the next planned time retries
+                        # also after a failure: the next planned time retries. Re-read first: the reopen, the start
+                        # and the sub-ticket moved the revision on, and a write against the old one is refused
+                        # without a word (ORCH-395: core's health checks then called the repeat stopped)
+                        record_last_run(self.root, orchcli.ticket(self.root, tid) or t, now)
                     if res == "started":
                         started.append(run_tid)
                 nxt = next_after(cron, now, tz)
