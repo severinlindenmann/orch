@@ -1,9 +1,11 @@
 """Checks a workspace sets for itself (checkfiles.py, `orch checks`, ORCH-529)."""
 
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -165,15 +167,28 @@ def test_files_starting_with_underscore_never_run(proj):
 
 @pytest.mark.parametrize(
     ("value", "want"),
-    [(None, 900), ("30m", 1800), ("2h", 7200), ("1d", 86400), (120, 120), ("90s", 90), ("10s", None), ("x", None)],
+    [
+        (None, 900),
+        ("30m", 1800),
+        ("2h", 7200),
+        ("1d", 86400),
+        (120, 120),
+        ("90s", 90),
+        ("10s", None),
+        ("x", None),
+    ],
 )
 def test_interval(value, want):
     assert checkfiles.duration(value, 900, 60, 7 * 86400) == want
 
 
 def test_interval_scheduling(proj, databricks):
-    _write(proj, "slow", {"command": ["databricks", "current-user", "me", "--profile", "a"], "interval": "2h"})
-    _write(proj, "fast", {"command": ["databricks", "current-user", "me", "--profile", "b"], "interval": "5m"})
+    _write(
+        proj, "slow", {"command": ["databricks", "current-user", "me", "--profile", "a"], "interval": "2h"}
+    )
+    _write(
+        proj, "fast", {"command": ["databricks", "current-user", "me", "--profile", "b"], "interval": "5m"}
+    )
     for n in ("slow", "fast"):
         checkfiles.approve(proj, n, "human:Ann")
     doc = health.check(proj, NOW)
@@ -215,14 +230,47 @@ def test_a_script_check_gets_its_key_as_a_variable_only(proj, monkeypatch):
     keystore.add(proj, "api-token", "token", "tok-12345678")
     _write(proj, "api", {"label": "Payments API", "kind": "key", "script": "api.py", "key": "api-token"})
     (checkfiles.folder(proj) / "api.py").write_text(
-        "import os, sys\nsys.exit(0 if os.environ.get('ORCH_CHECK_KEY') == 'tok-12345678' else 3)\n"
+        "import os, sys\n"
+        "fd = os.environ.get('ORCH_CHECK_KEY_FD')\n"
+        "key = os.read(int(fd), 4096).decode() if fd else os.environ.get('ORCH_CHECK_KEY')\n"
+        "sys.exit(0 if key == 'tok-12345678' else 3)\n"
     )
     checkfiles.approve(proj, "api", "human:Ann")
     r = checkfiles.recipes(proj)[0]
-    argv, env = checkfiles.script_argv(proj, r)
-    assert argv[:2] == [sys.executable, "-I"] and "tok-12345678" not in argv
+    with checkfiles.prepared(proj, r) as (argv, env, fds):
+        assert argv[:2] == [sys.executable, "-I"] and "tok-12345678" not in json.dumps(argv)
+        assert str(checkfiles.folder(proj)) not in argv[2]  # a private copy runs, never the project file
+        if os.name != "nt":
+            assert "tok-12345678" not in json.dumps(env) and fds
+    assert not Path(argv[2]).exists()  # the copy is gone afterwards
     rows = health.overview(proj, NOW)
     assert rows[0]["state"] == "works" and "tok-12345678" not in json.dumps(rows)
+
+
+def test_a_script_swapped_after_approval_does_not_run(proj, monkeypatch):
+    monkeypatch.setattr(health, "helper_recipes", lambda: [])
+    _write(proj, "api", {"script": "api.py"})
+    (checkfiles.folder(proj) / "api.py").write_text("import sys; sys.exit(0)\n")
+    checkfiles.approve(proj, "api", "human:Ann")
+    r = checkfiles.recipes(proj)[0]  # approved when it was read ...
+    (checkfiles.folder(proj) / "api.py").write_text("import sys; sys.exit(0)  # other\n")  # ... then swapped
+    with checkfiles.prepared(proj, r) as (argv, _, _):
+        assert argv is None
+    assert health.run_one(proj, r) == (None, None, False)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symbolic links need admin rights on Windows")
+def test_a_linked_or_huge_script_is_never_read(proj, tmp_path):
+    outside = tmp_path / "elsewhere.py"
+    outside.write_text("print(1)\n")
+    _write(proj, "linked", {"script": "linked.py"})
+    (checkfiles.folder(proj) / "linked.py").symlink_to(outside)
+    _write(proj, "huge", {"script": "huge.py"})
+    (checkfiles.folder(proj) / "huge.py").write_bytes(b"#" * (checkfiles._FILE_MAX + 1))
+    for n in ("linked", "huge"):
+        assert checkfiles._load(proj, n)[2] is None
+        checkfiles.approve(proj, n, "human:Ann")
+    assert all(health.run_one(proj, r) == (None, None, False) for r in checkfiles.recipes(proj))
 
 
 def test_phone_rows_skip_checks_that_wait_and_treat_tool_as_login(proj, databricks):

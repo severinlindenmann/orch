@@ -16,8 +16,9 @@ A check file (every field except the command or script may be left out):
 
 A command is a tool's own status command with plain arguments (health.command_ok). A script is a file next
 to the check (`.py` runs with orch's own Python, so it works on macOS and Windows; `.sh` on macOS/Linux;
-`.ps1` on Windows). A script check may name a key (`key`): its value reaches the script as the environment
-variable ORCH_CHECK_KEY, never as an argument and never in a file.
+`.ps1` on Windows). A script check may name a key (`key`): its value reaches the script through a pipe whose
+descriptor the variable ORCH_CHECK_KEY_FD names (on Windows the plain variable ORCH_CHECK_KEY), never as an
+argument and never in a file. The script runs from a private copy of exactly the bytes that were approved.
 
 Security (R5.2 and the cloned-project rule of health.py): a check file from the project folder never runs on
 its own. It runs only after the person approved it (`orch checks approve <name>`), and again only after a
@@ -34,7 +35,9 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
+import tempfile
 from pathlib import Path
 
 from orch import health
@@ -94,29 +97,46 @@ def _names(root: Path) -> list[str]:
 
 
 def _bytes(path: Path) -> bytes | None:
+    """A small regular file's bytes, read once from one open handle; None for a link, a folder, a device, a
+    file over _FILE_MAX or one that cannot be read (a check file is project content: never trusted)."""
     try:
-        if path.stat().st_size > _FILE_MAX:
-            return None
-        return path.read_bytes()
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
     except OSError:
         return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            raw = f.read(_FILE_MAX + 1)
+        return raw if len(raw) <= _FILE_MAX else None
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
 
 
-def digest(root: Path, name: str) -> str | None:
-    """The content hash of one check: its file plus its script (when it names one). None when unreadable."""
+def _load(root: Path, name: str) -> tuple[object, str | None, bytes | None]:
+    """(file content, content hash, script bytes) of one check, each file read once, so what is hashed is
+    exactly what is parsed and run. The hash covers the file and its script (when it names one)."""
     raw = _bytes(folder(root) / f"{name}.json")
     if raw is None:
-        return None
+        return None, None, None
     h = hashlib.sha256(raw)
     try:
         doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         doc = None
     script = doc.get("script") if isinstance(doc, dict) else None
+    body = None
     if isinstance(script, str) and _SCRIPT.fullmatch(script):
         body = _bytes(folder(root) / script)
         h.update(b"\0script\0" + (body if body is not None else b"\0missing\0"))
-    return h.hexdigest()
+    return doc, h.hexdigest(), body
+
+
+def digest(root: Path, name: str) -> str | None:
+    """The content hash of one check (see _load). None when its file cannot be read."""
+    return _load(root, name)[1]
 
 
 def parse(name: str, doc) -> dict | None:
@@ -165,11 +185,7 @@ def entries(root: Path) -> list[dict]:
     ok = _approved(root)
     out = []
     for name in _names(root):
-        dg = digest(root, name)
-        try:
-            doc = json.loads((_bytes(folder(root) / f"{name}.json") or b"").decode("utf-8"))
-        except (UnicodeDecodeError, ValueError):
-            doc = None
+        doc, dg, _ = _load(root, name)
         r = parse(name, doc)
         if r:
             r["v"] = (dg or "")[:16]
@@ -233,32 +249,72 @@ def waiting_rows(root: Path) -> list[dict]:
 # ------------------------------------------------------------------------------------------------ running
 
 
-def script_argv(root: Path, r: dict) -> tuple[list[str] | None, dict | None]:
-    """(argv, env) for a script check; (None, None) when its runner or a needed tool is missing here."""
-    path = folder(root) / r["script"]
-    if not path.is_file() or any(not shutil.which(b) for b in r.get("requires") or ()):
-        return None, None
-    ext = path.suffix.lower()
+def _runner(ext: str, path: str) -> list[str] | None:
     if ext == ".py":
-        argv = [sys.executable, "-I", str(path)]
-    elif ext == ".sh" and os.name != "nt" and shutil.which("sh"):
-        argv = [shutil.which("sh"), str(path)]
-    elif ext == ".ps1" and os.name == "nt" and (ps := shutil.which("powershell") or shutil.which("pwsh")):
-        argv = [ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(path)]
-    else:
-        return None, None
-    env = {k: v for k, v in os.environ.items() if k != KEY_ENV}
-    if r.get("key"):
+        return [sys.executable, "-I", path]
+    if ext == ".sh" and os.name != "nt" and (sh := shutil.which("sh")):
+        return [sh, path]
+    if ext == ".ps1" and os.name == "nt" and (ps := shutil.which("powershell") or shutil.which("pwsh")):
+        return [ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path]
+    return None
+
+
+@contextlib.contextmanager
+def prepared(root: Path, r: dict):
+    """(argv, env, pass_fds) to run a script check, or (None, None, ()) when it may not or cannot run here.
+
+    The check is read again and its hash compared with the approval right now; the bytes that matched are
+    written to a private copy that is run (never the project file, which could change in between) and
+    removed afterwards. A named key goes through a pipe (renew.hand_over: KEY_ENV + "_FD" names it; the
+    plain variable on Windows), never as an argument or a file."""
+    from orch import renew
+
+    no = (None, None, ())
+    if any(not shutil.which(b) for b in r.get("requires") or ()):
+        yield no
+        return
+    doc, dg, body = _load(root, r["name"])
+    now = parse(r["name"], doc)
+    if (
+        body is None
+        or not dg
+        or _approved(root).get(r["name"]) != dg
+        or not now
+        or now["script"] != r["script"]
+    ):
+        yield no
+        return
+    ext = Path(r["script"]).suffix.lower()
+    if not _runner(ext, "x"):
+        yield no
+        return
+    env = {k: v for k, v in os.environ.items() if k not in (KEY_ENV, KEY_ENV + "_FD")}
+    fd = None
+    if now.get("key"):
         from orch import keystore
 
         try:
-            value = keystore.get_value(Path(root), r["key"])
+            value = keystore.get_value(Path(root), now["key"])
         except Refused:
-            return None, None
-        if not isinstance(value, str):
-            return None, None  # a key file is not handed over as text
-        env[KEY_ENV] = value
-    return argv, env
+            value = None
+        if not isinstance(value, str):  # no such key, or a key file: nothing is handed over
+            yield no
+            return
+        fd = renew.hand_over(env, KEY_ENV, value)
+    tmp = Path(tempfile.mkdtemp(prefix="orch-check-"))  # 0700, this user only
+    copy = tmp / f"check{ext}"
+    try:
+        with open(copy, "wb") as f:
+            f.write(body)
+        yield _runner(ext, str(copy)), env, ((fd,) if fd is not None else ())
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
+            copy.unlink()
+        with contextlib.suppress(OSError):
+            tmp.rmdir()
 
 
 # ------------------------------------------------------------------------------------------------ changing
@@ -415,7 +471,10 @@ TEMPLATE = {
     "_how": "The one plain step the person takes when it stops working, shown word for word.",
     "_sign_in": "The terminal command that signs in again, shown with a Copy button; orch never runs it.",
     "_requires": "Tools that must be installed; when one is missing the check is unreachable, not 'renew'.",
-    "_key": "For a script: the name of a key (orch keys) handed to it as the variable ORCH_CHECK_KEY.",
+    "_key": (
+        "For a script: the name of a key (orch keys). The script reads it from the file descriptor in "
+        "ORCH_CHECK_KEY_FD (Windows: the variable ORCH_CHECK_KEY). The script runs from a private copy."
+    ),
     "label": "Databricks dev",
     "kind": "login",
     "command": ["databricks", "current-user", "me", "--profile", "dev"],

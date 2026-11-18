@@ -306,7 +306,12 @@ def recipes(root: Path) -> list[dict]:
 
 
 def ask(
-    binary: str, recipe: dict, *, argv: list[str] | None = None, env: dict | None = None
+    binary: str,
+    recipe: dict,
+    *,
+    argv: list[str] | None = None,
+    env: dict | None = None,
+    pass_fds: tuple = (),
 ) -> tuple[bool | None, str | None]:
     """(works, end time) from the recipe's command (or the given argv: a check file's script); (None, None)
     when it gave no readable answer or ran past its time limit."""
@@ -314,6 +319,8 @@ def ask(
     # an exit-code recipe never reads what the command prints; a JSON one keeps only stdout, parsed below
     out = subprocess.PIPE if json_answer else subprocess.DEVNULL
     extra = {"env": env} if env is not None else {}
+    if pass_fds:
+        extra["pass_fds"] = pass_fds
     try:
         r = subprocess.run(
             argv or [binary, *recipe["command"][1:]],
@@ -421,10 +428,10 @@ def run_one(root: Path, r: dict) -> tuple[bool | None, str | None, bool]:
     from orch import checkfiles
 
     if r.get("script"):
-        argv, env = checkfiles.script_argv(root, r)
-        if not argv:
-            return None, None, False
-        works, ends = ask(argv[0], r, argv=argv, env=env)
+        with checkfiles.prepared(root, r) as (argv, env, fds):
+            if not argv:
+                return None, None, False
+            works, ends = ask(argv[0], r, argv=argv, env=env, pass_fds=fds)
         return works, ends, True
     if any(not shutil.which(b) for b in r.get("requires") or ()):
         return None, None, False
