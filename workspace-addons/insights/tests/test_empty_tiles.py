@@ -22,16 +22,16 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const ctx = vm.createContext({node, plural});
 vm.runInContext(src.slice(start, end), ctx);
 const view = JSON.parse(process.argv[2]);
-console.log(JSON.stringify({tiles: vm.runInContext('emptyTiles(' + JSON.stringify(view) + ')', ctx).map(text),
+console.log(JSON.stringify({tiles: vm.runInContext('emptyTiles(' + JSON.stringify(view) + ',' + process.argv[3] + ')', ctx).map(text),
   services: text(vm.runInContext('servicesTile(' + JSON.stringify(view) + ')', ctx))}));
 """
 
 
-def run(connections):
+def run(connections, team=None):
     view = json.dumps({"tabs": {"connections": connections}})
     data = json.loads(
         subprocess.run(
-            ["node", "-e", RUNNER, str(JS), view], capture_output=True, text=True, check=True
+            ["node", "-e", RUNNER, str(JS), view, json.dumps(team)], capture_output=True, text=True, check=True
         ).stdout
     )
     assert not data.get("missing"), (
@@ -114,3 +114,11 @@ def test_runs_without_tokens_never_say_no_model_use():
 
     assert text(5) == "Token use isn’t recorded for these runs yet."
     assert text(0) == "No model use in the last 30 days."
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node missing")
+def test_tile_does_not_contradict_the_helper_time_shown_above():
+    """ORCH-410: no run is recorded but the tickets show helper time: the tile says where that time comes from."""
+    tile = run({"count": 0, "known": True}, {"time": "88 h 28 min"})["tiles"][0]
+    assert "No helper runs are recorded" not in tile and "helper time above" in tile
+    assert "No helper runs are recorded" in run({"count": 0, "known": True}, {"time": "–"})["tiles"][0]
