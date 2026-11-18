@@ -1,8 +1,12 @@
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
+# a running service started a minute ago, so "Running since today" holds on any day (a fixed date went stale)
+_STARTED = (datetime.now(UTC) - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 # No test may touch the real ~/.orch-tool (shared helper), and the core (orch) is found by path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -78,7 +82,7 @@ class FakeDriver:
 
         e = self.entries.get(spec.sid)
         on = bool(e and e["running"])
-        return Status(running=on, pid=4242 if on else None, since="2026-11-17T10:00:00Z" if on else None)
+        return Status(running=on, pid=4242 if on else None, since=_STARTED if on else None)
 
     def runs(self, spec):
         return self.run_counts.get(spec.sid)
