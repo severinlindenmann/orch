@@ -769,7 +769,8 @@ async function noTicket(page, dash, width) {
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: made.map(([kind, title, id]) => ({
     id, key: '', title, kind, status: kind === 'empty' ? 'working' : 'idle', word: kind === 'empty' ? 'Working' : kind === 'terminal' ? 'Open' : 'Idle',
     detail: '', waiting_on: [], question: null, lines: [], tool: kind === 'terminal' ? null : 'Claude Code', model: null,
-    mode: kind === 'terminal' ? null : 'live', opened_at: null, open_seconds: null, idle_seconds: null, closes_in_seconds: null, last_at: null })) } }));
+    mode: kind === 'terminal' ? null : 'live', opened_at: null, open_seconds: null, idle_seconds: null, closes_in_seconds: null, last_at: null,
+    pinned: true, name: null })) } }));  // orch pins a session without a ticket until it is unpinned (ORCH-361)
   await page.route('**/api/act', async route => {
     const body = route.request().postDataJSON();
     if (body.op !== 'session.new') return route.continue();
@@ -801,7 +802,7 @@ async function noTicket(page, dash, width) {
     await page.waitForSelector(`#live-dock .live-pane[data-session="${id}"]`, { timeout: 10000 });
     const head = await page.textContent(`#live-dock .live-pane[data-session="${id}"] .live-pt`);
     if (head.trim() !== title) throw new Error(`the pane of the ${title} says "${head.trim()}"`);
-    const pins = await page.evaluate(() => JSON.parse(localStorage.getItem('orch.live.pins') || '[]'));
+    const pins = await page.evaluate(() => window.LiveSessions?.pins || []);  // kept by orch for the workspace (ORCH-361)
     if (!pins.includes(id)) throw new Error(`the ${title} is not pinned`);
     if (await page.$(`#live-dock .live-pane[data-session="${id}"] [data-key="live-open-ticket"]`)) throw new Error(`the ${title} offers Open ticket`);
   }
@@ -828,8 +829,10 @@ async function noTicket(page, dash, width) {
   await page.waitForSelector('[data-key="live-new"] [data-live-new="empty"]', { timeout: 10000 });
   const buttons = await page.$$eval('[data-key="live-new"] [data-live-new]', els => els.map(el => el.innerText.trim()));
   if (buttons.join('|') !== NO_TICKET.map(n => n[1]).join('|')) throw new Error(`the top of Focus has ${buttons.join(', ')}`);
-  const rows = await page.$$eval('[data-key="live-no-ticket"] .lbar-row', els => els.map(el => el.innerText.replace(/\s+/g, ' ').trim()));
-  if (rows.length !== 4) throw new Error(`Focus shows ${rows.length} sessions without a ticket, not 4`);
+  // the wall shows them in the Pinned band (a session without a ticket is pinned until it is unpinned, ORCH-361)
+  for (const [, title, id] of NO_TICKET) {
+    if (!await page.$(`[data-band="pin"] [data-tile="${id}"]`)) throw new Error(`the wall does not show the ${title} as pinned`);
+  }
   await page.click('[data-key="live-new"] [data-live-new="chat"]');
   await page.waitForSelector('#live-dock .live-pane[data-session="t_ntchat001"]', { timeout: 10000 });
   if (calls.length !== 4) throw new Error('the Chat helper button on Focus started a second one');
