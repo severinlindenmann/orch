@@ -22,9 +22,10 @@ argument and never in a file. The script runs from a private copy of exactly the
 
 Security (R5.2 and the cloned-project rule of health.py): a check file from the project folder never runs on
 its own. It runs only after the person approved it (`orch checks approve <name>`); whenever its content (the
-file and its script) changes, the person approves it again first. What was approved is kept as content hashes in
-the guarded orch home (key folder record `checks`, field `approved`), never in `.orch/`. An agent cannot
-approve. What a check prints is handled as before: only works / ends are kept, nothing is stored or shown.
+file and its script) changes, the person approves it again first. What was approved is kept as content
+hashes in the guarded orch home (key folder record `checks`, field `approved`), never in `.orch/`.
+An agent cannot approve. What a check prints is handled as before: only works / ends are kept, nothing is
+stored or shown.
 """
 
 from __future__ import annotations
@@ -367,7 +368,7 @@ def _write(root: Path, name: str, doc: dict) -> Path:
 
 
 def remove(root: Path, name: str) -> bool:
-    """Delete one check file and forget that it was approved (a script next to it is the person's file and stays)."""
+    """Delete one check file and forget it was approved (a script next to it is the person's and stays)."""
     if not health._NAME.fullmatch(name or ""):
         return False
     path = folder(root) / f"{name}.json"

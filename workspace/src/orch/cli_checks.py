@@ -26,7 +26,7 @@ def add_parsers(sub, common) -> None:
         "approve", parents=[common], help="let a new or changed check file run (a person only)"
     )
     ap.add_argument("name")
-    r = acts.add_parser("remove", parents=[common], help="delete a check file and forget that it was approved")
+    r = acts.add_parser("remove", parents=[common], help="delete a check file and forget it was approved")
     r.add_argument("name")
     run = acts.add_parser("run", parents=[common], help="run the checks now (or one)")
     run.add_argument("name", nargs="?")
