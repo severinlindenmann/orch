@@ -8,15 +8,18 @@ branch, in line order:
 - several: one group commit (group.py) on top of the base branch on a branch `orch-queue/<base>-<time>`, one
   pull request for it, the core waiter merges that on green with a merge commit. GitHub then marks every
   included pull request merged.
-- one alone (owner, ORCH-432 q2): its own checks green and the base branch changed none of its files since it
+- one alone (owner, ORCH-432 q2; setting `merge_alone`, on by default): its own checks green and the base branch changed none of its files since it
   took the base in: its checked head gets the mark and the core waiter merges it, with no second run. The base
   changed its files: checked once on top of the base as a group of one. The queue never takes the base into a
   helper's branch.
 - the queue sets its mark (commit status `orch/merge-queue`) on every group commit it built and on every head it
   merges alone, so a develop rule that requires the mark lets nothing else in: no merge by hand, no merge ahead
   of the queue.
-- a red group is closed and split in halves; each half runs again (a half of one in a group of one). So a bad
-  pull request costs about log2(n) extra runs and the good ones still merge. A red group of one leaves the queue.
+- a red group is closed and split by what failed (blame.py, ORCH-558): the members whose files share the most
+  words with the failed checks' names are the suspects; the others run again together first (they merge on
+  green), the suspects after. When that tells nobody apart it is split in halves. So one bad pull request in a
+  group of 10 that touches the failing area costs two more runs, not about four. A red group of one leaves the
+  queue.
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
   proof before it counts. One a person merges (a Merge card, or a CI workflow change GitHub holds for the
   code owner) is only checked: on green its head gets the mark and the person merges it with the Merge card.
@@ -49,7 +52,7 @@ import hashlib
 import time
 from pathlib import Path
 
-from . import settings, store
+from . import blame, settings, store
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
 MAX_GROUP = settings.DEFAULT_MAX_GROUP  # the setting max_group wins (settings.max_group)
@@ -95,6 +98,7 @@ class Runner:
         self.wake = wake or _wake
         self.ask = ask or _ask_merge
         self.me: str | None = None
+        self.red_checks: frozenset[str] = frozenset()  # failed check names of the last red group
         self._red: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
 
     # -- the loop ----------------------------------------------------------------------------------------
@@ -428,11 +432,10 @@ class Runner:
         if len(batch) == 1:
             self.alone(batch[0])
             return
+        self.red_checks = frozenset()
         red = self.group(batch)
         if len(red) > 1:
-            half = (len(red) + 1) // 2
-            self.log(f"The group was red: splitting it into {half} and {len(red) - half}.")
-            for part in (red[:half], red[half:]):
+            for part in self.split(red, self.red_checks):
                 left = [e for e in part if _state(self.root, e["url"]) == RUNNING]
                 if len(left) == 1:  # group() looks at members again; one alone is looked at here
                     left = self.check_members(left, left[0]["base"])
@@ -440,6 +443,27 @@ class Runner:
                     self.process(left)
         elif red:
             self.alone(red[0])
+
+    def split(self, red: list[dict], failed: frozenset[str]) -> list[list[dict]]:
+        """The parts a red group runs again in, in order: the members that do not touch what failed first, then
+        those that do (blame.py); halves when that tells nobody apart."""
+        members = []
+        for e in red:
+            v = self.gh.pr(e["url"]) or {}
+            files = v.get("files") if isinstance(v.get("files"), list) else []
+            members.append((e["url"], [str(f.get("path") or "") for f in files if isinstance(f, dict)]))
+        bad = set(blame.suspects(failed, members))
+        if bad:
+            rest = [e for e in red if e["url"] not in bad]
+            sus = [e for e in red if e["url"] in bad]
+            self.log(
+                f"The group was red in {_names(failed)}: " + ", ".join(f"#{e['number']}" for e in sus)
+                + f" touch that; the other {len(rest)} run again first."
+            )  # fmt: skip
+            return [rest, sus]
+        half = (len(red) + 1) // 2
+        self.log(f"The group was red: splitting it into {half} and {len(red) - half}.")
+        return [red[:half], red[half:]]
 
     # -- one pull request --------------------------------------------------------------------------------
     def alone(self, e: dict, why: str = "") -> None:
@@ -450,8 +474,8 @@ class Runner:
         helper's branch never takes the base in. A fork is never put on a branch of the repository: merged
         directly when it may be, else it leaves the queue and a person merges it."""
         base = e.get("base") or ""
-        if e.get("lone") or e.get("proof"):
-            self.on_base(e, why)
+        if e.get("lone") or e.get("proof") or not settings.merge_alone(self.root):
+            self.on_base(e, why)  # merge_alone off: its own checks are only the light set, a group run counts
             return
         marked: list[str] = []
         o = None
@@ -635,7 +659,9 @@ class Runner:
             return []
         unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
         if o.status == "checks failed" and not unknown:
-            if self.base_to_blame(repo, base, url, inside):
+            look = getattr(self.gh, "failed_checks", None)  # the names, for the split (blame.py)
+            self.red_checks = frozenset(look(url)) if look else frozenset()
+            if self.base_to_blame(repo, base, url, inside, self.red_checks if look else None):
                 return []  # red in what the base branch is red in: not split, nobody blamed
             for e in inside:
                 why = f"its group {url} was red; checked in a smaller group"
