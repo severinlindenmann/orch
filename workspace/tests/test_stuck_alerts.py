@@ -1,6 +1,6 @@
-"""ORCH-426: a stuck ticket (a helper waiting on a permission, a step that keeps failing, a ticket the Reviewer
-left for the person) is a Needs you row, whether or not the ticket needs a person's review, and goes to the
-phone once while the relay is on and a phone is paired."""
+"""ORCH-426: a stuck ticket (a helper waiting on a permission, a step that keeps failing, a ticket the
+Reviewer left for the person) is a Needs you row, whether or not the ticket needs a person's review, and goes
+to the phone once while the relay is on and a phone is paired."""
 
 import json
 import subprocess
@@ -67,7 +67,8 @@ def test_two_failed_checks_in_a_row_are_stuck_until_one_passes(proj, new_ticket,
     assert _rows(proj, "helper:failing") == []
     _record(run, tid, "c1", 2)
     (row,) = _rows(proj, "helper:failing")
-    assert row["tone"] == "bad" and 'failed 2 times in a row on the step "Make the export work"' in row["text"]
+    assert row["tone"] == "bad"
+    assert 'failed 2 times in a row on the step "Make the export work"' in row["text"]
     _record(run, tid, "c1", 0)
     assert _rows(proj, "helper:failing") == []
 
@@ -99,7 +100,8 @@ def test_finished_tickets_are_never_stuck(proj, new_ticket, run, child):
 def test_failed_runs_counts_only_the_last_streak():
     ev = [{"type": "command", "exit": 1}, {"type": "command", "exit": 0}, {"type": "note"}]
     assert stuck.failed_runs({"evidence": ev}) == 0
-    ev += [{"type": "command", "exit": 3}, {"type": "command", "ref": "no exit"}, {"type": "command", "exit": 1}]
+    ev += [{"type": "command", "exit": 3}, {"type": "command", "ref": "no exit"},
+           {"type": "command", "exit": 1}]
     assert stuck.failed_runs({"evidence": ev}) == 2
 
 
