@@ -957,8 +957,8 @@ main.addEventListener('click', async event => {
   // ORCH-576: rows open and fold, a tile's parts list, and the scoped board (a ticket and all its parts; waits for; replaced by)
   if (action === 'board-open') { const lane = control.dataset.lane; if (boardOpen.has(lane)) boardOpen.delete(lane); else boardOpen.add(lane); render(); return; }
   if (action === 'board-parts') { if (!control.closest('.ticket-tile')) return; const id = control.dataset.ticket; if (boardPartsOpen.has(id)) boardPartsOpen.delete(id); else boardPartsOpen.add(id); render(); return; }
-  if (action === 'board-scope') { boardScope = {root:control.dataset.ticket, focus:control.dataset.focus || null}; render(); main.querySelector('.scope-bar')?.scrollIntoView({block:'nearest'}); return; }
-  if (action === 'board-pair') { const t = ticketOf(control.dataset.ticket), other = control.dataset.other; if (!t || !other) return; boardScope = {pair:[t.id, other], focus:other, words:t.superseded_by ? 'is replaced by' : 'waits for'}; render(); return; }
+  if (action === 'board-scope') { boardScope = {root:control.dataset.ticket, mark:control.dataset.mark || null}; render(); main.querySelector('.scope-bar')?.scrollIntoView({block:'nearest'}); return; }
+  if (action === 'board-pair') { const t = ticketOf(control.dataset.ticket), other = control.dataset.other; if (!t || !other) return; boardScope = {pair:[t.id, other], mark:other, words:t.superseded_by ? 'is replaced by' : 'waits for'}; render(); return; }
   if (action === 'board-scope-clear') { if (boardScope?.group) { ticketGroup = ''; writeTicketAddress(); } boardScope = null; render(); return; }
   if (action === 'file-preview') { previewFile(control.dataset.ticket, control.dataset.kind, control.dataset.name); return; }
   if (action === 'new') ticketForm();

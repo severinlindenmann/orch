@@ -297,7 +297,7 @@ const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'bo
 const BOARD_ROWS = ['waiting', 'review', 'active', 'blocked', 'ready', 'open', 'done', 'dropped', 'superseded'];
 const BOARD_FOLDED = ['done', 'dropped', 'superseded'];  // long rows at the end start folded: one click shows them
 const boardOpen = new Set(), boardPartsOpen = new Set();
-let boardScope = null;  // {root, focus} = a ticket and all its parts; {pair:[a, b], words} = waits for / replaced by
+let boardScope = null;  // {root, mark} = a ticket and all its parts; {pair:[a, b], words} = waits for / replaced by
 const BOARD_TONE = {waiting:'needs-you', review:'review', active:'working', blocked:'paused', ready:'text-muted', open:'text-faint', done:'done', dropped:'border-strong', superseded:'border-strong'};
 const boardTone = lane => 'var(--' + (BOARD_TONE[lane] || 'text-faint') + ')';
 const boardDot = lane => { const dot = h('span', {className:'sdot', 'aria-hidden':'true'}); dot.style?.setProperty('--c', boardTone(lane)); return dot; };
@@ -305,7 +305,7 @@ const boardLaneName = lane => (window.DashHelpers.LANES.find(([id]) => id === la
 const boardKind = t => t.release ? 'Release' : t.epic ? 'Epic' : '';
 const boardShort = (text, n) => { const s = clean(text); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
 // Two rows of tiles before "Show N more"; a tile is at least 260 px wide (one column on the phone).
-const boardCols = () => { const w = (typeof document !== 'undefined' && document.getElementById('content')?.clientWidth) || 1200; return Math.max(1, Math.floor((w - (w > 720 ? 200 : 32)) / 266)); };
+const boardTileColumns = () => { const w = (typeof document !== 'undefined' && document.getElementById('content')?.clientWidth) || 1200; return Math.max(1, Math.floor((w - (w > 720 ? 200 : 32)) / 266)); };
 // A ticket and every ticket inside it, all levels.
 function boardFamily(root) {
   const all = tickets(), ids = new Set();
@@ -395,8 +395,8 @@ function boardCard(t, lane = '') {
   const parts = boardChildren(tickets(), t), parent = boardParent(tickets(), t), kind = boardKind(t);
   const open = boardPartsOpen.has(t.id) && parts.length;
   const late = t.due && overdue(t) && (questions(t).length || shown(t).status === 'review');
-  const partOf = parent && boardScope?.root !== parent.id ? h('button', {type:'button', className:'tile-part-of tile-link', 'data-action':'board-scope', 'data-ticket':parent.id, 'data-focus':t.id, title:'Part of ' + clean(parent.key || '') + ' ' + clean(parent.title) + '. Show all its parts'}, 'Part of: ' + clean(parent.title)) : null;
-  const card = h('article', {className:'ticket-tile' + (boardScope?.focus === t.id ? ' tile-focus' : ''), 'data-col':lane || null, draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
+  const partOf = parent && boardScope?.root !== parent.id ? h('button', {type:'button', className:'tile-part-of tile-link', 'data-action':'board-scope', 'data-ticket':parent.id, 'data-mark':t.id, title:'Part of ' + clean(parent.key || '') + ' ' + clean(parent.title) + '. Show all its parts'}, 'Part of: ' + clean(parent.title)) : null;
+  const card = h('article', {className:'ticket-tile' + (boardScope?.mark === t.id ? ' tile-mark' : ''), 'data-col':lane || null, draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
     h('h3', {className:'tile-title'}, kind ? h('span', {className:'kind-tag', 'data-kind':kind.toLowerCase()}, kind) : null,
       h('a', {href:href(t.id), title:clean((t.key ? t.key + ' · ' : '') + t.title)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t)),
     h('div', {className:'tile-foot'},
@@ -447,7 +447,7 @@ function board() {
     const ids = boardScope.pair ? new Set(boardScope.pair) : boardFamily(ticketOf(boardScope.root));
     visible = visible.filter(t => ids.has(t.id) && t.id !== boardScope.root);
   }
-  const search = String(ticketSearch).trim(), cols = boardCols();
+  const search = String(ticketSearch).trim(), cols = boardTileColumns();
   const rows = BOARD_ROWS.map(status => {
     const label = boardLaneName(status), mine = window.DashHelpers.laneSorted(visible.filter(t => boardLane(t) === status), status);  // ORCH-156: the person's order
     if (!mine.length && (boardScope || ['dropped', 'superseded'].includes(status))) return null;  // ORCH-240: empty set-aside rows take no room

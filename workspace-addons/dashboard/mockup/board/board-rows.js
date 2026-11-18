@@ -76,7 +76,7 @@
     const subs = open ? `<div class="tile-parts">${parts.map(s => `<a class="tile-part" href="${OPEN}" title="${esc(s.k + ' ' + s.title)}">${dot(lane(s.lane))}<span class="key">${s.k}</span><span class="grow tile-part-title">${esc(s.title)}${s.deep ? ` <span class="meta">+${s.deep}</span>` : ''}</span><span class="meta">${esc(lane(s.lane).name)}</span></a>`).join('')}<button class="tile-link" type="button" data-fam="${t.k}">Show them on the board</button></div>` : '';
     const tasks = t.kind && parts.length ? partsBar(t, parts, open) : t.tasks[1] ? `<span class="tile-num">${t.tasks[0]}/${t.tasks[1]} tasks</span>` : '';
     const fam = p && !(st.hl && st.hl.root === p.k) ? `<button class="tile-part-of tile-link" type="button" data-scope="${p.k}" data-focus="${t.k}" title="Part of ${esc(p.k + ' ' + p.title)}. Show all its parts">Part of: ${esc(p.title)}</button>` : '';
-    return `<article class="ticket-tile${st.hl && st.hl.focus === t.k ? ' tile-focus' : ''}" data-ticket="${t.k}" style="--c:${t.q ? 'var(--needs-you)' : tone(l)}" ${phone() ? '' : 'draggable="true"'}>
+    return `<article class="ticket-tile${st.hl && st.hl.focus === t.k ? ' tile-mark' : ''}" data-ticket="${t.k}" style="--c:${t.q ? 'var(--needs-you)' : tone(l)}" ${phone() ? '' : 'draggable="true"'}>
       <h3 class="tile-title">${t.kind ? `<span class="kind-tag" data-kind="${t.kind}">${KIND[t.kind]}</span>` : ''}<a href="${OPEN}" title="${esc(t.k + ' · ' + t.title + ' · changed ' + t.age)}"><span class="key">${t.k}</span>${esc(t.title)}</a></h3>
       <div class="tile-foot">${tasks}${late(t)}${signal(t)}${fam}<span class="grow"></span>${addon}<details class="menu" data-menu="${t.k}"><summary class="tile-icon move-button" aria-label="Move ${esc(t.k)} to another row">${ic('more')}</summary><div class="menu-pop" role="menu">${menuItems(t)}</div></details></div>${subs}
     </article>`;
@@ -133,7 +133,7 @@
   }
   function highlight(h) {
     flip(() => { st.hl = h; st.only = h ? h.keys : null; });
-    root.querySelector('.tile-focus')?.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' });
+    root.querySelector('.tile-mark')?.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' });
     live.textContent = h ? root.querySelector('.scope-bar')?.textContent || '' : 'Showing every ticket';
   }
   const clearHl = () => { partOf.value = ''; highlight(null); };

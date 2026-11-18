@@ -1280,7 +1280,7 @@ button.status-row-none{color:var(--text-muted)}
 .tile-part .sdot{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}
 .tile-part-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tile-part .meta{font-size:11px;white-space:nowrap}
-.status-rows .ticket-tile.tile-focus{box-shadow:0 0 0 2px var(--brand)}
+.status-rows .ticket-tile.tile-mark{box-shadow:0 0 0 2px var(--brand)}
 .scope-bar{position:sticky;top:calc(var(--topbar-height,56px) + 4px);z-index:6;display:flex;align-items:center;gap:12px;margin:4px 0 8px;padding:8px 12px;border:1px solid var(--brand);border-radius:8px;background:var(--surface);box-shadow:var(--lift-shadow);font-size:13px;animation:ui-enter var(--dur-base) var(--ease-enter)}
 .scope-bar p{margin:0}
 .scope-bar .scope-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
