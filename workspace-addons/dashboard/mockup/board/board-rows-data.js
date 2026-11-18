@@ -102,7 +102,7 @@ window.D576 = {
   put({k:'ORCH-521', lane:'working', title:'Ticket list loads in under a second at 10,000', tasks:[2,4], age:'9 min ago', pk:'ORCH-518'}, 'ORCH-444');
   put({k:'ORCH-522', lane:'todo', title:'Board draws only what is on screen', tasks:[0,3], age:'1 h ago', pk:'ORCH-518'}, 'ORCH-560');
   put({k:'ORCH-420', lane:'todo', kind:'epic', title:'Review page polish, right side', tasks:[0,0], age:'yesterday'}, 'ORCH-10');
-  put({k:'ORCH-470', lane:'todo', title:'Windows: signed installer', tasks:[1,4], age:'2 h ago'}, 'ORCH-561');
+  put({k:'ORCH-470', lane:'todo', title:'Windows: installer for every computer', tasks:[1,4], age:'2 h ago'}, 'ORCH-561');
   const rel = (pk, keys) => keys.forEach(k => { const t = by(k); t.pk = pk; delete t.parent; });
   rel('ORCH-575', ['ORCH-546', 'ORCH-571', 'ORCH-568', 'ORCH-552']);
   by('ORCH-546').kind = 'epic'; by('ORCH-546').subs = [{k:'ORCH-553', title:'Prove the fast fix path end to end', s:'done'}];
