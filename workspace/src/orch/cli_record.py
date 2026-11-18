@@ -19,7 +19,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import record
+from orch import inventory, record
 from orch.errors import Refused
 
 SUBCOMMANDS = ("tail", "query", "counts", "settings", "delete-detail", "hook")
@@ -954,6 +954,26 @@ def _since(root: Path, models: list[dict]) -> tuple[str | None, list[dict]]:
     return (min(firsts) if firsts else None), problem
 
 
+_INV_KINDS = {"skills": "skill", "connections": "mcp", "keys": "key"}  # inventory list -> record kind
+
+
+def _unused(inv: dict, runs: list[dict], kinds) -> list[dict]:
+    """Inventory items no run in the window used, so counts.md lists them as not_seen / unknown (ORCH-416).
+    One per kind and name: the record and the inventory may name a different source for the same thing."""
+    used = {(u["kind"], u["name"]) for r in runs for u in r["uses"]}
+    out, seen = [], set()
+    for tab, kind in _INV_KINDS.items():
+        if kinds is not None and kind not in kinds:
+            continue
+        for item in inv[tab]:
+            key = (kind, item["name"])
+            if item.get("shadowed") or key in used or key in seen:
+                continue
+            seen.add(key)
+            out.append({"kind": kind, "name": item["name"], "source": item["source"], "action": None})
+    return out
+
+
 def counts(root: Path, args) -> dict:
     from orch import config
 
@@ -981,6 +1001,7 @@ def counts(root: Path, args) -> dict:
             m["sees"] = [k for k in m["sees"] if k in kinds]
             m["uses"] = [u for u in m["uses"] if u["kind"] in kinds]
     stamp = _today().strftime("%Y-%m-%dT%H:%M:%SZ")
+    inv = inventory.document(root, stamp)
     return {
         "schema": "orch.counts/1",
         "generated_at": stamp,
@@ -990,14 +1011,8 @@ def counts(root: Path, args) -> dict:
         "runs": len(runs),
         "tickets": len({m["ticket"] for m in runs}),
         "coverage": {"full": sum(not m["partial"] for m in runs), "partial": sum(m["partial"] for m in runs)},
-        "items": count_items(runs),
-        "inventory": {
-            "schema": "orch.inventory/1",
-            "generated_at": stamp,
-            "skills": [],
-            "connections": [],
-            "keys": [],
-        },
+        "items": count_items(runs, _unused(inv, runs, kinds)),
+        "inventory": inv,
         "sharing": {
             "counts": config.share_counts_state(root),
             "names": config.insights_share_names(root),  # the EFFECTIVE share_names (file AND the record)
