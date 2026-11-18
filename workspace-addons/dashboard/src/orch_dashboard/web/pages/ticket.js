@@ -1314,7 +1314,10 @@ function ticketChangesEditor(t) {
   const done = ticketButton('Looks good', 'primary sm', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}), {'data-key':'ticket-button-Accept-' + (tip ? tip.slice(0, 20) : 'none')}); // keyed by the tip: a refresh never keeps a handler with a stale one
   // ORCH-250: with a step still open Looks good is off and says why; Send back is the way on.
   const unfinished = array(t.checklist).filter(c => !c.done && !c.wont_do).length;
-  if (unfinished) { done.disabled = true; done.setAttribute('aria-disabled', 'true'); }
+  // ORCH-548 (owner 18 Nov): an open question stops it too, with the same words as the Review card
+  const asks = array(t.questions).filter(q => q && q.answer == null && !q.taken_back).length;
+  if (unfinished || asks) { done.disabled = true; done.setAttribute('aria-disabled', 'true'); }
+  const askNote = asks ? h('span', {className:'meta warn', 'data-key':'ticket-review-open-question'}, '! ' + (asks === 1 ? 'A question on this ticket still waits for your answer. Answer it first, then press Looks good.' : asks + ' questions on this ticket still wait for your answer. Answer them first, then press Looks good.')) : null;
   const unfinishedNote = unfinished ? h('span', {className:'meta warn', 'data-key':'ticket-review-open-steps'}, '! ' + (unfinished === 1 ? '1 step is' : unfinished + ' steps are') + ' not finished. Send it back to get ' + (unfinished === 1 ? 'it' : 'them') + ' done.') : null;
   const row = h('div', {className:'row ticket-review-actions'});
   const open_parts = array(t.proof?.uncovered).length;
@@ -1344,7 +1347,7 @@ function ticketChangesEditor(t) {
     box.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
     comp.field.focus();
   });
-  row.append(...[done, open, unfinishedNote, uncovered, shown].filter(Boolean)); host.append(row); return host;
+  row.append(...[done, open, unfinishedNote, askNote, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
   const card = q.card && typeof q.card === 'object' ? q.card : null;
@@ -1577,6 +1580,8 @@ function ticketStripModel(t, run, fresh) {
   // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
   const s = window.UI.ticketState(t, run?.running ? window.DashHelpers.helperState(run, t) : null);
   const m = sentence => ({pill:s.pill, word:s.word, helper:s.helper || undefined, sentence});
+  // ORCH-548: Looks good given on the Review page and still being saved (Undo there for a few seconds)
+  if (t.status === 'done' && t.accept_saving) return m('Done: your Looks good is being saved.');
   if (t.status === 'done') {
     const ev = ticketDoneEvent(t), when = window.DashHelpers.doneAt(t);
     return m('Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + ticketActor(ev.by) : '') + '.');
