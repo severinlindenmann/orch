@@ -14,7 +14,8 @@
   // The toast names what was saved: the account's name and the kind of change.
   const nameOf = target => model?.accounts.find(a => a.id === target.split(':')[0])?.label || 'Account';
   const WHAT = {limit: t => nameOf(t) + ': limit', period: t => nameOf(t) + ': what the limit counts', order: t => nameOf(t) + ': order',
-    on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself'};
+    on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself',
+    share: () => 'How work is spread'};
 
   function h(tag, props, ...kids) {
     const n = document.createElement(tag);
@@ -190,6 +191,79 @@
       h('div', {className: 'stack', role: 'list'}, list.map((a, i) => card(a, i, list))));
   }
 
+  // ---- how work is spread (ORCH-657): three ready-made spreads, the share as one sentence, Adjust for the rest ----
+  let adjustOpen = false;
+  const PCTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+  const ONE_IN = [0, 8, 6, 5, 4, 3, 2, 1];
+  const DOLLARS = [0, 5, 10, 20, 50];
+  const AHEAD = [['api', 'API credit'], ['codex', 'Codex'], ['both', 'API credit, then Codex'], ['none', 'Stay on the subscriptions']];
+  const oneIn = n => n === 0 ? 'none' : n === 1 ? 'all' : 'one in ' + n;
+  const cap = w => w.charAt(0).toUpperCase() + w.slice(1);
+  // a value set by command that is not one of the steps still shows, in its place
+  const withValue = (list, v, order) => list.includes(v) ? list : [...list, v].sort(order);
+  function numStep(name, values, value, fmt, onPick) {
+    const i = values.indexOf(value);
+    const go = d => { const v = values[i + d]; if (v !== undefined) onPick(v); };
+    return h('span', {className: 'num-step'},
+      h('button', {type: 'button', className: 'btn outline sm', 'aria-label': name + ': less', disabled: i <= 0 || null, onclick: () => go(-1)}, '−'),
+      h('output', {'aria-live': 'polite', 'aria-label': name, text: fmt(value)}),
+      h('button', {type: 'button', className: 'btn outline sm', 'aria-label': name + ': more', disabled: i >= values.length - 1 || null, onclick: () => go(1)}, '+'));
+  }
+  function settingsRow(title, hint, ...controls) {
+    return h('div', {className: 'settings-row'},
+      h('div', {}, h('h3', {text: title}), h('p', {className: 'muted', text: hint})),
+      h('div', {className: 'ctl'}, controls));
+  }
+  function adjustPanel(v) {
+    const s = v.share || v.presets.find(p => p.id === 'even').share;
+    const ahead = s.when_ahead;
+    const day = h('select', {'aria-label': 'Weekday'}, v.days.map(d => h('option', {value: d, selected: d === s.by_day || null, text: cap(d)})));
+    day.addEventListener('change', () => act('share', 'week:' + s.week_pct + ':' + day.value, day));
+    const chips = h('span', {className: 'row'}, v.kinds.map(k => {
+      const on = s.api_for.includes(k.id);
+      return h('button', {type: 'button', className: 'chip-btn' + (on ? ' sel' : ''), 'aria-pressed': String(on), 'aria-label': k.label + ' on API credit',
+        onclick: e => { const next = on ? s.api_for.filter(x => x !== k.id) : [...s.api_for, k.id]; act('share', 'api:' + (next.join(',') || 'none'), e.currentTarget); }}, k.label);
+    }));
+    const seg = h('div', {className: 'segmented', role: 'group', 'aria-label': 'When a subscription is ahead'}, AHEAD.map(([val, text]) => {
+      const r = h('input', {className: 'sr-only', type: 'radio', name: 'share-ahead', value: val, checked: val === ahead || null});
+      r.addEventListener('change', () => act('share', 'ahead:' + val + ':' + (val === 'api' || val === 'both' ? (s.day_dollars || 10) : 0), r));
+      return h('label', {}, r, text);
+    }));
+    const money = ahead === 'api' || ahead === 'both';
+    const oneInOrder = (a, b) => (a === 0 ? -1 : b === 0 ? 1 : b - a);
+    return h('div', {className: 'card', id: 'share-adjust'},
+      settingsRow('Subscription week', 'How much of a subscription week may be used by the end of which day. Each subscription counts its own week, from its reset.',
+        'up to', numStep('Week limit', withValue(PCTS, s.week_pct, (a, b) => a - b), s.week_pct, x => x + ' %', x => act('share', 'week:' + x + ':' + s.by_day)), 'of the week by', day),
+      settingsRow('On API credit', 'These kinds of work run on API credit, in the order of the API credits below.', chips),
+      settingsRow('Code tickets on Codex', 'How many Code ticket starts go to Codex. Counted per day, from midnight.',
+        numStep('Code tickets on Codex', withValue(ONE_IN, s.codex_one_in, oneInOrder), s.codex_one_in, oneIn, x => act('share', 'codex:' + x))),
+      settingsRow('When a subscription is ahead of its pace', 'New starts go here until the subscription is back on pace. The day limit starts again at midnight.',
+        seg, money ? h('span', {className: 'row'}, 'up to', numStep('Dollars a day', withValue(DOLLARS, s.day_dollars, (a, b) => a - b), s.day_dollars, x => '$' + x, x => act('share', 'ahead:' + ahead + ':' + x)), 'a day') : null),
+      v.share ? h('div', {className: 'settings-row'}, h('p', {className: 'meta', text: 'Without a share, helpers use the accounts in their order, one after the other.'}),
+        h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('share', 'clear', e.currentTarget)}, 'Remove the share')) : null);
+  }
+  function spread(v) {
+    const presets = h('div', {className: 'grid-3', role: 'group', 'aria-label': 'Ready-made spreads'}, v.presets.map(p => {
+      const on = v.preset === p.id;
+      return h('button', {type: 'button', className: 'live-opt tall', 'aria-pressed': String(on), onclick: e => act('share', 'preset:' + p.id, e.currentTarget)},
+        h('span', {className: 'live-opt-t'},
+          h('span', {className: 'row'}, h('strong', {text: p.name}), on ? h('span', {className: 'pill done', text: 'In use'}) : null),
+          h('span', {className: 'meta muted', text: p.what})));
+    }));
+    const own = v.share && !v.preset;
+    const toggle = h('button', {type: 'button', className: 'btn outline sm', 'aria-controls': 'share-adjust', 'aria-expanded': String(adjustOpen),
+      onclick: () => { adjustOpen = !adjustOpen; draw(model); }}, adjustOpen ? 'Hide the choices' : 'Adjust');
+    return h('section', {className: 'stack', id: 'spread'},
+      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', text: 'Saved now; helper starts follow it once Usage picks the account for each start.'})),
+      h('div', {className: 'card pad stack'},
+        presets,
+        h('p', {className: 't-row', id: 'share-sentence', text: v.sentence}),
+        v.counts.map(c => h('p', {className: 'meta muted', text: c})),
+        v.warnings.map(w => h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w}))),
+        h('div', {className: 'row'}, toggle, own ? h('span', {className: 'meta', text: 'Your own spread'}) : null)),
+      adjustOpen ? adjustPanel(v) : null);
+  }
+
   function history(rows) {
     return h('section', {className: 'card'},
       h('div', {className: 'card-h'}, h('h2', {text: 'History'}), h('span', {className: 'meta', text: 'Last 30 days'})),
@@ -220,6 +294,7 @@
       parts.push(h('section', {className: 'card empty state-empty'}, h('span', {className: 'file-type', 'aria-hidden': 'true', text: '—'}),
         h('h2', {text: 'One account found'}), h('p', {text: 'Usage shows its use and warns before it runs out. Switching needs a second account.'})));
     }
+    if (m.share) parts.push(spread(m.share));
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
     if (subs.length) parts.push(section('Subscriptions', subsNote, subs));
     if (other.length) parts.push(section('API keys and helper tools', 'Each one stops at its limit.', other));
