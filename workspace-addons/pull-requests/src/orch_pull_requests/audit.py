@@ -33,7 +33,7 @@ def _t(s: str | None) -> datetime | None:
 
 def merges(gh, repo: str, base: str, since: datetime, queued: frozenset[str] = frozenset()) -> dict | None:
     """{groups, through, alone, by_person, past, unsure} for one base branch: lists of {number, url, mergedAt}
-    (alone: merged by the queue on its own, url in queued; unsure: GitHub did not say whether its head carries the
+    (alone: its head carries the mark and the queue's file says it merged it, url in queued; unsure: GitHub did not say whether its head carries the
     mark). None when GitHub did not answer."""
     rows = gh.merged_prs(repo, base, since.strftime("%Y-%m-%dT%H:%M:%SZ"))
     if rows is None:
@@ -51,10 +51,10 @@ def merges(gh, repo: str, base: str, since: datetime, queued: frozenset[str] = f
         if r.get("number") in inside:
             through.append(r)
             continue
-        if str(r.get("url") or "") in queued:
+        marked = gh.has_mark(repo, str(r.get("headRefOid") or "")) if r.get("headRefOid") else False
+        if marked and str(r.get("url") or "") in queued:  # the queue merged it and its head carries the mark
             alone.append(r)
             continue
-        marked = gh.has_mark(repo, str(r.get("headRefOid") or "")) if r.get("headRefOid") else False
         (unsure if marked is None else by_person if marked else past).append(r)
     return {
         "groups": groups, "through": through, "alone": alone, "by_person": by_person, "past": past, "unsure": unsure,

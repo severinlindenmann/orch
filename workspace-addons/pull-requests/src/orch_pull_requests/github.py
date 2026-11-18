@@ -132,10 +132,13 @@ class GitHub:
         ]
         return lines[-1] if got.returncode == 0 and lines else None
 
-    def set_status(self, repo: str, sha: str, description: str, target: str = "") -> bool:
-        """Set the queue's mark (commit status MARK, success) on one commit (a write: the caller takes a slot)."""
+    def set_status(
+        self, repo: str, sha: str, description: str, target: str = "", state: str = "success"
+    ) -> bool:
+        """Set the queue's mark (commit status MARK, success) on one commit, or take it back (state failure: the
+        newest status of a context is the one GitHub uses). A write: the caller takes a slot."""
         args = [
-            "api", "-X", "POST", f"repos/{repo}/statuses/{sha}", "-f", "state=success",
+            "api", "-X", "POST", f"repos/{repo}/statuses/{sha}", "-f", f"state={state}",
             "-f", f"context={MARK}", "-f", f"description={description[:140]}",
         ]  # fmt: skip
         if target:

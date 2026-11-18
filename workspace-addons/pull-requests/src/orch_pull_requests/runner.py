@@ -317,6 +317,17 @@ class Runner:
             return False
         return bool(set_status(repo, sha, text, target))
 
+    def unmark(self, repo: str, sha: str, text: str) -> None:
+        """Take the queue's mark back from a head it marked but did not merge, so nobody merges it past the queue
+        on that mark. No room or no answer: written in the log (the head stays marked until its next commit)."""
+        set_status = getattr(self.gh, "set_status", None)
+        if set_status is None:
+            return
+        if not (
+            self.take("other", f"{repo} unmark {sha[:12]}") and set_status(repo, sha, text, state="failure")
+        ):
+            self.log(f"The queue's mark on {sha[:12]} in {repo} could not be taken back; it was not merged.")
+
     # -- looking at a member again -----------------------------------------------------------------------
     def look(self, e: dict, cards: dict, bases: list[str], base: str | None = None):
         """(view, kind, line, status) for one entry as GitHub and the tickets show it now. With base, it must
@@ -440,7 +451,10 @@ class Runner:
         if e.get("lone") or e.get("proof"):
             self.on_base(e, why)
             return
-        o = self.waiter(e["url"], lambda head: self.before_direct(e, base, head))
+        marked: list[str] = []
+        o = self.waiter(e["url"], lambda head: self.before_direct(e, base, head, marked))
+        if marked and not (o.ok and o.status == "merged"):  # marked, then not merged: the mark is taken back
+            self.unmark(e["repo"], marked[-1], f"Not merged by the queue: {o.status or 'no verdict'}")
         line = o.line + (f" ({why})" if why else "")
         unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
         if o.ok and o.status == "merged":
@@ -461,15 +475,17 @@ class Runner:
         else:
             self.finish(e, OUT, line, o.status)
 
-    def before_direct(self, e: dict, base: str, head: str) -> str | None:
+    def before_direct(self, e: dict, base: str, head: str, marked: list[str]) -> str | None:
         """Right before a direct merge: the pull request is still mergeable, then its checked head gets the
-        queue's mark (the develop rule lets only marked commits in). A reason stops the merge."""
+        queue's mark (the develop rule lets only marked commits in) and is noted in marked, so alone() takes the
+        mark back when the merge does not happen. A reason stops the merge."""
         why = self.why_not([dict(e, head=head)], base)
         if why:
             return why
         text = f"Its own checks were green and {base} changed none of its files"
         if not self.mark(e["repo"], head, text):
             return "the queue's mark could not be set on it"
+        marked.append(head)
         return None
 
     def on_base(self, e: dict, why: str = "") -> None:

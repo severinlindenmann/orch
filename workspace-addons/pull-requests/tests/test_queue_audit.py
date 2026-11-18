@@ -69,9 +69,10 @@ def test_merges_are_sorted_into_through_the_queue_by_a_person_and_past_it(ws):
 def test_a_pull_request_the_queue_merged_alone_counts_as_the_queues(ws):
     """Owner, ORCH-432 q2: one alone, green, develop did not touch its files: merged by the queue, no group."""
     entry(ws, 5, at(22), at(22, 10))  # the queue's file: merged
-    gh = AuditGitHub([pr(5), pr(6)])
+    entry(ws, 7, at(22), at(22, 15))  # the queue's file says merged too, but someone merged it by hand first
+    gh = AuditGitHub([pr(5), pr(6), pr(7)], marked={f"{5:040d}"})  # only #5's head carries the mark
     b = audit.run(ws, gh, 14, now=NOW)["bases"][0]
-    assert [r["number"] for r in b["alone"]] == [5] and [r["number"] for r in b["past"]] == [6]
+    assert [r["number"] for r in b["alone"]] == [5] and [r["number"] for r in b["past"]] == [6, 7]
     assert "1 merged alone by the queue" in audit.text(audit.run(ws, gh, 14, now=NOW))
     assert [r["number"] for r in audit.as_json(audit.run(ws, gh, 14, now=NOW))["bases"][0]["alone"]] == [5]
 
