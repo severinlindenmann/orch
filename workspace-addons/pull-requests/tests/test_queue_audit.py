@@ -128,3 +128,46 @@ def test_the_audit_command_prints_json(ws, monkeypatch, capsys):
     got = json.loads(capsys.readouterr().out)
     assert got["bases"][0]["past"][0]["number"] == 1 and got["still"] == []
     assert cli.main(["queue", "audit", "--hours", "0"]) == 2
+
+
+class RunsGitHub(AuditGitHub):
+    def __init__(self, merged, runs):
+        super().__init__(merged)
+        self.rows = runs
+
+    def runs(self, repo, since):
+        return self.rows
+
+
+def run_row(sha, event="pull_request", branch="feat/x", name="ci"):
+    return {"head_sha": sha, "event": event, "head_branch": branch, "name": name}
+
+
+def test_check_runs_per_merge_count_one_round_per_commit_and_event(ws):
+    """ORCH-545: 18 Nov had 365 ci runs for 62 merges; the audit says it in one line."""
+    rows = [
+        run_row("a"), run_row("a", name="rules"),  # one pull request commit: ci and rules count once
+        run_row("b"),
+        run_row("g", branch="orch-queue/develop-1-abc"), run_row("g", branch="orch-queue/develop-1-abc", name="rules"),
+        run_row("m", event="push", branch="develop"),
+        run_row("n", event="schedule", branch="develop"),
+    ]  # fmt: skip
+    entry(ws, 1, at(22), at(22, 20))  # the audit counts the repositories the queue knows
+    gh = RunsGitHub([pr(500, "orch-queue/develop-1-abc", "Merge queue: #1, #2"), pr(1), pr(2)], rows)
+    report = audit.run(ws, gh, 14, now=NOW)
+    assert report["runs"][REPO] == {"pull_requests": 2, "groups": 1, "pushes": 1, "other": 1}
+    assert "check runs: 5 (2.5 per merge): 2 on pull requests, 1 on queue groups, 1 on pushes, 1 other" in (
+        audit.text(report)
+    )
+
+
+def test_minutes_from_joining_the_queue_to_merged(ws):
+    entry(ws, 1, at(22), at(22, 30))
+    entry(ws, 2, at(22), at(23, 30))
+    entry(ws, 3, at(22), at(22, 10), state=store.OUT)  # left the queue: not counted
+    report = audit.run(ws, RunsGitHub([], None), 14, now=NOW)
+    assert report["waited"] == [30, 90]
+    out = audit.text(report)
+    assert "middle 90 min, longest 90 min (2 merged by the queue)" in out
+    assert "check runs: GitHub did not answer" in out
+    assert audit.as_json(report)["waited_minutes"] == [30, 90]

@@ -164,6 +164,25 @@ class GitHub:
         )  # fmt: skip
         return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else None
 
+    def runs(self, repo: str, since: str) -> list[dict] | None:
+        """Workflow runs started since an ISO time: {head_sha, event, head_branch, name}, None when GitHub did not
+        answer."""
+        got = self._run(
+            "api", "--paginate", f"repos/{repo}/actions/runs?created=>={since}&per_page=100",
+            "--jq", ".workflow_runs[] | {head_sha, event, head_branch, name}", timeout=120,
+        )  # fmt: skip
+        if got.returncode != 0:
+            return None
+        out = []
+        for line in (got.stdout or "").splitlines():
+            try:
+                v = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(v, dict):
+                out.append(v)
+        return out
+
     def close(self, url: str) -> bool:
         """Close a group pull request (its branch is deleted on its own, one more write)."""
         return self._run("pr", "close", url).returncode == 0

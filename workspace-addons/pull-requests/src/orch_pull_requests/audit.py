@@ -5,7 +5,10 @@
   the base changed none of its files; the queue's file says it merged it), checked alone and merged by a person
   (its head carries the queue's mark), or past the queue (none of these);
 - times the queue stood still (from the queue's own file): a stretch of at least STILL_MINUTES with a pull
-  request in line and no merge, with the reasons the entries of that stretch gave.
+  request in line and no merge, with the reasons the entries of that stretch gave;
+- check runs per merge (ORCH-545, from GitHub): rounds of checks (one per commit and event, all workflows
+  together) on pull requests, on queue groups, on pushes and other, divided by the merges;
+- minutes from joining the queue to merged, for the pull requests the queue merged (from its own file).
 
 The night of 17/18 Nov 2026 (ORCH-446): 13 groups for 64 merges, 5 stand-stills, 3 of them avoidable.
 """
@@ -98,6 +101,38 @@ def stood_still(rows: list[dict], merged_at: list[datetime], since: datetime, un
     return found
 
 
+def runs(rows: list[dict] | None) -> dict | None:
+    """Rounds of checks by kind: one per commit and event (the jobs of every workflow on it count once)."""
+    if rows is None:
+        return None
+    seen: dict[tuple[str, str], str] = {}
+    for r in rows:
+        ev, branch = str(r.get("event") or ""), str(r.get("head_branch") or "")
+        if branch.startswith(QUEUE_BRANCH):
+            kind = "groups"
+        elif ev == "pull_request":
+            kind = "pull_requests"
+        elif ev == "push":
+            kind = "pushes"
+        else:
+            kind = "other"
+        seen.setdefault((str(r.get("head_sha") or ""), ev), kind)
+    got = {k: 0 for k in ("pull_requests", "groups", "pushes", "other")}
+    for kind in seen.values():
+        got[kind] += 1
+    return got
+
+
+def waited(rows: list[dict], since: datetime, until: datetime) -> list[int]:
+    """Minutes from joining the queue to merged, for the entries the queue merged in the window (sorted)."""
+    out = []
+    for r in rows:
+        a, e = _t(r.get("added")), _t(r.get("ended"))
+        if r.get("state") == store.MERGED and a and e and since <= e <= until:
+            out.append(int((e - a).total_seconds() // 60))
+    return sorted(out)
+
+
 def run(root: Path, gh, hours: float, now: datetime | None = None) -> dict:
     """The audit of the last `hours`."""
     until = now or datetime.now(UTC)
@@ -106,7 +141,8 @@ def run(root: Path, gh, hours: float, now: datetime | None = None) -> dict:
     repos = sorted({str(r.get("repo")) for r in rows if r.get("repo")})
     bases = settings.bases(root)
     queued = frozenset(str(r.get("url")) for r in rows if r.get("state") == store.MERGED)
-    report = {"since": since, "until": until, "bases": [], "still": [], "unknown": []}
+    report = {"since": since, "until": until, "bases": [], "still": [], "unknown": [], "runs": {}}
+    report["waited"] = waited(rows, since, until)
     merged_at = [t for r in rows if r.get("state") == store.MERGED and (t := _t(r.get("ended")))]
     for repo in repos:
         for base in bases:
@@ -117,6 +153,8 @@ def run(root: Path, gh, hours: float, now: datetime | None = None) -> dict:
             every = got["groups"] + got["alone"] + got["by_person"] + got["past"] + got["unsure"]
             merged_at += [t for g in every if (t := _iso(g.get("mergedAt")))]
             report["bases"].append({"repo": repo, "base": base, **got})
+        look = getattr(gh, "runs", None)
+        report["runs"][repo] = runs(look(repo, since.strftime("%Y-%m-%dT%H:%M:%SZ"))) if look else None
     report["still"] = stood_still(rows, merged_at, since, until)
     return report
 
@@ -145,6 +183,23 @@ def text(report: dict) -> str:
         lines += [f"    past the queue: #{r['number']} {r.get('url', '')}" for r in b["past"]]
     for u in report["unknown"]:
         lines.append(f"- {u}: GitHub did not answer; not counted.")
+    for repo, c in report.get("runs", {}).items():
+        if c is None:
+            lines.append(f"- {repo} check runs: GitHub did not answer; not counted.")
+            continue
+        merged = sum(_merges(b) for b in report["bases"] if b["repo"] == repo)
+        total = sum(c.values())
+        per = f"{total / merged:.1f} per merge" if merged else "no merge"
+        lines.append(
+            f"- {repo} check runs: {total} ({per}): {c['pull_requests']} on pull requests, {c['groups']} on queue "
+            f"groups, {c['pushes']} on pushes, {c['other']} other."
+        )
+    w = report.get("waited") or []
+    if w:
+        lines.append(
+            f"From joining the queue to merged: middle {w[len(w) // 2]} min, longest {w[-1]} min "
+            f"({len(w)} merged by the queue)."
+        )
     still = report["still"]
     lines.append(
         f"The queue stood still {len(still)} times (at least {STILL_MINUTES} minutes with a pull request in "
@@ -154,6 +209,10 @@ def text(report: dict) -> str:
         lines.append(f"- {hm(s['start'])} to {hm(s['end'])} ({s['minutes']} min)")
         lines += [f"    {w[:200]}" for w in s["why"]]
     return "\n".join(lines)
+
+
+def _merges(b: dict) -> int:
+    return len(b["through"]) + len(b["alone"]) + len(b["by_person"]) + len(b["past"]) + len(b["unsure"])
 
 
 def as_json(report: dict) -> dict:
@@ -186,4 +245,6 @@ def as_json(report: dict) -> dict:
             for s in report["still"]
         ],
         "unknown": report["unknown"],
+        "runs": report.get("runs", {}),
+        "waited_minutes": report.get("waited", []),
     }
