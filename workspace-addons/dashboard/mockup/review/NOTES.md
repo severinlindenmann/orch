@@ -52,5 +52,9 @@
   card with no picture (plain answers, a short question) is as tall as its words, so the answers sit right under two
   short options (before: about 650 px with an empty block at 1920). A result with more than 6 files shows 5 tiles and
   a "+N more files" tile that shows the rest in place (before: the 7th and later were dropped without a word; the card
-  now carries up to 24). On a narrow deck a long card title keeps to three lines (full title on hover and in All cards)
-  and the summary line is 16 px, so the words box shows whole lines at 390.
+  now carries up to 24).
+- 18 Nov (ORCH-421 round 3, owner review): pictures hug their own shape, with the card's colour beside them, never a
+  black band (single picture, Before/After, option pictures). On a narrow deck (phone) the card is as tall as all it
+  holds and the page scrolls: the whole title and the whole summary are always readable (no "…", no words box that
+  cuts a line); the answers and Later stay pinned at the bottom above the tab bar; files wrap into rows so "+N more"
+  is in sight; the summary line is 16 px and clear of the "Make bigger" button.
