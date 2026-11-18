@@ -84,6 +84,22 @@ def test_recurring_cron_and_catch_up(ws):
     assert t["ext"]["automation"]["next_run"] == "2026-11-06T07:00:00Z"  # core's health checks read it
 
 
+def test_a_done_repeat_reopened_for_its_run_still_saves_its_next_run(ws):
+    """ORCH-395: the reopen and the start moved the ticket's revision on; the last/next run write used the old one,
+    was refused without a word, and core's health checks then called the repeat stopped."""
+    add_ticket(
+        ws,
+        "t_rec00010",
+        status="done",
+        created_at="2026-11-01T00:00:00Z",
+        ext={"automation": {"recurring": True, "cron": "0 7 * * *"}},
+    )
+    assert Scheduler(ws).tick(T(7, 1, d=4)) == ["t_rec00010"]
+    a = tk(ws, "t_rec00010")["ext"]["automation"]
+    assert a["last_run"] == "2026-11-04T07:01:00Z"
+    assert a["next_run"] == "2026-11-05T07:00:00Z"
+
+
 def test_next_run_is_saved_in_the_repeat_s_time_zone(ws):
     add_ticket(
         ws,

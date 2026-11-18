@@ -115,7 +115,8 @@ async function runOne(ctx, step, [w, h], o, urls) {
   const page = await ctx.newPage();
   const problems = [];
   page.on('pageerror', e => problems.push(`page error: ${String(e.message).slice(0, 200)}`));
-  page.on('console', m => { if (m.type() === 'error') problems.push(`console error: ${m.text().slice(0, 200)}`); });
+  // a step may name console lines it causes on purpose (okConsole: a refusal the page shows as a plain message)
+  page.on('console', m => { if (m.type() === 'error' && !(step.okConsole && step.okConsole.test(m.text()))) problems.push(`console error: ${m.text().slice(0, 200)}`); });
   try {
     await page.setViewportSize({ width: w, height: h });
     if (step.reduce) await page.emulateMedia({ reducedMotion: 'reduce' });

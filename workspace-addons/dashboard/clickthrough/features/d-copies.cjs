@@ -15,7 +15,7 @@ module.exports = {
     const ws = await page.evaluate(() => state.settings.folder);
     must(/\.orch-test[\\/]clickthrough-/.test(ws), 'not the throw-away workspace: ' + ws);
     const home = path.dirname(ws), repo = path.resolve(__dirname, '..', '..', '..', '..');
-    const base = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, ORCH_HOME: home + '/orch', ORCH_HOME_STRICT: '1',
+    const base = { PATH: path.join(home, 'bin') + path.delimiter + process.env.PATH, HOME: home, USERPROFILE: home, ORCH_HOME: home + '/orch', ORCH_HOME_STRICT: '1',
       UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache', 'uv') };
     const run = (cmd, args, env = {}) => execFileSync('env', ['-i', ...Object.entries({ ...base, ...env }).map(([k, v]) => `${k}=${v}`), cmd, ...args], { cwd: ws, encoding: 'utf8' });
     const orch = (...a) => run('uv', ['run', '-q', '--project', repo + '/workspace', 'python', '-I', '-m', 'orch', ...a]);
@@ -39,6 +39,9 @@ module.exports = {
     await open('#ticket/' + tid);
     await reload();
     const ask = page.getByRole('button', { name: 'Ask your helper to update' });
+    // A slow runner can draw the ticket before its waiting copy is read: wait, reload once more, wait again.
+    const shown = () => ask.first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+    if (!(await shown())) { await reload(); await shown(); }
     must(await ask.count() > 0, 'the waiting changes are not on the ticket:\n' + (await text()).slice(0, 500));
     const asked = await act('copies.ask-update', () => ask.click(), { refused: true });
     must(asked.text.length > 5, 'asking the helper to update gave no readable answer');

@@ -19,8 +19,6 @@ const WEB = path.join(DASH, 'src', 'orch_dashboard', 'web');
 const FIX = path.join(DASH, 'tests', 'fixtures');
 const KIT = path.join(__dirname, '..', 'workspace', 'src', 'orch_ui', 'static');
 const BASE = 'http://dash.test';
-// "Last synced Mon 10:15": a day within the last week is shown as its weekday; a fixed date went stale after a week
-const DAYS_AGO_2 = (d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)(new Date(Date.now() - 2 * 864e5));
 const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'";
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
@@ -95,6 +93,9 @@ async function open(browser, width, start, mutate = s => s) {
   const state = mutate(fixture()), fake = fakeSync(start);
   await serve(context, state, fake);
   const page = await context.newPage();
+  // A fixed clock (issue 1421, like 4deb7848): the fixture's syncs are on 11 Nov, so the page sees noon that day and
+  // "Last synced today 10:15" holds whatever day CI runs. Timers keep running.
+  await page.clock.setFixedTime(new Date('2026-11-11T12:00:00Z'));
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   await page.goto(BASE + '/#settings');
@@ -130,9 +131,9 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
       // 2. synced, remote (Variant A)
       {
         const {context, page, errors} = await open(browser, width, {mode: 'remote', remote: 'https://files.example.org/mia/month-end', shown: 'synced',
-          last_ok: DAYS_AGO_2 + 'T10:15:00', not_synced: [{name: 'scans-march.zip', why: 'too big, stays on this computer'}, {name: 'payroll-access.txt', why: 'may contain a password or access key'}]});
+          last_ok: '2026-11-11T10:15:00', not_synced: [{name: 'scans-march.zip', why: 'too big, stays on this computer'}, {name: 'payroll-access.txt', why: 'may contain a password or access key'}]});
         const card = page.locator('#sync-card');
-        await page.locator('[data-key="sync-status"]').filter({hasText: /Last synced (\w{3} )?10:15/}).waitFor();
+        await page.locator('[data-key="sync-status"]').filter({hasText: 'Last synced today 10:15'}).waitFor();
         await page.locator('[data-key="sync-skipped"]').waitFor();   // "2 files not synced"; the list under it is always shown
         await page.locator('#sync-details').getByText('Not synced: scans-march.zip').waitFor();
         await page.locator('[data-key="sync-check"]').click();
