@@ -139,14 +139,19 @@ class GitHub:
         return lines[-1] if got.returncode == 0 and lines else None
 
     def find_issue(self, repo: str, mark: str) -> str | None:
-        """The issue whose text carries `mark` (a broken test's key), still open; None: none or no answer."""
+        """The open issue whose text carries `mark` (a broken test's key) and that this computer's own GitHub
+        login opened (anyone can write the mark into an issue); None: none, or GitHub did not answer."""
+        me = self.login()
+        if not me:
+            return None
         v = self._json(
-            "issue", "list", "--repo", repo, "--state", "open", "--search", f"{mark} in:body", "--json", "url,body",
-            "--limit", "5",
+            "issue", "list", "--repo", repo, "--state", "open", "--author", me, "--search", f"{mark} in:body",
+            "--json", "url,body,author", "--limit", "5",
         )  # fmt: skip
         for i in v if isinstance(v, list) else []:
             if (
                 isinstance(i, dict)
+                and str((i.get("author") or {}).get("login") or "").lower() == me.lower()
                 and mark in str(i.get("body") or "")
                 and str(i.get("url") or "").startswith("https://")
             ):

@@ -173,8 +173,9 @@ nothing never counts, nor does a pull request from a fork.
 - A failure is remembered per pull request (a new commit failing the same way counts from its new time). When the
   same way shows on 3 or more pull requests of 3 or more tickets within an hour, the test is broken: one GitHub
   issue is opened (`gh issue create`, a slot of kind `other` first; its body ends with `orch-broken-test: <key>`,
-  and an open issue with that key is looked up first, so a pass that stopped after GitHub took the issue does not
-  open a second one; the address is saved at once). No room or refused: a later pass tries again.
+  and an open issue with that key opened by this computer's own login is looked up first, so a pass that
+  stopped after GitHub took the issue does not open a second one; the address is saved at once). No room or
+  refused: a later pass tries again.
 - The helpers of the pull requests that showed it, also those already woken to fix it, are woken once: "not your
   change, do not change your pull request for it" when that was its only failure, else "one of the failures is
   not yours; the others still are". Later pull requests failing only in a broken test get the first text instead

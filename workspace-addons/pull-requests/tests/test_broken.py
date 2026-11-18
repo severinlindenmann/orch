@@ -477,3 +477,24 @@ def test_the_night_of_17_18_nov_drops_to_under_5_fix_it_messages(on):
     assert len(gh.issues) == 2
     print("fix-it messages:", fix_it(waker), "of", failures)
     assert fix_it(waker) < 5  # was about 90
+
+
+def test_only_an_issue_this_login_opened_is_taken_as_ours():
+    from orch_pull_requests.github import GitHub
+
+    gh = GitHub.__new__(GitHub)
+    gh.login = lambda: "severin-agent"
+    mine = {
+        "url": "https://github.com/acme/app/issues/5",
+        "body": "x\norch-broken-test: k1",
+        "author": {"login": "severin-agent"},
+    }
+    other = dict(mine, url="https://github.com/acme/app/issues/6", author={"login": "someone"})
+    seen = []
+    gh._json = lambda *a: seen.append(a) or [other, mine]
+    assert gh.find_issue(REPO, "k1") == mine["url"]
+    assert "--author" in seen[0] and "severin-agent" in seen[0]
+    gh._json = lambda *a: [other]
+    assert gh.find_issue(REPO, "k1") is None
+    gh.login = lambda: None
+    assert gh.find_issue(REPO, "k1") is None
