@@ -12,13 +12,16 @@ A recipe says which command to run and how to read its answer:
   - a workspace recipe, written by a person on this computer into the guarded orch home (key folder record
     `checks`, keystore.RECORDS): never in the project folder, so a cloned project cannot bring commands that
     run by themselves:
-    {"checks": {name: {"label", "command", "works"?, "ends"?, "kind"?, "key"?, "how"?}}} (`orch logins add`).
+    {"checks": {name: {"label", "command", "works"?, "ends"?, "kind"?, "key"?, "how"?, "sign_in"?}}}
+    (`orch logins add`).
     Without "works" the exit code alone answers: 0 = works, anything else = needs renewing; "works" and
     "ends" may be a short path ('profiles.*.valid': every item must be true).
     "kind" says what it is for the person:
     login (the default), connection or key; a helper tool is always a login. "key" names the key (keystore)
     this check tests: when it fails, the person replaces that key from the warning (renew.replace_key).
     "how" is the one plain step the person takes to renew when orch cannot start it (shown on the warning).
+    "sign_in" is the exact terminal command that signs in again ('az login'): the warning shows it with a
+    Copy button (ORCH-218). orch never runs it; it is text for the person.
 
 States: works | soon (runs out within WARN_DAYS) | renew (stopped working, a person renews it) |
 unreachable (the command could not run or gave no readable answer). Nothing else the command prints is
@@ -60,6 +63,8 @@ _NOT_A_TOOL = frozenset(
 # a field of the JSON answer: a name, or a short dotted path; '*' walks every item of a list (all must work)
 _FIELD = re.compile(r"[A-Za-z_]{1,32}(\.(\*|[A-Za-z_]{1,32})){0,3}")
 _HOW = re.compile(r"[^\x00-\x1f\x7f<>]{1,160}")  # what the person does when orch cannot renew it
+# the terminal command that signs in again (shown and copied, never run): one line, plain characters
+_SIGN_IN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._:=/@,'\"+-]{0,119}")
 _LABEL = re.compile(r"[^\x00-\x1f\x7f]{1,40}")
 KINDS = ("login", "connection", "key")
 _KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")  # keystore.NAME_RE
@@ -119,6 +124,9 @@ def _recipe(name, doc) -> dict | None:
         return None
     if how is not None and not (isinstance(how, str) and _HOW.fullmatch(how)):
         return None
+    sign_in = doc.get("sign_in")
+    if sign_in is not None and not sign_in_ok(sign_in):
+        return None
     return {
         "name": name,
         "label": label.strip(),
@@ -129,7 +137,24 @@ def _recipe(name, doc) -> dict | None:
         "helper": None,
         "key": key,
         "how": how.strip() if how else None,
+        "sign_in": sign_in.strip() if sign_in else None,
     }
+
+
+def how_words(r: dict) -> str:
+    """What the person does to renew, in words: the check's own step, else the sign-in command to run."""
+    if r.get("how"):
+        return r["how"]
+    return f"Open a terminal on this computer and run: {r['sign_in']}" if r.get("sign_in") else ""
+
+
+def sign_in_ok(value) -> bool:
+    """A terminal command a person may be shown and copy: one short line of plain characters."""
+    return (
+        isinstance(value, str)
+        and bool(_SIGN_IN.fullmatch(value.strip()))
+        and value.strip() == " ".join(value.split())
+    )
 
 
 def workspace_recipes(root: Path) -> list[dict]:
@@ -210,6 +235,7 @@ def helper_recipes() -> list[dict]:
                     "helper": name,
                     "renew": bool(spec.get("renew") and spec.get("links")),
                     "how": spec.get("how"),
+                    "sign_in": spec.get("sign_in") if sign_in_ok(spec.get("sign_in")) else None,
                 }
             )
     return out
@@ -381,6 +407,9 @@ def overview(root: Path, now: datetime | None = None) -> list[dict]:
                 "renew": bool(r.get("renew")),  # orch can start the tool's own sign-in (ORCH-46)
                 "key": r.get("key"),  # the key a person replaces when this check fails (name only)
                 "how": r.get("how"),  # what the person does when orch cannot renew it (ORCH-48)
+                "sign_in": r.get(
+                    "sign_in"
+                ),  # the terminal command that signs in again, shown with Copy (ORCH-218)
             }
         )
     return rows + connection_rows(root, chosen, now)
@@ -440,6 +469,7 @@ def connection_rows(root: Path, adapter: str | None, now: datetime | None = None
                 "renew": False,
                 "key": None,
                 "how": how or None,
+                "sign_in": None,
             }
         )
     return rows
