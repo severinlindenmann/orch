@@ -190,11 +190,8 @@ def gather(root: Path) -> dict:
 
 
 def _local(at: str) -> str:
-    """A stored UTC time in this computer's local time, minutes only."""
-    try:
-        return store.to_time(at).astimezone().strftime("%Y-%m-%d %H:%M")
-    except (ValueError, TypeError):
-        return at[:16].replace("T", " ")
+    """A stored UTC time in this computer's local time with its zone, minutes only."""
+    return store.local_text(at)
 
 
 def _rule_text(rule: dict) -> str:
@@ -210,7 +207,7 @@ def _rule_text(rule: dict) -> str:
         )
     text = ", ".join(parts) or "no limit"
     if rule.get("ends"):
-        text += f" (ends {rule['ends'][:16].replace('T', ' ')} UTC)"
+        text += f" (ends {_local(rule['ends'])})"
     return text
 
 
@@ -406,7 +403,7 @@ def _loop_cmd(args, root: Path) -> int:
         else:
             line += " Switching is " + ("on." if on else "off: Usage only shows what it would switch.")
         if last:
-            line += f"\nLast look {last.get('at', '')[:16].replace('T', ' ')} UTC: {last.get('did')} ({last.get('why')})."
+            line += f"\nLast look {_local(last.get('at', ''))}: {last.get('did')} ({last.get('why')})."
         print(json.dumps(data, ensure_ascii=False) if args.json else line)
         return 0 if pid else 1
     # switching on|off
