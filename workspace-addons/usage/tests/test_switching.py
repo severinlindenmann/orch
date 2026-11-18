@@ -458,3 +458,40 @@ def test_reader_keeps_the_switchers_disabled_flag():
     data = switcher_data()
     data["accounts"][1]["disabled"] = True
     assert [r.disabled for r in cswap.parse(data)] == [False, True, False]
+
+
+def _weekly_only(label, order):
+    a = _acc(label, order)
+    a["rule"]["limits"] = [{"value": 98, "unit": "%", "period": "week"}]
+    return a
+
+
+def test_an_account_with_only_a_weekly_limit_switches_early_at_90_percent_of_its_5_hours():
+    """ORCH-642 (report r-1118-1812-ws): ALTYCA had only a weekly limit and was left only AT 100 % of its 5 hours,
+    after every helper had stopped on it."""
+    from orch_usage.readers import Window
+
+    accs = [_weekly_only("altyca", 1), _weekly_only("lindenmann", 2)]
+    first = SubscriptionUse(key="k_altyca", label="altyca", slot=1, active=True,
+                            windows={"5h": Window(91.0), "week": Window(40.0)})  # fmt: skip
+    other = SubscriptionUse(key="k_lindenmann", label="lindenmann", slot=2,
+                            windows={"5h": Window(10.0), "week": Window(20.0)})  # fmt: skip
+    c = switching.judge(accs[0], first, {}, 10)
+    assert c.under and not c.good and c.why == "5 hours 91%, switches early at 90%"
+    ch = switching.choose(accs, [first, other], {}, 10)
+    assert ch.target.account["label"] == "lindenmann" and not ch.all_at_limit
+    # alone it is kept: past the early switch is not full
+    ch = switching.choose(accs[:1], [first], {}, 10)
+    assert ch.target.account["label"] == "altyca"
+    assert switching.judge(accs[0], SubscriptionUse(key="k_altyca", label="altyca", slot=1,
+                           windows={"5h": Window(100.0)}), {}, 10).under is False  # fmt: skip
+
+
+def test_a_5_hour_limit_of_the_account_wins_over_the_default():
+    from orch_usage.readers import Window
+
+    a = _acc("main", 1, h5=95)
+    use = SubscriptionUse(
+        key="k_main", label="main", slot=1, windows={"5h": Window(93.0), "week": Window(1.0)}
+    )
+    assert switching.judge(a, use, {}, 10).good
