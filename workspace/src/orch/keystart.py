@@ -81,8 +81,10 @@ def spec(name: str, root: Path | None = None) -> dict | None:
 
 
 def check(root: Path, name: str, credit: dict) -> dict:
-    """The credit as it is kept: three plain strings. Refused (plain words) when the tool cannot start on a
-    key, the name is not a key-store name, or this workspace has no such key. The value is never read here."""
+    """The credit as it is kept: three plain strings. Refused (plain words) when asked from inside a helper,
+    the tool cannot start on a key, the name is not a key-store name, or this workspace has no such token.
+    The value is never read here."""
+    check_starter()
     if not isinstance(credit, dict):
         raise Refused("A start on an API key needs the credit's name and its key's name.")
     account = _plain(credit.get("account"), LABEL_MAX)
@@ -98,10 +100,28 @@ def check(root: Path, name: str, credit: dict) -> dict:
         with contextlib.suppress(Refused):
             label = adapters.load(name, root)["label"]
         raise Refused(f"{label} cannot start on an API key here.")
-    names = {r["name"] for r in keystore.list_keys(root) if r.get("state") != "shadowed"}
-    if key not in names:
+    rows = {r["name"]: r for r in keystore.list_keys(root) if r.get("state") != "shadowed"}
+    if key not in rows:
         raise Refused(f"There is no key named {key} in this workspace's key store.")
+    if rows[key].get("type") != "token":
+        raise Refused(f"The key {key} is not stored as a token, so it is not an API key.")
     return {"account": account, "key": key, "why": why}
+
+
+INSIDE_HELPER = (
+    "A helper cannot start another helper on an API key. Only a person, or orch itself when Usage picks a "
+    "credit, can."
+)
+
+
+def check_starter() -> None:
+    """A start on a key is never asked for from inside a helper (its tool's environment, or an orch run named
+    in the environment): otherwise any helper could hand any token of the store to a tool of its choice. A
+    person in a terminal and orch's own background starters (no tool, no run) may."""
+    from orch import tickets
+
+    if tickets.agent_tool() is not None or os.environ.get("ORCH_RUN") or os.environ.get("ORCH_TICKET"):
+        raise Refused(INSIDE_HELPER)
 
 
 def start_line(credit: dict) -> str:

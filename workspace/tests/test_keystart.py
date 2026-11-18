@@ -76,6 +76,8 @@ def fakes(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_CMD", f"{shlex.quote(sys.executable)} -m orch")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "inherited-value-that-must-not-reach-the-helper")
     monkeypatch.setenv("OPENAI_API_KEY", "inherited-value-that-must-not-reach-the-helper")
+    monkeypatch.delenv("ORCH_RUN", raising=False)  # the test itself is no helper run
+    monkeypatch.delenv("ORCH_TICKET", raising=False)
     return report
 
 
@@ -357,3 +359,22 @@ def test_a_key_too_long_for_a_pipe_is_refused(proj, monkeypatch):
     keystore.add(proj, "big", "token", "k" * (keystart.VALUE_MAX + 1))
     with pytest.raises(Refused, match="not one short line"):
         keystart.handoff(proj, "r1", "t1", "claude", {"key": "big"}, {}, "claude")
+
+
+@pytest.mark.parametrize(
+    "inside", [{"ORCH_RUN": "r_abcdefgh", "ORCH_TICKET": "t_abcdef"}, {"CLAUDECODE": "1"}]
+)
+def test_a_helper_cannot_start_another_helper_on_a_key(ws, run, monkeypatch, inside):
+    tid = _ticket(run)
+    for k, v in inside.items():
+        monkeypatch.setenv(k, v)
+    code, _, err = _start(run, tid)
+    assert code == 2 and "A helper cannot start another helper on an API key" in err
+    assert runs.read(ws, tid) is None
+
+
+def test_only_a_token_can_be_used_as_an_api_key(ws, run):
+    keystore.add(ws, "db-password", "password", "pw-0123456789abcdef")
+    tid = _ticket(run)
+    code, _, err = _start(run, tid, "db-password")
+    assert code == 2 and "not stored as a token" in err
