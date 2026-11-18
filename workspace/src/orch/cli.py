@@ -1519,6 +1519,42 @@ def _ref_merge(args, root: Path, who: str) -> None:
     _out(args, {"merged": True, "already": got["already"], "url": url}, line)
 
 
+def _queue_bases(root: Path) -> list[str]:
+    """The base branches the pull-requests add-on's merge queue merges into (`[pull_requests] bases`, default
+    develop, never main or master); empty when the add-on is not turned on here."""
+    from orch import addons, config
+
+    try:
+        if "pull-requests" not in addons.active(root):
+            return []
+        t = config.read(root).get("pull_requests")
+    except Exception:  # noqa: BLE001 - unreadable: the queue is not known to be on
+        return []
+    got = t.get("bases") if isinstance(t, dict) else None
+    if not isinstance(got, list) or not got or not all(isinstance(b, str) and b.strip() for b in got):
+        got = ["develop"]
+    return [b.strip() for b in got if b.strip().lower() not in ("main", "master")]
+
+
+def _past_the_queue(root: Path, urls: list[str], key: str) -> None:
+    """ORCH-450: with the merge queue on, every merge into its base branches goes through the queue, where it
+    is checked in a queue group on top of the base. `orch ref wait --merge` refuses those, before any wait."""
+    from orch import prwait
+
+    bases = _queue_bases(root)
+    if not bases:
+        return
+    for url in urls:
+        v = prwait.Live(url).view()
+        base = str((v or {}).get("baseRefName") or "")
+        if v is None or base in bases:
+            into = base or " / ".join(bases)
+            raise Refused(
+                f"Merges into {into} go through the merge queue, never past it. Mark {url} ready, then run: "
+                f"orch pull-requests queue add {url} --ticket {key}"
+            )
+
+
 def _owner_merges(root: Path, t: dict, url: str, who: str, carded: list):
     """ORCH-305 (owner 17 Nov, option A): GitHub holds a pull request that changes a CI workflow until the
     owner approves it, so on green it is not merged here: one Merge card for the owner is made instead, with
@@ -1570,6 +1606,8 @@ def _ref_wait(args, root: Path, who: str) -> None:
             if q.get("answer") is None and review.merge_url(q) in urls:
                 url = review.merge_url(q)
                 raise Refused(f"A person merges {url} with the Merge card on {key}; it is not merged here.")
+    if args.merge:
+        _past_the_queue(root, urls, key)
     if args.timeout < 1:
         raise Refused("--timeout is a number of minutes, at least 1.")
     done = []

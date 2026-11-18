@@ -184,8 +184,9 @@ def test_switch_off_and_on_starts_over(ws):
 
 
 def test_the_merge_itself_is_the_queue_runners_through_the_core_waiter(ws):
-    """The switch only queues (through runner.admit, with the login); the hardened runner merges a single pull
-    request with the core waiter (only the checked commit, write limit inside). Same fakes as the queue tests."""
+    """The switch only queues (through runner.admit, with the login); the hardened runner checks a single pull
+    request in its group of one and merges that with the core waiter (only the checked commit, write limit
+    inside). Same fakes as the queue tests."""
     import test_queue
 
     ticket(ws, 1)
@@ -193,7 +194,7 @@ def test_the_merge_itself_is_the_queue_runners_through_the_core_waiter(ws):
     assert tend(ws, gh)["added"] == [url(1)]
     r, calls = test_queue.make(ws, gh, test_queue.FakeGit())
     r.run()
-    assert calls == [url(1)] and queued(ws)[0][1] == "merged"
+    assert [gh.groups[c] for c in calls] == [[1]] and queued(ws)[0][1] == "merged"
 
 
 # -- the watcher service ----------------------------------------------------------------------------------

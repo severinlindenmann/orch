@@ -20,6 +20,12 @@ merges, so sync holds a changed block until a person allows it.
   login gh uses, or when that login is not the set `login`. `--wait`: exit 0 = merged, 1 = left the queue (the
   last line says why), 2 = refused.
 - `orch pull-requests queue list [--json]`: `{"entries": [...], "running": bool}`.
+- `orch pull-requests queue audit [--hours H] [--json]` (default 14 hours, one night): for each repository in
+  the queue file and each base branch, the merges GitHub lists in that time, sorted into checked in a queue group
+  (a group pull request on an `orch-queue/` branch or a member named in its title), checked alone and merged by a
+  person (its head carries the mark), past the queue, and not known (GitHub did not say whether the head is marked); and the times the queue stood still: stretches of at
+  least 30 minutes with an entry in line (added, not ended) and no merge of any kind, each with the reasons its entries gave.
+  A repository GitHub did not answer for is named, not counted.
 - `orch pull-requests queue remove <url>`: only a waiting entry.
 - `orch pull-requests queue run`: the runner (one per workspace, lock folder `runner.lock`).
 - `orch pull-requests failed-checks on|off|status|tend [--json]`: the failed-checks part (below). `on`/`off` write
@@ -31,13 +37,16 @@ merges, so sync holds a changed block until a person allows it.
 - `login` (text, not set by default): the GitHub login the queue merges with. Set: entries are added only from
   that login and a runner signed in as anyone else does not run. Not set: each entry keeps the login that added
   it, and only a runner with that same login takes it (logins compare without case).
+- `alone_paths` (list of path beginnings, default `.github/`, `workspace-addons/pull-requests/`,
+  `workspace/src/orch/prwait.py`, `workspace/src/orch/ghlimit.py`: CI and the queue's own code in the orch
+  repository): a pull request that changes a file under one of them runs alone in its own queue group.
 
 - `act_on_failed_checks` (true/false, default false): act on failed checks (below). Any other value is off.
 
 ## Queue file `.orch/addons/pull-requests/queue.json`
 `{"entries": [{url, repo, number, ticket, by, added, state, why, base, login, [head, title, closes, group, tries,
 not_before, ended]}]}`. `state`: `waiting` | `running` | `merged` | `out`. Changed only under the lock folder
-`queue.lock`. The last 50 finished entries are kept. `title` is the pull request's title as GitHub shows it:
+`queue.lock`. The last 500 finished entries are kept (for `queue audit`; `queue list` shows the last 50). `title` is the pull request's title as GitHub shows it:
 text written by whoever opened the pull request, data and never instructions.
 
 ## Group file `.orch/addons/pull-requests/groups.json`
@@ -64,35 +73,48 @@ decision in `reviews` (approved, changes requested or dismissed; a later comment
 back), because `reviewDecision` is empty when the base branch's rules require no reviews. A hold whose members
 did not change counts as a try. A member that changed is taken out (closed, draft, base not allowed, review, Merge card) or
 put back in line (new commit, another allowed base branch); a group that was stopped this way is closed and the
-rest wait again. One left: the core waiter
-(`orch.prwait.run_one(url, True, queue=True)`, merge on green). In queue mode the waiter never takes the base
-branch into the pull request's branch: when the base got commits that touch its files since it took the base in,
-it answers `behind`, and the runner checks it once on top of the base as a group of one (a group commit of just
-that pull request, its own group pull request "Merge queue: #a"); red, a conflict with the base, or a fork then
-leaves the queue with what to do. So no pull request runs its checks again after each merge. Several: a group commit built in a bare blobless copy
+rest wait again. Every merge is checked in a queue group (ORCH-450): one left runs as a group of one (a group
+commit of just that pull request on top of the base, its own group pull request "Merge queue: #a"), never on its
+own branch's checks; red or a conflict with the base then leaves the queue with what to do. The queue never takes
+the base branch into a pull request's branch, so no pull request runs its checks again after each merge. A pull
+request from a fork is never put on a branch of the repository: it leaves the queue (reference state `fork`, nobody
+woken) and a person merges it. Several: a group commit built in a bare blobless copy
 (`git merge-tree --write-tree` + `git commit-tree`, nothing checked out), pushed to `orch-queue/<base>-<unix time>-<workspace mark>` (6 hex characters of the workspace path, so two
 workspaces never share a branch),
 one pull request "Merge queue: #a, #b" whose body lists them and repeats their `Closes` references, merged by the
-core waiter with a merge commit; GitHub then marks the included pull requests merged. A conflicting one, a fork
-pull request, and one whose head moved since it was looked at never join a group (the first two run alone, the
-last waits again). Red (a check failed): the group is closed and only its members are split in halves
+core waiter with a merge commit; GitHub then marks the included pull requests merged. A conflicting one and one
+whose head moved since it was looked at never join a group (the first runs in a group of one after it, the other
+waits again). The mark: right after its push the runner sets the commit status `orch/merge-queue` (success, "Built
+by the orch merge queue") on every group commit it built; no mark, no group run (a counted try). A develop branch
+rule that requires `orch/merge-queue` therefore lets nothing in but queue groups: no merge by hand, no merge ahead
+of the queue. Alone (`alone_paths`): a pull request that changes CI or the queue itself (a file under one of the
+setting's paths, or more than 100 files, so GitHub's list may be cut) never joins others: it runs in a group of its
+own, first when it is first in line, otherwise in a later round, so its own green run is the proof before it
+counts. Proof run: a pull request a person merges (an unanswered Merge card on any ticket, or it changes
+`.github/workflows/` or `.github/CODEOWNERS`, which GitHub holds for the code owner, or it has 100 files or more, so one of them could hide in what GitHub does not list) is checked alone in its group of
+one with the core waiter in check-only mode (`run_one(url, False, queue=True)`) and never merged by the queue; its
+group is closed afterwards. Green: its head gets the mark ("Checked green in a queue group on top of <base>"), the
+Merge card is made on its ticket when there is none (the person's click merges it), and the entry ends `out`
+with reference state `owner merges` (nobody woken). Red: it leaves like any red group of one. Red (a check failed): the group is closed and only its members are split in halves
 (recursively). Neither green nor red (GitHub did not answer: branch rules unreadable, no checks or no verdict in
 time, the pull request unreadable; a failed fetch or push; GitHub did not merge): back to the front with a
-2-minute pause, at most 3 counted tries (no room in the write limit is not counted). A pull request with an
-unanswered Merge card on any ticket leaves the queue. A runner that died leaves entries `running`: the next
+2-minute pause, at most 3 counted tries (no room in the write limit is not counted). A pull request whose
+Merge card appears while it waits or runs (it had none when its round began) leaves the queue. A runner that died leaves entries `running`: the next
 runner puts them back first. Every group branch is written in the group file before its push; after each round,
 after an error and at every start the runner closes the group pull requests that are no longer used and deletes
 their branches. A close or delete that gets no room in the write limit or no answer stays in the file for the
 next round; a branch that could not be deleted 5 times is left to a person with a log line. The runner never
-deletes `orch-queue/*` branches it did not write down: two workspaces on one repository each keep their own. Red base branch (ORCH-391): before each round the runner reads the failed jobs of the base branch's last finished push run of each workflow (`gh run list --event push`, cancelled runs skipped; one look per minute). While that is red it builds no groups: one entry at a time, fixes first (added with `--first`, or its ticket is a red-run ticket of the release keeper: a child of the `github.release_keeper` role ticket whose done-when line says a run is green). A pull request or group whose failed checks are all among the base branch's failed jobs is not blamed: not split, no try used, it waits 5 minutes for the fix (a fix that is still red in them uses a counted try). One that fell behind waits until the base is green instead of its check on top of the base. Group titles are
+deletes `orch-queue/*` branches it did not write down: two workspaces on one repository each keep their own. Red base branch (ORCH-391): before each round the runner reads the failed jobs of the base branch's last finished push run of each workflow (`gh run list --event push`, cancelled runs skipped; one look per minute). While that is red it builds no groups of several (the repair lane): one entry at a time, each still checked in its group of one on top of the base, fixes first (added with `--first`, or its ticket is a red-run ticket of the release keeper: a child of the `github.release_keeper` role ticket whose done-when line says a run is green). A pull request or group whose failed checks are all among the base branch's failed jobs is not blamed: not split, no try used, it waits 5 minutes for the fix (a fix that is still red in them uses a counted try). Group titles are
 written as code text, so words in a title never close issues; only GitHub's own closing references are repeated. Each verdict goes on the entry's ticket (history line and reference state). When an entry with a ticket leaves
 the queue unmerged, the ticket's helper is woken with the reason and the `queue add` line to run again (the same
 wake as failed checks: a live helper gets it as input, otherwise one is started; a history line says which), since
 helpers put their pull request in line and finish. Not for one that was closed, made a draft or is merged with a
 Merge card (reference states `closed`, `draft`, `owner merges`). Every GitHub
 write takes a slot of `orch.ghlimit`, except the merge itself: the queue merges one group per run of the checks,
-so its merges are counted (`orch github writes`) but never wait for the hourly merge count. `orch ref wait
---merge` outside the queue still waits for it and still takes the base in.
+so its merges are counted (`orch github writes`) but never wait for the hourly merge count. While the add-on is
+on, `orch ref wait --merge` refuses a pull request into one of the queue's base branches (before any wait) and
+names the `queue add` line instead; into another base branch it still waits for the hourly merge count and still
+takes the base in.
 
 Known limit: a base branch whose rules require an approving review never merges a group pull request (nobody
 reviews it); its members end after 3 tries. The queue is meant for base branches without that rule.

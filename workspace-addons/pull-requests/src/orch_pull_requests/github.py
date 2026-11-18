@@ -10,8 +10,10 @@ from .store import Refused
 
 VIEW = (
     "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,"
-    "reviewDecision,reviews"
+    "reviewDecision,reviews,files"
 )
+# the commit status the queue sets on what it checked (a develop rule can require it)
+MARK = "orch/merge-queue"
 GONE = ("reference does not exist", "not found", "http 404")
 
 
@@ -129,6 +131,35 @@ class GitHub:
             x.strip() for x in (got.stdout or "").splitlines() if x.strip().startswith("https://github.com/")
         ]
         return lines[-1] if got.returncode == 0 and lines else None
+
+    def set_status(self, repo: str, sha: str, description: str, target: str = "") -> bool:
+        """Set the queue's mark (commit status MARK, success) on one commit (a write: the caller takes a slot)."""
+        args = [
+            "api", "-X", "POST", f"repos/{repo}/statuses/{sha}", "-f", "state=success",
+            "-f", f"context={MARK}", "-f", f"description={description[:140]}",
+        ]  # fmt: skip
+        if target:
+            args += ["-f", f"target_url={target}"]
+        return self._run(*args).returncode == 0
+
+    def has_mark(self, repo: str, sha: str) -> bool | None:
+        """True when the commit carries the queue's mark as success; None when GitHub did not answer."""
+        v = self._json("api", f"repos/{repo}/commits/{sha}/status")
+        if not isinstance(v, dict):
+            return None
+        rows = v.get("statuses") or []
+        return any(
+            isinstance(r, dict) and r.get("context") == MARK and r.get("state") == "success" for r in rows
+        )
+
+    def merged_prs(self, repo: str, base: str, since: str) -> list[dict] | None:
+        """Pull requests merged into base since an ISO time: {number, title, headRefName, headRefOid, mergedAt,
+        url}, None when GitHub did not answer."""
+        v = self._json(
+            "pr", "list", "--repo", repo, "--base", base, "--state", "merged", "--limit", "300",
+            "--search", f"merged:>={since}", "--json", "number,title,headRefName,headRefOid,mergedAt,url",
+        )  # fmt: skip
+        return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else None
 
     def close(self, url: str) -> bool:
         """Close a group pull request (its branch is deleted on its own, one more write)."""

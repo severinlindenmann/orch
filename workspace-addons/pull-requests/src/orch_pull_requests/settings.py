@@ -5,6 +5,9 @@
 - `login`: the GitHub login the queue merges with. When set, a pull request is queued only from that login and
   a runner signed in as anyone else does not run. When not set, each entry remembers the login that added it
   and only a runner with that same login merges it.
+- `alone_paths`: a pull request that changes a file under one of these runs alone in its own queue group (never
+  with others), so its green run is the proof before it counts. Default: CI (`.github/`) and the merge queue's
+  own code in the orch repository.
 """
 
 from __future__ import annotations
@@ -13,6 +16,12 @@ from pathlib import Path
 
 DEFAULT_BASES = ("develop",)
 NEVER = ("main", "master")
+DEFAULT_ALONE = (
+    ".github/",
+    "workspace-addons/pull-requests/",
+    "workspace/src/orch/prwait.py",
+    "workspace/src/orch/ghlimit.py",
+)
 
 
 def _table(root: Path) -> dict:
@@ -40,3 +49,10 @@ def login(root: Path) -> str | None:
 def same_login(a: str | None, b: str | None) -> bool:
     """GitHub logins do not care about case; an unknown login never matches."""
     return bool(a) and bool(b) and a.lower() == b.lower()
+
+
+def alone_paths(root: Path) -> list[str]:
+    got = _table(root).get("alone_paths")
+    if not isinstance(got, list) or not all(isinstance(x, str) for x in got):
+        return list(DEFAULT_ALONE)
+    return [x.strip().lstrip("/") for x in got if x.strip()]
