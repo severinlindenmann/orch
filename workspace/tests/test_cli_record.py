@@ -909,6 +909,7 @@ def test_a_changed_run_file_is_read_again_never_from_memory(ws):
     assert record.read_run_for(ws, RUN_B, "t_nobody1").value == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="no answer without opening on Windows (record._quick)")
 def test_the_quick_answer_still_sees_new_pending_writes(ws, monkeypatch):
     """A run answered from memory (nothing opened) still counts a pending write that arrived since: adding one
     changes the pending folder, so the run is looked at again."""

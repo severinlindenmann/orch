@@ -1416,20 +1416,17 @@ def _identity(fd) -> tuple:
     time (a write, a rename over it or a touch of the times moves the change time, which no caller sets)."""
     with _io():
         st = os.fstat(fd)
-    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, _ctime(st))
-
-
-def _ctime(st) -> int:
-    """The change time, or 0 on Windows: there os.stat gives the creation time and os.fstat the change time,
-    so a plain look would never equal the checked open (the memory would never answer)."""
-    return 0 if sys.platform == "win32" else st.st_ctime_ns
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
 
 
 def _quick(workspace, run):
     """(identity of the run file, identity of its pending folder or None) from a plain look (_path_info: a
     link, a foreign owner or anything but a regular file is refused), or None when either cannot be looked at.
     Equal to what was verified before = the same bytes and the same pending writes (adding or removing a
-    pending write moves the folder's times)."""
+    pending write moves the folder's times). Always None on Windows: there a plain look gives the creation
+    time where the open file gives the change time, so no plain look can stand for the checked open."""
+    if sys.platform == "win32":
+        return None
     base = record_dir(workspace)
     try:
         with _io():
@@ -1439,14 +1436,14 @@ def _quick(workspace, run):
     try:
         with _io():
             p = _path_info(base / "pending" / run, want_dir=True)
-        pend = (p.st_dev, p.st_ino, p.st_mtime_ns, _ctime(p))
+        pend = (p.st_dev, p.st_ino, p.st_mtime_ns, p.st_ctime_ns)
     except RecordUnavailable as error:
         if error.reason != "missing":
             return None
         pend = None
     except RecordTampered:
         return None
-    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, _ctime(st)), pend
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns), pend
 
 
 def _quick_dirs(workspace):
