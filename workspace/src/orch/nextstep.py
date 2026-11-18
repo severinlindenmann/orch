@@ -309,6 +309,7 @@ HINTS = {
     "skill check": "after you change a skill, run it again: orch skill check",
     "skill list": "orch skill show <name>",
     "skill show": "orch skill check <name>",
+    "skill credits": "after you change an api-credits file: orch skill check",
 }
 
 

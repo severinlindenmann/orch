@@ -35,6 +35,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `[[ticket_links]]` | Link types the add-on knows: `kind` (letters, digits, dashes and an optional add-on prefix, e.g. `github:pr`; not `url`, `ticket`, `artifact` or `file`), `label` (≤ 24), `icon` (a key), `match` (one or a list of `https://` patterns; `*` = one part of the address, a `*` at the end takes the rest), optional `statuses`, `preview = "thumb"`. Ticket references, below |
 | `[ticket_fields]` | `section` (heading under the ticket's Details), `schema` (JSON Schema of `ext.<name>`; the same file as `ticket_ext` when both are set), `show_on_card` (≤ 3 field keys shown as a chip on board cards). Ticket references, below |
 | `[acts.<verb>]` | What `orch <name> act <verb> [--by X] --json -- <ticket>` offers: `summary`, `who` (`anyone` · `people`), `writes` (`refs`, `ext.<name>`). Core knows `refresh` (Act: refresh, below) |
+| `api-credits` | A file inside the add-on folder that lists the API credits it spends on: one `[[credit]]` table each with `name`, `label`, `provider`, `key` (where the key lives: `pass:<vault>/<item>` or `orch:<name>`, never the key), `unit` (`$`, `tokens`, `calls`), `spend` (`report` or `log:<file>`), optional `balance`. The same file a skill names with `metadata: api-credits`. A broken file hides only its credits (shown by `orch skill credits`), never the add-on |
 
 All paths are relative to the manifest's folder and must stay inside it (no `..`, no absolute paths, no symlink leaving it).
 

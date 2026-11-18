@@ -55,7 +55,7 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts ticket_ext_inert".split()
+    "ticket_links ticket_fields acts ticket_ext_inert api-credits".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -1158,6 +1158,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     block = m.get("agents_block", f"{m['skill']}/AGENTS-block.md")
     m["agents_block"] = block
     _inside(base, block, "agents_block", "file")
+    if "api-credits" in m:  # its content is checked by apicredits.py, so a typo there hides no add-on
+        _inside(base, m["api-credits"], "api-credits", "file")
     if "ticket_ext" in m:
         _ext_schema(base, m["ticket_ext"], "ticket_ext")
     _ticket_links_fields_acts(base, m)

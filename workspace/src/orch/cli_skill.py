@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orch import skillmeta
+from orch import apicredits, skillmeta
 from orch.errors import Refused
 
 
@@ -19,6 +19,7 @@ def add_parsers(sub, common) -> None:
     s.add_parser("list", parents=[common], help="every skill here with its header")
     x = s.add_parser("show", parents=[common], help="one skill: its header and what the check says")
     x.add_argument("name")
+    s.add_parser("credits", parents=[common], help="the API credits skills and add-ons declare (never a key)")
 
 
 def _entries_for_paths(paths: list[str]) -> list[dict]:
@@ -85,6 +86,17 @@ def dispatch(args, root: Path) -> bool:
                 print(f"{e['name']}  ({e['source']}){'  ' + state if state else ''}")
             if not entries:
                 print("No skills here.")
+    elif args.sub == "credits":
+        res = apicredits.declared(root)
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+        else:
+            lines = [
+                f"{c['label']}  ({c['credit']})  {c['provider']}, in {c['unit']}, key in {c['key']}"
+                for c in res["credits"]
+            ] or ["No skill or add-on here declares an API credit."]
+            lines += [f"{p['owner']}: problem: {p['message']}" for p in res["problems"]]
+            print("\n".join(lines))
     elif args.sub == "show":
         e = skillmeta.find(root, args.name)
         res = {**e, "findings": skillmeta.check_all([e], root)}
