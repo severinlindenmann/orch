@@ -616,6 +616,9 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   // the icon rail scrolls its list only when it does not fit above the foot
   assert.match(kit, /\.sidebar:has\(\.nav-label\) \.sidebar-scroll\.cramped\{overflow-x:hidden;overflow-y:auto\}/);
   assert.match(source, /classList\.toggle\('cramped', sideScroll\.scrollHeight > sideScroll\.clientHeight \+ 1\)/);
+  // a long menu on a short screen (12 items at 900 px high, report r-1118-0908-t_oxw444-2): soft edges show it scrolls, the foot gets lower rows
+  assert.match(kit, /\.sidebar-scroll\{background:linear-gradient\(var\(--sidebar\) 30%,transparent\) top\/100% 24px no-repeat local/);
+  assert.match(kit, /@media\(min-width:721px\) and \(max-height:960px\)\{\.side-foot \.nav-item/);
 });
 test('ticket saved views filter by status and the board shows Changes to add', () => {
   const items = [{id:'w',title:'W',status:'active',owner:'anna'}, {id:'r',title:'R',status:'review',owner:'ben'},
