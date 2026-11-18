@@ -28,7 +28,9 @@ from .store import Refused
 WINDOW = 600  # seconds: failures counted in the last 10 minutes; healthy this long takes the question back
 LIMIT = 3  # failures in the window that make a service failing
 PORT_TIMEOUT = 0.5
-START_GRACE = 90  # seconds after a start or restart through orch in which a silent port is "Starting", not a failure
+START_GRACE = (
+    90  # seconds after a start or restart through orch in which a silent port is "Starting", not a failure
+)
 OPTIONS = ("Restart", "Stop", "Look into it")
 BY = "agent:services"
 MAX_EVENTS = 20

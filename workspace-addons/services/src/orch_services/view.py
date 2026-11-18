@@ -148,7 +148,9 @@ def _service_item(root: Path, r: dict) -> dict:
             {
                 "label": "Health check",
                 "value": _plain(health["text"]),
-                "tone": "neutral" if stopped or health.get("starting") else ("good" if health.get("ok") else "bad"),
+                "tone": "neutral"
+                if stopped or health.get("starting")
+                else ("good" if health.get("ok") else "bad"),
             }
         )
     depends = [_plain(d, 80) for d in r.get("depends") or [] if isinstance(d, str) and d.strip()][:6]
