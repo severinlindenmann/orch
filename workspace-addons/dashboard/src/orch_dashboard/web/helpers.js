@@ -782,6 +782,7 @@
       const c = typeof est.cost === 'number' && est.cost >= 0 ? moneyWords(est.cost) : '';
       if (m || c) parts.push('Estimate: about ' + [m, c].filter(Boolean).join(' · '));
     }
+    if (!parts.length && t && !t.spend && typeof t.range === 'string' && t.range) parts.push('Before Start: ' + t.range);  // ORCH-297
     const so = spendWords(t && t.spend);
     if (so) parts.push('So far: ' + so);
     return parts.join(' — ');

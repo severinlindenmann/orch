@@ -107,6 +107,7 @@ def main(argv=None):
         p.add_argument("title", nargs="?")
         p.add_argument("--file")
         p.add_argument("--ticket", help="turn this existing ticket (e.g. one made from Chat) into the order")
+        p.add_argument("--from", dest="source", help="the ticket this idea came from: both are linked")
         # what the Factory page's idea box does through the dashboard (the add-on act contract)
         p = sub.add_parser(
             "act",
@@ -215,7 +216,7 @@ def main(argv=None):
                     raise Refused(
                         "Give a title for a new idea, or --ticket <id> to turn a ticket into one.", "invalid"
                     )
-                result = commands.idea(root, args.title, data, args.ticket)
+                result = commands.idea(root, args.title, data, args.ticket, args.source)
             else:
                 result = fn(root, target, data)
         elif args.cmd == "act":

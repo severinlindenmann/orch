@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import CONTRACTS
@@ -500,7 +501,13 @@ def test_decide_needs_a_grant(ws, run):
     assert run("next", order)["step"] == "wait"
 
 
-def test_decide_under_a_human_grant(ws, run):
+def test_decide_under_a_human_grant(ws, run, monkeypatch):
+    # A fixed noon tomorrow: run at 23:59 the decision and the view fell on two days and "decided today" read 0
+    # (ORCH-390). FACTORY_NOW only moves forward, so tomorrow is the earliest fixed day it takes.
+    noon = (datetime.now().astimezone() + timedelta(days=1)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+    monkeypatch.setenv("FACTORY_NOW", noon.astimezone(UTC).isoformat())
     a, _ = autopilot_order(ws, run)
     assert run("next", a)["step"] == "resume"
     assert core(ws, "ticket", "show", a)["ext"]["factory"]["kind"] == "autopilot"

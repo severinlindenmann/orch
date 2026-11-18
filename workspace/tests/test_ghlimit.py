@@ -188,7 +188,7 @@ def test_orch_merge_waits_for_room_and_does_not_merge_without(monkeypatch):
 
 def test_live_pull_takes_from_the_shared_limit(monkeypatch):
     got = []
-    monkeypatch.setattr(ghlimit, "take", lambda kind, what: got.append((kind, what)) or True)
+    monkeypatch.setattr(ghlimit, "take", lambda kind, what, **kw: got.append((kind, what)) or True)
     monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
     live = prwait.Live("https://github.com/o/r/pull/1")
     assert live.take("merge", "u") and got == [("merge", "u")]
@@ -224,3 +224,14 @@ def test_a_merge_github_refused_gives_its_place_back(monkeypatch):
     assert not o.ok and used() == 0
     monkeypatch.setattr(prwait, "_run", lambda argv, t=30: subprocess.CompletedProcess(argv, 0, "", ""))
     assert prwait.run_one(pull.url, True, src=pull).ok and used() == 1
+
+
+def test_a_waiting_take_says_how_long_until_room():
+    c = Clock()
+    ghlimit.set_limit("merge", 1)
+    assert _take(c)
+    seen = []
+    assert ghlimit.take(
+        "merge", "o/r#2", sleep=c.sleep, clock=c, on_wait=lambda left, waited: seen.append(waited)
+    )
+    assert seen and seen[0] == 0 and seen == sorted(seen)  # called before every nap, from the first one
