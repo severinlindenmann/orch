@@ -24,7 +24,7 @@ from orch import (
 )
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security", "undo")
 CARD_KINDS = ("draft", "link", "plan", "choose")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
@@ -97,6 +97,11 @@ def add_parsers(sub, common) -> None:
     x.add_argument("word", choices=("ok", "problems"), help="ok: nothing High or Medium left; else problems")
     x.add_argument("why", help="one line: the worst finding, or what was checked")
     x.add_argument("--sha", required=True, metavar="COMMIT", help="the commit you reviewed (from the brief)")
+    x = s.add_parser(
+        "undo", parents=[common], help="undo what the Reviewer, Auto Reviewer or Away mode did on a ticket"
+    )
+    x.add_argument("ticket")
+    x.add_argument("question", nargs="?", help="an answer to undo (q3); without it the accept or send-back")
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -594,6 +599,24 @@ def _accepted(args, root: Path) -> None:
     _out(args, data, text)
 
 
+def _undo(args, root: Path) -> None:
+    from orch import autoreview
+
+    if tickets.agent_tool() or (args.by or "").startswith("agent:"):
+        raise Refused("Only a person can undo what the Reviewer did.")
+    tid = _ticket(root, args)["id"]
+    q = args.question
+    if q is not None and not re.fullmatch(r"q[0-9]{1,4}", q):
+        raise Refused("Give the question like q3.")
+    res = autoreview.undo(root, tid, tickets.current_actor(args.by), q)
+    said = {
+        "accept": "back in Review for you, with Human review needed on",
+        "back": "back in Review for you, with Human review needed on; the helper's new task is gone",
+        "answer": f"{q} waits for your answer again; the helper was told",
+    }[res["undone"]]
+    _out(args, res, f"{res['key']}: undone: {said}.")
+
+
 def _verdict(args, root: Path) -> None:
     from orch import lookreview
 
@@ -629,6 +652,7 @@ def dispatch(args, root: Path) -> bool:
         "tend-releases": _tend_releases,
         "accepted": _accepted,
         "verdict": _verdict,
+        "undo": _undo,
         "security": _security,
     }[args.sub](args, root)
     return True

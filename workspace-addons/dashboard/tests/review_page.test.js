@@ -253,3 +253,44 @@ test('ORCH-422: Add note and Send back on Review carry screenshots, files and vo
   // empty: no words and no files is refused before anything is sent
   assert.equal((await api.note({ticket:'t_abcdef', text:' ', files:[]})).ok, false);
 });
+test('Auto Reviewer card: two switches on the rail that save at once (ORCH-425)', async () => {
+  const c = ctx({review:{cards:[], accepted:[]}, settings:{auto_reviewer_on:false, away_on:true}});
+  const cardNode = c.reviewAutoCard();
+  assert.match(text(cardNode), /^Auto Reviewer/);
+  const sw = nodes(cardNode).filter(n => n.attrs?.role === 'switch');
+  assert.deepEqual(sw.map(n => [n.attrs['data-action'], n.attrs['aria-checked']]), [['auto-reviewer-set', false], ['away-set', true]]);
+  const rail = nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-rail');
+  assert.ok(nodes(rail).some(n => n.attrs?.['data-key'] === 'review-auto'));
+  await c.reviewSwitch('auto');
+  await c.reviewSwitch('away');
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['auto_reviewer.set', {on:true}], ['away.set', {on:false}]]);
+  assert.equal(ctx({review:{cards:[]}}).reviewAutoCard(), null, 'no settings (a read-only copy): no switches');
+  const snap = ctx({settings:{}}, {snapshot:true});
+  assert.ok(nodes(snap.reviewAutoCard()).filter(n => n.attrs?.role === 'switch').every(n => n.attrs.disabled));
+  assert.equal(await snap.reviewSwitch('auto'), null);
+});
+test('Accepted for you: each decision says who and what, and Undo takes it back in one click (ORCH-425)', async () => {
+  const rows = [
+    {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'code work, all 2 points shown.', auto:true, undo:'accept'},
+    {ticket:'t_bbbb22', key:'O-2', title:'Sort', why:'answered q2 = A', auto:true, answer:true, question:'q2', undo:'answer'},
+    {ticket:'t_cccc33', key:'O-3', title:'Home', why:'pictures missing', auto:true, back:true, undo:null},
+    {ticket:'t_dddd44', key:'O-4', title:'Old', why:'small', auto:false, undo:null, undone:true},
+  ];
+  const c = ctx({review:{cards:[], accepted:rows}});
+  const card = c.reviewAcceptedCard();
+  const t = text(card);
+  assert.match(t, /Auto Reviewer · Accepted/);
+  assert.match(t, /Away mode · Answered/);
+  assert.match(t, /Auto Reviewer · Sent back to the helper/);
+  assert.match(t, /Reviewer · AcceptedsmallUndone/);
+  const undos = nodes(card).filter(n => n.tag === 'button' && text(n) === 'Undo');
+  assert.equal(undos.length, 2);
+  const sends = nodes(card).filter(n => n.tag === 'button' && text(n) === 'Send back');
+  assert.equal(sends.length, 1, 'Send back only on an accept that is not undone');
+  await undos[1].onclick();
+  await undos[0].onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['review.undo', {ticket:'t_bbbb22', question:'q2'}], ['review.undo', {ticket:'t_aaaa11'}]]);
+  assert.match(text(c.reviewAcceptedCard()), /AnsweredUndone|Undone/);
+  const keys = nodes(c.reviewAcceptedCard()).map(n => n.attrs?.['data-key']).filter(k => /^review-accepted-t_/.test(k || '') && !/-(send|undo)$/.test(k));
+  assert.equal(new Set(keys).size, keys.length, 'one key per row');
+});
