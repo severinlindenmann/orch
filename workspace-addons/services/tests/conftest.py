@@ -1,5 +1,6 @@
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -78,7 +79,9 @@ class FakeDriver:
 
         e = self.entries.get(spec.sid)
         on = bool(e and e["running"])
-        return Status(running=on, pid=4242 if on else None, since="2026-11-17T10:00:00Z" if on else None)
+        # "now", not a fixed date: the page says "Running since today HH:MM" and a fixed day turns into "yesterday"
+        since = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if on else None
+        return Status(running=on, pid=4242 if on else None, since=since)
 
     def runs(self, spec):
         return self.run_counts.get(spec.sid)
