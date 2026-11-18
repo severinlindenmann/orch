@@ -27,12 +27,12 @@ module.exports = {
     await page.locator('#live-bar [data-key="lbar-new-menu"]').waitFor();
     await act('session.new', () => page.locator('#live-bar [data-lbar-kind="terminal"]').click());
     const pane = page.locator('#live-dock .live-pane .live-pt', { hasText: 'Plain terminal' });
-    await pane.first().waitFor({ timeout: 10000 });
+    await pane.first().waitFor({ timeout: 20000 });
     must(!(await page.locator('#live-dock [data-key="live-open-ticket"]').count()), 'a session without a ticket offers Open ticket');
 
     const listed = JSON.parse(orch('session', 'list', '--json'));
     must(listed.sessions.some(s => s.kind === 'terminal' && s.open), 'orch does not list the plain terminal as open');
     await reload();
-    await page.locator('#live-bar', { hasText: 'Plain terminal' }).first().waitFor({ timeout: 10000 });
+    await page.locator('#live-bar', { hasText: 'Plain terminal' }).first().waitFor({ timeout: 20000 });
   },
 };

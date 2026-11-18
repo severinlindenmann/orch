@@ -108,6 +108,10 @@ class Launchd(Driver):
         cp = self._run("bootstrap", self.domain, str(self.entry_path(spec)))
         if cp.returncode != 0 and not self._loaded(spec):
             raise tool_failed("start it", cp)
+        if not self.status(spec).running:  # a taken-over job without RunAtLoad or KeepAlive only loads
+            cp = self._run("kickstart", self._target(spec))
+            if cp.returncode != 0:
+                raise tool_failed("start it", cp)
         if not spec.auto:
             self._enable(spec, False)  # the running job stays; launchd only skips it at the next login
 
