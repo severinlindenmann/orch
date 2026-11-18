@@ -29,6 +29,7 @@ const T = {
   split: 'Split into one, two or three sessions (crew task split)',
   data: 'Live data for every session (crew task live-data)',
   wall: 'The wall (crew task wall)',
+  pin: 'Pin and rename sessions (crew task pin-rename)',
   sessions: 'Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)',
   chat: 'Chat (crew tasks of the Chat stage)',
   widgets: 'Result widgets and big overlay in the style guide (ORCH-263)',
@@ -652,6 +653,136 @@ async function focusButton(page, dash, width) {
   await noSideways(page);
 }
 
+// Steps 4, 5, 8 and 11: the wall (ORCH-360) with draft D's 24 sessions of step 9 (liveBarState). Each step starts with
+// nothing kept in this browser (folded bands, the layer's place) but keeps what it chose itself across its reload.
+async function wallPage(page, dash, tag, sessions) {
+  await liveBarState(page);
+  if (sessions) await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: sessions(), lines: 8, age_ms: 0 } }));
+  await page.addInitScript(t => { try { if (sessionStorage.getItem('wall') !== t) { localStorage.removeItem('orch.live.wall'); localStorage.removeItem('orch.live.layer'); sessionStorage.setItem('wall', t); } } catch (e) { /* none */ } }, tag);
+  await page.goto(dash + '/#addon/focus');
+  await page.waitForSelector('[data-key="live-wall"] .wall-band', { timeout: 15000 });
+}
+const tileOf = id => `[data-key="live-wall"] [data-tile="${id}"]`;
+async function wallBands(page) {
+  return page.$$eval('[data-key="live-wall"] .wall-band', els => els.map(el => el.dataset.band));
+}
+
+// Step 4: bands in draft D's order, one summary line, one sentence per tile, and a working tile's peek adds its newest
+// line by itself (the sessions API answers with one more line each time).
+async function wall(page, dash) {
+  let tick = 0;
+  await wallPage(page, dash, 'fd4', () => {
+    const list = barSessions();
+    tick += 1;
+    const s = list.find(x => x.id === 't_bar232');
+    s.lines = [...s.lines, '⏺ Checked part ' + tick];
+    return list;
+  });
+  const order = await wallBands(page);
+  if (order.join(',') !== 'pin,need,queue,idle') throw new Error('the bands are ' + order.join(', ') + ', not Pinned, Needs you and working, In line, Idle');
+  const hero = await page.textContent('[data-key="wall-hero"]');
+  for (const w of ['3 need you', '4 working', '9 in line', '8 idle']) if (!hero.includes(w)) throw new Error(`the summary line misses "${w}": ${hero}`);
+  if ((await page.textContent('[data-key="wall-total"]')).trim() !== '24 sessions') throw new Error('the summary does not say 24 sessions');
+  const empty = await page.$$eval('[data-key="live-wall"] .wall-tile [data-wall-now]', els => els.filter(el => !el.textContent.trim()).length);
+  if (empty) throw new Error(`${empty} tiles say nothing about what their helper does`);
+  if (/\bt_[A-Za-z0-9]{3,}/.test(await page.textContent('[data-key="live-wall"]'))) throw new Error('the wall shows a raw ticket id');
+  const peek = `${tileOf('t_bar232')} [data-wall-peek]`;
+  const first = Number((/Checked part (\d+)/.exec(await page.textContent(peek)) || [])[1]);
+  await page.waitForFunction(([sel, n]) => { const m = /Checked part (\d+)/.exec(document.querySelector(sel)?.textContent || ''); return m && Number(m[1]) > n; }, [peek, first], { timeout: 10000 });
+  await noSideways(page);
+}
+
+// Step 5: the three sessions that wait for an answer are orange tiles first after the pinned band, their sentence is the
+// question, nothing on the wall answers; once answered (the API says working) the tile turns back to Working.
+async function needsYou(page, dash) {
+  let answered = false;
+  await wallPage(page, dash, 'fd5', () => barSessions().map(s => answered && s.id === 't_bar238'
+    ? { ...s, status: 'working', word: 'Working', detail: 'Keeps the old file name', question: null } : s));
+  const need = await page.$$eval('[data-band="need"] .wall-tile', els => els.map(el => [el.dataset.tile, el.dataset.s]));
+  if (need.slice(0, 3).some(([, s]) => s !== 'needs-you') || need.slice(3).some(([, s]) => s === 'needs-you')) throw new Error('the needs-you tiles are not first: ' + need.map(x => x.join(' ')).join(', '));
+  const [orange, plain, sign] = await page.evaluate(([a, b]) => {
+    const c = el => getComputedStyle(el).borderTopColor, t = document.createElement('span');
+    t.style.color = 'var(--needs-you)'; document.body.append(t);
+    const want = getComputedStyle(t).color; t.remove();
+    return [c(document.querySelector(a)), c(document.querySelector(b)), want];
+  }, [tileOf('t_bar238'), tileOf('t_bar232')]);
+  if (orange !== sign || orange === plain) throw new Error(`the needs-you tile is not orange (${orange}, working ${plain}, orange ${sign})`);
+  if (!/Keep the old file name/.test(await page.textContent(`${tileOf('t_bar238')} [data-wall-now]`))) throw new Error('the orange tile does not say the question');
+  if (await page.$(`${tileOf('t_bar238')} :is(input, textarea, select, [data-answer], .question-card)`)) throw new Error('the wall itself offers an answer');
+  await page.click(`${tileOf('t_bar238')} [data-wall-open]`);
+  await page.waitForSelector('#live-dock .live-pane[data-session="t_bar238"]', { timeout: 5000 });
+  await page.waitForTimeout(300);
+  answered = true;
+  await page.evaluate(() => window.LiveSessions.refresh());
+  await page.waitForFunction(sel => document.querySelector(sel)?.dataset.s === 'working', tileOf('t_bar238'), { timeout: 10000 });
+  // the picture: the wall with its orange tiles, the layer at the bar
+  answered = false;
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.LiveSessions.refresh());
+  await page.waitForFunction(sel => document.querySelector(sel)?.dataset.s === 'needs-you', tileOf('t_bar238'), { timeout: 10000 });
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  await noSideways(page);
+}
+
+// Step 8: 24 sessions: the long bands scroll inside themselves, the filter keeps only matching tiles, a folded band
+// stays folded after a reload, and counts read right.
+async function manySessions(page, dash, width) {
+  await wallPage(page, dash, 'fd8');
+  if (!(await page.$('[data-key="wall-bands"][data-many]'))) throw new Error('24 sessions do not count as many');
+  if (width > 720) {
+    const scrolls = await page.$eval('[data-band="queue"] .wall-lines', el => getComputedStyle(el).overflowY);
+    if (scrolls !== 'auto') throw new Error('the long In line band does not scroll inside itself');
+  }
+  await page.fill('[data-wall-filter]', 'logo');
+  await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]').length === 1, null, { timeout: 5000 });
+  const head = await page.textContent('[data-band="queue"] .wall-bt');
+  if (!/In line \(1\)/.test(head)) throw new Error(`the In line band says "${head.trim()}" for one match`);
+  if ((await page.textContent('[data-key="wall-total"]')).trim() !== '24 sessions') throw new Error('the filter changed the total');
+  await page.fill('[data-wall-filter]', 'nothing like this');
+  await page.waitForSelector('[data-key="wall-nomatch"]', { timeout: 5000 });
+  await page.fill('[data-wall-filter]', '');
+  await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]').length === 24, null, { timeout: 5000 });
+  await page.click('[data-wall-fold="queue"]');
+  await page.waitForSelector('[data-wall-fold="queue"][aria-expanded="false"]', { timeout: 5000 });
+  if (await page.$('[data-band="queue"] [data-tile]')) throw new Error('the folded band still shows its sessions');
+  if (!(await page.evaluate(() => document.activeElement?.dataset.wallFold === 'queue'))) throw new Error('folding moved the keyboard place');
+  await page.reload();
+  await page.waitForSelector('[data-key="live-wall"] .wall-band', { timeout: 15000 });
+  if (!(await page.$('[data-wall-fold="queue"][aria-expanded="false"]'))) throw new Error('the folded band opened again after a reload');
+  const tall = await page.evaluate(() => document.documentElement.scrollHeight > innerHeight);
+  if (!tall) throw new Error('24 sessions fit without scrolling: the wall does not show them');
+  await noSideways(page);
+}
+
+// Step 11: a tile zooms into the layer; full screen; Esc goes back one step: full screen, then the panel, then the wall.
+async function zoom(page, dash, width) {
+  const phone = width <= 720;
+  await wallPage(page, dash, 'fd11');
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 10000 });
+  await page.click(`${tileOf('t_bar232')} [data-wall-open]`);
+  const pane = '.live-pane[data-session="t_bar232"]';
+  await page.waitForSelector(`#live-dock:is([data-mode="bottom"], [data-mode="right"]) ${pane}`, { timeout: 5000 });
+  if (!(await page.evaluate(p => document.querySelector(p).contains(document.activeElement), pane))) throw new Error('the keyboard did not move into the zoomed session');
+  const docked = await page.$eval('#live-dock', el => el.dataset.mode);
+  if (phone && docked !== 'bottom') throw new Error('a phone opened the session on the right');
+  await page.click(`${pane} [data-key="live-full"]`);
+  await page.waitForSelector(`#live-dock[data-mode="full"] ${pane}`, { timeout: 5000 });
+  if (!(await page.isVisible('#live-dock[data-mode="full"] #live-bar'))) throw new Error('full screen keeps no strip of the other sessions');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector(`#live-dock[data-mode="${docked}"] ${pane}`, { timeout: 5000 });
+  await page.focus(`${pane} [data-key="live-full"]`);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  if (!(await page.isVisible(tileOf('t_bar232')))) throw new Error('the wall is not back after Esc');
+  // the picture: the zoomed session in full screen, as in draft D
+  await page.click(`${tileOf('t_bar232')} [data-wall-open]`);
+  await page.waitForSelector('#live-dock ' + pane, { timeout: 5000 });
+  await page.click(`${pane} [data-key="live-full"]`);
+  await page.waitForSelector(`#live-dock[data-mode="full"] ${pane}`, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  await noSideways(page);
+}
+
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -686,19 +817,23 @@ const STEPS = [
   },
   {
     n: 4, pic: 'fd-04-wall', area: 'wall', title: 'The live wall in bands', feature: [1],
-    waits: T.wall,
     do: ['Open Focus.', 'Watch a working tile for 10 seconds.'],
-    see: ['Bands in this order: Pinned, Needs you, Working, In line, Idle, No session.',
+    see: ['Bands in this order: Pinned, Needs you and working, In line, Idle and no session.',
       'One summary line on top.', 'Each tile says in one plain sentence what its helper does.',
       'A working tile adds its newest last line by itself.'],
+    async run({ page, dash }) {
+      await wall(page, dash);
+    },
     draft: { q: '?page=focus' },
   },
   {
     n: 5, pic: 'fd-05-needs-you', area: 'wall', title: 'A session that needs you is an orange tile', feature: [2],
-    waits: T.wall,
     do: ['Find the tile of the helper that waits for an answer.', 'Open it and answer.'],
     see: ['The tile is orange and first after the pinned ones.', 'Its sentence is the question.',
       'Nothing can be answered on the wall itself; after the answer the tile turns back to Working.'],
+    async run({ page, dash }) {
+      await needsYou(page, dash);
+    },
     draft: { q: '?page=focus&cur=ORCH-238&view=zoom&ask=1' },
   },
   {
@@ -715,17 +850,19 @@ const STEPS = [
   },
   {
     n: 7, pic: 'fd-07-pin-name', area: 'wall', title: 'Pin a session and give it your own name', feature: [9],
-    waits: T.wall,
+    waits: T.pin,
     do: ['Pin a working session.', 'Click its name, type a new one and press Enter.'],
     see: ['The pinned session moves to the Pinned band and gets a chip in the bar.', 'The new name shows on its tile, its pane and its chip.'],
     draft: { q: '?page=focus&cur=Manager&view=zoom&ren=1' },
   },
   {
     n: 8, pic: 'fd-08-many', area: 'wall', title: 'Works with 24 and more sessions', feature: [11],
-    waits: T.wall,
     do: ['Use a workspace with 24 sessions.', 'Type a word in the filter.', 'Collapse the In line band.'],
     see: ['The wall scrolls; bands collapse and stay collapsed.', 'The filter keeps only the matching tiles.',
       'Counts read right: "1 session", "2 sessions".'],
+    async run({ page, dash, width }) {
+      await manySessions(page, dash, width);
+    },
     draft: { q: '?page=focus&many=1' },
   },
   {
@@ -775,10 +912,12 @@ const STEPS = [
   },
   {
     n: 11, pic: 'fd-11-zoom', area: 'layer', title: 'Zoom and full screen, Esc goes one step back', feature: [8],
-    waits: T.layer,
     do: ['Click a tile on the wall.', 'Press full screen.', 'Press Esc twice.'],
-    see: ['The tile grows into a large view.', 'Full screen keeps only a slim strip of the other sessions.',
-      'Each Esc goes back one step: full screen, then zoom, then the wall.'],
+    see: ['The tile opens large in the layer, the keyboard in it.', 'Full screen keeps only a slim strip of the other sessions.',
+      'Each Esc goes back one step: full screen, then the layer, then the wall.'],
+    async run({ page, dash, width }) {
+      await zoom(page, dash, width);
+    },
     draft: { q: '?page=focus&cur=ORCH-232&view=zoom&term=1&mode=full' },
   },
   {

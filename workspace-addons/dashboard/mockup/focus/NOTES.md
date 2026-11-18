@@ -250,3 +250,17 @@ Reopen. Reopen starts the helper on that conversation (`orch run start <ticket> 
 the buttons are off with one line why. The draft's Start choice above the list (continue, fresh start, tool and model)
 is the Start task; this draft lost only its "To build" chip and note. Master: `.live-hist*` in widgets.css (style guide:
 Live layer); click-through step 26.
+
+## The wall, built (ORCH-360, 18 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch the Focus page is the
+wall (`pages/livewall.js`) on the live sessions list: the summary line ("3 need you · 4 working · 9 in line · 8 idle",
+then "24 sessions"), the filter, then the draft's bands: Pinned, Needs you and working, In line, Idle and no session.
+Needs-you tiles are orange and first, their sentence is the question and they have no peek; a working tile shows its
+last three lines and adds the newest by itself (every 3 s). In line and idle are one line each. A band folds and stays
+folded (per workspace, in this browser); from 12 sessions a long band scrolls inside itself; at 1100 px and wider the
+bands sit side by side as in the draft. One change from the draft: clicking a tile zooms into it in the layer (the
+draft has a separate zoom view on the page), so full screen, split and Esc are the layer's; Esc goes full screen, then
+the layer, then the wall. Not in this task: the pin button on a tile and renaming (pin and rename task), the New
+session buttons and Runs on (start tasks). Master: `.wall-*` in widgets.css (style guide: Live wall); click-through
+steps 4, 5, 8 and 11.

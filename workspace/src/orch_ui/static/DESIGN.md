@@ -304,6 +304,15 @@ working", "9 in line", "2 idle") that opens a list (`.lbar-pop`, search from 9 s
 (`data-fold` 0 to 4) into counts instead, and on a phone it shows symbols and numbers above the tab bar. Counts in
 words read right: "1 session", "2 sessions". The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
 
+### Live wall (ORCH-360)
+`.wall` is the new Focus page in Preview (dashboard `pages/livewall.js`): one summary line ("3 need you · 4 working ·
+9 in line · 8 idle", then "24 sessions"), a filter, then bands that fold (`.wall-band`, `.wall-bt` with
+`aria-expanded`): Pinned, Needs you and working, In line, Idle and no session. Needs you and working are tiles
+(`.wall-tile`); a needs-you tile is orange (`data-s=needs-you`) and comes first, its sentence is the question and it
+has no peek. A working tile shows a peek of its last three lines (`.wall-peek`). In line and idle are one line each
+(`.wall-line`). From 12 sessions the bands carry `data-many` and a long list scrolls inside itself; at 1100 px and wider
+the bands sit side by side. A tile opens its session in the layer; nothing is answered on the wall itself.
+
 ## Loading, errors and performance
 
 The brief asks for shell + skeleton within 100 ms while the numeric checklist says not to show indicators for sub-second work. Reconcile by expected latency (BP-05, BP-55–67):
