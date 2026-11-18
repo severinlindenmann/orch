@@ -115,7 +115,7 @@ def test_no_same_computer_limit_is_left_in_the_product():
 
 
 def test_a_watch_only_server_says_why_it_cannot_sign_in(tws, monkeypatch):
-    """ORCH-387: a page server started inside an agent tool's terminal never signs anyone in. Its refusal must say
+    """ORCH-387: a page server started inside an agent tool's terminal never opens a page session. Its refusal must say
     so, not 'This link was already used' (which sent a tester after the wrong cause)."""
     from orch_dashboard import server as dash
     from orch_focus import server as focus
