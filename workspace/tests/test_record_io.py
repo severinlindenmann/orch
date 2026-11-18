@@ -1031,9 +1031,29 @@ def test_25_fast_strict_read_and_spool(store, monkeypatch):
     writer.append(event(id="first"))
     sample = event()
     runfile(ws).write_bytes(seal_lines(ws, RUN, [dict(sample, id=f"id{i}") for i in range(3000)]))
-    start = time.monotonic()
-    assert writer.append(event(id="last"))["seq"] == 3001
-    assert time.monotonic() - start < 0.5  # shared CI runners; W2b makes this structural
+    # Measure the work, not the wall time (a loaded shared CI runner took 0.52 s against 0.5 s, ORCH-569):
+    # one append reads the run file once and parses each of its lines once.
+    reads, parsed = [], []
+    real_read, real_plain = record._read_bytes, record._plain_lines
+
+    def counted_read(fd):
+        raw = real_read(fd)
+        reads.append(len(raw))
+        return raw
+
+    def counted_plain(raw, run):
+        parsed.append(len(raw.splitlines()))
+        return real_plain(raw, run)
+
+    size = runfile(ws).stat().st_size
+    with monkeypatch.context() as counting:
+        counting.setattr(record, "_read_bytes", counted_read)
+        counting.setattr(record, "_plain_lines", counted_plain)
+        start = time.monotonic()
+        assert writer.append(event(id="last"))["seq"] == 3001
+        elapsed = time.monotonic() - start
+    assert reads == [size] and parsed == [3000]
+    assert elapsed < 10  # only a backstop for a pathological slowdown, far above any loaded runner
     lock = record.record_dir(ws) / "runs" / (RUN + ".lock")
     lock.touch()
     monkeypatch.setattr(record, "_LOCK_WAIT", 0.01)

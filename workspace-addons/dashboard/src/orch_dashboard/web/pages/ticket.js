@@ -419,7 +419,11 @@ function agentBar(t) {
       : h('div', {className:'grow'}, h('p', {className:'ab-text truncate'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), lastLine),
     helper && window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : null, line.startFailed ? null : ticketWarmth(t, run, session),
     snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
-      alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
+      alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'})
+        // a plain start (Start, Continue, Retry, Try again) is the header's one Start button (ORCH-475), never a second one
+        // here; Start anyway takes over a stuck run
+        : line.primary?.op === 'run.start' && !line.primary.args?.take_over ? null
+        : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
 }
 
 // "X is also changing this folder": one quiet line from the core (orch run status), no banner. A hint, not a lock.
@@ -1194,11 +1198,19 @@ async function ticketTalkSend(tid, message) {
   if (!delivered && !(r && typeof r.id === 'string' && r.id)) return partial({status:200, text:'orch did not confirm that your message was saved.'});
   if (delivered) return {ok:true, text:'Sent. The helper reads it now.'};
   if (r.state !== 'none') return {ok:true, text:'Sent. The helper reads it when it finishes what it is doing.'};
-  const started = await act('run.start', {ticket:tid});  // nothing on the ticket: start a helper, it reads this first
+  // nothing on the ticket: start a helper, it reads this first. Through the one starter (ORCH-475): Starting… until it
+  // runs, one run for a double click, and the way the person picked in the Start choice (else the usual start).
+  const ops = talkStartOps.get(tid) || [['run.start', {ticket:tid}]];
+  talkStartOps.delete(tid);
+  const starter = window.UI?.startStarter;
+  const started = starter ? await starter.start(tid, ops) : await act('run.start', {ticket:tid});
+  if (started.again) return {ok:true, text:'Sent. The helper is starting and reads it first.'};
+  if (started.queued) return {ok:true, text:'Sent. The ticket waits in line for a free helper place; the helper reads it first.'};
   return started.ok ? {ok:true, text:'Sent. A helper starts and reads it first.'} : {ok:true, text:'Saved on the ticket. Start the helper to go on.'};
 }
 // The helper's screen as plain text: colours and cursor codes dropped (the kit's dock shows text only).
 function talkScreenText(screen) { return String(screen || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b[@-_]/g, '').replace(/\s+$/, ''); }
+const talkStartOps = new Map();  // ticket id -> the start picked in the Start choice next to Send and start helper
 function ticketTalkLabel(t, run) {
   if (t?.status === 'review') return 'Send back with this';
   return window.DashHelpers.helperAlive(t, run) ? 'Send to helper' : 'Send and start helper';
@@ -1246,10 +1258,31 @@ function ticketTalk(host, tid) {
     finally { busy = false; }
   }
   const submit = box.querySelector('[type=submit]');
+  // Send and start helper has the caret of the one Start button (ORCH-475, mockup ticket/ticket-start.html): a picked way
+  // to start sends the box first (when something is in it), then starts that way.
+  const caretFacts = () => {
+    const t = ticketOf(tid);
+    return t && typeof startFacts === 'function' ? {...startFacts(t), caretHidden:ticketTalkLabel(t, state.runs?.[tid]) !== 'Send and start helper'} : null;
+  };
+  let caret = null;
+  if (submit && window.UI?.startButton && caretFacts()) {
+    const slot = el('span');
+    submit.before(slot);
+    caret = window.UI.startButton(slot, {ticket:tid, caretOnly:true, mainEl:submit, label:'Send and start helper', send:(op, args) => act(op, args, {quiet:true}),
+      toast:(text, kind) => window.orch.toast(text, kind || 'ok'), ...caretFacts(),
+      before:async ops => {
+        const typed = box.querySelector('textarea')?.value.trim(), staged = box.querySelectorAll('.attachment-tile').length;
+        if (!typed && !staged) return [];  // nothing to send: just start that way
+        talkStartOps.set(tid, ops);
+        box.querySelector('form')?.requestSubmit();
+        return null;
+      }});
+  }
   return {
     update() {
       const label = ticketTalkLabel(ticketOf(tid), state.runs?.[tid]);
       if (submit && submit.textContent !== label) submit.textContent = label;
+      if (caret) { const f = caretFacts(); if (f) caret.update(f); }
       if (!timer) { poll(); timer = setInterval(poll, TALK_POLL); }
     },
     destroy() { clearInterval(timer); timer = null; composer.destroy?.(); },
@@ -1672,7 +1705,7 @@ function ticketProperties(t, parent) {
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)),
+    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)), field('Human review needed', humanReviewField(t)),
       ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t), field('Helper strength', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
@@ -1706,7 +1739,6 @@ function missingTicket(id) {
 // The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [], kidsDone = !questions(t).length && !run?.running ? ticketKidsAllDone(t) : null;
-  let startShown = false;
   if (kidsDone) m.sentence = (kidsDone.length === 1 ? 'Its sub-ticket is done.' : 'All ' + kidsDone.length + ' sub-tickets are done.') + ' Mark it Done when nothing else is left.';
   const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
   if (quiet) m.sentence = (/^Updated /.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: No news since replaces Updated
@@ -1716,10 +1748,9 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
     else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', e => focusTicketAnswer(t.id, e?.currentTarget), {'data-key':'ticket-answer'})); }
     else if (kidsDone) actions.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'}));
-    else if (fresh) { startShown = true; actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'})); }
-    else if (ticketPaused(t, run)) { startShown = true; actions.push(ticketButton('Continue', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'})); }
-    // ORCH-255: Continue is on the page in every state while no helper runs; Start helper / Continue (paused) already do that job
-    if (!run?.running && !startShown) actions.push(ticketButton('Continue', actions.length ? 'outline sm' : 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-continue'}));
+    // ORCH-255: a start is on the page in every state while no helper runs. ORCH-475: it is the one Start button (pages/start.js):
+    // Continue when an earlier session can be reopened, else Start helper; the caret opens the Start choice. Never filled (ORCH-415).
+    if (!run?.running) actions.push(startHost(t, 'ticket-start'));
     // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
     const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
     if (focusBtn) actions.push(focusBtn);
@@ -1883,6 +1914,21 @@ function releaseField(t) {
     if (sw.disabled) return;
     sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
     const result = await act('ticket.edit', {ticket:t.id, release:!on, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); sw.setAttribute('aria-checked', String(on)); }
+    sw.disabled = false;
+  };
+  return sw;
+}
+// ORCH-424: Human review needed. On unless the person turns it off (no field = on, also for older tickets); while
+// it is on nothing on this ticket is accepted without a person. The same switch as Release.
+function humanReviewField(t) {
+  const on = t.human_review !== false;
+  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, nothing is accepted without you' : 'No');
+  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'Human review needed', title:on ? 'Nothing is accepted without you' : 'Work may be accepted without you', 'data-key':'human-review-' + t.id});
+  sw.onclick = async () => {
+    if (sw.disabled) return;
+    sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
+    const result = await act('ticket.edit', {ticket:t.id, human_review:!on, if_revision:(ticketOf(t.id) || t).revision});
     if (!result.ok) { window.orch.toast(changeError(result), 'error'); sw.setAttribute('aria-checked', String(on)); }
     sw.disabled = false;
   };

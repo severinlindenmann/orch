@@ -228,11 +228,14 @@ test('a move to Working offers Start helper, a move to Done does not', async () 
   const acts = [];
   const ctx = moveContext(async () => ({ok:true}));
   ctx.act = async (op, args) => { acts.push([op, args]); return {ok:true}; };
+  // ORCH-475: the offer is the one Start button (kit), built in the notice for that ticket
+  const built = [];
+  ctx.startButtonIn = (host, t, o) => { built.push([host.attrs['data-action'], t.id, o.style]); return {}; };
   await ctx.moveTicket('t1', 'active');
   const offer = ctx.toasts.find(t => t.text === 'No helper is working on it yet.');
   assert.ok(offer, 'the offer is shown');
-  await offer.undo.listeners.click();
-  assert.equal(JSON.stringify(acts), JSON.stringify([['run.start', {ticket:'t1'}]]));
+  assert.equal(offer.undo.attrs['data-action'], 'offer-start');
+  assert.deepEqual(built, [['offer-start', 't1', 'ghost']]);
   const done = moveContext(async () => ({ok:true}));
   await done.moveTicket('t1', 'done');
   assert.equal(done.toasts.some(t => /No helper/.test(t.text)), false);

@@ -37,6 +37,9 @@ PACE_FORGET_MINUTES = 30  # a remembered pace older than this is dropped
 RETRY_MINUTES = 10  # a failed switch to the same account is tried again (and written down) after this
 WINDOW_OF = {"5h": "5h", "week": "week"}  # rule period -> switcher window
 SWITCH_TIMEOUT = 30
+BACK_MINUTES = (
+    10  # an account switched away from and active again within this is "another program switched back"
+)
 
 
 # ---------------------------------------------------------------- files
@@ -288,6 +291,15 @@ def _switch(slot: int) -> bool:
     return p.returncode == 0
 
 
+def _stuck(key: str, read=cswap.read) -> bool:
+    """After a switch: is the account really the one in use now? (exit 0 is not proof: another program can switch
+    back at once, or the switcher can answer yes and change nothing)."""
+    try:
+        return any(f.active and f.key == key for f in read())
+    except cswap.ReaderError:
+        return False
+
+
 def _row(what: str, a: dict | None, before, after, why: str, at: datetime) -> dict:
     return {
         "at": _iso(at),
@@ -380,12 +392,43 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
             )
             if recent:
                 did = "waiting to try again"
-            elif switch(t.use.slot):
+            elif switch(t.use.slot) and _stuck(t.use.key):
                 did = "switched"
                 memory.pop("failed", None)
-                hist.append(
-                    _row(f"switched to {t.account['label']}", t.account, before, t.account["label"], why, at)
+                prev = memory.get("switched") or {}
+                again = (
+                    prev.get("to") == t.account["id"]
+                    and isinstance(prev.get("at"), str)
+                    and at - store.to_time(prev["at"]) < timedelta(minutes=BACK_MINUTES)
                 )
+                if not again:  # a switch is written once
+                    hist.append(
+                        _row(
+                            f"switched to {t.account['label']}",
+                            t.account,
+                            before,
+                            t.account["label"],
+                            why,
+                            at,
+                        )
+                    )
+                elif not prev.get("back_noted"):  # something moved the account back: one row, not one per try
+                    hist.append(
+                        _row(
+                            f"another program switched back to {before or 'the first account'}",
+                            ch.active.account if ch.active else None,
+                            t.account["label"],
+                            before,
+                            f"Usage switched to {t.account['label']} at {prev['at']} and the account in use "
+                            "changed again without Usage; it is switching again",
+                            at,
+                        )
+                    )
+                memory["switched"] = {
+                    "to": t.account["id"],
+                    "at": prev["at"] if again else _iso(at),
+                    "back_noted": bool(again),
+                }
             else:
                 did = "switch failed"
                 memory["failed"] = {"to": t.account["id"], "at": _iso(at)}
