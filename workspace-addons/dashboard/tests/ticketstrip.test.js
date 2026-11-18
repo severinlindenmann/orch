@@ -90,6 +90,19 @@ test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', ()
   assert.doesNotMatch(text(sentence), /Updated/);
 });
 
+test('ORCH-415: In progress with no helper says so in the pill and the line; the start is outlined with its cost and a cheaper choice', () => {
+  const c = ctx({state:{runs:{}}});
+  const tree = c.detail({...base, status:'active', model:{name:'opus', by:'orch'}, estimate:{minutes:30, cost:1.2}});
+  const all = nodes(tree), sentence = all.find(n => n.attrs?.['data-key'] === 'ticket-sentence');
+  assert.equal(text(sentence), 'No helper is working on it right now.');
+  assert.match(text(all.find(n => /^status-/.test(n.attrs?.['data-key'] || ''))), /In progress/);
+  const go = all.find(n => n.attrs?.['data-key'] === 'ticket-continue'), cheaper = all.find(n => n.attrs?.['data-key'] === 'ticket-continue-cheaper');
+  assert.match(go.attrs.className, /\boutline\b/);
+  assert.equal(text(cheaper), 'Continue on Sonnet');
+  assert.equal(text(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cost')), 'On Opus · estimate about $1.20');
+  assert.ok(!all.some(n => n.tag === 'button' && /\bprimary\b/.test(n.attrs?.className || '') && /Continue|Start|Resume/.test(text(n))), 'no filled start');
+});
+
 test('Needs you: the strip names the agent that asked (as Home does), not always "Helper" (ORCH-65)', () => {
   const c = ctx({state:{runs:{t_one:{claim:{agent:'manager', label:'Manager'}}}}});
   const tree = c.detail({...base, status:'waiting', questions:[{id:'q1', text:'Build the new card look?'}]});

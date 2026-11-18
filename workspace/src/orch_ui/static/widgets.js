@@ -40,7 +40,9 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
    t: {status, questions, bring_back, waiting_on}; helper: the core's helper state {state, word, detail} while a helper runs, else null.
    UI.ticketState(t, helper) -> {pill, word, helper}; pill is a status icon name (todo, working, needs, check, done).
    UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
-const TICKET_WORD={open:'Backlog',ready:'To do',active:'Working',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
+/* active with no helper is In progress: Working is said only while a helper runs, so the pill never contradicts
+   the ticket's "No helper is working" line (ORCH-415) */
+const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
 const HELPER_WORD={working:'Working',starting:'Starting',you:'Waits for you',waiting:'On hold',idle:'Idle',stuck:'Stuck'};
 const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs'};
 UI.ticketState=(t,helper)=>{t=t||{};

@@ -198,3 +198,14 @@ It is the ticket page's own box, separate from Focus (owner answer on ORCH-238).
 - Check after a move by a person reads "Moved to Check by Anna 14:23", never "Helper finished".
 - An epic whose sub-tickets are all done says so and offers Mark Done; Done with open sub-tickets asks first
   ("Mark Done anyway" or Cancel).
+
+## ORCH-415: one status, one ask heading, starts never filled (18 Nov)
+
+- `ticket-idle.html` (new): a ticket In progress with no helper. The pill says **In progress** (Working is said only
+  while a helper runs), the line under the title says "No helper is working on it right now.", as the Add to this
+  ticket box below does.
+- The start is outlined, never filled (UX D2): its cost in one line above it ("On Opus · estimate about $1.20, $0.40
+  used so far") and, on a strong model, the same start on Sonnet beside it (kit `.cost-pick`). Every page's
+  Start helper is outlined too.
+- `ticket-working.html`: one **What was asked** section holds the description, the person's note and the files they
+  added (it was "What was asked" plus "What you asked").
