@@ -230,6 +230,16 @@ Every pane has Open ticket (also in More when the pane is narrow, as in the draf
 the ticket page shows. Finished tickets without a helper get no button. Wall tiles come with the wall task. No new
 master rules (kit buttons only); click-through step 6.
 
+## Live data for every session, built (ORCH-359, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. The bar and the panes read one list of
+sessions (GET /api/sessions, pages/livesessions.js) instead of the tickets and runs: status (needs you, working, in
+line, idle, closed), what it waits on, the open question, the last lines of its screen, tool and model, open time and
+when it closes for being idle. A pane shows what the session does now, its last lines and draft D's meta line
+("Helper · Opus · open 38 min · stays warm while it works"), updated in place every 3 s. The wall builds on the same
+list and the same words (liveNow, liveMeta). Master: `.live-now`, `.live-lines`, `.live-meta` in widgets.css (style
+guide: Live layer); click-through step 16.
+
 ## Earlier sessions, built (ORCH-363, 17 Nov)
 
 orch keeps the last 10 sessions per ticket on this computer (the ones in use included; only the ids are forgotten,

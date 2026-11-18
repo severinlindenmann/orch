@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-26 steps: 11 ready (the script clicks them), 15 pending (not built yet).
+27 steps: 11 ready (the script clicks them), 16 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -283,15 +283,16 @@ Must be seen:
 
 Do:
 
-1. Open a working session in the layer and look at the line at the top of its pane.
-2. Open the model choice of that session and pick another model.
+1. Open a session that needs you from the bar.
+2. Look at the pane: what it does now, its last lines and the line under them.
+3. Open the model choice of a working session and pick another model.
 
 Must be seen:
 
-- Tool and model are shown (for example "Claude Code · Opus").
-- How long it is open and when it closes for being idle.
+- The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
+- How long it is open and how long it stays (warm while it works, or when it closes for being idle).
+- All of it stays current while you look; the keyboard place does not jump.
 - A new model applies when the helper finishes its current step (or at its next start) and says so.
-- The wall's tiles show the same line once the wall is built.
 
 ## 17. Chat: messages with the results inside
 
@@ -457,4 +458,18 @@ Must be seen:
 - Up to 10 sessions of the ticket, newest first, each with its time, first message and number of messages.
 - The session in use says In use; one that is not on this computer has no Reopen.
 - Reopen starts the helper on that conversation and the list closes.
+
+## 27. Change the model of a running session
+
+- Part: sessions (draft D feature 12)
+- State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
+- Pictures: `fd-27-model-choice-1280.png`, `fd-27-model-choice-1920.png`, `fd-27-model-choice-390.png`
+
+Do:
+
+1. Open the model choice of a running session.
+
+Must be seen:
+
+- A new model applies from the next fresh start and says so.
 
