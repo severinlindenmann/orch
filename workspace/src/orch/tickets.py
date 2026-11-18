@@ -3795,6 +3795,30 @@ def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -
         net.write_json(root / ".orch" / "run" / "own-sessions.json", entries[-OWN_SESSIONS_MAX:])
 
 
+SESSIONS_KEPT = 10  # sessions remembered per ticket, the ones in use included (owner's choice, ORCH-363)
+
+
+def _keep_last_sessions(sessions: list) -> None:
+    """Forget the oldest replaced sessions so a ticket remembers at most SESSIONS_KEPT (the ones in use always
+    stay; only the ids are forgotten here: the tool's own conversation file is never touched)."""
+    earlier = [
+        (e.get("last_used") or "", -j, i)  # same time: the earlier place in a list is the newer one
+        for i, s in enumerate(sessions)
+        if isinstance(s, dict)
+        for j, e in enumerate(s.get("earlier") or [])
+        if isinstance(e, dict)
+    ]
+    room = max(0, SESSIONS_KEPT - len(sessions))
+    if len(earlier) <= room:
+        return
+    drop = {(i, -nj) for _, nj, i in sorted(earlier, reverse=True)[room:]}
+    for i, s in enumerate(sessions):
+        if isinstance(s, dict) and s.get("earlier"):
+            s["earlier"] = [e for j, e in enumerate(s["earlier"]) if (i, j) not in drop]
+            if not s["earlier"]:
+                del s["earlier"]
+
+
 def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
     """Remember the agent session for this agent and machine (updates last_used when it is known)."""
     if not valid_session_id(sid):
@@ -3811,7 +3835,7 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
                     # keep the replaced conversation so a person can read or continue it later
                     old = [e for e in s.get("earlier") or [] if isinstance(e, dict) and e.get("id") != sid]
                     old.insert(0, {"id": s["id"], "last_used": s.get("last_used")})
-                    s["earlier"] = old[:20]
+                    s["earlier"] = old
                 elif s.get("earlier"):
                     s["earlier"] = [e for e in s["earlier"] if e.get("id") != sid]
                 s["id"], s["last_used"] = sid, now()
@@ -3821,6 +3845,7 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
             if len(sessions) > 32:
                 sessions.sort(key=lambda s: s.get("last_used", ""))
                 del sessions[0 : len(sessions) - 32]
+        _keep_last_sessions(sessions)
 
     ticket = apply_op(root, tid, op, by=SYSTEM)[0]
     _record_own_session(root, tid, agent, sid, host)
