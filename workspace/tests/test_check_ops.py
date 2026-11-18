@@ -828,12 +828,16 @@ def test_a_yes_on_the_dashboard_counts_when_the_server_runs_under_a_helper(
     at the CLI the environment still decides."""
     tid = with_checks(proj, run, new_ticket)
     for c in ("c2", "c3"):
-        run("ask", tid, f"Mark step {c} as won't do?", "--option", "yes", "--option", "no", "--check", c)
+        code, out, err = run(
+            "ask", tid, f"Mark step {c} as won't do?", "--option", "yes", "--option", "no", "--check", c
+        )
+        assert code == 0, (out, err)
+    q1, q2 = (q["id"] for q in read(proj, tid)["questions"])
     monkeypatch.setenv("ORCH_AGENT", "claude")
     root = proj
-    tickets.answer(root, tid, "q1", "yes", "human:owner", "dashboard")
+    tickets.answer(root, tid, q1, "yes", "human:owner", "dashboard")
     assert read(proj, tid)["checklist"][1]["wont_do"] is True
-    tickets.answer(root, tid, "q2", "yes", "human:owner", "cli")  # a command in an agent's terminal: no
+    tickets.answer(root, tid, q2, "yes", "human:owner", "cli")  # a command in an agent's terminal: no
     assert "wont_do" not in read(proj, tid)["checklist"][2]
 
 
