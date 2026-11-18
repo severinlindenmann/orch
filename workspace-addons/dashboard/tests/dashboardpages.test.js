@@ -729,8 +729,6 @@ test('Settings: the kinds accepted for me are checkboxes under the switch; Draft
   c.window.orch = {toast() {}};
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
   c.state.settings = {reviewer_on:false, reviewer_kinds:['bug', 'small_bug']};
-  assert.equal(nodes(c.reviewerCard(c.state.settings), n => n.attrs?.type === 'checkbox').length, 0);
-  c.state.settings.reviewer_on = true;
   const boxes = nodes(c.reviewerCard(c.state.settings), n => n.attrs?.type === 'checkbox');
   assert.equal(boxes.length, 6);
   assert.deepEqual(boxes.filter(b => b.attrs.checked).map(b => b.attrs['data-kind']), ['bug', 'small_bug']);

@@ -180,7 +180,7 @@ function reviewerCard(settings) {
       h('div', {className:'grow'}, settingsText('h3', {}, 'Accept small finished work for me'),
         settingsText('p', {className:'meta'}, 'Merged work with green checks and no change to looks, words or rules is marked Done for you. You see it on Review and can send any back.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')})),
-      settings.reviewer_on ? reviewerKindsRow(settings) : null));
+      reviewerKindsRow(settings)));
 }
 // ORCH-645: which kinds of tickets it accepts by itself (the helper sets a ticket's kind). Draft or design is shown
 // and never on: drafts, mockups and designs are only accepted by a person.
