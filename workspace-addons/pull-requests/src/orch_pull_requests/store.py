@@ -268,6 +268,7 @@ def back_to_front(root: Path, urls: list[str], why: str, not_before: float | Non
             rows.remove(r)
             r.update(state=WAITING, why=why)
             r.pop("group", None)
+            r.pop("taken", None)
             if not_before:
                 r["not_before"] = not_before
             else:
@@ -287,7 +288,7 @@ def claim(root: Path, batch: list[dict]) -> list[dict]:
             row = find(rows, b["url"])
             if row is None or row.get("state") != WAITING or row.get("added") != b.get("added"):
                 continue
-            row.update(state=RUNNING, why="in the group being checked")
+            row.update(state=RUNNING, why="in the group being checked", taken=now())
             row.pop("not_before", None)
             got.append(b)
         return got

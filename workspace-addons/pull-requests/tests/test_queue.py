@@ -167,7 +167,11 @@ class FakeGitHub:
         self.deleted.append(branch)
         return True
 
-    def set_status(self, repo, sha, text, target=""):
+    def set_status(self, repo, sha, text, target="", state="success"):
+        if state != "success":  # taken back
+            self.marks = [m for m in self.marks if m[0] != sha]
+            self.unmarked = getattr(self, "unmarked", []) + [sha]
+            return True
         self.marks.append((sha, text))
         return True
 
@@ -241,12 +245,44 @@ def test_a_lone_green_pull_request_develop_did_not_touch_is_marked_and_merged_wi
 def test_a_lone_pull_request_is_not_merged_when_its_mark_could_not_be_set(ws):
     store.add(ws, url(1), None, "agent:t", login="bot")
     gh = FakeGitHub({1: {"fresh": True}})
-    gh.set_status = lambda repo, sha, text, target="": False
+    gh.set_status = lambda repo, sha, text, target="", state="success": False
     r, _ = make(ws, gh, FakeGit())
     r.process(r.next_batch())
     row = store.find(store.read(ws), url(1))
     assert gh.prs[1].get("state", "OPEN") == "OPEN" and row["state"] == "waiting"
     assert "mark could not be set" in row["why"]
+
+
+def test_a_lone_pull_request_marked_but_not_merged_gets_its_mark_taken_back(ws):
+    """The merge itself failed after the mark was set: nobody may merge that head past the queue on it."""
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {"fresh": True}})
+    r, _ = make(ws, gh, FakeGit())
+
+    def waiter(u, before_merge=None, merge=True):
+        assert before_merge(gh.pr(u)["headRefOid"]) is None  # marked
+        return Outcome(u, False, "", "GitHub refused the merge")
+
+    r.waiter = waiter
+    r.process(r.next_batch())
+    assert gh.marks == [] and gh.unmarked == [f"{1:040d}"]
+    assert store.find(store.read(ws), url(1))["state"] == "waiting"
+
+
+def test_a_waiter_that_fails_after_the_mark_still_takes_every_mark_back(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {"fresh": True}})
+    r, _ = make(ws, gh, FakeGit())
+
+    def waiter(u, before_merge=None, merge=True):
+        head = gh.pr(u)["headRefOid"]
+        assert before_merge(head) is None and before_merge(head) is None  # asked twice: marked twice
+        raise RuntimeError("the waiter broke")
+
+    r.waiter = waiter
+    with pytest.raises(RuntimeError):
+        r.process(r.next_batch())
+    assert gh.marks == [] and gh.unmarked == [f"{1:040d}"]  # taken back once per head
 
 
 def test_one_pull_request_alone_is_checked_in_a_group_of_one_on_top_of_the_base(ws):

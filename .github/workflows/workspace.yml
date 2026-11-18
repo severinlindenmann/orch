@@ -28,17 +28,17 @@ jobs:
         run: |
           python3 - <<'PY2'
           import json, os
-          # Windows is known red until ORCH-32 (pull request 1045) is merged: its parts run and show their result
-          # on every queue group but do not block the merge. ORCH-32 sets this to an empty set when it lands.
+          # Systems whose failures do not block a merge (the mechanism is kept for the next time a system is red).
+          # Windows was in it until ORCH-32 (pull request 1045): its parts now block again.
           # Known red works per STEP (continue-on-error on the test steps below), never on the job: a job-level
           # continue-on-error still reports a FAILURE check on the pull request, and the merge queue drops every
           # group with a failed check (18 Nov, after PR 1428). brand/tests/test_ci_known_red.py keeps it so.
-          KNOWN_RED = {"windows-latest"}
+          KNOWN_RED = set()
           parts = {"ubuntu-latest": 2}
           if os.environ["FULL"] == "true":
               parts["macos-latest"] = 5
           if os.environ["WINDOWS"] == "true":
-              parts["windows-latest"] = 10
+              parts["windows-latest"] = 16
           rows = [
               {"os": o, "part": k, "parts": n, "known_red": o in KNOWN_RED}
               for o, n in parts.items()
@@ -66,6 +66,12 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      # Windows: orch's safe git runs the python of the virtual environment as its `true` and refuses a python
+      # inside the project folder, so every git test failed. Keep the environment outside the project (ORCH-32).
+      - name: Virtual environment outside the project (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "UV_PROJECT_ENVIRONMENT=$RUNNER_TEMP/orch-venv" >> "$GITHUB_ENV"
       - run: uv sync
       - run: uv run ruff check .
         if: matrix.part == 1
@@ -83,9 +89,10 @@ jobs:
         run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 180
         if: runner.os == 'macOS'
         continue-on-error: ${{ matrix.known_red }}
-      # Windows: a test that hangs is stopped after 120 s with every thread's stack, so the log names it.
+      # Windows: a hung test stops at the 300 s of pyproject.toml, with every thread's stack. Not 120 s: the thread method
+      # then kills the whole worker, and the 100 s bring-back tests crossed it on a loaded runner (ORCH-32).
       - id: tests-windows
-        run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 180 --timeout 120 --timeout-method thread
+        run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 180 --timeout-method thread
         if: runner.os == 'Windows'
         continue-on-error: ${{ matrix.known_red }}
       - name: Installed wheel smoke (orch init, junction on Windows)

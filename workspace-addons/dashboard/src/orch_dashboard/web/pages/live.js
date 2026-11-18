@@ -43,6 +43,22 @@ function liveNextPage(r) {
         h('p', {}, 'The new ' + label + ' is being built; your helpers’ sessions will show here.'),
         h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(r.id), 'data-key':'live-next-off'}, 'Back to today’s ' + label))));
 }
+// One ticket's address (#addon/<page>/t/<ticket>, as Home, a ticket page or an old link names it) with Preview on:
+// the new page underneath and that ticket's session opened in the layer with the keyboard in it, so the address never
+// shows less than today's page did (ORCH-465). Once per address: closed again, it stays closed until the address changes.
+function liveAddressTicket(r) {
+  const m = r && r.kind === 'live' ? /^t\/([A-Za-z0-9_-]{1,64})$/.exec(r.path || '') : null;
+  return m ? m[1] : null;
+}
+let liveAddressOpened = '';
+function liveOpenFromAddress(r, layer = liveWin().LiveLayer, known = typeof liveLayerSession === 'function' ? liveLayerSession : null) {
+  const id = liveAddressTicket(r);
+  if (!id) { liveAddressOpened = ''; return false; }
+  if (liveAddressOpened === r.hash || typeof layer?.open !== 'function' || !known?.(id)) return false;  // not loaded yet: the next render tries again
+  liveAddressOpened = r.hash;
+  layer.open(id, true);
+  return true;
+}
 if (typeof document === 'object') document.addEventListener('click', e => {
   const b = e.target.closest?.('[data-live-new]');
   if (b && typeof window.LiveNew?.start === 'function') { window.LiveNew.start(b.dataset.liveNew); return; }

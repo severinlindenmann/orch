@@ -10,7 +10,7 @@ const PULL = 'https://github.com/standin/lunch/pull/7';
 module.exports = {
   name: 'GitHub: merge a green pull request from Home, set Merge when green',
   covers: ['pull.merge', 'ticket.field', 'page:ticket'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, workspace, standins, home, until }) {
+  async run({ page, open, reload, act, must, text, orch, addonOn, workspace, standins, home, until, addonOff }) {
     const tid = JSON.parse(orch('ticket', 'new', 'Add the lunch poll to the team page', '--json')).id;
     orch('check', 'add', tid, 'Build the poll');
     orch('check', 'done', tid, 'c1', '--summary', 'Poll built.', '--note', 'Pull request 7.', '--pr', PULL);
@@ -45,7 +45,6 @@ module.exports = {
     await reload();
     must((await field.innerText()).trim() === 'On', 'Merge when green is not On after a reload');
     must(JSON.parse(orch('ticket', 'show', tid, '--json')).ext?.['pull-requests']?.merge_when_green === 'on', 'the ticket file does not say on');
-    orchAsPerson('addon', 'remove', 'pull-requests');   // off again for the next click-through
-    await until(s => !(s.addons || []).some(a => a.name === 'pull-requests'), 'pull-requests off again');
+    await addonOff('pull-requests');   // off again for the next click-through
   },
 };

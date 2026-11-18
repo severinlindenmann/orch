@@ -2,12 +2,13 @@
 
 One runner per workspace (lock folder `runner.lock`). It first checks which GitHub login gh uses: with the
 setting `[pull_requests] login` it runs only as that login, and it only takes entries added by its own login.
-While pull requests wait, it takes up to MAX_GROUP of one repository and base branch, in line order:
+While pull requests wait, it takes up to `[pull_requests] max_group` (default 5) of one repository and base
+branch, in line order:
 
 - several: one group commit (group.py) on top of the base branch on a branch `orch-queue/<base>-<time>`, one
   pull request for it, the core waiter merges that on green with a merge commit. GitHub then marks every
   included pull request merged.
-- one alone (owner, ORCH-432 q2): its own checks green and the base branch changed none of its files since it
+- one alone (owner, ORCH-432 q2; setting `merge_alone`, on by default): its own checks green and the base branch changed none of its files since it
   took the base in: its checked head gets the mark and the core waiter merges it, with no second run. The base
   changed its files: checked once on top of the base as a group of one. The queue never takes the base into a
   helper's branch.
@@ -20,8 +21,11 @@ While pull requests wait, it takes up to MAX_GROUP of one repository and base br
   its pull requests go back to the front without a try used, to run again from the base branch. Nothing that runs
   alone, is proved for a person or comes from a fork goes on top of another group, and nothing does while the
   base branch is red.
-- a red group is closed and split in halves; each half runs again (a half of one in a group of one). So a bad
-  pull request costs about log2(n) extra runs and the good ones still merge. A red group of one leaves the queue.
+- a red group is closed and split by what failed (blame.py, ORCH-558): the members whose files share the most
+  words with the failed checks' names are the suspects; the others run again together first (they merge on
+  green), the suspects after. When that tells nobody apart it is split in halves. So one bad pull request in a
+  group of 10 that touches the failing area costs two more runs, not about four. A red group of one leaves the
+  queue.
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
   proof before it counts. One a person merges (a Merge card, or a CI workflow change GitHub holds for the
   code owner) is only checked: on green its head gets the mark and the person merges it with the Merge card.
@@ -56,10 +60,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import settings, store
+from . import blame, settings, store
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
-MAX_GROUP = 5
+MAX_GROUP = settings.DEFAULT_MAX_GROUP  # the setting max_group wins (settings.max_group)
 MAX_TRIES = 3
 LEAD_WAIT_SECS = 3 * 3600  # how long a green group built on top of another waits for that one to end
 PAUSE_SECS = 120  # before a group that hit trouble is tried again
@@ -124,6 +128,7 @@ class Runner:
         self.wake = wake or _wake
         self.ask = ask or _ask_merge
         self.me: str | None = None
+        self.red_checks: frozenset[str] = frozenset()  # failed check names of the last red group
         self._red: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
         self._ahead: Lead | None = None  # set while a group is built and checked on top of a running one
         self._live: set[str] = set()  # group branches whose checks run now: tidy leaves them alone
@@ -261,7 +266,7 @@ class Runner:
         self.tidy()
 
     def next_batch(self, follow: Lead | None = None) -> list[dict] | None:
-        """Up to MAX_GROUP waiting pull requests of the first one's repository and base, marked running.
+        """Up to max_group waiting pull requests of the first one's repository and base, marked running.
         None when nothing waits; [] when this round only cleared entries or everything is paused.
         follow: the batch goes on top of that running group: only its repository and base, and none that runs
         alone, is proved for a person or comes from a fork (those wait for a round of their own)."""
@@ -286,7 +291,8 @@ class Runner:
         red = self.red_base(repo, guess)
         if red and follow is not None:  # a red base branch: one at a time, nothing on top of another group
             return []
-        most = 1 if red else MAX_GROUP  # the base branch itself is red: no groups, one at a time
+        size = settings.max_group(self.root)
+        most = 1 if red else size  # the base branch itself is red: no groups, one at a time
         if red:  # its fixes first
             rows = sorted(rows, key=lambda r: not self.is_fix(r))
         for r in rows:
@@ -318,7 +324,7 @@ class Runner:
             if follow is not None and (lone or v.get("isCrossRepository") or b != follow.base):
                 continue  # never on top of another group: it waits for a round of its own
             if not base and b != guess:  # moved to another base branch since it was added: that one counts
-                most = 1 if self.red_base(repo, b) else MAX_GROUP
+                most = 1 if self.red_base(repo, b) else size
             base = base or b
             r.update(
                 base=b, head=v["headRefOid"], fork=bool(v.get("isCrossRepository")),
@@ -356,6 +362,17 @@ class Runner:
         if not self.take("other", f"{repo} mark {sha[:12]}"):
             return False
         return bool(set_status(repo, sha, text, target))
+
+    def unmark(self, repo: str, sha: str, text: str) -> None:
+        """Take the queue's mark back from a head it marked but did not merge, so nobody merges it past the queue
+        on that mark. No room or no answer: written in the log (the head stays marked until its next commit)."""
+        set_status = getattr(self.gh, "set_status", None)
+        if set_status is None:
+            return
+        if not (
+            self.take("other", f"{repo} unmark {sha[:12]}") and set_status(repo, sha, text, state="failure")
+        ):
+            self.log(f"The queue's mark on {sha[:12]} in {repo} could not be taken back; it was not merged.")
 
     # -- looking at a member again -----------------------------------------------------------------------
     def look(self, e: dict, cards: dict, bases: list[str], base: str | None = None):
@@ -455,11 +472,10 @@ class Runner:
         if len(batch) == 1:
             self.alone(batch[0])
             return
+        self.red_checks = frozenset()
         red = self.group(batch)
         if len(red) > 1:
-            half = (len(red) + 1) // 2
-            self.log(f"The group was red: splitting it into {half} and {len(red) - half}.")
-            for part in (red[:half], red[half:]):
+            for part in self.split(red, self.red_checks):
                 left = [e for e in part if _state(self.root, e["url"]) == RUNNING]
                 if len(left) == 1:  # group() looks at members again; one alone is looked at here
                     left = self.check_members(left, left[0]["base"])
@@ -467,6 +483,27 @@ class Runner:
                     self.process(left)
         elif red:
             self.alone(red[0])
+
+    def split(self, red: list[dict], failed: frozenset[str]) -> list[list[dict]]:
+        """The parts a red group runs again in, in order: the members that do not touch what failed first, then
+        those that do (blame.py); halves when that tells nobody apart."""
+        members = []
+        for e in red:
+            v = self.gh.pr(e["url"]) or {}
+            files = v.get("files") if isinstance(v.get("files"), list) else []
+            members.append((e["url"], [str(f.get("path") or "") for f in files if isinstance(f, dict)]))
+        bad = set(blame.suspects(failed, members))
+        if bad:
+            rest = [e for e in red if e["url"] not in bad]
+            sus = [e for e in red if e["url"] in bad]
+            self.log(
+                f"The group was red in {_names(failed)}: " + ", ".join(f"#{e['number']}" for e in sus)
+                + f" touch that; the other {len(rest)} run again first."
+            )  # fmt: skip
+            return [rest, sus]
+        half = (len(red) + 1) // 2
+        self.log(f"The group was red: splitting it into {half} and {len(red) - half}.")
+        return [red[:half], red[half:]]
 
     # -- one pull request --------------------------------------------------------------------------------
     def alone(self, e: dict, why: str = "") -> None:
@@ -477,10 +514,18 @@ class Runner:
         helper's branch never takes the base in. A fork is never put on a branch of the repository: merged
         directly when it may be, else it leaves the queue and a person merges it."""
         base = e.get("base") or ""
-        if e.get("lone") or e.get("proof"):
-            self.on_base(e, why)
+        if e.get("lone") or e.get("proof") or not settings.merge_alone(self.root):
+            self.on_base(e, why)  # merge_alone off: its own checks are only the light set, a group run counts
             return
-        o = self.waiter(e["url"], lambda head: self.before_direct(e, base, head))
+        marked: list[str] = []
+        o = None
+        try:
+            o = self.waiter(e["url"], lambda head: self.before_direct(e, base, head, marked))
+        finally:  # marked, then not merged (also when the waiter failed): every mark it set is taken back
+            if marked and not (o is not None and o.ok and o.status == "merged"):
+                why_not = (o.status if o is not None else "") or "no verdict"
+                for sha in dict.fromkeys(marked):
+                    self.unmark(e["repo"], sha, f"Not merged by the queue: {why_not}")
         line = o.line + (f" ({why})" if why else "")
         unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
         if o.ok and o.status == "merged":
@@ -501,15 +546,17 @@ class Runner:
         else:
             self.finish(e, OUT, line, o.status)
 
-    def before_direct(self, e: dict, base: str, head: str) -> str | None:
+    def before_direct(self, e: dict, base: str, head: str, marked: list[str]) -> str | None:
         """Right before a direct merge: the pull request is still mergeable, then its checked head gets the
-        queue's mark (the develop rule lets only marked commits in). A reason stops the merge."""
+        queue's mark (the develop rule lets only marked commits in) and is noted in marked, so alone() takes the
+        mark back when the merge does not happen. A reason stops the merge."""
         why = self.why_not([dict(e, head=head)], base)
         if why:
             return why
         text = f"Its own checks were green and {base} changed none of its files"
         if not self.mark(e["repo"], head, text):
             return "the queue's mark could not be set on it"
+        marked.append(head)
         return None
 
     def on_base(self, e: dict, why: str = "") -> None:
@@ -662,7 +709,9 @@ class Runner:
             return []
         unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
         if o.status == "checks failed" and not unknown:
-            if self.base_to_blame(repo, base, url, inside):
+            look = getattr(self.gh, "failed_checks", None)  # the names, for the split (blame.py)
+            self.red_checks = frozenset(look(url)) if look else frozenset()
+            if self.base_to_blame(repo, base, url, inside, self.red_checks if look else None):
                 return []  # red in what the base branch is red in: not split, nobody blamed
             for e in inside:
                 why = f"its group {url} was red; checked in a smaller group"

@@ -18,7 +18,7 @@ world = qs.world  # the same stand-in for GitHub, with real git
 
 @pytest.fixture(autouse=True)
 def groups_of_two(monkeypatch):
-    monkeypatch.setattr(runner, "MAX_GROUP", 2)
+    monkeypatch.setattr(runner.settings, "max_group", lambda root: 2)
 
 
 def overlapping(w, seen: dict):

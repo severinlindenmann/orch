@@ -1051,6 +1051,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     from orch.config import (
         agents_may_finish,
+        auto_reviewer_on,
         copies_max,
         copies_mode,
         copy_setup,
@@ -1076,6 +1077,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     return {
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
+        "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
@@ -1477,6 +1479,10 @@ def load_logins(root: Path) -> dict | None:
         # ORCH-48: what the person does to renew when orch cannot start the sign-in (plain text, one line)
         if isinstance(r.get("how"), str) and re.fullmatch(r"[^\x00-\x1f\x7f<>]{1,160}", r["how"]):
             row["how"] = r["how"]
+        # ORCH-218: the terminal command that signs in again, shown with a Copy button (never run)
+        sign_in = r.get("sign_in")
+        if isinstance(sign_in, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._:=/@,'\"+-]{0,119}", sign_in):
+            row["sign_in"] = sign_in
         row["stops"] = [
             {"id": t.get("id"), "key": t.get("key"), "title": t.get("title")}
             for t in (r.get("stops") or [])

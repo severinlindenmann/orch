@@ -38,7 +38,7 @@ except ImportError:  # standalone use without orch: nothing runs
 MAX_TEXT = 2000
 LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
 MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
-# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
+# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_AUDIO/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
 ATTACH_EXT = frozenset(
     {
         "txt",
@@ -56,6 +56,11 @@ ATTACH_EXT = frozenset(
         "jpeg",
         "gif",
         "webp",
+        "webm",
+        "ogg",
+        "m4a",
+        "mp3",
+        "wav",
     }
 )
 ATTACH_MAX = 25 * 1024 * 1024
@@ -151,6 +156,18 @@ FREE_OPS = frozenset(
 
 def needs_session(op) -> bool:
     return isinstance(op, str) and op not in FREE_OPS
+
+
+def turns_review_off(op, args) -> bool:
+    """ORCH-424: a ticket.new or ticket.edit that turns Human review needed off (also for a ticket inside an epic).
+    It lets work be accepted without the person, so it needs the page session even though the op is free."""
+    if op not in ("ticket.new", "ticket.edit") or not isinstance(args, dict):
+        return False
+    steps = args.get("steps") if isinstance(args.get("steps"), list) else []
+    # anything but true counts as off here, so the check never reads a value differently from the command
+    return any(
+        isinstance(x, dict) and "human_review" in x and x["human_review"] is not True for x in [args, *steps]
+    )
 
 
 def _tid(v) -> str:
@@ -286,9 +303,15 @@ def _ticket_new(a):
             "plan_first",
             "epic",
             "steps",
+            "human_review",
         ),
     )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
+    # ORCH-424: the Human review needed box; sent only when the person changed it from the workspace default
+    if "human_review" in a:
+        if not isinstance(a["human_review"], bool):
+            raise BadRequest("human_review is true or false.")
+        flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
     if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
         flags.append("--title-auto")
     if _flag(a.get("plan_first")):
@@ -348,7 +371,9 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
             raise BadRequest("That file could not be read.")
         ext = f["name"].rsplit(".", 1)[-1].lower() if "." in f["name"] else ""
         if ext not in ATTACH_EXT:
-            raise BadRequest(f"{f['name'][:60]}: only text files and pictures can be added.")
+            raise BadRequest(
+                f"{f['name'][:60]}: only text files, pictures and voice recordings can be added."
+            )
         if len(raw) > ATTACH_MAX:
             raise BadRequest(f"{f['name'][:60]} is over 25 MB. Choose a smaller file.")
         out.append((f["name"], raw))
@@ -428,8 +453,26 @@ def _ticket_changes(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "parent", "release", "if_revision"))
+    _only(
+        a,
+        (
+            "ticket",
+            "title",
+            "owner",
+            "due",
+            "note",
+            "done_when",
+            "parent",
+            "release",
+            "human_review",
+            "if_revision",
+        ),
+    )
     flags = []
+    if "human_review" in a:  # ORCH-424: the Human review needed switch on the ticket page
+        if not isinstance(a["human_review"], bool):
+            raise BadRequest("human_review is true or false.")
+        flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
     if "parent" in a:  # ORCH-156: "Part of": put the ticket under an epic, or None to take it out
         flags.append(f"--parent={_tid(a['parent']) if a['parent'] else ''}")
     if "release" in a:  # ORCH-37: the Release switch on the ticket page (true marks it, false takes it off)
@@ -1465,9 +1508,13 @@ def epic_new(root: Path, orch_bin: str | None, args: dict, session: bool) -> tup
     if not isinstance(epic_id, str) or not TID.fullmatch(epic_id):
         return 422, "The epic was made, but its address could not be read. Reload before trying again.", None
     made, failed = [], []
+    # ORCH-424: the tickets inside follow the epic's Human review needed choice unless one says its own
+    same = {"human_review": rest["human_review"]} if "human_review" in rest else {}
     for index, step in enumerate(steps):
         try:
-            st, msg, child = run_op(root, orch_bin, "ticket.new", {**step, "parent": epic_id}, session)
+            st, msg, child = run_op(
+                root, orch_bin, "ticket.new", {**same, **step, "parent": epic_id}, session
+            )
         except (BadRequest, Unavailable) as e:
             st, msg, child = 422, str(e), None
         if st == 200:
@@ -1502,6 +1549,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
 
         update.dismiss_auto_note()
         return 200, "", None
+    if orch_bin == SELF and turns_review_off(op, args) and not session:  # ORCH-424: only the signed-in person
+        raise NeedsPerson(SIGNIN)
     if op == "ticket.new" and isinstance(args, dict) and "steps" in args:
         return epic_new(root, orch_bin, args, session)
     argv = build_argv(op, args, root)
@@ -1618,6 +1667,48 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
     conflict = isinstance(out, dict) and "revision" in out and "changed_by" in out
     return (409 if conflict else 422), str(msg)[:500], out if conflict else None
+
+
+# Add-on verbs that only read (ORCH-413). The page reads them with GET /api/addon-read under the same rights as
+# /api/state (no page secret), so Settings opened without a signed-in session sends no click that is refused. The same
+# command as the click (`orch <addon> act <verb> -- <addon>`); anything not listed here stays a click (POST /api/act).
+READ_ACTS = frozenset({("sync", "status")})
+
+
+def addon_read(root: Path, orch_bin: str | None, addon, verb) -> tuple[int, str, dict | None]:
+    """One listed read-only add-on verb. Returns (http status, plain text, the add-on's answer or None)."""
+    if not (isinstance(addon, str) and isinstance(verb, str) and (addon, verb) in READ_ACTS):
+        raise BadRequest("That cannot be read here.")
+    if not orch_bin:
+        raise Unavailable("The orch command is not available here.")
+    if not _addon_is_on(root, orch_bin, addon):
+        raise BadRequest("That add-on is not on in this workspace.")
+    args = {"addon": addon, "verb": verb, "target": addon}
+    try:
+        r = _run(
+            [*argv0(orch_bin), *build_argv("addon.act", args, root)],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=_op_timeout("addon.act", args),
+            stdin=subprocess.DEVNULL,
+            env=human_env(root, orch_bin),
+        )
+    except subprocess.TimeoutExpired:
+        return 504, "That took too long. Please try again.", None
+    except OSError:
+        raise Unavailable("The orch command could not be started.") from None
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        out = None
+    if r.returncode == 0 and isinstance(out, dict):
+        return 200, "", out
+    msg = out.get("error") if isinstance(out, dict) else None
+    if not msg:
+        msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
+    return 422, str(msg)[:500], None
 
 
 # Renew from the warning (ORCH-46): the tool's own sign-in, and a key put in through the key store. A pasted code

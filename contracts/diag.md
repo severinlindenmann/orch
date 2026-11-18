@@ -90,6 +90,7 @@ helpers per pass on the new tickets.
 |---|---|
 | `cli.command` | span of one command: `command`, `sub` (a plain second word) |
 | `dashboard.request` | `method`, `path` (no query string) |
+| `dashboard.answer` | `method`, `path`, `status`, `ms`: the answer to every `/api/act` (also a refusal before any op runs) and to every other request answered 400 or higher (`lvl` `info` then, else `debug`) |
 | `ticket.op_applied` | `actor`, `op`, `status_from`, `status_to`, `revision_from`, `revision_to`, `written` |
 | `ticket.op_refused` | `actor`, `op`, `guard` (`closed_ticket`, `conflict`, or the refusal's class), `status`, `expected_revision`, `actual_revision` |
 | `relay.send_failed` | `what`, `reason` (the exception class), `why` (its message, cut at 300, key values hidden) |

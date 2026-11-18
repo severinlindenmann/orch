@@ -14,6 +14,7 @@ from orch import (
     addons,
     cli_addons,
     cli_chat,
+    cli_checks,
     cli_clients,
     cli_config,
     cli_conn,
@@ -54,6 +55,8 @@ from orch import (
 )
 from orch import init as init_mod
 from orch.errors import Refused
+
+MAX_CHECK_FILES = 10  # files one `orch check done` may attach
 
 _HINT = "Unset ORCH_ROOT, or point it at a folder with .orch in it."
 _noted = False
@@ -196,6 +199,17 @@ def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> lis
     return out
 
 
+def _person_only_review_off(args) -> None:
+    """ORCH-424: only a person turns Human review needed off (it lets work be accepted without them). An agent
+    in the environment counts as an agent whatever --by says (same rule as the Reviewer switches)."""
+    who = tickets.current_actor(getattr(args, "by", None))
+    if tickets.agent_tool() or not who.startswith("human:"):
+        raise Refused(
+            "Only a person turns Human review needed off: on the ticket page, or orch ticket edit "
+            "<ticket> --human-review no in their own terminal."
+        )
+
+
 def _lookup(root: Path | None, tid: str) -> dict | None:
     if root is None:
         return None
@@ -240,6 +254,7 @@ def _show(t: dict, root: Path) -> str:
     if modelpick.label(t):
         reason = modelpick.why(t)
         extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
+    extra.append("Human review needed: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
@@ -360,6 +375,7 @@ ADVANCED_TOP = {
     "manager",
     "session",
     "triage",
+    "checks",  # ORCH-529: --help-all only
 }
 ADVANCED_SUB = {"relay": {"allow"}}
 
@@ -479,6 +495,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
+    cli_checks.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -505,6 +522,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--release",
         action="store_true",
         help="a release: the epics and tickets that ship together go under it (--parent)",
+    )
+    x.add_argument(
+        "--human-review",
+        choices=("yes", "no"),
+        help="Human review needed (default yes; no while the Auto Reviewer is on); only a person says no",
     )
     x.add_argument(
         "--ext",
@@ -545,6 +567,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x.add_argument(
         "--release", choices=("yes", "no"), help="yes marks it as a release, no takes the mark off"
+    )
+    x.add_argument(
+        "--human-review",
+        choices=("yes", "no"),
+        help="Human review needed: yes (nothing is accepted without a person) or no (only a person says no)",
     )
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x = t.add_parser("order", parents=[common], help="the order of the tickets in one board lane")
@@ -668,8 +695,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("check")
     x.add_argument("--evidence", action="append", default=[], metavar="JSON", help=argparse.SUPPRESS)
-    for k in ("command", "note", "pr", "commit", "file", "url"):
+    for k in ("command", "note", "pr", "commit", "url"):
         x.add_argument(f"--{k}", metavar="TEXT", help=f"evidence: a {k}")
+    # several pictures (1280, 1920, 390) are one step's evidence: each --file is kept, not only the last
+    x.add_argument(
+        "--file", action="append", default=[], metavar="FILE", help="evidence: a file (up to 10 times)"
+    )
     x.add_argument("--title", help="short name of the evidence")
     x.add_argument("--role", help="result, check or support")
     x.add_argument("--summary", help="one line: what came out of this step (shown on the task)")
@@ -750,6 +781,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     g.add_argument("--after", metavar="FILE", help="the file as it would become")
     g.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
+    g.add_argument(
+        "--ci-shots",
+        metavar="PR_URL",
+        help="show the pictures CI took of the dashboard pages this pull request changes "
+        "(1280, 1920 and 390 px); no screenshots of your own",
+    )
     g.add_argument("--open", metavar="URL", help="an http(s) address to look at")
     g.add_argument(
         "--merge",
@@ -1037,6 +1074,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
         or cli_health.dispatch(args, root)
+        or cli_checks.dispatch(args, root)
     ):
         pass
     elif (
@@ -1063,6 +1101,8 @@ def run(args: argparse.Namespace) -> None:
     ):
         pass
     elif cmd == "ticket" and sub == "new":
+        if args.human_review == "no":
+            _person_only_review_off(args)
         t = tickets.create(
             root,
             args.title,
@@ -1074,6 +1114,7 @@ def run(args: argparse.Namespace) -> None:
             plan_first=args.plan_first,
             epic=args.epic,
             release=args.release,
+            human_review=None if args.human_review is None else args.human_review == "yes",
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -1129,16 +1170,29 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
-        if args.title is None and not fields and args.parent is None and args.release is None:
+        if (
+            args.title is None
+            and not fields
+            and args.parent is None
+            and args.release is None
+            and args.human_review is None
+        ):
             raise Refused(
-                "Say what to change: --title, --owner, --due, --note, --done-when, --parent or --release."
+                "Say what to change: --title, --owner, --due, --note, --done-when, --parent, --release "
+                "or --human-review."
             )
+        if args.human_review == "no":
+            _person_only_review_off(args)
         if args.parent is not None:  # first, so a refused parent changes nothing else
             t = tickets.set_parent(root, args.id, args.parent, by(), args.if_revision)
             if args.if_revision is not None and t.get("revision") != args.if_revision:
                 args.if_revision = t.get("revision")  # our own write: the other fields follow it
         if args.release is not None:
             t = tickets.set_release(root, args.id, args.release == "yes", by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other changes follow it
+        if args.human_review is not None:
+            t = tickets.set_human_review(root, args.id, args.human_review == "yes", by(), args.if_revision)
             if args.if_revision is not None and t.get("revision") != args.if_revision:
                 args.if_revision = t.get("revision")  # our own write: the other changes follow it
         if args.title is not None or fields:
@@ -1312,12 +1366,15 @@ def run(args: argparse.Namespace) -> None:
         if args.summary and shorthand and not args.file:
             shorthand[0] = json.dumps({**json.loads(shorthand[0]), "summary": args.summary})
         tickets.refuse_secret_in_evidence(root, args.evidence + shorthand)  # before a file is copied (R5.2)
+        if len(args.file) > MAX_CHECK_FILES:
+            raise Refused(f"At most {MAX_CHECK_FILES} files per step.")
         if args.file:
             tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id
-            attached = tickets.attach_file(
-                root, args.id, args.file, args.title, args.role, args.summary, by=by()
-            )
-            shorthand.append(json.dumps(attached))
+            for i, f in enumerate(args.file):  # the summary goes on the first file only
+                attached = tickets.attach_file(
+                    root, args.id, f, args.title, args.role, args.summary if i == 0 else None, by=by()
+                )
+                shorthand.append(json.dumps(attached))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by(), args.proves)
         ev = c["evidence"][-1]
         copied = args.file and tickets.proof_present(root, ev)
@@ -1381,6 +1438,10 @@ def run(args: argparse.Namespace) -> None:
             )
         if args.merge and not card:
             raise Refused("--merge goes with a link card: --link TITLE --open <pull request address>.")
+        if args.ci_shots and not card:
+            raise Refused(
+                "--ci-shots goes with a card, e.g. --draft TITLE --ci-shots <pull request address>."
+            )
         if args.release and not args.merge:
             raise Refused("--release goes with --merge.")
         if card:  # the card goes where every question goes; a phone shows it from the stack

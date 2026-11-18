@@ -30,6 +30,9 @@ add-on is `workspace`); `harness` only when orch read it from the agent tool's o
 did not ship is `workspace`. Since `workspace` and `harness` names stay hidden at the admin (usage-counts.md), a spoofed marker
 or name never sends an own name out. Reference `inv_classify`, vectors `classify`.
 
+The agent tool's own skill folders come from its adapter (`skill_dirs`, agents/connections.json), next to its
+`mcp_settings`; a workspace skill folder that links out of the workspace is not listed.
+
 Both entries of a name are listed; the loser has `shadowed: true`. Insights shows both with the active one marked.
 
 ## Connections

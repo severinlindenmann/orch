@@ -109,9 +109,10 @@ def test_found_group_shows_only_manage_with_orch_and_nothing_when_empty(ws):
     (group,) = view["blocks"][0]["groups"]
     assert group["title"] == "Found on this computer" and len(group["items"]) == 2
     item, real = group["items"]
-    # a real label with capitals gets a plain page id; Manage with orch still sends the real found id
+    # a real label with capitals gets a plain page id; Manage with orch sends it (the page draws a button only
+    # when its target is the item's own id) and adopt finds the real job from it
     assert real["id"].startswith("found-")
-    assert real["panel"]["buttons"][0]["action"]["args"]["target"] == "launchd:ch.Example.Forwarder"
+    assert real["panel"]["buttons"][0]["action"]["args"]["target"] == real["id"]
     assert item["state"] == {"label": "Running, not managed", "tone": "neutral"}
     assert item["panel"]["buttons"] == [
         {
@@ -155,3 +156,106 @@ def test_a_platform_note_shows_as_the_notice(cli, fake):
     fake.unavailable = "no session"
     view = _view(cli)
     assert view["notice_tone"] == "warn" and "no session" in view["notice"]
+
+
+def test_an_adopted_service_shows_its_own_log_and_remove_says_it_is_only_forgotten(cli, ws, monkeypatch):
+    # review ORCH-378: the page read logs/<id>.log (empty or an older service's) and promised "it stops now"
+    import orch_services.cli as cli_mod
+    from orch_services import store
+    from orch_services.view import build
+
+    store.save(
+        ws,
+        {
+            "schema": store.SCHEMA,
+            "id": "notes",
+            "name": "Notes sync",
+            "command": ["/usr/bin/python3", "sync.py"],
+            "cwd": ".",
+            "auto": True,
+            "created_at": store.now(),
+            "made_by": {"found": True},
+            "adopted": {"kind": "systemd", "entry": "notes-sync.service", "path": None},
+        },
+    )
+    old = store.log_path(ws, "notes")
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("left over from an older service\n", encoding="utf-8")
+    seen = []
+    monkeypatch.setattr(cli_mod, "_log_lines", lambda root, rec, n: seen.append(rec["id"]) or ["job started"])
+    row = {"id": "notes", "name": "Notes sync", "state": "running", "since": None, "auto": True}
+    row["made_by"] = {"found": True}
+    item = build(ws, ([row], 0, None))["blocks"][0]["groups"][0]["items"][0]
+    assert item["panel"]["log"]["lines"] == ["job started"] and seen == ["notes"]
+    assert item["panel"]["danger"]["confirm"]["lines"] == [
+        "orch stops managing it and it leaves this list.",
+        "The job itself is left as it is on this computer.",
+    ]
+
+
+def test_the_open_question_is_pinned_with_restart_stop_and_a_link_to_its_ticket(ws):
+    # ORCH-371 bug 1: list had the question, the page never showed it
+    from orch_services.view import build
+
+    rows = [
+        {
+            "id": "b",
+            "name": "Budget guard",
+            "state": "failing",
+            "since": None,
+            "auto": False,
+            "health": {"ok": False, "text": "Not alive"},
+            "question": {
+                "ticket": "t_abc1234",
+                "id": "q1",
+                "title": "Budget guard keeps stopping",
+                "text": "It failed 3 times in the last 10 minutes. Restart, Stop or Look into it?",
+            },
+        },
+        {"id": "a", "name": "Alpha", "state": "running", "since": None, "auto": False, "question": None},
+    ]
+    view = build(ws, (rows, 0, None))
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    failing, fine = view["blocks"][0]["groups"][0]["items"]
+    assert failing["question"] == {
+        "title": "Budget guard keeps stopping",
+        "text": "It failed 3 times in the last 10 minutes. Restart, Stop or Look into it?",
+        "buttons": [
+            {"label": "Restart", "action": {"op": "addon.act", "args": {"verb": "restart", "target": "b"}}},
+            {"label": "Stop", "action": {"op": "addon.act", "args": {"verb": "stop", "target": "b"}}},
+            {"label": "Look into it", "link": "t_abc1234"},
+        ],
+    }
+    assert "question" not in fine
+
+
+def test_a_stopped_found_job_says_stopped_and_the_found_group_says_none_are_managed(ws):
+    # ORCH-371 bugs 4 and 7
+    from orch_services.view import build
+
+    found = [{"id": "launchd:com.example.walkfound", "name": "walkfound", "running": False, "since": None}]
+    view = build(ws, ([], 0, None), found=found)
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    (group,) = view["blocks"][0]["groups"]
+    assert group["meta"] == "orch manages none of these yet"
+    (item,) = group["items"]
+    assert item["state"] == {"label": "Stopped, not managed", "tone": "neutral"}
+    assert _facts(item)["Found"]["value"] == "Stopped, not made by orch"
+
+
+def test_a_stopped_service_has_a_quiet_health_line(ws):
+    # ORCH-371 bug 6: a red dot next to "Stopped, so not checked" read like an alarm
+    from orch_services.view import build
+
+    rows = [
+        {
+            "id": "w",
+            "name": "Web",
+            "state": "stopped",
+            "since": None,
+            "auto": False,
+            "health": {"ok": False, "text": "Stopped, so not checked"},
+        }
+    ]
+    (item,) = build(ws, (rows, 0, None))["blocks"][0]["groups"][0]["items"]
+    assert _facts(item)["Health check"]["tone"] == "neutral"

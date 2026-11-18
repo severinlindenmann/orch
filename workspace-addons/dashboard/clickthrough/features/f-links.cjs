@@ -7,7 +7,7 @@ const path = require('node:path');
 module.exports = {
   name: 'Shared links: share a file, extend it, stop sharing',
   covers: ['link.share', 'link.extend', 'link.stop'],
-  async run({ page, open, reload, act, must, text, orch, standins, home, until }) {
+  async run({ page, open, reload, act, must, text, orch, standins, home, until, addonOff }) {
     const p = standins.publish;
     orch('addon', 'add', 'publish', '--yes');
     orch('publish', 'connect', p.url, '--workspace', p.workspace, '--token', p.token);
@@ -36,7 +36,6 @@ module.exports = {
     await reload();
     await page.getByRole('button', { name: 'Share a file' }).waitFor({ timeout: 30000 });
     must(!(await text()).includes('lunch-menu.txt'), 'the file is still shared after Stop sharing and a reload');
-    orch('addon', 'remove', 'publish');   // off again, as the next click-through expects
-    await until(s => !(s.addons || []).some(a => a.name === 'publish'), 'publish off again');
+    await addonOff('publish');   // off again, as the next click-through expects
   },
 };
