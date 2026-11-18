@@ -234,3 +234,38 @@ def test_team_finished_open_and_stuck(proj, env):
     assert team["anna"] == {"owner": "anna", "finished": 0, "open": 1, "seconds": 0, "cost": 4.0}
     assert team["ben"]["finished"] == 1 and team["ben"]["open"] == 0
     assert team[""]["open"] == 1
+
+
+def _finished(proj, title, status="done"):
+    t = make(proj, title, [SID])
+    raw = tickets.load(proj, t["id"])
+    raw["status"] = status
+    tickets._write(proj, raw)
+    return raw["id"]
+
+
+def test_estimate_range_from_finished_tickets(proj, env, monkeypatch):
+    """ORCH-297: the range before Start is the middle half of the finished tickets' helper time and cost."""
+    secs = {}
+    for minutes, cost in ((10, 1.0), (20, 2.0), (30, 3.0), (40, 4.0), (90, 9.0)):
+        secs[_finished(proj, f"T{minutes}")] = {"use": {"x": {}}, "seconds": minutes * 60, "cost": cost}
+    open_id = _finished(proj, "Still open", status="working")
+    secs[open_id] = {"use": {"x": {}}, "seconds": 9999 * 60, "cost": 99.0}  # not finished: never counted
+    monkeypatch.setattr(usage, "_scan", lambda root, t, environ, cache, live: secs[t["id"]])
+    rng = usage.estimate_range(proj, env)
+    assert rng == {"minutes": [20, 40], "cost": [2.0, 4.0], "n": 5}
+    assert usage.range_words(rng) == "about 20-40 min · $2.00-$4.00"
+
+
+def test_estimate_range_needs_enough_history(proj, env, monkeypatch):
+    for i in range(2):
+        _finished(proj, f"Few {i}")
+    monkeypatch.setattr(
+        usage, "_scan", lambda root, t, environ, cache, live: {"use": {"x": {}}, "seconds": 1800, "cost": 1.0}
+    )
+    assert usage.estimate_range(proj, env) is None
+    assert usage.range_words(None) == "" and usage.range_words({"minutes": "x"}) == ""
+
+
+def test_range_words_in_hours_and_without_cost():
+    assert usage.range_words({"minutes": [45, 120], "cost": None, "n": 4}) == "about 45 min to 2 h"
