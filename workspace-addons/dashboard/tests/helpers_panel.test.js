@@ -87,14 +87,15 @@ test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row but
   assert.match(UI.helperPill('stuck', 'Stuck').className, /pill helper-pill failed/);
 });
 
-test('Home: the Helpers side card replaces Working now, with Nudge on idle rows and Stop on finished idle ones', () => {
+test('Home: the Helpers side card replaces Working now, with Nudge on idle rows and Stop on finished idle ones, none for a ticket in Review', () => {
   const items = [
     {id:'w', key:'ORCH-56', title:'Fix flaky test', status:'active', checklist:[{state:'doing'}]},
     {id:'i', key:'ORCH-32', title:'Windows suite', status:'active'},
-    {id:'f', key:'ORCH-40', title:'Done but open', status:'review'},
+    {id:'f', key:'ORCH-40', title:'Done but open', status:'done'},
+    {id:'r', key:'ORCH-314', title:'Waits for review', status:'review'},
   ];
   const runs = {w:{running:true, helper:{state:'working'}, age_seconds:600}, i:{running:true, helper:{state:'idle', detail:'Nothing running for 8 min'}},
-    f:{running:true, helper:{state:'idle', detail:'Nothing running for 3 min'}}};
+    f:{running:true, helper:{state:'idle', detail:'Nothing running for 3 min'}}, r:{running:true, helper:{state:'idle', detail:'Nothing running for 55 s'}}};
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
   const UI = kit(), seen = [];
   const c = vm.createContext({window:{DashHelpers:helpers, UI:{...UI, helperList:(rows, o) => { seen.push(...rows); return h('section', {'data-key':o.dataKey}, 'Helpers'); }}},
@@ -111,7 +112,7 @@ test('Home: the Helpers side card replaces Working now, with Nudge on idle rows 
     ['ORCH-56', 'Working', 'Step 1 of 1 · 10 min', ''],
     ['ORCH-32', 'Idle', 'Nothing running for 8 min', 'Nudge'],
     ['ORCH-40', 'Idle', 'Finished · Nothing running for 3 min', 'Stop'],
-  ]);
+  ]);  // ORCH-407: ORCH-314 waits for review: it is the person's Check result, no Helpers row and no Stop
 });
 
 test('ticket page: the state pill, the last activity line and a Stop that says when the helper is idle', () => {

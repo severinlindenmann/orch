@@ -286,6 +286,10 @@ Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colo
 **Screenshot a page or file** (never start a browser yourself: it can pop a keychain password window on the person's screen)
 
     orch shot <address or html file> --width 1280,1920,390 --out <folder>    # one picture per width, prints the paths
+    orch shot <address> --page home,tickets --out <folder>                  # several pages of one site in one run
+
+When the project's checks already take pictures of the pages a pull request changes, take none yourself: `orch ask <id> "<question>" --draft "<title>" --ci-shots <pull request address> --then "<what next>"`
+puts them on the card, every page at each width.
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.
