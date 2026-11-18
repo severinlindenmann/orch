@@ -242,6 +242,24 @@ def test_a_draft_says_whether_an_agent_works_on_it_and_its_newest_version(ws, ru
     assert row["working"] is True
 
 
+def test_an_empty_draft_never_waits_for_you(ws, run, srv):
+    """Persona test 18 Nov: an order from before ORCH-231 kept an empty v1, so Factory counted it as waiting and offered
+    Plan the run on "This draft is empty". An empty newest draft is not the agent's draft; a written one is."""
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    put_file(ws, f"drafts/{order}/v1.md", b"  \n")  # the old empty file
+    assert _home_row(srv, order)["agent_draft"] is False
+    assert get(srv, f"/api/order/{order}")[1]["agent_draft"] is False
+    run("draft", order, "--file", "-", data=b"v2 written")
+    assert _home_row(srv, order)["agent_draft"] is True
+
+
+def test_an_empty_draft_is_refused(ws, run):
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    r = run("draft", order, "--file", "-", data=b" \n", code=2)
+    assert r["code"] == "invalid", r
+    assert not (Store(ws).path(f"drafts/{order}/v2.md")).exists()
+
+
 def _set_status(ws, order, status):
     path = ws / "fake-tickets" / f"{order}.json"
     t = json.loads(path.read_text())
