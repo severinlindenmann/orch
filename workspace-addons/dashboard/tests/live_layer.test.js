@@ -52,6 +52,19 @@ test('minimise leaves the bar, closed to the side leaves the edge; both open aga
   assert.equal(L.liveLayerStep(s, {type:'open', key:'t_2'}).mode, 'right', 'opening another session keeps the place');
 });
 
+test('Open ticket steps a bottom or full screen layer down to the bar and leaves a docked one (ORCH-676)', () => {
+  const open = L.liveLayerStep(L.liveLayerFresh(), {type:'open', key:'t_1'});
+  assert.equal(open.mode, 'bottom');
+  assert.equal(L.liveLayerStep(open, {type:'to-ticket'}).mode, 'bar', 'the bottom panel gets out of the way');
+  const full = L.liveLayerStep(open, {type:'place', mode:'full'});
+  assert.equal(L.liveLayerStep(full, {type:'to-ticket'}).mode, 'bar');
+  assert.equal(L.liveLayerStep(L.liveLayerStep(full, {type:'to-ticket'}), {type:'reopen'}).mode, 'bottom', 'it opens again where it was');
+  const right = L.liveLayerStep(open, {type:'place', mode:'right'});
+  assert.equal(L.liveLayerStep(right, {type:'to-ticket'}), right, 'docked beside the page it covers nothing');
+  const bar = L.liveLayerFresh();
+  assert.equal(L.liveLayerStep(bar, {type:'to-ticket'}), bar);
+});
+
 test('closing the last session keeps the bar (or the edge) and forgets the session', () => {
   let s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'close', key:'t_1'}]);
   assert.equal(s.mode, 'bar');

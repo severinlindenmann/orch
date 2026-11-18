@@ -102,6 +102,9 @@ function liveLayerStep(s, act, phone = false) {
       if (n.mode === 'full') n.back = n.back || n.last;
       n.mode = 'bar';
       return n;
+    case 'to-ticket':  // Open ticket: a layer over the page (bottom, full screen) steps down to the bar so the ticket page is usable; docked right sits beside it
+      if (n.mode !== 'full' && n.mode !== 'bottom') return s;
+      return liveLayerStep(n, {type:'min'}, phone);
     case 'close': {  // the others take its room and the selection moves to its neighbour; the last pane closes: the bar stays
       const at = n.panes.indexOf(act.key);
       if (at < 0) return s;
@@ -484,8 +487,8 @@ function liveFocusButton(t, long = false) {
   return b;
 }
 document.addEventListener('click', e => {
-  // Open ticket from full screen: the ticket page would stay hidden behind it, so full screen steps back first
-  if (e.target.closest?.('#live-dock [data-live-ticket]') && liveLayerModel().mode === 'full') liveLayerDo({type:'leave-full'});
+  // Open ticket: the layer would stay over the ticket page (full screen hides it, the bottom panel covers the answer buttons)
+  if (e.target.closest?.('#live-dock [data-live-ticket]')) liveLayerDo({type:'to-ticket'});
   const b = e.target.closest?.('#live-dock [data-live]');
   if (!b) {
     if (liveLayer?.menu && !e.target.closest?.('#live-dock .live-pop')) liveLayerDo({type:'menu', menu:liveLayer.menu});
