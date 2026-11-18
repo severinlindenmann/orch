@@ -134,6 +134,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": 5}, "if_revision": 1}),
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
         ("run.start", {"ticket": "t_abcdef", "agent": "x"}),
+        ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
+        ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
+        ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -298,6 +301,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         (
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
+        ),
+        (  # ORCH-363: Reopen in the History tab continues that earlier session
+            {"op": "session.reopen", "args": {"ticket": "t_abcdef", "session": "s-1"}},
+            ["run", "start", "t_abcdef", "--session", "s-1", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
         (

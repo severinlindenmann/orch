@@ -1103,3 +1103,11 @@ def test_client_gone_reads_only_the_end_of_the_connection():
         assert _client_gone(a) is True  # the page closed
     finally:
         a.close()
+
+
+def test_session_list_route_answers_for_a_ticket_id_only(art):
+    """ORCH-363: Focus's History tab reads the earlier sessions here (orch lists them; the fake lists none)."""
+    code, body, _ = _get(art, "/api/sessions/t_other000x")
+    assert code == 200 and json.loads(body) == {"available": False, "sessions": []}
+    assert _get(art, "/api/sessions/..%2fx")[0] == 404 and _get(art, "/api/sessions/t_x")[0] == 404
+    assert _get(art, "/api/sessions/t_other000x", {"Sec-Fetch-Site": "cross-site"})[0] == 403

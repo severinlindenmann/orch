@@ -49,7 +49,7 @@ def test_every_managed_service_is_in_the_list_with_its_panel(cli, ws):
     assert [b["label"] for b in web["panel"]["buttons"]] == ["Stop", "Restart"]
     assert [b["label"] for b in front["panel"]["buttons"]] == ["Start"]
     f = _facts(web)
-    assert f["State"]["value"].startswith("Running since today ") and f["State"]["tone"] == "good"
+    assert f["State"]["value"] == "Running since today 10:00" and f["State"]["tone"] == "good"
     assert f["Starts by itself"]["value"] == "Yes, after this computer restarts"
     assert f["Starts by itself"]["switch"]["on"] is True
     assert f["Starts by itself"]["switch"]["action"]["args"] == {"verb": "auto-off", "target": "web"}

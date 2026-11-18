@@ -239,3 +239,14 @@ when it closes for being idle. A pane shows what the session does now, its last 
 ("Helper · Opus · open 38 min · stays warm while it works"), updated in place every 3 s. The wall builds on the same
 list and the same words (liveNow, liveMeta). Master: `.live-now`, `.live-lines`, `.live-meta` in widgets.css (style
 guide: Live layer); click-through step 16.
+
+## Earlier sessions, built (ORCH-363, 17 Nov)
+
+orch keeps the last 10 sessions per ticket on this computer (the ones in use included; only the ids are forgotten,
+never the tool's own files). Behind the Preview switch each pane has a History button (in More when the pane is
+narrow) that shows the draft's "Earlier sessions" list instead of the session: time, first message, number of
+messages and the tool, newest first; the one in use says In use, one whose conversation is not on this computer has no
+Reopen. Reopen starts the helper on that conversation (`orch run start <ticket> --session <id>`); while a helper works
+the buttons are off with one line why. The draft's Start choice above the list (continue, fresh start, tool and model)
+is the Start task; this draft lost only its "To build" chip and note. Master: `.live-hist*` in widgets.css (style guide:
+Live layer); click-through step 26.
