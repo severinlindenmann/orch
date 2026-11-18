@@ -104,6 +104,7 @@ def test_hook_is_wired_before_bash_only(monkeypatch):
     """Where the record hook runs (POSIX) the guard is part of it (`orch record hook --with claude`, one
     process per tool event, ORCH-634; the guard itself answers only for Bash); without it (Windows) its own
     group, Bash only."""
+    monkeypatch.setattr(adapters, "_is_windows", lambda: False)
     doc = adapters.reminder_doc("claude")
     if doc is None:
         pytest.skip("hooks not importable here")
@@ -135,6 +136,10 @@ def test_the_record_hook_with_the_tool_answers_the_guard_too(proj, monkeypatch, 
     out = json.loads(hook(bash))
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert hook({**bash, "tool_input": {"command": "ls"}}) == ""
+    # a payload written over several lines is read whole: still refused
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(bash, indent=2) + "\n"))
+    assert cli_record.hook_main(["record", "hook", "--with", "claude"]) == 0
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert hook({**bash, "hook_event_name": "PostToolUse", "tool_response": {"stdout": "x"}}) == ""
     assert (
         hook({"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": "orch-dev"}})

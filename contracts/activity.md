@@ -98,10 +98,11 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   with a value before `hook` is not this form and goes to the parser (which can exit 2). The hook wiring calls
   exactly `orch record hook` (optionally `--strict`, and `--with <tool>`): the root comes from `ORCH_ROOT` or the
   working folder only; other flags are ignored. `--with <tool>` (ORCH-634: one process per tool event instead of up
-  to three) reads the payload once and, after the record write, runs that tool's own hooks of the step in the same
-  process: before a call its guard (`guard_hooks`, the protected-machines refusal), after one its step notice
-  (`step_hooks`, the waiting-input notice); their one JSON line is the only stdout. The record part is unchanged
-  (same run check, same exit rule). The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
+  to three) reads the payload once (all of it when its first line is not a whole JSON object) and runs that tool's
+  own hooks of the step in the same process: before a call its guard (`guard_hooks`, the protected-machines
+  refusal) answers FIRST, before the record write, so a slow write never lets a refused command through; after a
+  call its step notice (`step_hooks`, the waiting-input notice) follows the record write. Their one JSON line is
+  the only stdout. The record part is unchanged (same first line, run check and exit rule). The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
   never ends the process inside a write. *Follow-up:* the per-run hook file token
   (made at claim time) would replace the ancestry rule; it needs the claim code (runs.py).
   The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`, `toolu_…`) put there by the caller

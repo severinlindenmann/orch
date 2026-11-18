@@ -30,6 +30,7 @@ LINK = "reparse" if os.name == "nt" else "link"  # Windows sees a symlink as a r
 CORE = {
     "_identity",  # ORCH-634: fstat of an fd the core opened (the long-running reader's memory)
     "_quick",  # ORCH-634: lstat through _path_info of a run file and its pending folder
+    "_quick_dirs",  # ORCH-634: lstat through _path_info of the folders a run file is reached through
     "_io_setup",
     "_try_lock",
     "_release_lock",

@@ -1442,7 +1442,35 @@ def _quick(workspace, run):
     return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns), pend
 
 
-def read_run_for(workspace, run, ticket, *, seen_by="reader") -> RunRead:
+def _quick_dirs(workspace):
+    """The folders a run file is reached through (.orch, record, runs, and pending when it exists), each
+    looked at plainly (_path_info: a link, a foreign owner or anything but a folder is refused), as (device,
+    inode) pairs; None when one is refused. A reader takes this once per query: a folder swapped for a link or
+    another folder since a run was checked means no answer from memory (the checked open then refuses it as
+    before)."""
+    out = []
+    path = Path(workspace)
+    try:
+        with _io():
+            for part in (".orch", "record", "runs"):
+                path = path / part
+                info = _path_info(path, want_dir=True)
+                out.append((info.st_dev, info.st_ino))
+        pending = Path(workspace) / ".orch" / "record" / "pending"
+        try:
+            with _io():
+                info = _path_info(pending, want_dir=True)
+            out.append((info.st_dev, info.st_ino))
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                return None
+            out.append(None)
+    except (RecordTampered, RecordUnavailable):
+        return None
+    return tuple(out)
+
+
+def read_run_for(workspace, run, ticket, *, seen_by="reader", dirs=None) -> RunRead:
     """read_run, only the lines of `ticket`, for a reader that lives long and asks often (the dashboard, the
     Factory watcher; orch.reads). A run file is read on the same checked path as read_run; when it is the same
     file as last time (`_identity`) its lines are not parsed again, and when a plain look (`_quick`) shows the
@@ -1452,12 +1480,14 @@ def read_run_for(workspace, run, ticket, *, seen_by="reader") -> RunRead:
     _name(run, _RUN)
     key = (str(workspace), run)
     seen = _RUN_SEEN.get(key)
-    quick = _quick(workspace, run)
+    look = _quick(workspace, run)
+    dirs = _quick_dirs(workspace) if dirs is None else dirs
+    quick = (look, dirs) if look is not None and dirs is not None else None
     if (
         seen is not None
         and quick is not None
         and seen[4] == quick
-        and quick[0] == seen[0]
+        and quick[0][0] == seen[0]
         and (ticket not in seen[2] or ticket in seen[3])
     ):
         changed, mine, pending = seen[1], seen[3].get(ticket, []), seen[5]
@@ -1482,9 +1512,9 @@ def read_run_for(workspace, run, ticket, *, seen_by="reader") -> RunRead:
         finally:
             _close(fd)
         after = _pending_count(workspace, run)
-        steady = still and after == pending and quick is not None and quick[0] == ident
+        steady = still and after == pending and quick is not None and quick[0][0] == ident
         pending = max(pending, after)
-        if steady and _quick(workspace, run) == quick:
+        if steady and (_quick(workspace, run), _quick_dirs(workspace)) == quick:
             if len(_RUN_SEEN) >= _RUN_SEEN_MAX and key not in _RUN_SEEN:
                 _RUN_SEEN.clear()
             _RUN_SEEN[key] = (ident, changed, names, kept, quick, pending)
@@ -1502,7 +1532,7 @@ def _for_result(mine, changed, pending) -> RunRead:
     reason = "content" if changed else ("pending" if pending else None)
     return ReadResult(
         "ok",
-        [dict(e) for e in mine],
+        json.loads(json.dumps(mine)),  # a deep copy: nothing a caller changes reaches the memory
         changed=changed,
         pending=pending,
         reason=reason,

@@ -181,3 +181,18 @@ def test_same_orch(tmp_path):
     elsewhere.write_text("#!/usr/bin/python3-somewhere-else\nfrom orch_entry import main\n")
     assert reads.same_orch(str(mine)) is (sys.platform != "win32")
     assert not reads.same_orch(str(other)) and not reads.same_orch(str(elsewhere))
+
+
+def test_the_worker_keeps_what_a_child_of_the_command_prints(tmp_path):
+    """An add-on command runs as a child process of `orch`: what it prints reaches the answer too."""
+    import subprocess
+    import sys
+
+    code = (
+        "import json, os, subprocess, sys\n"
+        "from orch import cli, readworker\n"
+        "cli.main = lambda argv: subprocess.run([sys.executable, '-c', 'print(123)']).returncode\n"
+        "print(json.dumps(readworker._answer({'argv': ['x'], 'root': os.getcwd()})), file=sys.stderr)\n"
+    )
+    r = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, capture_output=True, text=True, timeout=60)
+    assert json.loads(r.stderr.strip().splitlines()[-1]) == {"code": 0, "out": "123\n"}

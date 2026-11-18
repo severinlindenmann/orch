@@ -28,12 +28,14 @@ import os
 import queue
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
 
 RETIRE_AFTER = 2000  # answers per worker
 RETIRE_SECONDS = 1800  # seconds a worker lives at most
+IDLE_SECONDS = 600  # an idle worker (of any environment) is ended after this long without a read
 STARTS = {
     "worker": 0,
     "answers": 0,
@@ -43,7 +45,7 @@ STARTS = {
 
 class _Worker:
     def __init__(self, env: dict):
-        self.started = time.monotonic()
+        self.started = self.used = time.monotonic()
         self.answers = 0
         self.proc = subprocess.Popen(
             [sys.executable, "-I", "-P", "-m", "orch.readworker"],
@@ -66,6 +68,9 @@ class _Worker:
         except Exception:  # noqa: BLE001 - a closed or missing pipe: the worker is gone
             pass
         self.lines.put(None)
+
+    def idle_too_long(self) -> bool:
+        return time.monotonic() - self.used > IDLE_SECONDS
 
     def alive(self) -> bool:
         return (
@@ -132,6 +137,10 @@ def _take(key: tuple, env: dict, timeout: float) -> _Worker | None:
     wait."""
     end = time.monotonic() + timeout
     with _COND:
+        for ws in _IDLE.values():  # workers of any environment that retired or sat idle too long
+            for w in [w for w in ws if w.idle_too_long() or not w.alive()]:
+                ws.remove(w)
+                w.stop()
         while True:
             idle = _IDLE.setdefault(key, [])
             while idle:
@@ -159,6 +168,7 @@ def _give_back(key: tuple, w: _Worker, ok: bool) -> None:
     with _COND:
         _BUSY[key] -= 1
         if ok and w.alive():
+            w.used = time.monotonic()
             _IDLE.setdefault(key, []).append(w)
         else:
             w.stop()
@@ -181,6 +191,8 @@ def run(root: Path, argv: list[str], *, timeout: float = 10.0, environ=None) -> 
         got = None
     finally:
         _give_back(key, w, got is not None)
+    if got is not None and got[0] == 0 and not got[1].strip():
+        got = None  # a read that printed nothing: let the caller run the command itself
     STARTS["answers" if got is not None else "failed"] += 1
     return got
 
@@ -210,6 +222,10 @@ def _answer(request: dict) -> dict:
     out = io.TextIOWrapper(raw, encoding="utf-8", write_through=True)
     err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", write_through=True)
     code = 1
+    # what a child process of the command writes (an add-on command runs as one) lands in this file: fd 1
+    # points at it for this request only, then back at the null device
+    spill = tempfile.TemporaryFile()
+    os.dup2(spill.fileno(), 1)
     try:
         os.chdir(root)
         os.environ["ORCH_ROOT"] = root
@@ -222,9 +238,16 @@ def _answer(request: dict) -> dict:
         code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
     except BaseException:  # noqa: BLE001 - a crash of one command is that command's exit 1, never the worker's end
         code = 1
+    finally:
+        null = os.open(os.devnull, os.O_RDWR)
+        os.dup2(null, 1)
+        os.close(null)
     with contextlib.suppress(Exception):
         out.flush()
-    return {"code": int(code or 0), "out": raw.getvalue().decode("utf-8", "replace")}
+    spill.seek(0)
+    child = spill.read()
+    spill.close()
+    return {"code": int(code or 0), "out": (raw.getvalue() + child).decode("utf-8", "replace")}
 
 
 def serve() -> int:

@@ -925,3 +925,28 @@ def test_the_quick_answer_still_sees_new_pending_writes(ws, monkeypatch):
     (spool / f"{'1' * 20}_{'a' * 32}.json").write_text("{}")
     got = record.read_run_for(ws, RUN_B, TICKET_B)
     assert got.pending == 1 and got.reason == "pending" and opened
+
+
+def test_an_answer_shares_nothing_with_the_memory(ws):
+    from orch import record
+
+    record._RUN_SEEN.clear()
+    first = record.read_run_for(ws, RUN_B, TICKET_B).value
+    first[0]["outcome"]["ok"] = "changed"
+    assert record.read_run_for(ws, RUN_B, TICKET_B).value[0]["outcome"]["ok"] != "changed"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a folder link needs POSIX symlinks here")
+def test_a_folder_swapped_for_a_link_is_never_answered_from_memory(ws, monkeypatch):
+    """The quick answer checks the folders on the way too: `runs` moved aside and replaced by a link to it
+    keeps the run file's identity, but the checked open refuses it as before (no answer from memory)."""
+    from orch import record
+
+    record._RUN_SEEN.clear()
+    assert record.read_run_for(ws, RUN_B, TICKET_B).status == "ok"
+    runs = record_dir(ws) / "runs"
+    aside = record_dir(ws) / "runs-aside"
+    runs.rename(aside)
+    runs.symlink_to(aside, target_is_directory=True)
+    assert record._quick_dirs(ws) is None
+    assert record.read_run_for(ws, RUN_B, TICKET_B).status != "ok"
