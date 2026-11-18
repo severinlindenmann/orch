@@ -193,3 +193,26 @@ def test_the_morning_list_says_who_answered_for_the_person(proj, run, new_ticket
     assert r["who"] == "Manager for Severin" and r["question"] == "q1"
     text = reviewer.accepted_text(rows)
     assert "Answered for you today: 1 question" in text and "q1 = B (Manager for Severin)" in text
+
+
+def test_a_helper_never_answers_for_the_person_on_its_own_ticket(
+    proj, run, new_ticket, monkeypatch, no_agent
+):
+    tid = asked(run, new_ticket)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    monkeypatch.setenv("ORCH_TICKET", tid)
+    code, out, err = run("answer", tid, "q1", "A", "--for", "Severin")
+    assert code == 2 and "its own ticket" in out + err
+    code, out, err = run("review", "answer", tid, "review", "--verdict", "ok", "--for", "Severin", "--json")
+    assert code != 0 and "its own ticket" in out + err
+    assert read(proj, tid)["questions"][0]["answer"] is None
+
+
+def test_roles_cannot_be_borrowed(proj, run, new_ticket, monkeypatch, no_agent):
+    tid = asked(run, new_ticket)
+    for role in ("agent:Reviewer", "agent:SCRIPT", "agent:release-keeper"):
+        code, out, err = run("answer", tid, "q1", "A", "--by", role, "--for", "Severin")
+        assert code == 2 and "orch's own role" in out + err, role
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    code, out, err = run("answer", tid, "q1", "A", "--by", "agent:boss", "--for", "Severin")
+    assert code == 2 and "as itself or as the manager" in out + err

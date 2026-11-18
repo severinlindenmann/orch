@@ -52,3 +52,4 @@
   holds and the page scrolls: the whole title and the whole summary are always readable (no "…", no words box that
   cuts a line); the answers and Later stay pinned at the bottom above the tab bar; files wrap into rows so "+N more"
   is in sight; the summary line is 16 px and clear of the "Make bigger" button.
+- 18 Nov (ORCH-547): an answer someone gave FOR the person names who gave it ("Manager for Severin", "Away mode for Severin", "Script for Severin") and says "Answered for you."; above the Answered list a segmented All / Answered for me (master `.segmented`, shown only when something was answered for the person) and an outlined Undo on each such record: the card waits for the person again. No page CSS.

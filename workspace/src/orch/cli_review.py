@@ -504,6 +504,8 @@ def _answer(args, root: Path) -> None:
         # an answer on a card is the person's; a helper or role answers only FOR them, saying so (--for)
         raise ReviewError("needs_person", review_server.AGENT_REFUSED)
     who, for_ = _guard(tickets.answer_actor, args)  # the person, or a role for them (ORCH-547)
+    if for_:
+        _guard(tickets.refuse_own_ticket_stand_in, root, tid)
     digest = given or current
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
     with tickets.standing_in(for_):

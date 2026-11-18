@@ -197,6 +197,20 @@ def standing_in(person: str | None):
         _STAND_IN.reset(tok)
 
 
+def refuse_own_ticket_stand_in(root: Path, tid: str) -> None:
+    """A helper never answers FOR the person on the ticket it works on itself: that would accept or decide
+    its own work (ORCH-547). Called before every stand-in answer."""
+    mine = os.environ.get("ORCH_TICKET")
+    if not mine or not (agent_tool() or os.environ.get("ORCH_RUN")):
+        return
+    try:
+        own = resolve(root, mine)
+    except Refused:
+        return
+    if own == resolve(root, tid):
+        raise Refused("A helper never answers for the person on its own ticket. Ask them: orch ask.")
+
+
 def answer_terminal() -> bool:
     """Is a person at a terminal for this answer? (stdin is one). A seam: the core tests set it."""
     return term.is_terminal(sys.stdin)
@@ -225,8 +239,14 @@ def answer_actor(args, *, terminal: bool | None = None) -> tuple[str, str | None
         )
     if given and given.startswith("agent:"):
         role = current_actor(given)
-        if role == REVIEWER or role == "agent:release-keeper":
+        if role.casefold() in (
+            REVIEWER,
+            "agent:release-keeper",
+            STAND_IN_SCRIPT,
+        ) or history.is_reserved_label(role):
             raise Refused(f"'{role}' is orch's own role. Use agent:manager or agent:<tool>.")
+        if tool and role.casefold() not in ("agent:manager", f"agent:{tool}".casefold()):
+            raise Refused("A helper answers as itself or as the manager: --by agent:manager, or no --by.")
     else:
         role = None
     if for_name:
@@ -3563,9 +3583,7 @@ def undo_answer(root: Path, tid: str, qid: str, by: str, via: str = "cli") -> di
         again = None
         if (q.get("card") or {}).get("kind") == "check":
             if ticket["status"] != "done":
-                raise Refused(
-                    "The helper already has this note. Send it back or accept it on the ticket."
-                )
+                raise Refused("The helper already has this note. Send it back or accept it on the ticket.")
             ticket["status"] = "review"
             add_history(ticket, by, "Status done -> review", via)
         else:

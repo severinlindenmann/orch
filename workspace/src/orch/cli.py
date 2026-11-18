@@ -1459,6 +1459,8 @@ def run(args: argparse.Namespace) -> None:
                 f"{args.question} changed after it was shown. Look at the question again, then answer."
             )
         who, for_ = tickets.answer_actor(args)  # who really answers, and for whom (ORCH-547)
+        if for_ and getattr(args, "for_", None):
+            tickets.refuse_own_ticket_stand_in(root, args.id)
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         with tickets.standing_in(for_):
