@@ -117,6 +117,7 @@ def test_the_step_hooks_go_only_into_the_runs_own_settings(proj):
     if doc is None:
         pytest.skip("the hook's python cannot import orch here")
     cmds = {g["hooks"][0]["command"] for g in doc["hooks"]["PostToolUse"]}
-    assert len(cmds) == 2  # the record hook and the work-check step hook
+    # the record hook and the work-check step hook; on Windows there is no record hook (adapters.reminder_doc)
+    assert len(cmds) == (1 if adapters._is_windows() else 2)
     a = adapters.load("claude", proj)
     assert "PostToolUse" not in a["reminder_hooks"]  # never in the workspace's own settings file

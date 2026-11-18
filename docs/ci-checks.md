@@ -58,6 +58,5 @@ and `brand/tests/test_ci_known_red.py` fails when this table and `KNOWN_RED` dis
 
 | System | Owner | End date | Ticket | Why |
 |---|---|---|---|---|
-| windows-latest | owner (worked on in ORCH-32) | 2026-11-30 | ORCH-32 | full workspace suite fails and runs past its time limit on Windows |
 
 When a system turns green: empty `KNOWN_RED` (or remove the system) and remove its row here in the same pull request.

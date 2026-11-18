@@ -261,6 +261,20 @@ shows something wrong; report a feature wish when you or the person keep missing
 thing, in plain words, never a secret. It is saved here and, when this workspace is set up to share reports, sent on
 by itself. It is not your ticket's work: do not stop to wait for it, and do not report the person's own project bugs.
 
+**The logins and tools this workspace depends on** (checked in the background; a warning names its own fix)
+
+    orch checks list                                   # each check: works or not, last and next run, approved or not
+    orch checks templates                              # built-in checks a workspace can add
+    orch checks add databricks --profile <name>        # one check per profile, from a template
+    orch checks init                                   # the folder .orch/checks with a documented template
+    orch checks run [<name>]                           # check now
+    orch checks remove <name>
+    orch checks approve <name>                         # the PERSON only, in their own terminal
+
+Your own check (any command or a small script, for example an API call with a key) goes in
+`.orch/checks/<name>.json`, written from `_template.json`. A new or changed check file runs only after the person
+approved it; you cannot approve it. Tell them to look at the file and run the approve command.
+
 **End of every run**
 
     orch ticket summary <id> "<what was done and what is left>"      # at most 200 characters

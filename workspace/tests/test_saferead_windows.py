@@ -32,7 +32,10 @@ def win(monkeypatch, tmp_path):
         if stat.S_ISDIR(st.st_mode):
             return None  # no backup semantics: a folder can not be opened
         link = stat.S_ISLNK(st.st_mode) or path in state["reparse"]
-        fd = os.open(os.devnull if stat.S_ISLNK(st.st_mode) else path, os.O_RDONLY | os.O_NONBLOCK)
+        flags = (
+            os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        )  # binary, as the real one
+        fd = os.open(os.devnull if stat.S_ISLNK(st.st_mode) else path, flags)
         return fd, 0x400 if link else 0x20, st.st_nlink, state["redirect"].get(path, "\\\\?\\" + path)
 
     monkeypatch.setattr(saferead, "_DIRFD", False)
@@ -113,13 +116,17 @@ def test_symlink_hard_link_fifo_and_folder(win):
     mk(r, "real.log")
     os.symlink(r / "real.log", r / "link.log")
     os.link(r / "real.log", r / "hard.log")
-    os.mkfifo(r / "pipe.log")
+    fifo = hasattr(os, "mkfifo")  # Windows has no named pipes in the file system
+    if fifo:
+        os.mkfifo(r / "pipe.log")
     (r / "dir.log").mkdir()
-    for name in ("link.log", "hard.log", "pipe.log", "dir.log"):
+    for name in (
+        ("link.log", "hard.log", "pipe.log", "dir.log") if fifo else ("link.log", "hard.log", "dir.log")
+    ):
         assert rp(r, name) is None
         assert tail(r, name) is None
     assert fs(r, "link.log").startswith("L:") and fs(r, "hard.log").startswith("H:")
-    assert fs(r, "pipe.log").startswith("S:") and fs(r, "dir.log").startswith("S:")
+    assert (not fifo or fs(r, "pipe.log").startswith("S:")) and fs(r, "dir.log").startswith("S:")
 
 
 def test_junction_swapped_in_after_the_folder_check_is_refused(win):
@@ -150,6 +157,7 @@ def test_api_failure_is_none(win, monkeypatch):
         assert rp(r, "a.log") is None and fs(r, "a.log") == "?" and tail(r, "a.log") is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="checks the POSIX dir_fd path")
 def test_posix_path_is_unchanged(tmp_path):
     (tmp_path / "a.log").write_bytes(b"{}")
     r = tmp_path.resolve()
@@ -355,7 +363,7 @@ def test_mapped_unc_and_short_roots_read_through_all_three_readers(win, monkeypa
         return got and (got[0], got[1], got[2], "\\\\?\\UNC\\host\\share\\" + Path_tail(path))
 
     def Path_tail(path):
-        return str(path)[len(str(r)) :].lstrip("/").replace("/", "\\")
+        return str(path)[len(str(r)) :].lstrip("/\\").replace("/", "\\")
 
     monkeypatch.setattr(saferead, "_win_open_raw", spelled_otherwise)
 
@@ -364,7 +372,9 @@ def test_mapped_unc_and_short_roots_read_through_all_three_readers(win, monkeypa
         if p.startswith("\\\\host\\share\\"):
             return p
         return (
-            "\\\\host\\share\\" + Path_tail(p.replace("\\", "/")) if str(r) in p.replace("\\", "/") else None
+            "\\\\host\\share\\" + Path_tail(p.replace("\\", "/"))
+            if str(r).replace("\\", "/") in p.replace("\\", "/")
+            else None
         )
 
     monkeypatch.setattr(saferead, "_win_resolve", resolve)

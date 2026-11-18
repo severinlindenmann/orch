@@ -266,3 +266,20 @@ def test_hidden_words_cannot_slip_past_the_scan(cli, ws, stored_keys):
     log.write_text("ok line\ngamma-part-55\ndelta-part-73\n", encoding="utf-8")
     lines = jrun(cli, "log", "web")[1]["lines"]
     assert "gamma-part-55" not in lines and "delta-part-73" not in lines
+
+
+def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
+    # ORCH-371 bug 10: a harmless command was refused as "holds a secret" when the key store could not be read
+    from orch import keystore, phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
+
+    def refused(root):
+        raise keystore.Refused("This is a test install outside the test folder.")
+
+    monkeypatch.setattr(keystore, "all_needles", refused)
+    code, out = jrun(cli, "add", "Web", "--id", "web", "--", "python3", "-m", "http.server")
+    assert code == 2
+    assert out["error"] == (
+        "Could not compare the command with this workspace's stored keys: This is a test install outside the test folder."
+    )
