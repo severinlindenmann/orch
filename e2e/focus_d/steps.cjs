@@ -513,45 +513,33 @@ async function startChoice(page, dash) {
   await mainHasText(page);
   await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
   await page.evaluate(id => window.LiveLayer.open(id), tid);
+  // ORCH-475: the pane shows the kit's Start choice (kit/start-choice.js inline): compact rows, tool and model as small
+  // pickers, the newest earlier session with Show more; after a start it stays Starting… and greys every choice with why.
   const pane = '#live-dock .live-pane [data-key="live-start"]';
-  await page.waitForSelector(pane + ' [data-key="live-start-earlier"] .live-hist-row', { timeout: 8000 });
+  await page.waitForSelector(pane + ' [data-key="start-earlier"] .live-hist-row', { timeout: 8000 });
   const seen = await page.$eval(pane, el => ({
-    places: el.querySelector('[data-key="live-start-places"]').textContent,
-    cont: el.querySelector('[data-key="live-start-continue"]')?.textContent || '',
-    tools: [...el.querySelectorAll('[data-what="tool"]')].map(b => [b.textContent, b.getAttribute('aria-pressed')]),
-    models: [...el.querySelectorAll('[data-what="model"]')].map(b => [b.textContent, b.getAttribute('aria-pressed')]),
-    earlier: el.querySelectorAll('[data-key="live-start-earlier"] .live-hist-row [data-live-hist="reopen"]').length }));
-  if (seen.places !== 'A start uses 1 of 6 helper places. Now 4 of 6 are in use.') throw new Error('places: ' + seen.places);
+    places: el.querySelector('.live-places')?.textContent || '',
+    cont: el.querySelector('[data-key="start-continue"]')?.textContent || '',
+    tool: (s => s ? [s.value, [...s.options].map(o => o.textContent)] : null)(el.querySelector('select[data-start-pick="tool"]')),
+    model: el.querySelector('select[data-start-pick="model"]')?.value || '',
+    earlier: el.querySelectorAll('[data-key="start-earlier"] .live-hist-row [data-start="reopen"]').length }));
+  if (seen.places !== '4 of 6 places in use') throw new Error('places: ' + seen.places);
   if (!/Continue where it stopped/.test(seen.cont) || !/from /.test(seen.cont)) throw new Error('no Continue with the last conversation: ' + seen.cont);
-  if (JSON.stringify(seen.tools) !== JSON.stringify([['Claude Code', 'true'], ['Codex', 'false']])) throw new Error('tools: ' + JSON.stringify(seen.tools));
-  if (!seen.models.some(m => m[0] === 'Sonnet' && m[1] === 'true')) throw new Error('the usual model is not preselected: ' + JSON.stringify(seen.models));
+  if (JSON.stringify(seen.tool) !== JSON.stringify(['claude', ['Claude Code', 'Codex']])) throw new Error('tools: ' + JSON.stringify(seen.tool));
+  if (seen.model !== 'sonnet') throw new Error('the usual model is not preselected: ' + seen.model);
   if (seen.earlier !== 2) throw new Error(`${seen.earlier} earlier sessions offer Reopen, not 2`);
   await noSideways(page);
   // one click starts fresh with the usual tool and model: only run.start --fresh goes to orch
-  await page.click(pane + ' [data-live-start="fresh"]');
-  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-start"][aria-busy]'), null, { timeout: 5000 });
+  await page.click(pane + ' [data-start="fresh"]');
+  await page.waitForTimeout(500);
   if (asked.length !== 1 || asked[0].op !== 'run.start' || !asked[0].args.fresh || asked[0].args.agent) throw new Error('one-click fresh start: ' + JSON.stringify(asked));
-  // continue the last conversation
-  await page.click(pane + ' [data-live-start="continue"]');
-  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-start"][aria-busy]'), null, { timeout: 5000 });
-  const c = asked[asked.length - 1];
-  if (c.op !== 'run.start' || c.args.fresh || c.args.ticket !== tid) throw new Error('Continue did not continue: ' + JSON.stringify(c));
-  // pick Opus, then another tool (it uses its own model), and start again: the model first, then the start on that tool
-  await page.click(pane + ' [data-what="model"][data-v="opus"]');
-  await page.click(pane + ' [data-what="tool"][data-v="codex"]');
-  await page.waitForSelector(pane + ' [data-key="live-start-pick"] .meta', { timeout: 3000 });
-  asked.length = 0;
-  await page.click(pane + ' [data-live-start="fresh"]');
-  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-start"][aria-busy]'), null, { timeout: 5000 });
-  if (asked.map(a => a.op).join() !== 'ticket.model,run.start' || asked[0].args.model !== 'opus' || asked[1].args.agent !== 'codex')
-    throw new Error('fresh start on the picked tool and model: ' + JSON.stringify(asked));
-  // every place taken: the places line says so with the line, and a start says it waits in line (no error)
-  full = true;
-  await page.evaluate(() => refresh());  // the next state read (the page polls every few seconds)
-  await page.waitForFunction(() => /All 4 helper places are in use\. 2 tickets wait in line\./.test(document.querySelector('#live-dock [data-key="live-start-places"]')?.textContent || ''), null, { timeout: 15000 });
-  await page.click(pane + ' [data-live-start="continue"]');
-  await page.waitForFunction(() => [...document.querySelectorAll('.toast, [role="status"], [role="alert"]')].some(el => /waits in line for a free helper place/.test(el.textContent)), null, { timeout: 5000 });
-  if ([...await page.$$eval('.toast', els => els.map(e => e.textContent))].some(t => /Could not start/.test(t))) throw new Error('a start in line shows as a failure');
+  // the faked start never shows a helper: the choice stays Starting… and every choice is greyed and says why
+  const busy = await page.$eval(pane, el => ({
+    busy: !!el.querySelector('.live-start[aria-busy="true"]'),
+    greyed: [...el.querySelectorAll('[data-start="continue"],[data-start="fresh"]')].every(b => b.disabled && /The helper is starting\./.test(document.getElementById(b.getAttribute('aria-describedby'))?.textContent || '')) }));
+  if (!busy.busy || !busy.greyed) throw new Error('after a start the choice is not Starting… with reasons: ' + JSON.stringify(busy));
+  await page.click(pane + ' [data-start="continue"]', { force: true, timeout: 2000 }).catch(() => {});
+  if (asked.length !== 1) throw new Error('a second click while Starting… sent another start: ' + JSON.stringify(asked));
   await noSideways(page);
 }
 

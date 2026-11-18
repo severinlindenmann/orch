@@ -666,6 +666,20 @@ def set_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+def auto_reviewer_on(root: Path | None) -> bool:
+    """[workflow] auto_reviewer (default off, ORCH-424/425): the Auto Reviewer checks tickets for the owner.
+    While it is on, a new ticket starts with Human review needed off unless the person turns it on (owner
+    18 Nov: "Auto Reviewer checks every new ticket unless I turn it on"). Only a person turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "auto_reviewer", False) is True
+
+
+def set_auto_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "auto_reviewer", value)
+    return value
+
+
 def reviewer_answers_on(root: Path | None) -> bool:
     """[workflow] reviewer_answers (default off): the Reviewer answers small, routine questions for the owner
     with the helper's recommended option (reviewer.answer_routine). Only a person turns it on."""
