@@ -279,3 +279,44 @@ async fn shared_skill_brings_the_skills_it_needs() {
     let (_, snap) = t.call(&b, "GET", "/v1/refresh", None).await;
     assert_eq!(snap["skills"].as_array().unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn shared_skill_needs_take_the_shortest_path() {
+    // a -> [b, x]; x -> c -> d -> y; b -> y; y -> z. y is 2 steps away through b, so z (3 steps) comes along even
+    // though the long path through x may be walked first.
+    let t = start().await;
+    let w = t.add_ws("Home").await;
+    for (name, needs) in [
+        ("a", "b, x"),
+        ("x", "c"),
+        ("c", "d"),
+        ("d", "y"),
+        ("b", "y"),
+        ("y", "z"),
+        ("z", ""),
+    ] {
+        let meta = if needs.is_empty() {
+            String::new()
+        } else {
+            format!("metadata:\n  requires-skills: \"{needs}\"\n")
+        };
+        put_skill(
+            &t,
+            name,
+            &format!("---\nname: {name}\ndescription: d\n{meta}---\n"),
+        )
+        .await;
+    }
+    let path = format!("/admin/api/shared/assign/{}", w.id);
+    let (s, v) = t
+        .admin_json(
+            "PUT",
+            &path,
+            Some(json!({"skills": ["a"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let mut added: Vec<String> = serde_json::from_value(v["added"].clone()).unwrap();
+    added.sort();
+    assert_eq!(added, vec!["b", "c", "d", "x", "y", "z"]);
+}

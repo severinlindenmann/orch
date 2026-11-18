@@ -909,13 +909,14 @@ fn needed_skills(
     had: &std::collections::HashSet<String>,
     want: &mut Vec<(&'static str, String)>,
 ) -> Res<(Vec<String>, Vec<String>)> {
-    let mut queue: Vec<(String, usize)> = want
+    // Nearest first: a skill reached by a short path keeps its short depth, whatever order the fields list them in.
+    let mut queue: std::collections::VecDeque<(String, usize)> = want
         .iter()
         .filter(|(k, n)| *k == "skills" && !had.contains(n))
         .map(|(_, n)| (n.clone(), 0))
         .collect();
     let (mut added, mut missing) = (vec![], vec![]);
-    while let Some((name, depth)) = queue.pop() {
+    while let Some((name, depth)) = queue.pop_front() {
         if depth >= 4 {
             continue;
         }
@@ -931,7 +932,7 @@ fn needed_skills(
             if exists {
                 want.push(("skills", need.clone()));
                 added.push(need.clone());
-                queue.push((need, depth + 1));
+                queue.push_back((need, depth + 1));
             } else {
                 missing.push(need);
             }
