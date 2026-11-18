@@ -77,6 +77,14 @@ function liveLayerStep(s, act, phone = false) {
       n.cur = act.key;
       return opened();
     }
+    case 'swap': {  // the group switcher of a pane (ORCH-345): that pane shows another session of its group
+      if (!act.key || !n.panes.includes(act.from)) return s;
+      if (act.key === act.from) { if (n.cur === act.key) return s; n.cur = act.key; return n; }
+      if (n.panes.includes(act.key)) n.panes.splice(n.panes.indexOf(act.from), 1);  // shown already: the two become one
+      else n.panes[n.panes.indexOf(act.from)] = act.key;
+      n.cur = act.key;
+      return opened();
+    }
     case 'select':
       if (!n.panes.includes(act.key) || n.cur === act.key) return s;
       n.cur = act.key;
@@ -281,8 +289,9 @@ function livePane(key, where, s, o) {
     ? liveBtn('btn icon sm ghost', 'leave-full', 'Leave full screen', 'full-exit', {'data-key':'live-full'})
     : liveBtn('btn icon sm ghost', 'full', 'Full screen', 'full-screen', {'data-key':'live-full'});
   const besideWhy = o.total >= LIVE_MAX ? 'Three sessions is the most' : o.next ? 'Add a session beside this one' : 'No other session is live';
+  const group = sess && !sess.kind && typeof liveGroupOf === 'function' ? liveGroupOf(liveGroups(), sess.id) : null;
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
-    'data-new':o.fresh ? '' : null, 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
+    'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
     h('header', {className:'live-ph'},
       o.narrow ? null : sess?.pill || null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
@@ -303,14 +312,20 @@ function livePane(key, where, s, o) {
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned) : null)),
     sess?.running && !sess.kind && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
-    typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess))
+    group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveGroupSwitcher(group, key, o.narrow), livePaneBody(key, sess, label))
+      : livePaneBody(key, sess, label));
+}
+// The body of a pane: the History tab, the Start choice, or the session itself with its message box (ORCH-345).
+function livePaneBody(key, sess, label) {
+  return typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess))
       : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, window.liveStartBody(sess))
       : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
       h('p', {className:'live-now', 'data-live-now':''}),
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       h('p', {className:'meta live-meta', 'data-live-meta':''}),
-      sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'))
-      : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.')));
+      sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'),
+      typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
+      : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
 }
 // The live part of a pane, written in place on every answer of the sessions API: no repaint, so the keyboard place,
 // an open menu and the scroll of the lines stay.
@@ -383,7 +398,7 @@ function liveLayerPaint() {
   const host = liveDockHost(), s = liveLayerModel(), where = liveLayerWhere(s, liveLayerPhone());
   const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '']);
   const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
-  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.narrow, v.pins.filter(k => s.panes.includes(k)), !!v.next], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null]);
+  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.narrow, v.pins.filter(k => s.panes.includes(k)), !!v.next], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null, typeof liveGroupKey === 'function' ? liveGroupKey(s.panes) : null]);
   host.dataset.mode = where;
   host.style.setProperty('--live-h', s.height ? s.height + 'px' : '');
   host.style.setProperty('--live-w', s.width ? s.width + 'px' : '');
@@ -393,13 +408,18 @@ function liveLayerPaint() {
     // the panel animates only when it appears or moves, not on every repaint
     if (where === liveLayerWas) host.dataset.still = ''; else delete host.dataset.still;
     const shared = liveBarShared(), keepBar = shared ? document.getElementById('live-bar') : null;
-    const typing = !!document.activeElement?.closest?.('#live-dock [data-live-ren]');
+    const typing = document.activeElement?.closest?.('#live-dock [data-live-msg-text]')?.dataset.liveMsgText;  // the message box keeps the keyboard
+    const renaming = !!document.activeElement?.closest?.('#live-dock [data-live-ren]');
     host.replaceChildren(...[liveLayerTree(s, where)].filter(Boolean), ...(keepBar ? [keepBar] : []));
-    if (typing) host.querySelector('[data-live-ren] input')?.focus({preventScroll:true});
+    if (renaming) host.querySelector('[data-live-ren] input')?.focus({preventScroll:true});
     if (shared) {
       // the shared bar goes after the panel in the dock (on top in full screen) and carries Open and Place at its end
       if (!keepBar || keepBar.parentNode !== host) shared.mount(host, {docked:true});
       shared.end(() => [liveBarEnd(liveLayerWhere(liveLayerModel(), liveLayerPhone()), liveLayerModel())]);
+    }
+    if (typing) {
+      const box = host.querySelector(`[data-live-msg-text="${typing.replace(/["\\]/g, '')}"]`);
+      if (box) { box.focus({preventScroll:true}); box.setSelectionRange(box.value.length, box.value.length); }
     }
     liveLayerPainted = key;
     liveLayerWas = where;
@@ -511,6 +531,12 @@ document.addEventListener('click', e => {
     if (next) liveLayerDo({type:'beside', key:next}, liveSel(next, 'live-close'));
   }
   else if (act === 'select') liveLayerDo({type:'select', key:b.dataset.session}, liveSel(b.dataset.session, 'live-close'));
+  else if (act === 'swap') {  // a row of the group switcher: History closes, the keyboard stays on the row
+    const to = b.dataset.to;
+    if (typeof liveHistOpen === 'object') liveHistOpen.delete(b.dataset.session);
+    liveLayerDo({type:'swap', from:b.dataset.session, key:to}, liveSel(to, 'live-group-' + to));
+    if (b.dataset.session === to && typeof liveHistOpen === 'object') liveLayerPaint();
+  }
   else if (act === 'rename') liveRenStart(b.dataset.session);
   else if (act === 'pin') {
     const key = b.dataset.session, menu = liveLayerModel().menu;
