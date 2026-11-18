@@ -45,7 +45,7 @@ VOUCH_HEADER = "X-Orch-Person"  # the dashboard's word to an add-on page behind 
 SESSION_LIFE = 30 * 24 * 3600  # seconds a page session lasts (cookie Max-Age and the kept session file)
 REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
 WATCH_ONLY_MSG = (
-    "This page cannot open a session: it was started from an agent tool's terminal, so it is watch-only. "
+    "This page cannot open a session: it was started from a helper tool's terminal, so it is watch-only. "
     "Run orch stop, then orch start from your own terminal."
 )
 
