@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-27 steps: 14 ready (the script clicks them), 13 pending (not built yet).
+27 steps: 15 ready (the script clicks them), 12 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -113,7 +113,7 @@ Must be seen:
 ## 7. Pin a session and give it your own name
 
 - Part: wall (draft D feature 9)
-- State: pending, waits for: Pin and rename sessions (crew task pin-rename)
+- State: ready, clicked by the script
 - Pictures: `fd-07-pin-name-1280.png`, `fd-07-pin-name-1920.png`, `fd-07-pin-name-390.png`
 
 Do:
@@ -125,6 +125,7 @@ Must be seen:
 
 - The pinned session moves to the Pinned band and gets a chip in the bar.
 - The new name shows on its tile, its pane and its chip.
+- Both stay after a reload; Unpin moves it back.
 
 ## 8. Works with 24 and more sessions
 

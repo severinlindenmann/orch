@@ -1475,6 +1475,22 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             return 200, "", {"people": people.choose(root, args.get("name"), add=op == "person.add")}
         except people.BadName as e:
             raise BadRequest(str(e)) from None
+    if op in (
+        "session.pin",
+        "session.name",
+    ):  # the live page: pin or name a session, kept in the workspace (ORCH-361)
+        from . import sessionprefs
+
+        if not isinstance(args, dict):
+            raise BadRequest("The arguments must be an object.")
+        if not session:  # watch-only: pins and names are the person's clicks
+            raise NeedsPerson(SIGNIN)
+        try:
+            if op == "session.pin":
+                return 200, "", {"prefs": sessionprefs.set_pin(root, args.get("session"), args.get("pinned"))}
+            return 200, "", {"prefs": sessionprefs.set_name(root, args.get("session"), args.get("name"))}
+        except sessionprefs.BadPref as e:
+            raise BadRequest(str(e)) from None
     if op == "update.note.dismiss":  # Home: "Got it" on the note after an automatic update; nothing runs
         if not session:
             raise NeedsPerson(SIGNIN)

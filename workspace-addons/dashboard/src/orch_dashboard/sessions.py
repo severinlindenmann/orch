@@ -23,6 +23,7 @@ The shape (the wall builds on it; keep it in step with the PR text):
       "opened_at": "<ISO>" | null, "open_seconds": int | null,     # when the session opened
       "idle_seconds": int | null, "closes_in_seconds": int | null, # idle close countdown (live sessions)
       "last_at": "<ISO>" | null,                                   # the ticket's last history line
+      "pinned": bool, "name": "<own name>" | null,                 # kept in the workspace (sessionprefs, ORCH-361)
     }
 
 Sessions come in the order needs you, working, in line, idle, closed; inside one status by key number.
@@ -35,6 +36,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import sessionprefs
 from .data import run_orch
 
 LINES = 8  # the last lines a tile or a pane shows by default
@@ -201,7 +203,7 @@ def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> 
 def answer(root: Path, orch_bin: str | None, state: dict, age: float, lines: int = LINES) -> dict:
     n = max(1, min(int(lines), LINES_MAX))
     return {
-        "sessions": build(root, orch_bin, state, n),
+        "sessions": sessionprefs.apply(root, build(root, orch_bin, state, n)),
         "lines": n,
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "age_ms": int(age * 1000),

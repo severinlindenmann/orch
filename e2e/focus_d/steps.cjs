@@ -73,7 +73,7 @@ async function previewSwitch(page, dash) {
   });
   await page.route('**/api/act', async route => {
     const body = route.request().postDataJSON();
-    if (body.op !== 'focus_preview.set') return route.continue();
+    if (body.op !== 'focus_preview.set') return route.fallback();
     on = body.args.on === true;
     route.fulfill({ json: dress({ ...last }) });
   });
@@ -123,8 +123,10 @@ async function previewOn(page) {
 
 // Step 9. The test dashboard has no running helpers, so the step gives the page draft D's 24 sessions (3 need you,
 // 1 pinned, 3 working, 9 in line, 8 idle) as extra tickets in its state and as the answer of the live sessions API
-// (/api/sessions, ORCH-359: the bar and the panes read it), with the Preview switch on. Pinning is
-// kept in the browser until the wall stores it. Everything else is the real page: the bar, its fold, list and search.
+// (/api/sessions, ORCH-359: the bar and the panes read it), with the Preview switch on. A pin or a name (session.pin /
+// session.name, ORCH-361) is taken by a stand-in, as the real server keeps it in the workspace (this test page has no
+// sign-in; the dashboard click-through f-session-pin-name sends them to the real server), and the stand-in list then
+// carries it, as the real API does. Everything else is the real page: the bar, its fold, list and search.
 const BAR_SESSIONS = [
   ['wait', 'ORCH-238', 'Add files and notes to a ticket'], ['wait', 'ORCH-201', 'Send the weekly summary'],
   ['wait', 'ORCH-214', 'New price list for the shop'], ['run', 'ORCH-228', 'Pages change without a full reload', 'pin'],
@@ -136,12 +138,23 @@ const BAR_SESSIONS = [
   ...['Survey for customers', 'Opening hours page', 'Newsletter for autumn', 'Price page for schools',
     'Photo page for the shop', 'Welcome mail', 'Order form', 'Holiday plan'].map((t, i) => ['idle', 'ORCH-' + (241 + i), t]),
 ];
+// What the stand-in server kept: one pin to start with.
+let barPrefs = { pins: { t_bar228: true }, names: {} };
+let barState = {};
 async function liveBarState(page) {
+  barPrefs = { pins: { t_bar228: true }, names: {} };
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
     dashboard: { label: 'Focus', icon: 'target', order: 20 } };
   const HELPER = { wait: 'you', run: 'working', idle: 'idle' };
-  await page.addInitScript(() => { try { localStorage.setItem('orch.live.pins', JSON.stringify(['t_bar228'])); } catch (e) { /* none */ } });
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (!['session.pin', 'session.name'].includes(body.op)) return route.fallback();
+    const id = body.args.session;
+    if (body.op === 'session.pin') barPrefs.pins[id] = body.args.pinned;
+    else if (body.args.name) barPrefs.names[id] = body.args.name; else delete barPrefs.names[id];
+    route.fulfill({ json: barState });  // the server answers an action with the page's state
+  });
   await page.route(/\/api\/state(\?.*)?$/, async route => {
     const res = await route.fetch();
     if (res.status() !== 200) return route.fulfill({ response: res });
@@ -158,6 +171,7 @@ async function liveBarState(page) {
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
     st.settings = { ...(st.settings || {}), focus_preview_on: true,
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    if (Array.isArray(st.tickets) && st.workspace) barState = st;  // a full state, not the poll's "unchanged"
     route.fulfill({ response: res, json: st });
   });
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: barSessions(), lines: 8, age_ms: 0 } }));
@@ -175,7 +189,8 @@ function barSessions() {
         '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ ' + title + ': step ' + (2 + (i % 3)) + ' of 5'] : [],
       tool: live ? 'Helper' : null, model: i % 2 ? 'Opus' : 'Sonnet', mode: live ? 'live' : null,
       opened_at: null, open_seconds: live ? (20 + 3 * i) * 60 : null, idle_seconds: s === 'idle' ? 18 * 60 : null,
-      closes_in_seconds: s === 'idle' ? 42 * 60 : live ? 3600 : null, last_at: null };
+      closes_in_seconds: s === 'idle' ? 42 * 60 : live ? 3600 : null, last_at: null, kind: '',
+      pinned: barPrefs.pins['t_bar' + key.slice(5)] === true, name: barPrefs.names['t_bar' + key.slice(5)] || null };
   });
 }
 // Step 16: every pane says what its session does, its last lines, tool and model, how long it is open and how long it
@@ -221,7 +236,7 @@ async function staysOpen(page, dash) {
   await page.goto(dash + '/#tickets');  // a deep link
   await mainHasText(page);
   // the steps share one browser: start with the layer at the bar, not where step 10 left it (it is kept per browser)
-  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.evaluate(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
   await page.reload();  // reload keeps the page
   await mainHasText(page);
   if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('reload left the page');
@@ -304,7 +319,7 @@ async function layer(page, dash, width) {
   const press = async key => { await page.keyboard.press(key); await page.waitForTimeout(50); };
   await livePreview(page);
   // start with nothing kept, without an extra page load (the reload below must keep what this step chose)
-  await page.addInitScript(() => { try { if (!sessionStorage.getItem('fd10')) { localStorage.removeItem('orch.live.layer'); sessionStorage.setItem('fd10', '1'); } } catch (e) { /* none */ } });
+  await page.addInitScript(() => { try { if (!sessionStorage.getItem('fd10')) { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); sessionStorage.setItem('fd10', '1'); } } catch (e) { /* none */ } });
   await page.goto(dash + '/#home');
   await mainHasText(page);
   // the bar: the bar task's #live-bar when it is there, else the layer's own minimal bar
@@ -409,11 +424,11 @@ async function history(page, dash) {
   let asked = null;
   await page.route('**/api/act', async route => {
     const body = route.request().postDataJSON();
-    if (body.op !== 'session.reopen') return route.continue();
+    if (body.op !== 'session.reopen') return route.fallback();
     asked = body.args;
     route.fulfill({ json: st0 });
   });
-  await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.addInitScript(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
   await page.goto(dash + '/#home');
   await mainHasText(page);
   await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
@@ -480,7 +495,7 @@ async function split(page, dash, width) {
   const sideBySide = (list, stacked) => list.every((p, i) => !i || (stacked ? p.y > list[i - 1].y && p.x === list[0].x : p.x > list[i - 1].x && p.y === list[0].y));
   await liveBarState(page);
   await page.goto(dash + '/#home');
-  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.evaluate(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
   await page.reload();
   await mainHasText(page);
   await page.waitForSelector('#live-dock[data-mode="bar"] #live-bar [data-key="live-open"]', { timeout: 10000 });
@@ -519,7 +534,7 @@ async function split(page, dash, width) {
     await page.click(inPane(one, 'live-pane-more'));
     await page.click('[data-key="live-more-menu"] [data-key="live-pin"]');
   } else await page.click(inPane(one, 'live-pin'));
-  await page.waitForFunction(k => JSON.parse(localStorage.getItem('orch.live.pins') || '[]').includes(k), one, { timeout: 5000 });
+  await page.waitForFunction(k => window.LiveSessions.pins.includes(k), one, { timeout: 5000 });
   if (!await page.evaluate(k => window.LiveLayer.pins.includes(k), one)) throw new Error('the pin was not kept');
   // place from a pane: on the right the panes stack; then back to the bottom (a phone has no right)
   const place = async mode => {
@@ -592,7 +607,7 @@ async function focusButton(page, dash, width) {
   // the added tickets have no files on disk: their ticket pages get an empty list of results
   await page.route(/\/api\/artifacts\/t_fb/, route => route.fulfill({ json: { files: [] } }));
   await page.goto(dash + '/#tickets');
-  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.evaluate(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
   await page.reload();
   await mainHasText(page);
   // every ticket row has its Focus button, with the word that fits the ticket
@@ -658,7 +673,7 @@ async function focusButton(page, dash, width) {
 async function wallPage(page, dash, tag, sessions) {
   await liveBarState(page);
   if (sessions) await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: sessions(), lines: 8, age_ms: 0 } }));
-  await page.addInitScript(t => { try { if (sessionStorage.getItem('wall') !== t) { localStorage.removeItem('orch.live.wall'); localStorage.removeItem('orch.live.layer'); sessionStorage.setItem('wall', t); } } catch (e) { /* none */ } }, tag);
+  await page.addInitScript(t => { try { if (sessionStorage.getItem('wall') !== t) { localStorage.removeItem('orch.live.wall'); Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); sessionStorage.setItem('wall', t); } } catch (e) { /* none */ } }, tag);
   await page.goto(dash + '/#addon/focus');
   await page.waitForSelector('[data-key="live-wall"] .wall-band', { timeout: 15000 });
 }
@@ -721,6 +736,74 @@ async function needsYou(page, dash) {
   await page.evaluate(() => window.LiveSessions.refresh());
   await page.waitForFunction(sel => document.querySelector(sel)?.dataset.s === 'needs-you', tileOf('t_bar238'), { timeout: 10000 });
   await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  await noSideways(page);
+}
+
+// Step 7: pin a working session from its tile: it moves to the Pinned band and the bar shows it with the pinned ones.
+// Open it, click its name in the pane header, type a new one and press Enter: the tile, the pane and the bar say the new
+// name. The server keeps both (session.pin / session.name): they stay after a reload. Unpin moves the tile back.
+async function pinName(page, dash, width) {
+  const phone = width <= 720, id = 't_bar232', NAME = 'Usage counts for the owner';
+  await wallPage(page, dash, 'fd7');
+  const band = async () => page.$eval(tileOf(id), el => el.closest('.wall-band')?.dataset.band);
+  if (await band() !== 'need') throw new Error('the working session does not start in Needs you and working');
+  await page.click(`${tileOf(id)} [data-wall-pin]`);
+  await page.waitForSelector(`[data-band="pin"] [data-tile="${id}"]`, { timeout: 5000 });
+  // the page is drawn again when the server answers; the keyboard is back on the pin button within a frame
+  await page.waitForFunction(i => document.activeElement?.dataset.wallPin === i, id, { timeout: 2000 }).catch(() => { throw new Error('pinning moved the keyboard place'); });
+  if (await page.getAttribute(`${tileOf(id)} [data-wall-pin]`, 'aria-pressed') !== 'true') throw new Error('the pin button does not say pinned');
+  // the bar: a chip with the pinned ones, or (folded) the pinned count, or (folded further) inside More
+  const barPinned = async () => {
+    if (await page.$('#live-bar [data-g="pin"]')) return !!(await page.$(`#live-bar [data-g="pin"] [data-lbar-open="${id}"]`));
+    if (await page.$('#live-bar [data-lbar-list="pin"]')) return (await page.getAttribute('#live-bar [data-lbar-list="pin"]', 'aria-label')) === 'Pinned: 2 sessions';
+    await page.click('#live-bar [data-lbar-list="more"]');
+    const there = !!(await page.waitForSelector(`#live-bar [data-lbar-open="${id}"]`, { timeout: 5000 }).catch(() => null));
+    await page.keyboard.press('Escape');
+    return there;
+  };
+  if (!(await barPinned())) throw new Error('the bar does not show the pinned session');
+  // the name: in the pane header of the open session (draft D: click the name, type, Enter)
+  await page.click(`${tileOf(id)} [data-wall-open]`);
+  const pane = `#live-dock .live-pane[data-session="${id}"]`;
+  await page.click(`${pane} [data-key="live-rename"]`);
+  const input = `${pane} [data-key="live-ren-input"]`;
+  await page.waitForSelector(input, { timeout: 5000 });
+  if (!(await page.evaluate(sel => document.activeElement === document.querySelector(sel), input))) throw new Error('the name field does not have the keyboard');
+  await page.fill(input, NAME);
+  await page.press(input, 'Enter');
+  await page.waitForFunction(([sel, n]) => document.querySelector(sel)?.textContent === n, [`${pane} [data-key="live-rename"]`, NAME], { timeout: 5000 }).catch(() => { throw new Error('the pane does not show the new name'); });
+  await page.waitForFunction(sel => document.activeElement === document.querySelector(sel), `${pane} [data-key="live-rename"]`, { timeout: 2000 })
+    .catch(() => { throw new Error('after saving the keyboard is not back on the name'); });
+  const shown = async () => ({
+    tile: (await page.textContent(`${tileOf(id)} .wall-tt`)).trim(),
+    pane: await page.$(`${pane} [data-key="live-rename"]`) ? (await page.textContent(`${pane} [data-key="live-rename"]`)).trim() : '',
+    chip: await page.$(`#live-bar [data-lbar-open="${id}"]`) ? (await page.textContent(`#live-bar [data-lbar-open="${id}"]`)).trim() : null,
+  });
+  const check = async when => {
+    const got = await shown();
+    if (got.tile !== NAME) throw new Error(`${when}: the tile says "${got.tile}"`);
+    if (got.pane !== NAME) throw new Error(`${when}: the pane says "${got.pane}"`);
+    if (got.chip !== null && !got.chip.includes(NAME)) throw new Error(`${when}: the chip says "${got.chip}"`);
+    if (got.chip === null && !(await page.$('#live-bar :is([data-lbar-list="pin"], [data-lbar-list="more"])'))) throw new Error(`${when}: the bar shows no pinned session`);
+    if (await band() !== 'pin') throw new Error(`${when}: the session is not in the Pinned band`);
+  };
+  await check('after saving');
+  // kept by the server: a reload (the same page, the layer as it was) shows both
+  await page.reload();
+  await page.waitForSelector(`[data-band="pin"] [data-tile="${id}"]`, { timeout: 15000 }).catch(() => { throw new Error('after a reload the session is not pinned'); });
+  // a reload never opens full screen (step 10): open the session again from its tile
+  if (!(await page.$(`${pane} [data-key="live-rename"]`))) await page.click(`${tileOf(id)} [data-wall-open]`);
+  await page.waitForSelector(`${pane} [data-key="live-rename"]`, { timeout: 10000 }).catch(() => { throw new Error('after a reload the pane does not open'); });
+  await check('after a reload');
+  // unpin moves it back; the name stays
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 }).catch(() => {});
+  await page.click(`${tileOf(id)} [data-wall-pin]`);
+  await page.waitForFunction(sel => document.querySelector(sel)?.closest('.wall-band')?.dataset.band === 'need', tileOf(id), { timeout: 5000 }).catch(() => { throw new Error('unpin did not move the tile back'); });
+  if ((await page.textContent(`${tileOf(id)} .wall-tt`)).trim() !== NAME) throw new Error('unpinning lost the name');
+  // pinned again for the picture: the Pinned band with the new name
+  await page.click(`${tileOf(id)} [data-wall-pin]`);
+  await page.waitForSelector(`[data-band="pin"] [data-tile="${id}"]`, { timeout: 5000 });
   await noSideways(page);
 }
 
@@ -850,9 +933,12 @@ const STEPS = [
   },
   {
     n: 7, pic: 'fd-07-pin-name', area: 'wall', title: 'Pin a session and give it your own name', feature: [9],
-    waits: T.pin,
     do: ['Pin a working session.', 'Click its name, type a new one and press Enter.'],
-    see: ['The pinned session moves to the Pinned band and gets a chip in the bar.', 'The new name shows on its tile, its pane and its chip.'],
+    see: ['The pinned session moves to the Pinned band and gets a chip in the bar.', 'The new name shows on its tile, its pane and its chip.',
+      'Both stay after a reload; Unpin moves it back.'],
+    async run({ page, dash, width }) {
+      await pinName(page, dash, width);
+    },
     draft: { q: '?page=focus&cur=Manager&view=zoom&ren=1' },
   },
   {

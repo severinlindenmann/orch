@@ -43,7 +43,7 @@ MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = (
     140 * 1024 * 1024
 )  # a new ticket with files: at most 100 MB of files (newticket.js) as base64, plus the text
-LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose")
+LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose", "session.pin", "session.name")
 # ops that name a ticket but change more than it (settings, add-ons, the workspace): answered with a full build
 WIDE_OPS = ("addon.act", "addon.set", "addon.uninstall", "addon.start", "update.start")
 # Settings choices that change only what Settings (or the phone switch) shows: answered at once with the Settings
