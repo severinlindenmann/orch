@@ -432,6 +432,7 @@ ACT_ARGS = {
     "check.remove": {"ticket": TID, "check": "c1"},
     "check.move": {"ticket": TID, "check": "c1", "after": "c2"},
     "run.start": {"ticket": TID},
+    "session.reopen": {"ticket": TID, "session": "s-1"},
     "session.new": {"kind": "empty"},
     "run.stop": {"ticket": TID},
     "run.send": {"ticket": TID, "text": "x"},
