@@ -352,7 +352,9 @@ def _choose(request: dict, share: dict, sources: list[dict], starts: dict, at: d
             [s for s in ordered if ahead_tool and s.get("tool") == ahead_tool],
             key=lambda s: s.get("type") != "subscription",
         )  # flat price first, then a key
-        targets = {"api": keys, "tool": same, "both": keys + [s for s in same if s not in keys]}.get(to, money)
+        targets = {"api": keys, "tool": same, "both": keys + [s for s in same if s not in keys]}.get(
+            to, money
+        )
         room = to == "tool" or (cap and _ahead_used(starts, day) + need <= float(cap))
         if on_subs and targets and room and all(float(s["week_used"]) > lines[s["id"]] for s in on_subs):
             first = targets

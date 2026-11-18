@@ -409,7 +409,9 @@ def _start_state_cmd(args, root: Path) -> int:
         try:
             spent = float(str(args.spent).lstrip("$"))
         except ValueError:
-            raise Refused(f"'{args.spent}' is not an amount of dollars. Use a number like 1.20 or unknown.") from None
+            spent = math.nan
+        if not math.isfinite(spent) or spent < 0:
+            raise Refused(f"'{args.spent}' is not an amount of dollars. Use a number like 1.20 or unknown.")
     fn = {"started": picker.started, "failed": picker.failed}.get(args.cmd)
     ok = fn(root, args.start) if fn else picker.finished(root, args.start, spent)
     text = "Saved." if ok else "Nothing changed: Usage has no open start with that id."

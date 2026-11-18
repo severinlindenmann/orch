@@ -201,7 +201,12 @@ def test_ahead_goes_where_the_share_says_and_a_subscription_ahead_of_its_own_wee
         {"id": "k1", "label": "API credit", "tool": "claude", "type": "api-key", "left": 100.0},
         {"id": "c1", "label": "Codex", "tool": "codex", "type": "helper-tool", "left": 100.0},
     ]  # fmt: skip
-    share = {"order": ["s1", "s2", "k1", "c1"], "week": {"wed": 70}, "ahead_to": "tool", "ahead_tool": "codex"}
+    share = {
+        "order": ["s1", "s2", "k1", "c1"],
+        "week": {"wed": 70},
+        "ahead_to": "tool",
+        "ahead_tool": "codex",
+    }
     p = picker.pick(tmp_path, {"start": "x1", "kind": "lead"}, share, subs, at)
     assert p.source == "s2" and "First is ahead of its week (80% used" in p.why  # the one on pace goes first
     both_ahead = [{**s, "week_used": 90.0} if s["type"] == "subscription" else s for s in subs]
@@ -213,3 +218,41 @@ def test_ahead_goes_where_the_share_says_and_a_subscription_ahead_of_its_own_wee
     p = picker.pick(tmp_path, {"start": "x4", "kind": "reviews"}, {"order": ["c1", "k1"], "credit_kinds": ["reviews"]},
                     subs, at)  # fmt: skip
     assert p.source == "k1"  # review work goes to the API credit first, Codex only as a fallback
+
+
+def test_finished_starts_come_off_what_is_left_when_the_reader_does_not_count_them(tmp_path):
+    at = datetime(2026, 11, 18, 12, 0, tzinfo=UTC)
+    row = {
+        "id": "k1",
+        "label": "API credit",
+        "on": True,
+        "type": "api-key",
+        "rule": {"limits": [{"period": "month", "unit": "$", "value": 2}]},
+        "use": {"month": {"spent": 0, "since": "2026-10-31T23:00:00Z"}},
+    }
+    s = sources.source(row)
+    assert s["left"] == 2 and s["left_at"] == "2026-10-31T23:00:00Z"
+    assert not picker.pick(tmp_path, {"start": "one", "model": "sonnet"}, {}, [s], at).wait
+    picker.finished(tmp_path, "one", 1.05, at)
+    p = picker.pick(tmp_path, {"start": "two", "model": "sonnet"}, {}, [s], at)
+    assert p.wait and "only $0.95 left" in p.why  # $1.05 of $2 spent by the first start: no second one
+
+
+def test_api_credit_then_codex_when_ahead_whatever_the_order(tmp_path):
+    at = datetime(2026, 11, 18, 12, 0, tzinfo=UTC)
+    subs = [
+        {"id": "sub", "label": "Sub", "type": "subscription", "week_used": 99.0},
+        {"id": "codex", "label": "Codex", "tool": "codex", "type": "helper-tool"},
+        {"id": "api", "label": "API", "type": "api-key"},
+    ]
+    share = {"week": {"wed": 70}, "ahead_to": "both", "ahead_tool": "codex", "ahead_dollars_day": 10}
+    assert picker.pick(tmp_path, {"start": "b1"}, share, subs, at).source == "api"
+
+
+def test_a_spend_that_is_not_an_amount_is_refused(cli, ws, fake_switcher, tmp_path):
+    _seed(cli, ws, fake_switcher, tmp_path)
+    jrun(cli, "pick", "--start", "z1", "--kind", "reviews")
+    for bad in ("-1", "nan", "inf", "lots"):
+        code, d = jrun(cli, "finished", "z1", "--spent", bad)
+        assert code == 2, (bad, d)
+    assert jrun(cli, "finished", "z1", "--spent", "1.20")[1]["ok"] is True

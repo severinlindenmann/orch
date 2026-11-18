@@ -28,7 +28,10 @@ def tool_of(row: dict) -> str:
     tool = str(row.get("tool") or "").lower()
     if tool in TOOL_LABELS:
         return tool
-    if str(row.get("provider") or "").lower() in CODEX_PROVIDERS or CODEX in str(row.get("label", "")).lower():
+    if (
+        str(row.get("provider") or "").lower() in CODEX_PROVIDERS
+        or CODEX in str(row.get("label", "")).lower()
+    ):
         return CODEX
     return "claude"
 
@@ -92,8 +95,14 @@ def source(row: dict) -> dict:
         if b.get("period") == "day":
             out["day_limit"], out["spent_today"] = limit, used
         elif used is not None:
-            lefts.append(max(limit - used, 0.0))
-    out["left"] = min(lefts) if lefts else None
+            since = ((row.get("use") or {}).get(b.get("period")) or {}).get("since")
+            lefts.append((max(limit - used, 0.0), since))
+    if lefts:
+        out["left"], since = min(lefts, key=lambda x: x[0])
+        # The readers today count the credit skills' calls, not helper starts: every start that finished since the
+        # limit's period began comes off what is left too (never overspend). A reader that counts helper starts
+        # itself must set left_at to the time it read the number instead.
+        out["left_at"] = picker._iso(_time(since)) if _time(since) else "0000-00-00T00:00:00Z"
     return out
 
 
