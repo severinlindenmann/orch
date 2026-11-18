@@ -80,3 +80,9 @@ if(window.UI?.date){const v=document.getElementById('g-due'),t=document.getEleme
  box('Blocked','something failed and needs you',{status:{tone:'failed',text:'Checks failed twice'},headline:'The login test fails at phone width.',paras:['I need: a decision on the 390 px layout.']});
  box('Link to try','a page to click through (the card Open button)',{headline:'Open the new Home page and look at the Review tab.',chips:[{text:'Opens in a new tab',tone:'info'}]});
  const n=document.createElement('p');n.className='meta';n.textContent='Before/after, Choice and Table use the compare, options and table previews above (the review deck). Pictures: img preview.';host.append(n)}}
+
+// Compact table "Show N more" (add-on view `show`, ORCH-537): shows the hidden rows of the table just above and goes away.
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-show-rows]'); if (!b) return;
+  b.previousElementSibling.querySelectorAll('tr[hidden]').forEach(r => { r.hidden = false; }); b.remove();
+});

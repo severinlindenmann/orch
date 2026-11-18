@@ -14,6 +14,7 @@ const OrchBlocks = (() => {
   const APP = /^app:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}$/;   // a page of the dashboard (hash route)
   const FILE = /^f_[a-z0-9]+$/;
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
+  const shownAll = new Set();   // tables whose "Show more" was pressed (by title), kept while the page is open
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
   const VERB = /^[a-z][a-z-]{0,20}$/;
   const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
@@ -501,7 +502,7 @@ const OrchBlocks = (() => {
     },
     table(b) {
       const s = el('section', 'blk'), head = blkHead(b); if (head) s.append(head);
-      const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table'), cols = arr(b.columns);
+      const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table' + (b.compact ? ' compact' : '')), cols = arr(b.columns);
       const hr = el('tr');
       const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
       // The switch column is named by what it turns on (the add-on's `text`, e.g. Repeats); at phone width the same
@@ -511,9 +512,12 @@ const OrchBlocks = (() => {
       if (hasActions) { const th = el('th', '', 'Actions'); th.scope = 'col'; hr.append(th); }
       if (hasToggle) { const th = el('th', '', toggleText); th.scope = 'col'; hr.append(th); }
       const thead = el('thead'); thead.append(hr); t.append(thead);
-      const tb = el('tbody');
-      for (const r of arr(b.rows)) {
-        const tr = el('tr');
+      const tb = el('tbody'), key = String(b.title || cols.map(c => c.key).join(','));
+      // `show`: the first rows, the rest behind one "Show N more" button; opened stays opened across refreshes
+      const show = Number.isInteger(b.show) && b.show > 0 && rowsList.length > b.show && !shownAll.has(key) ? b.show : rowsList.length;
+      const later = [];
+      rowsList.forEach((r, n) => {
+        const tr = el('tr'); if (n >= show) { tr.hidden = true; later.push(tr); }
         cols.forEach((c, i) => {
           const td = cell(c, (r.cells || {})[c.key]); td.dataset.label = c.label || '';
           if (i === 0 && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
@@ -533,8 +537,14 @@ const OrchBlocks = (() => {
           tr.append(td);
         }
         tb.append(tr);
-      }
+      });
       t.append(tb); wrap.append(t); s.append(wrap);
+      if (show < rowsList.length) {
+        const btn = el('button', 'btn ghost sm blk-show', `Show ${rowsList.length - show} more`);
+        btn.type = 'button';
+        btn.onclick = () => { shownAll.add(key); later.forEach(x => { x.hidden = false; }); btn.remove(); };
+        s.append(btn);
+      }
       if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
       return s;
     },

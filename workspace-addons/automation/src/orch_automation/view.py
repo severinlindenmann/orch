@@ -444,8 +444,7 @@ def _schedules(
                 },
             )
         )
-    # one-time wake-ups ("check again in 2 hours") sit in the same table, so every automation reads as
-    # either a repeat or a single run
+    # one-time wake-ups ("check again in 2 hours"): rows without a switch; build() puts them in their own table
     for t in tickets:
         w = t.get("waiting_on") or {}
         until = parse(w.get("until")) if w.get("kind") == "time" else None
@@ -463,7 +462,6 @@ def _schedules(
                         "last": "Not yet",
                     },
                     "link": t["id"],
-                    "subtitle": "One-time wake-up",
                     "actions": [{"label": "Start now", "action": _act("run", t["id"])}],
                 },
             )
@@ -531,6 +529,10 @@ def _runs(root: Path) -> list[dict]:
     return out
 
 
+SHOW = 5  # rows a table shows before "Show more"
+ROWS = 100  # rows a table carries at most (the contract's limit); the rest is "+N more"
+
+
 def build(root: Path, now: datetime | None = None) -> dict:
     now = now or datetime.now(UTC)
     tickets = orchcli.tickets(root)
@@ -545,17 +547,47 @@ def build(root: Path, now: datetime | None = None) -> dict:
     scripts_waiting = frozenset(t["id"] for t in tickets if scheduled(t) and _script_waits(root, t))
     sched_rows = _schedules(tickets, now, bool(pid), runs, waiting, scripts_waiting)
     if sched_rows:
-        table = {
-            "type": "table",
-            "columns": [
-                {"key": "schedule", "label": "Ticket", "type": "text"},
-                {"key": "repeats", "label": "Plan", "type": "text"},
-                {"key": "next", "label": "Next time", "type": "text"},
-                {"key": "last", "label": "Last time", "type": "text"},
-            ],
-            "rows": sched_rows[:20],
-            "more": max(0, len(sched_rows) - 20),
-        }
+        # ORCH-537 (owner 18 Nov): repeats and one-time wake-ups in two compact tables, the first rows shown
+        # and the rest behind "Show more"
+        repeat_rows = [r for r in sched_rows if "toggle" in r]
+        once_rows = [r for r in sched_rows if "toggle" not in r]
+        tables = []
+        if repeat_rows:
+            tables.append(
+                {
+                    "type": "table",
+                    "title": "Repeating",
+                    "meta": str(len(repeat_rows)),
+                    "compact": True,
+                    "show": SHOW,
+                    "columns": [
+                        {"key": "schedule", "label": "Ticket", "type": "text"},
+                        {"key": "repeats", "label": "Plan", "type": "text"},
+                        {"key": "next", "label": "Next time", "type": "text"},
+                        {"key": "last", "label": "Last time", "type": "text"},
+                    ],
+                    "rows": repeat_rows[:ROWS],
+                    "more": max(0, len(repeat_rows) - ROWS),
+                }
+            )
+        if once_rows:
+            tables.append(
+                {
+                    "type": "table",
+                    "title": "Once",
+                    "meta": str(len(once_rows)),
+                    "compact": True,
+                    "show": SHOW,
+                    "columns": [
+                        {"key": "schedule", "label": "Ticket", "type": "text"},
+                        {"key": "next", "label": "Starts", "type": "text"},
+                    ],
+                    "rows": [
+                        {**r, "cells": {k: r["cells"][k] for k in ("schedule", "next")}} for r in once_rows[:ROWS]
+                    ],
+                    "more": max(0, len(once_rows) - ROWS),
+                }
+            )
         days = []
         local_now = now.astimezone()
         for n in range(7):
@@ -579,7 +611,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
             "days": days,
         }
         # the week strip sits above the stable table, and only with two or more schedules (one needs no calendar)
-        blocks += [week, table] if len(sched_rows) >= 2 else [table]
+        blocks += [week, *tables] if len(sched_rows) >= 2 else tables
     else:
         blocks.append(
             {

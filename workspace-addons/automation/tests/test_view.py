@@ -380,7 +380,7 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     v = build(ws, T(7))
     check(v)
     (table,) = blocks(v, "table")
-    assert "title" not in table
+    assert table["title"] == "Repeating" and table["meta"] == "2"  # ORCH-537: titled since Once has its own table
     (week,) = blocks(v, "calendar")
     assert week["title"] == "Coming up" and "Workspace time" not in week["meta"]
     (runs,) = blocks(v, "list", "Recent starts")
@@ -570,7 +570,28 @@ def test_one_time_wake_up_is_a_row_marked_once(ws, monkeypatch):
     add_ticket(ws, "t_rec00002", title="Weekly", ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
     v = build(ws, T(8))
     check(v)
-    (table,) = blocks(v, "table")
-    cells = {r["cells"]["schedule"]: r["cells"] for r in table["rows"]}
-    assert cells["Check the build"]["repeats"] == "Once"
-    assert cells["Weekly"]["repeats"] == "Mondays at 07:00"
+    # ORCH-537: repeats and one-time wake-ups sit in two compact tables
+    (rep,) = blocks(v, "table", "Repeating")
+    (once,) = blocks(v, "table", "Once")
+    assert [r["cells"]["schedule"] for r in rep["rows"]] == ["Weekly"]
+    assert rep["rows"][0]["cells"]["repeats"] == "Mondays at 07:00" and rep["rows"][0]["toggle"]
+    assert [c["label"] for c in once["columns"]] == ["Ticket", "Starts"]
+    (row,) = once["rows"]
+    assert row["cells"] == {"schedule": "Check the build", "next": "Wed 04 Nov, 10:00"}
+    assert "subtitle" not in row and "toggle" not in row
+    assert [a["label"] for a in row["actions"]] == ["Start now"]
+    assert rep["compact"] and once["compact"] and rep["show"] == once["show"] == 5
+
+
+def test_long_tables_show_five_rows_then_show_more(ws, monkeypatch):
+    """ORCH-537: every row is sent (up to 100), the page shows five and the rest behind Show more."""
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    for n in range(8):
+        add_ticket(ws, f"t_wake{n:04d}", title=f"Wake {n}", waiting_on={"kind": "time", "until": "2026-11-04T10:00:00Z"})
+    v = build(ws, T(8))
+    check(v)
+    assert not blocks(v, "table", "Repeating")
+    (once,) = blocks(v, "table", "Once")
+    assert len(once["rows"]) == 8 and once["show"] == 5 and once["more"] == 0

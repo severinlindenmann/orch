@@ -574,9 +574,15 @@ dialog.report-dialog .actions{margin-top:12px}
 .blk-table .subline{display:block;font-size:12px;line-height:16px;color:var(--text-faint);margin-top:4px}
 .blk-table td .row{flex-wrap:nowrap}
 /* Short cells and button labels never break ("Edi/t", "Run/now"); the first cell (the name) may wrap, a narrow window scrolls the table. */
-.blk-table td:not(:first-child),.blk-table td .btn{white-space:nowrap}
+.blk-table th,.blk-table td:not(:first-child),.blk-table td .btn{white-space:nowrap}
 .blk-table td:has(.row){width:1%}
 .blk-table .cell-link{color:var(--text);font-weight:500;text-decoration:none}.blk-table .cell-link:hover{text-decoration:underline}
+/* compact table (add-on view `compact`, ORCH-537): 40 px rows, the quiet line sits on the name line instead of below it */
+.blk-table.data-table.compact td{padding-top:4px;padding-bottom:4px;line-height:20px}
+.blk-table.data-table.compact th{padding-top:6px;padding-bottom:6px}
+@media(min-width:721px){.blk-table.compact .subline{display:inline;margin:0 0 0 var(--s2)}}
+/* "Show N more" under a table that shows its first rows only (add-on view `show`) */
+.blk-show{margin:var(--s2) var(--s3)}
 .repeat-dialog{width:min(640px,calc(100% - 32px))}
 .repeat-dialog .form-fields{display:grid;gap:24px}
 .repeat-block{border:0;padding:0;margin:0;min-width:0}.repeat-block legend{margin-bottom:8px;padding:0}
