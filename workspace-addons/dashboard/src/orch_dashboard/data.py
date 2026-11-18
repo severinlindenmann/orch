@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -199,9 +200,15 @@ def _valid_ticket(t, stem: str | None = None) -> bool:
     )
 
 
+@functools.lru_cache(maxsize=8)
+def _resolved(root: str) -> Path:
+    """The workspace folder with links resolved, worked out once per process (it was once per proof file)."""
+    return Path(root).resolve()
+
+
 def _file_here(root: Path, tid: str, ref: str) -> int | None:
     """Size of this proof file if it is on this computer, else None. Looked up under the workspace or the ticket's evidence folder, never outside."""
-    base = root.resolve()
+    base = _resolved(str(root))
     for cand in (root / ref, root / ".orch" / "tickets" / tid / "evidence" / Path(ref).name):
         try:
             p = cand.resolve()
@@ -216,11 +223,12 @@ def _file_here(root: Path, tid: str, ref: str) -> int | None:
     return None
 
 
-def _mark_missing_proofs(root: Path, t: dict) -> None:
+def _mark_missing_proofs(root: Path, t: dict, tail: int | None = None) -> None:
+    """`missing` / `size` on each file proof. tail=n: only the last n proofs per task (a live row shows no
+    more, slim_row)."""
     for c in t.get("checklist", []):
-        for ev in (
-            c.get("evidence", []) if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []
-        ):
+        evs = c.get("evidence", []) if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []
+        for ev in evs[-tail:] if tail else evs:
             if (
                 isinstance(ev, dict)
                 and ev.get("type") == "file"
@@ -560,15 +568,14 @@ def load_live_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dic
     rows = _index_rows(root) if orch_bin == SELF else None
     if rows is not None:
         ids = live_ids(rows)
-        tickets, skipped, _ = _shape_items(root, orch_bin, [(t, None) for t in _read_many(root, ids)])
+        tickets, skipped, _ = _shape_items(root, orch_bin, [(t, None) for t in _read_many(root, ids)], True)
         counts = ticket_counts(rows)
     else:  # no index (an older core, a test's orch): the full list, cut before it is shaped
         items = _raw_list(root, orch_bin)
         rows = _rows_of(items)
         keep = set(live_ids(rows))
-        tickets, skipped, _ = _shape_items(
-            root, orch_bin, [(t, s) for t, s in items if not _valid_ticket(t, s) or t["id"] in keep]
-        )
+        keep_items = [(t, s) for t, s in items if not _valid_ticket(t, s) or t["id"] in keep]
+        tickets, skipped, _ = _shape_items(root, orch_bin, keep_items, True)
         counts = ticket_counts(rows)
     _add_parts(tickets, _parts(rows))
     return tickets, skipped, counts
@@ -583,7 +590,9 @@ def _rows_of(items: list[tuple]) -> list[dict]:
     ]
 
 
-def _shape_items(root: Path, orch_bin: str | None, items: list[tuple]) -> tuple[list[dict], int, list[dict]]:
+def _shape_items(
+    root: Path, orch_bin: str | None, items: list[tuple], live: bool = False
+) -> tuple[list[dict], int, list[dict]]:
     """Shape the read tickets as the page reads them: (tickets newest first, skipped, rows of all of them)."""
     branch_cache: dict = {}  # the work branches, listed once per load (see _review_tip)
     tickets, skipped = [], 0
@@ -593,7 +602,8 @@ def _shape_items(root: Path, orch_bin: str | None, items: list[tuple]) -> tuple[
         if not _valid_ticket(t, stem):
             skipped += 1
             continue
-        tickets.append(_shape_ticket(root, orch_bin, t, branch_cache, from_file=stem is not None))
+        tail = EVIDENCE_TAIL if live else None  # a live row shows the last proofs only (slim_row)
+        tickets.append(_shape_ticket(root, orch_bin, t, branch_cache, stem is not None, tail))
     _mark_tickets(root, tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     rows = [
@@ -689,7 +699,12 @@ def ticket_rows_view(tickets: list[dict]) -> list[dict]:
 
 
 def _shape_ticket(
-    root: Path, orch_bin: str | None, t: dict, branch_cache: dict, from_file: bool = True
+    root: Path,
+    orch_bin: str | None,
+    t: dict,
+    branch_cache: dict,
+    from_file: bool = True,
+    evidence_tail: int | None = None,
 ) -> dict:
     """One ticket as the page reads it (a full build does this for every ticket, a click for its own).
     from_file=False: the core's answer, already shown as provable here (ORCH-522: doing it again for every
@@ -708,7 +723,7 @@ def _shape_ticket(
     back = (t.get("work") or {}).get("bring_back") or {}
     if back.get("state") == "waiting":
         t["bring_back"] = _bring_back_view(back, _copy_review(orch_bin, root, t["id"]))
-    _mark_missing_proofs(root, t)
+    _mark_missing_proofs(root, t, evidence_tail)
     mobile.mark_chat_history(t)
     return t
 
