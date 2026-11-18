@@ -39,6 +39,9 @@ module.exports = {
     await open('#ticket/' + tid);
     await reload();
     const ask = page.getByRole('button', { name: 'Ask your helper to update' });
+    // A slow runner can draw the ticket before its waiting copy is read: wait, reload once more, wait again.
+    const shown = () => ask.first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+    if (!(await shown())) { await reload(); await shown(); }
     must(await ask.count() > 0, 'the waiting changes are not on the ticket:\n' + (await text()).slice(0, 500));
     const asked = await act('copies.ask-update', () => ask.click(), { refused: true });
     must(asked.text.length > 5, 'asking the helper to update gave no readable answer');

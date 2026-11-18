@@ -78,6 +78,14 @@ async function serve() {
     else if (l.startsWith('token ') && waiting.length) waiting.shift()(l.slice(6).trim());
   });
   const stop = () => {
+    // first the workspace's own services (dashboard, add-on pages): they keep writing into .orch while it is removed
+    for (const ws of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+      if (!fs.existsSync(path.join(dir, ws, '.orch'))) continue;
+      try {
+        execFileSync('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), 'uv', 'run', '-q', '--project',
+          path.join(REPO, 'workspace'), 'python', '-I', '-m', 'orch', 'stop'], { cwd: path.join(dir, ws), stdio: 'ignore', timeout: 60000 });
+      } catch (e) { /* nothing running */ }
+    }
     try { child.stdin.end(); process.kill(child.pid); } catch (e) { /* gone */ }
     // a helper run the page started (its tmux and wrapper) outlives the server: stop every process that names this
     // run's own folder, and nothing else
@@ -87,7 +95,12 @@ async function serve() {
         if (m && m[2].includes(dir + path.sep) && Number(m[1]) !== process.pid) try { process.kill(Number(m[1])); } catch (e) { /* gone */ }
       }
     } catch (e) { /* no ps */ }
-    if (path.dirname(dir) === root && path.basename(dir).startsWith('clickthrough-')) fs.rmSync(dir, { recursive: true, force: true });
+    // a process that was just stopped can still write a last file: retry instead of failing on ENOTEMPTY / EBUSY
+    if (path.dirname(dir) === root && path.basename(dir).startsWith('clickthrough-')) {
+      try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch (e) {
+        console.error(`could not remove the throw-away folder ${dir}: ${e.code || e.message}`);
+      }
+    }
   };
   try {
     const { base, ids } = await started;
