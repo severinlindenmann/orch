@@ -205,8 +205,8 @@ def make(ws: Path, w: World, take=None, waiter=None, logs=None):
     def sleep(secs):
         t[0] += secs
 
-    def real_waiter(u, before_merge):
-        return prwait.run_one(u, True, src=Src(w, u), before_merge=before_merge, queue=True)
+    def real_waiter(u, before_merge, merge=True, stop=None):
+        return prwait.run_one(u, merge, src=Src(w, u), before_merge=before_merge, queue=True, stop=stop)
 
     return runner.Runner(
         ws, w, lambda repo: Git(store.folder(ws), REPO, url=str(w.bare)), waiter=waiter or real_waiter,
