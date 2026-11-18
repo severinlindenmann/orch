@@ -6,8 +6,8 @@ merges the group with a merge commit. When that merge commit has exactly the fil
 tree), the push to develop would run the very same tests on the very same files again. This answers `true` then,
 and ci.yml skips every suite of that push; macOS and Windows still run nightly and in the release check.
 
-Proven = the commit has two parents, its tree equals the tree of its second parent, and a `ci` run of that second
-parent on an `orch-queue/` branch finished green. Anything else (a lone pull request merged on its own light
+Proven = the commit has two parents, its tree equals the tree of its second parent, and a `ci` pull request run of
+that second parent on an `orch-queue/` branch finished green. Anything else (a lone pull request merged on its own light
 checks, a merge by a person, develop moved in between, GitHub did not answer) is `false`: the push runs as before.
 
 Usage: python3 scripts/ci_proven.py --sha <commit> --repo <owner/name>   prints true or false (exit 0)
@@ -35,6 +35,7 @@ def decide(parents: list[str], tree: str, tree_of_second: str, runs: list[dict])
     for r in runs:
         if (
             r.get("name") == "ci"
+            and r.get("event") == "pull_request"  # a manual run on a queue branch skips the smoke jobs
             and str(r.get("head_branch") or "").startswith("orch-queue/")
             and r.get("status") == "completed"
             and r.get("conclusion") == "success"

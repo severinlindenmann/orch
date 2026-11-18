@@ -47,6 +47,15 @@ def test_a_changed_module_runs_the_tests_that_import_it_and_no_others():
     assert "--part" not in cmd
 
 
+def test_a_multiline_import_counts():
+    texts = {"test_m.py": "from orch import (\n    other,\n    store,\n)\n", "test_rest.py": "x" * 10_000}
+    assert light.pick_tests(["workspace/src/orch/store.py"], texts) == (["test_m.py"], False)
+
+
+def test_a_module_in_a_sub_package_runs_the_sample():
+    assert light.pick_tests(["workspace/src/orch/sub/helper.py"], TEXTS) == ([], True)
+
+
 def test_a_changed_test_file_runs_itself():
     tests, broad = light.pick_tests(["workspace/tests/test_cli.py"], TEXTS)
     assert tests == ["test_cli.py"] and not broad
@@ -95,7 +104,13 @@ def test_every_addon_light_runs_exists_as_a_folder():
 
 
 # -- proven develop push ---------------------------------------------------------------------------------------
-GREEN = {"name": "ci", "head_branch": "orch-queue/develop-1-abc", "status": "completed", "conclusion": "success"}
+GREEN = {
+    "name": "ci",
+    "event": "pull_request",
+    "head_branch": "orch-queue/develop-1-abc",
+    "status": "completed",
+    "conclusion": "success",
+}
 
 
 def test_same_files_as_a_green_queue_group_is_proven():
@@ -109,6 +124,7 @@ def test_not_proven_without_a_merge_commit_same_files_or_a_green_group_run():
     assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, conclusion="failure")])[0]
     assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, head_branch="feat/x")])[0]  # its own light run
     assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, name="rules")])[0]
+    assert not proven.decide(["p1", "p2"], "T", "T", [dict(GREEN, event="workflow_dispatch")])[0]
     assert not proven.decide(["p1", "p2"], "T", "T", [])[0]
 
 

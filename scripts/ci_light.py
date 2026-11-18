@@ -43,19 +43,20 @@ TEST_FILE = re.compile(r"^workspace/tests/(test_[^/]+\.py)$")
 CORE_MODULE = re.compile(r"^workspace/src/orch/([A-Za-z0-9_]+)\.py$")
 ADDON = re.compile(r"^workspace-addons/([^/]+)/")
 UI = re.compile(r"^workspace/src/orch_ui/")
+OTHER_PY = re.compile(r"^workspace/src/.*\.py$")  # a module the picker cannot name (a sub-package): the sample
 
 
 def changed(base: str) -> list[str]:
     out = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...HEAD"], capture_output=True, text=True, check=True, cwd=ROOT
+        ["git", "diff", "--name-only", "-z", f"{base}...HEAD"], capture_output=True, text=True, check=True, cwd=ROOT
     ).stdout
-    return [x.strip() for x in out.splitlines() if x.strip()]
+    return [x for x in out.split("\0") if x]  # -z: no quoting of unusual names
 
 
 def imports(module: str) -> re.Pattern[str]:
     """A test reads <module> when it names orch.<module> or imports it from the orch package."""
     m = re.escape(module)
-    return re.compile(rf"\borch\.{m}\b|^\s*from orch import [^\n]*\b{m}\b", re.MULTILINE)
+    return re.compile(rf"\borch\.{m}\b|^\s*from orch import (?:\([^)]*|[^\n(]*)\b{m}\b", re.MULTILINE)
 
 
 def test_texts() -> dict[str, str]:
@@ -85,6 +86,9 @@ def pick_tests(files: list[str], texts: dict[str, str]) -> tuple[list[str], bool
             if not found:  # no test imports it (read through the CLI): the sample instead
                 return [], True
             picked.update(found)
+            continue
+        if OTHER_PY.match(f) and not UI.match(f):
+            return [], True
     total = sum(len(x) for x in texts.values()) or 1
     if sum(len(texts[n]) for n in picked) / total > MAX_SHARE:
         return [], True
