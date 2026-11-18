@@ -140,6 +140,11 @@
             }
           }
         },
+        "skill_dirs": {
+          "type": "array", "maxItems": 8,
+          "description": "Optional. The tool's own skill folders of the account, read only (inventory.md, source harness): one sub-folder per skill, names and content hashes only. {home} = the account's home folder.",
+          "items": { "type": "string", "pattern": "^\\{home\\}/[A-Za-z0-9_./-]{1,200}$" }
+        },
         "permissions": {
           "type": "object", "additionalProperties": false,
           "propertyNames": { "enum": ["ask", "auto", "full"] },
@@ -215,7 +220,8 @@
             "ends": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Optional. Field with the end time (an ISO time, or seconds or milliseconds since 1970). Absent = the tool tells no end time: no early warning." },
             "renew": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Optional (with links). The tool's own sign-in step, arguments after the detect binary. orch runs it in the background from the warning's Renew (renew.py): it hands the person only the sign-in link and passes a code the sign-in page shows to the tool's input. Nothing else of its output is kept." },
             "links": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^https://[a-z0-9.-]+/$" }, "description": "Required with renew. How the sign-in link starts; any other link the tool prints is never shown." },
-            "how": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional (ORCH-48). What the person does to renew when orch cannot start the sign-in itself; shown on the warning." }
+            "how": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional (ORCH-48). What the person does to renew when orch cannot start the sign-in itself; shown on the warning." },
+            "sign_in": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._:=/@,'\"+-]{0,119}$", "description": "Optional (ORCH-218). The exact terminal command that signs in again (e.g. '<tool> login'); the warning shows it with a Copy button. orch never runs it." }
           },
           "dependentRequired": { "renew": ["links"], "links": ["renew"], "ends": ["logged_in"] }
         },

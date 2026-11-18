@@ -109,9 +109,10 @@ def test_found_group_shows_only_manage_with_orch_and_nothing_when_empty(ws):
     (group,) = view["blocks"][0]["groups"]
     assert group["title"] == "Found on this computer" and len(group["items"]) == 2
     item, real = group["items"]
-    # a real label with capitals gets a plain page id; Manage with orch still sends the real found id
+    # a real label with capitals gets a plain page id; Manage with orch sends it (the page draws a button only
+    # when its target is the item's own id) and adopt finds the real job from it
     assert real["id"].startswith("found-")
-    assert real["panel"]["buttons"][0]["action"]["args"]["target"] == "launchd:ch.Example.Forwarder"
+    assert real["panel"]["buttons"][0]["action"]["args"]["target"] == real["id"]
     assert item["state"] == {"label": "Running, not managed", "tone": "neutral"}
     assert item["panel"]["buttons"] == [
         {
@@ -155,3 +156,38 @@ def test_a_platform_note_shows_as_the_notice(cli, fake):
     fake.unavailable = "no session"
     view = _view(cli)
     assert view["notice_tone"] == "warn" and "no session" in view["notice"]
+
+
+def test_an_adopted_service_shows_its_own_log_and_remove_says_it_is_only_forgotten(cli, ws, monkeypatch):
+    # review ORCH-378: the page read logs/<id>.log (empty or an older service's) and promised "it stops now"
+    import orch_services.cli as cli_mod
+    from orch_services import store
+    from orch_services.view import build
+
+    store.save(
+        ws,
+        {
+            "schema": store.SCHEMA,
+            "id": "notes",
+            "name": "Notes sync",
+            "command": ["/usr/bin/python3", "sync.py"],
+            "cwd": ".",
+            "auto": True,
+            "created_at": store.now(),
+            "made_by": {"found": True},
+            "adopted": {"kind": "systemd", "entry": "notes-sync.service", "path": None},
+        },
+    )
+    old = store.log_path(ws, "notes")
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("left over from an older service\n", encoding="utf-8")
+    seen = []
+    monkeypatch.setattr(cli_mod, "_log_lines", lambda root, rec, n: seen.append(rec["id"]) or ["job started"])
+    row = {"id": "notes", "name": "Notes sync", "state": "running", "since": None, "auto": True}
+    row["made_by"] = {"found": True}
+    item = build(ws, ([row], 0, None))["blocks"][0]["groups"][0]["items"][0]
+    assert item["panel"]["log"]["lines"] == ["job started"] and seen == ["notes"]
+    assert item["panel"]["danger"]["confirm"]["lines"] == [
+        "orch stops managing it and it leaves this list.",
+        "The job itself is left as it is on this computer.",
+    ]

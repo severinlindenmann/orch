@@ -27,6 +27,10 @@ NAME_RE = re.compile(r"^[a-z0-9-]{2,40}$")  # existing apps (stop, remove, ...)
 DEPLOY_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".DS_Store"}
 BROKEN = "wrong key or broken file"
+# The dashboard page (`publish view`) waits 10 s for the whole answer. One request that stalls (a lost
+# connection, the server busy) must not use that up: it is cut after VIEW_TIMEOUT and tried again (net retries
+# GETs), so a single stall costs about 4 s instead of the page falling back to its old copy (ORCH-403).
+VIEW_TIMEOUT = 3.0
 
 
 def b64u(raw: bytes) -> str:
@@ -97,9 +101,9 @@ def _cfg(root: Path) -> dict:
     return net.load_service(root, "publish")
 
 
-def _api(root: Path, method: str, path: str, body=None):
+def _api(root: Path, method: str, path: str, body=None, timeout: float = 120):
     cfg = _cfg(root)
-    return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body)[1]
+    return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)[1]
 
 
 def whoami(root: Path) -> dict:
@@ -338,10 +342,11 @@ def extend(root: Path, ident: str, days: int) -> dict:
     return res
 
 
-def _all_files(root: Path) -> list:
+def _all_files(root: Path, timeout: float = 120) -> list:
     files, after = [], None
     for _ in range(1000):  # a hard stop: 100 000 files
-        page = _api(root, "GET", "/v1/files?limit=100" + (f"&after={after}" if after else ""))
+        q = "/v1/files?limit=100" + (f"&after={after}" if after else "")
+        page = _api(root, "GET", q, timeout=timeout)
         files += net.items(page)
         after = page.get("next") if isinstance(page, dict) else None
         if not after:
@@ -349,8 +354,8 @@ def _all_files(root: Path) -> list:
     return files
 
 
-def list_all(root: Path) -> dict:
-    files = _all_files(root)
+def list_all(root: Path, timeout: float = 120) -> dict:
+    files = _all_files(root, timeout)
     keys = net.read_json(_keys_path(root), {})
     names = net.read_json(_names_path(root), {})
     for f in files:
@@ -358,7 +363,7 @@ def list_all(root: Path) -> dict:
             f["key"] = keys[f["id"]]
         if f["id"] in names:
             f["name"] = names[f["id"]]
-    apps = net.items(_api(root, "GET", "/v1/apps"))
+    apps = net.items(_api(root, "GET", "/v1/apps", timeout=timeout))
     tokens = net.read_json(_tokens_path(root), {})
     for a in apps:
         if ("auth" in a and a["auth"] or "auth" not in a and not a.get("public")) and a["name"] in tokens:
@@ -411,7 +416,7 @@ def view(root: Path) -> dict:
                 }
             ],
         }
-    r = list_all(root)
+    r = list_all(root, VIEW_TIMEOUT)
     cap = 50
     files = [
         {

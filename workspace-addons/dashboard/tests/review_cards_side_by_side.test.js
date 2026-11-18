@@ -26,3 +26,11 @@ test('tiles open large on click and the card names its ticket', () => {
   assert.match(kit, /UI\.reviewViewer\(out\.map/);
   assert.match(home, /keyTag\(t, h\), title/);
 });
+
+// ORCH-408: a check card shows its detail plainly lower down, never behind a Details toggle (owner rule).
+test('the card document shows details as plain text, not a Details toggle', () => {
+  const kitJs = read('../../../workspace/src/orch_ui/static/widgets.js');
+  assert.match(kitJs, /el\('div','doc-details'\)/);
+  assert.doesNotMatch(kitJs, /el\('details','doc-details'\)/);
+  assert.doesNotMatch(kitJs, /el\('summary','','Details'\)/);
+});
