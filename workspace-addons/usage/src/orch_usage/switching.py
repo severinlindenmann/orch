@@ -255,7 +255,11 @@ def judge(a: dict, use: SubscriptionUse, pace: dict[str, float], ahead: float) -
 
 
 def choose(
-    accounts: list[dict], found: list[SubscriptionUse], pace: dict[str, float], ahead: float
+    accounts: list[dict],
+    found: list[SubscriptionUse],
+    pace: dict[str, float],
+    ahead: float,
+    skip: frozenset[str] = frozenset(),
 ) -> Choice:
     """The first account in order that is good; else stay on the active one while it is under its limits; else the
     first one under its limits. all_at_limit when no account is good."""
@@ -269,12 +273,12 @@ def choose(
             continue
         cands.append(judge(a, f, pace, ahead))
     active = next((c for c in cands if c.use.active), None)
-    good = [c for c in cands if c.good]
+    good = [c for c in cands if c.good and c.account["id"] not in skip]  # skip: a switch to it just failed
     if good:
         return Choice(good[0], active, cands, False, "first account under its limits")
     if active and active.under:
         return Choice(active, active, cands, True, "every account is at or near a limit; staying")
-    under = [c for c in cands if c.under]
+    under = [c for c in cands if c.under and c.account["id"] not in skip]
     if under:
         return Choice(under[0], active, cands, True, "every account is at or near a limit; this one has room")
     return Choice(None, active, cands, True, "every account is at its limit")
@@ -306,6 +310,32 @@ def _stuck(key: str, read=cswap.read) -> bool:
         return any(f.active and f.key == key for f in read())
     except cswap.ReaderError:
         return False
+
+
+def _recent_failures(memory: dict, at: datetime) -> dict[str, str]:
+    """Accounts a switch failed to within RETRY_MINUTES: {account id: when}. (An older memory kept one {to, at}.)"""
+    raw = memory.get("failed") or {}
+    if "to" in raw and "at" in raw:
+        raw = {raw["to"]: raw["at"]}
+    out = {}
+    for k, v in raw.items():
+        try:
+            if isinstance(v, str) and at - store.to_time(v) < timedelta(minutes=RETRY_MINUTES):
+                out[k] = v
+        except (ValueError, TypeError):
+            pass
+    return out
+
+
+def alerts(accounts: list[dict], ch: Choice, failed: dict[str, str]) -> list[str]:
+    """What the person should see now (list, status, the page), in plain words; empty when all is well."""
+    out = []
+    if ch.all_at_limit:
+        out.append("Every account is at or near its limit.")
+    names = {a["id"]: a["label"] for a in accounts}
+    for k in failed:
+        out.append(f"Could not switch to {names.get(k, k)}; Usage tries the next account in order.")
+    return out
 
 
 def _row(what: str, a: dict | None, before, after, why: str, at: datetime) -> dict:
@@ -347,8 +377,9 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     memory = _read(memory_path(root))
     active_use = next((f for f in found if f.active), None)
     pace = update_pace(memory, active_use, at)
-    ch = choose(accounts, found, pace, ahead)
     on = switching_on(root)
+    failed = _recent_failures(memory, at)  # account id -> when a switch to it failed, within RETRY_MINUTES
+    ch = choose(accounts, found, pace, ahead, frozenset(failed))
     hist: list[dict] = []
     did = "stay"
 
@@ -369,7 +400,7 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     memory["all_at_limit"] = ch.all_at_limit
 
     t = ch.target
-    if t and (ch.active is None or t.use.key != ch.active.use.key):
+    while t and (ch.active is None or t.use.key != ch.active.use.key):
         before = ch.active.account["label"] if ch.active else None
         if ch.active and not ch.active.good and ch.active.why:
             why = f"{ch.active.account['label']}: {ch.active.why}"  # the account left, not the new one
@@ -390,19 +421,13 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                     )
                 )
             memory["would"] = plan
+            break
         else:
             memory.pop("would", None)
-            last_fail = memory.get("failed") or {}
-            recent = (
-                last_fail.get("to") == t.account["id"]
-                and isinstance(last_fail.get("at"), str)
-                and at - store.to_time(last_fail["at"]) < timedelta(minutes=RETRY_MINUTES)
-            )
-            if recent:
-                did = "waiting to try again"
-            elif switch(t.use.slot) and _stuck(t.use.key):
+            if switch(t.use.slot) and _stuck(t.use.key):
                 did = "switched"
                 memory.pop("failed", None)
+                failed = {}
                 prev = memory.get("switched") or {}
                 again = (
                     prev.get("to") == t.account["id"]
@@ -437,9 +462,11 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                     "at": prev["at"] if again else _iso(at),
                     "back_noted": bool(again),
                 }
+                break
             else:
                 did = "switch failed"
-                memory["failed"] = {"to": t.account["id"], "at": _iso(at)}
+                failed[t.account["id"]] = _iso(at)
+                memory["failed"] = dict(failed)
                 hist.append(
                     _row(
                         f"could not switch to {t.account['label']}",
@@ -450,9 +477,15 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
                         at,
                     )
                 )
+                # try the next good account now, not the same one again in RETRY_MINUTES
+                ch = choose(accounts, found, pace, ahead, frozenset(failed))
+                t = ch.target
     else:
         memory.pop("would", None)
+        if did == "stay" and failed and ch.active and not ch.active.good:
+            did = "waiting to try again"  # the accounts to go to just failed; tried again after RETRY_MINUTES
 
+    memory["alerts"] = alerts(accounts, ch, failed)
     memory["last"] = {
         "at": _iso(at),
         "did": did,

@@ -75,7 +75,9 @@
     const day = at && !isNaN(at) ? (when ? when(at, now) : at.toISOString().slice(0, 16).replace('T', ' ')) : 'Earlier';
     const here = !!(r.reopenable || r.current);
     const facts = [r.turns ? plural(r.turns, 'message', 'messages') : (here ? 'No messages' : ''), r.label].filter(Boolean);
-    return {id: r.id, day, title: r.title || 'No first message', facts: facts.join(' · '), current: !!r.current, reopen: !!r.reopenable,
+    /* the one in use, still on this computer: a plain start continues it (the server never marks it reopenable) */
+    const cont = !!(r.current && r.readable !== false);
+    return {id: r.id, day, title: r.title || 'No first message', facts: facts.join(' · '), current: !!r.current, reopen: !!r.reopenable, cont,
       why: r.current ? '' : r.reopenable ? '' : 'On another computer, so it cannot be reopened here.'};
   }
   /* The earlier sessions: loading, error, empty or list; newest first, at most 10. */
@@ -85,9 +87,11 @@
     const rows = (Array.isArray(data.sessions) ? data.sessions : []).slice(0, KEEP).map(r => sessionRow(r, now, when));
     return {state: rows.some(r => !r.current) ? 'list' : 'empty', rows};
   }
-  /* The last conversation Continue picks up (the newest earlier session that can be reopened here), or null. */
+  /* The last conversation Continue picks up, or null: the session in use when it is on this computer (a stopped helper
+     keeps it; a plain start continues it), else the newest earlier session that can be reopened here. */
   function last(rows) {
-    return (Array.isArray(rows) ? rows : []).find(r => r.reopen) || null;
+    const list = Array.isArray(rows) ? rows : [];
+    return list.find(r => r.cont) || list.find(r => r.reopen) || null;
   }
   /* The main button (owner, ORCH-483): Continue when an earlier session can be reopened, else Start on the usual tool
      and model. Both send run.start without --fresh: orch continues the last conversation when there is one, else it
