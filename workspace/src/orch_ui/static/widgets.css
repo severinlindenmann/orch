@@ -1037,6 +1037,8 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-pt{flex:1 1 0;min-width:0;overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 button.live-pt{min-height:32px;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;font-weight:600;text-align:left;cursor:pointer}
 button.live-pt:hover{color:var(--brand)}
+.live-ren{display:flex;flex:1 1 0;gap:var(--s2);align-items:center;min-width:0}
+.live-ren .input{flex:1 1 0;min-width:0}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
@@ -1166,6 +1168,74 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
 
+/* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
+   filter, then bands that fold away (Pinned, Needs you and working, In line, Idle and no session). Needs-you tiles are
+   orange and come first; a working tile shows one sentence and a peek of its last lines. In line and idle are one
+   line each. From 12 sessions (data-many) a long band scrolls inside itself; at 1100 px and wider the bands sit side by
+   side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
+.wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
+.wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
+.wall-tools .input{max-width:360px}
+.wall-body{display:contents}
+.wall-sum{order:-2;display:grid;gap:var(--s1)}
+.wall-sum>.meta{margin:0}
+.wall-hero{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);margin:0}
+.wall-hero .wall-st{font-size:var(--fs-4);line-height:28px;font-weight:600}
+.wall-st{display:inline-flex;align-items:center;gap:var(--s1);font-size:var(--fs-meta);line-height:16px;font-weight:600;color:var(--text-muted);white-space:nowrap}
+.wall-st[data-s=needs-you]{color:var(--needs-you)}
+.wall-st[data-s=working]{color:var(--working)}
+.wall-sym{font-family:var(--font-mono)}
+.wall-key{font-family:var(--font-mono);font-size:var(--fs-meta);color:var(--text-muted);white-space:nowrap}
+.wall-bands{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4);align-items:start}
+.wall-band{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s2);min-width:0}
+.wall-bh{margin:0;font-size:var(--fs-body);line-height:20px;letter-spacing:0;color:var(--text-muted)}
+.wall-bt{display:inline-flex;gap:var(--s2);align-items:center;min-height:var(--s6);padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer}
+.wall-bt:hover{color:var(--text)}
+.wall-chev{width:12px;color:var(--text-faint)}
+.wall-none{margin:0}
+.wall-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,264px),1fr));gap:var(--s3);align-content:start}
+.wall-tile{display:flex;flex-direction:column;gap:var(--s2);min-width:0;padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);transition:border-color var(--dur-base) var(--ease-out),transform var(--dur-base) var(--ease-out)}
+.wall-tile:hover{border-color:var(--border-strong)}
+.wall-tile[data-s=needs-you]{border-color:var(--needs-you);background:var(--warning-soft)}
+.wall-open{display:flex;flex-direction:column;gap:var(--s1);flex:1;min-width:0;width:100%;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.wall-open:active{transform:scale(.99)}
+.wall-th{display:flex;gap:var(--s2);align-items:center;justify-content:space-between}
+.wall-tt{font-weight:600;overflow-wrap:anywhere}
+.wall-now{color:var(--text);overflow-wrap:anywhere}
+.wall-tile[data-s=needs-you] .wall-now{font-weight:600}
+.wall-peek{display:block;height:56px;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-meta);line-height:16px;white-space:pre;overflow:hidden;overflow-wrap:normal}
+.wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
+.wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
+.wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
+.wall-steps .progress{width:60px}
+.wall-steps .meta{margin:0}
+.wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}
+.wall-lines{display:grid;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden;container-type:inline-size}
+.wall-line{display:flex;gap:var(--s2);align-items:center;min-height:var(--touch);padding:var(--s1) var(--s3)}
+.wall-line+.wall-line{border-top:1px solid var(--border)}
+.wall-line:hover{background:var(--surface-2)}
+.wall-lopen{display:flex;gap:var(--s1) var(--s3);align-items:center;flex:1;min-width:0;min-height:var(--s7);padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.wall-line .wall-tt{white-space:nowrap}
+.wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
+.wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
+.wall-bands[data-many] [data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
+@container (max-width:900px){.wall-lmeta{display:none}}
+@container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
+@media(min-width:1100px){
+  .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .wall-band{grid-column:1/-1}
+  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=pin]){grid-column:span 2}
+  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=need]){grid-column:span 4}
+  .wall-bands:has([data-band=queue]) .wall-band:is([data-band=queue],[data-band=idle]){grid-column:span 3}
+}
+@media(max-width:720px){
+  .wall-tools .input{max-width:none}
+  .wall-tiles{grid-template-columns:minmax(0,1fr)}
+  .wall-bands[data-many] [data-many]{max-height:none}
+  .wall-lopen{flex-wrap:wrap}
+  .wall-lnow{flex-basis:100%;white-space:normal}
+}
+@media(prefers-reduced-motion:reduce){.wall-tile,.wall-open{transition:none}.wall-open:active{transform:none}}
 /* Review on a short screen (ORCH-420, owner's picture at 1144x755 and the 1280x800 walk): toasts sit top right while the
    answer buttons are on screen, so they never cover them; file tiles get smaller so the words box keeps its room; and a
    words box with more below shows a soft edge at the bottom (it scrolls), never a line cut in half. */
