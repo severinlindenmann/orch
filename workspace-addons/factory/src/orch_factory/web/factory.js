@@ -134,7 +134,9 @@
   // One review per stage (ORCH-335, owner 17 Nov): the stage's built result in a few lines (pictures of the built
   // screens, a short demo, the tests, whether the code is merged) and ONE Looks good / Change for the whole stage.
   // The pictures open big in the kit's result overlay; nothing here opens a ticket.
-  const reviews = order => array(order.reviews).filter(r => array(r?.tickets).some(validId));
+  // Results you just said Looks good to stay away even when the page's next answer is a slow, older one (ORCH-419).
+  const answered = new Set();
+  const reviews = order => array(order.reviews).filter(r => array(r?.tickets).some(t => validId(t) && !answered.has(t)));
   const RESULT_NAME = /^[A-Za-z0-9._-]{1,80}\.(png|jpg|jpeg|webp|gif|mp4|webm)$/;
   function resultSrc(order, file) {
     if (!file || !validId(order.id) || !validId(file.ticket) || !RESULT_NAME.test(String(file.name)) || String(file.name).includes('..')) return null;
@@ -216,10 +218,10 @@
     const status = meta(''); status.setAttribute('role', 'status'); status.hidden = true;
     const say = words => { status.textContent = words; status.hidden = false; };
     ok.addEventListener('click', async () => {
-      ok.disabled = change.disabled = true; status.hidden = true;
-      const result = await askDashboard({type: 'orch.looksgood', tickets});
-      if (result.error === undefined) return render();
-      say(result.error || 'Looks good could not be saved. Try again.'); ok.disabled = change.disabled = false;
+      ok.disabled = change.disabled = true; say('Saving…');  // the click shows at once (ORCH-419)
+      const result = await askDashboard({type: 'orch.looksgood', tickets}, 20000);
+      if (result.error === undefined) { for (const t of tickets) answered.add(t); return render(); }
+      say(result.error || 'Looks good could not be saved. Reload the page and try again.'); ok.disabled = change.disabled = false;
     });
     change.addEventListener('click', () => { buttons.hidden = true; changeBox.hidden = false; area.focus(); });
     back.addEventListener('click', () => { changeBox.hidden = true; buttons.hidden = false; change.focus(); });
