@@ -35,6 +35,7 @@ def sources(**over):
             "id": "a_key001",
             "label": "OpenAI credit",
             "tool": "codex",
+            "tool_label": "Codex",
             "type": "api-key",
             "on": True,
             "left": 100.0,
@@ -46,6 +47,7 @@ def sources(**over):
             "id": "a_cdx001",
             "label": "Codex subscription",
             "tool": "codex",
+            "tool_label": "Codex",
             "type": "subscription",
             "on": True,
             "week_used": 10.0,
@@ -60,7 +62,7 @@ def sources(**over):
 SHARE = {
     "order": ["a_sub001", "a_sub002", "a_key001", "a_cdx001"],
     "credit_kinds": ["reviews"],
-    "codex_one_in": 4,
+    "one_in": {"tool": "codex", "every": 4},
 }
 
 
@@ -93,10 +95,10 @@ def test_twenty_starts_follow_the_share(tmp_path):
 
 def test_starts_at_the_same_time_cannot_overspend_the_day(tmp_path):
     src = sources(a_key001={"day_limit": 5.0})  # room for 4 holds of 1.05, not 5
-    out, gate = [], threading.Barrier(8)
+    out, together = [], threading.Barrier(8)
 
     def go(i):
-        gate.wait()
+        together.wait()
         out.append(picker.pick(tmp_path, req(i, "reviews"), SHARE, src, TUE))
 
     threads = [threading.Thread(target=go, args=(i,)) for i in range(8)]
@@ -176,7 +178,7 @@ def test_a_failed_start_gives_the_money_back_and_its_retry_counts_once(tmp_path)
 
 
 def test_a_failed_start_does_not_count_for_one_in_n(tmp_path):
-    src, share = sources(), {**SHARE, "codex_one_in": 2}
+    src, share = sources(), {**SHARE, "one_in": {"tool": "codex", "every": 2}}
     assert picker.pick(tmp_path, req(1), share, src, TUE).source == "a_sub001"
     picker.failed(tmp_path, "s1")
     assert picker.pick(tmp_path, req(2), share, src, TUE).source == "a_sub001"  # still the first code start
@@ -203,7 +205,7 @@ def test_finished_uses_the_real_spend(tmp_path):
 def test_a_share_change_applies_to_the_next_start_and_keeps_the_holds(tmp_path):
     src = sources(a_key001={"day_limit": 2.0})
     assert picker.pick(tmp_path, req(1, "reviews"), SHARE, src, TUE).source == "a_key001"
-    new = {"order": ["a_key001", "a_sub001"], "codex_one_in": 0}
+    new = {"order": ["a_key001", "a_sub001"], "one_in": {}}
     p = picker.pick(tmp_path, req(2, "helpers"), new, src, TUE)
     assert (
         p.source == "a_sub001" and "OpenAI credit at its day limit" in p.why
@@ -242,7 +244,7 @@ def test_the_week_line():
 
 
 def test_ahead_of_the_week_moves_starts_to_credit_up_to_the_day_budget_and_the_week_turning_over(tmp_path):
-    share = {**SHARE, "week": {"wed": 70}, "ahead_dollars_day": 2.0, "codex_one_in": 0}
+    share = {**SHARE, "week": {"wed": 70}, "ahead_dollars_day": 2.0, "one_in": {}}
     ahead = sources(a_sub001={"week_used": 60.0}, a_sub002={"week_used": 55.0}, a_cdx001={"on": False})
     p1 = picker.pick(tmp_path, req(1, "helpers"), share, ahead, TUE)  # Tuesday 10:00: line about 33 %
     assert (

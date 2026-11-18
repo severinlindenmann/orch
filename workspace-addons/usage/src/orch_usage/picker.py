@@ -14,12 +14,13 @@ The share (what the owner sets, ORCH-657; every field may be missing):
                                                       #   that weekday (a straight line between the marks, 0 at the
                                                       #   start of the week, 100 at its end)
      "credit_kinds": ["reviews"],                     # kinds of work that go to an API key first
-     "codex_one_in": 4,                               # one in N code starts goes to Codex first
+     "one_in": {"tool": "<a helper tool's registry name>", "every": 4},
+                                                      # one in N code starts goes to that tool first
      "ahead_dollars_day": 10}                         # subscriptions ahead of the week line: up to N dollars a day
-                                                      #   of new starts go to API keys or Codex instead
+                                                      #   of new starts go to API keys instead
 
 A source (one per account, built by the caller from accounts.json and the readers; labels and numbers only):
-    {"id", "label", "tool": "claude|codex", "type": "subscription|api-key|helper-tool", "on": bool,
+    {"id", "label", "tool": "<helper tool's registry name>", "tool_label": "<its name for people>", "type": "subscription|api-key|helper-tool", "on": bool,
      "at_limit": bool, "resets": "<UTC time it has room again>" | None,
      "week_used": percent (subscription) | None,
      "left": dollars left | None (unknown), "left_at": "<UTC time that number was read>" | None,
@@ -273,7 +274,7 @@ def _model(s: dict, request: dict) -> str | None:
         return models[want]
     if s.get("model"):
         return s["model"]
-    return want if s.get("tool", "claude") == "claude" else None
+    return want  # a tool that takes orch's own model names
 
 
 def _wake(sources: list[dict], at: datetime, day_limited: bool) -> str | None:
@@ -304,14 +305,18 @@ def _choose(request: dict, share: dict, sources: list[dict], starts: dict, at: d
     first: list[dict] = []
     reason = "first in the order"
     ahead = False
-    n = share.get("codex_one_in")
+    one_in = share.get("one_in") if isinstance(share.get("one_in"), dict) else {}
+    n, tool = one_in.get("every"), one_in.get("tool")
     if kind in (share.get("credit_kinds") or []):
         first = money
         reason = f"{KIND_WORDS.get(kind, kind)} goes to API credit"
-    elif kind == "code" and isinstance(n, int) and n > 0 and (_code_starts(starts, day) + 1) % n == 0:
-        codex = [s for s in ordered if s.get("tool") == "codex"]
-        first = sorted(codex, key=lambda s: s.get("type") != "subscription")  # flat price first, then a key
-        reason = f"one in {n} code starts goes to Codex"
+    elif (
+        kind == "code" and tool and isinstance(n, int) and n > 0 and (_code_starts(starts, day) + 1) % n == 0
+    ):
+        same = [s for s in ordered if s.get("tool") == tool]
+        first = sorted(same, key=lambda s: s.get("type") != "subscription")  # flat price first, then a key
+        name = next((s.get("tool_label") for s in same if s.get("tool_label")), tool)
+        reason = f"one in {n} code starts goes to {name}"
     else:
         line = week_line(share.get("week"), at)
         cap = share.get("ahead_dollars_day")
@@ -352,7 +357,7 @@ def _choose(request: dict, share: dict, sources: list[dict], starts: dict, at: d
                 start=request["start"],
                 source=s["id"],
                 label=s.get("label") or s["id"],
-                tool=s.get("tool", "claude"),
+                tool=s.get("tool"),
                 account_type=s.get("type"),
                 model=_model(s, request),
                 dollars=need if s.get("type") in MONEY_TYPES else 0.0,
