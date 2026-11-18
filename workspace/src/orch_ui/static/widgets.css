@@ -1043,6 +1043,24 @@ button.live-pt:hover{color:var(--brand)}
 .live-hist-t{grid-area:t;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .live-hist-f{grid-area:f;min-width:0}
 .live-hist-row>.btn,.live-hist-row>.chip{grid-area:act}
+/* The Start choice of a pane (pages/live-start.js, ORCH-362): continue, fresh start with tool and model, earlier sessions */
+.live-pb.live-pb-start{align-items:stretch;justify-content:flex-start;padding:var(--s4);text-align:left;color:var(--text)}
+.live-start{display:grid;gap:var(--s3);width:100%;max-width:76ch;margin-inline:auto}
+.live-start-h{margin:0}
+.live-places{margin:0}
+.live-places[data-full]{color:var(--warning)}
+.live-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:var(--s3)}
+.live-choice{display:grid;gap:var(--s2);align-content:start;justify-items:start;padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface-2)}
+.live-choice h4,.live-choice p{margin:0}
+.live-pick{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;margin-block:var(--s1)}
+.live-pick-l{color:var(--text-muted);font-size:var(--fs-meta)}
+.live-pick .segmented .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
+.live-start .live-hist{max-width:none;padding-top:var(--s3);border-top:1px solid var(--border)}
+/* Tool, model and open time of a working session (pages/live-model.js, ORCH-362): one line at the top of its pane */
+.live-prow{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s3);align-items:center;padding:var(--s1) var(--s3);border-bottom:1px solid var(--border)}
+.live-mdl-wrap{position:relative}
+.live-mdl{min-height:28px;padding:0 var(--s2)}
+.live-pop[data-down]{top:calc(100% + var(--s1));right:auto;bottom:auto;left:0}
 @media (max-width:720px){.live-hist-list{grid-template-columns:minmax(0,1fr) auto}.live-hist-row{grid-template-areas:"day act" "t act" "f act"}}
 .live-grip{position:absolute;z-index:2;background:none;border:0;padding:0;touch-action:none}
 .live-grip::after{content:"";position:absolute;border-radius:2px;background:var(--border-strong);transition:background-color var(--dur-fast) var(--ease-move)}
