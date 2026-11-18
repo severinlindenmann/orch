@@ -33,21 +33,24 @@ def _ts(stamp: str) -> float:
 
 
 def _queue(root: Path) -> None:
-    """The merge queue's line on the loaded page: one being checked, one waiting, one paused (ORCH-432)."""
+    """The merge queue on the loaded page: a group of two being checked, one paused, one waiting (ORCH-432)."""
     from orch_pull_requests import store
 
-    rows = [
-        ("acme/billing", 421, "t_pdf014", "2026-11-17T09:12:00Z", "running", "in the group being checked", None),
-        ("acme/website", 88, None, "2026-11-17T09:20:00Z", "waiting", "waiting in line", None),
-        ("acme/billing", 420, "t_tax015", "2026-11-17T09:33:00Z", "waiting",
-         "waits again: GitHub did not answer", _ts(AT) + 120),
+    group = "https://github.com/acme/billing/pull/530"
+    rows = [  # repo, number, ticket, added, state, why, paused until, group
+        ("acme/billing", 421, "t_pdf014", "2026-11-17T09:12:00Z", "running", "in the group being checked", None, group),
+        ("acme/billing", 420, "t_tax015", "2026-11-17T09:15:00Z", "running", "in the group being checked", None, group),
+        ("acme/website", 88, None, "2026-11-17T08:52:00Z", "waiting", "waits again: GitHub did not answer",
+         _ts(AT) + 360, None),
     ]  # fmt: skip
     entries = []
-    for repo, n, tid, added, state, why, later in rows:
+    for repo, n, tid, added, state, why, later, grp in rows:
         e = {"url": f"https://github.com/{repo}/pull/{n}", "repo": repo, "number": n, "ticket": tid,
              "by": "agent:claude", "added": added, "state": state, "why": why, "base": "develop", "login": "bot"}  # fmt: skip
         if later:
             e["not_before"] = later
+        if grp:
+            e.update(group=grp, taken="2026-11-17T09:29:00Z")
         entries.append(e)
     store.folder(root).mkdir(parents=True, exist_ok=True)
     (store.folder(root) / "queue.json").write_text(json.dumps({"entries": entries}), encoding="utf-8")

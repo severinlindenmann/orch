@@ -23,9 +23,9 @@ def fail_run(name, conclusion="FAILURE"):
 
 
 def test_empty_page(prws):
-    v = valid(view.build(prws, running=True))
-    assert [b["type"] for b in v["blocks"]] == ["stat", "stat", "stat", "list"]
-    assert v["blocks"][-1]["empty"]["title"] == "No pull requests yet"
+    v = valid(view.build(prws, running=True, queue_alive=True))
+    assert [b["type"] for b in v["blocks"]] == ["list", "footnote"]  # one empty state, not two
+    assert v["blocks"][0]["empty"]["title"] == "No pull requests yet"
     assert "notice" not in v
 
 
@@ -47,33 +47,32 @@ def test_rows_with_ticket_checks_and_merge_state(prws):
         }
     )
     poll.once(prws, fetch=fake)
-    v = valid(view.build(prws, running=True))
-    stats = {b["label"]: b["value"] for b in v["blocks"] if b["type"] == "stat"}
-    assert stats == {"Open": 3, "Checks failed": 1, "Ready to merge": 1}
+    v = valid(view.build(prws, running=True, queue_alive=True))
+    assert not [b for b in v["blocks"] if b["type"] == "stat"]  # the counts live in the table's heading
     (table,) = [b for b in v["blocks"] if b["type"] == "table"]
-    assert table["title"] == "acme/app" and table["meta"] == "3 open"
+    assert table["title"] == "Open pull requests" and table["meta"] == "3 open"
+    assert [c["key"] for c in table["columns"]] == ["pr", "ticket", "state", "in_line"]
     rows = table["rows"]
-    # what needs attention first: failed, then ready to merge, then the rest newest first
-    assert [r["cells"]["pr"] for r in rows] == ["#3 Change 3", "#1 Change 1", "#2 Change 2"]
-    assert rows[0]["cells"] == {
-        "pr": "#3 Change 3",
-        "ticket": "DM-2",
-        "checks": "Failed: lint",
-        "merge": "Blocked",
-    }
+    # what needs someone first, then ready to merge, then drafts
+    assert [r["cells"]["pr"] for r in rows] == ["Change 3", "Change 1", "Change 2"]
+    assert rows[0]["cells"] == {"pr": "Change 3", "ticket": "DM-2", "state": "Checks failed", "in_line": None}
+    assert rows[0]["subtitle"] == "Checks failed: lint. Open the ticket to fix it."
     assert rows[0]["link"] == "t_aaaaa2"  # a linked pull request opens its ticket
+    assert rows[1]["cells"]["state"] == "Ready to merge" and rows[1]["subtitle"] == "Not in the merge queue."
     assert rows[2]["cells"]["ticket"] is None and rows[2]["link"] == PR.format(2)  # no ticket: GitHub
-    assert rows[2]["cells"]["merge"] == "Draft" and rows[2]["cells"]["checks"] == "No checks"
-    assert rows[1]["cells"]["merge"] == "Ready to merge"
-    assert rows[1]["subtitle"] == "feat/x1 into develop · dev"
+    assert rows[2]["cells"]["state"] == "Draft"
+    assert v["blocks"][-1] == {
+        "type": "footnote",
+        "text": "The merge queue checks up to 5 pull requests together and merges them when the checks pass.",
+    }
 
 
 def test_github_trouble_is_the_notice(prws):
     add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
     poll.once(prws, fetch=FakeGitHub({}, fail={"acme/app": gh.NOT_SIGNED_IN}))
-    v = valid(view.build(prws, running=True))
+    v = valid(view.build(prws, running=True, queue_alive=True))
     assert v["notice"] == gh.NOT_SIGNED_IN and v["notice_tone"] == "bad"
-    assert v["blocks"][-1]["type"] == "list"  # nothing readable: the empty state, not an empty table
+    assert v["blocks"][0]["type"] == "list"  # nothing readable: the empty state, not an empty table
 
 
 @pytest.mark.parametrize("n", [101])
@@ -86,76 +85,84 @@ def test_long_lists_are_cut_with_more(prws, n):
     assert len(table["rows"]) == 100 and table["more"] == 1
 
 
-# -- the merge queue's line (ORCH-432) ------------------------------------------------------------------------
-def _queue(root, *numbers, ticket=None):
+# -- the merge queue on the page (ORCH-432) -------------------------------------------------------------------
+def _queue(root, *numbers, ticket=None, repo="acme/app"):
     from orch_pull_requests import store
 
     for n in numbers:
-        store.add(root, PR.format(n), ticket, "agent:t", base="develop", login="bot")
+        store.add(root, f"https://github.com/{repo}/pull/{n}", ticket, "agent:t", base="develop", login="bot")
 
 
-def test_no_queue_block_when_nothing_waits(prws):
-    assert view.queue_block(prws, [], alive=True) is None
-    v = valid(view.build(prws, running=True))
-    assert not [b for b in v["blocks"] if b.get("title") == "Merge queue"]
-
-
-def test_queue_block_shows_place_wait_and_why(prws):
+def _t(stamp):
     from datetime import UTC, datetime
 
+    return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+
+
+def test_the_queue_shows_its_groups_per_project_and_each_row_its_place(prws):
     from orch_pull_requests import store
 
-    _queue(prws, 1, ticket="t_aaaaa1")
-    _queue(prws, 2, 3, 4)
-    added = (
-        datetime.strptime(store.read(prws)[0]["added"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
-    )
-    now = added + 600
-    store.claim(prws, [store.read(prws)[1]])  # #2 is in the group being checked
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}, {"url": PR.format(2)}, {"url": PR.format(3)}])
+    poll.once(prws, fetch=FakeGitHub({"acme/app": [gql_pr(1), gql_pr(2), gql_pr(3), gql_pr(4, draft=True)]}))
+    _queue(prws, 1, 2, 3, ticket="t_aaaaa1")
+    _queue(prws, 7, repo="acme/web")
+    rows = store.read(prws)
+    store.claim(prws, rows[:2])  # #1 and #2 are the group being checked
+    now = _t(rows[0]["added"]) + 25 * 60
     store.set_state(
-        prws, PR.format(3), store.WAITING, "waits again: GitHub did not answer", not_before=now + 120
+        prws, PR.format(3), store.WAITING, "waits again: GitHub did not answer", not_before=now + 360
     )
-    tickets = [{"id": "t_aaaaa1", "key": "DM-1"}]
-    b = view.queue_block(prws, tickets, alive=True, now=now)
-    valid({"schema": "orch.addon-view/1", "generated_at": "2026-11-18T10:00:00Z", "blocks": [b]})
-    assert b["title"] == "Merge queue" and b["meta"] == "3 waiting · 1 being checked · groups of up to 5"
-    cells = [r["cells"] for r in b["rows"]]
-    assert [c["pr"] for c in cells] == ["#2", "#1", "#3", "#4"]  # being checked first, then the line
-    assert [c["place"] for c in cells] == ["Being checked", "1st in line", "2nd in line", "3rd in line"]
-    assert cells[0]["why"] == "Checked alone on top of develop"
-    assert cells[1]["ticket"] == "DM-1" and b["rows"][1]["link"] == "t_aaaaa1"
-    assert cells[1]["why"] == "Waits for the group being checked" and cells[1]["waited"] == 600
-    assert cells[2]["why"] == "Paused for 2 min: GitHub did not answer"
-    assert b["rows"][3]["link"] == PR.format(4) and cells[3]["ticket"] is None
+    v = valid(view.build(prws, running=True, queue_alive=True, now=now))
+    lists = [b for b in v["blocks"] if b["type"] == "list"]
+    assert [b["title"] for b in lists] == ["Merge queue: acme/app", "Merge queue: acme/web"]
+    app = lists[0]
+    assert app["meta"] == "into develop · groups of up to 5" and not app.get("compact")
+    assert app["items"][0]["title"] == "Group of 2 · checks running 25 min"
+    assert app["items"][0]["subtitle"] == "Change 1; Change 2"
+    assert app["items"][1]["title"] == "1 waiting in line · longest 25 min"
+    assert app["items"][1]["subtitle"] == "Next: Change 3"
+    (table,) = [b for b in v["blocks"] if b["type"] == "table"]
+    cells = [(r["cells"]["pr"], r["cells"]["state"], r["cells"]["in_line"]) for r in table["rows"]]
+    assert cells == [
+        ("Change 1", "Being checked", 1500),
+        ("Change 2", "Being checked", 1500),
+        ("Change 3", "1st in line, paused", 1500),
+        ("#7", "1st in line", 1500),  # its own project's line; queued without a link read: shown by number
+        ("Change 4", "Draft", None),
+    ]
+    paused = table["rows"][2]
+    assert paused["subtitle"] == "GitHub did not answer; tries again by itself in 6 min."
+    assert table["meta"] == "5 open · 2 repositories"
 
 
-def test_queue_block_says_when_the_runner_does_not_run(prws):
-    _queue(prws, 1)
-    b = view.queue_block(prws, [], alive=False)
-    assert b["rows"][0]["cells"]["why"].startswith("The merge queue is not running")
-    assert b["rows"][0]["cells"]["place"] == "1st in line"
-
-
-def test_queue_block_follows_the_group_size_setting(prws):
+def test_an_empty_queue_still_says_where_it_is(prws):
     (prws / ".orch" / "config.toml").write_text("[pull_requests]\nmax_group = 10\n", encoding="utf-8")
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
+    poll.once(prws, fetch=FakeGitHub({"acme/app": [gql_pr(1)]}))
+    v = valid(view.build(prws, running=True, queue_alive=True))
+    first = v["blocks"][0]
+    assert first["title"] == "Merge queue" and first["meta"] == "groups of up to 10"
+    assert first["empty"]["title"] == "Nothing in the merge queue"
+    assert "up to 10 pull requests" in v["blocks"][-1]["text"]
+
+
+def test_a_queue_that_does_not_run_says_so(prws):
     _queue(prws, 1)
-    b = view.queue_block(prws, [], alive=True)
-    assert b["meta"].endswith("groups of up to 10")
-    assert b["rows"][0]["cells"]["why"] == "Goes into the next group"
+    v = valid(view.build(prws, running=True, queue_alive=False))
+    item = v["blocks"][0]["items"][0]
+    assert item["tone"] == "warn" and item["subtitle"].startswith("The merge queue is not running")
 
 
-def test_queue_block_names_the_group_partners_and_never_a_raw_address(prws):
+def test_no_raw_address_in_the_reasons(prws):
     from orch_pull_requests import store
 
-    _queue(prws, 1, 2, 3)
-    g = "https://github.com/acme/app/pull/500"
-    for n in (1, 2):
-        store.claim(prws, [store.find(store.read(prws), PR.format(n))])
-        store.set_state(prws, PR.format(n), store.RUNNING, f"in the group {g}", group=g)
+    _queue(prws, 1)
     store.set_state(
-        prws, PR.format(3), store.WAITING, f"waits again: the group {g} was not merged: no verdict"
+        prws,
+        PR.format(1),
+        store.WAITING,
+        "waits again: the group https://github.com/acme/app/pull/500 was not merged",
     )
-    b = view.queue_block(prws, [], alive=True)
-    whys = [r["cells"]["why"] for r in b["rows"]]
-    assert whys == ["Checked together with 1 other", "Checked together with 1 other",
-                    "The group #500 was not merged: no verdict"]  # fmt: skip
+    v = valid(view.build(prws, running=True, queue_alive=True))
+    (table,) = [b for b in v["blocks"] if b["type"] == "table"]
+    assert table["rows"][0]["subtitle"] == "The group #500 was not merged"
