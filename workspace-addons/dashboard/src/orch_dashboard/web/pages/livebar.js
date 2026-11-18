@@ -69,8 +69,17 @@ function liveBarCountText(l, n, compact) {
   return l === 'pin' ? 'Pinned (' + n + ')' : l === 'more' ? 'More (' + n + ')' : n + ' ' + LIVEBAR_LISTS[l].word;
 }
 
+// The words of the "needs you" end of the bar: what is true for the person, not only for the live sessions. `total` is
+// the one number of things waiting on them (Review badge: questions, results, changes), `sessions` those of it that
+// are a live session. All calm only when nothing waits (ORCH-464).
+function liveBarNeedText(total, sessions) {
+  const n = Math.max(Number(total) || 0, Number(sessions) || 0);
+  if (!n) return 'All calm';
+  return n + (n === 1 ? ' needs you' : ' need you');
+}
+
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW};
+  module.exports = {liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW};
 } else {
   (() => {
     const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, busy:''};
@@ -80,6 +89,7 @@ if (typeof module === 'object' && module.exports) {
     const phone = () => window.matchMedia('(max-width: 720px)').matches;
     const link = (a, o) => '#addon/' + encodeURIComponent(a.name) + '/t/' + encodeURIComponent(o.id);
     const label = o => o.key || o.title;
+    const needTotal = () => { try { return typeof needsYouTotal === 'function' ? needsYouTotal() : 0; } catch (e) { return 0; } };
     const sym = (s, text) => h('span', {className:'lbar-sym', 'data-s':s, 'aria-hidden':'true'}, text);
 
     function chip(a, o) {
@@ -103,10 +113,14 @@ if (typeof module === 'object' && module.exports) {
       if (fold >= 3) {
         const lists = fold >= 4 ? ['wait', 'more'] : ['wait', 'pin', 'run', 'queue', 'idle'];
         const counts = lists.map(l => count(all, l, true)).filter(Boolean);
+        const total = needTotal(), seen = all.filter(o => liveBarIn(o, 'wait')).length;
+        // things waiting on the person that are no live session: one orange count to Review, so the phone bar never reads calm
+        if (total > seen) counts.unshift(h('a', {className:'lbar-cnt', href:'#review', 'data-s':'wait', 'data-key':'lbar-cnt-need', 'aria-label':liveBarNeedText(total, seen)},
+          sym('wait', LIVEBAR_LISTS.wait.sym), h('span', {}, String(total))));
         return counts.length ? counts : [h('span', {className:'lbar-l'}, 'All calm')];
       }
       const need = all.filter(o => liveBarIn(o, 'wait')), pin = all.filter(o => liveBarIn(o, 'pin'));
-      return [group(a, 'wait', need.length ? 'Needs you' : 'All calm', need),
+      return [group(a, 'wait', liveBarNeedText(needTotal(), need.length), need),
         pin.length ? (fold >= 1 ? count(all, 'pin') : group(a, 'pin', '', pin)) : null,
         ...(fold >= 2 ? [count(all, 'more')] : ['run', 'queue', 'idle'].map(l => count(all, l)))].filter(Boolean);
     }
@@ -204,7 +218,7 @@ if (typeof module === 'object' && module.exports) {
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
       const all = liveBarModel(sessions(), pins());
-      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, bar.list, bar.menu, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth]);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, bar.list, bar.menu, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
       const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';
