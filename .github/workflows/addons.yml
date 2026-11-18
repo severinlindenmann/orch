@@ -112,7 +112,7 @@ jobs:
       - run: uv run pytest -q -n 2
   services:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: workspace-addons/services
@@ -134,6 +134,26 @@ jobs:
           systemctl --user show-environment > /dev/null
           ORCH_SERVICES_REAL=1 uv run pytest -q -rs tests/test_real_driver.py -k "systemd or linux" | tee real.txt
           grep -q "2 passed" real.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Real Linux click-through of the Services tab (e2e SVC-1, ORCH-272)
+        working-directory: e2e/walkthrough
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          # Ubuntu 24.04 blocks the user namespaces Chrome's sandbox needs; this runner only
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          mkdir -p "$RUNNER_TEMP/services-shots"
+          E2E_SHOTS="$RUNNER_TEMP/services-shots" ../run.sh SVC-1 --mode local | tee svc1.txt
+          grep -q "SVC-1 PASS" svc1.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: services-tab-shots
+          path: ${{ runner.temp }}/services-shots
+          retention-days: 14
+          if-no-files-found: ignore
   pull-requests:
     runs-on: ubuntu-latest
     timeout-minutes: 5
