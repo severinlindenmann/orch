@@ -185,9 +185,11 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
     const r = await act('run.send', {ticket:id, text});
     liveMsgBusy.delete(id);
-    if (r.ok) liveMsgDraft.delete(id);
+    // only what was sent is cleared: words typed while it was on its way stay in the box
+    const sent = r.ok && String(liveMsgDraft.get(id) || '').trim() === text;
+    if (sent) liveMsgDraft.delete(id);
     const box = document.querySelector(`#live-dock [data-live-msg-text="${id.replace(/["\\]/g, '')}"]`);
-    if (box && r.ok) box.value = '';
+    if (box && sent) box.value = '';
     if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
     window.orch?.toast?.(r.ok ? 'Sent to ' + who + '.' : r.text || 'Could not send the message.', r.ok ? 'ok' : 'error');
   });

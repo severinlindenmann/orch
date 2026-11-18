@@ -1146,10 +1146,8 @@ async function groupState(page) {
       }
     } catch (e) { /* none */ }
   });
-  await page.route(/\/api\/state(\?.*)?$/, async route => {
-    const res = await route.fetch();
-    if (res.status() !== 200) return route.fulfill({ response: res });
-    const st = await res.json();
+  // the dashboard's own state with the group's tickets and runs on top (also the answer to a send: the page takes it whole)
+  const shape = st => {
     const base = (st.tickets || [])[0] || {};
     const extra = GROUP.map(([key, title, , depth]) => ({ ...base, id: gid(key), key, title, status: 'active', questions: [], checks: [],
       sessions: [], parent: depth === 1 ? gid('ORCH-300') : null }));
@@ -1162,7 +1160,12 @@ async function groupState(page) {
     st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
     st.settings = { ...(st.settings || {}), focus_preview_on: true,
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
-    route.fulfill({ response: res, json: st });
+    return st;
+  };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    route.fulfill({ response: res, json: shape(await res.json()) });
   });
   const sessions = GROUP.filter(([, , s]) => s !== 'closed').map(([key, title, s]) => ({ id: gid(key), key, title, status: s, word: GWORD[s],
     detail: s === 'working' ? 'Writing the offers section' : '', waiting_on: [], question: s === 'needs-you' ? 'Which header picture for the mail page?' : null,
@@ -1174,7 +1177,10 @@ async function groupState(page) {
     members: GROUP.filter(([, , , d]) => d >= 0).map(([key, title, s, depth]) => ({ id: gid(key), key, title, depth, main: depth === 0,
       status: s, word: GWORD[s], small: key === 'ORCH-301' ? SMALL : [] })) };
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions, groups: [group], lines: 8, age_ms: 0 } }));
-  await page.route(/\/api\/act$/, route => route.fulfill({ json: { ok: true } }));
+  await page.route(/\/api\/act$/, async route => {
+    const r = await route.fetch({ url: new URL('/api/state', route.request().url()).href, method: 'GET' });
+    await route.fulfill({ json: shape(await r.json()) });
+  });
 }
 // The epic is one orange tile; a click opens the helper that needs you with the group beside it; a click on a row swaps
 // the session in that pane and the message box names who receives it; small helpers are watch only.

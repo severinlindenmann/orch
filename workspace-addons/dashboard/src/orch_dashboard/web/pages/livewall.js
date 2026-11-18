@@ -130,7 +130,7 @@ function liveWallGroupTile(s, pinned) {
       h('span', {className:'wall-tt'}, s.title || ''),
       h('span', {className:'wall-now', 'data-wall-now':s.id}, liveGroupLine(g)),
       liveGroupPreview(g)),
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallBeside(s)));
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s)));
 }
 function liveWallTile(s, pinned) {
   if (s.group && typeof liveGroupPreview === 'function') return liveWallGroupTile(s, pinned);

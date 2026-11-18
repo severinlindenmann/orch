@@ -74,6 +74,8 @@ test('wall: the group sits in Needs you first and is pinned by its main helper',
   assert.deepEqual(b.queue, [], 'the helper in line stays inside the group');
   const p = wall.liveWallBands(SESSIONS, ['t_ep'], '', [EPIC]);
   assert.deepEqual(p.pin.map(s => s.id), ['t_ep']);
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8');
+  assert.match(src.slice(src.indexOf('function liveWallGroupTile'), src.indexOf('function liveWallTile(')), /liveWallPin\(s, pinned\)/, 'a group tile has the pin button of its main helper');
   assert.deepEqual(wall.liveWallBands(SESSIONS, [], '').need.map(s => s.id), ['t_mp', 't_zz', 't_ep', 't_tx', 't_ot'], 'without groups the wall is as before');
 });
 
