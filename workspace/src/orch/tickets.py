@@ -545,10 +545,12 @@ def apply_op(
     expect: tuple[str, object] | None = None,
     if_revision: int | None = None,
     by: str,
+    person_click: bool = False,
 ):
-    """Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
+    """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {}
+    info: dict = {"person_click": person_click}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -602,7 +604,7 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         was_review = ticket.get("status") == "review"
         wont_before = _wont_view(ticket)
         result = fn(ticket)
-        if agent_tool():
+        if agent_tool() and not info.get("person_click"):
             ids = [c.get("id") for c in ticket.get("checklist") or [] if isinstance(c, dict)]
             if len(ids) != len(set(ids)):
                 raise Refused("Duplicate checklist step ids are not allowed.")
@@ -3470,6 +3472,8 @@ def answer(
         raise Refused("An answer needs text.")
     text = text.strip()
 
+    person_click = by.startswith("human:") and (via != "cli" or not agent_tool())
+
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
@@ -3499,13 +3503,15 @@ def answer(
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
-        if _is_person(by) and _wont_do_yes(q, ans):
+        # A click on the dashboard or a phone is a person even when that server was started from a helper's
+        # session (its environment then shows an agent tool, which only says who runs the CLI). #1354.
+        if person_click and _wont_do_yes(q, ans):
             item = _item(ticket, q["check"])
             if not item.get("done") and not item.get("wont_do"):
                 _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
-    return apply_op(root, tid, op, by=by)
+    return apply_op(root, tid, op, by=by, person_click=person_click)
 
 
 def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:
