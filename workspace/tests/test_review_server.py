@@ -4,6 +4,7 @@ import contextlib
 import http.client
 import io
 import json
+import os
 import subprocess
 import threading
 import time
@@ -32,10 +33,13 @@ def ws(proj, monkeypatch):
 
     seen = []
 
-    def in_process(argv, cwd, env):
-        seen.append({"argv": list(argv), "env": dict(env)})
+    def in_process(argv, cwd, env, fds=()):
+        seen.append({"argv": list(argv), "env": dict(env), "fds": fds})
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        grant = {
+            k: v for k, v in env.items() if k.startswith("ORCH_PERSON_GRANT")
+        }  # the page's grant (ORCH-582)
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), _env(grant):
             code = cli.main(list(argv))
         return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
 
@@ -53,6 +57,20 @@ def ws(proj, monkeypatch):
 
 
 ws_seen: dict = {}
+
+
+@contextlib.contextmanager
+def _env(extra: dict):
+    old = {k: os.environ.get(k) for k in extra}
+    os.environ.update(extra)
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _add_card(root, run_cli, title="Block"):
