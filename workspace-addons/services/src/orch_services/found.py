@@ -81,7 +81,7 @@ def script_name(argv: list[str]) -> str:
     if not argv:
         return "?"
     prog = Path(argv[0]).name
-    if re.sub(r"[\d.]+$", "", prog) in INTERPRETERS:
+    if _interpreter(prog):
         for a in argv[1:]:
             if a == "-m" or a in ("run", "exec"):  # a tuple holding "-m" looks like a spawn to the lint
                 continue
@@ -302,9 +302,25 @@ def _cwds_lsof(pids: list[int]) -> dict[int, Path]:
     return out
 
 
+def _interpreter(prog: str) -> bool:
+    """python3.12, Python (the macOS framework app), node ... count as interpreters."""
+    return re.sub(r"[\d.]+$", "", prog.lower()) in INTERPRETERS
+
+
 def _is_orch(argv: list[str]) -> bool:
+    """orch itself, or one of its own parts (orch_dashboard, orch_automation ...), also behind interpreter flags
+    such as `Python -P -m orch_dashboard`: orch's own background pages are never found items."""
     prog = Path(argv[0]).name if argv else ""
-    return prog == "orch" or any(a == "orch" or a.startswith("orch_") for a in argv[1:3])
+    if prog == "orch" or any(a == "orch" or a.startswith("orch_") for a in argv[1:3]):
+        return True
+    if not _interpreter(prog):
+        return False
+    for a in argv[1:6]:
+        if a.startswith("-"):
+            continue
+        name = Path(a).name
+        return name == "orch" or name.startswith("orch_") or "/orch_" in a
+    return False
 
 
 def _processes(root: Path, skip: set[int]) -> list[dict]:
@@ -345,7 +361,7 @@ def _processes(root: Path, skip: set[int]) -> list[dict]:
         cwds = _cwds_lsof(cand)  # no lsof: no processes (see the module comment)
     base = root.resolve()
     items = []
-    for pid in sorted(cwds):
+    for pid in sorted(set(cwds) & set(cand)):  # only the candidates, whatever lsof answered
         try:
             cwds[pid].resolve().relative_to(base)
         except (ValueError, OSError):
