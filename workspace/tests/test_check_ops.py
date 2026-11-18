@@ -829,8 +829,9 @@ def test_a_yes_on_the_dashboard_counts_when_the_server_runs_under_a_helper(
     tid = with_checks(proj, run, new_ticket)
     for c in ("c2", "c3"):
         code, out, err = run(
-            "ask", tid, f"Mark step {c} as won't do?", "--option", "yes", "--option", "no", "--check", c
-        )
+            "ask", tid, f"Mark step {c} as won't do?", "--option", "yes",
+            "--option", "No, run it in CI", "--check", c,
+        )  # fmt: skip
         assert code == 0, (out, err)
     q1, q2 = (q["id"] for q in read(proj, tid)["questions"])
     monkeypatch.setenv("ORCH_AGENT", "claude")
