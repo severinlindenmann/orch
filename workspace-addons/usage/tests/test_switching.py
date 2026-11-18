@@ -283,6 +283,99 @@ def test_every_account_at_its_limit_warns_once_and_stays(cli, switcher, ws):
     assert len([h for h in usage_rows(ws) if h["what"].startswith("warning")]) == 2
 
 
+def _warn_ids(ws, t):
+    return [r["id"] for r in switching.needs_rows(ws, at(t)) if r["kind"].startswith("usage:all-at-limit")]
+
+
+def test_every_account_at_its_limit_reaches_the_person_once_as_one_row(cli, switcher, ws):
+    """ORCH-644: one row in `orch usage needs` with a stable id while it lasts, not one per look."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.use(first=(97.0, 80.0), second=(93.0, 40.0), third=(95.0, 50.0))
+    switching.look(ws, at(0))
+    first = _warn_ids(ws, 0)
+    assert first == [f"usage:all-at-limit:{switching._iso(at(0))}"]
+    for n in range(1, 6):  # five more looks: the same one row
+        switching.look(ws, at(30 * n))
+        assert _warn_ids(ws, 30 * n) == first
+    (row,) = [r for r in switching.needs_rows(ws, at(150)) if r["id"] == first[0]]
+    assert row["source"] == "usage" and row["ticket"] is None and row["tone"] == "bad"
+    assert (
+        row["actions"][0]["verb"] == "seen" and row["actions"][0]["target"] == f"all-at-limit:{row['since']}"
+    )
+    # a look that stopped long ago is not shown: it may be out of date (the command reads the clock: T0 is old)
+    assert _warn_ids(ws, 150 + 60 * switching.FRESH_MINUTES) == []
+
+
+def test_a_warning_comes_back_only_after_it_cleared_and_started_again(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    full = {"first": (97.0, 80.0), "second": (93.0, 40.0), "third": (95.0, 50.0)}
+    room = {"first": (97.0, 80.0), "second": (10.0, 40.0), "third": (95.0, 50.0)}
+    switcher.use(**full)
+    switching.look(ws, at(0))
+    first = _warn_ids(ws, 0)
+    switcher.use(active=switcher.active(), **room)  # a flicker: room for one look, then full again
+    switching.look(ws, at(30))
+    assert _warn_ids(ws, 30) == []  # gone while it is gone
+    switcher.use(active=switcher.active(), **full)
+    switching.look(ws, at(60))
+    assert _warn_ids(ws, 60) == first  # back within 10 minutes: the same warning, not a new card
+    switcher.use(active=switcher.active(), **room)
+    switching.look(ws, at(90))
+    switching.look(ws, at(90 + 60 * switching.CLEAR_MINUTES))  # gone for 10 minutes: cleared
+    switcher.use(active=switcher.active(), **full)
+    t = 120 + 60 * switching.CLEAR_MINUTES
+    switching.look(ws, at(t))
+    again = _warn_ids(ws, t)
+    assert again and again != first  # it came back: a new row the person is told about once more
+
+
+def test_a_warning_gone_ten_minutes_starts_anew_even_without_a_look_between():
+    t = T0
+    a = switching._episodes({}, {"all-at-limit": {}}, t)
+    b = switching._episodes(a, {}, t + timedelta(seconds=30))
+    assert b["all-at-limit"]["since"] == a["all-at-limit"]["since"] and b["all-at-limit"]["cleared"]
+    later = t + timedelta(seconds=30, minutes=switching.CLEAR_MINUTES)
+    c = switching._episodes(b, {"all-at-limit": {}}, later)
+    assert c["all-at-limit"] == {"since": switching._iso(later)}
+    d = switching._episodes(b, {"all-at-limit": {}}, later - timedelta(seconds=1))
+    assert d["all-at-limit"] == {"since": a["all-at-limit"]["since"]}  # back in time: the same warning
+
+
+def test_got_it_hides_a_warning_until_it_comes_back(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.use(first=(97.0, 80.0), second=(93.0, 40.0), third=(95.0, 50.0))
+    switching.look(ws, at(0))
+    (row,) = [r for r in switching.needs_rows(ws, at(0)) if r["kind"] == "usage:all-at-limit"]
+    assert jrun(cli, "act", "seen", "all-at-limit:2020-01-01T00:00:00Z", "--by", "human:owner")[0] != 0
+    code, out = jrun(cli, "act", "seen", row["actions"][0]["target"], "--by", "human:owner")
+    assert code == 0 and out["changed"] is True, out
+    switching.look(ws, at(30))
+    assert _warn_ids(ws, 30) == []
+    assert any(h["what"].startswith("warning seen") for h in store.history(ws))
+    assert jrun(cli, "act", "seen", "bogus:x", "--by", "human:owner")[0] != 0
+
+
+def test_a_failed_switch_reaches_the_person_once_and_clears_after_a_switch(cli, switcher, ws):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    switcher.failing()
+    switching.look(ws, at(0))
+    switching.look(ws, at(30))
+    rows = [r for r in switching.needs_rows(ws, at(30)) if r["kind"] == "usage:switch-failed"]
+    assert len(rows) == 1 and "TEAMCO" in rows[0]["title"] and rows[0]["tone"] == "warn"
+    assert rows[0]["id"] == f"usage:switch-failed:{switching._iso(at(0))}"
+    switching.look(ws, at(601))  # tried again, failed again: still the same one row
+    assert [r["id"] for r in switching.needs_rows(ws, at(601)) if r["kind"] == "usage:switch-failed"] == [
+        rows[0]["id"]
+    ]
+    switcher.failing(False)
+    switching.look(ws, at(1300))
+    assert [r for r in switching.needs_rows(ws, at(1300)) if r["kind"] == "usage:switch-failed"] == []
+
+
 def test_near_every_limit_it_still_leaves_an_account_that_is_over(cli, switcher, ws):
     """No account is safe for 10 minutes, but the active one is over its limit and another still has room."""
     seed(cli)

@@ -9,6 +9,7 @@ the rules, refusals and history lines are the CLI's own:
     on, off    <account>
     end        <account>:<YYYY-MM-DD> | <account>:none
     switching  on | off
+    seen       all-at-limit:<since> | switch-failed:<since>   (Got it on a warning card; since = its start time)
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from pathlib import Path
 from . import store
 from .store import Refused
 
-VERBS = ("limit", "period", "order", "on", "off", "end", "switching")
+VERBS = ("limit", "period", "order", "on", "off", "end", "switching", "seen")
 _ACC = r"a_[a-z0-9]{6}"
 _PERIOD = r"5h|week|month|until"
 _DAY = r"\d{4}-\d\d-\d\d"
@@ -32,6 +33,7 @@ PATTERNS = {
     "off": re.compile(rf"({_ACC})"),
     "end": re.compile(rf"({_ACC}):({_DAY}|none)"),
     "switching": re.compile(r"(on|off)"),
+    "seen": re.compile(r"(all-at-limit|switch-failed):(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)"),
 }
 NOT_THIS = "That is not something Usage can change. Reload the page and try again."
 
@@ -63,4 +65,6 @@ def argv_for(root: Path, verb: str, target: str, by: str | None) -> list[str]:
         return [verb, g[0], *who]
     if verb == "end":
         return ["end", g[0], g[1], *who]
+    if verb == "seen":
+        return ["seen", g[0], "--since", g[1], *who]
     return ["switching", g[0], *who]
