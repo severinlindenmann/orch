@@ -35,6 +35,7 @@ from orch import (
     cli_session,
     cli_shot,
     cli_status,
+    cli_tools,
     diag,
     diag_incident,
     fields,
@@ -496,6 +497,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_leave.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
     cli_checks.add_parsers(sub, common)
+    cli_tools.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -1075,6 +1077,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_leave.dispatch(args, root)
         or cli_health.dispatch(args, root)
         or cli_checks.dispatch(args, root)
+        or cli_tools.dispatch(args, root)
     ):
         pass
     elif (
