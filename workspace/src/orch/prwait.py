@@ -40,6 +40,7 @@ from orch.ghmerge import is_pr_url  # noqa: F401  (orch ref wait checks addresse
 NO_CHECKS_SECS = 900  # a fresh push reports no checks for a while; after this long that is an answer
 TIMEOUT_SECS = 3600
 POLL_SECS = 60
+SAY_SECS = 60  # at most one progress line a minute while it waits
 FIRST_NAP = 30
 NET_TRIES = 7
 NET_SLEEP = 20
@@ -130,6 +131,9 @@ class Replay:
         self.reran = list(names)
         return True
 
+    def say(self, text: str) -> None:
+        self.said = [*getattr(self, "said", []), (self.t, text)]  # a recorded case keeps its lines
+
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
     """One gh call with the helper's own environment; a connection-level failure is retried (the request
@@ -167,7 +171,14 @@ class Live:
 
     def take(self, kind: str, what: str) -> bool:
         """Wait for room in this computer's hourly GitHub write limit (orch github writes), then count it."""
-        return ghlimit.take(kind, what)
+        said = [0.0]
+
+        def on_wait(left: float, waited: float) -> None:
+            if waited - said[0] >= SAY_SECS or waited == 0:
+                said[0] = waited
+                self.say(_room_line(self.url, kind, left, waited))
+
+        return ghlimit.take(kind, what, on_wait=on_wait)
 
     def count(self, kind: str, what: str) -> None:
         """Count a write that did not wait for room (the merge queue's merges: one per run of the checks)."""
@@ -270,7 +281,10 @@ class Live:
         )  # fmt: skip
         if got.returncode != 0:
             return None
-        for _ in range(20):  # GitHub makes the merge commit a moment later
+        for i in range(20):  # GitHub makes the merge commit a moment later
+            if i and i % 4 == 0:
+                base = self.base or "the base branch"
+                self.say(f"{i // 4} min: waiting for GitHub to take {base} into {self.url}.")
             time.sleep(15)
             v = self.view()
             if v and v.get("headRefOid") != head:
@@ -343,6 +357,53 @@ class Live:
     def elapsed(self) -> float:
         return time.monotonic() - self.start
 
+    def say(self, text: str) -> None:
+        """One progress line while it waits (at most one a minute), so a helper or person watching sees what
+        it waits for (17 Nov: a silent wait for the hourly merge limit looked like a hang for 50 minutes)."""
+        print(f"{time.strftime('%H:%M')} {text}", file=sys.stderr, flush=True)
+
+
+def _say(src, text: str) -> None:
+    say = getattr(src, "say", None)
+    if callable(say):
+        say(text)
+
+
+def _mins(secs: float) -> str:
+    return f"{int(secs // 60)} min"
+
+
+def _waiting_line(src, el, checks, pending, required, names, open_runs) -> str:
+    """What the wait waits for right now, in one line."""
+    url = getattr(src, "url", "") or "the pull request"
+    if not checks:
+        return f"{_mins(el)}: waiting for the checks of {url} to start (none reported yet)."
+    running = [str(c.get("name")) for c in checks if c.get("bucket") == "pending"]
+    parts = []
+    if pending:
+        parts.append(f"{pending} of {len(checks)} still running (" + ", ".join(running[:3])
+                     + (" ..." if len(running) > 3 else "") + ")")  # fmt: skip
+    missing = [r for r in required if r not in names]
+    if missing:
+        parts.append("required not reported yet: " + ", ".join(missing))
+    if open_runs:
+        parts.append(f"workflow runs not finished: {open_runs}")
+    return f"{_mins(el)}: waiting for the checks of {url}: " + "; ".join(parts or ["reading them"]) + "."
+
+
+def _room_line(url: str, kind: str, left: float, waited: float) -> str:
+    """The wait for room in this computer's hourly GitHub write limit, in one line."""
+    try:
+        row = next((r for r in ghlimit.status() if r["kind"] == kind), None)
+    except (OSError, Refused):
+        row = None
+    used = f"{row['used']} of {row['per_hour']} this hour, " if row else ""
+    what = f"checks of {url} passed" if kind == "merge" else url
+    return (
+        f"{_mins(waited)}: {what}; waiting for room in this computer's GitHub limit for "
+        f"{ghlimit.WHAT[kind]} ({used}next fits in about {max(1, round(left / 60))} min; orch github writes)."
+    )
+
 
 def _sorted(checks: list) -> list[tuple[str, str]]:
     rank = {"SUCCESS": 0, "SKIPPED": 1}
@@ -406,6 +467,7 @@ def _wait_once(src, no_checks: float, timeout: float) -> Verdict:
             if open_runs:
                 why += f"; unfinished workflow runs: {open_runs}"
             return Verdict(False, why + ")", _sorted(checks), unknown=True)
+        _say(src, _waiting_line(src, el, checks, pending, required, names, open_runs))
         src.sleep(POLL_SECS)
     rows = _sorted(checks)
     bad = [f"{n} {s}" for n, s in rows if s != "SUCCESS"]

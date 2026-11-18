@@ -611,3 +611,39 @@ def test_retry_summary_keeps_only_the_window_and_orders_by_count():
     checkretry.record("a/b", "3", "other", "timeout", now=10_000_000.0)
     s = checkretry.summary(30, now=10_000_100.0)
     assert [c["check"] for c in s["checks"]] == ["flaky", "other"] and s["total"] == 3
+
+
+def test_the_wait_says_once_a_minute_what_it_waits_for():
+    """17 Nov: orch ref wait --merge sat 50 minutes without a word (it waited for the hourly merge limit)."""
+    running = [{"name": "build", "state": "PENDING", "bucket": "pending"},
+               {"name": "lint", "state": "SUCCESS", "bucket": "pass"}]  # fmt: skip
+    done = [{"name": "build", "state": "SUCCESS", "bucket": "pass"},
+            {"name": "lint", "state": "SUCCESS", "bucket": "pass"},
+            {"name": "gate", "state": "SUCCESS", "bucket": "pass"}]  # fmt: skip
+    src = prwait.Replay({"required": ["gate"], "polls": [[], running, running, done]})
+    src.url = PR
+    assert prwait.wait(src).green
+    lines = [text for _, text in src.said]
+    assert len(lines) == 3  # one per minute of waiting, none after the verdict
+    assert "to start (none reported yet)" in lines[0]
+    assert "1 of 2 still running (build)" in lines[1] and "required not reported yet: gate" in lines[1]
+    assert all(PR in x for x in lines)
+
+
+def test_a_wait_for_room_in_the_merge_limit_is_said_at_most_once_a_minute(monkeypatch, capsys):
+    from orch import ghlimit
+
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+
+    def take(kind, what, on_wait=None, **kw):
+        for waited in (0, 20, 40, 60, 80, 100, 120):
+            on_wait(900 - waited, waited)
+        return True
+
+    monkeypatch.setattr(ghlimit, "take", take)
+    monkeypatch.setattr(ghlimit, "status", lambda: [{"kind": "merge", "used": 12, "per_hour": 12}])
+    assert prwait.Live(PR).take("merge", PR)
+    lines = [x for x in capsys.readouterr().err.splitlines() if x.strip()]
+    assert len(lines) == 3  # at 0, 60 and 120 seconds
+    assert f"checks of {PR} passed" in lines[0] and "GitHub limit for merges (12 of 12 this hour" in lines[0]
+    assert "next fits in about 15 min" in lines[0]
