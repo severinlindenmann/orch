@@ -1,0 +1,84 @@
+/* Draft 605c (ORCH-605, Personal, concept C). New looks of this draft only; tokens only; every rule under the draft's body class. */
+body.mk-personal-605c .p-draftbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) var(--s3);padding:var(--s2) var(--s3);border:1px dashed var(--border);border-radius:var(--r1);font-size:var(--fs-meta);line-height:var(--s4);color:var(--text-faint)}
+body.mk-personal-605c .p-draftbar span{color:var(--text-muted);font-weight:500}
+body.mk-personal-605c .p-draftbar a{color:var(--text-faint);padding:var(--s1) 0}
+body.mk-personal-605c .p-draftbar a[aria-current=page]{color:var(--text);text-decoration:none}
+body.mk-personal-605c .page-heading h1 .badge{vertical-align:middle}
+body.mk-personal-605c .nav-item .badge{margin-left:auto}
+
+/* The vault: my context | the note or the inbox | what the helper sees */
+body.mk-personal-605c .p-vault{display:grid;grid-template-columns:208px minmax(0,1fr) 256px;gap:var(--s4);align-items:start}
+body.mk-personal-605c .p-vault.p-wide{grid-template-columns:208px minmax(0,1fr)}
+body.mk-personal-605c .p-main,body.mk-personal-605c .p-side{display:grid;gap:var(--s4);min-width:0;align-content:start}
+body.mk-personal-605c .p-nav .list-row{padding:var(--s1) var(--s3)}
+body.mk-personal-605c .p-nav .list-row:has(a[aria-current=page]){background:var(--surface-2)}
+body.mk-personal-605c .p-nav .list-row .meta{font-weight:400}
+body.mk-personal-605c .p-nav .card-h{min-height:var(--s6);padding:var(--s2) var(--s3);border-top:1px solid var(--border)}
+body.mk-personal-605c .p-main h3 a,body.mk-personal-605c a.chip{color:var(--text);text-decoration:none}
+body.mk-personal-605c .p-main h3 a:hover,body.mk-personal-605c a.chip:hover{text-decoration:underline}
+body.mk-personal-605c .p-main [hidden]{display:none}
+body.mk-personal-605c .p-side .list-row{align-items:flex-start;min-height:var(--s6)}
+body.mk-personal-605c .p-words{color:var(--text-faint)}
+
+/* A link from one note to another */
+body.mk-personal-605c .p-wl{color:var(--brand);text-decoration:underline dotted;text-underline-offset:var(--s1)}
+body.mk-personal-605c .p-wl:hover{text-decoration-style:solid}
+
+/* Transcript line, mail row, log time */
+body.mk-personal-605c .p-line{display:grid;grid-template-columns:var(--s7) minmax(0,1fr);gap:var(--s3);align-items:baseline}
+body.mk-personal-605c .p-mail{align-items:flex-start;padding-block:var(--s3)}
+body.mk-personal-605c .p-time{min-width:var(--s7)}
+
+/* Week with every calendar at once */
+body.mk-personal-605c .p-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:var(--s2)}
+body.mk-personal-605c .p-day{display:grid;gap:var(--s2);align-content:start;min-width:0;padding:var(--s1);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}
+body.mk-personal-605c .p-day.today{border-color:var(--brand)}
+body.mk-personal-605c .p-day h3{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1)}
+body.mk-personal-605c .p-ev{display:grid;gap:var(--space-0);min-width:0;padding:var(--s1);border-left:var(--s1) solid var(--border-strong);border-radius:var(--r1);background:var(--surface-2);color:var(--text);text-decoration:none;font-size:var(--fs-meta);line-height:var(--s4);overflow-wrap:break-word}
+body.mk-personal-605c a.p-ev:hover{background:var(--surface-3)}
+body.mk-personal-605c .p-ev.work{border-left-color:var(--info)}
+body.mk-personal-605c .p-ev.private{border-left-color:var(--chart-4)}
+body.mk-personal-605c .p-ev.family{border-left-color:var(--warning)}
+body.mk-personal-605c .p-ev .pill{justify-self:start;font-size:var(--fs-meta);line-height:var(--s4)}
+body.mk-personal-605c .p-swatch{display:inline-block;width:var(--s3);height:var(--s3);border-radius:var(--s1);background:var(--border-strong)}
+body.mk-personal-605c .p-swatch.work{background:var(--info)}
+body.mk-personal-605c .p-swatch.private{background:var(--chart-4)}
+body.mk-personal-605c .p-swatch.family{background:var(--warning)}
+
+/* Tool cards on Add a tool */
+body.mk-personal-605c .p-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(256px,1fr));gap:var(--s4);align-items:start}
+
+@media(max-width:1100px){
+ body.mk-personal-605c .p-vault{grid-template-columns:208px minmax(0,1fr)}
+ body.mk-personal-605c .p-side{grid-column:2}
+ body.mk-personal-605c .p-week{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+/* Phone: one column, the list or note first, then my context, then the helper */
+@media(max-width:720px){
+ body.mk-personal-605c .p-vault,body.mk-personal-605c .p-vault.p-wide{grid-template-columns:minmax(0,1fr)}
+ body.mk-personal-605c .p-main{order:1}
+ body.mk-personal-605c .p-nav{order:2}
+ body.mk-personal-605c .p-side{order:3;grid-column:1}
+ body.mk-personal-605c .p-week{grid-template-columns:minmax(0,1fr)}
+ body.mk-personal-605c .p-main .list-row{flex-wrap:wrap}
+}
+@media(min-width:721px){body.mk-personal-605c .settings-row .p-can{flex:none}}
+@media(max-width:720px){body.mk-personal-605c .p-main .banner .grow{flex-basis:100%}}
+/* Fix round: Today overview keys, the editable "File under" label, per-source rows */
+body.mk-personal-605c .p-key{min-width:var(--s9);flex:none}
+body.mk-personal-605c .p-under summary{cursor:pointer;list-style:none;color:var(--text)}
+body.mk-personal-605c .p-under summary::-webkit-details-marker{display:none}
+body.mk-personal-605c .p-under details{position:relative}
+body.mk-personal-605c .p-main .tabs{border-bottom:0}
+body.mk-personal-605c [data-tool] .settings-row{padding:var(--s4)}
+body.mk-personal-605c [data-tool] .settings-row+.settings-row,body.mk-personal-605c [data-tool] .list-row+.settings-row{border-top:1px solid var(--border)}
+@media(max-width:720px){
+ body.mk-personal-605c .p-today .list-row>.grow{flex-basis:60%}
+ body.mk-personal-605c .p-today .list-row>.meta:last-child{flex-basis:100%}
+ body.mk-personal-605c .p-today .p-key{min-width:var(--s9);flex-basis:100%}
+}
+@media(max-width:720px){
+ body.mk-personal-605c #helper-log .list-row>.grow{flex-basis:100%;order:1}
+ body.mk-personal-605c #helper-log .list-row>.meta:last-child{margin-left:auto}
+ body.mk-personal-605c .p-main header.row>.grow{flex-basis:70%}
+}

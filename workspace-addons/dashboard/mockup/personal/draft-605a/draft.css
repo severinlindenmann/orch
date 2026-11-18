@@ -1,0 +1,137 @@
+/* Draft A "Home of tiles" (ORCH-605). Draft only: tokens only, every rule under body.mk-personal-605a.
+   When the owner picks, the chosen looks move into the master and this folder is deleted. */
+
+/* the small bar that names the draft and links its screens */
+body.mk-personal-605a .draft-bar{display:flex;align-items:center;gap:var(--s4);padding:var(--s1) var(--s4);background:var(--sidebar);border-bottom:1px solid var(--border);color:var(--text-faint);font-size:var(--fs-meta);line-height:var(--s4);overflow-x:auto;white-space:nowrap}
+body.mk-personal-605a .draft-bar strong{color:var(--text-muted);font-weight:500}
+body.mk-personal-605a .draft-bar a{color:var(--text-faint);text-decoration:none;padding:var(--s1) 0}
+body.mk-personal-605a .draft-bar a:hover{color:var(--text);text-decoration:underline}
+body.mk-personal-605a .draft-bar a[aria-current=page]{color:var(--text)}
+body.mk-personal-605a .p-nav-tag{margin-left:var(--s2)}
+body.mk-personal-605a .page-header h1 .badge{vertical-align:middle;margin-left:var(--s2)}
+
+/* home: one tile per sub add-on */
+body.mk-personal-605a .p-tile{position:relative;display:flex;flex-direction:column;transition:border-color var(--dur-fast) var(--ease-out)}
+body.mk-personal-605a .p-tile:hover,body.mk-personal-605a .p-tile:focus-within{border-color:var(--border-strong)}
+body.mk-personal-605a .p-tile .card-h{border-bottom:0;padding-bottom:0;color:var(--text-muted)}
+body.mk-personal-605a .p-tile .card-h h2{font-size:var(--s4);line-height:var(--s5);color:var(--text)}
+body.mk-personal-605a .p-tile-link{text-decoration:none}
+body.mk-personal-605a .p-tile-link::after{content:"";position:absolute;inset:0}
+body.mk-personal-605a .p-tile-link:focus-visible{outline:none}
+body.mk-personal-605a .p-tile:has(.p-tile-link:focus-visible){box-shadow:var(--focus-ring)}
+body.mk-personal-605a .p-tile-body{display:grid;gap:var(--s2);align-content:start;padding:var(--s3) var(--s4);flex:1}
+body.mk-personal-605a .p-tile-foot{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
+body.mk-personal-605a .p-over{position:relative}
+body.mk-personal-605a .p-tile-add{align-items:center;justify-content:center;gap:var(--s2);text-align:center;text-decoration:none;border-style:dashed;border-color:var(--border-strong);background:transparent;color:var(--text-muted);padding:var(--s5)}
+body.mk-personal-605a .p-tile-add strong{color:var(--text)}
+body.mk-personal-605a .p-tile-add:hover{background:var(--surface)}
+
+/* one glance line: time, colour dot, words, one fact on the right */
+body.mk-personal-605a .p-line{display:flex;align-items:baseline;gap:var(--s2);min-width:0}
+body.mk-personal-605a .p-line strong{font-weight:500}
+body.mk-personal-605a .p-when{flex:none;min-width:var(--s7);font-variant-numeric:tabular-nums}
+body.mk-personal-605a .p-side{flex:none}
+body.mk-personal-605a .p-quote{margin-top:calc(var(--s1)*-1)}
+body.mk-personal-605a .p-status{display:flex;align-items:baseline;gap:var(--s2);margin-top:var(--s1)}
+body.mk-personal-605a .p-sub{display:block}
+body.mk-personal-605a .p-foot code{color:var(--text-muted)}
+body.mk-personal-605a .p-pick-t{font-size:var(--s4);line-height:var(--s5)}
+body.mk-personal-605a .card .settings-row{padding:var(--s4)}
+body.mk-personal-605a .p-steps{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius)}
+body.mk-personal-605a .p-steps .list-row{padding-inline:var(--s3)}
+body.mk-personal-605a .p-back{align-self:flex-start}
+body.mk-personal-605a .split-panel{padding:var(--s5)}
+body.mk-personal-605a .p-wikilink{color:var(--brand)}
+
+/* who said what */
+body.mk-personal-605a .p-transcript{margin:0}
+body.mk-personal-605a .p-transcript>div{grid-template-columns:calc(var(--s9)*2) minmax(0,1fr)}
+body.mk-personal-605a .p-transcript dt{font-weight:500}
+body.mk-personal-605a .p-transcript dt .meta{display:block;font-weight:400}
+body.mk-personal-605a .p-transcript dd{margin:0;max-width:var(--reading-width)}
+
+/* one colour and one name per calendar */
+body.mk-personal-605a .p-cal-work{--cal:var(--info);--cal-soft:var(--info-soft)}
+body.mk-personal-605a .p-cal-private{--cal:var(--chart-4);--cal-soft:var(--surface-3)}
+body.mk-personal-605a .p-cal-family{--cal:var(--success);--cal-soft:var(--success-soft)}
+body.mk-personal-605a .p-dot{display:inline-block;flex:none;width:var(--s2);height:var(--s2);border-radius:var(--space-0);background:var(--cal);align-self:center}
+body.mk-personal-605a .p-legend{gap:var(--s4)}
+
+/* week view: all calendars in one grid, a quarter hour per row */
+body.mk-personal-605a .p-week{--p-time:var(--s8);overflow-x:auto}
+body.mk-personal-605a .p-week-head,body.mk-personal-605a .p-week-all,body.mk-personal-605a .p-week-body{display:grid;grid-template-columns:var(--p-time) repeat(7,minmax(0,1fr))}
+body.mk-personal-605a .p-week-head{border-bottom:1px solid var(--border)}
+body.mk-personal-605a .p-day-h{padding:var(--s2) var(--s2);border-left:1px solid var(--border)}
+body.mk-personal-605a .p-day-h.today strong{color:var(--brand)}
+body.mk-personal-605a .p-week-all{border-bottom:1px solid var(--border);min-height:var(--s7)}
+body.mk-personal-605a .p-week-all>.meta{padding:var(--s2) var(--s1);align-self:center}
+body.mk-personal-605a .p-day-all{display:grid;gap:var(--s1);padding:var(--s1);border-left:1px solid var(--border)}
+body.mk-personal-605a .p-hours{display:grid;grid-template-rows:repeat(11,calc(var(--s4)*4))}
+body.mk-personal-605a .p-hours .meta{padding:var(--s1);font-variant-numeric:tabular-nums}
+body.mk-personal-605a .p-day{display:grid;grid-template-rows:repeat(44,var(--s4));gap:0 var(--space-0);border-left:1px solid var(--border);background:repeating-linear-gradient(to bottom,var(--border) 0 1px,transparent 1px calc(var(--s4)*4))}
+body.mk-personal-605a .p-day.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+body.mk-personal-605a .p-day>.p-ev{grid-column:1/-1}
+body.mk-personal-605a .p-day.today,body.mk-personal-605a .p-day-all.today{background-color:var(--surface-2)}
+body.mk-personal-605a .p-ev{display:block;min-width:0;overflow:hidden;margin:0 var(--space-0) var(--space-0);padding:var(--space-0) var(--s1) var(--space-0) var(--s2);border-left:var(--s1) solid var(--cal);border-radius:var(--s1);background:var(--cal-soft);color:var(--text);text-decoration:none;font-size:var(--fs-meta);line-height:var(--s4)}
+body.mk-personal-605a .p-ev-t{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.mk-personal-605a .p-ev .meta{display:block;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.mk-personal-605a .p-ev.now{box-shadow:inset 0 0 0 1px var(--cal)}
+body.mk-personal-605a a.p-ev:hover{background:var(--surface-3)}
+body.mk-personal-605a a.p-ev:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+body.mk-personal-605a [data-cal][hidden]{display:none}
+
+@media(max-width:720px){
+  body.mk-personal-605a .p-transcript>div{grid-template-columns:minmax(0,1fr);gap:var(--s1)}
+  body.mk-personal-605a .p-transcript dt .meta{display:inline;margin-left:var(--s2)}
+  body.mk-personal-605a .split-panel{padding:var(--s4)}
+  body.mk-personal-605a .list-row{flex-wrap:wrap}
+}
+body.mk-personal-605a .list-row>.p-when{min-width:calc(var(--s9) + var(--s4))}
+body.mk-personal-605a .split-list .list-row.cur{background:var(--surface-2);box-shadow:inset var(--space-0) 0 var(--brand)}
+@media(max-width:720px){
+  body.mk-personal-605a .sidebar:not([data-open=true]) .nav-group{display:none}
+}
+
+/* fix round: source picker on a phone, sources with "You see" and "Helpers can use", the ticket side */
+body.mk-personal-605a .p-picker{gap:var(--s2)}
+body.mk-personal-605a .p-picker .chip{min-height:var(--s7);padding:var(--s2) var(--s4);font-size:var(--fs-body);text-decoration:none}
+body.mk-personal-605a .p-tile-add{min-height:calc(var(--s9)*2)}
+body.mk-personal-605a .p-src{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,4fr) minmax(0,4fr) calc(var(--s9) + var(--s6));gap:var(--s4);align-items:center;padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
+body.mk-personal-605a .p-src.p-src-h{border-top:0;padding-block:var(--s2)}
+body.mk-personal-605a .p-src>:last-child{justify-self:end}
+body.mk-personal-605a .p-lab{display:block}
+body.mk-personal-605a .p-src~.settings-row{border-top:1px solid var(--border)}
+body.mk-personal-605a .p-src~.list-row{border-top:1px solid var(--border)}
+body.mk-personal-605a [data-used] .card-h h3{font-size:var(--fs-body)}
+body.mk-personal-605a #use-dialog .radio-row{padding:var(--s2) 0}
+@media(max-width:720px){
+  body.mk-personal-605a .p-src{grid-template-columns:minmax(0,1fr);gap:var(--s2)}
+  body.mk-personal-605a .p-src>:last-child{justify-self:start}
+}
+/* the skip link shows only on keyboard focus (a full-page capture of a scrolled page drew it mid-page) */
+body.mk-personal-605a .skip-link:not(:focus){clip-path:inset(50%)}
+@media(max-width:720px){
+  body.mk-personal-605a .banner>.grow{flex-basis:100%}
+}
+
+/* how it connects: three boxes and two arrows, facts per sub add-on, the order */
+body.mk-personal-605a .p-flow{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr) minmax(0,3fr) minmax(0,2fr) minmax(0,3fr);gap:var(--s3);align-items:center}
+body.mk-personal-605a .p-node{background:var(--surface-2);height:100%}
+body.mk-personal-605a .p-arrow{display:grid;justify-items:center;gap:var(--s1);text-align:center;color:var(--text-muted)}
+body.mk-personal-605a .p-arrow>[aria-hidden]{font-size:var(--fs-5);line-height:var(--s6);color:var(--brand)}
+body.mk-personal-605a .p-facts{margin:0}
+body.mk-personal-605a .p-facts dd{margin:0}
+body.mk-personal-605a .p-facts>div:last-child{border-bottom:0}
+body.mk-personal-605a .p-order{margin:0;padding-left:var(--s5);display:grid;gap:var(--s2)}
+@media(max-width:720px){
+  body.mk-personal-605a .p-flow{grid-template-columns:minmax(0,1fr)}
+}
+
+/* round 2 of how it connects: one line (notebook, one connection, workspace), the connection line, a sample tile */
+body.mk-personal-605a .p-flow{grid-template-columns:minmax(0,5fr) minmax(0,3fr) minmax(0,4fr)}
+body.mk-personal-605a .p-conn{padding:var(--s2) var(--s4);border-bottom:1px solid var(--border)}
+body.mk-personal-605a .p-conn .dot,body.mk-personal-605a .p-status .dot{margin-right:var(--s1)}
+body.mk-personal-605a .p-sample .card-h h3{font-size:var(--s4);line-height:var(--s5);color:var(--text)}
+@media(max-width:720px){
+  body.mk-personal-605a .p-flow{grid-template-columns:minmax(0,1fr)}
+}
