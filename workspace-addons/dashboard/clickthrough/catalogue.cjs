@@ -42,7 +42,9 @@ function serverOps() {
 
 /** The ops the page code names (a quoted op name anywhere in web/**.js): the actions a person can trigger. */
 function pageOps() {
-  const web = walk(WEB).filter(f => f.endsWith('.js')).map(read).join('\n');
+  // an op the page only compares (`x.action.op === 'message.send'`: it recognises an add-on view's button and does
+  // something else, here it opens the chat) is never sent by the page, so it is no action of its own
+  const web = walk(WEB).filter(f => f.endsWith('.js')).map(read).join('\n').replace(/\bop\s*===?\s*['"`][a-z_.-]+['"`]/g, '');
   // A dotted name (ticket.new) is an op wherever it is quoted; a one-word name (answer, log) also means other things
   // in page code (role:'log'), so it counts only when it is passed to a call or set as `op:`.
   const named = op => op.includes('.')
@@ -74,37 +76,24 @@ function clickthroughs() {
   return fs.readdirSync(FEATURES).filter(f => f.endsWith('.cjs')).sort().map(f => ({ file: f, ...require(path.join(FEATURES, f)) }));
 }
 
-/** not-yet.json: {feature: why} for the features that have no click-through YET (the list only shrinks). */
-function notYet() {
-  const doc = JSON.parse(read(path.join(__dirname, 'not-yet.json')));
-  const out = new Map();
-  for (const [why, list] of Object.entries(doc)) if (!why.startsWith('_')) for (const k of list) out.set(k, why);
-  return out;
-}
-
-/** {missing: features with no claim and not on the not-yet list, done: listed features that have a claim now,
- *  unknown: claims or list entries that are no feature (renamed or gone), waiting: the not-yet list}. */
+/** {missing: features no click-through claims, unknown: claims that are no feature (renamed or gone)}. Every
+ *  feature has one: there is no list to park a feature on (the not-yet list of ORCH-308 is gone, ORCH-384). */
 function coverage() {
   const all = new Set(features());
   const claimed = new Map();
   for (const c of clickthroughs()) for (const k of c.covers || []) claimed.set(k, [...(claimed.get(k) || []), c.file]);
-  const later = notYet();
   return {
     features: [...all],
-    missing: [...all].filter(k => !claimed.has(k) && !later.has(k)),
-    done: [...later.keys()].filter(k => claimed.has(k)),
-    unknown: [...claimed.keys()].filter(k => !all.has(k)).map(k => `${k} (${claimed.get(k).join(', ')})`)
-      .concat([...later.keys()].filter(k => !all.has(k)).map(k => `${k} (not-yet.json)`)),
-    waiting: later,
+    missing: [...all].filter(k => !claimed.has(k)),
+    unknown: [...claimed.keys()].filter(k => !all.has(k)).map(k => `${k} (${claimed.get(k).join(', ')})`),
   };
 }
 
-module.exports = { serverOps, pageOps, pages, features, clickthroughs, coverage, notYet, FEATURES };
+module.exports = { serverOps, pageOps, pages, features, clickthroughs, coverage, FEATURES };
 
 if (require.main === module) {
   const c = coverage();
-  console.log(`${c.features.length} dashboard features, ${c.features.length - c.missing.length - c.waiting.size} with a click-through, ${c.waiting.size} on the not-yet list.`);
-  if (c.missing.length) console.log('No click-through and not on the list:\n' + c.missing.map(k => '  - ' + k).join('\n'));
-  if (c.done.length) console.log('Have a click-through now, take them off not-yet.json:\n' + c.done.map(k => '  - ' + k).join('\n'));
+  console.log(`${c.features.length} dashboard features, ${c.features.length - c.missing.length} with a click-through.`);
+  if (c.missing.length) console.log('No click-through:\n' + c.missing.map(k => '  - ' + k).join('\n'));
   if (c.unknown.length) console.log('Claimed but no longer a feature:\n' + c.unknown.map(k => '  - ' + k).join('\n'));
 }

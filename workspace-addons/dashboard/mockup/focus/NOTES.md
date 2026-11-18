@@ -251,6 +251,24 @@ the buttons are off with one line why. The draft's Start choice above the list (
 is the Start task; this draft lost only its "To build" chip and note. Master: `.live-hist*` in widgets.css (style guide:
 Live layer); click-through step 26.
 
+## Start choice and tool and model, built (ORCH-362, 18 Nov)
+
+Behind the Preview switch the pane of a ticket with no helper shows the draft's Start choice: Continue where it stopped
+(with the time of the last conversation; only when there is one), Fresh start with "Runs on" tool and model (the
+workspace's tool and the ticket's model preselected, so one click starts it), and the earlier sessions with Reopen
+(the History list). Above it one line says how many helper places are in use; when every place is taken it says how
+many tickets wait in line, a start then waits in line (a plain message, no error), and a ticket in line shows where it
+stands. Only tools found on this computer are offered; a tool orch passes no model to says it uses its own model. It
+uses the existing start: `orch run start` (`--fresh`, `--agent`), `orch ticket model`, `orch run start --session`.
+
+A working session's pane has one line at its top: tool · model, how long it is open and when it closes for being idle
+(the draft's words). Tool · model opens the model choice. One change from the draft: orch already switches a working
+helper's model when it finishes its current step (ORCH-49), so the menu says "applies when the helper finishes its
+current step (or at its next start)" instead of "takes effect with a fresh start". Wall tiles get the same line with
+the wall task; with the live data of every session (ORCH-359) the line reads tool, model and times from it. Master:
+`.live-start`, `.live-choice*`, `.live-pick*`, `.live-places`, `.live-prow`, `.live-pop[data-down]` in widgets.css
+(style guide: Live layer); click-through steps 14 and 16.
+
 ## The wall, built (ORCH-360, 18 Nov)
 
 focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch the Focus page is the
