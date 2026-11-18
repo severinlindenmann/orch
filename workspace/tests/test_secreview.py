@@ -321,6 +321,18 @@ def test_release_without_them_lets_the_release_go(tmp_path):
     assert not any(d.startswith("security-review:") for d in out["did"])
 
 
+def test_release_without_them_never_overrides_a_review_started_since(tmp_path):
+    first = go(tmp_path, state=used_up())
+    st = first["state"]
+    st["security"]["limit_card"]["qid"] = "q9"
+    st["security"]["prs"]["2"] = {"sha": "h2", "tid": "t_sec2", "key": "SEC-2"}
+    q = {"id": "q9", "text": "...", "answer": "Release without them", "answered_by": "human:owner"}
+    v = {"2": {"sha": "h2", "verdict": "problems", "line": "a way in without sign-in"}}
+    out = go(tmp_path, state=st, ticket={"ORCH-79": {"questions": [q]}}, security_verdicts=v)
+    assert "owner_ok" not in out["state"]["security"]["prs"]["2"]
+    assert out["lines"][-1] == "waits for every security OK: #2 (security review found problems)"
+
+
 def test_an_agents_answer_to_the_limit_card_does_not_count(tmp_path):
     out = _limit_card_answered(tmp_path, "Release without them", by="agent:claude")
     assert out["did"] == []

@@ -379,9 +379,9 @@ def _limit_answered(w, sec: dict, role: str, window: str) -> list[str]:
     if ans == RELEASE_WITHOUT:
         for k, head in prs.items():
             e = sec["prs"].get(k) or {}
-            if e.get("sha") and e.get("sha") != head:
-                continue  # it changed since the card: its own review decides
-            sec["prs"][k] = {**e, "sha": head, "owner_ok": head, "at": e.get("at") or tickets.now()}
+            if e.get("sha") == head and e.get("tid"):
+                continue  # a review of this very commit started after the card: its verdict decides
+            sec["prs"][k] = {"sha": head, "owner_ok": head, "url": e.get("url"), "at": tickets.now()}
         w.note(role, f"The owner said release without a security review of {names}.")
         return [f"security limit: the owner said release without a review of {names}"]
     if ans == c.get("review"):
