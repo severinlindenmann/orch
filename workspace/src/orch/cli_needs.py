@@ -13,7 +13,9 @@ def add_parsers(sub, common) -> None:
     x = sub.add_parser("needs", parents=[common], help="what waits for a person")
     # orch's own detached run: asks GitHub about pull requests left open (stuck.py), prints nothing
     x.add_argument("--look-at-pulls", action="store_true", help=argparse.SUPPRESS)
-    sub.add_parser("counts", parents=[common], help="the numbers every page shows (needs you, working, stuck)")
+    sub.add_parser(
+        "counts", parents=[common], help="the numbers every page shows (needs you, working, stuck)"
+    )
 
 
 def _counts_text(c: dict) -> str:

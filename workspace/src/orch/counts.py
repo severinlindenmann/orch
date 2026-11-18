@@ -1,11 +1,12 @@
 """The ONE source for every count and step a page shows (ORCH-476).
 
-Home, Review, the ticket page, Focus, its layer and Insights each counted on their own, so the same thing showed
-different numbers (4 vs 5 vs 6 "need you", "Step 4 of 4" vs "Step 3 of 3", "4 working" vs "Running now (1)",
-"1 skipped" vs "won't do"). Every surface now reads these functions (Python directly, the pages through the
-`counts` block the dashboard and Focus put next to their data, the CLI through `orch counts --json`).
+Every page counted on its own, so the same thing showed different numbers (4 vs 5 vs 6 "need you",
+"Step 4 of 4" vs "Step 3 of 3", "4 working" vs "Running now (1)", "1 skipped" vs "won't do").
+Every surface now reads these functions: Python directly, a page through the `counts` block its
+server puts next to its data, the CLI through `orch counts --json`.
 
-Pure functions over ticket dicts and run status dicts (`orch run status --json` per ticket); nothing is stored.
+Pure functions over ticket dicts and run status dicts (`orch run status --json` per ticket);
+nothing is stored.
 
 - needs_you: one per open question plus one per ticket in Review, the same items the Review page shows as
   cards (review.stack); the hidden General conversation and finished tickets never count.
@@ -97,8 +98,13 @@ def needs_you(tickets: list[dict]) -> dict:
     for i in items:
         if i["ticket"] not in seen:
             seen.append(i["ticket"])
-    return {"count": len(items), "questions": questions, "results": len(items) - questions, "tickets": seen,
-            "items": items}
+    return {
+        "count": len(items),
+        "questions": questions,
+        "results": len(items) - questions,
+        "tickets": seen,
+        "items": items,
+    }
 
 
 def helper(run: dict | None) -> str | None:

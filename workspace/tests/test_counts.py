@@ -37,7 +37,11 @@ def test_step_is_the_task_being_done_else_the_first_open_one():
 def test_the_word_for_a_task_not_done_is_wont_do_never_skipped():
     assert counts.task_word({"wont_do": True}) == "won't do"
     assert counts.task_word({"wont_do": True, "done": True}) == "won't do"
-    assert {counts.task_word(c) for c in ({"done": True}, {"state": "doing"}, {})} == {"Done", "Working", "To do"}
+    assert {counts.task_word(c) for c in ({"done": True}, {"state": "doing"}, {})} == {
+        "Done",
+        "Working",
+        "To do",
+    }
 
 
 def test_needs_you_is_one_per_open_question_plus_one_per_result():

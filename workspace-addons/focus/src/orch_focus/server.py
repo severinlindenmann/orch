@@ -25,7 +25,6 @@ from .record import RecordFeed
 from .revisions import Revisions
 
 
-
 def _progress(ticket: dict) -> dict:
     """The core's task count (orch/counts.py, ORCH-476); the same rule here for an older core."""
     try:
@@ -44,6 +43,7 @@ def _step_of(ticket: dict) -> dict | None:
     except ImportError:
         return None
     return counts.step(ticket)
+
 
 def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
     """Resolve the adapter's display label, including tickets without a claim."""

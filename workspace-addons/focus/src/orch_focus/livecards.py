@@ -124,7 +124,9 @@ def _step(checklist: list[dict], status: str | None = None) -> dict | None:
         pass
     open_ = [i for i, c in enumerate(checklist) if not c.get("done") and not c.get("wont_do")]
     at = next((i for i in open_ if checklist[i].get("state") == "doing"), open_[0] if open_ else None)
-    return {"n": at + 1, "of": len(checklist)} if at is not None and status not in ("done", "dropped") else None
+    return (
+        {"n": at + 1, "of": len(checklist)} if at is not None and status not in ("done", "dropped") else None
+    )
 
 
 def card(v: dict) -> dict:
