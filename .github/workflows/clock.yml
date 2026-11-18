@@ -37,7 +37,9 @@ jobs:
           for d in workspace-addons/*/; do
             [ -d "$d/tests" ] && [ -x "$d/.venv/bin/python" ] || continue
             echo "::group::$d"
-            (cd "$d" && ../../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n auto -p no:cacheprovider -rfE --timeout 120) || failed="$failed $d"
+            # the same number of workers as the add-on's own job in addons.yml (test order stays as there)
+            case "$d" in */dashboard/|*/automation/|*/sync/|*/focus/|*/insights/) n=auto ;; *) n=2 ;; esac
+            (cd "$d" && ../../scripts/at-clock.sh "${{ matrix.at }}" .venv/bin/python -m pytest -q -n $n -p no:cacheprovider -rfE --timeout 120) || failed="$failed $d"
             echo "::endgroup::"
           done
           [ -z "$failed" ] || { echo "red at ${{ matrix.at }} UTC:$failed"; exit 1; }
