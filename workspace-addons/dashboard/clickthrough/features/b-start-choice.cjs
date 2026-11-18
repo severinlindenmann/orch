@@ -43,9 +43,9 @@ module.exports = {
     const fresh = [];
     page.on('request', r => { if (r.url().endsWith('/api/act') && r.headers()['x-orch-op'] === 'run.start') fresh.push(JSON.parse(r.postData() || '{}').args || {}); });
     // On a slow runner this click once timed out with no clue: say what the page showed (menu open, button greyed, covered)
-    // by its data attribute, not getByRole('button'): the kit's menus() may give the choice's buttons role=menuitem
-    // when it meets a freshly drawn choice, and then a role locator finds nothing (red on CI, ORCH-664)
-    const freshBtn = choice.locator('button[data-start="fresh"]');
+    // Found by its own marker, not by role: the shared menu helper (components.js menus()) gives the buttons of an open
+    // menu role=menuitem when it runs after the choice was drawn, so getByRole('button') sometimes found nothing.
+    const freshBtn = choice.locator('[data-start="fresh"][aria-label^="Fresh start on"]');
     await act('run.start', () => freshBtn.click({ timeout: 20000 }).catch(async err => {
       const seen = await page.evaluate(() => {
         const host = document.querySelector('[data-key="ticket-start"]'), menu = host?.querySelector('details.menu');

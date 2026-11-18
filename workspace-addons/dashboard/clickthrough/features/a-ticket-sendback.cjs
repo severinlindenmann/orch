@@ -19,8 +19,7 @@ module.exports = {
 
     await page.locator('input[type=file]').first().setInputFiles({ name: 'allergies.txt', mimeType: 'text/plain', buffer: Buffer.from('Nuts: Jonas\nGluten: Mira\n') });
     await page.getByLabel('Add to this ticket').last().fill('Please add the new names from the file.');
-    // the page sends ticket.attach, then ticket.changes: wait for the second one, not a fixed time (on a slow runner the
-    // reload below cut its answer off and the run said ticket.changes never happened)
+    // the file goes on the ticket first, then the words are sent back: wait for both before the reload
     await act('ticket.changes', () => act('ticket.attach', () => page.getByRole('button', { name: 'Send back with this' }).click()));
 
     await reload();

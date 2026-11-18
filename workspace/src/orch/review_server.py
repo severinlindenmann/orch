@@ -286,14 +286,15 @@ class Handler(BaseHTTPRequestHandler):
         self._answer(body)
 
     def _refuse(self, code: int, text: str):
-        """Refuse a POST after reading its body (at most MAX_BODY): a socket closed with unread bytes is reset on
-        Windows, and the caller then sees an aborted connection instead of the refusal."""
+        """Refuse a POST, reading its (small) body first: closing a socket with unread bytes makes Windows
+        reset the connection, and the client then never sees the refusal (WinError 10053)."""
         try:
             n = int(self.headers.get("Content-Length") or "0")
             if 0 < n <= MAX_BODY:
                 self.rfile.read(n)
         except (ValueError, OSError):
             pass
+        self.close_connection = True
         self._text(code, text)
 
     def _body(self) -> dict | None:
