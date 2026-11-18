@@ -265,3 +265,41 @@ def test_chat_polls_start_no_orch_process_until_something_arrives(ws, orch, monk
     for _ in range(10):
         data.load_chat_contacts(ws, orch)
     assert len(calls) == 4
+
+
+def test_person_chat_reads_run_without_agent_variables(ws, monkeypatch):
+    """ORCH-383: a dashboard started from a helper's shell read the contacts as that helper; the core refused
+    ("Only a person ...") and the Chat page logged 404 on /api/chat/contacts. The page reads them for the person."""
+    import subprocess
+
+    import orch.adapters
+
+    from orch_dashboard import data
+
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    seen = []
+
+    def run(argv, **kw):
+        seen.append((argv[-3:], kw["env"]))
+        return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+    monkeypatch.setattr(data, "_run", run)
+    for args in (
+        ["chat", "sync", "--json"],
+        ["chat", "contacts", "--json"],
+        ["chat", "thread", "ws_abcdefghij", "--json"],
+    ):
+        assert data._run_orch("/bin/orch", args, ws, 5.0) == []
+        env = seen[-1][1]
+        assert "ORCH_AGENT" not in env and "CLAUDECODE" not in env and env["ORCH_ROOT"] == str(ws)
+    # every other read keeps the environment as it is (only the person-only reads change)
+    data._run_orch("/bin/orch", ["ticket", "list", "--json"], ws, 5.0)
+    assert seen[-1][1]["ORCH_AGENT"] == "claude"
+    # the list of agent variables can not be read: the read is not made rather than made as the agent
+    monkeypatch.setattr(
+        orch.adapters, "human_environ", lambda environ: (_ for _ in ()).throw(RuntimeError("bad"))
+    )
+    n = len(seen)
+    assert data._run_orch("/bin/orch", ["chat", "contacts", "--json"], ws, 5.0) is None
+    assert len(seen) == n

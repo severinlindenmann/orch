@@ -52,6 +52,9 @@ def look3(e):
 def look4(e):
     """Publish: a shared file's /f/<id>/meta has the workspace name and look; switched off -> workspace null."""
     pid, tok = e.connect_publish("Pilatus")
+    # own starting point: LOOK-2 (runs before, same workspace) switches the shared-pages setting off on publish
+    on = http("PATCH", e.pub.url + "/v1/me", ws_hdr(pid, tok), {"show_on_shared_pages": True})
+    check(on.status == 200, f"switch on first: {on}")
     r, _ = share(e, "Pilatus", name="look4.bin", size=2000)
     _, fid, _ = link_parts(r["link"])
     ok = http("PATCH", e.pub.url + "/v1/me", ws_hdr(pid, tok), {"icon": "wallet", "color": "amber"})
@@ -68,21 +71,45 @@ def look4(e):
     return "meta on/off"
 
 
+def _real_home():
+    import pwd
+    from pathlib import Path
+    return Path(os.environ.get("E2E_REAL_HOME") or pwd.getpwuid(os.getuid()).pw_dir)  # the run uses a temp HOME
+
+
+def find_pw_dir():
+    """The node_modules folder that holds playwright, or "" (shared by LOOK-2 and LOOK-5)."""
+    from pathlib import Path
+    if os.environ.get("PW_DIR"):
+        return os.environ["PW_DIR"]
+    home = _real_home()
+    for p in (home / "orch-dev/e2e/dashboard/node_modules", Path(__file__).parent / "walkthrough/node_modules"):
+        if (p / "playwright").is_dir():
+            return str(p)
+    return ""
+
+
+def find_node(extra_path=""):
+    import shutil
+    from pathlib import Path
+    node = shutil.which("node", path=os.environ.get("PATH", "") + os.pathsep + extra_path)
+    if node:
+        return node
+    return str(next((_real_home() / ".nvm/versions/node").glob("*/bin/node"), "")) or ""
+
+
 @scenario("LOOK-5")
 def look5(e):
     """Playwright: both admin portals show the badge picker before connect and the locked 409 text after."""
-    import shutil
     import subprocess
     from pathlib import Path
 
-    import pwd
-
-    home = Path(pwd.getpwuid(os.getuid()).pw_dir)  # the run uses a temp HOME
-    nm = home / "orch-dev/.trun6q-e2e/node_modules"
-    node = shutil.which("node") or str(next((home / ".nvm/versions/node").glob("*/bin/node"), ""))
-    if not (nm / "playwright").is_dir() or not node or node == ".":
+    home = _real_home()
+    pw = find_pw_dir()
+    node = find_node(e.path)
+    if not pw or not (Path(pw) / "playwright").is_dir() or not node:
         from lib import Skip
-        raise Skip("playwright or node not installed")
+        raise Skip("playwright or node not installed (set PW_DIR to a node_modules folder)")
     for kind, srv in (("relay", e.rel), ("publish", e.pub)):
         r = srv.admin.call("POST", "/admin/api/workspaces", {"name": e.label("Portal" + kind), "description": "d", "tags": []})
         check(r.status == 201, f"add: {r}")
@@ -90,9 +117,9 @@ def look5(e):
         wid = j["id"]
         e.cleanup.append(lambda s=srv, w=wid: s.admin.call("DELETE", f"/admin/api/workspaces/{w}"))
         script = Path(__file__).parent / "look_portal_check.mjs"
-        env = {**e.env, "PW_DIR": str(nm), "HOME": str(home)}
+        env = {**e.env, "PW_DIR": pw, "HOME": str(home)}
         p = subprocess.run([node, str(script), kind, srv.admin.base, srv.admin.token, wid, e.label("Portal" + kind), j["token"], srv.url],
-                           capture_output=True, text=True, timeout=120, env=env, cwd=str(nm.parent))
+                           capture_output=True, text=True, timeout=120, env=env, cwd=str(Path(pw).parent))
         check(p.returncode == 0, f"{kind} portal: {p.stdout[-300:]} {p.stderr[-600:]}")
     return "both portals"
 
@@ -138,9 +165,8 @@ def look2(e):
     import shutil
     from pathlib import Path
 
-    pw = os.environ.get("PW_DIR") or next((str(p) for p in (Path(os.environ.get("E2E_REAL_HOME") or Path.home()) / "orch-dev" / "e2e" / "dashboard" / "node_modules",
-                                                           Path(__file__).parent / "walkthrough" / "node_modules") if (p / "playwright").is_dir()), "")
-    node = shutil.which("node", path=os.environ.get("PATH", "") + os.pathsep + e.path)
+    pw = find_pw_dir()
+    node = find_node(e.path)
     if not pw or not node:
         from lib import Skip
         raise Skip("node + playwright not available (set PW_DIR to a node_modules folder)")
@@ -177,7 +203,9 @@ def look2(e):
     check((who["icon"], who["color"]) == ("wallet", "amber"), f"relay whoami {who}")
     check((who.get("pending") or {}).get("description") == "Product work, now with a Wallet", f"pending {who.get('pending')}")
     check("Waiting for relay approval" in got["pending"], f"pending text {got['pending']!r}")
-    check(got["shared"] == "false" and e.orchj(n, "look", "shared-pages")["on"] is False, f"shared-pages {got['shared']}")
+    shared_off = e.orchj(n, "look", "shared-pages")["on"] is False
+    e.person(n, "look", "shared-pages", "on")  # leave Pilatus as found: LOOK-4 reads the publish meta of this workspace
+    check(got["shared"] == "false" and shared_off, f"shared-pages {got['shared']}")
     check(set(got["items"]) >= {n, other}, f"switcher items {got['items']}")
     check(["teal", True] in got["itemLooks"] and ["amber", True] in got["itemLooks"], f"badges {got['itemLooks']}")
     check(got["noOverflow"] and not got["errors1280"] and not got["errors720"], f"layout/errors {got}")

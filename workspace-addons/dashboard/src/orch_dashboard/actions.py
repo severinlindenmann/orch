@@ -788,10 +788,17 @@ def _chat_make_ticket(a):
 
 
 def _run_start(a):
-    _only(a, ("ticket", "fresh", "take_over"))
+    """Start a helper on the ticket: continue its last conversation, or fresh; the Start choice (ORCH-362) can
+    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know."""
+    _only(a, ("ticket", "fresh", "take_over", "agent"))
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
+    agent = a.get("agent")
+    if agent is not None:
+        if not isinstance(agent, str) or not AGENT.fullmatch(agent):
+            raise BadRequest("That is not a tool name.")
+        flags += ["--agent", agent]
     return ["run", "start", _tid(a.get("ticket"))], flags, []
 
 

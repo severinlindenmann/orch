@@ -764,7 +764,8 @@ function aboutPanel() {
     body = [
       // A build from a branch (no release number, a commit) is a normal case, not an error: say what it is, skip the check.
       !newest && have?.sha && !have.release && info.ref ? settingsText('p', {className:'meta', 'data-key':'update-branch'}, 'This is a development build, so there is no release to compare it with. Update checks are skipped.')
-        : !newest ? settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.')
+        : !newest ? h('div', {className:'row'}, settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.'),
+          snapshot ? null : updButton('Check again', 'update-check-again', () => { updUi.info = null; updLoad(true); render(); }))
         : ready ? h('div', {className:'upd-ready'}, settingsText('strong', {}, updNum(newest.release) || newest.label), settingsText('span', {className:'meta'}, ' is ready to install'))
         : settingsText('p', {className:'meta', 'data-key':'update-current'}, 'You have the newest version.'),
       ready && array(info.changes).length ? h('div', {className:'stack', 'data-key':'update-changes'}, h('h3', {}, 'What changed'), h('ul', {className:'upd-changes'}, array(info.changes).map(c => settingsText('li', {}, c)))) : null,

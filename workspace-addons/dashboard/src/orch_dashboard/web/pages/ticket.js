@@ -626,7 +626,7 @@ function ticketShareButton(t, file) {
     }
     window.orch.toast(clean(result.text) || 'Could not share the file.', 'error');
   };
-  return ticketButton('Share with group', 'outline', () => share(false));
+  return ticketButton('Share with group', 'ghost sm', () => share(false), {'data-key':'file-share-group-' + file.name});
 }
 // ---- The shared file viewer: name, meta, Open in new tab, Download, Copy link. × Close, Esc and a click outside close it,
 // and the opening control gets the cursor back.
@@ -698,7 +698,8 @@ function ticketFileActions(t, kind, file) {
   return h('div', {className:'file-actions'},
     ticketButton('Open', 'ghost sm', () => previewFile(t.id, kind, file.name), {'data-key':'file-open-' + k}),
     h('a', {className:'btn ghost sm', href:fileUrl(t.id, kind, file.name, true), download:file.name.split('/').pop()}, 'Download'),
-    ticketButton('Copy link for this computer', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}));
+    ticketButton('Copy link for this computer', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}),
+    kind === 'artifacts' ? ticketShareButton(t, file) : null);
 }
 // ORCH-185: a picture shows itself in its row (the badge stays under it until it has loaded).
 const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name), alt:'', loading:'lazy'});
@@ -2283,7 +2284,7 @@ function embedActRequest(e) {
 }
 let embedActBusy = false;  // one setting at a time: a second click while saving is dropped
 async function runEmbedAct(req) {
-  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (embedActBusy) return reply({type:'orch.act.failed', error:'Still saving the last change. Try again in a moment.'});
   embedActBusy = true;
   try {
