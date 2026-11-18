@@ -13,7 +13,7 @@ The shape (the wall builds on it; keep it in step with the PR text):
     Session = {
       "id": "t_7k3f9q", "key": "ORCH-12", "title": "...",
       "status": "needs-you" | "working" | "in-line" | "idle" | "closed",
-      "word": "Waits for you" | "Working" | "Starting" | "On hold" | "Stuck" | "In line" | "Idle" | "No session",
+      "word": "Waits for you" | "Working" | "Starting" | "On hold" | "Stuck" | "Stopped: usage limit" | "In line" | "Idle" | "No session",
       "detail": "Your answer" | "Running pytest" | "" ...,          # the core's one-line detail
       "waiting_on": [{"kind": "person"|"time"|"ticket"|"external"|"command"|"hold", "what": "<plain words>"}],
       "question": "<the open question>" | null,                    # what Needs you shows
