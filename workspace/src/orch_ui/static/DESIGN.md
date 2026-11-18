@@ -303,6 +303,9 @@ Sessions that need you are orange chips, pinned ones are chips after them, every
 working", "9 in line", "2 idle") that opens a list (`.lbar-pop`, search from 9 sessions). It never wraps: it folds
 (`data-fold` 0 to 4) into counts instead, and on a phone it shows symbols and numbers above the tab bar. Counts in
 words read right: "1 session", "2 sessions". The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
+At its right end **New** opens a `.live-pop` of four `.live-opt` choices for a session without a ticket (Empty helper,
+Chat helper, Plain terminal, Manager), each a `.live-opt-t`: the name, then what it does as `.meta`; one already open
+says "Already open: go to it". The same four are buttons at the top of Focus. A new one is pinned (ORCH-364).
 
 ## Loading, errors and performance
 

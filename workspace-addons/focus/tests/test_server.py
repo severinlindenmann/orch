@@ -349,9 +349,16 @@ def test_run_start_marks_the_ticket_page_once(server, fake_orch, ws):
     assert len([c for c in calls(fake_orch) if c[:2] == ["ext", "set"]]) == 1  # already set: not again
 
 
-@pytest.mark.parametrize("path", [f"/t/{TID}", f"//t/{TID}", f"/t/t/{TID}"])
+@pytest.mark.parametrize("path", [f"/t/{TID}", f"//t/{TID}", f"/t/t/{TID}", f"/{TID}", f"//{TID}"])
 def test_page_route_tolerates_how_a_surface_joins_the_path(server, path):
     assert req(server, "GET", path)[0] == 200
+
+
+def test_short_ticket_address_opens_the_focus_page(server):
+    # #addon/focus/<ticket> (typed without t/) answered a bare 404 'not found' (report r-1118-0544-t_rhcwe3-2)
+    st, body, _ = req(server, "GET", f"/{TID}")
+    assert st == 200 and b"not found" not in body.lower()
+    assert req(server, "GET", "/t_x")[0] == 404  # not a ticket id: still refused
 
 
 def test_retry_error_shows_on_the_view(server):

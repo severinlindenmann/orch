@@ -305,3 +305,95 @@ def test_the_queue_check_decides_base_branch_reviews_and_login(ws):
     assert "merges only into develop" in why[url(2)] and "not queued" in why[url(3)]
     [row] = store.read(ws)
     assert (row["base"], row["login"]) == ("develop", "helper-bot")
+
+
+# -- a helper stopped with a ready pull request (ORCH-433) ------------------------------------------------
+def stopped_ticket(ws, *prs: int, status: str = "active", ref: str = "ready to merge") -> str:
+    from orch import tickets
+
+    tid = ticket(ws, *prs, on=None, status=ref)
+    tickets.set_status(ws, tid, status, "human:p")
+    return tid
+
+
+@pytest.fixture
+def helper(monkeypatch):
+    """The helper state per ticket that stuck._helper reports (default: no helper at all)."""
+    from orch import stuck
+
+    states: dict[str, str] = {}
+    monkeypatch.setattr(stuck, "_helper", lambda root, t: (states.get(t["id"], "none"), None))
+    return states
+
+
+def test_helper_stopped_is_off_by_default(ws, helper):
+    stopped_ticket(ws, 1)
+    gh = FakeGitHub({1: {}})
+    assert switch.stopped_is_on(ws) is False
+    assert tend(ws, gh)["added"] == [] and store.read(ws) == [] and gh.calls == []
+
+
+def test_a_stopped_helpers_ready_pull_request_goes_in_line_once(ws, helper):
+    switch.set_stopped(ws, True)
+    tid = stopped_ticket(ws, 1)
+    idle = stopped_ticket(ws, 2)
+    helper[idle] = "idle"  # at its prompt: stopped as well
+    gh = FakeGitHub({1: {}, 2: {}})
+    got = tend(ws, gh)
+    assert sorted(got["added"]) == [url(1), url(2)]
+    assert sorted(queued(ws)) == [(1, "waiting", tid), (2, "waiting", idle)]
+    assert all(r["by"] == switch.BY_STOPPED for r in store.read(ws))
+    helper[tid] = "busy"  # a helper took the ticket again: its entry stays in line
+    assert tend(ws, gh) == {"added": [], "removed": [], "skipped": []}
+    assert len(store.read(ws)) == 2
+
+
+def test_a_working_helper_keeps_its_own_pull_request(ws, helper):
+    switch.set_stopped(ws, True)
+    tid = stopped_ticket(ws, 1)
+    helper[tid] = "busy"
+    gh = FakeGitHub({1: {}})
+    assert tend(ws, gh)["added"] == [] and gh.calls == []
+
+
+def test_only_pull_requests_recorded_ready_to_merge(ws, helper):
+    switch.set_stopped(ws, True)
+    for n, word in (
+        (1, "draft"),
+        (2, "checks running"),
+        (3, "checks failed"),
+        (4, "conflict"),
+        (5, "blocked"),
+    ):
+        stopped_ticket(ws, n, ref=word)
+    gh = FakeGitHub({n: {} for n in range(1, 6)})
+    assert tend(ws, gh)["added"] == [] and gh.calls == []  # not even read on GitHub
+
+
+def test_never_while_a_question_waits_in_backlog_or_when_finished(ws, helper):
+    from orch import tickets
+
+    switch.set_stopped(ws, True)
+    asked = stopped_ticket(ws, 1)
+    tickets.ask(ws, asked, "Merge it now?", ["yes", "no"], "yes", "agent:t")
+    stopped_ticket(ws, 2, status="open")  # Backlog
+    stopped_ticket(ws, 3, status="done")
+    gh = FakeGitHub({1: {}, 2: {}, 3: {}})
+    assert tend(ws, gh)["added"] == [] and gh.calls == []
+
+
+def test_github_still_decides_a_stopped_helpers_pull_request(ws, helper):
+    switch.set_stopped(ws, True)
+    stopped_ticket(ws, 1, 2)
+    gh = FakeGitHub({1: {"isDraft": True}, 2: {"state": "CLOSED"}})  # the recorded word is older than GitHub
+    got = tend(ws, gh)
+    assert got["added"] == [] and dict(got["skipped"]) == {url(1): "a draft", url(2): "not open"}
+
+
+def test_the_helper_stopped_command_writes_the_setting(ws, capsys):
+    assert cli.main(["helper-stopped", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"on": False}
+    assert cli.main(["helper-stopped", "on"]) == 0
+    assert "Helper stopped: on" in capsys.readouterr().out and switch.stopped_is_on(ws)
+    assert cli.main(["helper-stopped", "off", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"on": False} and not switch.stopped_is_on(ws)

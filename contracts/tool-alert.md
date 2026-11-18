@@ -51,6 +51,9 @@ ticket titles, file paths. `text` and every field go through the outgoing secret
 | `unreachable` | `The <label> cannot be reached.` + the same helper sentence as `renew` + ` Check it on your computer.` |
 | `works` | `The <label> works again.` |
 
+A check that names its terminal sign-in command (`sign_in`, ORCH-218: `az login`, `gh auth login`, ...) ends with
+` Sign in again on your computer: <command>` instead of ` Renew it on your computer.` (`soon` and `renew`).
+
 ## What the phone does
 
 - The relay pushes the text as for any workspace text to `phones` (`type: text`, title = workspace name, body =

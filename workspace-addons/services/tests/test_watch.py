@@ -324,3 +324,27 @@ def test_systemd_runs_reads_nrestarts(monkeypatch):
     assert seen[0][1].startswith("orch-svc-") and seen[0][2] == "--property=NRestarts"
     monkeypatch.setattr(d, "_run", lambda *a: subprocess.CompletedProcess([], 0, "NRestarts=\n", ""))
     assert d.runs(_spec()) is None
+
+
+def test_an_answer_that_cannot_be_carried_out_is_asked_again(cli, fake, ws, clock, orch, monkeypatch):
+    # review ORCH-378: a refused Stop used the answer up and orch never asked again while the service kept failing
+    from orch_services.store import Refused
+
+    _make_failing(cli, fake, clock)
+    orch.answer("DM1-12", "q1", "Stop")
+
+    def refuse(spec):
+        raise Refused("Could not stop it (busy). Run orch services list and try again.")
+
+    monkeypatch.setattr(fake, "stop", refuse)
+    clock["t"] = T0 + 300
+    res = _check(cli)
+    assert "Could not stop Budget guard" in res["did"] and fake.entries["budget"]["running"] is True
+    logs = [c for c in orch.calls() if c["args"][0] == "log"]
+    assert logs and "busy" not in json.dumps(logs)  # the tool's words stay off the ticket
+    assert len(orch.asks()) == 2  # the same pass asks again, once
+    q = _state(ws)["watch"]["question"]
+    assert q["open"] is True and q["id"] != "q1"
+    clock["t"] = T0 + 360
+    _check(cli)
+    assert len(orch.asks()) == 2

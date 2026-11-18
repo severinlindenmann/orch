@@ -83,3 +83,41 @@ test('G2: a quiet Working ticket is one "No news since" row on Home, never a nee
   assert.ok(!/quiet/.test(home.slice(home.indexOf('function needsToday'), home.indexOf('function needsYouTotal'))), 'not counted as needing you');
   for (const f of ['pages/tickets.js', 'pages/ticket.js']) assert.match(read(f), /quietWords\(t\.quiet_since/, f + ' shows No news since');
 });
+test('"What changed" shows at most about 3 plain lines per ticket, never commit ids, file or test names (ORCH-407)', () => {
+  const c = ctx({tickets:() => [], ticketOf:() => null});
+  // the summaries of report r-1118-0544 as the owner saw them
+  const s384 = "Merged on green CI: 28 of 28 click-throughs, 84 of 84 features, in their own CI job; dashboard tests 706 pass. Merged by the owner's Merge click (workflow file change), merge commit 11e55282. Local: full click-through run 28/28, node dashboard tests 706/706, dashboard pytest (touched files) 171 passed.";
+  const s399 = 'The report holds no contacts line (0 matches in timeline.jsonl); its window shows only CLI commands. Cause, already worked out in issue 1408: data._run_orch passes the server environment through unchanged. Relay on or off makes no difference. Fix: run the person-only reads with orch.adapters.human_environ. Check that would have caught it: a dashboard test (added in PR 1410, test_chat_data.py -k person_chat).';
+  const s390 = 'Merged into develop on green CI; the clock check now runs on every pull request touching workspace or add-ons. Merged 2026-11-18 04:02 UTC as c1fdc5e9 by the owner\'s Merge click (q2; workflow file change). Last CI run 44232803104 green incl. both clock jobs. Local: factory suite 296 passed, sync test_act passed (isolated home).';
+  for (const s of [s384, s399, s390]) {
+    const out = c.plainChanged(s);
+    assert.ok(out.length <= 201, out);
+    assert.doesNotMatch(out, /11e55282|c1fdc5e9|\.jsonl|\.py|_run_orch|human_environ|-k /, out);
+    assert.ok(out.length > 0);
+  }
+  assert.match(c.plainChanged(s390), /^Merged into develop on green CI; the clock check now runs on every pull request/);
+  assert.equal(c.plainChanged(s399), 'Relay on or off makes no difference.');
+  assert.equal(c.plainChanged('Ordered 500 cups.'), 'Ordered 500 cups.');
+  assert.match(c.plainChanged('Fixed data._run_orch in server.py ' + 'and more words '.repeat(30)), /…$/);  // nothing plain: the first sentence, cut short
+  assert.equal(c.plainChanged(''), '');
+});
+test('the top bar "longest wait" is the age of the same needs the number counts, never a dropped ticket\'s old question (ORCH-407)', () => {
+  // report r-1118-0544: one result to check, minutes old, but "longest wait 19 h ago" from questions on dropped tickets
+  const tickets = [{id:'d1', title:'Dropped long ago', status:'dropped', updated_at:'2026-11-13T17:00:00Z', questions:[{id:'q1', text:'Old?', answer:null}]},
+    {id:'r1', title:'Keep develop checks running', status:'review', updated_at:'2026-11-14T11:55:00Z'}];
+  const c = ctx({needsList:() => [], tickets:() => tickets, ticketOf:id => tickets.find(t => t.id === id)});
+  assert.equal(c.needsToday().count, 1);
+  assert.equal(c.needsOldestAt(), Date.parse('2026-11-14T11:55:00Z'));
+  const rows = [{id:'n1', ticket:'w1', since:'2026-11-14T09:00:00Z', title:'Which logo?', answer:{question:'q2', digest:'d', options:['A', 'B']}}];
+  const withQ = [...tickets, {id:'w1', title:'Newsletter', status:'waiting', questions:[{id:'q2', text:'Which logo?'}]}];
+  const c2 = ctx({needsList:() => rows, tickets:() => withQ, ticketOf:id => withQ.find(t => t.id === id)});
+  assert.equal(c2.needsOldestAt(), Date.parse('2026-11-14T09:00:00Z'));  // the question, asked first
+  assert.equal(ctx({needsList:() => [], tickets:() => [], ticketOf:() => null}).needsOldestAt(), null);
+  assert.match(read('app.js'), /needsOldestAt\(\)/);
+});
+test('"What changed" says a head the note repeats once and ends a head with a full stop (ORCH-407)', () => {
+  const c = ctx({tickets:() => [], ticketOf:() => null});
+  assert.equal(c.changedText({head:'Merged on green CI', detail:'Merged on green CI: 28 of 28.'}), 'Merged on green CI: 28 of 28.');
+  assert.equal(c.changedText({head:'Menu written', detail:'Three dishes.'}), 'Menu written. Three dishes.');
+  assert.equal(c.changedText({head:'Menu written.', detail:''}), 'Menu written.');
+});
