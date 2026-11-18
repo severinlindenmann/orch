@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -141,6 +142,14 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
     return steps
 
 
+def step_env(base: dict[str, str]) -> dict[str, str]:
+    """The environment of every step: uv runs the tests with its own Python (in the runner user's home), never the
+    job's setup-python one in /opt/hostedtoolcache. That folder is writable by a group the runner user is not in, so
+    `orch secret exec` refuses its interpreter (secretrun._check_chain) and test_cli_secret.py goes red whenever a
+    pull request picks it (#1566). The full workspace job never installs that Python, so it never saw this."""
+    return {**base, "UV_PYTHON_PREFERENCE": "only-managed"}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", default="origin/develop")
@@ -153,7 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     for s in steps:
         print(f"::group::{s['name']}", flush=True)
         print(f"$ (cd {s['cwd']} && {s['cmd']})", flush=True)
-        got = subprocess.run(s["cmd"], check=False, shell=True, cwd=ROOT / s["cwd"])
+        env = step_env(dict(os.environ))
+        got = subprocess.run(s["cmd"], check=False, shell=True, cwd=ROOT / s["cwd"], env=env)
         print("::endgroup::", flush=True)
         if got.returncode != 0:
             print(f"::error title=Light check red::{s['name']}", flush=True)
