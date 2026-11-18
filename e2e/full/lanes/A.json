@@ -352,12 +352,12 @@
     },
     {
      "do": "wait_for",
-     "sel": ".kanban-col.is-shown .ticket-card",
+     "sel": ".status-row .ticket-tile",
      "timeout": 10000
     },
     {
      "do": "wait_for",
-     "sel": ".status-jumps button[aria-pressed='true']",
+     "sel": ".status-row[data-status='review']",
      "state": "attached"
     },
     {

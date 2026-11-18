@@ -1220,3 +1220,87 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
 .swipe-preview:has(>.doc):not(:has(.doc-rows)){background:linear-gradient(transparent,var(--ink) 70%) 0 100%/100% 32px no-repeat local,linear-gradient(transparent,color-mix(in srgb,var(--text) 22%,transparent)) 0 100%/100% 16px no-repeat scroll,var(--ink)}
 /* a toast never covers the comment sheet's buttons: while a sheet is open it shows at the top (ORCH-422 look check) */
 body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:auto}
+/* ORCH-576 (owner picked board draft C, 18 Nov): status rows. Every status is a row of small tiles, the most urgent row
+   first. .status-rows > .status-row[data-status] > .status-row-h (dot, name, count) + .status-row-main > .tile-grid >
+   .ticket-tile. A tile: .tile-title (kind tag, key, 2 lines) and .tile-foot (tasks, ONE .tile-sig, .tile-part-of, one add-on
+   .tile-addon, the ⋯ menu). .parts-bar: one block per part, coloured by its row. .scope-bar: the bar over a board that
+   shows one ticket and all its parts. Drag: .is-dragging on .status-rows, .drop-target on the row, .drop-before on the
+   tile it lands above. */
+.status-rows-track{display:grid}
+.status-row{position:relative;display:grid;grid-template-columns:144px minmax(0,1fr);gap:12px;padding:10px 0;border-top:1px solid var(--border);border-radius:0;transition:background-color var(--dur-fast) var(--ease-move)}
+.status-row-h{display:flex;align-items:center;gap:8px;align-self:start;min-height:28px}
+.status-row-h h2{font-size:14px;line-height:20px;margin:0;white-space:nowrap}
+.status-row-h .sdot{width:8px;height:8px;border-radius:50%;background:var(--c,var(--text-faint));flex:none}
+.status-row.is-empty .status-row-h h2{color:var(--text-muted);font-weight:500}
+.status-row-main{min-width:0;display:grid;gap:6px}
+.status-row-none{margin:0;min-height:28px;display:flex;align-items:center;color:var(--text-faint);font-size:13px}
+button.status-row-none{color:var(--text-muted)}
+.status-row-foot{gap:8px;align-items:center}
+.tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px;align-items:start}
+.status-rows .ticket-tile{--c:var(--text-faint);position:relative;display:grid;width:auto;min-height:0;align-content:start;gap:4px;margin:0;padding:8px 8px 6px 10px;background:var(--surface);border:1px solid var(--border);border-left:2px solid var(--c);border-radius:6px;cursor:grab;transition:border-color var(--dur-fast) var(--ease-move),opacity var(--dur-fast) var(--ease-move),box-shadow var(--dur-fast) var(--ease-move)}
+.status-rows .ticket-tile:hover,.status-rows .ticket-tile:focus-within{border-color:var(--border-strong);border-left-color:var(--c)}
+.status-rows .ticket-tile:has(.menu[open]){z-index:5}
+.status-rows .tile-title{margin:0;font-size:14px;font-weight:500;line-height:20px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.status-rows .tile-title a{color:var(--text);text-decoration:none}
+.status-rows .tile-title a:hover{text-decoration:underline;text-underline-offset:2px}
+.status-rows .tile-title .key{font-size:11px;line-height:1;margin-right:6px;color:var(--text-faint)}
+.kind-tag{display:inline-block;margin-right:6px;padding:0 5px;border:1px solid currentColor;border-radius:4px;font-size:11px;line-height:16px;font-weight:500;vertical-align:1px}
+.kind-tag[data-kind=epic]{color:var(--info)}
+.kind-tag[data-kind=release]{color:var(--brand)}
+.tile-foot{display:flex;align-items:center;gap:10px;min-height:24px;font-size:12px;color:var(--text-muted)}
+.tile-foot>*{min-width:0}
+.tile-foot .grow{flex:1}
+.tile-num{font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
+.tile-sig{flex:0 1 auto;min-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-sig.warn{color:var(--warning)}.tile-sig.bad{color:var(--danger)}
+.tile-link{background:none;border:0;padding:0;color:var(--text-muted);font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.tile-link:hover,.tile-link:focus-visible{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+.tile-part-of{display:inline-block;flex:0 4 auto;min-width:48px;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-late{display:inline-grid;flex:none;color:var(--warning)}
+.tile-answer{border-color:var(--needs-you)}
+.tile-icon{flex:none;display:inline-grid;grid-auto-flow:column;place-items:center;gap:2px;min-width:24px;height:24px;padding:0 4px;border:0;border-radius:4px;background:none;color:var(--text-muted);cursor:pointer;list-style:none}
+.tile-icon::-webkit-details-marker{display:none}
+.tile-icon:hover,.tile-icon:focus-visible,.menu[open]>.tile-icon{background:var(--surface-3);color:var(--text)}
+.tile-icon[data-tone=bad]{color:var(--danger)}.tile-icon[data-tone=active]{color:var(--working)}.tile-icon[data-tone=watch]{color:var(--info)}.tile-icon[data-tone=good]{color:var(--success)}
+.status-rows .move-button{opacity:.55}
+.status-rows .ticket-tile:hover .move-button,.status-rows .ticket-tile:focus-within .move-button,.status-rows .menu[open]>.move-button{opacity:1}
+.tile-addon,.tile-foot>details.menu{flex:none;position:relative}
+.tile-facts{width:300px;gap:10px;padding:10px}
+.tile-fact{display:grid;grid-template-columns:16px 1fr;gap:8px;font-size:13px;line-height:18px}
+.tile-fact p{margin:0;color:var(--text)}
+.tile-fact a{font-size:12px;color:var(--text-muted)}
+.tile-fact[data-tone=bad]>.ic-wrap{color:var(--danger)}.tile-fact[data-tone=active]>.ic-wrap{color:var(--working)}.tile-fact[data-tone=watch]>.ic-wrap{color:var(--info)}.tile-fact[data-tone=good]>.ic-wrap{color:var(--success)}
+.parts-bar{flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:6px;padding:0;border:0;background:none;color:var(--text-muted);font:inherit;font-size:12px;cursor:pointer}
+.parts-bar:hover .tile-num{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+.parts-segs{display:inline-flex;gap:1px;width:min(56px,calc(var(--n,1) * 8px));height:8px;flex:none}
+.parts-segs i{flex:1;border-radius:1px;background:var(--c,var(--text-faint))}
+.tile-parts{display:grid;gap:2px;padding:4px 0 2px 10px;border-left:1px solid var(--border);animation:ui-enter var(--dur-base) var(--ease-enter)}
+.tile-part{display:flex;align-items:center;gap:6px;min-width:0;font-size:12px;color:var(--text-muted);text-decoration:none}
+.tile-part:hover{color:var(--text)}
+.tile-part .sdot{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}
+.tile-part-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-part .meta{font-size:11px;white-space:nowrap}
+.status-rows .ticket-tile.tile-focus{box-shadow:0 0 0 2px var(--brand)}
+.scope-bar{position:sticky;top:calc(var(--topbar-height,56px) + 4px);z-index:6;display:flex;align-items:center;gap:12px;margin:4px 0 8px;padding:8px 12px;border:1px solid var(--brand);border-radius:8px;background:var(--surface);box-shadow:var(--lift-shadow);font-size:13px;animation:ui-enter var(--dur-base) var(--ease-enter)}
+.scope-bar p{margin:0}
+.scope-bar .scope-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scope-bar .scope-title .key{margin-right:6px}
+.scope-bar .chip{margin:0 6px}
+.scope-bar .parts-bar{vertical-align:middle;cursor:default}
+/* dragging */
+.status-rows.is-dragging .status-row{outline:1px dashed var(--border);outline-offset:-2px;border-radius:8px}
+.status-rows .status-row.drop-target{background:var(--brand-soft);outline:1px solid var(--brand)}
+.status-rows .status-row.drop-target::after{content:attr(data-say);position:absolute;left:8px;top:40px;max-width:136px;font-size:12px;color:var(--text)}
+.status-rows .ticket-tile.dragging{opacity:.35}
+.status-rows .ticket-tile.drop-before::before{content:"";position:absolute;left:-5px;top:4px;bottom:4px;width:2px;border-radius:2px;background:var(--brand)}
+@media(max-width:720px){
+  .status-row{grid-template-columns:1fr;gap:6px;padding:8px 0}
+  .status-row.is-empty{grid-template-columns:auto 1fr;align-items:center}
+  .tile-grid{grid-template-columns:1fr}
+  .tile-foot{min-height:32px}
+  .tile-icon{min-width:32px;height:32px}
+  .status-rows .move-button{opacity:1}
+  .scope-bar{top:4px;flex-wrap:wrap}
+}
+@media(hover:none){.status-rows .move-button{opacity:1}}
+@media(prefers-reduced-motion:reduce){.status-rows .ticket-tile,.status-row,.tile-parts,.scope-bar{transition:none;animation:none}}
