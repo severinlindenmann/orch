@@ -26,8 +26,9 @@ test('the All cards list stays beside the deck below 1440 px and folds away only
 test('a cut copy of the question is not shown above the full question', () => {
   const js = readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8');
   // the title shows only when the question is not cut (ORCH-421: it also carries the whole title on hover)
-  assert.match(js, /if\(!cut\)\{const t3=el\('h3','',it\.title\);t3\.title=it\.title;h\.append\(t3\)\}/);
-  assert.match(js, /it\.text&&\(cut\|\|it\.text!==it\.title\)/);
+  // round 2 (ORCH-477): title first, then the one meta line; a cut title gives its place to the whole question
+  assert.match(js, /if\(!cut\)\{const t3=el\('h3','',it\.title\);t3\.title=it\.title;h\.append\(t3,m\);if\(it\.text&&it\.text!==it\.title\)/);
+  assert.match(js, /else h\.append\(el\('p','swipe-text swipe-lead',it\.text\),m\)/);
 });
 
 // ORCH-329: a doc box leads with a headline, bar, chips, flow, chart or diff; long text sits behind Details.
@@ -35,4 +36,20 @@ test('doc box draws the glance formats and folds long text', () => {
   const js = readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8');
   for (const k of ['doc-headline', 'doc-progress', 'doc-chips', 'doc-flow', 'doc-chart', 'doc-diff', 'doc-details']) assert.match(js, new RegExp(k));
   assert.match(css, /\.doc-details summary/);
+});
+
+// ORCH-477 round 2 (owner sent back): where the "All cards" list shows beside the deck, the deck's own "All" button
+// goes (it repeated the list); a phone keeps it. Files sit in equal boxes: 2 columns, 3 from 1600 px, 1 on a phone,
+// 2 on each Compare side; a picture is contained, never stretched past its own size.
+test('the All button hides where the list shows; files take 2 / 3 / 1 columns and never crop or blow up', () => {
+  assert.match(css, /@media \(min-width:721px\)\{\.review-layout \.swipe-top>\.swipe-all\{display:none\}\}/);
+  assert.match(css, /\.swipe-card \.swipe-files\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(css, /@media \(min-width:1600px\)\{\.swipe:not\(\.pairing\) \.swipe-card \.swipe-files\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)\}/);
+  assert.ok(css.includes('\n .swipe-card .swipe-files{grid-template-columns:minmax(0,1fr);'), 'one column on a phone');
+  assert.match(css, /\.swipe-files \.swipe-file-thumb>img\{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain\}/);
+});
+test('no green frame: a programmatic focus of the deck shows no ring, the current list row is tinted with a mint edge', () => {
+  assert.match(css, /\.swipe\.quiet-focus:focus-visible\{box-shadow:none\}/);
+  assert.match(css, /\.review-row\.is-current\{background:var\(--brand-soft\);box-shadow:inset 3px 0 0 var\(--brand\)\}/);
+  assert.match(css, /prefers-reduced-motion:reduce\)\{\.review-row,\.swipe-files \.swipe-file-thumb\{transition:none\}\}/);
 });

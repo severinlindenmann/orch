@@ -1312,3 +1312,136 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
  .review-tick{width:var(--touch);min-height:var(--touch)}
  .review-layout>.review-rail{order:2}
 }
+/* ORCH-477 round 2 (owner sent it back, 18 Nov: "a nicer feeling, the bar left looks better, sizes and text lengths
+   fit"). One reading column for a card (760 px, left-aligned with the tabs; compare keeps the full width); no frame
+   around the deck, the mint ring only for real keyboard focus; title first and one quiet meta line; the "What was done"
+   box on the raised surface; the same answer bar everywhere (consequence line, then Later left and the answers right,
+   44 px, 12 px apart, only the suggested answer filled); equal file boxes that never crop or blow up; a calmer list. */
+.swipe,.review-main{--review-card-w:760px}
+.swipe.quiet-focus:focus-visible{box-shadow:none}
+.swipe:not(.pairing)>:is(.swipe-top,.swipe-stage,.swipe-actions){width:100%;max-width:var(--review-card-w)}
+.swipe-top{min-height:var(--touch);padding:0 var(--s1)}
+@media (min-width:721px){.review-layout .swipe-top>.swipe-all{display:none}}/* the list beside the deck is the way to every card */
+/* the card head: title, then type · deadline · ticket key */
+.swipe-card .swipe-head{gap:var(--s1);padding:var(--s5) var(--s5) var(--s4)}
+.swipe-head h3,.swipe-head .swipe-lead{margin:0;font-size:20px;line-height:28px;font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.swipe-head .swipe-text,.swipe-head .swipe-why,.swipe-head .swipe-about{margin-top:var(--s2);max-width:70ch;overflow-wrap:anywhere}
+.swipe-meta{gap:0;font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-meta>*+*::before{content:'·';margin:0 var(--s2);color:var(--text-faint)}
+.swipe-meta>.swipe-kind{gap:var(--s1);padding:0;border-radius:0;background:none;font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-meta>.swipe-need{color:var(--text-muted);font-weight:400;white-space:normal;overflow-wrap:anywhere}
+.swipe-meta>.swipe-need.soon{color:var(--warning);font-weight:500}
+.swipe-meta>.swipe-key{white-space:nowrap}
+/* "What was done": the raised surface, short lines, the expand button kept */
+.swipe-card .swipe-preview{margin:0 var(--s5)}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table]){background:var(--surface-2);border-color:var(--border)}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table])>.doc{padding:var(--s4) var(--s5)}
+.swipe-preview .doc>*,.swipe-zoomed .doc>*{max-width:70ch}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table])+.swipe-files,.swipe-card .swipe-files:last-child{padding-bottom:var(--s5)}
+.swipe-card>.swipe-preview:last-child,.swipe-card>.swipe-foot:last-child{margin-bottom:var(--s5)}
+.swipe-card .swipe-foot{padding:var(--s3) var(--s5) 0}
+.swipe-card .swipe-foot.empty{display:none}
+.swipe-card .swipe-foot:not(.empty){padding-bottom:var(--s4)}
+/* the answers, the same in one card and on each side of Compare */
+.swipe-actions{display:grid;justify-content:stretch;gap:var(--s2);padding:var(--s3) var(--s1) max(var(--s3),env(safe-area-inset-bottom))}
+.swipe-actions .swipe-bar-then,.swipe-pair-bar .swipe-then{margin:0;max-width:70ch;font-size:14px;line-height:20px;color:var(--text-muted);text-align:left;overflow-wrap:anywhere}
+.swipe-actions .swipe-bar-then b,.swipe-pair-bar .swipe-then b{color:var(--text)}
+.swipe-actions>.swipe-acts-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s3);position:static;height:auto;margin:0;background:none}
+.swipe-acts-row>.swipe-later{min-height:var(--touch);margin-right:auto}
+.swipe-answers{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--s3);margin-left:auto}
+.swipe-answers .swipe-act,.swipe-answers .swipe-own>.swipe-act{flex:0 1 auto;min-width:fit-content;min-height:var(--touch)}
+.swipe-act.ok{background:var(--surface);border-color:var(--border-strong);color:var(--text)}
+.swipe-act.ok:hover{background:var(--surface-2)}
+.swipe-act.ok .ring{color:var(--brand)}
+.swipe-act.suggested,.swipe-act.ok.suggested{background:var(--brand);border-color:var(--brand);color:var(--on-brand);box-shadow:none}
+.swipe-act.suggested:hover{background:var(--brand-strong)}
+.swipe-act.suggested .ring{color:inherit}
+.swipe-act.suggested .act-sug{color:var(--on-brand);border-color:currentColor;background:transparent}
+.swipe-act.ok:not(.suggested) .act-sug{color:var(--brand-chip-text)}
+.swipe-pair-bar{gap:var(--s2);padding:var(--s3) var(--s5) var(--s4)}
+.swipe-pair-acts,.swipe-pair-answers{gap:var(--s3)}
+.swipe-pair-acts .btn{min-height:var(--touch)}
+/* a result's files: equal boxes, the whole picture inside (never cropped, a tiny icon at its own size), the name under it */
+.swipe-card .swipe-files{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4) var(--s3);padding:var(--s4) var(--s5) 0}
+.swipe-files .swipe-file{display:grid;gap:var(--s2);min-width:0;border-radius:var(--radius)}
+.swipe-files .swipe-file-thumb{display:flex;align-items:center;justify-content:center;height:200px;aspect-ratio:auto;padding:var(--s2);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);transition:border-color var(--dur-fast) var(--ease-out),background-color var(--dur-fast) var(--ease-out)}
+.swipe-files .swipe-file-thumb>img{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain}
+.swipe-files .swipe-file:hover .swipe-file-thumb{border-color:var(--border-strong);background:var(--surface-3)}
+.swipe-files .swipe-file:focus-visible{outline:none;box-shadow:none}
+.swipe-files .swipe-file:focus-visible .swipe-file-thumb{box-shadow:var(--focus-ring)}
+.swipe-files .swipe-file-name{font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-files .swipe-file-more .swipe-file-thumb{font-size:16px}
+@media (min-width:1600px){.swipe:not(.pairing) .swipe-card .swipe-files{grid-template-columns:repeat(3,minmax(0,1fr))}.swipe-files .swipe-file-thumb{height:240px}}
+/* the empty deck: a quiet check mark and the same words */
+.swipe-stage>.swipe-done{position:relative;inset:auto;padding:var(--s8) var(--s5);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}
+.swipe-done .tally{color:var(--text-muted)}
+/* the "All cards" list: 260 px at 1280, 300 px at 1920; it scrolls by itself under the page header */
+@media (min-width:721px){
+ .review-layout,.review-layout:has(.swipe.pairing){grid-template-columns:clamp(260px,calc(260px + (100vw - 1280px) / 16),300px) minmax(0,1fr);gap:var(--s5)}
+ .review-side{display:block;padding:0;top:calc(var(--topbar-height) + var(--s4));max-height:calc(100dvh - var(--topbar-height) - var(--s6));overflow:auto;overscroll-behavior:contain}
+}
+.review-side>.review-queue{display:block}
+.review-list-head{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);padding:var(--s4) var(--s4) var(--s3);border-bottom:1px solid var(--border);background:var(--surface)}
+.review-list-title{flex:1;margin:0;font-size:16px;line-height:24px;font-weight:600}
+.review-list-acts{display:flex;align-items:center;gap:var(--s2)}
+.review-list-hint{flex:1 1 100%;margin:0}
+.review-list-groups{display:grid;gap:var(--s5);padding:var(--s3) var(--s2) var(--s4)}
+.review-group{display:grid;gap:var(--s1);min-width:0}
+.review-group-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s2);margin:0;padding:0 var(--s3) var(--s1);font-size:14px;line-height:20px;font-weight:600;color:var(--text)}
+.review-group-name{min-width:0;overflow-wrap:anywhere}
+.review-group-count{flex:none;font-size:12px;line-height:16px;font-weight:400;color:var(--text-muted)}
+.review-li{display:grid;min-width:0}
+.review-row{display:flex;align-items:flex-start;gap:var(--s2);width:100%;min-width:0;min-height:var(--touch);padding:var(--s3);border:0;border-radius:var(--radius);background:none;color:var(--text);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer;transition:background-color var(--dur-fast) var(--ease-out)}
+.review-row:hover{background:var(--surface-2)}
+.review-row:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.review-row.is-current{background:var(--brand-soft);box-shadow:inset 3px 0 0 var(--brand)}
+.review-row.is-current:focus-visible{box-shadow:inset 3px 0 0 var(--brand),var(--focus-ring)}
+.review-row.is-done{color:var(--text-faint)}
+.review-row-icon{display:inline-flex;flex:none;margin-top:2px;color:var(--text-faint)}
+.review-row-text{display:grid;flex:1;gap:2px;min-width:0}
+.review-row-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.review-row-sub{font-size:12px;line-height:16px;color:var(--text-muted);overflow-wrap:anywhere}
+.review-row-sub.soon{color:var(--warning)}
+.review-row-pick{display:flex;align-items:flex-start;min-width:0}
+.review-row-pick>.review-tick{width:var(--s6);min-height:var(--touch)}
+.review-row-pick>.review-row{flex:1}
+.review-tick.review-row-opt{display:flex;justify-content:flex-start;align-items:center;gap:var(--s2);width:auto;min-height:var(--touch);padding:0 var(--s3) 0 calc(var(--s6) + var(--s5));font-size:13px;line-height:18px;color:var(--text-muted);border-radius:var(--radius)}
+.review-tick.review-row-opt:hover{background:var(--surface-2)}
+/* the phone's full list: the same rows, 16 px at the sides */
+.swipe-overview .swipe-viewer-bar{flex-wrap:wrap}
+.swipe-overview .review-list-head{position:static;flex:1;padding:0;border:0;background:none}
+.swipe-overview .review-list-body,.swipe-viewer-body.review-list{padding:0 var(--s4) var(--s5)}
+.swipe-overview .review-list-groups{padding:var(--s3) 0 var(--s4)}
+@media (max-width:720px){
+ .swipe-card .swipe-head{padding:var(--s4) var(--s4) var(--s3)}
+ .swipe-card .swipe-preview{margin:0 var(--s4)}
+ .swipe-card .swipe-files{grid-template-columns:minmax(0,1fr);padding:var(--s3) var(--s4) 0}
+ .swipe-files .swipe-file-thumb{height:180px}
+ .swipe-pair-bar{padding:var(--s3) var(--s4)}
+ .swipe-pair-bar .swipe-then{font-size:14px;line-height:20px}
+ .swipe-pair-answers{flex-wrap:wrap}
+ .swipe-pair-answers .btn{flex:1 1 auto;min-width:fit-content}
+ .swipe-actions .swipe-act{flex:1 1 auto;min-width:fit-content}
+ .swipe-actions>.swipe-acts-row{position:static;height:auto}
+}
+@container (max-width:560px){.swipe-actions{display:grid;grid-auto-flow:row;grid-auto-columns:auto;grid-template-columns:minmax(0,1fr);gap:var(--s2)}.swipe-actions .swipe-act{flex:1 1 auto;min-width:fit-content;padding:0 var(--s3)}}
+@media (prefers-reduced-motion:reduce){.review-row,.swipe-files .swipe-file-thumb{transition:none}}
+.review-side-keys{margin:0 var(--s4) var(--s4)}
+/* lone cards without a header sit close together; a group with a header gets 24 px above it */
+.review-list-groups{gap:var(--s1)}
+.review-group.has-head:not(:first-child),.review-group.has-head+.review-group{margin-top:var(--s5)}
+/* a wide screen: the reading column and its tabs stand in the middle of the room right of the list */
+@media (min-width:721px){
+ .review-main .swipe:not(.pairing){width:100%;max-width:var(--review-card-w);margin-inline:auto}
+ .review-main:has(>#deck:not([hidden]):not(.pairing))>.segmented{margin-left:max(0px,(100% - var(--review-card-w)) / 2)}
+}
+.review-list-title{flex:1 0 auto;white-space:nowrap}
+.review-list-acts{margin-left:auto}
+.swipe-actions>.swipe-acts-row{flex-wrap:wrap-reverse}/* tight room: the answers keep their row, Later goes under them on the left (as on each Compare side) */
+.swipe-meta{row-gap:2px}
+@media (max-width:720px){.swipe-card .swipe-preview:is([data-type=doc],[data-type=table])>.doc{padding:var(--s4)}}
+.swipe-optcard-text{padding:0 var(--s5) var(--s3)}
+@media (max-width:720px){.swipe-optcard-text{padding:0 var(--s4) var(--s3)}}
+/* the list stays in sight while a long card scrolls: the column it sits in is as tall as the page */
+@media (min-width:721px){.review-layout>.review-rail{align-self:stretch;align-content:start}.review-side{z-index:2}}
+@media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */

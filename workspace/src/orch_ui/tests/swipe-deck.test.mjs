@@ -46,7 +46,8 @@ function deck(items, o = {}, extra = {}) {
   vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window, document: doc, setTimeout, clearTimeout, performance, console, Promise});
   const host = new N('section'), decided = [];
   const d = UI.swipeDeck(host, items, {mode: 'desk', voice: false, onDecide: (it, v, note) => decided.push({id: it.id, v, note}), ...o});
-  const [top, , acts] = host.children, [noBtn, talkBtn, okBtn] = acts.children, undoBtn = top.children[4], note = top.children[1];
+  // round 2: the bar is the consequence line over one row (Later left, the answers right), so find the buttons by name
+  const [top] = host.children, noBtn = host.querySelector('.swipe-act.no'), talkBtn = host.querySelector('.swipe-act.talk'), okBtn = host.querySelector('.swipe-act.ok'), undoBtn = top.children[4], note = top.children[1];
   return {d, host, decided, toasts, viewed, noBtn, talkBtn, okBtn, undoBtn, note};
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -204,10 +205,13 @@ const choice = {id: 'c', kind: 'choice', kindLabel: 'Choose', title: 'Which layo
   {id: 'A', title: 'As today', preview: {type: 'img', src: '/a.png'}}, {id: 'B', title: 'Changes first', suggested: true, preview: {type: 'img', src: '/b.png'}}, {id: 'C', title: 'Plain'}]}};
 const panes = host => host.querySelectorAll('.swipe-pair-pane');
 const filled = host => host.querySelectorAll('.btn').filter(b => b.classList.contains('primary'));
-test('tick two cards: they stand side by side, each with its own answers, and the shared bar steps aside', async () => {
+test('Compare mode: off by default; two ticked wait for Compare, each side has its own answers, the shared bar steps aside', async () => {
   const {d, host, decided} = deck([check('a', {then: 'Done.'}), check('b'), draft('x')]);
+  assert.equal(d.picking, false, 'no ticks until Compare is pressed');
+  d.setPicking(true); assert.equal(d.picking, true);
   d.tick('a'); assert.equal(d.comparing, false, 'one tick: still one card');
-  d.tick('b'); assert.equal(d.comparing, true);
+  d.tick('b'); assert.equal(d.comparing, false, 'two ticks: they wait for the Compare button');
+  d.showPair(); assert.equal(d.comparing, true);
   assert.equal(host.querySelector('.swipe-actions').hidden, true, 'no shared bar: each side answers itself');
   assert.equal(panes(host).length, 2);
   assert.match(panes(host)[0].querySelector('.swipe-then').textContent, /If you approve: Done\./);
@@ -216,6 +220,46 @@ test('tick two cards: they stand side by side, each with its own answers, and th
   assert.deepEqual(decided.map(x => [x.id, x.v]), [['b', 'ok']]);
   assert.equal(d.comparing, false, 'one side answered: back to one card');
   assert.equal(d.items[d.index].id, 'a', 'the other side shows'); assert.deepEqual([...d.ticked], ['a']);
+  d.tick('x'); assert.equal(d.comparing, false, 'a new second tick waits for Compare again');
+});
+test('Cancel ends picking and clears the ticks; Close in the side by side view ends it too', () => {
+  const {d, host} = deck([check('a'), check('b')]);
+  const list = new N('div'); d.drawList(list);
+  const btns = () => list.querySelectorAll('button').map(b => b.textContent);
+  assert.deepEqual(btns().slice(0, 1), ['Compare'], 'one Compare button in the header');
+  assert.equal(list.querySelectorAll('.review-tick-box').length, 0, 'no tick box on a row by default');
+  list.querySelector('.review-list-compare').click(); d.drawList(list);
+  assert.equal(list.querySelectorAll('.review-tick-box').length, 2, 'Compare mode: a tick beside each card');
+  const go = () => list.querySelector('.review-list-compare');
+  assert.equal(go().disabled, true); assert.equal(go().classList.contains('primary'), false, 'not filled before two are ticked');
+  d.tick('a'); d.tick('b'); d.drawList(list);
+  assert.equal(go().classList.contains('primary'), true, 'filled once two are ticked');
+  list.querySelector('.review-list-cancel').click();
+  assert.equal(d.picking, false); assert.deepEqual([...d.ticked], []);
+  d.compare(['a', 'b']); assert.equal(d.picking, true);
+  host.querySelector('.swipe-pair-close').click();
+  assert.equal(d.comparing, false); assert.equal(d.picking, false, 'Close goes back to one card and ends picking');
+});
+test('the list: a group header is the ticket name with the count only when more than one waits; none when it repeats the title', () => {
+  const items = [check('a', {ticketTitle: 'Spring sale', title: 'Spring sale'}), check('b', {ticketTitle: 'Weekly report'}), check('c', {ticketTitle: 'Weekly report'}), check('d', {ticketTitle: 'Survey', need: 'Sends Friday 08:00'})];
+  const {d} = deck(items);
+  const list = new N('div'); d.drawList(list);
+  const heads = list.querySelectorAll('.review-group-head').map(h => h.textContent);
+  assert.deepEqual(heads, ['Weekly report2 waiting', 'Survey'], 'no header that repeats the title, no "1 of 1 waiting"');
+  const rows = list.querySelectorAll('.review-row');
+  assert.equal(rows.length, 4);
+  assert.equal(rows[0].classList.contains('is-current'), true, 'the card on screen: tinted, no "Now" pill');
+  assert.doesNotMatch(list.textContent, /Now/);
+  assert.equal(rows[3].querySelector('.review-row-sub').textContent, 'Sends Friday 08:00', 'the deadline under the title');
+  assert.equal(rows[1].querySelector('.review-row-sub'), null, 'no deadline: no second line');
+  rows[2].click(); assert.equal(d.index, 2, 'a row opens its card');
+});
+test('the card head: title first, then one quiet line (type · deadline · ticket key), no time stamp', () => {
+  const {host} = deck([check('a', {need: 'Sends Friday 08:00', ticket: 'DT-53', when: 'today 09:40', group: 'Spring', suggest: 'ok'})]);
+  const head = host.querySelector('.swipe-head');
+  assert.equal(head.children[0].tag, 'h3'); assert.equal(head.children[1].className, 'swipe-meta');
+  assert.deepEqual(head.children[1].children.map(c => c.textContent), ['Check', 'Sends Friday 08:00', 'DT-53']);
+  assert.doesNotMatch(head.textContent, /09:40|Spring$|Suggested:/);
 });
 test('two options of one choice side by side: Use B is the one filled button (the suggested option)', () => {
   const {d, host, decided} = deck([choice, check('b')]);
@@ -249,15 +293,24 @@ test('Send back on one side opens the words box for that card; Close goes back t
   e.host.querySelector('.swipe-pair-close').click();
   assert.equal(e.d.comparing, false); assert.deepEqual([...e.d.ticked], []);
 });
-test('the "All cards" overview has the ticks too, and Compare once two are ticked', () => {
+test('the phone\'s full list: the same rows; ticks in Compare mode, Compare once two are ticked; Close returns focus to its opener', () => {
   const {d, host} = deck([check('a'), choice]);
+  const opener = host.querySelector('.swipe-jump-all'); opener.focus();
   d.openOverview();
+  assert.equal(host.querySelectorAll('.review-tick-box').length, 0, 'no ticks by default');
+  assert.equal(host.querySelector('.swipe-overview').querySelectorAll('.review-row').length, 2);
+  host.querySelector('.swipe-overview').querySelector('.review-list-compare').click();
   const boxes = host.querySelectorAll('.review-tick-box');
-  assert.deepEqual(boxes.map(b => b.dataset.ref), ['a', 'c', 'c\nA', 'c\nB']);
+  assert.deepEqual(boxes.map(b => b.dataset.ref), ['a', 'c', 'c\nA', 'c\nB'], 'the options of a choice show under it only in this mode');
   boxes[2].listeners.change[0](); boxes[3].listeners.change[0]();
-  assert.equal(d.comparing, true);
-  assert.equal(host.querySelector('.swipe-ov-compare').hidden, false);
+  assert.equal(d.comparing, false);
   assert.equal(boxes[0].disabled, true, 'two ticked: the others wait');
+  const go = host.querySelector('.swipe-overview').querySelector('.review-list-compare');
+  assert.equal(go.classList.contains('primary'), true);
+  go.click(); assert.equal(d.comparing, true); assert.equal(host.querySelector('.swipe-overview'), null);
+  d.compare([]); d.openOverview(); opener.focus(); d.openOverview();
+  host.querySelector('.swipe-overview').querySelector('.btn.icon').click();
+  assert.equal(doc.activeElement, opener, 'focus back on the button that opened the list');
 });
 test('a phone shows "All cards · 1 of N" with ← → above the card', () => {
   const {d, host} = deck([check('a'), check('b'), check('c')]);

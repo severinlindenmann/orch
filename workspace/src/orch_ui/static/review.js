@@ -129,7 +129,8 @@ UI.reviewViewer=(shots,index,o)=>{o=o||{};shots=(shots||[]).filter(Boolean);if(!
   prev.hidden=next.hidden=shots.length<2;out.hidden=!s.open;if(s.open)out.href=s.open;prev.disabled=i===0;next.disabled=i===shots.length-1;body.replaceChildren(big(s));body.scrollTop=0;d.dataset.kind=(s.preview||{}).type||'doc'};
  const go=n=>{if(n<0||n>=shots.length||n===i)return;i=n;draw()};
  d.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==='ArrowLeft'){e.preventDefault();go(i-1)}if(e.key==='ArrowRight'){e.preventDefault();go(i+1)}});
- d.addEventListener('close',()=>d.remove(),{once:true});
+ /* Esc or Close: focus goes back to the tile it came from (ORCH-477 round 2) */
+ const back=o.opener||document.activeElement;d.addEventListener('close',()=>{d.remove();if(back&&back!==document.body&&typeof back.focus==='function'&&back.isConnected!==false)back.focus()},{once:true});
  draw();document.body.append(d);d.showModal();return {dialog:d,go,get index(){return i}}};
 
 /* Every answered card says what it was about: its own title, else the question (one line), else the ticket. */
@@ -224,11 +225,11 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    else if(code==='needs_person')UI.toast('Sign in to answer: run orch review in your terminal.',null,'error');
    else UI.toast((res&&res.error&&res.error.message)||'Could not save your answer. It is waiting again.',null,'error');
    dirty=true;load(true)})};
- const build=(items,start,later,pins)=>{deckEl.replaceChildren();
+ const build=(items,start,later,pins)=>{const was=deck?{picking:deck.picking,ticked:deck.ticked}:{};deckEl.replaceChildren();/* a new card arriving keeps Compare mode and its ticks */
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
-  const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus({preventScroll:true})};
+  const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
   if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.'}));waitCount(0);return}
   if(!items.length)return;/* everything answered here: keep the summary */

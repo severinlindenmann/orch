@@ -26,15 +26,6 @@ function reviewSubtitle() {
   const n = (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
   return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
 }
-// The words the "All cards" list shows for an answered card (the same as the deck's own summary).
-function reviewWord(answer) {
-  const it = answer.item || {}, note = answer.note || {};
-  const own = Array.isArray(it.answers) && it.answers.find(x => x.picked === note.picked);
-  if (answer.verdict === 'ok' && own) return own.label;
-  if (answer.verdict === 'ok') return note.picked ? 'Use ' + note.picked : it.okLabel || 'Looks good';
-  if (answer.verdict === 'no') return it.preview?.type === 'options' ? 'None' : it.kind === 'check' ? 'Sent back' : "Don't do";
-  return 'Sent back';
-}
 // What the page's api needs, from the dashboard: state in, one signed click out, files through /api/file.
 function reviewApi() {
   return {
@@ -85,58 +76,12 @@ function reviewApi() {
     }
   };
 }
-// The deck list: one section per set of cards (the helper's group, else the ticket) with its own count, one line
-// per card, the one on screen in bold, answered ones quiet with their word. ORCH-477 (owner pick B): the list stands on
-// the left; every waiting card (and every option of a choice with pictures) has a tick; two ticked stand side by side
-// in the deck (deck.tickBox / deck.optionRefs from the kit); a click on a line opens that card alone.
-function reviewGroupOf(it) { return it.group || it.ticketTitle || it.ticket || ''; }
+// The "All cards" list beside the deck is the kit's own (deck.drawList, ORCH-477 round 2): a row opens its card; the
+// "Compare" button in its header turns on the ticks (at most two), then Compare opens them side by side and Cancel ends
+// it. One section per set (the helper's group, else the ticket); the phone's full list draws the same rows.
 function reviewDrawSide(queue, deck) {
-  if (!queue || !deck) return;
-  const groups = new Map();
-  deck.items.forEach((it, i) => {
-    const key = reviewGroupOf(it);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(i);
-  });
-  const pair = !!deck.comparing, open = i => { deck.compare?.([]); deck.jump(i); };
-  const hint = queue.parentElement?.querySelector?.('.review-side-hint'), n = (deck.ticked || []).length;
-  if (hint) hint.textContent = n === 2 ? 'Two ticked. Untick one to pick another.' : n ? 'One ticked. Tick one more.' : 'Tick two to see them side by side.';
-  const tick = (ref, label) => deck.tickBox ? deck.tickBox(ref, label) : el('span', 'review-tick');
-  const row = i => {
-    const it = deck.items[i], a = deck.answers[it.id], now = i === deck.index && !a && !pair, r = el('button', 'btn ghost sm review-queue-row' + (now ? ' is-now' : '') + (a ? ' is-done' : ''));
-    r.type = 'button';
-    const label = [it.ticket, it.title].filter(Boolean).join(' · '), title = el('span', 'review-queue-title', label); title.title = label;  // two lines, and the whole title on hover (F4: cut titles looked repeated)
-    r.append(iconEl(it.icon), title);
-    const word = a ? reviewWord(a) : now ? 'Now' : '';
-    if (word) r.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));
-    r.onclick = () => open(i);
-    const line = el('div', 'review-queue-item'); line.setAttribute('role', 'listitem');
-    line.append(a ? el('span', 'review-tick') : tick(it.id, label), r);
-    if (a) return [line];
-    // a choice with two or more option pictures: one ticked line per option, so two options stand side by side
-    return [line, ...(deck.optionRefs?.(it) || []).map(x => {
-      const sub = el('div', 'review-queue-item sub'), b = el('button', 'btn ghost sm review-queue-row');
-      b.type = 'button'; b.append(el('span', 'review-queue-title', x.label)); b.onclick = () => open(i);
-      sub.setAttribute('role', 'listitem'); sub.append(tick(x.ref, x.label), b);
-      return sub;
-    })];
-  };
-  const one = groups.size < 2;
-  queue.replaceChildren(...[...groups].map(([name, rows]) => {
-    const sec = el('div', 'review-group');
-    sec.setAttribute('role', 'list');
-    sec.setAttribute('aria-label', name || 'Cards');
-    // a set of one card under a heading of its own ticket says the same thing twice (ORCH-420): no heading then,
-    // unless the helper grouped it on purpose
-    if ((!one || name) && (rows.length > 1 || deck.items[rows[0]]?.group)) {
-      const left = rows.filter(i => !deck.answers[deck.items[i].id]).length;
-      const head = el('h3', 'review-group-head');
-      head.append(el('span', '', name || 'Cards'), el('span', 'meta', left ? left + ' of ' + rows.length + ' waiting' : 'All ' + rows.length + ' answered'));
-      sec.append(head);
-    }
-    sec.append(...rows.flatMap(row));
-    return sec;
-  }));
+  if (!queue || !deck || typeof deck.drawList !== 'function') return;
+  deck.drawList(queue);
 }
 // "Accepted for you" (ORCH-77): what the Reviewer marked Done today; one tap sends a ticket back with a short note.
 // A phone width keeps this card (the "All cards" aside hides there), so it sits under the deck.
@@ -196,10 +141,9 @@ function reviewAcceptedCard() {
   return card('review-accepted', 'Accepted for you', '', rows.map(reviewAcceptedRow));
 }
 function reviewPage() {
-  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':''},
-    h('h2', {}, 'All cards'),
-    h('p', {className:'meta review-side-hint'}, 'Tick two to see them side by side.'),
-    h('div', {className:'review-queue', 'aria-label':'All cards', 'data-review-queue':''}));
+  // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
+  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'All cards'},
+    h('div', {className:'review-queue', 'data-review-queue':''}));
   return fragment(
     heading('Review', reviewSubtitle()),
     // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477)

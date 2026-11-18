@@ -78,43 +78,20 @@ test('refusals become the codes the page understands', async () => {
   assert.equal((await reply({ok:false, status:400, text:'That is not a card.'})).error.code, 'refused');
   assert.equal((await reply({ok:false, status:0, text:'Could not reach orch.'})).error.code, 'error');
 });
-test('the All cards list: the card on screen in bold, answered ones quiet with their word', () => {
-  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
-  const rows = []; const queue = {replaceChildren(...r) { rows.push(...r); }};
-  const item = (id, title) => ({id, title, icon:'page', kind:'draft', okLabel:'Build it', preview:{type:'page'}});
-  const deck = {items:[item('a', 'First'), item('b', 'Second'), item('c', 'Third')], index:1, answers:{a:{verdict:'ok', item:item('a', 'First'), note:null}, c:{verdict:'no', item:item('c', 'Third')}}, jump(i) { deck.index = i; }};
-  c.document = {createElement: t => h(t)}; c.reviewDrawSide(queue, deck);
-  assert.equal(rows.length, 1, 'one set: one section without a heading');
-  assert.ok(!nodes(rows[0]).some(n => /review-group-head/.test(n.attrs?.className || '')));
-  rows.splice(0, 1, ...rows[0].children.map(line => line.children[1]));  // each line: its tick, then the card's button (ORCH-477)
-  assert.equal(rows.length, 3);
-  assert.match(rows[0].attrs.className, /is-done/); assert.match(text(rows[0]), /Build it/);
-  assert.match(rows[1].attrs.className, /is-now/); assert.match(text(rows[1]), /Now/);
-  assert.match(text(rows[2]), /Don't do/);
-  rows[2].onclick(); assert.equal(deck.index, 2);
-  assert.doesNotThrow(() => c.reviewDrawSide(null, deck));
-});
-// ORCH-477 (owner pick B): a tick on every waiting card and on every option of a choice with pictures; two ticked stand
-// side by side in the deck; a click on a line closes Compare and opens that card; the list stands left of the deck.
-test('the All cards list: a tick per waiting card and per option picture, a click opens that card alone (ORCH-477)', () => {
-  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
-  const secs = []; const queue = {replaceChildren(...r) { secs.push(...r); }};
-  const item = (id, extra) => ({id, title:'Card ' + id, icon:'page', kind:'draft', preview:{type:'page'}, ...extra});
-  const ticks = [], calls = [];
-  const deck = {items:[item('a'), item('b', {kind:'choice'}), item('c')], index:0, answers:{c:{verdict:'ok', item:item('c')}}, ticked:['a'], comparing:false,
-    tickBox:(ref, label) => { ticks.push([ref, label]); return h('label', {className:'review-tick'}); },
-    optionRefs:it => it.id === 'b' ? [{ref:'b\nA', label:'A: Short'}, {ref:'b\nB', label:'B: Long'}] : [],
-    compare:refs => calls.push(['compare', refs]), jump:i => calls.push(['jump', i])};
+// ORCH-477 round 2 (owner sent back): the list is the kit's (deck.drawList: rows, groups, Compare mode); the page only
+// hands it the queue and keeps it on the left. The kit's swipe-deck tests cover the rows and Compare mode.
+test('the All cards list is drawn by the kit into the queue, on the left of the deck (ORCH-477)', () => {
+  const c = ctx({});
+  const drawn = [], queue = h('div'), deck = {drawList:q => drawn.push(q)};
   c.reviewDrawSide(queue, deck);
-  assert.deepEqual(ticks, [['a', 'Card a'], ['b', 'Card b'], ['b\nA', 'A: Short'], ['b\nB', 'B: Long']], 'no tick on an answered card');
-  const lines = secs[0].children;
-  assert.equal(lines.length, 5);
-  assert.match(lines[2].attrs.className, /review-queue-item sub/);
-  lines[2].children[1].onclick();
-  assert.equal(JSON.stringify(calls), JSON.stringify([['compare', []], ['jump', 1]]));
+  assert.deepEqual(drawn, [queue]);
+  assert.doesNotThrow(() => c.reviewDrawSide(null, deck));
+  assert.doesNotThrow(() => c.reviewDrawSide(queue, {}), 'an old deck without the list draws nothing');
   const page = nodes(c.reviewPage()), layout = page.find(n => n.attrs?.['data-key'] === 'review-layout');
   assert.equal(layout.children[0].attrs['data-key'], 'review-rail', 'the list is on the left');
-  assert.match(text(page.find(n => /review-side-hint/.test(n.attrs?.className || ''))), /Tick two to see them side by side/);
+  const side = page.find(n => n.attrs?.['data-review-side'] !== undefined);
+  assert.equal(side.attrs['aria-label'], 'All cards');
+  assert.deepEqual(side.children.map(n => n.attrs['data-review-queue']), [''], 'no tick hint and no heading of its own: the kit draws them');
 });
 test('the page keeps its host and side list out of the reconcile (mounted once), and leaving destroys the page', () => {
   const calls = [];
@@ -185,17 +162,6 @@ test('Review answers on a ticket: only those with a card answer, newest first', 
   assert.equal(vm.runInContext('ticketReviewAnswers', c)({id:'t_abcdef', questions:[{id:'q4', answer:'x'}]}).length, 0);
 });
 
-test('the All cards list: one section per set (group, else ticket) with its own count (ORCH-65)', () => {
-  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
-  const secs = []; const queue = {replaceChildren(...r) { secs.push(...r); }};
-  const item = (id, extra) => ({id, title:'Card ' + id, icon:'page', kind:'draft', preview:{type:'page'}, ticketTitle:'Home look', ...extra});
-  const deck = {items:[item('a', {group:'Phone'}), item('b', {group:'Phone'}), item('c')], index:1, answers:{a:{verdict:'ok', item:item('a'), note:null}}, jump() {}};
-  c.reviewDrawSide(queue, deck);
-  assert.equal(secs.length, 2);
-  assert.match(text(secs[0]), /^Phone1 of 2 waiting/);
-  // ORCH-420: a set of one card under its own ticket's name has no heading (it said the title twice)
-  assert.doesNotMatch(text(secs[1]), /Home look|waiting/); assert.match(text(secs[1]), /Card c/);
-});
 test('ORCH-420: the subtitle never says nothing waits above cards (a card put off on Home is still a card here)', () => {
   const c = ctx({review:{cards:[CARD]}}, {needsYouTotal:() => 0});
   assert.match(c.reviewSubtitle(), /^1 thing waits on you/);
@@ -234,12 +200,6 @@ test('"Accepted for you": hidden when empty, a link and the why line per row, on
   assert.deepEqual(JSON.parse(JSON.stringify(c.acts[0])), ['ticket.changes', {ticket:'t_aaaa11', text:'Keep the old name'}]);
   assert.equal(nodes(c.reviewAcceptedCard()).filter(n => n.tag === 'button').length, 0);
 });
-test('the All cards list names an own answer by its button word', () => {
-  const c = ctx({});
-  const it = {answers:[{label:'Change it', picked:'Edit'}]};
-  assert.equal(c.reviewWord({verdict:'ok', item:it, note:{picked:'Edit'}}), 'Change it');
-});
-
 test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle say one number', () => {
   const base = {settings:{}, runs:{}, services:[], review:{cards:[CARD, CARD], answered:[]}};
   const rows = [{id:'n1', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'A', answer:{question:'q1', digest:ID, options:[]}}];

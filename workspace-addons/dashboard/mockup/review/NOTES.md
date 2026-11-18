@@ -61,3 +61,18 @@
   with the "If you approve" line in it, so nothing hides under it. A phone opens on the first card with "All cards · 1
   of N" and ← → above it; the list with its ticks is one tap away; Compare shows one side at a time with a switch that
   names both. The draft folder of that round (draft-orch-477) is gone; its pictures are in assets/.
+- 18 Nov round 2 (ORCH-477, owner sent back: "a nicer feeling, the bar left looks better, sizes and text lengths fit";
+  Codex challenge in the ticket): the "All cards" list is calmer and is the kit's own (deck.drawList): no tick on every
+  row (before: a box beside every card and option), a row opens its card, and one "Compare" button in its header turns
+  on the ticks (at most two; Compare opens them side by side, Cancel or Close ends it). Group header = the ticket name,
+  the count only when more than one waits (before: "1 of 1 waiting" everywhere), no header that repeats a lone card's
+  title; rows with icon, two-line title and the deadline under it (amber within a day); the current card tinted with a
+  mint left edge (before: a "Now" pill); 260 px at 1280, 300 px at 1920, it scrolls by itself under the header. The deck
+  has no green frame (only real keyboard focus shows the ring) and the "All" button is gone where the list shows. A card
+  reads in one 760 px column (centred with its tabs at 1920): title first, then type · deadline · ticket key (no time
+  stamp), the "What was done" box on the raised surface (before: black), files in equal boxes that never crop (2
+  columns, 3 at 1920, 1 on a phone). One answer bar everywhere: "If you approve" over Later (left) and the answers
+  (right), only the suggested answer filled (before: Looks good always filled). The menu badge, the tab bar, the heading
+  and the Waiting tab read one number. Stress cards (x1-x8): a 2-word title, a 114-character title, an unbroken web
+  address, one line and 15 paragraphs, 0/1/2/12 files with a wide banner, a tall phone picture and a tiny icon, a
+  choice of 2 and of 6, a question with no detail text.
