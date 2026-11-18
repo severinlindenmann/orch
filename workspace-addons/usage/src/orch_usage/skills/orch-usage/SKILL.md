@@ -46,8 +46,8 @@ When a rule ends it falls back to the rule before its last change, and the histo
     orch usage share --preset even                 # save | even | sub: a ready-made spread
     orch usage share --week 70 --day wed           # at most 70 % of a subscription's week by the end of Wednesday
     orch usage share --api reviews,scripts         # kinds of work on API credit (or none)
-    orch usage share --codex "one in 4"            # Code tickets on Codex: one in N, all or none
-    orch usage share --ahead api --dollars 10      # a subscription ahead of its pace: api, codex, both or none
+    orch usage share --tool "one in 4"             # Code tickets on the helper tool: one in N, all or none
+    orch usage share --ahead api --dollars 10      # a subscription ahead of its pace: api, tool, both or none
     orch usage share --order "Personal 1, Company" # the accounts in order
     orch usage share --clear                       # no share: accounts in order, one after the other
 

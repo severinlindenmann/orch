@@ -128,18 +128,35 @@ def parse_time(text: str, now: datetime | None = None) -> str:
 # ---------------------------------------------------------------- share words (ORCH-657)
 
 _KIND_IN = {
-    "lead": "lead", "leads": "lead",
-    "code": "code", "coding": "code",
-    "review": "reviews", "reviews": "reviews", "challenge": "reviews", "challenges": "reviews",
-    "build": "builds", "builds": "builds",
-    "script": "scripts", "scripts": "scripts",
-    "helper": "helpers", "helpers": "helpers",
+    "lead": "lead",
+    "leads": "lead",
+    "code": "code",
+    "coding": "code",
+    "review": "reviews",
+    "reviews": "reviews",
+    "challenge": "reviews",
+    "challenges": "reviews",
+    "build": "builds",
+    "builds": "builds",
+    "script": "scripts",
+    "scripts": "scripts",
+    "helper": "helpers",
+    "helpers": "helpers",
 }
 _AHEAD_IN = {
-    "api": "api", "credit": "api", "api-credit": "api", "apicredit": "api",
-    "codex": "codex",
-    "both": "both", "api-then-codex": "both",
-    "none": "none", "no": "none", "subscriptions": "none", "subscription": "none", "stay": "none",
+    "api": "api",
+    "credit": "api",
+    "api-credit": "api",
+    "apicredit": "api",
+    "tool": "tool",
+    "helper-tool": "tool",
+    "both": "both",
+    "api-then-tool": "both",
+    "none": "none",
+    "no": "none",
+    "subscriptions": "none",
+    "subscription": "none",
+    "stay": "none",
 }
 
 
@@ -168,9 +185,7 @@ def parse_kinds(text: str) -> list[str]:
             continue
         k = _KIND_IN.get(w)
         if not k:
-            raise Refused(
-                f"'{w}' is not a kind of work. Use " + ", ".join(store.KINDS) + ", or none."
-            )
+            raise Refused(f"'{w}' is not a kind of work. Use " + ", ".join(store.KINDS) + ", or none.")
         if k not in out:
             out.append(k)
     return out
@@ -193,7 +208,9 @@ def parse_one_in(text: str) -> int:
 def parse_ahead(text: str) -> str:
     a = _AHEAD_IN.get((text or "").strip().lower().replace(" ", "-"))
     if not a:
-        raise Refused(f"'{text}' is not a choice. Use api, codex, both (API credit, then Codex) or none.")
+        raise Refused(
+            f"'{text}' is not a choice. Use api, tool (the helper tool), both (API credit, then the helper tool) or none."
+        )
     return a
 
 
@@ -219,8 +236,8 @@ def _share_cmd(args, root: Path) -> int:
         changes["by_day"] = parse_day(args.day)
     if args.api is not None:
         changes["api_for"] = parse_kinds(args.api)
-    if args.codex is not None:
-        changes["codex_one_in"] = parse_one_in(args.codex)
+    if args.tool is not None:
+        changes["tool_one_in"] = parse_one_in(args.tool)
     if args.ahead is not None:
         changes["when_ahead"] = parse_ahead(args.ahead)
     if args.dollars is not None:
@@ -249,9 +266,13 @@ def _share_cmd(args, root: Path) -> int:
     view = share_mod.view(root, gather(root)["accounts"])
     view["changed"] = changed
     did = bool(changes or preset or args.clear or args.order)
-    nxt = (SAVED if changed else "Already like that. Nothing changed.") if did else (
-        "Change it: orch usage share --preset even|save|sub, or --week 70 --day wed --api reviews,scripts "
-        "--codex 'one in 4' --ahead api --dollars 10"
+    nxt = (
+        (SAVED if changed else "Already like that. Nothing changed.")
+        if did
+        else (
+            "Change it: orch usage share --preset even|save|sub, or --week 70 --day wed --api reviews,scripts "
+            "--tool 'one in 4' --ahead api --dollars 10"
+        )
     )
     view["next"] = nxt
     lines = [view["sentence"], *view["counts"], *[f"Warning: {w}" for w in view["warnings"]]]
@@ -631,8 +652,8 @@ def main(argv=None) -> int:
     s.add_argument("--week", help="at most this %% of a subscription's week ...")
     s.add_argument("--day", help="... by the end of this weekday (wed)")
     s.add_argument("--api", help="kinds of work on API credit: reviews,scripts or none")
-    s.add_argument("--codex", help="Code tickets on Codex: 'one in 4', all or none")
-    s.add_argument("--ahead", help="a subscription ahead of its pace: api, codex, both or none")
+    s.add_argument("--tool", help="Code tickets on the helper tool: 'one in 4', all or none")
+    s.add_argument("--ahead", help="a subscription ahead of its pace: api, tool, both or none")
     s.add_argument("--dollars", help="dollars a day on API credit while ahead")
     s.add_argument("--order", help="all or the first accounts in order: 'Personal 1, Company'")
     s.add_argument("--clear", action="store_true", help="remove the share")

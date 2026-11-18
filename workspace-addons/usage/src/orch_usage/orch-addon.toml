@@ -49,5 +49,5 @@ summary = "Switch accounts by itself, or only show and warn"
 who = "people"
 
 [acts.share]
-summary = "Change how helper work is spread: a ready-made spread, the week, API credit, Codex or the day limit"
+summary = "Change how helper work is spread over subscriptions, API credit and helper tools"
 who = "people"

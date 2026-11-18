@@ -9,8 +9,8 @@ the rules, refusals and history lines are the CLI's own:
     on, off    <account>
     end        <account>:<YYYY-MM-DD> | <account>:none
     switching  on | off
-    share      preset:<save|even|sub> | week:<10-100>:<weekday> | api:<none|kind,kind> | codex:<0-20>
-               | ahead:<api|codex|both|none>:<dollars> | clear      (how helper work is spread, ORCH-657)
+    share      preset:<save|even|sub> | week:<10-100>:<weekday> | api:<none|kind,kind> | tool:<0-20>
+               | ahead:<api|tool|both|none>:<dollars> | clear      (how helper work is spread, ORCH-657)
 """
 
 from __future__ import annotations
@@ -37,8 +37,8 @@ PATTERNS = {
     "switching": re.compile(r"(on|off)"),
     "share": re.compile(
         r"(preset):(save|even|sub)|(week):(\d{2,3}):(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
-        rf"|(api):(none|(?:{_KIND})(?:,(?:{_KIND})){{0,5}})|(codex):(\d{{1,2}})"
-        r"|(ahead):(api|codex|both|none):(\d{1,4}(?:\.\d{1,2})?)|(clear)"
+        rf"|(api):(none|(?:{_KIND})(?:,(?:{_KIND})){{0,5}})|(tool):(\d{{1,2}})"
+        r"|(ahead):(api|tool|both|none):(\d{1,4}(?:\.\d{1,2})?)|(clear)"
     ),
 }
 NOT_THIS = "That is not something Usage can change. Reload the page and try again."
@@ -84,8 +84,8 @@ def _share_words(parts: list[str]) -> list[str]:
         return ["--week", rest[0], "--day", rest[1]]
     if head == "api":
         return ["--api", rest[0]]
-    if head == "codex":
-        return ["--codex", rest[0]]
+    if head == "tool":
+        return ["--tool", rest[0]]
     if head == "ahead":
         return ["--ahead", rest[0], "--dollars", rest[1]]
     return ["--clear"]

@@ -196,7 +196,8 @@
   const PCTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
   const ONE_IN = [0, 8, 6, 5, 4, 3, 2, 1];
   const DOLLARS = [0, 5, 10, 20, 50];
-  const AHEAD = [['api', 'API credit'], ['codex', 'Codex'], ['both', 'API credit, then Codex'], ['none', 'Stay on the subscriptions']];
+  // the helper tool's name comes from Usage (the label of its account), never from this code
+  const aheadChoices = tool => [['api', 'API credit'], ['tool', tool], ['both', 'API credit, then ' + tool], ['none', 'Stay on the subscriptions']];
   const oneIn = n => n === 0 ? 'none' : n === 1 ? 'all' : 'one in ' + n;
   const cap = w => w.charAt(0).toUpperCase() + w.slice(1);
   // a value set by command that is not one of the steps still shows, in its place
@@ -224,7 +225,7 @@
       return h('button', {type: 'button', className: 'chip-btn' + (on ? ' sel' : ''), 'aria-pressed': String(on), 'aria-label': k.label + ' on API credit',
         onclick: e => { const next = on ? s.api_for.filter(x => x !== k.id) : [...s.api_for, k.id]; act('share', 'api:' + (next.join(',') || 'none'), e.currentTarget); }}, k.label);
     }));
-    const seg = h('div', {className: 'segmented', role: 'group', 'aria-label': 'When a subscription is ahead'}, AHEAD.map(([val, text]) => {
+    const seg = h('div', {className: 'segmented', role: 'group', 'aria-label': 'When a subscription is ahead'}, aheadChoices(v.tool).map(([val, text]) => {
       const r = h('input', {className: 'sr-only', type: 'radio', name: 'share-ahead', value: val, checked: val === ahead || null});
       r.addEventListener('change', () => act('share', 'ahead:' + val + ':' + (val === 'api' || val === 'both' ? (s.day_dollars || 10) : 0), r));
       return h('label', {}, r, text);
@@ -235,8 +236,8 @@
       settingsRow('Subscription week', 'How much of a subscription week may be used by the end of which day. Each subscription counts its own week, from its reset.',
         'up to', numStep('Week limit', withValue(PCTS, s.week_pct, (a, b) => a - b), s.week_pct, x => x + ' %', x => act('share', 'week:' + x + ':' + s.by_day)), 'of the week by', day),
       settingsRow('On API credit', 'These kinds of work run on API credit, in the order of the API credits below.', chips),
-      settingsRow('Code tickets on Codex', 'How many Code ticket starts go to Codex. Counted per day, from midnight.',
-        numStep('Code tickets on Codex', withValue(ONE_IN, s.codex_one_in, oneInOrder), s.codex_one_in, oneIn, x => act('share', 'codex:' + x))),
+      settingsRow('Code tickets on ' + v.tool, 'How many Code ticket starts go to ' + v.tool + '. Counted per day, from midnight.',
+        numStep('Code tickets on ' + v.tool, withValue(ONE_IN, s.tool_one_in, oneInOrder), s.tool_one_in, oneIn, x => act('share', 'tool:' + x))),
       settingsRow('When a subscription is ahead of its pace', 'New starts go here until the subscription is back on pace. The day limit starts again at midnight.',
         seg, money ? h('span', {className: 'row'}, 'up to', numStep('Dollars a day', withValue(DOLLARS, s.day_dollars, (a, b) => a - b), s.day_dollars, x => '$' + x, x => act('share', 'ahead:' + ahead + ':' + x)), 'a day') : null),
       v.share ? h('div', {className: 'settings-row'}, h('p', {className: 'meta', text: 'Without a share, helpers use the accounts in their order, one after the other.'}),
