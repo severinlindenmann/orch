@@ -7,7 +7,7 @@ import os
 import shutil
 from pathlib import Path
 
-from orch import harness
+from orch import harness, skillstatus
 from orch.errors import Refused
 
 BLOCK_FILE = "AGENTS-block.md"
@@ -74,6 +74,12 @@ def install_skill(root: Path, name: str, source: Path) -> None:
         (dest / fn).write_bytes(data)
     if (source / "topics").is_dir():
         (dest / "SKILL.md").write_bytes(skill_text(source).encode("utf-8"))
+    sk = dest / "SKILL.md"
+    if sk.is_file() and not harness.is_link(sk):
+        text = sk.read_bytes().decode("utf-8")
+        marked = skillstatus.mark_deprecated(text)
+        if marked != text:
+            sk.write_bytes(marked.encode("utf-8"))
 
 
 def remove_skill(root: Path, name: str) -> None:
@@ -163,12 +169,18 @@ def apply_agent_files(root: Path) -> list[str]:
     for where in places:
         for n in names:
             harness.check_harness(root, sk / n)
+            if skillstatus.hidden_reason(sk / n):  # retired, or not for this system: not offered, files stay
+                harness.unlink_skill(root, where, n)
+                continue
             try:
                 harness.link_skill(root, where, n)
             except Refused as e:
                 refused = refused or e
     for sh in _shared_skills(root):  # skills the relay delivered (not orch*): visible to every detected agent
         for where in places[1:]:
+            if skillstatus.hidden_reason(sh):
+                _unlink_shared(root, where, sh)
+                continue
             try:
                 harness.link_skill(root, where, sh.name, sh)
             except Refused as e:
@@ -221,6 +233,10 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
             continue
         for n in _harness_skill_names(root):
             harness.check_harness(root, sk / n)
+            if skillstatus.hidden_reason(sk / n):
+                if harness._same(work / where / n, sk / n):
+                    harness.unlink_skill(work, where, n)
+                continue
             if harness.is_link(work / where / n) and not harness._same(work / where / n, sk / n):
                 refused = refused or Refused(f"{work / where / n} is a link to somewhere else.")
                 continue
@@ -231,6 +247,9 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
     for sh in _shared_skills(root):
         for where in _skill_places(root)[1:]:
             if via_link(where) or not plain(where):
+                continue
+            if skillstatus.hidden_reason(sh):
+                _unlink_shared(work, where, sh)
                 continue
             try:
                 harness.link_skill(work, where, sh.name, sh)
@@ -246,6 +265,29 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
                 refused = refused or Refused(f"{work / fn} is a link; orch will not write through it.")
     if refused:
         raise refused
+
+
+def _unlink_shared(root: Path, where: str, sh: Path) -> None:
+    """Remove <where>/<name> only when it is orch's link to this shared skill (never a folder of the person's)."""
+    dest = root / where / sh.name
+    if harness.is_link(root / where) or not harness.is_link(dest) or not harness._same(dest, sh):
+        return
+    harness.unlink_skill(root, where, sh.name)
+
+
+def hidden_skills(root: Path) -> dict[str, str]:
+    """{skill name: why} for the installed and shared skills orch does not offer here (retired, wrong system)."""
+    out = {}
+    sk = harness.harness_dir(root) / "skills"
+    for n in _harness_skill_names(root):
+        why = skillstatus.hidden_reason(sk / n)
+        if why:
+            out[n] = why
+    for sh in _shared_skills(root):
+        why = skillstatus.hidden_reason(sh)
+        if why:
+            out[sh.name] = why
+    return out
 
 
 def _shared_skills(root: Path) -> list[Path]:
