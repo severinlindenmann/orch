@@ -670,8 +670,7 @@ def _release_fix(root: Path, tid: str | None) -> bool:
             return False
     except Exception:  # noqa: BLE001 - not readable: not a fix (it waits its turn like any other)
         return False
-    made = (t.get("history") or [{}])[0]
-    return made.get("by") == "agent:release-keeper" and "green" in str(t.get("done_when") or "")
+    return "green" in str(t.get("done_when") or "")  # its deploy tickets are done when production answers
 
 
 def wake_text(e: dict, line: str) -> str:

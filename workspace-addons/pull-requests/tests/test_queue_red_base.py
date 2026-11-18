@@ -139,7 +139,7 @@ def test_release_keeper_red_ticket_counts_as_the_fix(ws):
         ws, "Deploy release 3", "agent:release-keeper", parent=role["id"],
         fields={"done_when": "The production health checks answer"},
     )  # fmt: skip
-    other = tickets.create(ws, "Something", "agent:claude", fields={"done_when": "it is green"})
+    other = tickets.create(ws, "Something", "agent:claude", fields={"done_when": "it is green"})  # no parent
     config.path(ws).parent.mkdir(parents=True, exist_ok=True)
     config.path(ws).write_text(f'[github]\nrelease_keeper = "{role["id"]}"\n', encoding="utf-8")
     assert runner._release_fix(ws, red["id"])
