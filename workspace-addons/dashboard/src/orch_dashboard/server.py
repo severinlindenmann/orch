@@ -825,7 +825,8 @@ class Handler(BaseHTTPRequestHandler):
                 forget_static()  # the add-on list too: a catalogue opened after a change made in the terminal
             state, age = self.server.state_cache.fresh() if fresh else self.server.state_cache.get()
             rev = str(state.get("rev") or "")
-            hdr = {"X-State-Age-Ms": str(int(age * 1000))}
+            # X-Orch-Boot: which run of the dashboard this is (a lost click's "unknown" from another run = forgotten)
+            hdr = {"X-State-Age-Ms": str(int(age * 1000)), "X-Orch-Boot": self.server.act_ids.boot}
             have = parse_qs(query).get("have", [""])[0]
             if (
                 rev and not fresh and have == rev
@@ -1301,13 +1302,14 @@ class Handler(BaseHTTPRequestHandler):
         elif reply:  # a delta: the click's keys ride in it as set keys (the page keeps only the listed keys)
             out["set"] = {**out["set"], **reply}
             out["keys"] = [*out["keys"], *(k for k in reply if k not in out["keys"])]
+            out["reply"] = list(reply)  # which set keys are the click's own (kept when the delta does not fit)
         body = json.dumps(out).encode()
-        hdr = None
+        hdr = {"X-Orch-Boot": self.server.act_ids.boot}
         if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
             import gzip
 
             body = gzip.compress(body, 3)
-            hdr = {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"}
+            hdr.update({"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
         self._send(200, body, "application/json", hdr)
 
     def _act_run(self, body, op_name, session: bool):

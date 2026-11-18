@@ -562,6 +562,7 @@ async function act(op, args, opts = {}) {
   writing++;
   mutation++;
   const id = opts.id || newActId();
+  const boot = serverBoot;  // the run of the dashboard this click goes to, as far as the page knows
   let sent = false;
   try {
     const body = JSON.stringify({op, args});
@@ -571,12 +572,13 @@ async function act(op, args, opts = {}) {
     try {
       const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers, body});
       sent = true;
+      serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
       if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
       next = await actAnswer(await res.json());
     } catch (err) {
       // No answer, or a cut one (ERR_CONTENT_LENGTH_MISMATCH): did the click go through?
       if (opts.check === false) throw err;
-      const lost = await actLost(id);
+      const lost = await actLost(id, boot);
       if (!lost.ok) return lost;
       succeeded = true;
       if (before) startedAt.set(args.ticket, Date.now());
@@ -611,9 +613,13 @@ function newActId() {
   return [...b].map(x => x.toString(16).padStart(2, '0')).join('');
 }
 const LOST_NOT_DONE = 'The answer did not arrive, and orch checked: it was not done. Nothing was saved, try again.';
-const LOST_UNKNOWN = 'The answer did not arrive and orch could not be asked whether it went through. Look in the ticket list before you try again.';
-// The answer was lost: ask whether this id went through (a few tries, the server may still be at it).
-async function actLost(id, tries = 20, pause = 1500) {
+const LOST_UNKNOWN = 'The answer did not arrive and orch could not tell whether it went through. Look in the ticket list before you try again.';
+// Which run of the dashboard the page talks to (X-Orch-Boot): a restarted one has forgotten every click id, so its
+// "unknown" never means "not done".
+let serverBoot = null;
+// The answer was lost: ask whether this id went through (a few tries, the server may still be at it). `boot`: the
+// run of the dashboard the click was sent to; "unknown" from another run (restarted meanwhile) cannot tell.
+async function actLost(id, boot, tries = 20, pause = 1500) {
   for (let i = 0; i < tries; i++) {
     if (i) await new Promise(done => setTimeout(done, pause));
     let st = null;
@@ -622,7 +628,10 @@ async function actLost(id, tries = 20, pause = 1500) {
       if (res.ok) st = await res.json();
     } catch (_) { /* not reachable yet */ }
     if (!st || st.state === 'running') continue;
-    if (st.state !== 'done') return {ok:false, status:0, text:LOST_NOT_DONE, lost:'not-done'};
+    if (st.state !== 'done') {
+      if (!boot || st.boot !== boot) return {ok:false, status:0, text:LOST_UNKNOWN, lost:'unknown'};
+      return {ok:false, status:0, text:LOST_NOT_DONE, lost:'not-done'};
+    }
     let full = null;
     try {
       const res = await fetch('/api/state', {cache:'no-store'});
@@ -634,12 +643,12 @@ async function actLost(id, tries = 20, pause = 1500) {
   return {ok:false, status:0, text:LOST_UNKNOWN, lost:'unknown'};
 }
 // A click's answer may be only what changed since the revision this page holds (ORCH-580): merged here; one
-// that does not fit is replaced by the whole state, with the click's own keys kept.
+// that does not fit is replaced by the whole state, with the click's own keys kept (the server lists them in `reply`).
 async function actAnswer(next) {
   if (!next || !next.delta) return next;
   const merged = window.DashHelpers.applyStateDelta(state, next);
   if (merged) return merged;
-  const own = Object.fromEntries((next.keys || []).filter(k => next.set && k in next.set && !(state && k in state)).map(k => [k, next.set[k]]));
+  const own = Object.fromEntries((Array.isArray(next.reply) ? next.reply : []).filter(k => next.set && k in next.set).map(k => [k, next.set[k]]));
   const res = await fetch('/api/state', {cache:'no-store'});
   if (!res.ok) throw new Error('Could not load the workspace.');
   return {...(await res.json()), ...own};
@@ -662,6 +671,7 @@ async function refresh() {
     wantFull = false;
     const res = await fetch('/api/state' + have, {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
+    serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
     let next = await res.json();
     if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
       const merged = window.DashHelpers.applyStateDelta(state, next);

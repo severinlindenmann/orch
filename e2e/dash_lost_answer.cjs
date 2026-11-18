@@ -30,12 +30,13 @@ async function run(width, arrives) {
     await context.route('**/*', async route => {
       const req = route.request();
       const url = new URL(req.url());
-      const json = body => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(body)});
+      // X-Orch-Boot: the run of the dashboard (the page tells "not done" from "forgotten after a restart" by it)
+      const json = body => route.fulfill({status: 200, contentType: 'application/json', headers: {'X-Orch-Boot': 'e2eboot01'}, body: JSON.stringify(body)});
       if (url.origin !== BASE) return route.abort();
       if (url.pathname === '/api/state') return json(state);
       if (url.pathname === '/api/act/status') {
         const tid = made.get(url.searchParams.get('id'));
-        return json(tid ? {state: 'done', op: 'ticket.new', status: 200, reply: {created: {id: tid}}} : {state: 'unknown'});
+        return json(tid ? {state: 'done', op: 'ticket.new', status: 200, reply: {created: {id: tid}}, boot: 'e2eboot01'} : {state: 'unknown', boot: 'e2eboot01'});
       }
       if (url.pathname === '/api/act') {
         const body = req.postDataJSON();

@@ -164,7 +164,7 @@ def test_double_click_with_one_id_runs_once(srv, made_orch):
 def test_a_refused_click_is_not_remembered(srv, made_orch):
     (made_orch.parent / "mode.txt").write_text("refuse")
     assert new_ticket(srv, "ref-0123456789")[0] != 200
-    assert status_of(srv, "ref-0123456789")[1] == {"state": "unknown"}
+    assert status_of(srv, "ref-0123456789")[1] == {"state": "unknown", "boot": srv.act_ids.boot}
     (made_orch.parent / "mode.txt").write_text("ok")
     assert new_ticket(srv, "ref-0123456789")[0] == 200  # fixed and sent again: it runs now
     assert made(made_orch) == 1
@@ -175,7 +175,7 @@ def test_ids_are_separate_and_status_checks_its_input(srv, made_orch):
     assert new_ticket(srv, "b-0123456789")[0] == 200
     assert new_ticket(srv)[0] == 200  # no id (an older page): runs as before
     assert made(made_orch) == 3
-    assert status_of(srv, "never-sent-0123")[1] == {"state": "unknown"}
+    assert status_of(srv, "never-sent-0123")[1] == {"state": "unknown", "boot": srv.act_ids.boot}
     assert status_of(srv, "bad%20id")[0] == 400
 
 
@@ -186,11 +186,14 @@ def test_answer_is_a_small_gzipped_delta_when_the_page_holds_a_revision(srv, mad
     r = c.getresponse()
     full = r.read()
     rev = json.loads(full)["rev"]
+    assert r.getheader("X-Orch-Boot") == srv.act_ids.boot  # the page learns which dashboard run it talks to
     code, raw, hdr = new_ticket(srv, "dlt-0123456789", **{"X-Orch-Have": rev, "Accept-Encoding": "gzip"})
     out = json.loads(raw)
     assert code == 200 and hdr.get("Content-Encoding") == "gzip"
+    assert hdr.get("X-Orch-Boot") == srv.act_ids.boot
     assert out["delta"] is True and out["base"] == rev
     assert out["set"]["created"] == {"id": "t_made0001"} and "created" in out["keys"]
+    assert out["reply"] == ["created"]  # the click's own keys, kept when the delta does not fit
     assert [row["id"] for row in out.get("upsert", [])] == ["t_made0001"]
     assert len(raw) < len(full) / 20  # not the whole state again
 
@@ -250,5 +253,43 @@ def test_a_click_is_only_told_to_who_sent_it():
     assert first
     mem.finish(entry, (200, "", {"id": "t_x"}), {"created": {"id": "t_x"}})
     assert mem.status("own-0123456789", (True, None))["reply"] == {"created": {"id": "t_x"}}
-    assert mem.status("own-0123456789", (False, None)) == {"state": "unknown"}  # watch-only
-    assert mem.status("own-0123456789", (True, "sync")) == {"state": "unknown"}  # an add-on page's pass
+    assert mem.status("own-0123456789", (False, None)) == {"state": "unknown", "boot": mem.boot}  # watch-only
+    assert mem.status("own-0123456789", (True, "sync")) == {"state": "unknown", "boot": mem.boot}  # an add-on page's pass
+
+
+def test_status_names_the_dashboard_run_and_a_refused_click_is_unknown():
+    from orch_dashboard.actids import ActIds
+
+    mem = ActIds()
+    assert mem.status("none-0123456789", (True, None)) == {"state": "unknown", "boot": mem.boot}
+    entry, _ = mem.claim("refu-0123456789", "ticket.new", (True, None), "h")
+    mem.finish(entry, (400, "no", None))
+    assert mem.status("refu-0123456789", (True, None)) == {"state": "unknown", "boot": mem.boot}
+    assert ActIds().boot != mem.boot  # a restarted dashboard is another run
+
+
+def test_status_while_a_refusal_finishes_never_breaks():
+    """status() reads the entry under the lock: finish() of a refusal (result None, entry dropped) cannot slip in
+    between and leave a done entry with no result."""
+    import threading
+
+    from orch_dashboard.actids import ActIds
+
+    mem = ActIds()
+    errors = []
+
+    def ask(act_id):
+        try:
+            for _ in range(200):
+                assert mem.status(act_id, (True, None))["state"] in ("running", "unknown")
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    for i in range(30):
+        act_id = f"race-{i:04d}-0123456789"
+        entry, _ = mem.claim(act_id, "ticket.new", (True, None), "h")
+        t = threading.Thread(target=ask, args=(act_id,))
+        t.start()
+        mem.finish(entry, (409, "refused", None))
+        t.join()
+    assert not errors

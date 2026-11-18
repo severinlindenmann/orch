@@ -2,11 +2,14 @@
 id did for a while: a repeat of the same id (a retry after a lost answer, a double click) gets the first result
 and is never run again, and the page can ask whether an id went through before it offers Retry.
 
-Kept in memory only: a restarted dashboard forgets them (the page then says it could not tell)."""
+Kept in memory only: a restarted dashboard forgets them. Every status answer names this run of the dashboard
+(`boot`, also sent as X-Orch-Boot on /api/state): an "unknown" from another run than the one the page sent the
+click to means "forgotten", never "not done", and the page says it could not tell."""
 
 from __future__ import annotations
 
 import re
+import secrets
 import threading
 import time
 from collections import OrderedDict
@@ -35,6 +38,7 @@ class Entry:
 class ActIds:
     def __init__(self):
         self.lock = threading.Lock()
+        self.boot = secrets.token_hex(6)  # this run of the dashboard
         self.items: OrderedDict[str, Entry] = OrderedDict()
 
     def _prune(self):
@@ -75,14 +79,16 @@ class ActIds:
     def status(self, act_id: str, caller: tuple = ()) -> dict:
         """What the page's question "did my click go through?" gets: done (with its status and small reply),
         running, or unknown (never arrived, refused, or forgotten)."""
-        with self.lock:
+        with self.lock:  # one snapshot: finish() may drop the entry and clear its result meanwhile
             self._prune()
             e = self.items.get(act_id)
-        if e is None or e.caller != caller:  # only who sent the click learns about it
-            return {"state": "unknown"}
-        if not e.done.is_set():
-            return {"state": "running", "op": e.op}
-        out: dict = {"state": "done", "op": e.op, "status": e.result[0]}
-        if e.reply:
-            out["reply"] = e.reply
-        return out
+            if e is None or e.caller != caller:  # only who sent the click learns about it
+                return {"state": "unknown", "boot": self.boot}
+            if not e.done.is_set():
+                return {"state": "running", "op": e.op, "boot": self.boot}
+            if e.result is None:  # refused: nothing was done
+                return {"state": "unknown", "boot": self.boot}
+            out: dict = {"state": "done", "op": e.op, "status": e.result[0], "boot": self.boot}
+            if e.reply:
+                out["reply"] = e.reply
+            return out
