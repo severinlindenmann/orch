@@ -66,7 +66,7 @@ _HOW = re.compile(r"[^\x00-\x1f\x7f<>]{1,160}")  # what the person does when orc
 # the terminal command that signs in again (shown and copied, never run): one line, plain characters
 _SIGN_IN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._:=/@,'\"+-]{0,119}")
 _LABEL = re.compile(r"[^\x00-\x1f\x7f]{1,40}")
-KINDS = ("login", "connection", "key")
+KINDS = ("login", "connection", "key", "tool")
 _KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")  # keystore.NAME_RE
 
 
@@ -98,16 +98,20 @@ def _runner(binary: str) -> bool:
     return base in _NOT_A_TOOL or binary.lower().removesuffix(".exe") in _NOT_A_TOOL
 
 
-def _recipe(name, doc) -> dict | None:
-    """A checked workspace recipe, or None when it is not one (a bad entry is left out, never run)."""
+def command_ok(cmd) -> bool:
+    """A tool's own status command with plain arguments: never a shell, a script runner or a general tool."""
+    if not (isinstance(cmd, list) and 1 <= len(cmd) <= 9 and all(isinstance(a, str) for a in cmd)):
+        return False
+    return bool(_BINARY.fullmatch(cmd[0]) and all(_ARG.fullmatch(a) for a in cmd[1:])) and not _runner(cmd[0])
+
+
+def _recipe(name, doc, *, script: bool = False) -> dict | None:
+    """A checked workspace recipe, or None when it is not one (a bad entry is left out, never run). With
+    script=True the check is a script next to its check file (checkfiles.py), which brings no command."""
     if not (isinstance(name, str) and _NAME.fullmatch(name) and isinstance(doc, dict)):
         return None
     cmd, label = doc.get("command"), doc.get("label", name)
-    if not (isinstance(cmd, list) and 1 <= len(cmd) <= 9 and all(isinstance(a, str) for a in cmd)):
-        return None
-    if not (_BINARY.fullmatch(cmd[0]) and all(_ARG.fullmatch(a) for a in cmd[1:])):
-        return None
-    if _runner(cmd[0]):
+    if not script and not command_ok(cmd):
         return None
     if not (isinstance(label, str) and _LABEL.fullmatch(label)):
         return None
@@ -130,7 +134,7 @@ def _recipe(name, doc) -> dict | None:
     return {
         "name": name,
         "label": label.strip(),
-        "command": cmd,
+        "command": None if script else cmd,
         "works": works,
         "ends": ends,
         "kind": kind,
@@ -187,7 +191,10 @@ def add_recipe(root: Path, name: str, doc: dict) -> dict:
     r = _recipe(name, doc)
     if not r:
         raise Refused(BAD_CHECK)
-    if name in {x["name"] for x in helper_recipes()} or name in _known_names():
+    from orch import checkfiles
+
+    known = set() if checkfiles.present(root) else _known_names()
+    if name in {x["name"] for x in helper_recipes()} or name in known:
         raise Refused(f"orch already checks {name} by itself; pick another name.")
     have = keystore.record_read(Path(root), "checks") or {}
     items = have.get("checks") if isinstance(have.get("checks"), dict) else {}
@@ -281,10 +288,14 @@ def known_recipes() -> list[dict]:
 
 
 def recipes(root: Path) -> list[dict]:
-    """Helper tools first, then the known tools, then the workspace's own; a later name never replaces an
-    earlier one."""
+    """Helper tools first, then the known tools (only while the workspace has no check folder, ORCH-529),
+    then the workspace's own (orch logins add), then its approved check files; a later name never replaces
+    an earlier one."""
+    from orch import checkfiles
+
+    known = [] if checkfiles.present(root) else known_recipes()
     out, taken = [], set()
-    for r in helper_recipes() + known_recipes() + workspace_recipes(root):
+    for r in helper_recipes() + known + workspace_recipes(root) + checkfiles.recipes(root):
         if r["name"] not in taken:
             taken.add(r["name"])
             out.append(r)
@@ -294,20 +305,25 @@ def recipes(root: Path) -> list[dict]:
 # ------------------------------------------------------------------------------------------------ one check
 
 
-def ask(binary: str, recipe: dict) -> tuple[bool | None, str | None]:
-    """(works, end time) from the recipe's command; (None, None) when it gave no readable answer."""
+def ask(
+    binary: str, recipe: dict, *, argv: list[str] | None = None, env: dict | None = None
+) -> tuple[bool | None, str | None]:
+    """(works, end time) from the recipe's command (or the given argv: a check file's script); (None, None)
+    when it gave no readable answer or ran past its time limit."""
     json_answer = bool(recipe.get("works"))
     # an exit-code recipe never reads what the command prints; a JSON one keeps only stdout, parsed below
     out = subprocess.PIPE if json_answer else subprocess.DEVNULL
+    extra = {"env": env} if env is not None else {}
     try:
         r = subprocess.run(
-            [binary, *recipe["command"][1:]],
+            argv or [binary, *recipe["command"][1:]],
             stdout=out,
             stderr=subprocess.DEVNULL,
             text=True,
             errors="replace",
-            timeout=TIMEOUT,
+            timeout=recipe.get("timeout") or TIMEOUT,
             stdin=subprocess.DEVNULL,
+            **extra,
         )
     except (OSError, subprocess.SubprocessError, ValueError):
         return None, None
@@ -380,20 +396,79 @@ def stops(root: Path, adapter: str | None) -> list[dict]:
 # ------------------------------------------------------------------------------------------------ all of them
 
 
-def overview(root: Path, now: datetime | None = None) -> list[dict]:
-    """One row per thing set here: {name, label, kind, state, ends_at, helper, chosen, stops, renew, key}. A
-    helper tool that is not installed is not set here and is left out; a workspace recipe whose command is
-    missing is unreachable."""
+def _stamp(t: datetime) -> str:
+    return t.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse(at) -> datetime | None:
+    try:
+        return datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fresh(row: dict | None, r: dict, now: datetime) -> bool:
+    """The last row of this check is still within its interval (the check's own, else CHECK_EVERY)."""
+    at = _parse((row or {}).get("checked_at"))
+    if not at or row.get("v") != r.get("v"):
+        return False
+    return now < at + timedelta(seconds=r.get("interval") or CHECK_EVERY)
+
+
+def run_one(root: Path, r: dict) -> tuple[bool | None, str | None, bool]:
+    """(works, end time, could run) for one recipe. A tool or a needed tool that is missing gives (None,
+    None, False): unreachable, never "renew"."""
+    from orch import checkfiles
+
+    if r.get("script"):
+        argv, env = checkfiles.script_argv(root, r)
+        if not argv:
+            return None, None, False
+        works, ends = ask(argv[0], r, argv=argv, env=env)
+        return works, ends, True
+    if any(not shutil.which(b) for b in r.get("requires") or ()):
+        return None, None, False
+    binary = shutil.which(r["command"][0])
+    if not binary:
+        return None, None, False
+    works, ends = ask(binary, r)
+    return works, ends, True
+
+
+def overview(
+    root: Path, now: datetime | None = None, *, due_only: bool = False, only: str | None = None
+) -> list[dict]:
+    """One row per thing set here: {name, label, kind, state, ends_at, helper, chosen, stops, renew, key,
+    checked_at}. A helper tool that is not installed is not set here and is left out; a workspace recipe
+    whose command is missing is unreachable. due_only: a check whose last row is still within its interval
+    keeps that row (the background run, ORCH-529); only: run just this check and keep the other rows.
+    A check file that waits for the person's approval gets a row that says how to approve it, and runs
+    nothing."""
+    from orch import checkfiles
+
+    now = now or datetime.now(UTC)
     try:
         chosen = adapters.load(adapters.chosen(root), root)["adapter"]
     except Exception:  # noqa: BLE001  no agent chosen or found: nothing is "the helper here"
         chosen = None
+    before = last(root) if (due_only or only) else None
+    old = {x.get("name"): x for x in (before or {}).get("items") or [] if isinstance(x, dict)}
     rows = []
     for r in recipes(root):
-        binary = shutil.which(r["command"][0])
-        if not binary and r["helper"]:
+        prev = old.get(r["name"])
+        if (only and r["name"] != only) or (due_only and prev and _fresh(prev, r, now)):
+            if prev:  # kept as it was; only the tickets it stops are read again
+                rows.append(
+                    {
+                        **prev,
+                        "stops": stops(root, r["helper"]),
+                        "chosen": bool(r["helper"]) and r["helper"] == chosen,
+                    }
+                )
             continue
-        works, ends_at = ask(binary, r) if binary else (None, None)
+        if r["helper"] and not shutil.which(r["command"][0]):
+            continue
+        works, ends_at, _ = run_one(root, r)
         rows.append(
             {
                 "name": r["name"],
@@ -410,9 +485,16 @@ def overview(root: Path, now: datetime | None = None) -> list[dict]:
                 "sign_in": r.get(
                     "sign_in"
                 ),  # the terminal command that signs in again, shown with Copy (ORCH-218)
+                "checked_at": _stamp(now),
+                **({"interval": r["interval"]} if r.get("interval") else {}),
+                **({"v": r["v"]} if r.get("v") else {}),  # a check file's version: a new one runs again
             }
         )
-    return rows + connection_rows(root, chosen, now)
+    rows += checkfiles.waiting_rows(root)
+    conn_at = _parse((before or {}).get("connections_at"))
+    if only or (due_only and conn_at and now < conn_at + timedelta(seconds=CHECK_EVERY)):
+        return rows + [x for x in old.values() if x.get("kind") == "connection" and x.get("conn")]
+    return rows + [{**x, "conn": True, "checked_at": _stamp(now)} for x in connection_rows(root, chosen, now)]
 
 
 # ------------------------------------------------------------------------------------------------ connections
@@ -511,10 +593,27 @@ def _path(root: Path) -> Path:
     return orch_home.key_dir(Path(root)) / "health.json"
 
 
-def save(root: Path, rows: list[dict], now: datetime | None = None) -> dict:
+def _next_at(rows: list[dict], now: datetime) -> str:
+    """When the background run is due again: the earliest end of a row's interval (CHECK_EVERY by default;
+    connections every CHECK_EVERY), never later than CHECK_EVERY from now."""
+    ends = [now + timedelta(seconds=CHECK_EVERY)]
+    for x in rows:
+        at = _parse(x.get("checked_at"))
+        if at and not x.get("approve"):
+            every = x.get("interval") if isinstance(x.get("interval"), int) else CHECK_EVERY
+            ends.append(at + timedelta(seconds=every))
+    return _stamp(min(ends))
+
+
+def save(root: Path, rows: list[dict], now: datetime | None = None, notice: str | None = None) -> dict:
+    now = now or datetime.now(UTC)
+    conn = [_parse(x.get("checked_at")) for x in rows if x.get("conn")]
     doc = {
         "schema": "orch.health/1",
-        "checked_at": (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "checked_at": _stamp(now),
+        "next_at": _next_at(rows, now),
+        **({"connections_at": _stamp(min(c for c in conn if c))} if any(conn) else {}),
+        **({"notice": notice} if notice else {}),
         "items": rows,
     }
     try:
@@ -542,9 +641,15 @@ def last(root: Path) -> dict | None:
     return doc
 
 
-def check(root: Path, now: datetime | None = None) -> dict:
-    """Run every check now and keep the result."""
-    return save(root, overview(root, now), now)
+def check(
+    root: Path, now: datetime | None = None, *, due_only: bool = False, only: str | None = None
+) -> dict:
+    """Run every check now (due_only: only those whose interval ran out; only: just this one) and keep the
+    result, with the notice for a workspace that still runs the built-in checks the old way."""
+    from orch import checkfiles
+
+    now = now or datetime.now(UTC)
+    return save(root, overview(root, now, due_only=due_only, only=only), now, checkfiles.notice(root))
 
 
 # ------------------------------------------------------------------------------------------------ by itself
@@ -554,15 +659,17 @@ ASK_EVERY = 60  # seconds between two background checks
 
 
 def due(root: Path, now: float | None = None) -> bool:
-    """True when there is no result yet or the last one is older than CHECK_EVERY."""
+    """True when there is no result yet, or the earliest check's interval ran out (next_at; a result from
+    before ORCH-529 has none: then older than CHECK_EVERY)."""
     doc = last(root)
     if not doc:
         return True
-    try:
-        at = datetime.strptime(doc["checked_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
-    except (KeyError, TypeError, ValueError):
-        return True
-    return (now if now is not None else time.time()) - at >= CHECK_EVERY
+    t = now if now is not None else time.time()
+    nxt = _parse(doc.get("next_at"))
+    if nxt:
+        return t >= nxt.timestamp()
+    at = _parse(doc.get("checked_at"))
+    return not at or t - at.timestamp() >= CHECK_EVERY
 
 
 def soon(root: Path, *, force: bool = False, now: float | None = None) -> bool:
@@ -585,8 +692,8 @@ def soon(root: Path, *, force: bool = False, now: float | None = None) -> bool:
         os.utime(mark, (now, now))
         from orch import procs
 
-        subprocess.Popen(
-            procs.orch_python_argv("logins", "--json"),
+        subprocess.Popen(  # due only: each check keeps its own interval; a helper that failed checks all
+            procs.orch_python_argv("logins", "--json", *(() if force else ("--due-only",))),
             cwd=Path(os.path.realpath(tempfile.gettempdir())),
             env={**os.environ, "ORCH_ROOT": str(root)},
             stdin=subprocess.DEVNULL,
