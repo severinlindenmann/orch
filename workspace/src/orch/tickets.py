@@ -939,8 +939,10 @@ def create(
     plan_first: bool = False,
     epic: bool = False,
     release: bool = False,
+    human_review: bool = True,
 ) -> dict:
-    """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
+    """`human_review`: the Human review needed switch (ORCH-424); on unless the person turns it off.
+    `title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
     tid lets callers persist a reserved id before this write."""
     if tid is not None:
@@ -983,6 +985,9 @@ def create(
         release
     ):  # ORCH-37: a release holds the epics and tickets that ship together (set_release changes it later)
         ticket["release"] = True
+    if not human_review:  # ORCH-424: stored only when off; no field = on (also every older ticket)
+        ticket["human_review"] = False
+        add_history(ticket, by, HUMAN_REVIEW_OFF, at=t)
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -1590,7 +1595,16 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "release", "description", "description_by", "model")
+PROTECTED_FIELDS = (
+    "title_auto",
+    "plan_first",
+    "epic",
+    "release",
+    "human_review",
+    "description",
+    "description_by",
+    "model",
+)
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1851,6 +1865,34 @@ def set_release(root: Path, tid: str, on: bool, by: str, if_revision: int | None
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
+def human_review(ticket: dict) -> bool:
+    """ORCH-424: the Human review needed switch. On unless a person turned it off (the field is False only
+    then), so a ticket made before the switch existed counts as on. While it is on, nothing on the ticket is
+    accepted without a person."""
+    return ticket.get("human_review") is not False
+
+
+HUMAN_REVIEW_ON = "Human review needed: on"
+HUMAN_REVIEW_OFF = "Human review needed: off"
+
+
+def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-424: turn the Human review needed switch on or off. Who may turn it off is checked by the caller
+    (only a person: `orch ticket edit --human-review no`, the dashboard, a paired phone)."""
+    me = load(root, tid)
+    if human_review(me) == on:
+        return me  # nothing changes: no write, no history line
+
+    def op(ticket):
+        if on:
+            ticket.pop("human_review", None)
+        else:
+            ticket["human_review"] = False
+        add_history(ticket, by, HUMAN_REVIEW_ON if on else HUMAN_REVIEW_OFF)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
 PARENT_DEPTH = 50  # a parent chain longer than this is broken data: never followed further
 
 
@@ -1986,12 +2028,22 @@ def create_from_input(
     parent: str | None = None,
     fields: dict | None = None,
     ext: dict[str, dict] | None = None,
+    human_review: bool = True,
 ) -> dict:
     """THE way a ticket is made from what a person wrote or said (dashboard paste box, phone text, Open
     agent): the title is the first words (a placeholder, flag `title_auto`, when the text is long or has
     several lines)
     and the agent writes the real title and the description first (runs.fresh_prompt, `orch ticket title`)."""
-    return create(root, placeholder_title(text), by, parent, ext, fields, title_auto=needs_agent_title(text))
+    return create(
+        root,
+        placeholder_title(text),
+        by,
+        parent,
+        ext,
+        fields,
+        title_auto=needs_agent_title(text),
+        human_review=human_review,
+    )
 
 
 def set_auto_title(root: Path, tid: str, title: str, by: str, description: str | None = None) -> dict:

@@ -1649,7 +1649,7 @@ function ticketProperties(t, parent) {
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)),
+    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)), field('Human review needed', humanReviewField(t)),
       ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t), field('Helper strength', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
@@ -1859,6 +1859,21 @@ function releaseField(t) {
     if (sw.disabled) return;
     sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
     const result = await act('ticket.edit', {ticket:t.id, release:!on, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); sw.setAttribute('aria-checked', String(on)); }
+    sw.disabled = false;
+  };
+  return sw;
+}
+// ORCH-424: Human review needed. On unless the person turns it off (no field = on, also for older tickets); while
+// it is on nothing on this ticket is accepted without a person. The same switch as Release.
+function humanReviewField(t) {
+  const on = t.human_review !== false;
+  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, nothing is accepted without you' : 'No');
+  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'Human review needed', title:on ? 'Nothing is accepted without you' : 'Work may be accepted without you', 'data-key':'human-review-' + t.id});
+  sw.onclick = async () => {
+    if (sw.disabled) return;
+    sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
+    const result = await act('ticket.edit', {ticket:t.id, human_review:!on, if_revision:(ticketOf(t.id) || t).revision});
     if (!result.ok) { window.orch.toast(changeError(result), 'error'); sw.setAttribute('aria-checked', String(on)); }
     sw.disabled = false;
   };

@@ -166,6 +166,22 @@ test('Show me the plan first is a plain box; Start creates a plan-first ticket a
   assert.equal(s.calls[1].args.ticket, 'new');
 });
 
+test('Human review needed is ticked by default; unticking it sends human_review false (ORCH-424)', async () => {
+  const s = setup();
+  s.input.value = 'Spring campaign'; await s.input.fire('input');
+  const box = walk(s.d).find(n => n.name === 'human_review');
+  assert.equal(box.type, 'checkbox');
+  assert.equal(box.checked, true);
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].op, 'ticket.new');
+  assert.equal(s.calls[0].args.human_review, undefined);  // on is the default: nothing to send
+  const u = setup();
+  u.input.value = 'Spring campaign'; await u.input.fire('input');
+  walk(u.d).find(n => n.name === 'human_review').checked = false;
+  await u.form.fire('submit');
+  assert.equal(u.calls[0].args.human_review, false);
+});
+
 test('long typed text moved to a chip on submit shrinks the text box back', async () => {
   const s = setup();
   s.input.style = {};

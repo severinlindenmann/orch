@@ -1305,3 +1305,43 @@ async fn trickling_upload_below_16kb_per_s_loses_its_slot() {
     assert_eq!(t.app.upload_slots.available_permits(), 4);
     assert_eq!(upload(&t, &p, vec![1u8; 10]).await.0, 201);
 }
+
+#[tokio::test]
+async fn send_human_review_off_only_on_a_new_topic() {
+    // ORCH-424: `human_review: false` reaches the workspace only on a text that starts a ticket.
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let cases = [
+        (
+            json!({"to": a.id, "client_id": "a0000000-0000-4000-8000-000000000424", "text": "new", "human_review": false}),
+            true,
+        ),
+        (
+            json!({"to": a.id, "client_id": "b0000000-0000-4000-8000-000000000424", "text": "chat", "general": true, "human_review": false}),
+            false,
+        ),
+        (
+            json!({"to": a.id, "client_id": "c0000000-0000-4000-8000-000000000424", "text": "more", "ticket": "t_7k3f9q", "human_review": false}),
+            false,
+        ),
+    ];
+    for (body, kept) in cases {
+        let (s, v) = send(&t, &p, body).await;
+        assert_eq!(s, 201, "{v}");
+        let id = v["id"].clone();
+        let m = t
+            .inbox(&a)
+            .await
+            .into_iter()
+            .find(|m| m["id"] == id)
+            .expect("stored");
+        assert_eq!(m["body"].get("human_review").is_some(), kept, "{m}");
+        if kept {
+            assert_eq!(m["body"]["human_review"], json!(false));
+        }
+    }
+    // only false is a valid value
+    let (s, _) = send(&t, &p, json!({"to": a.id, "client_id": "d0000000-0000-4000-8000-000000000424", "text": "x", "human_review": true})).await;
+    assert_eq!(s, 422);
+}

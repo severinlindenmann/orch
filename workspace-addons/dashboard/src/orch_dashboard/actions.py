@@ -286,9 +286,13 @@ def _ticket_new(a):
             "plan_first",
             "epic",
             "steps",
+            "human_review",
         ),
     )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
+    # ORCH-424: the Human review needed box is on unless the person unticks it
+    if "human_review" in a and not _flag(a["human_review"]):
+        flags.append("--human-review=no")
     if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
         flags.append("--title-auto")
     if _flag(a.get("plan_first")):
@@ -428,8 +432,26 @@ def _ticket_changes(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "parent", "release", "if_revision"))
+    _only(
+        a,
+        (
+            "ticket",
+            "title",
+            "owner",
+            "due",
+            "note",
+            "done_when",
+            "parent",
+            "release",
+            "human_review",
+            "if_revision",
+        ),
+    )
     flags = []
+    if "human_review" in a:  # ORCH-424: the Human review needed switch on the ticket page
+        if not isinstance(a["human_review"], bool):
+            raise BadRequest("human_review is true or false.")
+        flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
     if "parent" in a:  # ORCH-156: "Part of": put the ticket under an epic, or None to take it out
         flags.append(f"--parent={_tid(a['parent']) if a['parent'] else ''}")
     if "release" in a:  # ORCH-37: the Release switch on the ticket page (true marks it, false takes it off)
@@ -1452,9 +1474,13 @@ def epic_new(root: Path, orch_bin: str | None, args: dict, session: bool) -> tup
     if not isinstance(epic_id, str) or not TID.fullmatch(epic_id):
         return 422, "The epic was made, but its address could not be read. Reload before trying again.", None
     made, failed = [], []
+    # ORCH-424: the tickets inside follow the epic's Human review needed choice unless one says its own
+    same = {"human_review": rest["human_review"]} if "human_review" in rest else {}
     for index, step in enumerate(steps):
         try:
-            st, msg, child = run_op(root, orch_bin, "ticket.new", {**step, "parent": epic_id}, session)
+            st, msg, child = run_op(
+                root, orch_bin, "ticket.new", {**same, **step, "parent": epic_id}, session
+            )
         except (BadRequest, Unavailable) as e:
             st, msg, child = 422, str(e), None
         if st == 200:

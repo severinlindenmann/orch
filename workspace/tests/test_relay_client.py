@@ -1275,6 +1275,19 @@ def test_phone_text_without_ticket_makes_one_ticket_and_one_ack(proj, run, rel):
     assert len(_tickets(run)) == 1 and len(rel.sent) == 1
 
 
+def test_phone_text_can_start_a_ticket_without_human_review(proj, run, rel):
+    """ORCH-424: a new topic with human_review false makes the ticket with the switch off; without it, on."""
+    _phone_setup(rel, run)
+    off = {"text": "Spring numbers", "human_review": False}
+    rel.inbox.append(msg("m_phone00000000424", "text", off, frm=PHONE))
+    rel.inbox.append(msg("m_phone00000000425", "text", {"text": "Autumn numbers"}, frm=PHONE))
+    code, _, _ = run("relay", "inbox")
+    assert code == 0
+    by_title = {t["title"]: t for t in _tickets(run)}
+    assert by_title["Spring numbers"]["human_review"] is False
+    assert "human_review" not in by_title["Autumn numbers"]
+
+
 def test_phone_long_text_is_kept_as_a_file_and_the_history_stays_short(proj, run, rel):
     _phone_setup(rel, run)
     long = "Point one.\n" + ("The inventory has many lines. " * 200)
