@@ -170,7 +170,13 @@ test('the All cards list: one section per set (group, else ticket) with its own 
   const deck = {items:[item('a', {group:'Phone'}), item('b', {group:'Phone'}), item('c')], index:1, answers:{a:{verdict:'ok', item:item('a'), note:null}}, jump() {}};
   c.reviewDrawSide(queue, deck);
   assert.equal(secs.length, 2);
-  assert.match(text(secs[0]), /^Phone1 of 2 waiting/); assert.match(text(secs[1]), /^Home look1 of 1 waiting/);
+  assert.match(text(secs[0]), /^Phone1 of 2 waiting/);
+  // ORCH-420: a set of one card under its own ticket's name has no heading (it said the title twice)
+  assert.doesNotMatch(text(secs[1]), /Home look|waiting/); assert.match(text(secs[1]), /Card c/);
+});
+test('ORCH-420: the subtitle never says nothing waits above cards (a card put off on Home is still a card here)', () => {
+  const c = ctx({review:{cards:[CARD]}}, {needsYouTotal:() => 0});
+  assert.match(c.reviewSubtitle(), /^1 thing waits on you/);
 });
 
 test('Review opens at the card the ticket page asked for (#review?card=...)', () => {
