@@ -1755,6 +1755,16 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     return out + [f"release {n}: {len(un)} pull requests waiting; started {names} on {sha[:8]}"]
 
 
+def _other_change(hold: str, fix: dict) -> bool:
+    """A security hold that names another pull request or another commit than the fix (only those cannot
+    hold a fix release, which ships the fix alone). Any other hold (the check could not run ...) counts."""
+    m = re.match(r"^#(\d+) \(", hold) or re.match(r"^([0-9a-f]{7,40}) \(", hold)
+    if not m:
+        return False
+    v = m[1]
+    return v != str(fix["number"]) if hold.startswith("#") else not fix["sha"].startswith(v)
+
+
 def fix_lane(w: World, st: dict, hold: str | None, sec_holds: list[str] | None = None) -> list[str]:
     """A merged pull request labelled "fix for release N", N the newest release on main, not shipped yet: cut
     release N.k from main with only that change, at once (no pace, no other work, no walks). Its checks, Merge
@@ -1781,7 +1791,7 @@ def fix_lane(w: World, st: dict, hold: str | None, sec_holds: list[str] | None =
     if hold:
         return out + [f"fix #{todo[0]['number']} for release {newest} waits: on hold: {hold}"]
     fix = sorted(todo, key=lambda f: f["number"])[0]
-    mine = [x for x in sec_holds or [] if x.startswith((f"#{fix['number']} ", fix["sha"][:8]))]
+    mine = [x for x in sec_holds or [] if not _other_change(x, fix)]  # fail closed: unknown holds count
     if mine:  # the same rule as every release: no cut before the security OK of what it ships
         return out + [
             f"fix #{fix['number']} for release {newest} waits for its security OK: " + ", ".join(mine)

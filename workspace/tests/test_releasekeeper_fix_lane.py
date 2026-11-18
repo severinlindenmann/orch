@@ -170,3 +170,18 @@ def test_the_pass_hands_the_security_holds_to_the_fix_lane(tmp_path, monkeypatch
     monkeypatch.setattr(secreview, "tend", lambda w, st, role: ([], ["#50 (security review found problems)"]))
     out = go(tmp_path, fixes=[FIX])
     assert out["did"] == [] and any("waits for its security OK" in x for x in out["lines"])
+
+
+@pytest.mark.parametrize(
+    ("hold", "blocks"),
+    [
+        ("#50 (security review running)", True),
+        ("#7 (security review running)", False),
+        ("5555555 (changes relay/ but no pull request with its merged commit was found)", True),
+        ("abcdef12 (changes relay/ but no pull request with its merged commit was found)", False),
+        ("the security check could not run", True),
+        ("#50x odd", True),
+    ],
+)
+def test_unknown_security_holds_hold_the_fix_too(hold, blocks):
+    assert rk._other_change(hold, FIX) is not blocks
