@@ -1272,8 +1272,8 @@ def start_walks(w: World, rel: dict) -> list[str]:
             f"{rel.get('url') or ''} "
             f"(commit {rel['sha'][:12]}). {how} Walk exactly this commit in a test home or on a throwaway "
             "server, never on production or the real home. Open one ticket per bug you find. Then record the "
-            f'result: orch github release-walk {rel["n"]} {name} pass "<what was walked, one line>" (or '
-            f'fail "<the worst problem>"), and finish this ticket.',
+            f'result: orch github release-walk {rel["n"]} {name} pass "<what was walked, one line>" '
+            f'--commit {rel["sha"][:12]} (or fail "<the worst problem>"), and finish this ticket.',
             f"The {name} walk of release {rel['n']} is recorded as passed or failed",
             priority="normal",
         )
@@ -1283,8 +1283,8 @@ def start_walks(w: World, rel: dict) -> list[str]:
 
 
 def walk_verdicts(w: World, rel: dict) -> dict:
-    """{"passed", "failed", "waiting"} lines for the walks of github.release_walks; a result recorded before
-    this release started the walk (an earlier cut of the same number) does not count."""
+    """{"passed", "failed", "waiting"} lines for the walks of github.release_walks; only a result for this
+    release's own commit counts (an earlier cut of the same number walked another one)."""
     got = (w.walk_results() or {}).get(str(rel["n"])) or {}
     started = rel.get("walks") or {}
     status = {t.get(k): t.get("status") for t in w.tickets() for k in ("key", "id")}
@@ -1293,7 +1293,8 @@ def walk_verdicts(w: World, rel: dict) -> dict:
         s = started.get(name) or {}
         r = got.get(name) or {}
         tk = s.get("ticket") or "no ticket"
-        fresh = r and (ts(r.get("at")) or now()) >= (ts(s.get("at")) or now())
+        c = str(r.get("commit") or "")
+        fresh = bool(r) and len(c) >= 7 and rel["sha"].startswith(c)
         if fresh and r.get("verdict") == "pass":
             res["passed"].append(f"{name} ({tk})")
         elif fresh and r.get("verdict") == "fail":
@@ -1301,7 +1302,7 @@ def walk_verdicts(w: World, rel: dict) -> dict:
         elif (status.get(tk) or "") in DONE:
             res["waiting"].append(
                 f"{name} ({tk} finished without a result: "
-                f"orch github release-walk {rel['n']} {name} pass|fail)"
+                f"orch github release-walk {rel['n']} {name} pass|fail ... --commit {rel['sha'][:12]})"
             )
         else:
             res["waiting"].append(f"{name} ({tk})")
@@ -1466,7 +1467,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                 if (e := known_name(c, allowed)) is not None
             ]
             rel["known_red"] = sorted(set((rel.get("known_red") or []) + excused))
-            proof = (f" Red by a recorded exception: {', '.join(excused)}." if excused else "") + (
+            proof = (f" Red by a named exception: {', '.join(excused)}." if excused else "") + (
                 f" Walks passed: {', '.join(wv['passed'])}." if wv["passed"] else ""
             )
             ask = [
@@ -1615,7 +1616,7 @@ def cut_now(w: World, st: dict, h: dict) -> list[str]:
     if not got:
         return [f"release {rel['n']}: cut failed (see the log)"]
     rel.update(phase="gate", pr=got["number"], url=got["url"], wt=got["wt"], main_before=h["main"])
-    return [f"release {rel['n']}: cut, pull request {got['url']}; its checks next"]
+    return [f"release {rel['n']}: cut, pull request {got['url']}; its checks next", *start_walks(w, rel)]
 
 
 def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
@@ -1675,7 +1676,7 @@ def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
         f" It reached main without its proof: {'; '.join(gaps)}." if gaps else ""
     )
     tail = (
-        (f"\nRed by a recorded exception: {', '.join(kr)}." if kr else "")
+        (f"\nRed by a named exception: {', '.join(kr)}." if kr else "")
         + "".join(
             f"\nThe {x} server already runs this release (deployed {_when(running[x])}): nothing to deploy."
             for x in done
@@ -1910,8 +1911,9 @@ def list_exceptions(root: Path) -> dict[str, dict]:
     return _read_json(Cfg(root).exceptions_path)
 
 
-def record_walk(root: Path, n: int, name: str, verdict: str, line: str, by: str) -> dict:
-    """`orch github release-walk <N> <walk> pass|fail "<line>"`: a walk helper's result for release N."""
+def record_walk(root: Path, n: int, name: str, verdict: str, line: str, by: str, commit: str = "") -> dict:
+    """`orch github release-walk <N> <walk> pass|fail "<line>" --commit <sha>`: a walk helper's result for
+    release N, for the commit it walked."""
     cfg = Cfg(root)
     names = [x for x, _ in cfg.walks]
     if name not in names:
@@ -1926,10 +1928,19 @@ def record_walk(root: Path, n: int, name: str, verdict: str, line: str, by: str)
         raise Refused("Say in one line what was walked (pass) or the worst problem (fail).")
     if n < 1:
         raise Refused("Give the release number.")
+    commit = (commit or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{7,40}", commit):
+        raise Refused("Give the commit you walked: --commit <sha> (its ticket names it).")
     data = _read_json(cfg.walks_path)
     for k in sorted(data, key=lambda x: int(x) if str(x).isdigit() else 0)[:-20]:  # keep the last 20 releases
         data.pop(k, None)
-    e = {"verdict": verdict, "line": text, "by": by, "at": now().isoformat(timespec="seconds")}
+    e = {
+        "verdict": verdict,
+        "line": text,
+        "commit": commit,
+        "by": by,
+        "at": now().isoformat(timespec="seconds"),
+    }
     data.setdefault(str(n), {})[name] = e
     cfg.run_dir.mkdir(parents=True, exist_ok=True)
     runs._atomic(cfg.walks_path, json.dumps(data, indent=1) + "\n")

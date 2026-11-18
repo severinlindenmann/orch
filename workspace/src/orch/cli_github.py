@@ -24,7 +24,7 @@
     orch github release-exception ["<check>" --ticket <key> --until <YYYY-MM-DD> [--why ...] | --ticket off]
         a named exception (a person's): this check may be red in a release until the date or until the
         ticket is done; shown on the Merge card and in the note. Without a check: the list
-    orch github release-walk <N> <walk> pass|fail "<one line>"
+    orch github release-walk <N> <walk> pass|fail "<one line>" --commit <sha>
         a walk helper's result for release N (github.release_walks); the Merge card waits for every pass
 
 The limits are settings: `orch config set github.merge_per_hour 12` (also pr_, comment_, other_per_hour).
@@ -95,6 +95,7 @@ def add_parsers(sub, common) -> None:
     wk.add_argument("walk", help="the walk's name (github.release_walks)")
     wk.add_argument("verdict", choices=("pass", "fail"))
     wk.add_argument("line", help="what was walked (pass) or the worst problem (fail), one line")
+    wk.add_argument("--commit", required=True, help="the commit you walked (the walk ticket names it)")
 
 
 def _release(args, root: Path | None) -> None:
@@ -112,7 +113,7 @@ def _release(args, root: Path | None) -> None:
         _exception(args, root, rk)
     elif args.sub == "release-walk":
         by = tickets.current_actor(getattr(args, "by", None))
-        e = rk.record_walk(root, args.n, args.walk, args.verdict, args.line, by)
+        e = rk.record_walk(root, args.n, args.walk, args.verdict, args.line, by, args.commit)
         msg = (
             f"Recorded: release {args.n} {args.walk} walk {'passed' if args.verdict == 'pass' else 'FAILED'}."
         )

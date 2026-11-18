@@ -1178,8 +1178,14 @@ def started(at="2026-11-18T10:00:00+00:00"):
     }
 
 
-def result(verdict="pass", at="2026-11-18T11:00:00+00:00", line="walked it"):
-    return {"verdict": verdict, "line": line, "at": at, "by": "agent:claude"}
+def result(verdict="pass", commit=DEV[:12], line="walked it"):
+    return {
+        "verdict": verdict,
+        "line": line,
+        "commit": commit,
+        "at": "2026-11-18T11:00:00+00:00",
+        "by": "agent:x",
+    }
 
 
 def test_every_walk_passed_puts_the_card(tmp_path):
@@ -1207,7 +1213,7 @@ def test_one_walk_missing_still_waits(tmp_path):
 
 
 def test_a_result_from_an_earlier_cut_does_not_count(tmp_path):
-    res = {"31": {k: result(at="2026-11-18T09:00:00+00:00") for k in ("install", "services", "clickthrough")}}
+    res = {"31": {k: result(commit="e" * 12) for k in ("install", "services", "clickthrough")}}
     out = go_walks(
         tmp_path,
         state={"release": gate(walks=started())},
@@ -1298,11 +1304,38 @@ def test_walk_command_records_only_a_named_walk(proj, run_cli):
     )
     assert run_cli("config", "set", "github.release_walks", WALKS, "--by", "human:t")[0] == 0
     assert run_cli("config", "set", "github.release_walks", WALKS, "--by", "agent:claude")[0] == 2
-    assert run_cli("github", "release-walk", "31", "nope", "pass", "x")[0] == 2
+    assert run_cli("github", "release-walk", "31", "nope", "pass", "x", "--commit", DEV[:12])[0] == 2
+    assert run_cli("github", "release-walk", "31", "services", "pass", "x", "--commit", "nope")[0] == 2
     code, out, _ = run_cli(
-        "github", "release-walk", "31", "services", "fail", "watcher left behind", "--by", "agent:x"
+        "github",
+        "release-walk",
+        "31",
+        "services",
+        "fail",
+        "watcher left",
+        "--commit",
+        DEV[:12],
+        "--by",
+        "agent:x",
     )
     assert code == 0 and "FAILED" in out
     saved = json.loads((proj / ".orch" / "run" / "release-walks.json").read_text())
-    assert saved["31"]["services"]["verdict"] == "fail"
+    assert saved["31"]["services"]["verdict"] == "fail" and saved["31"]["services"]["commit"] == DEV[:12]
     assert rk.walks(WALKS) == [("install", "release-walk"), ("services", None), ("clickthrough", None)]
+
+
+def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatch):
+    notes = []
+    monkeypatch.setattr(
+        rk.World,
+        "new_ticket",
+        lambda self, parent, title, note, dw, priority="high": notes.append((title, note)) or "t_sim",
+    )
+    out = go_walks(
+        tmp_path,
+        state={"release": in_testing()},
+        runs={"ci.yml": [run(DEV, "workflow_dispatch")], "e2e.yml": [run(DEV, "workflow_dispatch")]},
+    )
+    assert out["state"]["release"]["phase"] == "gate" and len(out["state"]["release"]["walks"]) == 3
+    assert [t for t, _ in notes] == [f"Release 31: {k} walk" for k in ("install", "services", "clickthrough")]
+    assert f"--commit {DEV[:12]}" in notes[0][1] and "Use the skill release-walk." in notes[0][1]
