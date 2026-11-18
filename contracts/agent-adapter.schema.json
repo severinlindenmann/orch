@@ -140,6 +140,11 @@
             }
           }
         },
+        "skill_dirs": {
+          "type": "array", "maxItems": 8,
+          "description": "Optional. The tool's own skill folders of the account, read only (inventory.md, source harness): one sub-folder per skill, names and content hashes only. {home} = the account's home folder.",
+          "items": { "type": "string", "pattern": "^\\{home\\}/[A-Za-z0-9_./-]{1,200}$" }
+        },
         "permissions": {
           "type": "object", "additionalProperties": false,
           "propertyNames": { "enum": ["ask", "auto", "full"] },
