@@ -41,6 +41,10 @@ merges, so sync holds a changed block until a person allows it.
   `workspace/src/orch/prwait.py`, `workspace/src/orch/ghlimit.py`: CI and the queue's own code in the orch
   repository): a pull request that changes a file under one of them runs alone in its own queue group.
 
+- `overlap` (true/false, default true, ORCH-432): while a group's checks run, the next group is built on top of it and
+  checked at the same time; it merges only after the group before it merged, and when that one does not, its pull
+  requests go back to the front of the line without a try used. `false`: one group at a time.
+
 - `act_on_failed_checks` (true/false, default false): act on failed checks (below). Any other value is off.
 
 ## Queue file `.orch/addons/pull-requests/queue.json`

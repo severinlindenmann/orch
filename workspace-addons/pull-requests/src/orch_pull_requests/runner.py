@@ -10,6 +10,12 @@ While pull requests wait, it takes up to MAX_GROUP of one repository and base br
   queue never takes the base into a helper's branch.
 - the queue sets its mark (commit status `orch/merge-queue`) on every group commit it built, so a develop rule
   that requires the mark lets nothing else in: no merge by hand, no merge ahead of the queue.
+- the next group while one runs (ORCH-432, setting `overlap`, on by default): while a group's checks run, the next
+  waiting pull requests are built on top of that group's commit and checked at the same time (one group ahead at
+  most). It merges only after the group before it merged; when that one does not merge, its wait is stopped and
+  its pull requests go back to the front without a try used, to run again from the base branch. Nothing that runs
+  alone, is proved for a person or comes from a fork goes on top of another group, and nothing does while the
+  base branch is red.
 - a red group is closed and split in halves; each half runs again (a half of one in a group of one). So a bad
   pull request costs about log2(n) extra runs and the good ones still merge. A red group of one leaves the queue.
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
@@ -41,7 +47,9 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import settings, store
@@ -49,6 +57,7 @@ from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
 MAX_GROUP = 5
 MAX_TRIES = 3
+LEAD_WAIT_SECS = 3 * 3600  # how long a green group built on top of another waits for that one to end
 PAUSE_SECS = 120  # before a group that hit trouble is tried again
 MARK_SECS = 60  # how long GitHub may take to mark the members of a merged group merged
 RED_PAUSE_SECS = 300  # an entry that waits for the fix of a red base branch is looked at again after this
@@ -61,6 +70,27 @@ NO_ROOM = "this computer's GitHub write limit had no room for the group"
 OK, GONE_MERGED, LEAVE, AGAIN, UNKNOWN = "ok", "merged", "out", "again", "unknown"
 NO_WAKE = ("closed", "owner merges", "draft", "fork")  # left the queue on purpose: nobody is woken for it
 BAD_REVIEW = {"CHANGES_REQUESTED": "changes were requested", "REVIEW_REQUIRED": "it still needs a review"}
+
+
+@dataclass
+class Lead:
+    """A group whose checks run while the next group is built on top of it (ORCH-432): its group commit, and
+    whether it has ended and merged. Written only by the thread that waits for it."""
+
+    repo: str
+    base: str
+    url: str
+    sha: str
+    done: threading.Event
+    merged: bool = False
+
+    def failed(self) -> str | None:
+        """For the follower's waiter: a reason to stop once the group before it ended without a merge."""
+        return (
+            f"the group {self.url} before it was not merged"
+            if self.done.is_set() and not self.merged
+            else None
+        )
 
 
 class Runner:
@@ -82,8 +112,8 @@ class Runner:
         self.root, self.gh, self.make_git, self.log = root, gh, make_git, log
         self.clock, self.sleep = clock, sleep
         self.waiter = waiter or (
-            lambda url, before_merge, merge=True: prwait.run_one(
-                url, merge, before_merge=before_merge, queue=True
+            lambda url, before_merge, merge=True, stop=None: prwait.run_one(
+                url, merge, before_merge=before_merge, queue=True, stop=stop
             )
         )
         self.take = take or ghlimit.take
@@ -91,6 +121,8 @@ class Runner:
         self.ask = ask or _ask_merge
         self.me: str | None = None
         self._red: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
+        self._ahead: Lead | None = None  # set while a group is built and checked on top of a running one
+        self._live: set[str] = set()  # group branches whose checks run now: tidy leaves them alone
 
     # -- the loop ----------------------------------------------------------------------------------------
     def run(self) -> int:
@@ -224,15 +256,19 @@ class Runner:
             self.log("Back in line after a stopped runner: " + ", ".join(r["url"] for r in stuck))
         self.tidy()
 
-    def next_batch(self) -> list[dict] | None:
+    def next_batch(self, follow: Lead | None = None) -> list[dict] | None:
         """Up to MAX_GROUP waiting pull requests of the first one's repository and base, marked running.
-        None when nothing waits; [] when this round only cleared entries or everything is paused."""
+        None when nothing waits; [] when this round only cleared entries or everything is paused.
+        follow: the batch goes on top of that running group: only its repository and base, and none that runs
+        alone, is proved for a person or comes from a fork (those wait for a round of their own)."""
         for r in store.waiting(self.root):  # added before entries kept their login: nobody would take it
             if not r.get("login"):
                 self.finish(r, OUT, f"{r['url']} was queued without a login; add it again.", "")
         now = self.clock()
         mine = self.mine()
         rows = [r for r in mine if float(r.get("not_before") or 0) <= now]
+        if follow is not None:
+            rows = [r for r in rows if r["repo"] == follow.repo]
         if not rows:
             return [] if mine else None
         cards = merge_cards(self.root)
@@ -244,6 +280,8 @@ class Runner:
         repo, base, batch, unseen, answered = rows[0]["repo"], None, [], [], False
         guess = str(rows[0].get("base") or "")  # the base seen at add time; checked again below
         red = self.red_base(repo, guess)
+        if red and follow is not None:  # a red base branch: one at a time, nothing on top of another group
+            return []
         most = 1 if red else MAX_GROUP  # the base branch itself is red: no groups, one at a time
         if red:  # its fixes first
             rows = sorted(rows, key=lambda r: not self.is_fix(r))
@@ -273,6 +311,8 @@ class Runner:
             lone = self.lone_reason(v, proof)
             if lone and batch:  # it runs in a group of its own, in a later round
                 continue
+            if follow is not None and (lone or v.get("isCrossRepository") or b != follow.base):
+                continue  # never on top of another group: it waits for a round of its own
             if not base and b != guess:  # moved to another base branch since it was added: that one counts
                 most = 1 if self.red_base(repo, b) else MAX_GROUP
             base = base or b
@@ -450,7 +490,8 @@ class Runner:
         """Check and merge batch as one group; every entry is finished or back in line, except those of a red
         group, which are returned (still running) so the caller checks them in smaller groups. alone: a group
         of one (alone()): built on top of the base branch even for one pull request."""
-        least = 1 if alone else 2
+        ahead = self._ahead
+        least = 1 if alone or ahead is not None else 2  # on top of a running group, one is a group too
         forks = [e for e in batch if e.get("fork")]
         batch = [e for e in batch if not e.get("fork")]
         for e in forks:  # a fork's code never lands on a branch of the repository
@@ -476,8 +517,9 @@ class Runner:
         if moved:  # pushed to since it was looked at: looked at again next round
             store.back_to_front(self.root, [e["url"] for e in moved], "it got a new commit; waits again")
             return self.group([e for e in batch if e not in moved], alone)
+        start = ahead.sha if ahead is not None else heads["base"]  # on top of the running group's commit
         try:
-            sha, included, conflicted = git.build(heads["base"], [(n, heads[str(n)]) for n in nums])
+            sha, included, conflicted = git.build(start, [(n, heads[str(n)]) for n in nums])
         except Refused as e:
             self.retry(batch, f"the group could not be built: {e}")
             return []
@@ -490,7 +532,10 @@ class Runner:
         else:
             red = self._check_group(repo, base, sha, inside, alone)
         for e in apart:
-            if alone:  # it conflicts with the base branch itself
+            if ahead is not None:  # it conflicts with the group before it: a round of its own, no try used
+                why = f"it conflicted with the group {ahead.url} before it; waits again"
+                store.back_to_front(self.root, [e["url"]], why)
+            elif alone:  # it conflicts with the base branch itself
                 line = f"{e['url']} conflicts with {base}: merge {base} into the branch by hand, push, add it again."
                 self.finish(e, OUT, line, "conflict")
             else:  # conflicts with the group: in a group of its own, after it
@@ -536,8 +581,13 @@ class Runner:
             store.set_state(self.root, e["url"], RUNNING, f"in the group {url}", group=url)
         if len(inside) == 1 and inside[0].get("proof"):
             return self._proof(repo, base, url, inside[0])
-        o = self.waiter(url, lambda head: self.why_not_group(url, base, head) or self.why_not(inside, base))
-        self.tidy()  # merged: its branch goes; not merged: the group pull request is closed
+        if self._ahead is not None:
+            for e in inside:
+                why = f"in the group {url}, checked on top of the group {self._ahead.url}"
+                store.set_state(self.root, e["url"], RUNNING, why, group=url)
+        o = self.wait_group(repo, base, url, branch, sha, inside)
+        if self._ahead is not None and not (o.ok and o.status == "merged"):
+            return self._not_followed(url, base, inside, o)
         if o.ok and o.status == "merged":
             for e in inside:
                 v = self._merged(e["url"])
@@ -573,6 +623,86 @@ class Runner:
                 store.set_state(self.root, e["url"], RUNNING, why, group=None)
             return inside
         self.retry(inside, f"the group {url} was not merged: {o.line}")
+        return []
+
+    # -- the next group while one runs (ORCH-432) --------------------------------------------------------
+    def wait_group(self, repo: str, base: str, url: str, branch: str, sha: str, inside: list[dict]):
+        """Wait for a group's checks and merge it on green. When the next pull requests may go on top of it,
+        its wait runs in a thread while the next group is built on top of its commit and checked at the same
+        time (one group ahead at most); that one merges only after this one merged."""
+
+        def before(head):
+            return self.why_not_group(url, base, head) or self.why_not(inside, base)
+
+        self._live.add(branch)
+        try:
+            lead = self._ahead
+            if lead is not None:  # this group is the one on top: it waits for the one before it
+                return self.waiter(url, lambda head: self._after_lead(lead) or before(head), stop=lead.failed)
+            if not self.may_follow(inside):
+                return self.waiter(url, before)
+            me = Lead(repo, base, url, sha, threading.Event())
+            got: list = []
+
+            def wait() -> None:
+                try:
+                    got.append(self.waiter(url, before))
+                    me.merged = bool(got[0].ok and got[0].status == "merged")
+                except Exception as e:  # noqa: BLE001 - told to the caller as trouble, never as merged
+                    got.append(_Trouble(url, e))
+                finally:
+                    me.done.set()
+
+            t = threading.Thread(target=wait, name=f"merge-queue {url}", daemon=True)
+            t.start()
+            try:
+                self.follow(me)
+            finally:
+                t.join()
+            return got[0]
+        finally:
+            self._live.discard(branch)
+            self.tidy()  # merged: its branch goes; not merged: the group pull request is closed
+
+    def may_follow(self, inside: list[dict]) -> bool:
+        """The next pull requests may be checked on top of this group: the setting is on, this group runs no
+        change that must prove itself alone, and the base branch is not red."""
+        if not settings.overlap(self.root) or any(e.get("lone") or e.get("proof") for e in inside):
+            return False
+        return not self.red_base(inside[0]["repo"], inside[0]["base"])
+
+    def follow(self, lead: Lead) -> None:
+        """Build the next group on top of the running one and check it at the same time."""
+        if lead.done.is_set():  # it ended already: the next round starts from the base branch
+            return
+        batch = self.next_batch(follow=lead)
+        if not batch:
+            return
+        self.log(f"Next group on top of {lead.url}: " + ", ".join(f"#{e['number']}" for e in batch))
+        self._ahead = lead
+        try:
+            self.group(batch)
+        except Exception as e:  # noqa: BLE001 - its entries go back; the group before it goes on
+            left = [b for b in batch if _state(self.root, b["url"]) == RUNNING]
+            self.retry(left, f"the merge queue hit an error ({e.__class__.__name__}: {str(e)[:120]})")
+        finally:
+            self._ahead = None
+
+    def _after_lead(self, lead: Lead) -> str | None:
+        """Right before the merge of a group on top of another: that one must have ended merged."""
+        if not lead.done.wait(LEAD_WAIT_SECS):
+            return f"the group {lead.url} before it did not end in time"
+        return lead.failed()
+
+    def _not_followed(self, url: str, base: str, inside: list[dict], o) -> list[dict]:
+        """A group on top of another that did not merge (the one before it failed, or it was red or held while
+        checked on top of it): its pull requests go back to the front without a try used and run again from the
+        base branch in a round of their own, where a red run is split and counted as always."""
+        good = self.check_members(inside, base)  # one that changed is settled there
+        if good:
+            why = f"its group {url} was checked on top of another group and not merged ({o.line[:160]}); waits again"
+            store.back_to_front(self.root, [e["url"] for e in good], why)
+            self.log(f"Back in line, no try used ({why}): " + ", ".join(e["url"] for e in good))
         return []
 
     def _proof(self, repo: str, base: str, url: str, e: dict) -> list[dict]:
@@ -631,6 +761,8 @@ class Runner:
     def _tidy(self) -> None:
         for g in store.groups(self.root):
             repo, branch, url = g["repo"], g["branch"], g.get("url")
+            if branch in self._live:  # its checks run now (a group with the next one on top of it)
+                continue
             if url and not g.get("closed"):
                 v = self.gh.pr(url)
                 if v is None:
@@ -661,6 +793,8 @@ class Runner:
         """Back to the front of the line after a pause; after MAX_TRIES counted tries, out with the reason.
         A waiting entry keeps its place and only gets the pause."""
         if count and self.gh.login() is None:  # GitHub does not answer at all: an outage uses up no tries
+            count = False
+        if self._ahead is not None:  # built on top of another group: not its own run yet, so no try is used
             count = False
         rows = {r["url"]: r for r in store.read(self.root) if r.get("state") in (RUNNING, WAITING)}
         back = []
@@ -706,6 +840,20 @@ class Runner:
             how = f"the helper could not be woken ({x.__class__.__name__})"
         with contextlib.suppress(CoreRefused, OSError, KeyError, ValueError):
             tickets.note_history(self.root, tid, BY, f"{e['url']} left the merge queue: {how}.")
+
+
+@dataclass
+class _Trouble:
+    """What the waiter thread says when the waiter itself broke: neither green nor red."""
+
+    url: str
+    error: Exception
+    ok: bool = False
+    status: str = ""
+
+    @property
+    def line(self) -> str:
+        return f"the wait for {self.url} broke ({self.error.__class__.__name__}: {str(self.error)[:120]})"
 
 
 def _names(jobs) -> str:
