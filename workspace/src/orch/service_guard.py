@@ -6,7 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from orch import home, pagelaunch, runs, runs_live, tickets
+from orch import addons, home, pagelaunch, runs, runs_live, tickets
 from orch.errors import Refused
 
 
@@ -32,7 +32,7 @@ def require_change(root: Path, by: str | None = None) -> None:
         return
     if isolated(root):
         return
-    if pagelaunch.remote_base(root, "dashboard") or any(
+    if any(pagelaunch.remote_base(root, a) for a in addons.active(root)) or any(
         runs.state(rec) == "alive" for rec in runs_live.records(root)
     ):
         raise Refused(
@@ -45,6 +45,6 @@ def command(root: Path, cmd: str, sub: str | None = None, by: str | None = None)
     if (
         cmd in ("start", "stop", "restart", "update")
         or (cmd == "addon" and sub in ("add", "remove"))
-        or (cmd == "dashboard" and sub == "stop")
+        or (sub == "stop" and cmd in addons.active(root))  # an add-on's own stop (orch dashboard stop)
     ):
         require_change(root, by)

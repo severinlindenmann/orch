@@ -153,6 +153,7 @@ def test_dashboard_checks_explicit_target(workspace, monkeypatch, capsys):
     live = workspace.parent / "live"
     (live / ".orch").mkdir(parents=True)
     busy(live, "remote")
+    monkeypatch.setattr(addons, "active", lambda root: ["dashboard"])  # remote sign-in needs the page on
     stopped = []
     monkeypatch.setattr(dashboard_cli.service, "stop", lambda root: stopped.append(root))
     assert dashboard_cli.main(["--dir", str(live), "stop"]) == 2
