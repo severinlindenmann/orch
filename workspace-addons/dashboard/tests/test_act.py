@@ -137,6 +137,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
+        ("session.new", {"kind": "ticket"}),
+        ("session.new", {"kind": "empty", "ticket": "t_abcdef"}),
+        ("session.new", {}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -307,6 +310,8 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["run", "start", "t_abcdef", "--session", "s-1", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
+        ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
         (
             {
                 "op": "pull.merge",

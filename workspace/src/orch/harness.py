@@ -292,6 +292,8 @@ def _general_lines(root: Path) -> list[str]:
     is left alone (the team owns it)."""
     import re
 
+    from orch import tickets
+
     out: list[str] = []
     try:
         d = root / ".orch" / "tickets"
@@ -305,9 +307,7 @@ def _general_lines(root: Path) -> list[str]:
                 continue
             if not isinstance(data, dict) or data.get("id") != stem:
                 continue
-            if (
-                data.get("general") is not True and data.get("manager") is not True
-            ):  # Manager: this computer's own
+            if not tickets.is_hidden(data):  # Chat, Manager, sessions without a ticket: this computer's own
                 continue
             if _tracked(root, f".orch/tickets/{f.name}"):
                 continue  # already committed by the team: ignoring it would change nothing
