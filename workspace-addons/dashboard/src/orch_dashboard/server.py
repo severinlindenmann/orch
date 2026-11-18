@@ -274,11 +274,29 @@ class Handler(BaseHTTPRequestHandler):
         diag.new_trace(self.headers.get("traceparent"))
         if self.path.startswith("/api/diag"):  # the page's own trail is not logged again as a request
             return
+        path = "/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200]
+        method = getattr(self, "command", "")
+        self._req = (method, path, time.monotonic())
+        diag.log("dashboard.request", "debug", method=method, path=path)
+
+    def _answer_log(self, code: int) -> None:
+        """The answer's status in the debug log (ORCH-386): every /api/act answer (an early refusal such as a
+        used sign-in link too, before any op runs) and every other refused or failed answer."""
+        req = getattr(self, "_req", None)
+        if not diag or req is None:
+            return
+        self._req = None
+        method, path, t0 = req
+        if code < 400 and not path.endswith("/api/act"):
+            return
         diag.log(
-            "dashboard.request",
-            "debug",
-            method=getattr(self, "command", ""),
-            path="/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200],
+            "dashboard.answer",
+            "info" if code >= 400 else "debug",
+            root=self.root,
+            method=method,
+            path=path,
+            status=int(code),
+            ms=int((time.monotonic() - t0) * 1000),
         )
 
     def log_message(self, *a):  # quiet
@@ -301,6 +319,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
+        self._answer_log(code)
         act = getattr(self, "_act", None)
         if act is not None:
             self._act = None
@@ -757,6 +776,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            from . import sessions
+
+            try:
+                n = int((parse_qs(query).get("lines") or [sessions.LINES])[0])
+            except ValueError:
+                n = sessions.LINES
+            state, age = self.server.state_cache.get()
+            body = sessions.answer(self.root, self.orch_bin, state, age, n)
+            return self._send(
+                200, json.dumps(body).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path == "/api/events":
             return self._events()
         if path == "/api/ref-file":
@@ -889,6 +922,22 @@ class Handler(BaseHTTPRequestHandler):
                     else "default-src 'none'; img-src 'self'; media-src 'self'; sandbox"
                 ),
             )
+        # a listed read-only add-on verb (the Sync card's status): the rights of /api/state, no page secret (ORCH-413)
+        if path == "/api/addon-read":
+            q = parse_qs(query)
+            try:
+                code, text, out = actions.addon_read(
+                    self.root, self.orch_bin, (q.get("addon") or [""])[0], (q.get("verb") or [""])[0]
+                )
+            except actions.BadRequest as e:
+                return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
+            except actions.Unavailable as e:
+                return self._send(503, str(e).encode(), "text/plain; charset=utf-8")
+            if code != 200:
+                return self._send(code, text.encode(), "text/plain; charset=utf-8")
+            return self._send(
+                200, json.dumps(out).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path.startswith("/api/addon/"):  # only names that are active here and have a tab
             name = path[len("/api/addon/") :]
             if not any(a["name"] == name and a["dashboard"] for a in load_addons(self.root, self.orch_bin)):
@@ -907,7 +956,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live|soft|live-layer|live-history|livebar)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])

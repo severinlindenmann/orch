@@ -271,8 +271,7 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
         missing = [p for p in pts if not p.lower().endswith(": shown")]
         if missing:  # a point that is not shown is a send-back, never an accept
             raise Refused(f"Not every point is shown ({missing[0]}): send it back or leave it.")
-        shown = f" ({len(pts)} of {len(pts)} points shown)" if pts else ""
-        after = tickets.accept_for_owner(root, tid, f"second look: {why}{shown}")
+        after = tickets.accept_for_owner(root, tid, why)
     elif word == "back":
         missing = [p for p in pts if not p.lower().endswith(": shown")]
         after = reviewer._send_back(root, tid, "; ".join([why, *missing])[:1500])

@@ -133,10 +133,16 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": "--all"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": 5}, "if_revision": 1}),
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
-        ("run.start", {"ticket": "t_abcdef", "agent": "x"}),
+        ("run.start", {"ticket": "t_abcdef", "agent": "../x"}),
+        ("run.start", {"ticket": "t_abcdef", "agent": "--all"}),
+        ("run.start", {"ticket": "t_abcdef", "agent": 5}),
+        ("run.start", {"ticket": "t_abcdef", "model": "opus"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
         ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
+        ("session.new", {"kind": "ticket"}),
+        ("session.new", {"kind": "empty", "ticket": "t_abcdef"}),
+        ("session.new", {}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -302,11 +308,17 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
+        (  # ORCH-362: the Start choice's fresh start on the tool the person picked
+            {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "agent": "codex"}},
+            ["run", "start", "t_abcdef", "--fresh", "--agent", "codex", *common],
+        ),
         (  # ORCH-363: Reopen in the History tab continues that earlier session
             {"op": "session.reopen", "args": {"ticket": "t_abcdef", "session": "s-1"}},
             ["run", "start", "t_abcdef", "--session", "s-1", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        ({"op": "session.new", "args": {"kind": "empty"}}, ["session", "new", "empty", *common]),
+        ({"op": "session.new", "args": {"kind": "terminal"}}, ["session", "new", "terminal", *common]),
         (
             {
                 "op": "pull.merge",
@@ -762,6 +774,7 @@ def test_settings_state_has_agents_and_every_addon(ws, act_orch):
             "can": "x",
             "status": "found 2.1",
             "chosen": True,
+            "models": None,  # an orch before ORCH-362 does not say whether the tool takes a model
         }
     ]
     assert [(a["name"], a["active"]) for a in s["addons"]] == [("alpha", True), ("beta", False)]
@@ -1586,6 +1599,27 @@ def test_attach_files_to_an_existing_ticket():
     with pytest.raises(actions.BadRequest):  # a program file is refused before orch is asked
         actions.attachments(
             "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "x.exe", "text": "x"}]}
+        )
+
+
+def test_a_voice_note_is_a_ticket_file_like_a_picture():
+    """ORCH-422: Send back and Add note bring a voice note recorded in the browser; the mirror of orch's list takes it."""
+    import base64
+
+    from orch import tickets
+
+    rec = b"\x1a\x45\xdf\xa3voice"
+    args = {
+        "ticket": "t_abcdef12",
+        "files": [{"name": "voice-note-0931.webm", "data": base64.b64encode(rec).decode()}],
+    }
+    assert actions.attachments("ticket.attach", args) == [("voice-note-0931.webm", rec)]
+    # the dashboard's early check names exactly what orch itself accepts
+    core = set(tickets.ATTACH_TEXT) | set(tickets.ATTACH_IMAGES) | set(tickets.ATTACH_AUDIO)
+    assert set(actions.ATTACH_EXT) == core
+    with pytest.raises(actions.BadRequest, match="voice recordings"):
+        actions.attachments(
+            "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "clip.mov", "text": "x"}]}
         )
 
 

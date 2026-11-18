@@ -29,7 +29,7 @@ def view(root):
         t["questions"] = [q for q in t["questions"] if q["id"] not in d["decided_ok"]]
         if d["open"] and d["open"]["row"]["kind"] == "factory:stop":
             stops.append((t, d["open"]["data"]["stage"]))
-    local = datetime.now().astimezone()
+    local = clock().astimezone()  # the same clock as the journal stamps, so "today" counts what it shows
     monday = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     journal = store.journal_read()
     shipped = {

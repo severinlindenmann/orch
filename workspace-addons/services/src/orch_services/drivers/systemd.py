@@ -172,7 +172,9 @@ class Systemd(Driver):
             return
         p = self.entry_path(spec)
         if p.exists():
-            self._run("stop", unit_name(spec))
+            self.stop(
+                spec
+            )  # refused when it does not stop: the unit file and the record stay, nothing runs unseen
             self._run("disable", unit_name(spec))
             p.unlink()
         self._run("daemon-reload")

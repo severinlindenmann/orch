@@ -147,6 +147,7 @@ def agents_rows(root: Path) -> list[dict]:
                 "can": adapters.describe(name, root) if status != "not found" else "",
                 "status": status,
                 "chosen": name == chosen,
+                "models": bool(a.get("model_args")),  # orch passes the ticket's model to this tool
             }
         )
     return rows
