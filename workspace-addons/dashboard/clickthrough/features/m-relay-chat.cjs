@@ -9,7 +9,7 @@ const path = require('node:path');
 module.exports = {
   name: 'Relay: message a workspace, write to a group, remove and add a member, share a file',
   covers: ['chat.send_ws', 'group.say', 'group.remove', 'group.add', 'group.share', 'page:chat'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson, python, workspace, standins, until }) {
+  async run({ page, open, reload, act, must, text, orch, orchAsPerson, python, workspace, standins, until, shot }) {
     const r = standins.relay;
     if (!fs.existsSync(path.join(workspace, '.orch', 'secrets', 'relay.json'))) {
       orchAsPerson('addon', 'add', 'relay', '--yes');
@@ -61,6 +61,7 @@ module.exports = {
     await open('#ticket/' + tid);
     const share = page.getByRole('button', { name: 'Share with group' }).first();
     await share.waitFor({ timeout: 20000 }).catch(async () => { throw new Error('no Share with group button on the ticket:\n' + (await text()).slice(0, 600)); });
+    await shot('share-with-group');
     await act('group.share', () => share.click());
     await page.getByText('Shared with the group.').first().waitFor({ timeout: 20000 });
     orchAsPerson('addon', 'remove', 'relay');   // off again

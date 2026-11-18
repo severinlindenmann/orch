@@ -14,7 +14,7 @@ const clickConfirm = async page => {
 module.exports = {
   name: 'Add-ons: start Focus, its switches, a Lessons button, uninstall refused',
   covers: ['addon.start', 'typing.set', 'focus_preview.set', 'addon.act', 'addon.uninstall'],
-  async run({ page, open, reload, act, must, text, orchAsPerson, addonOn, until }) {
+  async run({ page, open, reload, act, must, text, orchAsPerson, addonOn, until, shot }) {
     addonOn('focus');
     addonOn('lessons');
     orchAsPerson('lessons', 'add', 'Check the oven is off before you leave');
@@ -43,6 +43,7 @@ module.exports = {
       await sw.waitFor({ timeout: 20000 });
       must(await sw.getAttribute('aria-checked') !== before, `${op}: the switch is back to ${before} after a reload`);
     }
+    await shot('focus-switches');
 
     // a button of the Lessons page (the add-on's own action)
     await open('#addon/lessons');

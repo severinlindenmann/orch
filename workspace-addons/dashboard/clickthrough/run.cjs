@@ -5,6 +5,7 @@
 //   node workspace-addons/dashboard/clickthrough/run.cjs --only home,checks   only these files (features/<name>.cjs)
 //   node workspace-addons/dashboard/clickthrough/run.cjs --list           the features and who covers them, no browser
 //   node workspace-addons/dashboard/clickthrough/run.cjs --out DIR        keep a picture of each click-through's end
+//   node workspace-addons/dashboard/clickthrough/run.cjs --size 390x844   another window size (default 1280x900)
 //
 // Each click-through (features/*.cjs) does a thing, reloads the page, checks the result is still there, and fails on
 // any console error or uncaught exception. The server is the real dashboard with working actions (server.py): a click
@@ -25,7 +26,7 @@ const { spawn, execFileSync } = require('node:child_process');
 const catalogue = require('./catalogue.cjs');
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
-const SIZE = { width: 1280, height: 900 };
+let SIZE = { width: 1280, height: 900 };
 /** Add-ons of this checkout the demo home has installed (off until a click-through turns one on, see server.py):
  *  every orch the run starts sees the same ones. */
 const ADDONS = ['focus', 'lessons', 'pull-requests'];
@@ -45,6 +46,7 @@ function args(argv) {
     if (a === '--list') o.list = true;
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(s => s.replace(/\.cjs$/, '')));
     else if (a === '--out') o.out = path.resolve(argv[++i]);
+    else if (a === '--size') { const [w, h] = argv[++i].split('x').map(Number); SIZE = { width: w, height: h }; }
     else throw new Error(`unknown option ${a}`);
   }
   return o;
@@ -167,7 +169,7 @@ const PAGE_KIND = () => {
 };
 
 /** The helpers a click-through gets. */
-function tools(page, srv, rec) {
+function tools(page, srv, rec, shots = null) {
   const settle = async () => {
     await page.waitForFunction(() => document.querySelector('main') && !document.querySelector('main .sk-title'), null, { timeout: 20000 });
     await page.waitForTimeout(150);
@@ -256,6 +258,8 @@ function tools(page, srv, rec) {
         path.join(srv.dir, 'Pilatus'), name);
       return t.orchAsPerson('addon', 'add', name, '--project-only');
     },
+    /** with --out: keep a picture of the page now as <file>-<name>.png (a state worth showing in a review) */
+    async shot(name) { if (shots) await page.screenshot({ path: `${shots}-${name}.png` }); },
     /** fail with a plain message unless cond */
     must(cond, msg) { if (!cond) throw new Error(msg); },
     /** the visible text of the page's main area */
@@ -288,7 +292,7 @@ async function main() {
       const problems = [];
       const t0 = Date.now();
       try {
-        await c.run(tools(page, srv, rec));
+        await c.run(tools(page, srv, rec, o.out ? path.join(o.out, c.file.replace(/\.cjs$/, '')) : null));
       } catch (e) {
         problems.push(String(e.message).split('\n')[0]);
       }
