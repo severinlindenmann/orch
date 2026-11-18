@@ -87,8 +87,19 @@ def test_an_urgent_label_on_older_work_does_not_count(tmp_path, capsys):
     assert out["did"] == []
 
 
-def test_the_pace_counts_from_the_last_try(tmp_path, capsys):
+def test_a_blocked_try_does_not_move_the_pace(tmp_path, capsys):
     out = go(tmp_path, capsys, state={"last_cut_at": rk.now().isoformat()})
+    assert out["did"] == ["dispatch:ci.yml", "dispatch:e2e.yml"]
+    assert out["state"]["release"]["phase"] == "testing"
+
+
+def test_a_started_try_does_not_write_the_pace(tmp_path, capsys):
+    out = go(tmp_path, capsys)
+    assert "last_cut_at" not in out["state"]
+
+
+def test_the_pace_counts_from_the_last_merged_release(tmp_path, capsys):
+    out = go(tmp_path, capsys, last_release_at=rk.now().isoformat())
     assert out["did"] == []
 
 
