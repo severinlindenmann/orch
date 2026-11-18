@@ -4,10 +4,11 @@ description: See each pull request's checks and merge state (on the Pull request
 ---
 # orch merge queue
 
-When many pull requests are ready at once, merging them one by one makes each later one take the base branch in and
-run its checks again. The merge queue puts them in line instead: several go on one group branch, the checks run once,
-and all of them are merged together on green. A red group is split in halves and tried again, so the good ones still
-get merged. No AI call: a program does the waiting and merging.
+Every merge into develop goes through the merge queue: it checks pull requests on top of develop in a queue group
+(several together on one group branch), the checks run once, and all of them are merged together on green. One alone
+whose own checks are green is merged directly when develop changed none of its files; otherwise it runs as a group of
+one. A red group is split in halves and tried again, so the good ones still get merged. No
+merge by hand, no merge ahead of the queue. No AI call: a program does the waiting and merging.
 
 ## When to use
 - Your ticket's pull request is ready and the rules say to merge it on green.
@@ -26,11 +27,18 @@ request link shows `merged`, or a history line says why it left the queue (check
 requested, conflicts with the base branch, GitHub did not answer three times) and the ticket's helper is woken
 with that reason: fix it, push and add it again. The pull request must go into an allowed base branch (develop unless the workspace
 says otherwise; never main). Do not take the base branch in by hand to get it merged: a pull request that fell
-behind is checked once on top of the base branch by the queue.
+behind is checked once on top of the base branch by the queue. Never `gh pr merge` and never `orch ref wait --merge`
+into develop (it refuses while the add-on is on), also not for an urgent fix.
 
-Your pull request fixes a red develop (the base branch itself fails its checks): add `--first`, so it goes ahead
-of the line and alone. While develop is red the queue builds no groups, and a pull request that fails only in the
-checks develop fails waits for the fix instead of leaving the queue.
+Your pull request fixes a red develop (the base branch itself fails its checks): add `--first` (the repair lane),
+so it goes ahead of the line and alone, still checked in its own group on top of develop. While develop is red the
+queue builds no groups of several, and a pull request that fails only in the checks develop fails waits for the fix
+instead of leaving the queue.
+
+Your pull request changes CI (`.github/`) or the merge queue itself: add it the same way. It runs alone in its own
+queue group and counts only once that run is green. A change to a CI workflow file (`.github/workflows/`) is only
+checked by the queue: on green the queue makes the owner's Merge card on your ticket and the owner merges it. Do
+not make that card yourself first.
 
 Only when a person asks you to stay until it is merged: add `--wait` and run it bare, not through a pipe. Exit 0 =
 merged (alone or with its group); exit 1 = it left the queue, the last line says why.
@@ -65,8 +73,19 @@ When it is on, a cancelled or timed-out job of your ticket's pull request is run
 check fails for real you get a message with the failed job and the last lines of its log (once per commit). Fix the
 cause and push; do not rerun jobs by hand that orch already reran.
 
+**7. How a night went**
+
+    orch pull-requests queue audit [--hours 14]
+
+Merges into develop checked in a queue group, checked alone and merged by a person, or past the queue; and the times
+the queue stood still (30 minutes or more with a pull request in line and no merge) with the reasons.
+
 ## Rules
-- A pull request a person merges with a Merge card is never queued; a Merge card made while it waits takes it out.
+- Every merge into develop goes through the queue; it sets the mark `orch/merge-queue` on each group commit it
+  built and on each head it merges alone (a develop rule can require it).
+- A pull request a person merges with a Merge card is only checked by the queue (alone, then marked); a Merge
+  card made while it waits takes it out.
+- A pull request from a fork is never put on a branch of the repository: it leaves the queue, a person merges it.
 - A pull request that is closed, made a draft, moved to another base branch, gets a new commit or gets changes
   requested while it waits or runs is never merged with its group.
 - Only the GitHub login that added a pull request merges it (or the workspace's set login).
