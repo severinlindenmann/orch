@@ -17,7 +17,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, unquote_plus
 
-from . import actions, copychanges, diagapi, framepass, reffiles, selfupdate, sessionlist, ticketfiles
+from . import actids, actions, copychanges, diagapi, framepass, reffiles, selfupdate, sessionlist, ticketfiles
 from .data import (
     forget_static,
     load_addons,
@@ -63,6 +63,7 @@ SETTINGS_OPS = (
     "mobile.set",
     "mobile.hours",
 )
+WRITE_SLICE = 64 * 1024  # bytes per send of an answer (see _send)
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -350,7 +351,12 @@ class Handler(BaseHTTPRequestHandler):
             csp or "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'",
         )
         self.end_headers()
-        self.wfile.write(body)
+        # In slices: the socket timeout (10 s) bounds each send, not the whole body. One write of a big answer had
+        # to finish within 10 s and was cut on a slow link while the header kept the full length (ORCH-580:
+        # ERR_CONTENT_LENGTH_MISMATCH after the ticket was made).
+        view = memoryview(body)
+        for at in range(0, len(view), WRITE_SLICE):
+            self.wfile.write(view[at : at + WRITE_SLICE])
 
     def _host_ok(self, path: str = "/") -> bool:
         """DNS-rebinding guard. This computer's names always pass. Any other well-formed name (a proxy in front,
@@ -804,6 +810,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
             )
+        if path == "/api/act/status":
+            # did a click whose answer was lost go through? (ORCH-580) done / running / unknown, a few bytes
+            act_id = parse_qs(query).get("id", [""])[0]
+            if not actids.ID.fullmatch(act_id):
+                return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+            return self._send(
+                200, json.dumps(self.server.act_ids.status(act_id)).encode(), "application/json"
+            )
         if path == "/api/state":
             fresh = "fresh=1" in query.split(
                 "&"
@@ -1239,6 +1253,53 @@ class Handler(BaseHTTPRequestHandler):
         with _update.click():  # no automatic update starts during a person's click (or right after it)
             return self._act_run(body, op_name, session)
 
+    def _run_once(self, body, session: bool):
+        """actions.run_op, once per click id (X-Orch-Act-Id, ORCH-580): a repeat of an id that was done gets the
+        first result and runs nothing (a retry after a lost answer, a double click); a repeat of an id still
+        running waits for it. A request without an id runs as before."""
+        op, args = body.get("op"), body.get("args", {})
+        act_id = self.headers.get("X-Orch-Act-Id") or ""
+        if not actids.ID.fullmatch(act_id):
+            return actions.run_op(self.root, self.orch_bin, op, args, session=session)
+        mem = self.server.act_ids
+        while True:
+            entry, first = mem.claim(act_id, str(op))
+            if first:
+                break
+            if entry.op != str(op):
+                raise actions.BadRequest("That request could not be read.")
+            if not entry.done.wait(actids.WAIT):
+                raise actions.Unavailable("This is still being saved. Wait a moment, then look again.")
+            if entry.result is not None:
+                self._act_log(f"{entry.op} repeat answered with the first result")
+                return entry.result
+        result = None
+        try:
+            result = actions.run_op(self.root, self.orch_bin, op, args, session=session)
+        finally:
+            mem.finish(entry, result, act_reply(body, result[2]) if result and result[0] == 200 else None)
+        return result
+
+    def _send_state(self, state: dict, reply: dict):
+        """A click's answer: the state plus the click's own few keys. The page says which revision it holds
+        (X-Orch-Have): then only what changed since (ORCH-580: the whole state, about 6 MB on a big workspace, was
+        cut on a slow remote link). Gzipped when the browser takes it."""
+        have = (self.headers.get("X-Orch-Have") or "")[:200]
+        out = self.server.state_cache.answer(state, have) if have else state
+        if out is state:
+            out = {**state, **reply}
+        elif reply:  # a delta: the click's keys ride in it as set keys (the page keeps only the listed keys)
+            out["set"] = {**out["set"], **reply}
+            out["keys"] = [*out["keys"], *(k for k in reply if k not in out["keys"])]
+        body = json.dumps(out).encode()
+        hdr = None
+        if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            import gzip
+
+            body = gzip.compress(body, 3)
+            hdr = {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"}
+        self._send(200, body, "application/json", hdr)
+
     def _act_run(self, body, op_name, session: bool):
         self._act_log(f"{op_name} start")
         try:
@@ -1261,9 +1322,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
             if body.get("op") in RESTARTING_OPS and session:
                 _arm_resume(self.root, self.session)
-            code, text, extra = actions.run_op(
-                self.root, self.orch_bin, body.get("op"), body.get("args", {}), session=session
-            )
+            code, text, extra = self._run_once(body, session)
         except actions.NeedsPerson as e:
             msg = self._refused_text(str(e))
             return self._send(403, msg.encode(), "text/plain; charset=utf-8")
@@ -1279,6 +1338,7 @@ class Handler(BaseHTTPRequestHandler):
             tid = extra.get("id")  # the new ticket
         state = None
         renew = _renew_answer(extra) if str(body.get("op")).startswith("logins.") else None
+        reply = act_reply(body, extra)
         if renew is not None and renew["state"] not in RENEWED:
             state = dict(
                 self.server.state_cache.get()[0]
@@ -1304,82 +1364,7 @@ class Handler(BaseHTTPRequestHandler):
         if state is None:
             state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
             self.server.state_cache.invalidate(state)  # before the reply's own keys are added
-        if renew is not None:  # the Renew window's answer (ORCH-46): a few plain facts, never a code or a key
-            state["renew_result"] = renew
-        if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
-            state["chat_dm_result"] = extra
-        if body.get("op") == "workspace.propose" and isinstance(extra, dict):
-            # a proposal only, shown in the edit fields; the page saves it with workspace.set after the person's Save
-            tags = extra.get("tags") if isinstance(extra.get("tags"), list) else []
-            state["proposal"] = {
-                "name": str(extra.get("name") or "")[:60],
-                "description": str(extra.get("description") or "")[:280],
-                "tags": [str(t)[:24] for t in tags if isinstance(t, str)][:4],
-                "icon": str(extra["icon"])[:32] if isinstance(extra.get("icon"), str) else None,
-            }
-        if body.get("op") == "config.agent.test" and isinstance(
-            extra, dict
-        ):  # the answer of the try, plain words only
-            state["test"] = {
-                "name": str(extra.get("name"))[:40],
-                "ok": extra.get("ok") is True,
-                "reason": str(extra.get("reason") or "")[:300],
-            }
-        if (
-            body.get("op") == "addon.act"
-            and isinstance(extra, dict)
-            and isinstance(extra.get("changes"), list)
-        ):  # refresh
-            state["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
-        if body.get("op") == "addon.act" and isinstance(extra, dict):
-            # the add-on's own answer to this click (a Sync card's status, a check): shown as plain text only
-            answer = json.dumps(extra)
-            if len(answer) <= 32_768:
-                state["act_answer"] = {
-                    "addon": str((body.get("args") or {}).get("addon"))[:32],
-                    "answer": extra,
-                }
-        if body.get("op") == "run.send" and isinstance(extra, dict):
-            # what orch did with the person's message: delivered to the agent now, or queued for it (an id). The
-            # embedded Factory page says "Sent" only on one of these, never on a bare 200.
-            sid, dlv, st = extra.get("id"), extra.get("delivered"), extra.get("state")
-            state["send_result"] = {
-                "id": sid[:64] if isinstance(sid, str) and sid else None,
-                "delivered": dlv if type(dlv) is int and dlv > 0 else 0,
-                "state": st[:20] if isinstance(st, str) else None,
-            }
-        if body.get("op") == "ticket.new" and isinstance(extra, dict) and isinstance(extra.get("id"), str):
-            # the new ticket's id: the New ticket window opens it by id, never by guessing from the title
-            state["created"] = {"id": extra["id"][:40]}
-        steps = extra.get("steps") if body.get("op") == "ticket.new" and isinstance(extra, dict) else None
-        if isinstance(steps, dict):  # ORCH-185: the tickets of an epic made in the same request, by position
-            made, failed = steps.get("made"), steps.get("failed")
-            state["steps"] = {
-                "made": [
-                    {
-                        "index": m["index"],
-                        "id": str(m.get("id"))[:40],
-                        "attached": {
-                            "failed": [str(x)[:100] for x in (m.get("attached") or {}).get("failed", [])[:10]]
-                        },
-                    }
-                    for m in (made if isinstance(made, list) else [])[:50]
-                    if isinstance(m, dict) and type(m.get("index")) is int
-                ],
-                "failed": [
-                    {"index": f["index"], "message": str(f.get("message"))[:300]}
-                    for f in (failed if isinstance(failed, list) else [])[:50]
-                    if isinstance(f, dict) and type(f.get("index")) is int
-                ],
-            }
-        if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
-            att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
-            state["attached"] = {
-                "id": str(extra.get("id"))[:40],
-                "saved": [str(x)[:100] for x in att.get("saved", [])[:10]],
-                "failed": [str(x)[:100] for x in att.get("failed", [])[:10]],
-            }
-        self._send(200, json.dumps(state).encode(), "application/json")
+        self._send_state(state, reply)
 
 
 RENEWED = (
@@ -1399,6 +1384,87 @@ _RENEW_STATES = (
     "soon",
     "renew",
 )
+
+
+def act_reply(body: dict, extra) -> dict:
+    """The few keys a click's answer carries next to the state (the new ticket's id, the files kept with it, an
+    add-on's answer ...). Kept with the click's id too, so a lost answer can be asked for again (ORCH-580)."""
+    reply: dict = {}
+    renew = _renew_answer(extra) if str(body.get("op")).startswith("logins.") else None
+    if renew is not None:  # the Renew window's answer (ORCH-46): a few plain facts, never a code or a key
+        reply["renew_result"] = renew
+    if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
+        reply["chat_dm_result"] = extra
+    if body.get("op") == "workspace.propose" and isinstance(extra, dict):
+        # a proposal only, shown in the edit fields; the page saves it with workspace.set after the person's Save
+        tags = extra.get("tags") if isinstance(extra.get("tags"), list) else []
+        reply["proposal"] = {
+            "name": str(extra.get("name") or "")[:60],
+            "description": str(extra.get("description") or "")[:280],
+            "tags": [str(t)[:24] for t in tags if isinstance(t, str)][:4],
+            "icon": str(extra["icon"])[:32] if isinstance(extra.get("icon"), str) else None,
+        }
+    if body.get("op") == "config.agent.test" and isinstance(
+        extra, dict
+    ):  # the answer of the try, plain words only
+        reply["test"] = {
+            "name": str(extra.get("name"))[:40],
+            "ok": extra.get("ok") is True,
+            "reason": str(extra.get("reason") or "")[:300],
+        }
+    if (
+        body.get("op") == "addon.act" and isinstance(extra, dict) and isinstance(extra.get("changes"), list)
+    ):  # refresh
+        reply["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
+    if body.get("op") == "addon.act" and isinstance(extra, dict):
+        # the add-on's own answer to this click (a Sync card's status, a check): shown as plain text only
+        answer = json.dumps(extra)
+        if len(answer) <= 32_768:
+            reply["act_answer"] = {
+                "addon": str((body.get("args") or {}).get("addon"))[:32],
+                "answer": extra,
+            }
+    if body.get("op") == "run.send" and isinstance(extra, dict):
+        # what orch did with the person's message: delivered to the agent now, or queued for it (an id). The
+        # embedded Factory page says "Sent" only on one of these, never on a bare 200.
+        sid, dlv, st = extra.get("id"), extra.get("delivered"), extra.get("state")
+        reply["send_result"] = {
+            "id": sid[:64] if isinstance(sid, str) and sid else None,
+            "delivered": dlv if type(dlv) is int and dlv > 0 else 0,
+            "state": st[:20] if isinstance(st, str) else None,
+        }
+    if body.get("op") == "ticket.new" and isinstance(extra, dict) and isinstance(extra.get("id"), str):
+        # the new ticket's id: the New ticket window opens it by id, never by guessing from the title
+        reply["created"] = {"id": extra["id"][:40]}
+    steps = extra.get("steps") if body.get("op") == "ticket.new" and isinstance(extra, dict) else None
+    if isinstance(steps, dict):  # ORCH-185: the tickets of an epic made in the same request, by position
+        made, failed = steps.get("made"), steps.get("failed")
+        reply["steps"] = {
+            "made": [
+                {
+                    "index": m["index"],
+                    "id": str(m.get("id"))[:40],
+                    "attached": {
+                        "failed": [str(x)[:100] for x in (m.get("attached") or {}).get("failed", [])[:10]]
+                    },
+                }
+                for m in (made if isinstance(made, list) else [])[:50]
+                if isinstance(m, dict) and type(m.get("index")) is int
+            ],
+            "failed": [
+                {"index": f["index"], "message": str(f.get("message"))[:300]}
+                for f in (failed if isinstance(failed, list) else [])[:50]
+                if isinstance(f, dict) and type(f.get("index")) is int
+            ],
+        }
+    if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
+        att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
+        reply["attached"] = {
+            "id": str(extra.get("id"))[:40],
+            "saved": [str(x)[:100] for x in att.get("saved", [])[:10]],
+            "failed": [str(x)[:100] for x in att.get("failed", [])[:10]],
+        }
+    return reply
 
 
 def _renew_answer(extra) -> dict | None:
@@ -1473,6 +1539,7 @@ def make_server(
     srv.frame_passes = framepass.FramePasses()
     srv.revisions = Revisions(root)
     srv.state_cache = StateCache(root, orch_bin, srv.revisions)
+    srv.act_ids = actids.ActIds()
     srv.remote_server, srv.remote_error = None, None
     if remote is not None:
         try:
@@ -1483,6 +1550,7 @@ def make_server(
             other.page_port = srv.page_port
             other.frame_passes = srv.frame_passes
             other.revisions, other.state_cache = srv.revisions, srv.state_cache
+            other.act_ids = srv.act_ids
             srv.remote_server = other
     if orch_bin == actions.SELF:  # the real server: the automatic update looks once a minute (off by default)
         from . import update

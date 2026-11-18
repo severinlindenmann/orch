@@ -485,11 +485,12 @@ async function actRetry(op, args, applies) {
   if (!applies()) return first;
   return act(op, args());
 }
-window.orchAct = (op, args) => act(op, args);
+window.orchAct = (op, args, opts) => act(op, args, opts);
+window.orchActId = () => newActId();  // one id a form keeps for its retries (ORCH-580)
 // Turning an add-on on or off restarts the running services, this page's server too. When the answer is lost on
 // the way (the server restarted), read the state again once it is back: the add-on's switch says if it worked.
 async function addonSet(name, on, tries = 20, pause = 1500) {
-  const result = await act('addon.set', {name, on});
+  const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
   if (result.ok || result.status !== 0 || snapshot) return result;
   for (let i = 0; i < tries; i++) {
     await new Promise(done => setTimeout(done, pause));
@@ -513,7 +514,7 @@ async function addonUninstall(name, tries = 20, pause = 1500) {
     const off = await addonSet(name, false);
     if (!off.ok) return off;
   }
-  const result = await act('addon.uninstall', {name});
+  const result = await act('addon.uninstall', {name}, {check:false});
   if (result.ok || result.status !== 0 || snapshot) return result;
   for (let i = 0; i < tries; i++) {
     await new Promise(done => setTimeout(done, pause));
@@ -549,7 +550,7 @@ function busyOff(busy) {
   busy.control.removeAttribute('aria-busy');
   if (busy.was === null) busy.control.removeAttribute('aria-disabled'); else busy.control.setAttribute('aria-disabled', busy.was);
 }
-async function act(op, args) {
+async function act(op, args, opts = {}) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const busy = busyOn();
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
@@ -557,17 +558,34 @@ async function act(op, args) {
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
   writing++;
   mutation++;
+  const id = opts.id || newActId();
+  let sent = false;
   try {
     const body = JSON.stringify({op, args});
-    const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers:{'Content-Type':'application/json', 'X-Orch-Op':String(op)}, body});
-    if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
-    const next = await res.json();
+    const headers = {'Content-Type':'application/json', 'X-Orch-Op':String(op), 'X-Orch-Act-Id':id};
+    if (state?.rev) headers['X-Orch-Have'] = String(state.rev);
+    let next;
+    try {
+      const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers, body});
+      sent = true;
+      if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
+      next = await actAnswer(await res.json());
+    } catch (err) {
+      // No answer, or a cut one (ERR_CONTENT_LENGTH_MISMATCH): did the click go through?
+      if (opts.check === false) throw err;
+      const lost = await actLost(id);
+      if (!lost.ok) return lost;
+      succeeded = true;
+      if (before) startedAt.set(args.ticket, Date.now());
+      starting.delete(args.ticket);
+      return lost;
+    }
     succeeded = true;
     if (before) startedAt.set(args.ticket, Date.now());
     starting.delete(args.ticket);
     accept(next);
     return {ok:true, status:200, state:next};
-  } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.'}; }
+  } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.', sent}; }
   finally {
     busyOff(busy);
     writing--;
@@ -579,6 +597,49 @@ async function act(op, args) {
       render();
     }
   }
+}
+// Every click carries an id made here (ORCH-580). The server runs an id once: a repeat (a retry, a double click)
+// gets the first result. When the answer is lost on the way, the page asks the server whether the click went
+// through before it says anything, and says which it was.
+function newActId() {
+  const c = window.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  const b = new Uint8Array(16); c?.getRandomValues ? c.getRandomValues(b) : b.forEach((_, i) => { b[i] = Math.random() * 256; });
+  return [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+const LOST_NOT_DONE = 'The answer did not arrive, and orch checked: it was not done. Nothing was saved, try again.';
+const LOST_UNKNOWN = 'The answer did not arrive and orch could not be asked whether it went through. Look in the ticket list before you try again.';
+// The answer was lost: ask whether this id went through (a few tries, the server may still be at it).
+async function actLost(id, tries = 20, pause = 1500) {
+  for (let i = 0; i < tries; i++) {
+    if (i) await new Promise(done => setTimeout(done, pause));
+    let st = null;
+    try {
+      const res = await fetch('/api/act/status?id=' + encodeURIComponent(id), {cache:'no-store'});
+      if (res.ok) st = await res.json();
+    } catch (_) { /* not reachable yet */ }
+    if (!st || st.state === 'running') continue;
+    if (st.state !== 'done') return {ok:false, status:0, text:LOST_NOT_DONE, lost:'not-done'};
+    let full = null;
+    try {
+      const res = await fetch('/api/state', {cache:'no-store'});
+      if (res.ok) full = await res.json();
+    } catch (_) { /* the click went through all the same */ }
+    if (full && !full.delta) accept(full);
+    return {ok:true, status:200, state:{...(full && !full.delta ? full : state), ...(st.reply || {})}, recovered:true};
+  }
+  return {ok:false, status:0, text:LOST_UNKNOWN, lost:'unknown'};
+}
+// A click's answer may be only what changed since the revision this page holds (ORCH-580): merged here; one
+// that does not fit is replaced by the whole state, with the click's own keys kept.
+async function actAnswer(next) {
+  if (!next || !next.delta) return next;
+  const merged = window.DashHelpers.applyStateDelta(state, next);
+  if (merged) return merged;
+  const own = Object.fromEntries((next.keys || []).filter(k => next.set && k in next.set && !(state && k in state)).map(k => [k, next.set[k]]));
+  const res = await fetch('/api/state', {cache:'no-store'});
+  if (!res.ok) throw new Error('Could not load the workspace.');
+  return {...(await res.json()), ...own};
 }
 // A notice that comes while a fetch or a change is under way is kept, never dropped: that fetch may have read the
 // tickets before the change (load_state reads tickets first, run status last), so one more fetch follows it.

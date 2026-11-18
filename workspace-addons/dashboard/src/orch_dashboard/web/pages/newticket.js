@@ -330,7 +330,7 @@ function ticketForm(t) {
     window.orch.toast(run.ok ? 'Helper started' : 'The ticket was created, but the helper did not start: ' + run.text, run.ok ? 'ok' : 'error');
   };
   form.append(fields, error, reload, actions); d.append(form);
-  let created = null, creationUnresolved = false, epicMade = false, epicProblems = [], togetherDone = false;
+  let created = null, newActIdOnce = null, creationUnresolved = false, epicMade = false, epicProblems = [], togetherDone = false;
   // Cmd+Enter (Ctrl+Enter) saves from any field, like the Save button.
   form.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.defaultPrevented) { event.preventDefault(); form.requestSubmit(); } });
   form.addEventListener('submit', async event => {
@@ -385,7 +385,10 @@ function ticketForm(t) {
           error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
           submit.disabled = false; idle(); return;
         }
-        result = await act('ticket.new', args);  // one write, one history line
+        // One id for this ticket until it is made (ORCH-580): a Retry after a lost answer, or a second press, gets
+        // the ticket that was made instead of a second one.
+        newActIdOnce = newActIdOnce || window.orchActId?.();
+        result = await act('ticket.new', args, {id:newActIdOnce});  // one write, one history line
         if (result.ok) {
           if (result.state?.attached?.failed?.length) window.orch.toast('The ticket was created. Not saved: ' + result.state.attached.failed.join(', '), 'error');
           if (args.steps && result.state?.steps) {  // the tickets inside came with the same answer
@@ -411,7 +414,8 @@ function ticketForm(t) {
         for (const step of togetherDone ? [] : [...steps]) {
           const args = ticketStepArgs(step.input.value, step.files, created.id, values.owner);
           if (!args) continue;
-          const made = await act('ticket.new', args);
+          step.actId = step.actId || window.orchActId?.();  // the same id when the button is pressed again
+          const made = await act('ticket.new', args, {id:step.actId});
           if (made.ok) {
             if (made.state?.attached?.failed?.length) window.orch.toast('Ticket ' + (steps.indexOf(step) + 1) + ' was created. Not saved: ' + made.state.attached.failed.join(', '), 'error');
             step.remove.click();
