@@ -69,6 +69,23 @@ def refuse_ticket(ticket: dict, person: bool) -> None:
         raise Refused(TICKET_REFUSAL)
 
 
+HUMAN_REVIEW_REFUSAL = (
+    "Human review needed is on for this ticket: the Auto Reviewer and Away mode leave it for you."
+)
+
+
+def refuse_auto(ticket: dict) -> None:
+    """THE check for the Auto Reviewer and Away mode (ORCH-425/428) before they answer or accept anything on a
+    ticket: refused for a ticket that carries a draft, and for one with Human review needed on (on by
+    default; owner 18 Nov on ORCH-582). The plain Reviewer (`orch review tend`) and its second look do not ask
+    this: they keep accepting small bug fixes whatever the switch says, and only drafts stop them."""
+    from orch import tickets
+
+    refuse_ticket(ticket, person=False)
+    if tickets.human_review(ticket):
+        raise Refused(HUMAN_REVIEW_REFUSAL)
+
+
 def person_granted(root: Path, by: str | None) -> bool:
     """True only when the dashboard's signed-in page session handed THIS call a one-time person grant (the
     same proof as Renew/Replace): never for an agent actor, an agent tool's environment or a helper run,

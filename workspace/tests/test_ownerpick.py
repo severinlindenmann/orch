@@ -365,3 +365,25 @@ def test_an_unneeded_grant_is_used_up_and_never_reaches_a_child(proj, run, new_t
     assert code == 0, out + err
     assert renew.GRANT_ENV not in os.environ and renew.GRANT_ENV + "_FD" not in os.environ
     assert list(renew._grants(proj).iterdir()) == []  # the grant file is gone too
+
+
+def test_human_review_needed_blocks_only_the_auto_reviewer_and_away_mode(proj, run, new_ticket, facts):
+    """Owner 18 Nov (q2): the switch stays on by default; it blocks the Auto Reviewer and Away mode only."""
+    _on(run, "reviewer")
+    tid = _finished(proj, run, new_ticket, "Fix the stale run record")
+    t = tickets.load(proj, tid)
+    assert tickets.human_review(t)  # on by default
+    with pytest.raises(Refused, match="Human review needed is on"):
+        ownerpick.refuse_auto(t)
+    tickets.set_human_review(proj, tid, False, "human:tester")
+    ownerpick.refuse_auto(tickets.load(proj, tid))  # switch off, no draft: the Auto Reviewer may look
+    q = _draft(run, tid)
+    with pytest.raises(Refused, match="This ticket carries a draft"):
+        ownerpick.refuse_auto(tickets.load(proj, tid))  # a draft wins over the switch
+    # the plain Reviewer ignores the switch: a bug fix with Human review needed on is accepted
+    fix = _finished(proj, run, new_ticket, "Fix the second stale record")
+    assert tickets.human_review(tickets.load(proj, fix))
+    tickets.set_status(proj, fix, "review", "human:tester")
+    rows = {a["ticket"]: a["verdict"] for a in reviewer.run(proj)["actions"]}
+    assert rows[fix] == "accept" and tickets.load(proj, fix)["status"] == "done"
+    assert q["id"]
