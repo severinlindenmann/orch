@@ -52,10 +52,20 @@ function reviewApi() {
         ? '/view/' + encodeURIComponent(c.ticket) + '/' + f[1] + '/' + f[2].split('/').map(encodeURIComponent).join('/')
         : '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=' + f[1] + '&n=' + encodeURIComponent(f[2]);
     },
-    // "Add note" on the Comment sheet: the words go to the ticket's helper (queued if none is running); no verdict, the card stays.
-    note: async ({ticket, text}) => {
-      if (snapshot || typeof ticket !== 'string' || !String(text || '').trim()) return {ok:false, error:{code:'refused', message:'Write your note first.'}};
-      const r = await act('run.send', {ticket, text:String(text).trim()});
+    // The Comment sheet's box (ORCH-422): screenshots, files and voice notes land on the ticket before the answer or note.
+    get box() { return snapshot || typeof FEEDBACK_BOX === 'undefined' ? null : FEEDBACK_BOX; },
+    attach: async ({ticket, files}) => {
+      if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here.'}};
+      const r = await ticketAttachFiles(ticket, files);
+      return r.ok ? r : {ok:false, error:{code:'error', message:String(r.text || 'The files could not be added.').slice(0, 300)}};
+    },
+    // "Add note" on the Comment sheet: the words (and files) go to the ticket's helper (queued if none is running); no verdict, the card stays.
+    note: async ({ticket, text, files}) => {
+      const list = array(files);
+      if (snapshot || typeof ticket !== 'string' || (!String(text || '').trim() && !list.length)) return {ok:false, error:{code:'refused', message:'Write your note first.'}};
+      const kept = await ticketAttachFiles(ticket, list);
+      if (!kept.ok) return {ok:false, error:{code:'error', message:String(kept.text || 'The files could not be added.').slice(0, 300)}};
+      const r = await act('run.send', {ticket, text:ticketTalkText(text, kept.names)});
       return r.ok ? {ok:true} : {ok:false, error:{code:'error', message:String(r.text || 'Could not save the note.').slice(0, 300)}};
     },
     answer: async ({id, digest, verdict, picked, note}) => {
@@ -138,26 +148,28 @@ function reviewAcceptedRow(a) {
   host.append(head);
   if (open) open.onclick = () => {
     locks.add(key);
-    let busy = false;
-    const input = h('input', {type:'text', className:'input', placeholder:'What should change?', 'aria-label':'What should change?'});
-    const close = () => { if (busy) return; locks.delete(key); host.replaceChildren(head); open.focus(); };
-    const send = h('button', {type:'button', className:'btn primary sm', disabled:true}, 'Send back');
-    const cancel = h('button', {type:'button', className:'btn ghost icon', 'aria-label':'Cancel'}, iconEl('x'));
-    send.onclick = async () => {
-      if (!input.value.trim() || busy) return;
-      busy = true; send.disabled = input.disabled = cancel.disabled = true;
-      let ok = false;
-      try { ok = await reviewSendBack(a, input.value); } finally { busy = false; input.disabled = cancel.disabled = false; send.disabled = !input.value.trim(); }
-      if (ok) { locks.delete(key); render(); }
-    };
+    // The feedback box (ORCH-422): words, a pasted screenshot, a file or a voice note.
+    const box = h('div', {id:key + '-box'});
+    let comp = null, busy = false;
+    const close = () => { if (busy) return; comp?.destroy?.(); locks.delete(key); host.replaceChildren(head); open.focus(); };
+    const cancel = h('button', {type:'button', className:'btn ghost sm'}, 'Cancel');
     cancel.onclick = close;
-    input.oninput = () => { send.disabled = busy || !input.value.trim(); };
-    input.onkeydown = e => {
-      if (e.key === 'Escape') { e.preventDefault(); close(); }
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send.click(); }
-    };
-    host.replaceChildren(head, h('div', {className:'ticket-ask-line'}, input, send, cancel));
-    input.focus();
+    host.replaceChildren(head, box, h('div', {className:'row'}, cancel));
+    if (!window.UI?.composer || typeof FEEDBACK_BOX === 'undefined') return;
+    comp = window.UI.composer(box, {...FEEDBACK_BOX, label:'What should change?', placeholder:'What should change?', sendLabel:'Send back', interrupt:false, hint:'',
+      emptyError:'Write what should change, or add a file or a voice note.', dropTarget:host, dropLabel:'Drop to send back with this', sendingText:'Sending…',
+      onSend:async message => {
+        busy = true;
+        try {
+          const kept = await ticketAttachFiles(a.ticket, message.files);
+          if (!kept.ok) return kept;
+          const ok = await reviewSendBack(a, ticketTalkText(message.text, kept.names));
+          if (ok) { busy = false; locks.delete(key); render(); return {ok:true, text:''}; }
+          return {ok:false, dropFiles:kept.names.length > 0, text:'It was not sent back. Try again.'};
+        } finally { busy = false; }
+      }});
+    box.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
+    comp.field.focus();
   };
   return host;
 }

@@ -102,27 +102,54 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   c.snapshot = true;
   assert.equal(nodes(c.ticketBringBackRow({id:'t_abc123', bring_back:b})).filter(n => n.tag === 'button').length, 0);
 });
-test('Send back on the ticket page opens a real text box: label above, no repeated placeholder, Ctrl+Enter sends (ORCH-183)', async () => {
-  const sent = [];
-  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), value:'', append(...kids) { this.children.push(...kids); }, replaceChildren(...kids) { this.children = kids; }, focus() {}, click() { this.onclick?.(); }});
-  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), render() {}, moveTicket:() => Promise.resolve(), ticketOf:() => ({revision:1}), act:async (op, args) => { sent.push(args.text); return {ok:true}; }});
+test('Send back on the ticket page opens the feedback box: words, screenshots, files and a voice note (ORCH-183, ORCH-422)', async () => {
+  const acts = [];
+  let opts = null;
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }, replaceChildren(...kids) { this.children = kids; }, addEventListener() {}, focus() {}, click() { this.onclick?.(); }});
+  const composer = (box, o) => { opts = o; return {field:{focus() {}}, destroy() {}}; };
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), render() {}, moveTicket:() => Promise.resolve(), ticketOf:() => ({revision:1}),
+    act:async (op, args) => { acts.push([op, args]); return op === 'ticket.attach' ? {ok:true, state:{attached:{saved:['shot (2).png', 'voice-note-0931.webm'], failed:[]}}} : {ok:true}; }});
+  c.window.UI.composer = composer;
   const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
   const editor = c.ticketChangesEditor({id:'t_abc123', status:'review'});
   nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back')).onclick();
-  const box = nodes(editor).find(n => n.tag === 'textarea'), label = nodes(editor).find(n => n.tag === 'label');
-  assert.ok(box, 'a text box with room for a few lines');
-  assert.equal(box.attrs.rows, 3);
-  assert.equal(box.attrs.placeholder, undefined, 'the label is not repeated inside the box');
-  assert.equal(label.attrs.for, box.attrs.id, 'the label names the box');
-  assert.ok(label.children.includes('What should change?'));
-  const send = nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back') && n.attrs.className.includes('primary'));
-  box.value = 'Use the new logo'; box.oninput();
-  const key = (k, mods = {}) => box.onkeydown({key:k, preventDefault() {}, ...mods});
-  key('Enter');
-  assert.deepEqual(sent, [], 'Enter makes a new line');
-  key('Enter', {ctrlKey:true}); await new Promise(r => setTimeout(r, 0));
-  assert.deepEqual(sent, ['Use the new logo']);
-  assert.ok(send);
+  assert.ok(opts, 'the shared feedback box opens');
+  assert.equal(opts.sendLabel, 'Send back');
+  assert.equal(opts.voice, true, 'a Record button');
+  for (const kind of ['png', 'webm', 'm4a', 'ogg', 'md']) assert.ok(opts.accept.includes(kind), kind);
+  assert.equal(opts.maxBytes, 25 * 1024 * 1024, 'the same limit as every ticket file');
+  assert.ok(nodes(editor).some(n => n.tag === 'p' && n.children.includes('What should change?')));
+  // words only: one ticket.changes, nothing attached
+  const plain = v => JSON.parse(JSON.stringify(v));
+  assert.deepEqual(plain(await opts.onSend({text:'Use the new logo', files:[]})), {ok:true, text:''});
+  assert.deepEqual(plain(acts), [['ticket.changes', {ticket:'t_abc123', text:'Use the new logo'}]]);
+  // a screenshot and a voice note without words: on the ticket first, then sent back naming orch's own file names
+  acts.length = 0;
+  await opts.onSend({text:'', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}, {name:'voice-note-0931.webm', url:'data:audio/webm;base64,GkXf'}]});
+  assert.equal(acts[0][0], 'ticket.attach');
+  assert.deepEqual(plain(acts[0][1].files), [{name:'shot.png', data:'iVBO'}, {name:'voice-note-0931.webm', data:'GkXf'}]);
+  assert.equal(acts[1][0], 'ticket.changes');
+  assert.match(acts[1][1].text, /I added 2 files to this ticket: shot \(2\)\.png, voice-note-0931\.webm\./);
+  assert.match(acts[1][1].text, /voice note came without written words/);
+  // a voice note with its words: no "without words" line
+  acts.length = 0;
+  await opts.onSend({text:'Voice note: make the button bigger', files:[{name:'voice-note-0931.webm', url:'data:audio/webm;base64,GkXf'}]});
+  assert.doesNotMatch(acts[1][1].text, /without written words/);
+  assert.match(acts[1][1].text, /^Voice note: make the button bigger/);
+});
+test('A refused file keeps the box open and nothing is sent back (ORCH-422)', async () => {
+  const acts = [];
+  let opts = null;
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }, replaceChildren(...kids) { this.children = kids; }, addEventListener() {}, focus() {}, click() { this.onclick?.(); }});
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), render() {}, moveTicket:() => Promise.resolve(), ticketOf:() => ({revision:1}),
+    act:async (op, args) => { acts.push(op); return {ok:false, status:400, text:'x.pdf: only text files, pictures and voice recordings can be added.'}; }});
+  c.window.UI.composer = (box, o) => { opts = o; return {field:{focus() {}}, destroy() {}}; };
+  const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
+  const editor = c.ticketChangesEditor({id:'t_abc123', status:'review'});
+  nodes(editor).find(n => n.tag === 'button' && n.children.includes('Send back')).onclick();
+  const r = await opts.onSend({text:'see file', files:[{name:'x.pdf', url:'data:application/pdf;base64,JVBE'}]});
+  assert.equal(r.ok, false);
+  assert.deepEqual(acts, ['ticket.attach'], 'not sent back when the files did not land');
 });
 test('Accept shows the reviewed tip and sends the full tip with the Done (B13g)', () => {
   const moves = [];

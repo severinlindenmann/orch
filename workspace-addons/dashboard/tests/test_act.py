@@ -1602,6 +1602,27 @@ def test_attach_files_to_an_existing_ticket():
         )
 
 
+def test_a_voice_note_is_a_ticket_file_like_a_picture():
+    """ORCH-422: Send back and Add note bring a voice note recorded in the browser; the mirror of orch's list takes it."""
+    import base64
+
+    from orch import tickets
+
+    rec = b"\x1a\x45\xdf\xa3voice"
+    args = {
+        "ticket": "t_abcdef12",
+        "files": [{"name": "voice-note-0931.webm", "data": base64.b64encode(rec).decode()}],
+    }
+    assert actions.attachments("ticket.attach", args) == [("voice-note-0931.webm", rec)]
+    # the dashboard's early check names exactly what orch itself accepts
+    core = set(tickets.ATTACH_TEXT) | set(tickets.ATTACH_IMAGES) | set(tickets.ATTACH_AUDIO)
+    assert set(actions.ATTACH_EXT) == core
+    with pytest.raises(actions.BadRequest, match="voice recordings"):
+        actions.attachments(
+            "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "clip.mov", "text": "x"}]}
+        )
+
+
 # --- Review page: review.answer ----------------------------------------------------------------------------
 D64 = "a" * 64
 

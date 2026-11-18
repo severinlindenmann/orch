@@ -38,7 +38,7 @@ except ImportError:  # standalone use without orch: nothing runs
 MAX_TEXT = 2000
 LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
 MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
-# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
+# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_AUDIO/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
 ATTACH_EXT = frozenset(
     {
         "txt",
@@ -56,6 +56,11 @@ ATTACH_EXT = frozenset(
         "jpeg",
         "gif",
         "webp",
+        "webm",
+        "ogg",
+        "m4a",
+        "mp3",
+        "wav",
     }
 )
 ATTACH_MAX = 25 * 1024 * 1024
@@ -348,7 +353,9 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
             raise BadRequest("That file could not be read.")
         ext = f["name"].rsplit(".", 1)[-1].lower() if "." in f["name"] else ""
         if ext not in ATTACH_EXT:
-            raise BadRequest(f"{f['name'][:60]}: only text files and pictures can be added.")
+            raise BadRequest(
+                f"{f['name'][:60]}: only text files, pictures and voice recordings can be added."
+            )
         if len(raw) > ATTACH_MAX:
             raise BadRequest(f"{f['name'][:60]} is over 25 MB. Choose a smaller file.")
         out.append((f["name"], raw))
