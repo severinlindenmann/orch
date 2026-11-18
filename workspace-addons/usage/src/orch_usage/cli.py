@@ -1,4 +1,4 @@
-"""orch usage list|history|limit|period|order|on|off|end|switching|act|run|start|stop|status
+"""orch usage list|needs|history|limit|period|order|on|off|end|switching|act|run|start|stop|status
 (store: store.py; readers: readers/; early switching: switching.py; background process: service.py)."""
 
 from __future__ import annotations
@@ -286,6 +286,13 @@ def run(args) -> int:
 
     if cmd in ("run", "start", "stop", "status", "switching"):
         return _loop_cmd(args, root)
+    if cmd == "needs":
+        from . import switching
+
+        rows = switching.needs_rows(root)
+        return _emit(
+            args, rows, "\n".join(f"{r['title']}: {r['text']}" for r in rows) or "Nothing needs you here."
+        )
 
     who = _actor(args.by)
     end = parse_time(args.end) if getattr(args, "end", None) else None
@@ -435,6 +442,10 @@ def _look_text(r: dict) -> str:
         "would switch": f"Would switch from {r.get('active')} to {r.get('target')} (switching is off).",
         "switch failed": f"Could not switch to {r.get('target')}. It is tried again in 10 minutes.",
         "waiting to try again": f"Waiting to try {r.get('target')} again.",
+        "held": (
+            f"Staying on {r.get('active')}: another program keeps switching back to it. "
+            "Which rule should win? See orch usage needs."
+        ),
     }.get(r["did"], r["did"])
     if r.get("all_at_limit"):
         text += " Warning: every account is at or near its limit."
@@ -452,6 +463,7 @@ def main(argv=None) -> int:
         return s
 
     p("list")
+    p("needs")
     s = p("history")
     s.add_argument("--account")
     s = p("limit")

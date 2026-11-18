@@ -51,6 +51,11 @@ limits and would not reach one within 10 minutes at the current pace, and moves 
 switch it would make while switching is off, and a warning when every account is at or near its limit land in the
 history. Switching is off until the person turns it on. Without the account switcher Usage shows and warns only.
 
+When another program changes the account in use, Usage writes that in the history and switches away once more. When
+it is switched back again, Usage stops and asks the person once which rule should win (`orch usage needs`, also on
+Home). Their answer is `switching on` (Usage's limits win) or `switching off` (the other program wins); never answer
+it for them.
+
 An account is named by its label from `orch usage list` (or the start of it). Every command takes `--json`.
 
 ## Rules
