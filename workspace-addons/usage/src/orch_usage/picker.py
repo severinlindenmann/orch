@@ -16,13 +16,17 @@ The share (what the owner sets, ORCH-657; every field may be missing):
      "credit_kinds": ["reviews"],                     # kinds of work that go to an API key first
      "one_in": {"tool": "<a helper tool's registry name>", "every": 4},
                                                       # one in N code starts goes to that tool first
-     "ahead_dollars_day": 10}                         # subscriptions ahead of the week line: up to N dollars a day
+     "ahead_dollars_day": 10,                         # subscriptions ahead of the week line: up to N dollars a day
                                                       #   of new starts go to API keys instead
+     "ahead_to": "api|tool|both", "ahead_tool": "<a helper tool's registry name>"}
+                                                      # where those go: API keys, that tool (no dollar cap), or API
+                                                      #   keys then that tool (default: API keys and helper tools)
+The share the owner keeps (share.json, ORCH-657) has its own words; `sources.picker_share` turns it into this.
 
 A source (one per account, built by the caller from accounts.json and the readers; labels and numbers only):
     {"id", "label", "tool": "<helper tool's registry name>", "tool_label": "<its name for people>", "type": "subscription|api-key|helper-tool", "on": bool,
      "at_limit": bool, "resets": "<UTC time it has room again>" | None,
-     "week_used": percent (subscription) | None,
+     "week_used": percent (subscription) | None, "week_start": "<UTC start of its own week>" | None,
      "left": dollars left | None (unknown), "left_at": "<UTC time that number was read>" | None,
      "day_limit": dollars a day | None, "spent_today": dollars | None (a reader may lag: Usage counts the larger of
      it and the finished starts it knows of),
@@ -214,8 +218,10 @@ def _code_starts(starts: dict, day: str) -> int:
     )
 
 
-def week_line(week: dict | None, at: datetime) -> float | None:
-    """Percent of the week a subscription may have used by `at` (straight line between the owner's marks)."""
+def week_line(week: dict | None, at: datetime, start: str | None = None) -> float | None:
+    """Percent of the week a subscription may have used by `at` (straight line between the owner's marks).
+    Without `start` the week is Monday to Sunday (UTC) and "wed" is Wednesday; with `start` (the subscription's own
+    week start, its reset minus 7 days) "wed" is the end of day 3 of that week."""
     marks = []
     for k, v in (week or {}).items():
         if k in DAYS and isinstance(v, (int, float)) and 0 <= v <= 100:
@@ -224,6 +230,11 @@ def week_line(week: dict | None, at: datetime) -> float | None:
         return None
     t = at.astimezone(UTC)
     hours = t.weekday() * 24 + t.hour + t.minute / 60
+    if start:
+        try:
+            hours = min(max((t - store.to_time(start)).total_seconds() / 3600, 0.0), 168.0)
+        except ValueError:
+            pass
     points = [(0.0, 0.0), *sorted(marks), (168.0, 100.0)]
     for (h0, v0), (h1, v1) in itertools.pairwise(points):
         if h0 <= hours <= h1:
@@ -307,8 +318,24 @@ def _choose(request: dict, share: dict, sources: list[dict], starts: dict, at: d
     ahead = False
     one_in = share.get("one_in") if isinstance(share.get("one_in"), dict) else {}
     n, tool = one_in.get("every"), one_in.get("tool")
+    lines = {}
+    for s in subs:
+        if s.get("week_used") is not None:
+            ln = week_line(share.get("week"), at, s.get("week_start"))
+            if ln is not None:
+                lines[s["id"]] = ln
+    # a subscription ahead of its week line goes after the ones on pace: the owner wants it saved
+    behind = [s for s in subs if s["id"] in lines and float(s["week_used"]) > lines[s["id"]]]
+    on_pace = [s for s in subs if s.get("on", True) and s not in behind]
+    if behind and on_pace:  # only among the subscriptions: they move after the last one on pace
+        rest_ = [s for s in ordered if s not in behind]
+        at_ = rest_.index(on_pace[-1]) + 1
+        ordered = rest_[:at_] + behind + rest_[at_:]
+    else:
+        behind = []
+    keys = [s for s in money if s.get("type") == "api-key"]
     if kind in (share.get("credit_kinds") or []):
-        first = money
+        first = keys  # API credit first; a helper tool only as a fallback
         reason = f"{KIND_WORDS.get(kind, kind)} goes to API credit"
     elif (
         kind == "code" and tool and isinstance(n, int) and n > 0 and (_code_starts(starts, day) + 1) % n == 0
@@ -318,23 +345,23 @@ def _choose(request: dict, share: dict, sources: list[dict], starts: dict, at: d
         name = next((s.get("tool_label") for s in same if s.get("tool_label")), tool)
         reason = f"one in {n} code starts goes to {name}"
     else:
-        line = week_line(share.get("week"), at)
         cap = share.get("ahead_dollars_day")
-        on_subs = [s for s in subs if s.get("on", True) and s.get("week_used") is not None]
-        if (
-            line is not None
-            and on_subs
-            and cap
-            and all(float(s["week_used"]) > line for s in on_subs)
-            and _ahead_used(starts, day) + need <= float(cap)
-        ):
-            first = money
+        to, ahead_tool = share.get("ahead_to"), share.get("ahead_tool")
+        on_subs = [s for s in subs if s.get("on", True) and s["id"] in lines]
+        same = sorted(
+            [s for s in ordered if ahead_tool and s.get("tool") == ahead_tool],
+            key=lambda s: s.get("type") != "subscription",
+        )  # flat price first, then a key
+        targets = {"api": keys, "tool": same, "both": keys + [s for s in same if s not in keys]}.get(to, money)
+        room = to == "tool" or (cap and _ahead_used(starts, day) + need <= float(cap))
+        if on_subs and targets and room and all(float(s["week_used"]) > lines[s["id"]] for s in on_subs):
+            first = targets
             ahead = True
-            used = min(float(s["week_used"]) for s in on_subs)
-            reason = (
-                f"subscriptions are ahead of the week ({used:g}% used, {line:g}% planned by now), "
-                f"{_fmt(_ahead_used(starts, day))} of {_fmt(float(cap))} for that used today"
-            )
+            least = min(on_subs, key=lambda s: float(s["week_used"]) - lines[s["id"]])
+            used, line = float(least["week_used"]), lines[least["id"]]
+            reason = f"subscriptions are ahead of the week ({used:g}% used, {line:g}% planned by now)"
+            if to != "tool":
+                reason += f", {_fmt(_ahead_used(starts, day))} of {_fmt(float(cap))} for that used today"
     rest = [s for s in ordered if s not in first]
     skipped = []
     day_limited = False
@@ -345,6 +372,12 @@ def _choose(request: dict, share: dict, sources: list[dict], starts: dict, at: d
             day_limited = day_limited or why.startswith("at its day limit")
             continue
         chosen_reason = reason if s in first else ("first with room" if skipped else "first in the order")
+        if s not in first and s.get("type") == "subscription" and behind and s not in behind:
+            chosen_reason += "; " + ", ".join(
+                f"{b.get('label') or b['id']} is ahead of its week ({float(b['week_used']):g}% used, "
+                f"{lines[b['id']]:g}% planned by now)"
+                for b in behind
+            )
         text = f"runs on {s.get('label') or s['id']}: {chosen_reason}"
         if s.get("type") in MONEY_TYPES:
             lim = s.get("day_limit")
