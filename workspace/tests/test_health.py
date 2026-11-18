@@ -173,6 +173,7 @@ def test_overview_names_the_tickets_that_stop_and_leaks_nothing(proj, run, new_t
     assert [t["id"] for t in r["stops"]] == [tid] and other not in json.dumps(rows)
     assert r["stops"][0]["title"] == "Plan the newsletter"
     assert set(r) == {
+        "checked_at",
         "name",
         "label",
         "kind",
@@ -322,7 +323,7 @@ def test_soon_checks_again_only_when_stale_and_not_too_often(proj, tools, spawne
     assert health.soon(proj, now=t0) is True  # never checked
     assert health.soon(proj, now=t0 + 5) is False  # one background check at a time
     argv, kw = spawned[0]
-    assert argv[-2:] == ["logins", "--json"] and kw["env"]["ORCH_ROOT"] == str(proj)
+    assert argv[-3:] == ["logins", "--json", "--due-only"] and kw["env"]["ORCH_ROOT"] == str(proj)
     assert kw["stdout"] == subprocess.DEVNULL and kw["stdin"] == subprocess.DEVNULL
     health.check(proj, NOW)  # the background check wrote its result
     later = t0 + health.ASK_EVERY + 1
