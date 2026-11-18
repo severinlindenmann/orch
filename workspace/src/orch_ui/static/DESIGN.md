@@ -307,6 +307,23 @@ At its right end **New** opens a `.live-pop` of four `.live-opt` choices for a s
 Chat helper, Plain terminal, Manager), each a `.live-opt-t`: the name, then what it does as `.meta`; one already open
 says "Already open: go to it". The same four are buttons at the top of Focus. A new one is pinned (ORCH-364).
 
+### Live wall (ORCH-360)
+`.wall` is the new Focus page in Preview (dashboard `pages/livewall.js`): one summary line ("3 need you · 4 working ·
+9 in line · 8 idle", then "24 sessions"), a filter, then bands that fold (`.wall-band`, `.wall-bt` with
+`aria-expanded`): Pinned, Needs you and working, In line, Idle and no session. Needs you and working are tiles
+(`.wall-tile`); a needs-you tile is orange (`data-s=needs-you`) and comes first, its sentence is the question and it
+has no peek. A working tile shows a peek of its last three lines (`.wall-peek`). In line and idle are one line each
+(`.wall-line`). From 12 sessions the bands carry `data-many` and a long list scrolls inside itself; at 1100 px and wider
+the bands sit side by side. A tile opens its session in the layer; nothing is answered on the wall itself.
+
+### Pin and rename (ORCH-361)
+Every wall tile and line has a pin button (`btn icon sm ghost`, the `pinned` icon, `aria-pressed`); a pinned session
+moves to the Pinned band, gets a chip in the bar and comes first in the layer. A session without a ticket starts
+pinned. The selected pane's title is a button ("Click to rename"): it turns into `.live-ren`, one `.input` (60
+characters at most) and Save name; Enter keeps it, Esc leaves it. The own name shows on the tile, the pane and the chip
+(a chip shows the own name, else the ticket key); an empty name goes back to the title. Pins and names are kept by orch
+for the workspace, so every browser shows the same.
+
 ## Loading, errors and performance
 
 The brief asks for shell + skeleton within 100 ms while the numeric checklist says not to show indicators for sub-second work. Reconcile by expected latency (BP-05, BP-55–67):

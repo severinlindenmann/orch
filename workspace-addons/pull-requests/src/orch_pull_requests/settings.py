@@ -10,6 +10,10 @@
   own code in the orch repository.
 - `max_group`: how many pull requests go into one queue group at most. Default 5, from 1 to 20; any other value
   means the default. Read at the start of every round, so a change counts without restarting the runner.
+- `merge_alone`: true (default) = a pull request waiting alone whose own checks are green and whose files the
+  base did not change is merged on its own checks, with no second run. false = it is checked in a queue group of
+  its own on top of the base first, like every group: for a repository whose pull requests run only a light set of
+  checks of their own and the full set runs on queue groups (orch development, ORCH-545).
 """
 
 from __future__ import annotations
@@ -59,6 +63,11 @@ def alone_paths(root: Path) -> list[str]:
     if not isinstance(got, list) or not all(isinstance(x, str) for x in got):
         return list(DEFAULT_ALONE)
     return [x.strip().lstrip("/") for x in got if x.strip()]
+
+
+def merge_alone(root: Path) -> bool:
+    got = _table(root).get("merge_alone")
+    return got if isinstance(got, bool) else True
 
 
 def max_group(root: Path) -> int:
