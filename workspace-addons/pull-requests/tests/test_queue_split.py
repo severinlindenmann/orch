@@ -78,6 +78,7 @@ def test_a_green_group_of_ten_merges_all_ten_after_one_run(ws):
     r.run()
     assert len(calls) == 1 and gh.groups[calls[0]] == TEN  # one group, one run of the checks
     assert gh.direct == [] and len(git.pushed) == 1  # no member merged on its own light checks
+    assert git.pushed[0].startswith("orch-queue/develop-")  # built on top of develop
     assert states(ws) == {n: "merged" for n in TEN}
 
 
