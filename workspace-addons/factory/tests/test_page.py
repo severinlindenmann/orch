@@ -1196,3 +1196,11 @@ def test_budget_health_is_measured_when_the_page_reads_it(ws, run, srv):
     code, home, _ = get(srv, "/api/home")
     by = {o["id"]: o for o in home["orders"]}
     assert code == 200 and by[order]["budget"]["used"] == 12
+
+
+def test_proposal_names_tools_and_putting_live_in_plain_words(srv):
+    """Report r-1118-0907: the proposal said "Manager · claude" and "What Ship does"."""
+    js = get(srv, "/web/factory.js")[1].decode()
+    assert "What Ship does" not in js and "node('h3','What putting it live does')" in js
+    assert "roleName(c.role) + ' · ' + toolName(c.agent)" in js
+    assert "({claude: 'Claude', codex: 'Codex', gemini: 'Gemini'})[agent] || capital(text(agent))" in js

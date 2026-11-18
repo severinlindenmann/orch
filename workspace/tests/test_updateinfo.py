@@ -51,6 +51,21 @@ def test_release_titles_follow_the_pull_requests_when_there_is_room():
     assert updateinfo.changes_from(msgs) == ["Sync keeps its history", "Helpers start again"]
 
 
+def test_changes_have_no_issue_or_ticket_numbers():
+    """Report r-1118-0907: Home listed "#1393, #1381, #1364" as a change."""
+    msgs = [
+        "Merge pull request #9 from u/a\n\n#1393, #1381, #1364",
+        "Merge pull request #8 from u/b\n\nfix(factory): Budget health is right again (ORCH-411)",
+        "Merge pull request #7 from u/c\n\nHelpers say when a test is broken, closes #1290",
+        "Merge pull request #6 from u/d\n\nFiles stay utf-8 on release-34",
+    ]
+    assert updateinfo.changes_from(msgs) == [
+        "Budget health is right again",
+        "Helpers say when a test is broken",
+        "Files stay utf-8 on release-34",
+    ]
+
+
 def test_changes_text_is_printable_only():
     lines = updateinfo.changes_from(["Merge pull request #1 from u/b\n\nHello\x1b[31m red‮"])
     assert lines == ["Hello[31m red"]
