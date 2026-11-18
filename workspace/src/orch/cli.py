@@ -985,8 +985,9 @@ def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
     cmd, sub = args.cmd, getattr(args, "sub", None)
-    from orch import chat
+    from orch import chat, service_guard
 
+    service_guard.command(root, cmd, sub, getattr(args, "by", None))
     chat.guard(root, args)  # the Chat helper's role is enforced here (every command, init too)
     args.orch_root = root  # (after the guard: not an option) JSON output shows tickets as provable here
 
