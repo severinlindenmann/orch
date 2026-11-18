@@ -8,6 +8,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
 
+
+def _just_now():
+    """A start time a moment ago, so "Running since today ..." holds on any day (a fixed date broke the next day)."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE.parents[2] / "workspace" / "src"))
 CONTRACTS = HERE.parents[2] / "contracts"
@@ -78,7 +85,7 @@ class FakeDriver:
 
         e = self.entries.get(spec.sid)
         on = bool(e and e["running"])
-        return Status(running=on, pid=4242 if on else None, since="2026-11-17T10:00:00Z" if on else None)
+        return Status(running=on, pid=4242 if on else None, since=_just_now() if on else None)
 
     def runs(self, spec):
         return self.run_counts.get(spec.sid)
