@@ -552,6 +552,7 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name);
   const key = url + '|' + (file.mtime || '');
   if (!ticketPreviewText.has(key)) ticketPreviewText.set(key, fetch(url).then(async r => {
+    if (r.status === 404) return {missing:true};  // listed, but not on this computer: say so instead of an empty tile
     if (!r.ok) return null;
     const mime = (r.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
     if (picture) return ['image/png', 'image/jpeg', 'image/webp'].includes(mime) ? {blob:await r.blob()} : null;
@@ -563,7 +564,8 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   }).catch(() => null));
   // A finished preview is drawn at once: the page redraws often, and a tile filled later would be thrown away.
   const fill = data => {
-    if (data?.blob) {
+    if (data?.missing) tile.append(h('p', {className:'meta file-missing'}, 'This file is missing. It is listed here, but not on this computer.'));
+    else if (data?.blob) {
       const src = URL.createObjectURL(data.blob), img = h('img', {src, alt:title, loading:'lazy'});
       img.onload = img.onerror = () => URL.revokeObjectURL(src); tile.append(img);
     } else if (data?.text) tile.append(previewText(t, kind, file, data.text));
@@ -1599,6 +1601,7 @@ function ticketStripModel(t, run, fresh) {
     if (s.helper) return m((s.helper.detail || s.word) + '.');
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
+  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press Start to begin now.');
   if (fresh) return m('Not started. Your helper begins when you press Start.');
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
   return m(at ? 'Updated ' + at + '.' : '');

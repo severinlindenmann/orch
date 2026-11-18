@@ -302,6 +302,17 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
   assert.ok(pre.children[0].split('\n').length <= 8);
 });
 
+test('a listed file the server cannot find says it is missing in its preview tile', async () => {
+  const h = (tag, attrs = {}, ...children) => ({tag, attrs, children, append(...kids){this.children.push(...kids);}});
+  const ctx = {h, window:{UI:{...kitState}, DashHelpers:helpers}, snapshot:false, route:() => ({kind:'home'}), render(){}, URL, TextDecoder, fetch:async () => new Response('not found',{status:404})};
+  vm.createContext(ctx);
+  vm.runInContext(source.slice(source.indexOf('const PREVIEW_EXT'),source.indexOf('function loadArtifacts')),ctx);
+  vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);
+  const tile = ctx.ticketPreviewTile({id:'t_test'},{name:'orders-5000.csv'},'evidence');
+  await new Promise(resolve => setTimeout(resolve,20));
+  assert.match(JSON.stringify(tile), /This file is missing/);
+});
+
 test('task proof chips: only plain evidence files and http(s) links get a chip, and the summary is the task line', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
   const opened = [];
@@ -707,4 +718,12 @@ test('Answer in the header opens the answer window like the ticket list; without
   assert.deepEqual(log, ['scroll center']);
   assert.equal(focused.length, 1);
   assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
+});
+test('a sent-back ticket says it was sent back, not "Not started" (ORCH-460)', () => {
+  const start = source.indexOf('function ticketStripModel'), end = source.indexOf('\nfunction ', start + 10);
+  const ctx = {questions:() => [], time:x => x, clean:x => x, window:{UI:{ticketState:() => ({pill:'todo', word:'To do'})}, DashHelpers:helpers}};
+  vm.createContext(ctx); vm.runInContext(source.slice(start, end), ctx);
+  const asked = {status:'ready', checklist:[{id:'c1', text:'Add shipping', origin:'change_request', done:false}], history:[]};
+  assert.match(ctx.ticketStripModel(asked, null, true).sentence, /^Sent back\./);
+  assert.match(ctx.ticketStripModel({...asked, checklist:[]}, null, true).sentence, /^Not started\./);
 });
