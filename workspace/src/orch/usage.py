@@ -308,6 +308,28 @@ def _member() -> dict:
     return {"finished": 0, "open": 0, "seconds": 0, "cost": 0.0}
 
 
+def _counted(root: Path, cutoff: str):
+    """The tickets workspace_usage counts, by creation time: every unfinished ticket and every ticket
+    changed since `cutoff` (a finished ticket last changed before it was finished before it too, as done_at
+    <= updated_at, and adds nothing). With the ticket index (ORCH-521) only those files are read (ORCH-522:
+    `orch tokens` read every ticket, 7 s at 10,000); without it every ticket."""
+    try:
+        from orch import ticketindex
+
+        rows = ticketindex.rows(root)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        yield from tickets.list_all(root)
+        return
+    for r in rows:
+        changed = str(r.get("updated_at") or r.get("created_at") or "")
+        if r.get("status") in ("done", "dropped") and changed < cutoff:
+            continue
+        try:
+            yield tickets.load(root, r["id"])
+        except Exception:  # noqa: BLE001, S112 - a ticket that cannot be read is left out (as list_all skips it)
+            continue
+
+
 def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | None = None) -> dict:
     root = Path(root)
     cutoff = (datetime.now(UTC) - timedelta(days=max(days, 0))).isoformat()
@@ -318,7 +340,8 @@ def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | Non
     cost, secs = 0.0, 0
     team: dict = {}
     finished = stuck = 0
-    for t in tickets.list_all(root):
+    bases: dict = {}
+    for t in _counted(root, cutoff):
         who = _who(t.get("owner"))
         status = t.get("status")
         if status not in ("done", "dropped"):
@@ -333,7 +356,7 @@ def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | Non
         name = m.get("name") if isinstance(m, dict) else None
         if name:
             with_model += 1
-        r = _scan(root, t, environ, cache, live)
+        r = _scan(root, t, environ, cache, live, bases)
         use = r["use"]
         if not use:
             continue

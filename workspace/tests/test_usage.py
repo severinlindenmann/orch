@@ -271,3 +271,33 @@ def test_estimate_range_needs_enough_history(proj, env, monkeypatch):
 
 def test_range_words_in_hours_and_without_cost():
     assert usage.range_words({"minutes": [45, 120], "cost": None, "n": 4}) == "about 45 min to 2 h"
+
+
+def test_workspace_usage_with_the_index_reads_only_what_counts(proj, env, monkeypatch):
+    """ORCH-522: with the ticket index only unfinished tickets and those changed in the window are read; the
+    answer is the same as from every ticket."""
+    import sys
+    import types
+
+    a = make(proj, "Big", [SID], model="opus")
+    old = make(proj, "Finished long ago", [SID2], model="sonnet")
+    raw = tickets.load(proj, old["id"])
+    raw.update(status="done", updated_at="2020-01-01T00:00:00Z", done_at="2020-01-01T00:00:00Z")
+    tickets._write(proj, raw)
+    write(projects(env) / "-p" / f"{SID}.jsonl", line("claude-opus-5-5", "a", 100, 10))
+    every = usage.workspace_usage(proj, 30, env)
+    mod = types.ModuleType("orch.ticketindex")
+    mod.rows = lambda root, include_hidden=False: [
+        {k: t.get(k) for k in ("id", "status", "updated_at", "created_at")} for t in tickets.list_all(root)
+    ]
+    monkeypatch.setitem(sys.modules, "orch.ticketindex", mod)
+    seen, real = [], tickets.load
+
+    def load(root, tid, *x, **k):
+        seen.append(tid)
+        return real(root, tid, *x, **k)
+
+    monkeypatch.setattr(tickets, "load", load)
+    got = usage.workspace_usage(proj, 30, env)
+    assert {k: v for k, v in got.items() if k != "at"} == {k: v for k, v in every.items() if k != "at"}
+    assert a["id"] in seen and old["id"] not in seen

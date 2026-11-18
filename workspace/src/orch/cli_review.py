@@ -405,7 +405,7 @@ def _answered_tickets(root: Path, limit: int | None, out: list[dict]):
         try:
             from orch import ticketindex
 
-            rows = ticketindex.rows(root, include_hidden=True)
+            rows = ticketindex.rows(root)  # hidden tickets left out, as list_all
         except Exception:  # noqa: BLE001 - no index: every ticket
             rows = None
     if rows is None:

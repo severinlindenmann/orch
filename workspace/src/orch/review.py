@@ -1284,7 +1284,7 @@ def _stack_tickets(root: Path) -> list[dict]:
     try:
         from orch import ticketindex
 
-        rows = ticketindex.rows(root, include_hidden=True)
+        rows = ticketindex.rows(root)  # hidden tickets left out, as list_all
     except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
         return tickets.list_all(root)
     out = []
