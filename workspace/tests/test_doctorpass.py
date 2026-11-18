@@ -134,11 +134,40 @@ def test_load_counts_only_on_two_passes_in_a_row(ws):
     assert _pass(ws, load=2)["problems"] == []
 
 
-def test_a_login_running_out_is_a_problem(ws):
-    res = _pass(
-        ws, logins=[{"name": "claude", "label": "Claude", "state": "soon", "ends_at": "2026-11-18T10:00:00Z"}]
-    )
+def test_a_login_running_out_is_a_problem_on_the_second_pass(ws):
+    soon = [{"name": "claude", "label": "Claude", "state": "soon", "ends_at": "2026-11-18T10:00:00Z"}]
+    assert _pass(ws, logins=soon)["problems"] == []
+    res = _pass(ws, logins=soon)
     assert res["problems"] == ["login-claude"] and "2026-11-18 10:00" in res["opened"][0]["title"]
+
+
+GH_BAD = [{"name": "github", "label": "GitHub", "state": "renew"}]
+GH_OK = [{"name": "github", "label": "GitHub", "state": "works"}]
+
+
+def test_a_login_that_fails_once_opens_no_ticket(ws):
+    """ORCH-395: one failed status command at night opened 'GitHub login needs renewing' while it worked."""
+    assert _pass(ws, logins=GH_BAD)["opened"] == []
+    assert _pass(ws, logins=GH_OK)["problems"] == []
+    assert _pass(ws, logins=GH_BAD)["opened"] == [] and _titles(ws) == []
+
+
+def test_a_login_ticket_closes_by_itself_when_the_login_works_again(ws):
+    _pass(ws, logins=GH_BAD)
+    tid = _pass(ws, logins=GH_BAD)["opened"][0]["ticket"]
+    _pass(ws, logins=GH_OK)
+    t = tickets.load(ws, tid)
+    assert t["status"] == "dropped" and any("works again" in h["text"] for h in t["history"])
+    assert "login-github" not in doctorpass.last(ws)["problems"]
+
+
+def test_a_login_ticket_someone_works_on_is_only_told(ws):
+    _pass(ws, logins=GH_BAD)
+    tid = _pass(ws, logins=GH_BAD)["opened"][0]["ticket"]
+    tickets.set_status(ws, tid, "active", "human:owner")
+    _pass(ws, logins=GH_OK)
+    t = tickets.load(ws, tid)
+    assert t["status"] == "active" and any("no longer see" in h["text"] for h in t["history"])
 
 
 def test_dry_run_opens_nothing_and_keeps_no_state(ws):
@@ -518,6 +547,23 @@ def test_paused_closed_unplanned_and_not_repeating_are_left_out():
         _rep("t_done", old, status="done"),  # a finished repeat still runs again: counted
     ]
     assert [r["ticket"] for r in doctorpass.overdue_repeats(rows, NOW, 30)] == ["t_done"]
+
+
+def test_a_repeat_whose_add_on_started_it_after_the_planned_time_is_not_stopped():
+    """ORCH-395: the add-on started the 23:00 run but its last/next run write was lost; the run shows."""
+    planned = "2026-11-17T10:00:00Z"
+    ran = _rep("t_ran", planned, "2026-11-17T09:45:00Z")
+    ran["history"] = [
+        {"at": "2026-11-17T09:45:10Z", "by": "agent:automation", "text": "Set ext.automation"},
+        {"at": "2026-11-17T10:00:31Z", "by": "agent:automation", "text": "Automation started an agent run"},
+        {"at": "2026-11-17T10:20:00Z", "by": "agent:claude", "text": "Check c1 done"},
+    ]
+    other = _rep("t_other", planned, "2026-11-17T09:45:00Z")  # only someone else wrote after the planned time
+    other["history"] = [
+        {"at": "2026-11-17T09:45:10Z", "by": "agent:automation", "text": "Set ext.automation"},
+        {"at": "2026-11-17T10:20:00Z", "by": "human:owner", "text": "Edited note"},
+    ]
+    assert [r["ticket"] for r in doctorpass.overdue_repeats([ran, other], NOW, 30)] == ["t_other"]
 
 
 def test_the_pass_opens_one_ticket_for_a_stopped_repeat(ws):
