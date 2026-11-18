@@ -514,9 +514,9 @@ def test_plain_pairs_stay():
     [
         "node --test review_page.test.js (23 pass: upload then answer, delete)",
         "23 pass: upload then answer",
-        "pytest: 5 pass: all green, 0 fail",
+        "pytest -q, 5 pass: all green, 0 fail",
         "2 PASS: login works",
-        "12\tPass: ok",
+        "12\tPass: all ok",
     ],
 )
 def test_a_test_count_before_pass_is_no_password_label(text):
@@ -526,7 +526,17 @@ def test_a_test_count_before_pass_is_no_password_label(text):
 
 
 @pytest.mark.parametrize(
-    "text", ["pass: 1234", "db pass: hunter2", "v2 pass: hunter2", "1.5 pass: hunter2", "23 pass=hunter2"]
+    "text",
+    [
+        "pass: 1234",
+        "db pass: hunter2",
+        "v2 pass: hunter2",
+        "1.5 pass: hunter2",
+        "23 pass=hunter2",
+        "5432 pass: hunter2",
+        "port: 5432 pass: correct horse",
+        "port=5432 pass: correct horse",
+    ],
 )
 def test_pass_without_a_test_count_stays_a_password_label(text):
     assert "[hidden]" in phone_view.redact(text)
