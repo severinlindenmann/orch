@@ -1025,6 +1025,13 @@ button.live-pt{min-height:32px;padding:0;border:0;border-radius:var(--r1);backgr
 button.live-pt:hover{color:var(--brand)}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
+/* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small): the title keeps a full row, the
+   buttons go on a second row and wrap when even that is short */
+.live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
+.live-ph[data-compact]{flex-wrap:wrap;row-gap:0;padding-top:var(--s2)}
+.live-ph[data-compact]>.live-ctl{flex:1 0 100%;flex-wrap:wrap;justify-content:flex-end}
+.live-opt .key{color:var(--text-muted);font-variant-numeric:tabular-nums}
+.live-pop-scroll{max-height:min(320px,45vh);overflow-y:auto;overscroll-behavior:contain}  /* a long list of sessions to pick from (Add beside) */
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
 /* a pane with a session (ORCH-359): what it does now, its last lines (the latest at the end), tool, model and open time */
 .live-pb[data-live-body]{align-items:stretch;justify-content:flex-start;gap:var(--s3);padding:var(--s3) var(--s4);color:var(--text);text-align:left}
@@ -1090,7 +1097,7 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
   .live-dock[data-mode=side]{top:auto;bottom:calc(var(--live-bottom,0px) + var(--s4));transform:none}
   .live-panel[data-mode=bottom]{height:min(var(--live-h),60vh)}
   .live-bar{padding-inline:var(--s2)}
-  .live-word{display:none}
+  :not(.live-pbtn)>.live-word{display:none}  /* the bar folds its words; a pane keeps them (ORCH-463) */
 }
 /* Glance formats of a doc box (ORCH-329): headline, progress, chips, flow, chart, diff, details */
 .doc-headline{margin:0 0 10px;font-size:20px;line-height:28px;font-weight:600;color:var(--text)}
