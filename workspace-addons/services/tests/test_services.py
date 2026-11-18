@@ -120,7 +120,11 @@ def test_add_with_start_says_it_was_started(cli, fake, clock):
     assert code == 0 and "was started and is still starting" in out["next"] and "Start it:" not in out["next"]
     fake.start_polls, fake.start_dies = 0, True
     code, out = _add(cli, "api", "--start")
-    assert code == 0 and "started it, but it did not stay running" in out["next"] and "Start it:" not in out["next"]
+    assert (
+        code == 0
+        and "started it, but it did not stay running" in out["next"]
+        and "Start it:" not in out["next"]
+    )
 
 
 def test_act_verbs_match_the_commands(cli, fake, ws):
