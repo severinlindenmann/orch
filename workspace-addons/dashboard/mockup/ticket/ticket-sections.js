@@ -9,7 +9,7 @@
   };
   const notes = {
     review:['112 of 112 answers read · reported by the helper.', 'The one-page summary was finished at 12:26. Check the page before accepting.'],
-    working:['The plan lists three stories: new opening hours, the spring workshop and a customer spotlight.', 'The short intro task was completed at 12:26. No separate note was attached.', 'Skipped: we have no new photos this month.', 'No evidence yet. The test mail task is unfinished; the helper stopped before finishing.'],
+    working:['The plan lists three stories: new opening hours, the spring workshop and a customer spotlight.', 'The short intro task was completed at 12:26. No separate note was attached.', "Won't do: we have no new photos this month.", 'No evidence yet. The test mail task is unfinished; the helper stopped before finishing.'],
     change:['The table compares old and new prices for three items.', 'The shared sheet was updated at 12:26, before the shipping-cost request.', 'You asked: “Please also add the shipping costs to the list.” Received at 12:28; no result yet.'],
     copy:['The sign was printed and hung by the door at 12:32.'],
     done:['Completion note: the page now says Sunday 9:00 – 13:00.']
@@ -46,7 +46,7 @@
     });
     panels.Steps.append(el('h2','','Steps'),el('p','muted','Open a step to see its notes, files and links.'));
     if(!empty)rows.forEach((row,i)=>{
-      const detail=el('details','task-evidence');const summary=el('summary');const title=el('span','grow',taskNames[i]);const note=row.querySelector('.task-note');if(note)title.append(el('span','task-note meta',note.textContent));summary.append(title,el('span','meta',row.querySelector('.task-mark, .tick')?.textContent.trim()==='✓'?'Done':/Skipped|photos from the shop/.test(row.textContent)?'Skipped':'Working'));detail.append(summary);
+      const detail=el('details','task-evidence');const summary=el('summary');const title=el('span','grow',taskNames[i]);const note=row.querySelector('.task-note');if(note)title.append(el('span','task-note meta',note.textContent));summary.append(title,el('span','meta',row.querySelector('.task-mark, .tick')?.textContent.trim()==='✓'?'Done':/Won't do|Skipped|photos from the shop/.test(row.textContent)?"Won't do":'Working'));detail.append(summary);
       const body=el('div','evidence-body');body.append(el('h3','','Notes'),el('p','muted',notes[kind]?.[i]||'No notes attached yet.'),el('h3','','Files'));
       if(files[kind]?.tasks.includes(i))body.append(fileButton());else body.append(el('p','meta','No files attached to this task.'));
       body.append(el('h3','','Links'),el('p','meta','No separate links attached to this step.'));detail.append(body);panels.Steps.append(detail);

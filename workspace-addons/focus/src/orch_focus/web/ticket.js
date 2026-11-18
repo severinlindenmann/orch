@@ -289,7 +289,7 @@
     const mins = c => S.views.live.taskMinutes(v, c.id);
     const done = checks.filter(c => c.done && !c.wont_do).length, skipped = checks.filter(c => c.wont_do).length;
     const total = checks.reduce((n, c) => n + (parseInt(mins(c), 10) || 0), 0);
-    els.logMeta.textContent = checks.length ? [done + ' done', skipped ? skipped + ' skipped' : '', total ? total + ' min' : ''].filter(Boolean).join(' · ') : '';
+    els.logMeta.textContent = checks.length ? [done + ' done', skipped ? skipped + " won't do" : '', total ? total + ' min' : ''].filter(Boolean).join(' · ') : '';
     const key = keyOf([checks.map(c => [c.id, c.text, c.done, c.wont_do, c.reason, c.state, evText(c), mins(c)]), S.state.sel, v.run.running]);
     if (key === els.tasks.dataset.k) return;
     els.tasks.dataset.k = key;
@@ -297,7 +297,7 @@
       const cls = c.wont_do ? 'wont' : c.done ? 'done' : (c.state === 'doing' ? 'doing' : '');
       const row = h('button', {class: 'fx-task ' + cls, 'data-task': String(i), 'aria-current': String(i === (S.state.sel === 0 && doing >= 0 && !els.tasks.dataset.picked ? doing : S.state.sel))},
         h('span', {class: 'st', icon: c.done && !c.wont_do ? 'check' : false, text: c.wont_do ? '–' : false}), h('span', {}, h('span', {class: 'tt', text: (c.done && !c.wont_do ? 'Done · ' : '') + c.text}),
-          h('span', {class: 'sub', text: c.wont_do ? 'Skipped' + (c.reason ? ' · ' + c.reason : '') : [mins(c), evText(c)].filter(Boolean).join(' · ')})));
+          h('span', {class: 'sub', text: c.wont_do ? "Won't do" + (c.reason ? ' · ' + c.reason : '') : [mins(c), evText(c)].filter(Boolean).join(' · ')})));
       row.addEventListener('click', () => { S.views.live.scrollToTask(c.id); S.state.sel = i; els.tasks.dataset.picked = '1'; els.tasks.dataset.k = ''; renderTasks(S.state.view); });
       const reason = c.wont_do && c.reason && h('details', {class: 'fx-task-reason meta'}, h('summary', {text: 'Reason'}), h('span', {text: c.reason}));
       const out = [reason ? h('div', {}, row, reason) : row];

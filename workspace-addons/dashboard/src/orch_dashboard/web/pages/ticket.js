@@ -882,7 +882,7 @@ function taskRows(t) {
     return h('div', {className:'card-row ticket-task-row', 'data-key':'task-' + (task.id || i)}, mark,
       h('div', {className:'grow'}, h('h3', {className:task.wont_do ? 'task-wont' : ''}, doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Helper is working', 'aria-label':'Helper is working'}) : null, clean(change ? change.title : task.text)),
         change ? h('p', {className:'meta preserve-lines task-asked'}, 'You asked: ' + clean(change.asked)) : null,
-        task.wont_do ? h('p', {className:'meta task-note'}, task.reason ? 'Skipped: ' + clean(task.reason) : 'Skipped. No reason was given.') : null,
+        task.wont_do ? h('p', {className:'meta task-note'}, task.reason ? window.DashHelpers.WONT_DO + ': ' + clean(task.reason) : window.DashHelpers.WONT_DO + '. No reason was given.') : null,
         array(task.evidence).filter(ev => (ev.type || ev.kind) === 'note' && (ev.text || ev.title)).map(ev => h('p', {className:'preserve-lines task-evidence-note'}, clean(ev.text || ev.title))),
         meta ? h('p', {className:'meta'}, meta) : null,
         task.wont_do ? null : h('p', {className:'meta task-proof'}, doing && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task)),
@@ -1571,12 +1571,12 @@ function ticketStripModel(t, run, fresh) {
   return m(at ? 'Updated ' + at + '.' : '');
 }
 const taskTitle = task => clean(changeTask(task.text, task.origin)?.title || task.text);
-const taskWord = task => task.wont_do ? 'Skipped' : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
+// ORCH-476: one word for a task that will not be done, the same as its button and the core ("Won't do", never "Skipped")
+const taskWord = task => task.wont_do ? window.DashHelpers.WONT_DO : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
+// The core's progress (state.counts, ORCH-476): the same numbers as every other page.
 function ticketProgressCounts(t) {
-  const list = array(t.checklist), n = f => list.filter(f).length;
-  const done = n(c => c.done && !c.wont_do), skipped = n(c => c.wont_do), doing = n(c => !c.done && !c.wont_do && c.state === 'doing');
-  const todo = list.length - done - skipped - doing;
-  return [done && done + ' done', skipped && skipped + ' skipped', doing && doing + ' in progress', todo && todo + ' to do'].filter(Boolean).join(' · ');
+  const p = window.DashHelpers.progressOf(state?.counts, t);
+  return [p.done && p.done + ' done', p.wont_do && p.wont_do + " won't do", p.doing && p.doing + ' in progress', p.todo && p.todo + ' to do'].filter(Boolean).join(' · ');
 }
 // "Progress": counts and one row per task; the task the helper works on now is highlighted.
 function ticketProgress(t, run) {

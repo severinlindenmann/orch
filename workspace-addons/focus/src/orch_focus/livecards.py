@@ -113,13 +113,20 @@ def helper(v: dict) -> dict:
     return {"state": key, "word": WORDS[key], "detail": detail}
 
 
-def _step(checklist: list[dict]) -> dict | None:
-    """{n, of}: the task being done, else the first open one (the same count as the dashboard's Helpers list)."""
-    tasks = [c for c in checklist if not c.get("wont_do")]
-    at = next((i for i, c in enumerate(tasks) if c.get("state") == "doing"), None)
-    if at is None:
-        at = next((i for i, c in enumerate(tasks) if not c.get("done")), None)
-    return {"n": at + 1, "of": len(tasks)} if tasks and at is not None else None
+def _step(checklist: list[dict], status: str | None = None) -> dict | None:
+    """{n, of}: the core's one step (orch/counts.py, ORCH-476): every task counts, a won't-do one too; the task
+    being done, else the first open one. The same rule here for an older core."""
+    try:
+        from orch import counts
+
+        return counts.step({"status": status, "checklist": checklist})
+    except ImportError:
+        pass
+    open_ = [i for i, c in enumerate(checklist) if not c.get("done") and not c.get("wont_do")]
+    at = next((i for i in open_ if checklist[i].get("state") == "doing"), open_[0] if open_ else None)
+    return (
+        {"n": at + 1, "of": len(checklist)} if at is not None and status not in ("done", "dropped") else None
+    )
 
 
 def card(v: dict) -> dict:
@@ -131,7 +138,7 @@ def card(v: dict) -> dict:
     now = _one_line(board.get("step")) or (steps[0]["text"] if steps else "") or state["detail"]
     age, idle = run.get("age_seconds"), run.get("idle_seconds")
     return {
-        **state, "step": _step(checklist), "finished": t.get("status") in FINISHED,
+        **state, "step": _step(checklist, t.get("status")), "finished": t.get("status") in FINISHED,
         "age_minutes": age // 60 if isinstance(age, int) else None,
         "idle_minutes": idle // 60 if isinstance(idle, int) else None,
         "ticket": t["id"], "key": t.get("key"), "title": _one_line(t.get("title")),

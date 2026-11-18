@@ -397,8 +397,8 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   let all = c.taskRows(t).flatMap(nodes);
   assert.ok(all.some(n => n.attrs.className === 'task-wont' && n.children.includes('Skip this')));
-  assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes('Skipped')));
-  assert.ok(all.some(n => JSON.stringify(n.children).includes('Skipped: No longer needed')), 'the reason shows plainly, no disclosure');
+  assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes("Won't do")), "ORCH-476: one word, the button's");
+  assert.ok(all.some(n => JSON.stringify(n.children).includes("Won't do: No longer needed")), 'the reason shows plainly, no disclosure');
   assert.ok(!all.some(n => n.tag === 'details'));
   assert.doesNotMatch(JSON.stringify(all), /ticket-spinner|Not started yet|Working on this task/);
   assert.equal(t.checklist.filter(helpers.resolved).length, 1);

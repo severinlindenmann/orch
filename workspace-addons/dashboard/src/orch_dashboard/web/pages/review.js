@@ -20,8 +20,10 @@ function reviewAnswered() { return array(state?.review?.answered); }
 function reviewCount() { return reviewCards().length; }
 // The subtitle shows THE needs-you number (needsYouTotal: open questions plus results to check, exactly what this page
 // shows as cards; the Review menu entry and the top bar show the same one, ORCH-63).
+// While the deck is open, the heading says what its Waiting tab says (cards answered here leave both at once, ORCH-476).
+let reviewWaiting = null;
 function reviewSubtitle() {
-  const n = typeof needsYouTotal === 'function' ? needsYouTotal() : reviewCount();
+  const n = reviewWaiting != null ? reviewWaiting : typeof needsYouTotal === 'function' ? needsYouTotal() : reviewCount();
   return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
@@ -187,6 +189,11 @@ function reviewPage() {
       h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})),
       h('div', {className:'stack', 'data-key':'review-rail'}, side, reviewAcceptedCard())));
 }
+function reviewSetWaiting(main, deck) {
+  reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;
+  const sub = main.querySelector('[data-key="heading"] p.muted');
+  if (sub && sub.textContent !== reviewSubtitle()) sub.textContent = reviewSubtitle();
+}
 // Mount the kit page once per host (render() calls this after every reconcile; the mounted host is left alone).
 function mountReview(main) {
   main.querySelectorAll('[data-review-side]').forEach(s => { if (!mounts.has(s)) mounts.set(s, {destroy() {}}); });
@@ -194,8 +201,8 @@ function mountReview(main) {
     if (mounts.has(host) || !window.UI?.reviewPage) return;
     const queue = main.querySelector('[data-review-queue]');
     const want = /[?&]card=([^&]+)/.exec(typeof location === 'undefined' ? '' : location.hash || '');  // the ticket page's "Look and answer" opens this card
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => reviewDrawSide(queue, deck), ticketHref:id => '#ticket/' + encodeURIComponent(id)});
-    mounts.set(host, {destroy() { page.destroy(); }, page});
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id)});
+    mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
 }
 // A new state (a card arrived, one was answered elsewhere): the open page reads it at once, not at its next tick.
