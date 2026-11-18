@@ -12,7 +12,7 @@ const source = fs.readFileSync(path.join(dir, 'pages/live-history.js'), 'utf8');
 const model = source.slice(0, source.indexOf('// --- the page ---'));
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(model + '\nthis.api = {liveHistRow, liveHistView, LIVE_HIST_MAX, LIVE_HIST_EMPTY};', ctx);
+vm.runInContext(model + '\nthis.api = {liveHistRow, liveHistView, LIVE_HIST_MAX, liveHistEmptyLine};', ctx);
 const H = ctx.api;
 const when = at => 'at ' + at.toISOString().slice(11, 16);
 const now = new Date('2026-11-17T20:00:00Z');
@@ -62,7 +62,8 @@ test('the layer shows the History button and the list in the pane, and the page 
 });
 
 test('the empty line says why nothing earlier is kept and the one in use still shows', () => {
-  assert.match(H.LIVE_HIST_EMPTY, /same conversation/);
+  assert.match(H.liveHistEmptyLine([{}]), /same conversation/, 'one session in use: it goes on with it');
+  assert.match(H.liveHistEmptyLine([]), /keeps no conversation/, 'nothing kept at all: the helper keeps none');
   const v = H.liveHistView({available:true, sessions:[row('a', {current:true, reopenable:false})]}, now, when);
   assert.equal(v.state, 'empty');
   assert.equal(v.rows.length, 1);
