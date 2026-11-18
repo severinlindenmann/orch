@@ -1,7 +1,8 @@
-"""A short check after every update (ORCH-551): does the new install still do the everyday things? The
-Factory list, the merge queue runner, the dashboard sign-in and the page of every add-on that is on. Each
-probe runs the newly installed `orch` as a child process (core never imports add-on code), so a broken add-on
-shows up here and not later in a person's face.
+"""A short check after every update (ORCH-551): does the new install still do the everyday things? What each
+add-on that is on declares in its manifest ([[selfcheck]]: the Factory list, the merge queue runner ...), the
+sign-in of each running page server and the page of every add-on. Each probe runs the newly installed `orch`
+as a child process (core never imports add-on code or names an add-on), so a broken add-on shows up here and
+not later in a person's face.
 
 When a probe fails after an update that moved to a newer release, orch keeps one card for Home: "Go back to
 release N-1?" (the release this update came from). Yes runs `orch update --to <N-1>` (ORCH-550). The card is
@@ -12,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -27,14 +27,12 @@ KEEP_DAYS = 14
 Runner = Callable[[list[str], Path], tuple[int, str]]
 
 
-def _orch_argv() -> list[str]:
-    return [sys.executable, "-I", "-m", "orch"]
-
-
 def run_orch(argv: list[str], root: Path) -> tuple[int, str]:
     try:
+        from orch import procs
+
         p = subprocess.run(  # noqa: S603 - our own interpreter and module, fixed argv
-            [*_orch_argv(), *argv],
+            procs.orch_python_argv(*argv),
             cwd=root,
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -76,41 +74,42 @@ def _loopback(url: object) -> bool:
     )
 
 
-def _dashboard_url(root: Path) -> str | None:
-    from orch import services
+def _page_servers(root: Path) -> list[tuple[str, str]]:
+    """(name, address) of the page servers running for this workspace that a person signs in to."""
+    from orch import pagelaunch, services
 
     want = str(Path(root).resolve())
+    out = []
     for e in services.running():
         same = isinstance(e.get("workspace"), str) and str(Path(e["workspace"]).resolve()) == want
-        if same and e.get("addon") == "dashboard" and _loopback(e.get("url")):
-            return e["url"].rstrip("/")
-    return None
+        if same and e.get("addon") in pagelaunch.LAUNCH_SERVERS and _loopback(e.get("url")):
+            out.append((e["addon"], e["url"].rstrip("/")))
+    return sorted(out)
 
 
-def _sign_in(root: Path, base: str, http) -> int:
+def _sign_in(root: Path, server: str, base: str, http) -> int:
     """Sign in the way the page does: a fresh one-time token handed to POST /session. Only when a person ran
     the update (a helper never signs in as the person); the token is spent here and never printed."""
     from orch import pagelaunch, tickets
 
     if tickets.agent_tool() is not None and not pagelaunch.is_test_workspace(root):
         return -1
-    token = pagelaunch.write_launch_token(root, "dashboard")
+    token = pagelaunch.write_launch_token(root, server)
     return http(f"{base}/session", {"token": token}, base)
 
 
-def _dashboard(root: Path, http=_http, find=_dashboard_url, sign_in=_sign_in) -> str | None:
-    base = None
-    for _ in range(10):  # it was just restarted: give it a moment to come up
-        base = find(root)
-        if base and 0 < http(f"{base}/") < 500:
+def _signs_in(root: Path, server: str, base: str, http=_http, sign_in=_sign_in) -> str | None:
+    for i in range(10):  # it was just restarted: give it a moment to come up
+        if 0 < http(f"{base}/") < 500:
             break
-        time.sleep(2)
+        if i < 9:
+            time.sleep(2)
     else:
-        return "the dashboard does not answer" if base else "the dashboard is not running"
-    code = sign_in(root, base, http)
+        return f"the {server} page does not answer"
+    code = sign_in(root, server, base, http)
     if code in (-1, 200):  # -1: a helper ran the update, the page answering is what can be checked
         return None
-    return f"dashboard sign-in failed (answer {code or 'none'})"
+    return f"{server} sign-in failed (answer {code or 'none'})"
 
 
 def _active(root: Path, run: Runner) -> list[dict] | None:
@@ -123,24 +122,13 @@ def _active(root: Path, run: Runner) -> list[dict] | None:
     ]
 
 
-def _factory(root: Path, run: Runner) -> str | None:
-    rc, out = run(["factory", "list", "--json"], root)
-    return None if rc == 0 and _json(out) is not None else "the Factory list does not open"
-
-
-def _queue(root: Path, run: Runner) -> str | None:
-    rc, out = run(["pull-requests", "queue", "list", "--json"], root)
-    got = _json(out) if rc == 0 else None
-    if not isinstance(got, dict):
-        return "the merge queue does not answer"
-    waiting = [
-        e
-        for e in got.get("entries") or []
-        if isinstance(e, dict) and e.get("state") in ("waiting", "running")
-    ]
-    if waiting and not got.get("running"):
-        return f"the merge queue runner is not running ({len(waiting)} pull requests wait)"
-    return None
+def _declared(root: Path, run: Runner, name: str, entry: dict) -> str | None:
+    """One [[selfcheck]] entry of an add-on's manifest: `orch <name> <args>` must end well (and give JSON
+    when it asks for --json)."""
+    args = [str(x) for x in entry.get("args") or []]
+    rc, out = run([name, *args], root)
+    ok = rc == 0 and ("--json" not in args or _json(out) is not None)
+    return None if ok else str(entry.get("fails") or f"{entry.get('label') or name} does not work")
 
 
 def _page(root: Path, run: Runner, a: dict) -> str | None:
@@ -154,8 +142,9 @@ def _page(root: Path, run: Runner, a: dict) -> str | None:
     return None if ok else f"the {name} page does not answer"
 
 
-def run_checks(root: Path, run: Runner = run_orch, dashboard=_dashboard) -> list[dict]:
-    """[{"name", "ok", "why"}] for each probe that applies here (add-ons that are off are not probed)."""
+def run_checks(root: Path, run: Runner = run_orch, servers=_page_servers, signs_in=_signs_in) -> list[dict]:
+    """[{"name", "ok", "why"}] for each probe that applies here: what each add-on that is on declares in its
+    manifest ([[selfcheck]]), the sign-in of each running page server, and each add-on page."""
     results: list[dict] = []
 
     def add(name: str, why: str | None) -> None:
@@ -165,14 +154,14 @@ def run_checks(root: Path, run: Runner = run_orch, dashboard=_dashboard) -> list
     if on is None:
         add("add-ons", "the add-on list does not open")
         return results
-    names = {a["name"] for a in on}
-    if "factory" in names:
-        add("Factory list", _factory(root, run))
-    if "pull-requests" in names:
-        add("Merge queue runner", _queue(root, run))
-    if "dashboard" in names:
-        add("Dashboard sign-in", dashboard(root))
-    for a in sorted(on, key=lambda a: a["name"]):
+    on = sorted(on, key=lambda a: a["name"])
+    for a in on:
+        for entry in a.get("selfcheck") or []:
+            if isinstance(entry, dict):
+                add(str(entry.get("label") or a["name"]), _declared(root, run, a["name"], entry))
+    for server, base in servers(root):
+        add(f"{server.capitalize()} sign-in", signs_in(root, server, base))
+    for a in on:
         if a.get("dashboard") or a.get("page"):
             add(f"{a['name']} page", _page(root, run, a))
     return results
@@ -187,14 +176,14 @@ def after_update(
     old_release: int | str | None,
     new_release: int | str | None,
     run: Runner = run_orch,
-    dashboard=_dashboard,
+    servers=_page_servers,
 ) -> list[str]:
     """Run the checks after an update and keep (or clear) the Home card. Returns the lines `orch update`
     prints.
     The card offers going back only when this update moved to a newer release; a failed check after going
     back (or on a development build) is reported without that offer."""
     try:
-        results = run_checks(root, run, dashboard)
+        results = run_checks(root, run, servers)
     except Exception as e:  # noqa: BLE001 - a broken check must never break the update itself
         results = [{"name": "self-check", "ok": False, "why": f"the check itself failed: {e}"[:200]}]
     failed = [r for r in results if not r["ok"]]

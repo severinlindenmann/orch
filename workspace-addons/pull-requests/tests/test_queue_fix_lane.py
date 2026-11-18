@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from test_queue import FakeGit, FakeGitHub, make, states, url
 
-from orch_pull_requests import runner, store
+from orch_pull_requests import cli, runner, store
 
 
 def add(ws, n, **kw):
@@ -43,3 +43,16 @@ def test_without_a_fix_the_line_still_groups(ws):
     gh = FakeGitHub({n: {} for n in (1, 2, 3)})
     make(ws, gh, FakeGit())[0].run()
     assert any(len(m) == 3 for m in gh.groups.values())
+
+
+def test_queue_check_after_an_update(ws, monkeypatch, capsys):
+    """The add-on's [[selfcheck]] (ORCH-551): fine with an empty line or a live runner, exit 1 when pull
+    requests wait and no runner is alive."""
+    monkeypatch.chdir(ws)
+    monkeypatch.setattr(cli, "runner_alive", lambda root: False)
+    assert cli.main(["queue", "check"]) == 0
+    add(ws, 1)
+    assert cli.main(["queue", "check"]) == 1
+    assert "1 pull requests wait and no merge queue runner is running" in capsys.readouterr().out
+    monkeypatch.setattr(cli, "runner_alive", lambda root: True)
+    assert cli.main(["queue", "check"]) == 0

@@ -55,7 +55,7 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts ticket_ext_inert".split()
+    "ticket_links ticket_fields acts ticket_ext_inert selfcheck".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -1286,6 +1286,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         if isinstance(order, bool) or not isinstance(order, int) or not 0 <= order <= 99:
             raise _bad("dashboard order is 0 to 99")
         d["order"] = order
+    _check_selfcheck(m)
     tv = m.get("ticket_view", [])
     if not isinstance(tv, list) or len(tv) > 8:
         raise _bad("ticket_view has at most 8 rows")
@@ -1821,6 +1822,30 @@ def _running_here(root: Path) -> set[str]:
     return out
 
 
+def _check_selfcheck(m: dict) -> None:
+    """[[selfcheck]] of a manifest: what orch runs after an update to see the add-on still works."""
+    sc = m.get("selfcheck", [])
+    if not isinstance(sc, list) or len(sc) > 3:
+        raise _bad("selfcheck has at most 3 entries")
+    for row in sc:
+        args = row.get("args") if isinstance(row, dict) else None
+        if (
+            not isinstance(row, dict)
+            or set(row) - {"label", "fails", "args"}
+            or not _text_ok(row.get("label"), 40)
+            or not _text_ok(row.get("fails"), 80)
+            or not isinstance(args, list)
+            or not 1 <= len(args) <= 6
+            or not all(
+                isinstance(a, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}|--[a-z][a-z0-9-]{0,30}", a)
+                for a in args
+            )
+        ):
+            raise _bad("a [[selfcheck]] entry needs label, fails and args (the command after orch <name>)")
+    m["selfcheck"] = sc
+
+
 def _row(name: str, m: dict, source: str, installed: bool, active: bool, running: bool) -> dict:
     return {
         "name": name,
@@ -1834,6 +1859,7 @@ def _row(name: str, m: dict, source: str, installed: bool, active: bool, running
         "background": m["background"],
         "recommended": m["recommended"],
         "page": m.get("page"),
+        "selfcheck": [dict(x) for x in m.get("selfcheck") or []],
         "running": running,
         "ticket_links": [dict(x) for x in m["ticket_links"]],
         "ticket_fields": m["ticket_fields_section"] if "ticket_fields_section" in m else fields.section(m),

@@ -19,6 +19,7 @@ _KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), 
 ALLOW = {
     "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
     "orch/cli.py": {"dashboard": _MANIFEST},
+    "orch/selfcheck.py": {"dashboard": _MANIFEST},
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},

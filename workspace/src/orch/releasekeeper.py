@@ -1139,7 +1139,7 @@ class World:
             parents = self._run(
                 ["git", "-C", str(wt), "rev-list", "--parents", "-n", "1", fix["sha"]]
             ).stdout.split()
-            pick = ["cherry-pick", "-x", *(["-m", "1"] if len(parents) > 2 else []), fix["sha"]]
+            pick = ["cherry-pick", "-x", *(["--mainline", "1"] if len(parents) > 2 else []), fix["sha"]]
             r = self._run(["git", "-C", str(wt), *pick])
             if r.returncode != 0:
                 self._run(["git", "-C", str(wt), "cherry-pick", "--abort"])

@@ -183,7 +183,7 @@ def test_release_line_from_a_git_source(monkeypatch, tmp_path):
     ).stdout.split()
     monkeypatch.undo()  # the real release_line
     monkeypatch.setattr(addons, "_SWITCH_TO", None)
-    monkeypatch.setattr(addons, "_install_origin", lambda: {"repo": f"file://{src}", "ref": "main"})
+    monkeypatch.setattr(addons, "_install_origin", lambda: {"repo": src.as_uri(), "ref": "main"})
     monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     monkeypatch.delenv("ORCH_REPO", raising=False)
     monkeypatch.delenv("ORCH_REF", raising=False)
@@ -222,6 +222,7 @@ def test_a_fix_release_ends_the_hold_and_can_be_gone_back_to(_setup):
 def test_a_bare_file_source_recorded_without_dot_git(tmp_path):
     bare = tmp_path / "origin.git"
     bare.mkdir()
-    assert addons.file_repo(f"file://{tmp_path}/origin") == bare
-    assert addons.file_repo(f"file://{tmp_path}/origin.git") == bare
-    assert addons.file_repo(f"file://{tmp_path}/nothing") is None and addons.file_repo("https://x/y") is None
+    assert addons.file_repo((tmp_path / "origin").as_uri()) == bare
+    assert addons.file_repo(bare.as_uri()) == bare
+    assert addons.file_repo((tmp_path / "nothing").as_uri()) is None
+    assert addons.file_repo("https://x/y") is None

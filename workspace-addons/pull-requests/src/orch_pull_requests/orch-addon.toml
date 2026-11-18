@@ -37,3 +37,8 @@ statuses = ["open", "draft", "checks running", "checks failed", "conflict", "beh
 summary = "Look up the ticket's pull requests and their checks"
 who = "anyone"
 writes = ["refs", "ext.pull-requests"]
+
+[[selfcheck]]                              # after every update: pull requests in line have a runner
+label = "Merge queue runner"
+fails = "the merge queue runner is not running while pull requests wait"
+args = ["queue", "check"]
