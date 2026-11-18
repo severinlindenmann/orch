@@ -155,3 +155,9 @@ def test_the_light_job_runs_only_on_light_pull_requests_and_the_final_check_wait
     assert _job_if("light") == "needs.changes.outputs.light == 'true'"
     assert re.search(r"needs: \[changes, light,", CI)
     assert "scripts/ci_light.py" in CI and "scripts/ci_proven.py" in CI
+
+
+def test_steps_use_uv_s_own_python_not_the_shared_tool_folder_one():
+    """#1566: the setup-python interpreter lives in a group-writable folder; orch secret exec refuses it."""
+    env = light.step_env({"PATH": "/opt/hostedtoolcache/Python/3.12/x64/bin:/usr/bin"})
+    assert env["UV_PYTHON_PREFERENCE"] == "only-managed" and env["PATH"].startswith("/opt/hostedtoolcache")
