@@ -2222,7 +2222,7 @@ def kind(ticket: dict) -> str | None:
 
 def kind_by_person(ticket: dict) -> bool:
     k = ticket.get("kind")
-    return isinstance(k, dict) and str(k.get("by") or "").startswith("human:")
+    return kind(ticket) is not None and str(k.get("by") or "").startswith("human:")
 
 
 def _put_kind(ticket: dict, name: str, by: str) -> bool:

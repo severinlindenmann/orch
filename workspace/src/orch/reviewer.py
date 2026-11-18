@@ -255,18 +255,39 @@ def part_match(part: str, items: list[dict]) -> tuple[list[str], list[str]]:
     return want, [w for w in want if w in seen]
 
 
+def kind_block(root: Path, ticket: dict) -> str | None:
+    """ORCH-645: why no automation may accept this ticket by its kind (a draft, an empty list, a kind the
+    workspace does not list; no kind counts as a small bug), or None. One check for the Reviewer and its
+    second look."""
+    kind = tickets.kind(ticket)
+    if kind == "draft":
+        return "drafts, mockups and designs are only accepted by you."
+    allowed = config.reviewer_kinds(root)
+    if not allowed:
+        return "this workspace lets the Reviewer accept no kind of work by itself."
+    if (kind or "small_bug") not in allowed:
+        return f"{tickets.KINDS[kind or 'small_bug'].lower()} work is not accepted by itself here (Settings)."
+    return None
+
+
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
+    """The verdict below, marked kind_block when the ticket's kind keeps every automation away (the second look
+    then leaves it too, whatever the verdict's reason)."""
+    res = _decide(root, ticket, facts, sent_back)
+    if res.get("verdict") == "leave" and kind_block(root, ticket):
+        res["kind_block"] = True
+    return res
+
+
+def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
     proof = tickets.proof_state(ticket, root)
-    kind = tickets.kind(ticket)
-    if kind == "draft":  # ORCH-645 / ORCH-582: never accepted by an automation
-        return {
-            "verdict": "leave",
-            "why": "drafts, mockups and designs are only accepted by you.",
-            "kind_block": True,
-        }
+    if (
+        tickets.kind(ticket) == "draft"
+    ):  # ORCH-645 / ORCH-582: never accepted by an automation, never sent back
+        return {"verdict": "leave", "why": kind_block(root, ticket)}
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
@@ -313,20 +334,9 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         return _back_or_leave("; ".join(missing[:2]), sent_back)
     if open_part:
         return {"verdict": "leave", "why": open_part}
-    allowed = config.reviewer_kinds(root)  # ORCH-645: which kinds this workspace lets the Reviewer accept
-    if not allowed:
-        return {
-            "verdict": "leave",
-            "why": "this workspace lets the Reviewer accept no kind of work by itself.",
-            "kind_block": True,
-        }
-    if (kind or "small_bug") not in allowed:  # no kind (older tickets) counts as a small bug, today's rule
-        return {
-            "verdict": "leave",
-            "why": f"{tickets.KINDS[kind or 'small_bug'].lower()} work is not accepted by itself here "
-            "(Settings).",
-            "kind_block": True,  # the second look leaves it too: the owner's setting covers every automation
-        }
+    blocked = kind_block(root, ticket)  # ORCH-645: which kinds this workspace lets the Reviewer accept
+    if blocked:
+        return {"verdict": "leave", "why": blocked}
     why: list[str] = []
     files = lines = all_files = all_lines = 0
     for f in facts:
@@ -421,14 +431,15 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     state = _read_state(root)
     actions = []
     in_review = set()
+    kinds = config.reviewer_kinds(root)  # a changed list decides every waiting ticket again (ORCH-645)
     for t in tickets.list_all(root):
         if t.get("status") != "review":
             continue
         tid = t["id"]
         in_review.add(tid)
         mine = state.get(tid, {})
-        if mine.get("rev") == t.get("revision"):
-            continue  # decided already and nothing changed since
+        if mine.get("rev") == t.get("revision") and mine.get("kinds", kinds) == kinds:
+            continue  # decided already and nothing changed since (the ticket, or the kinds it accepts)
         facts = [facts_of(u) for u in pr_urls(root, t)]
         res = decide(root, t, facts, int(mine.get("back") or 0))
         if look and res["verdict"] == "leave" and tid not in own:  # bigger work: a second look (ORCH-175)
@@ -452,6 +463,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             actions.append(row)
             continue
         mine["rev"] = after.get("revision")
+        mine["kinds"] = kinds
         state[tid] = mine
         row["done"] = True
         actions.append(row)

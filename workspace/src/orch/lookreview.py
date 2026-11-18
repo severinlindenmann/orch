@@ -282,6 +282,8 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
     mine_r = rst.get(tid, {})
     if word == "back" and int(mine_r.get("back") or 0):
         word, why = "leave", f"sent back once already and still: {why}"
+    if word == "accept" and (blocked := reviewer.kind_block(root, tickets.load(root, tid))):
+        word, why = "leave", blocked  # ORCH-645: the kind changed while it waited, or the list did
     if word == "accept":
         missing = [p for p in pts if not p.lower().endswith(": shown")]
         if missing:  # a point that is not shown is a send-back, never an accept

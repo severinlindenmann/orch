@@ -209,3 +209,29 @@ def test_a_helper_cannot_give_finished_work_its_first_kind(proj, run, new_ticket
     tickets.set_status(proj, tid, "review", "human:tester")
     assert run("ticket", "kind", tid, "feature", "--by", "agent:claude")[0] == 2
     assert tickets.kind(tickets.load(proj, tid)) is None
+
+
+def test_a_kind_not_listed_never_reaches_the_second_look_whatever_the_reason(proj, run, new_ticket, facts):
+    assert run("config", "set", "workflow.reviewer_kinds", "none", "--by", "human:t")[0] == 0
+    tid = _finished(proj, run, new_ticket, "feature")
+    t = tickets.load(proj, tid)
+    res = reviewer.decide(proj, t, [])  # left for "no pull request", not for the kind
+    assert res["verdict"] == "leave" and res["kind_block"]
+    assert lookreview.triage(t, [], res, 0) is None
+
+
+def test_a_changed_list_decides_a_waiting_ticket_again(proj, run, new_ticket, facts, on):
+    tid = _finished(proj, run, new_ticket, "small_feature")
+    assert _verdict(proj)[0][0] == "leave"
+    assert reviewer.run(proj)["actions"] == []  # nothing changed: decided once
+    assert (
+        run("config", "set", "workflow.reviewer_kinds", "small_bug,small_feature", "--by", "human:t")[0] == 0
+    )
+    assert _verdict(proj)[0][0] == "accept"
+    assert tickets.load(proj, tid)["status"] == "done"
+
+
+def test_an_unknown_kind_a_person_wrote_does_not_crash_a_helper():
+    t = {"id": "t_x", "history": [], "kind": {"name": "future_kind", "by": "human:x"}}
+    assert not tickets.kind_by_person(t)
+    assert tickets._put_kind(t, "bug", "agent:claude") and tickets.kind(t) == "bug"
