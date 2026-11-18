@@ -418,7 +418,7 @@
  "services": {
   "acts": {},
   "agents_block": "skills/orch-services/AGENTS-block.md",
-  "background": false,
+  "background": true,
   "dashboard": {
    "icon": "box",
    "label": "Services",
