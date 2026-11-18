@@ -716,7 +716,7 @@ async function updStart(to) {
   updUi.from = was?.release || was?.label || null; updUi.phase = 'running'; updUi.reason = ''; render();
   try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
   let res = null;
-  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' || /^[1-9][0-9]{0,5}$/.test(String(to || '')) ? {to:String(to)} : {}})}); } catch (e) { /* the server may already be restarting */ }
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' || /^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(String(to || '')) ? {to:String(to)} : {}})}); } catch (e) { /* the server may already be restarting */ }
   if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }

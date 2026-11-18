@@ -204,7 +204,6 @@ _SWITCH_TO: str | None = (
 
 
 _SWITCH_REPO: str | None = None  # set with _SWITCH_TO when going back to a release: stay on this source
-_RELEASE_NO = re.compile(r"[1-9][0-9]{0,5}")
 
 
 def switch_to(build: str) -> None:
@@ -216,8 +215,11 @@ def switch_to(build: str) -> None:
         _SWITCH_TO, _SWITCH_REPO = BUILDS[build], None
         _unpin()
         return
-    if _RELEASE_NO.fullmatch(build or ""):
-        go_back_to(int(build))
+    from orch import updateinfo
+
+    v = updateinfo.as_version(build)
+    if v is not None and isinstance(build, str) and not build.startswith("0"):
+        go_back_to(v)
         return
     raise Refused("Choose release, development or a release number (for example: orch update --to 32).")
 
@@ -243,19 +245,21 @@ def pinned() -> dict | None:
         return None
     if not isinstance(d, dict):
         return None
-    sha, rel, left = _sha_or_none(d.get("sha")), d.get("release"), d.get("left")
-    if not sha or not isinstance(rel, int) or isinstance(rel, bool) or not isinstance(d.get("repo"), str):
+    from orch import updateinfo
+
+    sha, rel, left = _sha_or_none(d.get("sha")), updateinfo.as_version(d.get("release")), d.get("left")
+    if not sha or rel is None or not isinstance(d.get("repo"), str):
         return None
     try:
         if ref() != sha:
             return None
     except Refused:
         return None
-    ok_left = isinstance(left, int) and not isinstance(left, bool)
-    return {"release": rel, "sha": sha, "left": left if ok_left else rel, "repo": d["repo"]}
+    left = updateinfo.as_version(left)
+    return {"release": rel, "sha": sha, "left": left if left is not None else rel, "repo": d["repo"]}
 
 
-def go_back_to(number: int) -> None:
+def go_back_to(number: int | str) -> None:
     """`orch update --to <N>`: this update installs release N of the current install source (the commit of
     its release merge) and holds it there: later updates stay on N until a release newer than the one left
     is out (leave_pin_if_newer). A folder source has no releases to go back to."""
@@ -268,13 +272,13 @@ def go_back_to(number: int) -> None:
     line = updateinfo.release_line()
     if line is None:
         raise Refused("Could not read the list of releases (no network?). Try again in a moment.")
-    sha = dict(line).get(number)
+    sha = dict(line).get(updateinfo.as_version(number))
     if not sha:
         have = ", ".join(str(n) for n, _ in line[:5]) or "none"
         raise Refused(f"Release {number} was not found. The newest releases are: {have}.")
     current = updateinfo.installed()["release"]
     held = pinned()
-    left = max(x for x in (current, held and held["left"], number) if x)
+    left = max((x for x in (current, held and held["left"], number) if x), key=updateinfo.vkey)
     _SWITCH_TO, _SWITCH_REPO = sha, r
     _write_atomic(_pin_path(), json.dumps({"release": number, "sha": sha, "left": left, "repo": r}))
 
@@ -291,7 +295,7 @@ def leave_pin_if_newer() -> tuple[str, str | None]:
         return "free", None
     line = updateinfo.release_line()
     newest = line[0][0] if line else None
-    if newest is not None and newest > held["left"]:
+    if newest is not None and updateinfo.vkey(newest) > updateinfo.vkey(held["left"]):
         _SWITCH_TO, _SWITCH_REPO = RELEASE_REF, held["repo"]
         _unpin()
         return "leave", f"Release {newest} is out: leaving release {held['release']}."
@@ -2469,11 +2473,13 @@ def _stored_sha() -> str | None:
     return _sha_or_none(d.get("sha")) if isinstance(d, dict) else None
 
 
-def _save_installed(sha: str | None, release: int | None = None) -> None:
-    """The commit this install came from and, when known, its release number (what a person reads)."""
+def _save_installed(sha: str | None, release: int | str | None = None) -> None:
+    """The commit this install came from and, when known, its release (what a person reads: 33 or "33.1")."""
+    from orch import updateinfo
+
     data: dict = {"sha": _sha_or_none(sha)}
-    if isinstance(release, int) and not isinstance(release, bool) and release > 0:
-        data["release"] = release
+    if updateinfo.as_version(release) is not None:
+        data["release"] = updateinfo.as_version(release)
     _write_atomic(home() / "installed.json", json.dumps(data))
 
 

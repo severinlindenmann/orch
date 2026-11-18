@@ -31,6 +31,11 @@ test('a failed check after an update offers going back to the release before', (
   assert.equal(all(view, n => n.tag === 'input').length, 0);  // one click, no typed words
 });
 
+test('a fix release can be gone back to', () => {
+  const view = card({at:1, release:'33.1', back_to:33, failed:[{why:'x'}]});
+  assert.match(text(view), /After the update to 33\.1 x\. Go back to release 33\?/);
+});
+
 test('several problems are listed in one card', () => {
   const view = card({at:1, release:33, back_to:32, failed:[{why:'a does not answer'}, {why:'b failed.'}]});
   assert.match(text(view), /these do not work: a does not answer; b failed\./);
@@ -52,8 +57,8 @@ test('no card without a failed check, and no buttons in a copy', () => {
 
 test('Go back starts the normal update with that release number; Not now dismisses', () => {
   const back = between(app, "action === 'update-check-back'", "action === 'auto-update-note-ok'");
-  assert.match(back, /\^\[1-9\]\[0-9\]\{0,5\}\$/); assert.match(back, /updStart\(to\)/); assert.match(back, /#settings\/about/);
+  assert.match(back, /\^\[1-9\]\[0-9\]\{0,5\}\(\\\.\[1-9\]\[0-9\]\{0,3\}\)\?\$/); assert.match(back, /updStart\(to\)/); assert.match(back, /#settings\/about/);
   assert.match(app, /action === 'update-check-ok'\) \{ const r = await act\('update\.check\.dismiss'/);
-  assert.match(between(settings, 'async function updStart', 'window.addEventListener'), /\^\[1-9\]\[0-9\]\{0,5\}\$/);
+  assert.match(between(settings, 'async function updStart', 'window.addEventListener'), /\^\[1-9\]\[0-9\]\{0,5\}\(\\\.\[1-9\]\[0-9\]\{0,3\}\)\?\$/);
   assert.match(home, /backgroundBanner\(\), updateCheckCard\(\), autoUpdateNote\(\)/);
 });

@@ -18,7 +18,7 @@ except ImportError:  # standalone use without orch: nothing runs
 
 
 BUILDS = ("release", "development")
-_RELEASE_NO = re.compile(r"[1-9][0-9]{0,5}")  # "Go back to release N" (the card after a failed self-check)
+_RELEASE_NO = re.compile(r"[1-9][0-9]{0,5}(?:\.[1-9][0-9]{0,3})?")  # 33, or 33.1 (a fix release)  # "Go back to release N" (the card after a failed self-check)
 
 
 def target_ok(to) -> bool:

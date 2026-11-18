@@ -841,7 +841,7 @@ main.addEventListener('click', async event => {
   if (action === 'update-check-ok') { const r = await act('update.check.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
   if (action === 'update-check-back') {
     const to = String(control.dataset.to || '');
-    if (!/^[1-9][0-9]{0,5}$/.test(to)) return;
+    if (!/^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(to)) return;
     location.hash = '#settings/about';  // the same steps as any update: Downloading, Installing, Restarting, Done
     await updStart(to);
     return;

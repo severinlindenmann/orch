@@ -184,8 +184,8 @@ def card_path() -> Path:
 
 def after_update(
     root: Path,
-    old_release: int | None,
-    new_release: int | None,
+    old_release: int | str | None,
+    new_release: int | str | None,
     run: Runner = run_orch,
     dashboard=_dashboard,
 ) -> list[str]:
@@ -201,14 +201,17 @@ def after_update(
     if not failed:
         card_path().unlink(missing_ok=True)
         return [f"Self-check: all {len(results)} checks passed."] if results else []
-    back = old_release if (old_release and new_release and old_release < new_release) else None
+    from orch import updateinfo
+
+    old, new = updateinfo.as_version(old_release), updateinfo.as_version(new_release)
+    back = old if (old and new and updateinfo.vkey(old) < updateinfo.vkey(new)) else None
     addons._write_atomic(
         card_path(),
         json.dumps(
             {
                 "at": int(time.time()),
                 "root": str(Path(root).resolve()),
-                "release": new_release,
+                "release": new,
                 "back_to": back,
                 "failed": [{"name": r["name"], "why": r["why"]} for r in failed],
             }
@@ -230,11 +233,12 @@ def card() -> dict | None:
         return None
     if time.time() - d["at"] > KEEP_DAYS * 86400:
         return None
-    back = d.get("back_to")
+    from orch import updateinfo
+
     return {
         "at": d["at"],
-        "release": d.get("release") if isinstance(d.get("release"), int) else None,
-        "back_to": back if isinstance(back, int) and not isinstance(back, bool) and back > 0 else None,
+        "release": updateinfo.as_version(d.get("release")),
+        "back_to": updateinfo.as_version(d.get("back_to")),
         "failed": [
             {"name": str(f.get("name", ""))[:80], "why": str(f.get("why", ""))[:200]}
             for f in d["failed"][:10]

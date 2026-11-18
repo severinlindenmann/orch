@@ -10,7 +10,7 @@ from .store import Refused
 
 VIEW = (
     "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,"
-    "reviewDecision,reviews"
+    "reviewDecision,reviews,labels"
 )
 GONE = ("reference does not exist", "not found", "http 404")
 

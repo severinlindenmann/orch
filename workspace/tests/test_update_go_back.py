@@ -188,3 +188,30 @@ def test_release_line_from_a_git_source(monkeypatch, tmp_path):
     monkeypatch.delenv("ORCH_REPO", raising=False)
     monkeypatch.delenv("ORCH_REF", raising=False)
     assert updateinfo.release_line() == [(32, out[0]), (31, out[2])]
+
+
+# ---- fix releases (ORCH-552): release/part33.1 is "33.1", after 33 and before 34
+
+
+def test_fix_release_numbers_read_and_order():
+    msgs = ["Merge pull request #9 from x/release/part33.1-1118\n\nRelease 33.1: fix"]
+    assert updateinfo.release_in(msgs) == "33.1"
+    assert updateinfo.release_in(["Merge pull request #8 from x/release/part33-1118"]) == 33
+    assert sorted(["34", 33, "33.2", "33.1"], key=updateinfo.vkey) == [33, "33.1", "33.2", "34"]
+    assert updateinfo.as_version("33.0") is None and updateinfo.as_version(True) is None
+    assert updateinfo.label("33.1", SHA[33], "main") == "orch 33.1"
+
+
+def test_a_fix_release_ends_the_hold_and_can_be_gone_back_to(_setup):
+    addons.switch_to("32")
+    _installed_at(_setup, 32)
+    fix = "ab" * 20
+    _setup["line"] = [("33.1", fix), (33, SHA[33]), (32, SHA[32])]
+    how, text = addons.leave_pin_if_newer()
+    assert how == "leave" and "Release 33.1 is out" in text
+    addons._SWITCH_TO = addons._SWITCH_REPO = None
+    _setup["origin"] = {"repo": OFFICIAL, "ref": "main"}
+    (addons.home() / "installed.json").write_text(json.dumps({"sha": fix, "release": "33.1"}))
+    assert updateinfo.installed()["release"] == "33.1"
+    addons.switch_to("33")
+    assert addons.ref() == SHA[33] and addons.pinned()["left"] == "33.1"
