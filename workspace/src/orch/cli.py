@@ -347,7 +347,7 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "usage", "github", "manager", "triage"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "tokens", "github", "manager", "triage"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -439,7 +439,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x = sub.add_parser("work-check", parents=[common], help="say so when files changed without a ticket")
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
-    x = sub.add_parser("usage", parents=[common], help="tokens per model and per ticket (read-only)")
+    x = sub.add_parser("tokens", parents=[common], help="tokens per model and per ticket (read-only)")
     x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
     x = sub.add_parser("triage", parents=[common], help="list the tickets that need a look (read-only)")
     x.add_argument(
@@ -677,6 +677,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--take-back",
         metavar="QID",
         help='take back your question; the text is the reason: --take-back q3 "why"',
+    )
+    x.add_argument(
+        "--in-conversation",
+        metavar="QID",
+        help="the person answered in your window, not on the card: write their words on it and close it: "
+        '--in-conversation q3 "their words"',
     )
     x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
     x.add_argument(
@@ -964,7 +970,7 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "work-check":
         workcheck.run(root, args.json)
-    elif cmd == "usage":
+    elif cmd == "tokens":
         from orch import usage
 
         data = usage.workspace_usage(root, max(args.days, 1))
@@ -1310,6 +1316,23 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.log(root, args.id, args.text, by())
         h = history.lines(root, t)[-1]
         _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
+    elif cmd == "ask" and args.in_conversation:
+        if (
+            args.take_back
+            or args.phone
+            or args.option
+            or args.recommend
+            or args.kind
+            or args.action
+            or args.check
+            or (cli_review.has_card_flags(args))
+        ):
+            raise Refused(
+                "--in-conversation goes with the person's words only: "
+                "orch ask <ticket> --in-conversation q3 '<their words>'."
+            )
+        q = tickets.answered_in_conversation(root, args.id, args.in_conversation, args.text, by())
+        _out(args, q, f"Closed {q['id']}: answered in the conversation.")
     elif cmd == "ask" and args.take_back:
         if (
             args.phone
@@ -1713,6 +1736,10 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
             s_.reconfigure(encoding="utf-8")
+    if argv[:1] == ["protected-check"] and "--hook" in argv:  # a tool's before-tool hook: always exit 0
+        from orch import protected
+
+        return protected.hook_main(argv, watchdog)
     if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
         return workcheck.hook_main(argv, watchdog)
     show_all = "--help-all" in argv

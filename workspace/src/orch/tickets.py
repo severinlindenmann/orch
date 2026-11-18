@@ -38,10 +38,23 @@ STATUS_WORDS = {
 }
 
 
+def changes_asked(t: dict) -> bool:
+    """True while a person's Send back is still open: the ticket is back on the list (Ready) and a task
+    made from their words (origin change_request) is neither done nor set aside. Derived, never stored:
+    Undo and finishing the task clear it by themselves."""
+    return t.get("status") == "ready" and any(
+        c.get("origin") == "change_request" and not c.get("done") and not c.get("wont_do")
+        for c in t.get("checklist") or []
+    )
+
+
 def status_word(t: dict) -> str:
-    """The word for a ticket's status; a dropped ticket another ticket replaces says Superseded."""
+    """The word for a ticket's status; a dropped ticket another ticket replaces says Superseded; a ticket
+    a person sent back and that is not yet worked says Changes asked."""
     if t.get("status") == "dropped" and t.get("superseded_by"):
         return "Superseded"
+    if changes_asked(t):
+        return "Changes asked"
     return STATUS_WORDS.get(t.get("status"), str(t.get("status")))
 
 
@@ -1711,7 +1724,7 @@ def stuck_why(ticket: dict, now: datetime | None = None) -> str | None:
     for q in ticket.get("questions") or []:
         if not isinstance(q, dict) or q.get("answer") is not None or q.get("taken_back"):
             continue
-        sent = _utc(q.get("sent_at") or q.get("at"))
+        sent = _utc(q.get("asked_at") or q.get("sent_at") or q.get("at"))
         if sent is not None and utc_now - sent > limit:
             return "question"
     since = quiet_since(ticket, utc_now)
@@ -2492,9 +2505,60 @@ def check_done(
 
 
 WONT_DO_AGENT = (
-    "Only a person marks a step as won't do. Ask them: orch ask {tid} \"Mark step {cid} as won't do?\" "
-    "--option yes --option no --check {cid}"
+    "Only a person marks a step as won't do. Ask them, and say where the step would run if they say no: "
+    'orch ask {tid} "Mark step {cid} as won\'t do?" --option yes '
+    '--option "No, run it in CI" --check {cid}'
 )
+
+_WONT_DO_Q_RE = re.compile(r"\bwon'?t do\b|\bskip\b", re.IGNORECASE)
+_TEST_WORD_RE = re.compile(
+    r"\b(test|tests|tested|testing|pytest|try[- ]?out|trial|experiment)\b", re.IGNORECASE
+)
+
+
+def _guard_question(
+    root: Path, text: str, options: list[str], recommended: str | None, check: str | None
+) -> None:
+    """Two plain refusals (ORCH-332). A question never offers a protected (production) machine for a test.
+    A question that asks whether to skip a step must name where it would run if the answer is no (a bare
+    yes/no was once read as "run it now, on production")."""
+    parts = [text, *options, *([recommended] if recommended else [])]
+    machines = config.protected_machines(root)
+    if machines:
+        from orch import protected
+
+        names = protected.expand(machines)
+
+        def find(blob: str) -> str | None:
+            blob = blob.lower()
+            return next(
+                (
+                    n
+                    for n in sorted(names)
+                    if re.search(rf"(?<![a-z0-9.-]){re.escape(n)}(?![a-z0-9.-])", blob)
+                ),
+                None,
+            )
+
+        offered = find(" ".join(parts[1:]))  # an option or the recommended answer
+        mentioned = find(text) if _TEST_WORD_RE.search(text) else None
+        deploy = re.search(r"\b(release|deploy|deployment|ship)\b", text, re.IGNORECASE)
+        hit = mentioned or (offered if not deploy else None)
+        if hit:
+            raise Refused(
+                f"{hit} is a protected machine (production): a question never offers it for a test or as a "
+                "place to run something. Offer the CI job or a throwaway server, or skip the step."
+            )
+    if (
+        check is not None
+        and _WONT_DO_Q_RE.search(text)
+        and options
+        and all(o.strip().lower() in {"yes", "no", "y", "n"} for o in options)
+    ):
+        raise Refused(
+            "A question about skipping a step must say where it would run if the answer is no. "
+            'Use options such as yes and "No, run it in CI", not a bare yes and no.'
+        )
 
 
 def _refuse_if_wont_do(item: dict, tid: str, cid: str) -> None:
@@ -2520,22 +2584,43 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
         raise Refused("The reason is one line of at most 200 characters.")
 
     def op(t):
-        item = _item(t, cid)
-        if item.get("done"):
-            raise Refused(f"{cid} is already done. Open it again first.")
-        item["evidence"] = []
-        _clear_doing(item)
-        item["wont_do"] = True
-        if why:
-            item["reason"] = why
-        else:
-            item.pop("reason", None)
-        item.update({"by": by, "at": now(), "wont_by": by, "wont_at": now()})
-        history.created("steps", item)  # the step mark is core's own (like check_start)
-        add_history(t, by, f"Marked {cid} as won't do")
-        return item
+        return _mark_wont_do(t, cid, by, why)
 
     return apply_op(root, tid, op, by=by)
+
+
+def _mark_wont_do(t: dict, cid: str, by: str, why: str = "") -> dict:
+    """Inside an apply_op: mark step `cid` won't do for the person `by` (check_wont_do, or their yes to a
+    "won't do?" question tied to the step)."""
+    item = _item(t, cid)
+    if item.get("done"):
+        raise Refused(f"{cid} is already done. Open it again first.")
+    item["evidence"] = []
+    _clear_doing(item)
+    item["wont_do"] = True
+    if why:
+        item["reason"] = why
+    else:
+        item.pop("reason", None)
+    item.update({"by": by, "at": now(), "wont_by": by, "wont_at": now()})
+    history.created("steps", item)  # the step mark is core's own (like check_start)
+    add_history(t, by, f"Marked {cid} as won't do")
+    return item
+
+
+_YES = "yes"
+
+
+def _wont_do_yes(q: dict, ans: str) -> bool:
+    """A person's yes to exactly the question WONT_DO_AGENT tells helpers to ask ("Mark step c2 as won't do?",
+    tied to that step, with a yes option). ORCH-267: the yes marks the step; no second click. Only that exact
+    wording counts, so a helper cannot word another question so that its yes also drops a step."""
+    cid, text = q.get("check"), q.get("text")
+    if not isinstance(cid, str) or not isinstance(text, str):
+        return False
+    canon = re.compile(rf"Mark step {re.escape(cid)} as won['\u2019]t do\??", re.IGNORECASE)
+    options = [o.casefold() for o in q.get("options") or [] if isinstance(o, str)]
+    return bool(canon.fullmatch(text.strip())) and _YES in options and ans.strip().casefold() == _YES
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
@@ -3168,6 +3253,7 @@ def ask(
                 "A merge goes with a link card: orch ask --link TITLE --open <pull request> --merge."
             )
 
+    _guard_question(root, text, options, recommended, check)
     for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
         if _asks_for_secret(part):
             with contextlib.suppress(Exception):  # the attempt stays visible in the history
@@ -3316,6 +3402,53 @@ def take_back(root: Path, tid: str, qid: str, reason: str, by: str) -> tuple[dic
     return t, q, True
 
 
+IN_CONVERSATION = "Answered in the conversation: "
+IN_CONVERSATION_VIA = "conversation"
+
+
+def answered_in_conversation(root: Path, tid: str, qid: str, words: str, by: str) -> dict:
+    """The person answered the helper in its own window instead of on the open card (owner, ORCH-267): the
+    helper writes their words on the card and it closes. It is shown as theirs only through the helper: the
+    answer reads "Answered in the conversation: <words>", answered_by stays the helper, via is "conversation".
+    A card that does something on its answer (merge, start a run, release) is refused: the person answers that
+    one on the card. Returns the question."""
+    words = " ".join(str(words or "").split())
+    if not words:
+        raise Refused(
+            'Write down what the person said: orch ask <ticket> --in-conversation q3 "<their words>".'
+        )
+    if len(words) > MAX_TAKE_BACK_REASON:
+        raise Refused(f"Keep it to one short line (at most {MAX_TAKE_BACK_REASON} characters).")
+
+    if str(by).startswith("human:"):
+        raise Refused(
+            "Only the helper writes down an answer from the conversation; a person answers on the card."
+        )
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}. See the open ones: orch needs.")
+        refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        if q.get("action") or q.get("kind") not in (None, "plain"):
+            raise Refused(f"{qid} does something when it is answered: the person answers it on the card.")
+        at = now()
+        q["in_conversation"] = {"at": at, "by": by}
+        q["answer"], q["answered_by"], q["via"], q["answered_at"] = (
+            IN_CONVERSATION + words,
+            by,
+            IN_CONVERSATION_VIA,
+            at,
+        )
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, by, f"{qid} answered in the conversation: {words}")
+        return q
+
+    return apply_op(root, tid, op, by=by)[1]
+
+
 def answer(
     root: Path,
     tid: str,
@@ -3366,6 +3499,10 @@ def answer(
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
+        if _is_person(by) and _wont_do_yes(q, ans):
+            item = _item(ticket, q["check"])
+            if not item.get("done") and not item.get("wont_do"):
+                _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
     return apply_op(root, tid, op, by=by)
@@ -3652,6 +3789,30 @@ def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -
         net.write_json(root / ".orch" / "run" / "own-sessions.json", entries[-OWN_SESSIONS_MAX:])
 
 
+SESSIONS_KEPT = 10  # sessions remembered per ticket, the ones in use included (owner's choice, ORCH-363)
+
+
+def _keep_last_sessions(sessions: list) -> None:
+    """Forget the oldest replaced sessions so a ticket remembers at most SESSIONS_KEPT (the ones in use always
+    stay; only the ids are forgotten here: the tool's own conversation file is never touched)."""
+    earlier = [
+        (e.get("last_used") or "", -j, i)  # same time: the earlier place in a list is the newer one
+        for i, s in enumerate(sessions)
+        if isinstance(s, dict)
+        for j, e in enumerate(s.get("earlier") or [])
+        if isinstance(e, dict)
+    ]
+    room = max(0, SESSIONS_KEPT - len(sessions))
+    if len(earlier) <= room:
+        return
+    drop = {(i, -nj) for _, nj, i in sorted(earlier, reverse=True)[room:]}
+    for i, s in enumerate(sessions):
+        if isinstance(s, dict) and s.get("earlier"):
+            s["earlier"] = [e for j, e in enumerate(s["earlier"]) if (i, j) not in drop]
+            if not s["earlier"]:
+                del s["earlier"]
+
+
 def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
     """Remember the agent session for this agent and machine (updates last_used when it is known)."""
     if not valid_session_id(sid):
@@ -3668,7 +3829,7 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
                     # keep the replaced conversation so a person can read or continue it later
                     old = [e for e in s.get("earlier") or [] if isinstance(e, dict) and e.get("id") != sid]
                     old.insert(0, {"id": s["id"], "last_used": s.get("last_used")})
-                    s["earlier"] = old[:20]
+                    s["earlier"] = old
                 elif s.get("earlier"):
                     s["earlier"] = [e for e in s["earlier"] if e.get("id") != sid]
                 s["id"], s["last_used"] = sid, now()
@@ -3678,6 +3839,7 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
             if len(sessions) > 32:
                 sessions.sort(key=lambda s: s.get("last_used", ""))
                 del sessions[0 : len(sessions) - 32]
+        _keep_last_sessions(sessions)
 
     ticket = apply_op(root, tid, op, by=SYSTEM)[0]
     _record_own_session(root, tid, agent, sid, host)

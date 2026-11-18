@@ -327,12 +327,13 @@ function cardSetRow(row) {
   const api = typeof reviewApi === 'function' ? reviewApi() : null, o = {fileUrl:api ? api.fileUrl : () => ''};
   const pics = window.UI?.cardShown ? open.slice(0, 3).map(q => {
     const g = window.UI.cardShown({card:q.card, ticket:t.id}, o), tiles = g ? [...g.children] : [];
-    const pick = tiles.find(x => x.dataset.on === 'after') || tiles.find(x => x.dataset.on !== 'before') || tiles[0];  // the proposal, not how it is
+    if (open.length === 1) return tiles;  // one card: every picture side by side (Before and After, A and B), each captioned
+    const pick = tiles.find(x => x.dataset.on === 'after') || tiles.find(x => x.dataset.on !== 'before') || tiles[0];  // a set: the proposal of each card
     if (!pick) return null;
     const cap = pick.querySelector('b');
     if (cap) cap.textContent = clean(q.card.title || '');
     return pick;
-  }).filter(Boolean) : [];
+  }).flat().filter(Boolean) : [];
   const meta = [n === 1 ? '1 card to look at' : n + ' cards to look at', (names[0] && names[0] !== title ? names[0] : '') || (t && clean(t.title) !== title ? clean(t.title) : ''), typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
   const go = snapshot ? null : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + row.ticket + ':' + (open[0]?.id || row.answer?.question)), 'data-key':key + '-go'}, n === 1 ? 'Look at it' : 'Look at all ' + n);
   return h('div', {className:'card-row', 'data-key':key, 'data-need-row':row.id},
@@ -591,6 +592,19 @@ function loginBanner(stopped) {
     h('div', {className:'grow'}, h('strong', {}, stopped.length + ' things stopped working'), h('p', {}, (lead ? lead + '. ' : '') + names + '.')),
     snapshot ? null : h('a', {className:'btn primary sm', href:'#settings/agent', 'data-key':'login-see'}, 'See what to fix'));
 }
+// Tickets waiting in line for a helper, and why none starts now (ORCH-266: the computer looked busy and nothing said so).
+// No reason (only the short pause between two starts): no banner, it passes within seconds.
+function lineBanner() {
+  const line = snapshot ? null : state.start_line;
+  if (!line || !line.why || !array(line.waiting).length) return null;
+  const byId = new Map(tickets().map(t => [t.id, t])), list = array(line.waiting).map(id => byId.get(id)).filter(Boolean);
+  if (!list.length) return null;
+  const n = list.length, why = clean(line.why);
+  return h('div', {className:'banner attn', role:'status', 'data-key':'start-line'},
+    h('div', {className:'grow'}, h('strong', {}, 'No helper starts right now: ' + why + '.'),
+      h('p', {}, n + (n === 1 ? ' ticket waits' : ' tickets wait') + ' in line and ' + (n === 1 ? 'starts by itself' : 'start by themselves') + ' when that passes: ', loginTicketLinks(list))),
+    line.limit ? h('a', {className:'btn outline sm', href:'#settings/helper', 'data-key':'start-line-limit'}, 'Allow more helpers') : null);
+}
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further
 // question, result to check and change to add (one button each); the notes that need no answer are one quiet line.
 function home() {
@@ -602,7 +616,7 @@ function home() {
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const banner = [loginBanner(logins.stopped), backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
+  const banner = [loginBanner(logins.stopped), lineBanner(), backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
   // The number counts open questions and results to check only (ORCH-63); the list below also holds failed starts,
   // changes to add and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;

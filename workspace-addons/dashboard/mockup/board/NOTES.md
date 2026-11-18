@@ -134,6 +134,10 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - `../insights/insights.html`: Helper time, Cost, Tickets finished, Stuck now and a By person table on top.
 - `../ticket/ticket-change.html`, `ticket-question.html`: Time · cost in Properties (the helper's first-run estimate
   beside what it took so far).
+- ORCH-297: a ticket nobody started shows "Before Start: about 20-40 min · $2.00-$4.00" in the same Time · cost
+  line (the middle half of this workspace's finished tickets; none until 3 are finished). Insights gets one bar,
+  "This week against the budget" (`insights.html`, `#week`), read from the weekly limit set in Usage; no bar when
+  Usage has no weekly limit or reading.
 ## ORCH-240 (17 Nov, owner's words)
 
 - The filter "Group" is now "Part of", with "Any ticket" for no choice; the list column "Steps" is "Tasks".

@@ -10,9 +10,11 @@ description: Use when a ticket needs something to keep running in the background
 - Not for a one-off command (run it yourself) and not for repeating a ticket at a time (that is automation).
 
 A service is a command that should keep running: orch writes one small record for it and hands it to this computer's
-own service tool (on a Mac the login items list, on Linux the user's service manager). It runs under the person's own
+own service tool (on a Mac the login items list, on Linux the user's service manager, on Windows a task of the
+person's own in Task Scheduler, no admin rights). It runs under the person's own
 account, writes its output to a log file in this workspace and comes back after a crash. "Starts by itself" means it
-also starts after the computer restarts.
+also starts after the computer restarts. On Linux the first add or adopt also lets the person's services keep running
+after they log out (their own account only, no admin rights) and says so in one line.
 
 ## Recipes
 
@@ -34,6 +36,25 @@ itself.
     orch services stop <id>
     orch services restart <id>
     orch services auto <id> on      # or off
+
+**Health check and a service that keeps stopping** (one pass, then it ends)
+
+    orch services check
+
+Each service is checked: its process is alive and, when it has a port, it answers on 127.0.0.1. When a service failed
+3 times in 10 minutes (a failed check, or the computer started it again by itself) it is Failing, and orch asks ONE
+question on the ticket that made it (a service without a ticket gets its own ticket "Services: <name> keeps
+stopping"): Restart, Stop or Look into it, Restart recommended. Never a second question while that one is open; when
+the service runs fine again for 10 minutes, orch takes the question back.
+The person answers the question on the ticket. The next `check` reads the answer and acts on it once: Restart restarts
+the service, Stop stops it, Look into it changes nothing and only notes it on the ticket (no new question until the
+service runs fine again for 10 minutes and then fails again). `list --json` shows `health`, `failing` and the open
+`question` on each service.
+
+To check regularly, the person sets up a repeat once (do not set it up yourself; tell them these two lines):
+
+    orch automation script add services-check -- orch services check
+    orch automation repeat <ticket> "every 5 minutes" --script services-check
 
 **Read the log** (the last 20 lines; secrets are shown as ••••••)
 

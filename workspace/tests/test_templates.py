@@ -115,6 +115,50 @@ def test_python_template_commands_use_python3(tmp_path):
     assert m["start"].startswith("python3 ") and m["test"].startswith("python3 ")
 
 
+def _evaluated_union_hints(src: str) -> list[int]:
+    """Lines whose hint uses `X | Y` and is evaluated at import (no `from __future__ import annotations`)."""
+    import ast
+
+    tree = ast.parse(src)
+    if any(
+        isinstance(n, ast.ImportFrom)
+        and n.module == "__future__"
+        and any(a.name == "annotations" for a in n.names)
+        for n in tree.body
+    ):
+        return []
+    hints = [n.annotation for n in ast.walk(tree) if isinstance(n, (ast.arg, ast.AnnAssign)) and n.annotation]
+    hints += [
+        n.returns
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.returns
+    ]
+    return sorted(
+        {
+            h.lineno
+            for h in hints
+            for b in ast.walk(h)
+            if isinstance(b, ast.BinOp) and isinstance(b.op, ast.BitOr)
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("stack", "store"), [(s, st) for s in ("python", "docker") for st in templates.STORES]
+)
+def test_python_templates_import_on_python_3_9(tmp_path, stack, store):
+    # a host without containers runs the app and its test with the system python3 (macOS: 3.9);
+    # `dict | None` in a hint is a TypeError there unless the hints stay unevaluated
+    folder = tmp_path / "py-app"
+    templates.create(stack, store, folder)
+    bad = {
+        str(p.relative_to(folder)): ln
+        for p in folder.rglob("*.py")
+        if (ln := _evaluated_union_hints(p.read_text()))
+    }
+    assert not bad, f"add `from __future__ import annotations`: {bad}"
+
+
 def test_docker_template_files(tmp_path):
     folder = tmp_path / "dock-app"
     templates.create("docker", "json", folder)

@@ -88,10 +88,8 @@ def start_runner(root: Path) -> None:
     d.mkdir(parents=True, exist_ok=True)
     argv = [sys.executable, "-I", "-P", "-m", "orch_pull_requests", "queue", "run", "--root", str(root)]
     with open(d / "runner.log", "a", encoding="utf-8") as log:
-        subprocess.Popen(
-            argv, cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-            start_new_session=os.name != "nt", **procs.background_popen_kwargs(),
-        )  # fmt: skip
+        # background_popen_kwargs sets stdin and the own session (or the hidden Windows console): never pass them here too
+        subprocess.Popen(argv, cwd=root, stdout=log, stderr=log, **procs.background_popen_kwargs())
 
 
 def _github():
@@ -162,6 +160,47 @@ def _tend(root: Path) -> dict:
     return switch.tend(root, GitHub(), log=lambda s: print(s, flush=True), start=start_runner)
 
 
+def _round(root: Path) -> None:
+    """One round of the background watcher: read the linked pull requests (the Pull requests page and the live
+    state on tickets), then the Merge when green and failed-checks round. A failed read never stops that round."""
+    from . import poll
+
+    try:
+        got = poll.once(root)
+        if got["refreshed"] or got["errors"]:
+            print(f"Pull requests: {json.dumps(got)}", flush=True)
+    except Exception as e:  # noqa: BLE001 - one bad read never ends the round
+        print(f"Pull requests: {e.__class__.__name__}: {str(e)[:200]}", flush=True)
+    _watch_round(root)
+
+
+def _page_cmd(args, root: Path) -> int:
+    """poll, view, act refresh: the Pull requests page and the live pull request state on tickets."""
+    from . import poll
+
+    if args.cmd == "view":
+        from .view import build
+
+        print(json.dumps(build(root)))
+        return 0
+    if args.cmd == "poll":
+        got = poll.once(root)
+        text = f"Read {len(got['repos'])} repositories; {len(got['refreshed'])} tickets updated."
+        for repo, why in got["errors"].items():
+            text += f"\n{repo}: {why}"
+        print(json.dumps(got) if args.json else text)
+        return 0
+    want = args.target.upper()
+    t = next(
+        (x for x in poll.tickets(root) if x["id"] == args.target or str(x.get("key") or "").upper() == want),
+        None,
+    )
+    if t is None:
+        raise Refused(f"There is no ticket {args.target}.")
+    print(json.dumps(poll.refresh_one(root, t, os.environ.get(poll.CACHED_ENV) == "1")))
+    return 0
+
+
 def _checks_tend(root: Path) -> dict:
     from . import checks
     from .github import GitHub
@@ -222,7 +261,7 @@ def _switch_cmd(args, root: Path) -> int:
         print(json.dumps(data) if getattr(args, "json", False) else text, flush=True)
 
     if args.cmd == "watch":
-        return service.watch(root, lambda: _watch_round(root), log=lambda s: print(s, flush=True))
+        return service.watch(root, lambda: _round(root), log=lambda s: print(s, flush=True))
     if args.cmd == "tend":
         got = _tend(root)
         n = len(got["added"])
@@ -271,6 +310,13 @@ def main(argv: list[str] | None = None) -> int:
         ("status", "is it running?"),
     ):
         sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    for name, text in (("poll", "read the linked pull requests now"), ("view", "the Pull requests page")):
+        sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    ac = sub.add_parser("act", help="what the ticket page's Refresh does (run through orch, which writes)")
+    ac.add_argument("verb", choices=["refresh"])
+    ac.add_argument("--by", help="who asked (recorded on the ticket by orch)")
+    ac.add_argument("--json", action="store_true")
+    ac.add_argument("target", help="ticket id or key")
     fc = sub.add_parser(
         "failed-checks", help="rerun a cancelled or timed-out job once, wake the helper on a failure"
     )
@@ -281,6 +327,8 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         root = _root(getattr(args, "root", None))
+        if args.cmd in ("poll", "view", "act"):
+            return _page_cmd(args, root)
         if args.cmd == "failed-checks":
             return _checks_cmd(args, root)
         if args.cmd != "queue":
@@ -321,6 +369,8 @@ def main(argv: list[str] | None = None) -> int:
         return _wait(root, url, args.max_wait * 60, args.json)
     except Refused as e:
         print(str(e), file=sys.stderr)
+        if getattr(args, "json", False):  # the add-on CLI contract: with --json the refusal is on stdout too
+            print(json.dumps({"error": str(e)}))
         return 2
     except Exception as e:  # the core's Refused (ticket not found ...) is plain words too
         if e.__class__.__name__ == "Refused":

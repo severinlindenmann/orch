@@ -50,6 +50,12 @@ function reviewApi() {
         ? '/view/' + encodeURIComponent(c.ticket) + '/' + f[1] + '/' + f[2].split('/').map(encodeURIComponent).join('/')
         : '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=' + f[1] + '&n=' + encodeURIComponent(f[2]);
     },
+    // "Add note" on the Comment sheet: the words go to the ticket's helper (queued if none is running); no verdict, the card stays.
+    note: async ({ticket, text}) => {
+      if (snapshot || typeof ticket !== 'string' || !String(text || '').trim()) return {ok:false, error:{code:'refused', message:'Write your note first.'}};
+      const r = await act('run.send', {ticket, text:String(text).trim()});
+      return r.ok ? {ok:true} : {ok:false, error:{code:'error', message:String(r.text || 'Could not save the note.').slice(0, 300)}};
+    },
     answer: async ({id, digest, verdict, picked, note}) => {
       const m = REVIEW_ID.exec(String(id || ''));
       if (!m) return {ok:false, error:{code:'not_found', message:'That card is not here any more.'}};

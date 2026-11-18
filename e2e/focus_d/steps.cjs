@@ -105,6 +105,506 @@ async function previewSwitch(page, dash) {
   await noSideways(page);
 }
 
+// Step 13. Preview on without the switch's clicks (step 3 clicks them): the page's state says the switch is on.
+async function previewOn(page) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    route.fulfill({ response: res, json: st });
+  });
+}
+
+// Step 9. The test dashboard has no running helpers, so the step gives the page draft D's 24 sessions (3 need you,
+// 1 pinned, 3 working, 9 in line, 8 idle) as runs of extra tickets in its state, with the Preview switch on. Pinning is
+// kept in the browser until the wall stores it. Everything else is the real page: the bar, its fold, list and search.
+const BAR_SESSIONS = [
+  ['wait', 'ORCH-238', 'Add files and notes to a ticket'], ['wait', 'ORCH-201', 'Send the weekly summary'],
+  ['wait', 'ORCH-214', 'New price list for the shop'], ['run', 'ORCH-228', 'Pages change without a full reload', 'pin'],
+  ['run', 'ORCH-232', 'Insights and usage counts'], ['run', 'ORCH-235', 'Check the links on the help pages'],
+  ['run', 'ORCH-240', 'Tidy the release notes'],
+  ...['Search in the help pages', 'Export tickets to a table', 'Faster first page', 'Monthly report for sales',
+    'Tidy the settings page', 'Spelling check in mails', 'New logo on every page', 'Calendar for the team',
+    'Backup check every night'].map((t, i) => ['queue', 'ORCH-' + (205 + 2 * i), t]),
+  ...['Survey for customers', 'Opening hours page', 'Newsletter for autumn', 'Price page for schools',
+    'Photo page for the shop', 'Welcome mail', 'Order form', 'Holiday plan'].map((t, i) => ['idle', 'ORCH-' + (241 + i), t]),
+];
+async function liveBarState(page) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const HELPER = { wait: 'you', run: 'working', idle: 'idle' };
+  await page.addInitScript(() => { try { localStorage.setItem('orch.live.pins', JSON.stringify(['t_bar228'])); } catch (e) { /* none */ } });
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    const base = (st.tickets || [])[0] || {};
+    const extra = BAR_SESSIONS.map(([s, key, title]) => ({ ...base, id: 't_bar' + key.slice(5), key, title,
+      status: 'active', questions: [], checks: [], sessions: [] }));
+    st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_bar')), ...extra];
+    st.runs = { ...(st.runs || {}) };
+    BAR_SESSIONS.forEach(([s, key]) => {
+      st.runs['t_bar' + key.slice(5)] = s === 'queue' ? { running: false, hold: 'Waits for a free place' }
+        : { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } };
+    });
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    route.fulfill({ response: res, json: st });
+  });
+}
+
+// Step 13 until the layer exists (crew task layer replaces the stand-in with the real layer): a small open dialog with
+// a typed, unsent message in the keep place. Page changes by real links, Back, Forward, a deep link and a reload.
+async function staysOpen(page, dash) {
+  const go = async hash => {
+    await page.locator(`a[href="${hash}"]:visible`).first().click();
+    await page.waitForFunction(h => location.hash === h, hash, { timeout: 10000 });
+    await mainHasText(page);
+  };
+  const kept = async where => {
+    const st = await page.evaluate(() => ({ mark: window.softMark, open: !!document.querySelector('#keep dialog[open]'),
+      typed: document.getElementById('soft-typed')?.value, hash: location.hash }));
+    if (st.mark !== 'same page') throw new Error(`${where}: the page loaded again`);
+    if (!st.open) throw new Error(`${where}: the dialog in the keep place closed`);
+    if (st.typed !== 'Not sent yet') throw new Error(`${where}: the typed text is gone`);
+    return st.hash;
+  };
+  await previewOn(page);
+  await page.goto(dash + '/#tickets');  // a deep link
+  await mainHasText(page);
+  // the steps share one browser: start with the layer at the bar, not where step 10 left it (it is kept per browser)
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.reload();  // reload keeps the page
+  await mainHasText(page);
+  if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('reload left the page');
+  await page.evaluate(() => {
+    window.softMark = 'same page';
+    const d = document.createElement('dialog'), t = document.createElement('textarea'), a = document.createElement('a');
+    d.style.cssText = 'position:fixed;inset:35% 8px auto auto;margin:0;width:200px';
+    t.id = 'soft-typed'; t.setAttribute('aria-label', 'Message');
+    a.href = '/#tickets'; a.id = 'soft-full-link'; a.textContent = 'Tickets';
+    d.append(t, a);
+    window.orchKeep.mount(d);
+    d.show();
+  });
+  await page.fill('#soft-typed', 'Not sent yet');
+  await go('#home');
+  await kept('Home');
+  await go('#review');
+  await kept('Review');
+  await page.click('#soft-full-link');  // "/#tickets" would load the page again without the soft change
+  await page.waitForFunction(() => location.hash === '#tickets', null, { timeout: 10000 });
+  await mainHasText(page);
+  await kept('Tickets');
+  await page.goBack();
+  if (await kept('Back') !== '#review') throw new Error('Back did not go to Review');
+  await page.goBack();
+  if (await kept('Back twice') !== '#home') throw new Error('Back twice did not go to Home');
+  await page.goForward();
+  if (await kept('Forward') !== '#review') throw new Error('Forward did not go to Review');
+  await mainHasText(page);
+  await noSideways(page);
+}
+
+// The bar is one row that never wraps and stays inside the page.
+async function barIsOneRow(page) {
+  const r = await page.evaluate(() => {
+    const bar = document.getElementById('live-bar'), sw = bar && bar.querySelector('.lbar-sw');
+    if (!bar) return { missing: true };
+    const tops = [...sw.children].map(c => Math.round(c.getBoundingClientRect().top));
+    const box = bar.getBoundingClientRect();
+    return { rows: new Set(tops).size, cut: sw.scrollWidth - sw.clientWidth, h: box.height, bottom: box.bottom, vh: innerHeight };
+  });
+  if (r.missing) throw new Error('the bar is not under the page');
+  if (r.rows > 1 || r.cut > 1) throw new Error(`the bar wraps or cuts (${r.rows} rows, ${r.cut} px cut)`);
+  if (r.h > 64) throw new Error(`the bar is ${r.h} px high, more than one row`);
+  if (r.bottom > r.vh + 1) throw new Error('the bar is below the screen');
+}
+
+// The new page with Preview on, for the steps after step 3: the same dressing of the page's state as previewSwitch
+// (the live-session add-on and the setting), plus the one ticket of the test workspace marked as having a working helper.
+async function livePreview(page) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    const first = (st.tickets || [])[0];
+    if (first) st.runs = { ...(st.runs || {}), [first.id]: { running: true, state: 'alive' } };
+    if (first && !first.key) first.key = 'ORCH-238';  // the test ticket has no key; the pane shows the key, never the raw id
+    route.fulfill({ response: res, json: st });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+}
+
+// Step 10: the layer in every place, kept across a page change and a reload.
+async function layer(page, dash, width) {
+  const phone = width <= 720;
+  const panel = m => `#live-dock[data-mode="${m}"] .live-panel[data-mode="${m}"]`;
+  const press = async key => { await page.keyboard.press(key); await page.waitForTimeout(50); };
+  await livePreview(page);
+  // start with nothing kept, without an extra page load (the reload below must keep what this step chose)
+  await page.addInitScript(() => { try { if (!sessionStorage.getItem('fd10')) { localStorage.removeItem('orch.live.layer'); sessionStorage.setItem('fd10', '1'); } } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  // the bar: the bar task's #live-bar when it is there, else the layer's own minimal bar
+  await page.waitForSelector('#live-dock[data-mode="bar"] :is(#live-bar, [data-key="live-bar"])', { timeout: 10000 });
+  if (await page.$('[data-key="live-panel"]')) throw new Error('the layer opened by itself');
+  // open from the bar: at the bottom, the page stays usable behind it
+  await page.click('[data-key="live-open"]');
+  await page.waitForSelector(panel('bottom'), { timeout: 5000 });
+  await page.waitForSelector('[data-key="live-pane"] [data-key="live-open-ticket"]');
+  if (await page.$eval('[data-key="live-pane"] .live-ph', el => /\bt_[A-Za-z0-9]+/.test(el.textContent))) throw new Error('the pane shows the raw ticket id');
+  if (!await page.$eval('[data-key="live-pane"] .key', el => el.textContent.trim() === 'ORCH-238')) throw new Error('the pane does not show the ticket key');
+  // the page changes, the layer stays (the same element, never painted again)
+  await page.$eval('[data-key="live-panel"]', el => { el.dataset.kept = '1'; });
+  for (const hash of ['#tickets', '#review', '#home']) {
+    await page.evaluate(h => { location.hash = h; }, hash);
+    await mainHasText(page);
+  }
+  if (!await page.$('[data-key="live-panel"][data-kept="1"]')) throw new Error('the layer did not stay open when the page changed');
+  // place: right (a phone has no right; it stays at the bottom)
+  await page.click('[data-key="live-place"]');
+  await page.waitForSelector('[data-key="live-place-menu"]');
+  const right = await page.$('[data-key="live-place-menu"] [data-mode="right"]');
+  if (phone && right) throw new Error('a phone offers the right edge');
+  if (!phone) {
+    await right.click();
+    await page.waitForSelector(panel('right'), { timeout: 5000 });
+    const [box, main] = await page.evaluate(() => [document.querySelector('.live-panel').getBoundingClientRect().left,
+      document.querySelector('#content').getBoundingClientRect().right]);
+    if (main > box + 1) throw new Error('the right panel covers the page');
+  } else await press('Escape');
+  const docked = phone ? 'bottom' : 'right';
+  // full screen; Esc goes back one step at a time: full screen, the panel, the bar
+  await page.click('[data-key="live-full"]');
+  await page.waitForSelector(panel('full'), { timeout: 5000 });
+  // the page behind full screen takes no keyboard (ORCH-340)
+  if (!(await page.evaluate(() => document.getElementById('content').inert))) throw new Error('the page behind full screen still takes Tab');
+  await press('Escape');
+  await page.waitForSelector(panel(docked), { timeout: 5000 });
+  if (await page.evaluate(() => document.getElementById('content').inert)) throw new Error('the page stayed inert after full screen');
+  await press('Escape');
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  if (await page.$('[data-key="live-panel"]')) throw new Error('Esc left the panel open');
+  // Open brings it back where it was; minimise leaves only the bar
+  await page.click('[data-key="live-open"]');
+  await page.waitForSelector(panel(docked), { timeout: 5000 });
+  await page.click('[data-key="live-min"]');
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  // closed to the side: a slim edge; it opens where it was last
+  await page.click('[data-key="live-place"]');
+  await page.click('[data-key="live-place-menu"] [data-mode="side"]');
+  await page.waitForSelector('#live-dock[data-mode="side"] [data-key="live-edge"]', { timeout: 5000 });
+  if (await page.isVisible('#live-dock :is(#live-bar, [data-key="live-bar"])')) throw new Error('the bar still shows with the layer closed to the side');
+  await page.click('[data-key="live-edge"]');
+  await page.waitForSelector(panel(docked), { timeout: 5000 });
+  // size by keyboard, then a reload: same place, same size
+  await page.focus('[data-live-grip]');
+  await press(phone ? 'ArrowUp' : 'ArrowLeft');
+  await press(phone ? 'ArrowUp' : 'ArrowLeft');
+  const size = () => page.$eval('.live-panel', (el, w) => Math.round(w ? el.offsetWidth : el.offsetHeight), !phone);
+  const before = await size();
+  await page.reload();
+  await mainHasText(page);
+  await page.waitForSelector(panel(docked), { timeout: 10000 });
+  const after = await size();
+  if (Math.abs(after - before) > 1) throw new Error(`the size was not kept (${before} px before the reload, ${after} px after)`);
+  // the picture: the place menu open, as in draft D
+  await page.click('[data-key="live-place"]');
+  await page.waitForSelector('[data-key="live-place-menu"]');
+  await noSideways(page);
+}
+
+// Step 12: the split. The test workspace has one ticket, so the step uses the bar's 24 sessions of draft D (step 9).
+// Every pane has pin, add beside, place, minimise and close; narrow panes keep pin and place in More (draft D).
+// Step 26 (ORCH-363): the History tab of a pane lists the ticket's earlier sessions (the last 10, newest first) and
+// Reopen starts the helper on one. The list comes from GET /api/sessions/<ticket>; here it is fake data, and the
+// Reopen action is caught before orch so nothing starts. The ticket has no working helper, so Reopen can be pressed.
+async function history(page, dash) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  let tid = '', st0 = null;
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    const first = (st.tickets || [])[0];
+    if (first) { tid = first.id; if (!first.key) first.key = 'ORCH-189'; st0 = st; }  // a full state, for the fake Reopen answer
+    route.fulfill({ response: res, json: st });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+  const at = h => new Date(Date.now() - h * 3600e3).toISOString();
+  const rows = [
+    { id: 's-now', label: 'Helper', last_used: at(1), title: 'Write the summary from the survey answers', turns: 24, current: true, reopenable: false },
+    { id: 's-mon', label: 'Helper', last_used: at(30), title: 'Read the survey answers and group them', turns: 12, current: false, reopenable: true },
+    { id: 's-old', label: 'Helper', last_used: at(200), title: 'First draft of the newsletter', turns: 1, current: false, reopenable: true },
+    { id: 's-gone', label: 'Helper', last_used: at(400), title: '', turns: 0, current: false, reopenable: false },
+  ];
+  await page.route(/\/api\/sessions\/t_[a-z0-9]+$/, route => route.fulfill({ json: { available: true, sessions: rows } }));
+  let asked = null;
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'session.reopen') return route.continue();
+    asked = body.args;
+    route.fulfill({ json: st0 });
+  });
+  await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
+  await page.evaluate(id => window.LiveLayer.open(id), tid);
+  const pane = '#live-dock .live-pane';
+  // History is a button in the pane header; a narrow pane (the phone) has it in its More menu
+  const toggle = async (dom = false) => {
+    await page.waitForSelector(pane + ' :is([data-key="live-history"], [data-key="live-pane-more"])', { timeout: 5000 });
+    const press = sel => dom ? page.$eval(sel, el => el.click()) : page.click(sel);
+    if (await page.$(pane + ' [data-key="live-history"]')) return press(pane + ' [data-key="live-history"]');
+    await press(pane + ' [data-key="live-pane-more"]');
+    await page.waitForSelector(pane + ' [data-key="live-history-item"]', { timeout: 5000 });
+    await press(pane + ' [data-key="live-history-item"]');
+  };
+  await toggle();
+  await page.waitForSelector(pane + ' .live-hist-row', { timeout: 5000 });
+  if (await page.$(pane + ' [data-key="live-history"][aria-pressed="false"]')) throw new Error('History is not marked as open');
+  if (await page.$(pane + ' [data-key="live-more-menu"]')) throw new Error('the More menu stayed open after History');
+  const seen = await page.$$eval(pane + ' .live-hist-row', els => els.map(el => ({
+    t: el.querySelector('.live-hist-t').textContent, f: el.querySelector('.live-hist-f').textContent,
+    use: !!el.querySelector('.chip'), reopen: !!el.querySelector('button'), off: !!el.querySelector('button[disabled]') })));
+  if (seen.length !== 4) throw new Error(`the History tab shows ${seen.length} sessions, not 4`);
+  if (!seen[0].use || seen[0].reopen) throw new Error('the session in use is not marked In use');
+  if (!seen[1].reopen || !seen[2].reopen || seen[1].off) throw new Error('an earlier session has no Reopen');
+  if (seen[3].reopen || !/Not on this computer/.test(seen[3].f)) throw new Error('a session that is not on this computer offers Reopen');
+  if (seen[2].f.indexOf('1 message ') !== 0) throw new Error(`the plural is wrong: ${seen[2].f}`);
+  await noSideways(page);
+  await page.click(pane + ' .live-hist-row:nth-child(2) [data-live-hist="reopen"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock .live-hist'), null, { timeout: 5000 });
+  if (!asked || asked.session !== 's-mon' || asked.ticket !== tid) throw new Error('Reopen did not ask orch for that session: ' + JSON.stringify(asked));
+  // open it again for the picture (the "continues that conversation" toast may sit over the pane's corner)
+  await toggle(true);
+  await page.waitForSelector(pane + ' .live-hist-row', { timeout: 5000 });
+}
+
+async function split(page, dash, width) {
+  const phone = width <= 720;
+  const panes = () => page.$$eval('#live-dock .live-pane', els => els.map(el => {
+    const r = el.getBoundingClientRect();
+    return { key: el.dataset.session, on: el.dataset.on !== undefined, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+  }));
+  const count = async n => {
+    await page.waitForFunction(k => document.querySelectorAll('#live-dock .live-pane').length === k, n, { timeout: 5000 });
+    return panes();
+  };
+  const inPane = (key, what) => `#live-dock .live-pane[data-session="${key}"] [data-key="${what}"]`;
+  // pin, add beside, place, minimise and close on every pane (pin and place through More when the pane is narrow)
+  const controls = async () => {
+    for (const p of await panes()) {
+      const has = async what => !!await page.$(inPane(p.key, what));
+      const more = await has('live-pane-more');
+      if (!more && !(await has('live-pin') && await has('live-pane-place'))) throw new Error(`the pane of ${p.key} has no pin or place`);
+      if (!phone && !await has('live-beside')) throw new Error(`the pane of ${p.key} has no add beside`);
+      if (!await has('live-min') || !await has('live-close')) throw new Error(`the pane of ${p.key} has no minimise or close`);
+      if (more) {
+        await page.click(inPane(p.key, 'live-pane-more'));
+        await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-pin"]', { timeout: 5000 });
+        if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bottom"]')) throw new Error(`More of ${p.key} has no place`);
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('[data-key="live-more-menu"]', { state: 'detached', timeout: 5000 });
+      }
+    }
+  };
+  const sideBySide = (list, stacked) => list.every((p, i) => !i || (stacked ? p.y > list[i - 1].y && p.x === list[0].x : p.x > list[i - 1].x && p.y === list[0].y));
+  await liveBarState(page);
+  await page.goto(dash + '/#home');
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.reload();
+  await mainHasText(page);
+  await page.waitForSelector('#live-dock[data-mode="bar"] #live-bar [data-key="live-open"]', { timeout: 10000 });
+  await page.click('[data-key="live-open"]');
+  let list = await count(1);
+  await controls();
+  if (phone) {
+    // a phone shows one session at a time: no add beside; a second session from the bar takes the pane
+    if (await page.$('[data-key="live-beside"]')) throw new Error('a phone offers add beside');
+    await page.evaluate(() => window.LiveLayer.beside('t_bar232'));
+    list = await count(1);
+    if (list[0].key !== 't_bar232') throw new Error('on a phone the second session does not take the pane');
+  } else {
+    // Add beside twice: two, then three panes next to each other; the third is the most
+    await page.click('[data-key="live-beside"]');
+    list = await count(2);
+    if (!sideBySide(list)) throw new Error('two panes do not sit next to each other');
+    await page.click(inPane(list[0].key, 'live-beside'));
+    list = await count(3);
+    if (!sideBySide(list)) throw new Error('three panes do not sit next to each other');
+    if (!list[2].on || list.filter(p => p.on).length !== 1) throw new Error('the new pane is not the selected one');
+    if (!await page.$eval(inPane(list[0].key, 'live-beside'), b => b.disabled)) throw new Error('add beside still works with three panes');
+    await controls();
+  }
+  // the split stays while the page changes (the same element, never painted again)
+  await page.$eval('[data-key="live-panel"]', el => { el.dataset.kept = '1'; });
+  for (const hash of ['#tickets', '#review', '#home']) {
+    await page.evaluate(h => { location.hash = h; }, hash);
+    await mainHasText(page);
+  }
+  if (!await page.$('[data-key="live-panel"][data-kept="1"]')) throw new Error('the split did not stay when the page changed');
+  if ((await panes()).length !== list.length) throw new Error('the split lost a pane when the page changed');
+  // pin one pane
+  const one = list[0].key;
+  if (await page.$(inPane(one, 'live-pane-more'))) {
+    await page.click(inPane(one, 'live-pane-more'));
+    await page.click('[data-key="live-more-menu"] [data-key="live-pin"]');
+  } else await page.click(inPane(one, 'live-pin'));
+  await page.waitForFunction(k => JSON.parse(localStorage.getItem('orch.live.pins') || '[]').includes(k), one, { timeout: 5000 });
+  if (!await page.evaluate(k => window.LiveLayer.pins.includes(k), one)) throw new Error('the pin was not kept');
+  // place from a pane: on the right the panes stack; then back to the bottom (a phone has no right)
+  const place = async mode => {
+    if (await page.$(inPane(one, 'live-pane-more'))) await page.click(inPane(one, 'live-pane-more'));
+    else await page.click(inPane(one, 'live-pane-place'));
+    const opt = await page.$(`#live-dock .live-pane .live-pop [data-live="place"][data-mode="${mode}"]`);
+    if (!opt) return false;
+    await opt.click();
+    await page.waitForSelector(`#live-dock[data-mode="${mode}"] .live-panel[data-mode="${mode}"]`, { timeout: 5000 });
+    return true;
+  };
+  if (await place('right') === phone) throw new Error(phone ? 'a phone offers the right edge' : 'the pane has no right place');
+  if (!phone) {
+    if (!sideBySide(await panes(), true)) throw new Error('on the right the panes are not stacked');
+    await place('bottom');
+  } else await page.keyboard.press('Escape');
+  // minimise to the bar; Open brings the split back
+  await page.click(inPane(one, 'live-min'));
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  await page.click('[data-key="live-open"]');
+  list = await count(list.length);
+  // close one pane: the others take its room
+  if (!phone) {
+    const room = list.reduce((a, p) => a + p.w, 0), gone = list[1].key;
+    await page.click(inPane(gone, 'live-close'));
+    const left = await count(2);
+    if (left.some(p => p.key === gone)) throw new Error('the closed pane is still there');
+    const now = left.reduce((a, p) => a + p.w, 0);
+    if (Math.abs(now - room) > 2) throw new Error(`the others did not take the room (${room} px before, ${now} px after)`);
+    // the picture: three panes again, as in draft D
+    await page.click(inPane(left[0].key, 'live-beside'));
+    await count(3);
+  } else {
+    await page.click(inPane(list[0].key, 'live-close'));
+    await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+    await page.click('[data-key="live-open"]');
+    await count(1);
+  }
+  await page.waitForTimeout(300);
+  await noSideways(page);
+}
+
+// Step 6: the Focus button on the ticket page and on every ticket row, and Open ticket back from the session. The test
+// workspace has one ticket, so the step adds four with the run states the button speaks for (Preview on).
+const FOCUS_TICKETS = [['run', 'ORCH-189', 'New price list for the shop', 'Watch'], ['wait', 'ORCH-190', 'Send the weekly summary', 'Answer'],
+  ['idle', 'ORCH-191', 'Tidy the release notes', 'Open'], ['none', 'ORCH-192', 'Opening hours page', 'Start']];
+async function focusButton(page, dash, width) {
+  const phone = width <= 720;
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const HELPER = { wait: 'you', run: 'working', idle: 'idle' };
+  const id = key => 't_fb' + key.slice(5);
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    const base = (st.tickets || [])[0] || {};
+    const extra = FOCUS_TICKETS.map(([s, key, title]) => ({ ...base, id: id(key), key, title, status: s === 'none' ? 'ready' : 'active',
+      questions: s === 'wait' ? [{ id: 'q1', text: 'Send it to the whole team or only to sales?', options: ['Whole team', 'Only sales'] }] : [],
+      checks: [], sessions: [] }));
+    st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_fb')), ...extra];
+    st.runs = { ...(st.runs || {}) };
+    FOCUS_TICKETS.forEach(([s, key]) => { if (s !== 'none') st.runs[id(key)] = { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } }; });
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    route.fulfill({ response: res, json: st });
+  });
+  // the added tickets have no files on disk: their ticket pages get an empty list of results
+  await page.route(/\/api\/artifacts\/t_fb/, route => route.fulfill({ json: { files: [] } }));
+  await page.goto(dash + '/#tickets');
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.reload();
+  await mainHasText(page);
+  // every ticket row has its Focus button, with the word that fits the ticket
+  const rowSel = phone ? k => `[data-key="short-${id(k)}"]` : k => `[data-key="tree-${id(k)}"]`;
+  for (const [, key, , verb] of FOCUS_TICKETS) {
+    const b = `${rowSel(key)} [data-key="live-session-btn"]`;
+    await page.waitForSelector(b, { timeout: 10000 });
+    const word = (await page.textContent(b)).trim();
+    if (word !== verb) throw new Error(`the row of ${key} says "${word}", not "${verb}"`);
+    if (await page.$$eval(`${rowSel(key)} button`, els => els.filter(e => e.textContent.trim() === 'Answer').length) > 1) throw new Error(`the row of ${key} shows two Answer buttons`);
+  }
+  // a row's button opens that session in the layer, the list stays
+  await page.click(`${rowSel('ORCH-191')} [data-key="live-session-btn"]`);
+  await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-191')}"]`, { timeout: 5000 });
+  if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('the row\'s Focus button left the list');
+  if (!await page.evaluate(() => !!document.activeElement?.closest('#live-dock'))) throw new Error('the keyboard did not move into the session');
+  // the ticket page: "Watch in Focus" opens its session; Open ticket comes back to the same page
+  await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-189'));
+  await mainHasText(page);
+  const strip = `[data-key="ticket-strip-${id('ORCH-189')}"] [data-key="live-session-btn"]`;
+  await page.waitForSelector(strip, { timeout: 10000 });
+  if ((await page.textContent(strip)).trim() !== 'Watch in Focus') throw new Error('the ticket page does not say Watch in Focus');
+  if (await page.$('[data-key="watch-live"]')) throw new Error('today\'s Watch live still shows with Preview on');
+  await page.click(strip);
+  const pane = `#live-dock .live-pane[data-session="${id('ORCH-189')}"]`;
+  await page.waitForSelector(pane, { timeout: 5000 });
+  if (!await page.$eval(`${pane} .key`, el => el.textContent.trim() === 'ORCH-189')) throw new Error('the pane does not show the ticket key');
+  // from full screen too: Open ticket steps out of it so the ticket page shows
+  await page.click(`${pane} [data-key="live-full"]`);
+  await page.waitForSelector('#live-dock[data-mode="full"]', { timeout: 5000 });
+  await page.evaluate(() => { location.hash = '#home'; });
+  await mainHasText(page);
+  await page.click(`${pane} [data-key="live-open-ticket"]`);
+  await page.waitForFunction(h => location.hash === h, '#ticket/' + id('ORCH-189'), { timeout: 10000 });
+  await page.waitForSelector(`[data-key="ticket-strip-${id('ORCH-189')}"]`, { timeout: 10000 });
+  if (await page.$('#live-dock[data-mode="full"]')) throw new Error('Open ticket left the ticket page hidden behind full screen');
+  if (!await page.$(pane)) throw new Error('the session closed when Open ticket was pressed');
+  // a narrow pane keeps Open ticket in More as well (draft D)
+  if (await page.$(`${pane} [data-key="live-pane-more"]`)) {
+    await page.click(`${pane} [data-key="live-pane-more"]`);
+    await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-more-ticket"]', { timeout: 5000 });
+    await page.keyboard.press('Escape');
+  }
+  // a ticket with no helper: "Start in Focus" opens its pane, where the start is offered
+  await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-192'));
+  await mainHasText(page);
+  const start = `[data-key="ticket-strip-${id('ORCH-192')}"] [data-key="live-session-btn"]`;
+  await page.waitForSelector(start, { timeout: 10000 });
+  if ((await page.textContent(start)).trim() !== 'Start in Focus') throw new Error('a ticket with no helper does not say Start in Focus');
+  await page.click(start);
+  await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-192')}"]`, { timeout: 5000 });
+  // the picture: the working ticket's page with its session open, as in draft D
+  await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-189'));
+  await mainHasText(page);
+  await page.click(strip);
+  await page.waitForSelector(pane, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  await noSideways(page);
+}
+
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -156,10 +656,14 @@ const STEPS = [
   },
   {
     n: 6, pic: 'fd-06-focus-button', area: 'wall', title: 'Focus button on a ticket and Open ticket on a session',
-    feature: [3], waits: T.wall,
-    do: ['Open a ticket page.', 'Press its Focus button.', 'In the session press Open ticket.'],
-    see: ['The button says Watch, Answer, Open or Start to fit the ticket.', 'The session opens in the layer.',
-      'Open ticket goes back to the same ticket page.'],
+    feature: [3],
+    do: ['Open Tickets and press the Focus button of a row.', 'Open a ticket page and press its Focus button.',
+      'In the session press Open ticket, also from full screen.'],
+    see: ['Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.',
+      'The session opens in the layer and the page stays.', 'Open ticket goes back to the same ticket page; the session stays open.'],
+    async run({ page, dash, width }) {
+      await focusButton(page, dash, width);
+    },
     draft: { q: '?page=ticket&tk=ORCH-189' },
   },
   {
@@ -179,19 +683,47 @@ const STEPS = [
   },
   {
     n: 9, pic: 'fd-09-bar', area: 'bar', title: 'The bar under every page', feature: [7, 11],
-    waits: T.bar,
     do: ['Open Home, then Tickets, then Review.', 'Press the "in line" count in the bar.', 'Type in the list\'s search.'],
     see: ['The bar is under every page, calm, on one line that never wraps.',
       'Chips only for sessions that need you and pinned ones; the rest are counts such as "9 in line".',
       'A count opens a list you can search.'],
+    async run({ page, dash }) {
+      await liveBarState(page);
+      for (const where of ['#home', '#tickets', '#review']) {
+        await page.goto(dash + '/' + where);
+        await mainHasText(page);
+        await page.waitForSelector('#live-bar .lbar-sw', { timeout: 10000 });
+        await barIsOneRow(page);
+        await noSideways(page);
+      }
+      const words = await page.textContent('#live-bar');
+      if (!/ORCH-238|Needs you|3/.test(words)) throw new Error('the bar does not show the sessions that need you');
+      // the "in line" count, or the More count it folded into when the row is short
+      const count = (await page.$('#live-bar [data-lbar-list="queue"]')) ? 'queue' : 'more';
+      await page.click(`#live-bar [data-lbar-list="${count}"]`);
+      await page.waitForSelector('#live-bar .lbar-pop .lbar-row', { timeout: 5000 });
+      const head = await page.textContent('#live-bar .lbar-pop-h');
+      if (count === 'queue' && head.trim() !== 'In line (9)') throw new Error(`the list says "${head}", not "In line (9)"`);
+      await page.fill('#live-bar [data-lbar-q]', 'logo');
+      await page.waitForFunction(() => document.querySelectorAll('#live-bar .lbar-row').length === 1, null, { timeout: 5000 });
+      if (!/New logo on every page/.test(await page.textContent('#live-bar .lbar-list'))) throw new Error('the search does not find "logo"');
+      await page.fill('#live-bar [data-lbar-q]', '');
+      await page.waitForFunction(n => document.querySelectorAll('#live-bar .lbar-row').length >= n, 9, { timeout: 5000 });
+      await noSideways(page);
+    },
     draft: { q: '?page=home&many=1&list=queue' },
   },
   {
     n: 10, pic: 'fd-10-layer', area: 'layer', title: 'The layer at the bottom, on the right, full screen, to the bar, to the side',
-    feature: [7], waits: T.layer,
-    do: ['Open a session from the bar.', 'Use Place: bottom, right, full screen.', 'Minimise it to the bar, then put it to the side.'],
-    see: ['Each place works and the page stays usable behind it.', 'Minimise leaves only the bar; to the side leaves a slim edge.',
-      'The layer opens where it was last.'],
+    feature: [7],
+    do: ['Open a session from the bar.', 'Change to Tickets, Review and Home.', 'Use Place: bottom, right, full screen; press Esc twice.',
+      'Open it again, minimise it to the bar, then put it to the side and open it from the edge.', 'Make it larger, then reload the page.'],
+    see: ['Each place works and the page stays usable behind it; on a phone there is no right.', 'The layer stays open while the page changes.',
+      'Esc goes back one step: full screen, then the panel, then the bar.', 'In full screen Tab stays in the layer.',
+      'Minimise leaves only the bar; to the side leaves a slim edge.', 'After the reload the layer opens where it was last, at the same size.'],
+    async run({ page, dash, width }) {
+      await layer(page, dash, width);
+    },
     draft: { q: '?page=home&mode=right&menu=pos' },
   },
   {
@@ -204,18 +736,24 @@ const STEPS = [
   },
   {
     n: 12, pic: 'fd-12-split', area: 'split', title: 'Split into two and three sessions with the pane controls', feature: [7],
-    waits: T.split,
-    do: ['In the layer press Add beside twice.', 'On one pane use pin, Place, minimise and close.'],
-    see: ['Two, then three panes sit next to each other.', 'Every pane has pin, add beside, place, minimise and close.',
-      'Closing a pane gives its room to the others.'],
+    do: ['In the layer press Add beside twice.', 'Change to Tickets, Review and Home.', 'On one pane use pin, Place, minimise and close.'],
+    see: ['Two, then three panes sit next to each other; on the right they are stacked.', 'Every pane has pin, add beside, place, minimise and close.',
+      'The split stays while the page changes.', 'Closing a pane gives its room to the others.',
+      'On a phone one session shows at a time and there is no add beside.'],
+    async run({ page, dash, width }) {
+      await split(page, dash, width);
+    },
     draft: { q: '?page=home&mode=bottom&split=3' },
   },
   {
     n: 13, pic: 'fd-13-stays-open', area: 'layer', title: 'Focus stays open with typed text and split while you change pages',
-    feature: [7], waits: T.pages,
+    feature: [7],
     do: ['Open two sessions side by side, type a message without sending.', 'Change to Home, Tickets and Review, then press Back.'],
     see: ['The layer, its split and the typed text stay as they were.', 'The page itself does not reload (no flash).',
       'Back and links work like before.'],
+    async run({ page, dash }) {
+      await staysOpen(page, dash);
+    },
     draft: { q: '?page=tickets&mode=bottom&split=2' },
   },
   {
@@ -310,6 +848,17 @@ const STEPS = [
       'Nothing scrolls sideways; every button can be reached.'],
     draft: { q: '?page=focus&cur=ORCH-238&mode=right' },
   },
+  {
+    n: 26, pic: 'fd-26-history', area: 'sessions', title: 'Earlier sessions in the History tab, reopened with one click', feature: [4],
+    do: ['Open a session in the layer and press History (in More when the pane is narrow).', 'Press Reopen on an earlier session.'],
+    see: ['Up to 10 sessions of the ticket, newest first, each with its time, first message and number of messages.',
+      'The session in use says In use; one that is not on this computer has no Reopen.',
+      'Reopen starts the helper on that conversation and the list closes.'],
+    async run({ page, dash }) {
+      await history(page, dash);
+    },
+    draft: { q: '?page=focus&cur=ORCH-189&view=zoom&ask=1' },
+  },
 ];
 
-module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText };
+module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText, liveBarState, barIsOneRow, livePreview };

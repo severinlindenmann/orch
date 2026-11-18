@@ -53,13 +53,14 @@ ask; its list replaces the one above.
 
 Started by hand (not by orch)? Tell orch which ticket you work on so nobody starts a second agent on it:
 `orch run claim <id> --session <your session id>`. Finishing a piece of work in a live session: `orch run done <id>`.
-In a live session, when you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready`, run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
+When you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready` (at your prompt in a live session, or after a tool step in a one-step run), run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
-Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, reminds a helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
+Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, sends on a helper that stopped with open steps within a minute (the second time the ticket moves up to Opus), reminds any other helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
 The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes, or a part of Done when that no task covers, stay in Review with one line why; `--dry-run` only says it. When the person also turned on `workflow.reviewer_answers`, the same pass answers a plain question for them with your recommended option after 30 minutes, unless it names concept, words, look, money, production or something that cannot be undone; so recommend the option you would pick. What it accepted and answered: `orch review accepted [--since yesterday]`.
 Its second look (only when the person also turned on `workflow.reviewer_look`): bigger work it leaves waits in line, and one helper on the small model checks each Done-when part and the pictures, then decides each ticket with `orch review verdict <ticket> accept|back|leave "<one line>" --point "<point>: shown"` (only for tickets in that line; never for your own ticket).
 Releases (for a script that repeats, only when the person turned on `workflow.release_merge` in Settings): a release Merge card made with `orch ask ... --merge --release` is merged for the person by `orch review tend-releases` once every check of its pull request is green; otherwise the person clicks Merge. `--dry-run` only says it.
+Security review (you were started as one by the release keeper, ticket "Security review: pull request #N"): read only, follow the ticket's note, then record exactly one verdict: `orch review security <N> ok "<one line>" --sha <commit>` (nothing High or Medium left) or `orch review security <N> problems "<the worst finding>" --sha <commit>`, with the commit the note names. Releases wait for it.
 
 **Finish a step**
 
@@ -83,9 +84,11 @@ A step that shows a part of Done when in other words than its title: add `--prov
 
 Only the person marks a step "Won't do"; you cannot. Ask instead, with the step on the question:
 
-    orch ask <id> "Mark step c2 as won't do?" --option yes --option no --check c2
+    orch ask <id> "Mark step c2 as won't do?" --option yes --option "No, run it in CI" --check c2
 
-Wait for the answer. If it is yes, the person marks it; do not try to tick or reopen it yourself.
+Say in the no option where the step would run; a bare yes and no is refused. Never offer a protected machine (a
+production machine the owner listed, `orch config get workspace.protected_machines`) for a test: offer CI or a
+throwaway server. Wait for the answer. A yes marks the step won't do by itself; never tick or reopen it yourself.
 
 **Files you make**
 
@@ -132,7 +135,7 @@ In a live session finish your reply: orch switches the same conversation to Opus
 a ticket up by itself after two failed check runs on one step. It never moves down by itself, and a person's
 choice of model always stays (ask them instead). Your own subagents follow the same rule: the small model for
 searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
-Tokens per model and per ticket, and how many tickets moved up: `orch usage` (Insights shows the same).
+Tokens per model and per ticket, and how many tickets moved up: `orch tokens` (Insights shows the same).
 
 Haiku (fastest) and Fable (drafts) are only ever a person's choice: orch and helpers never pick them. A
 ticket a person put on Fable works the drafts way (its start text says how): at least three clearly different,
@@ -146,6 +149,7 @@ switches when its turn ends.
     orch ask <id> "<question>" --option A --option B --recommend A
     orch ask <id> "<question>" --check <c>        # tie it to a step
     orch ask <id> --take-back <q> "<why>"          # the question no longer matters: take it back (it leaves the person's list)
+    orch ask <id> --in-conversation <q> "<their words>"  # the person answered you in your window, not on the card: write their words on it, it closes
 
 Write the question for a person who has not seen your work, in plain words:
 - Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).
@@ -171,6 +175,18 @@ is today beside the options: `--choose ... --before files/today.png`. Several ca
 review): give each the same `--group "<short name>"`; the person sees them as one set with its own count.
 Links to look at beside the card (a mockup, an issue): `--ref "Mockup=http://…"` (up to 5). A line under one option of
 a choice: `--describe "A=Keeps the menu as it is"`.
+
+**Cards are short and visual, never a text wall** (owner 17 Nov: "I will never read reviews like that"). A headline is one sentence; everything long goes in `details`, which sits behind one click. Pick the format that fits the news, as in the style guide (`/styleguide`, "Review card formats"):
+- Work finished: a Check card (orch builds it: headline, progress bar, chips, short steps). Put your result in the ticket summary: its FIRST sentence is the headline, so make it say the outcome.
+- Looks different: `--before` and `--after` pictures, one line of words. Several ways: `--choose` with a picture per option.
+- Numbers: a chart. Order or how it works: a flow of at most 6 boxes. Wording or files changed: a diff.
+- Many items or a comparison: a table. Something failed: say what, where and what you need, in 2 lines. A page to try: `--link` with `--open`.
+Write the card as a JSON file and pass it with `--file card.json` on `--draft` or `--plan`:
+    {"headline": "Page load is 2.4 s faster.", "progress": {"done": 5, "total": 5},
+     "chips": [{"text": "17 tests passed", "tone": "ok"}], "flow": ["Idea", "Build", "Ticket"],
+     "chart": {"unit": " s", "bars": [{"label": "Before", "value": 4.2}, {"label": "After", "value": 1.8}]},
+     "diff": [{"op": "-", "text": "Approve"}, {"op": "+", "text": "Looks good"}], "details": ["Long text here."]}
+Chip tones: ok, warn, bad, info. Use only the fields you need. Add a screenshot (`--before`/`--after`) whenever the work has something to look at.
 
 A GitHub pull request only the person may merge: `orch ask <id> "Merge release 3?" --link "Release 3" --open <pull request address> --merge --then "<what follows>"`. The person's Merge click merges it with their own GitHub login; never merge it yourself.
 

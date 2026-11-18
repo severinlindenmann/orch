@@ -1,6 +1,9 @@
 """The real platform tool, once per platform: skipped unless on that platform AND ORCH_SERVICES_REAL=1.
 
-The plist or unit lands under the test's HOME (a temp folder); the test removes it by its exact path at the end."""
+The plist lands under the test's HOME (a temp folder). The systemd unit lands in the real account's
+~/.config/systemd/user, the only folder the user service manager reads. The Windows task lands in the account's own
+\\orch\\ task folder and must run as a standard user signed in on the screen. Each test removes its file or task by
+its exact name at the end."""
 
 import json
 import os
@@ -12,7 +15,12 @@ import pytest
 from conftest import WID
 
 REAL = os.environ.get("ORCH_SERVICES_REAL") == "1"
-SLEEPER = ["python3", "-u", "-c", "print('hello from the service', flush=True); import time; time.sleep(600)"]
+SLEEPER = [
+    sys.executable if sys.platform == "win32" else "python3",
+    "-u",
+    "-c",
+    "print('hello from the service', flush=True); import time; time.sleep(600)",
+]
 
 
 def _wait(cond, seconds=15.0):
@@ -25,13 +33,9 @@ def _wait(cond, seconds=15.0):
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    from orch_services import winproc  # never os.kill(pid, 0) on Windows: it ends the process there
+
+    return winproc.started(pid) is not None
 
 
 @pytest.fixture
@@ -123,9 +127,13 @@ def test_real_launchd(real, ws):
 @pytest.mark.skipif(
     not (REAL and sys.platform.startswith("linux")), reason="real systemd test: Linux + ORCH_SERVICES_REAL=1"
 )
-def test_real_systemd(real, ws):
+def test_real_systemd(real, ws, monkeypatch):
+    import pwd
     from pathlib import Path
 
+    # The user service manager reads only the real account's unit folder, never the test's temp HOME
+    # (launchd is handed the plist path, systemd is not): the unit goes there, removed by its exact path.
+    monkeypatch.setenv("HOME", pwd.getpwuid(os.getuid()).pw_dir)
     unit = f"orch-svc-{WID}-sleeper.service"
     path = Path.home() / ".config" / "systemd" / "user" / unit
 
@@ -215,3 +223,106 @@ def test_real_found_and_adopt_on_a_mac(real, ws):
             plist.unlink()
         if log.exists():
             log.unlink()
+
+
+@pytest.mark.skipif(
+    not (REAL and sys.platform.startswith("linux")), reason="real systemd test: Linux + ORCH_SERVICES_REAL=1"
+)
+def test_real_found_and_adopt_on_linux(real, ws, monkeypatch):
+    """A throwaway user unit of its own: found, adopted, stopped, started, forgotten (unit file untouched)."""
+    import pwd
+    import secrets
+    from pathlib import Path
+
+    # The user service manager reads only the real account's unit folder, never the test's temp HOME.
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    monkeypatch.setenv("HOME", str(home))
+    unit = f"orchtest-found-{secrets.token_hex(4)}.service"
+    units = home / ".config" / "systemd" / "user"
+    made = [d for d in (home / ".config", home / ".config" / "systemd", units) if not d.exists()]
+    units.mkdir(parents=True, exist_ok=True)
+    path = units / unit
+    log = ws / f"{unit}.log"
+    body = (
+        "[Unit]\nDescription=Throwaway test job\n\n[Service]\n"
+        f'ExecStart=/usr/bin/python3 -u -c "{SLEEPER[-1]}"\n'
+        f"StandardOutput=append:{log}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n"
+    ).encode()
+    path.write_bytes(body)
+
+    def sc(*a):
+        return subprocess.run(["systemctl", "--user", *a], check=False, capture_output=True, text=True)
+
+    try:
+        sc("daemon-reload")
+        assert sc("start", unit).returncode == 0
+        fid = f"systemd:{unit}"
+
+        def item():
+            code, out = real("found")
+            assert code == 0, out
+            return {i["id"]: i for i in out["found"]}.get(fid)
+
+        assert _wait(lambda: (item() or {}).get("running") is True), item()
+        found_pid = item()["how"]["pid"]
+        code, out = real("adopt", fid, "--name", "Throwaway job")
+        assert code == 0, out
+        sid = out["service"]["id"]
+        assert out["service"]["state"] == "running"
+        assert out["service"]["pid"] == found_pid  # not restarted
+        assert path.read_bytes() == body
+        assert item() is None  # managed now, no longer found
+
+        code, out = real("stop", sid)
+        assert code == 0 and out["service"]["state"] == "stopped", out
+        assert _wait(lambda: not _alive(found_pid))
+        code, out = real("start", sid)
+        assert code == 0, out
+        assert _wait(lambda: _row(real)["state"] == "running"), _row(real)
+        assert _wait(lambda: log.is_file() and "hello from the service" in log.read_text(encoding="utf-8"))
+        assert path.read_bytes() == body
+
+        code, out = real("remove", sid)
+        assert code == 0 and out["forgotten"] is True, out
+        assert path.read_bytes() == body
+        assert sc("is-active", unit).stdout.strip() == "active"  # the job is still there
+        assert (item() or {}).get("id") == fid  # found again
+    finally:
+        sc("stop", unit)
+        if path.exists():
+            path.unlink()
+        sc("daemon-reload")
+        for d in reversed(made):
+            d.rmdir()
+
+
+@pytest.mark.skipif(
+    not (REAL and sys.platform == "win32"), reason="real Task Scheduler test: Windows + ORCH_SERVICES_REAL=1"
+)
+def test_real_windows(real, ws):
+    import xml.etree.ElementTree as ET
+
+    task = f"\\orch\\orch-svc-{WID}-sleeper"
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+
+    def schtasks(*a):
+        return subprocess.run(["schtasks", *a], check=False, capture_output=True, creationflags=0x08000000)
+
+    def disabled():
+        raw = schtasks("/Query", "/TN", task, "/XML").stdout
+        # schtasks prints the XML in the console code page (or UTF-16): only ASCII tags are read here
+        text = raw.decode("utf-16") if b"\x00" in raw else raw.decode("latin-1")
+        root = ET.fromstring(text[text.index("<Task") :])
+        on = root.find(".//t:LogonTrigger/t:Enabled", ns)  # Task Scheduler leaves out the default (true)
+        return on is not None and on.text == "false"
+
+    try:
+        _cycle(real, ws, disabled)
+        assert schtasks("/Query", "/TN", task).returncode != 0  # the task is gone
+    finally:
+        from orch_services import keeper, winproc
+
+        run = keeper.read_run(ws / ".orch/addons/services/keeper/sleeper.json") or {}
+        winproc.end(run.get("keeper"), run.get("keeper_start"))
+        winproc.end(run.get("pid"), run.get("pid_start"))
+        schtasks("/Delete", "/TN", task, "/F")

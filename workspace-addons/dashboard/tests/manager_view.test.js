@@ -34,6 +34,7 @@ test('helpers: time and money words, totals, stuck lines, this week', () => {
   assert.deepEqual(helpers.spendTotal([{spend:{cost:1, seconds:60}}, {}, {spend:{cost:2.5, seconds:120}}]), {cost:3.5, seconds:180});
   const now = Date.parse('2026-11-18T12:00:00Z');
   assert.equal(helpers.stuckWords({stuck:'question', questions:[{sent_at:'2026-11-15T12:00:00Z'}]}, now), 'Question waits 3 days');
+  assert.equal(helpers.stuckWords({stuck:'question', questions:[{asked_at:'2026-11-16T12:00:00Z'}]}, now), 'Question waits 2 days');
   assert.equal(helpers.stuckWords({stuck:'quiet', quiet_since:'2026-11-17T10:00:00Z'}, now), 'No news for 26 h');
   assert.equal(helpers.stuckWords({stuck:'overdue'}, now), 'Past its due date');
   assert.equal(helpers.stuckWords({}, now), '');
@@ -91,6 +92,9 @@ test('ticket page: Time · cost puts the first-run estimate beside what it took 
   assert.equal(helpers.costLine({spend:{seconds:600, cost:0.3}}), 'So far: 10 min · $0.30');
   assert.equal(helpers.costLine({estimate:{minutes:'x'}}), '');
   assert.equal(helpers.costLine({}), '');
+  assert.equal(helpers.costLine({range:'about 20-40 min · $2.00-$4.00'}), 'Before Start: about 20-40 min · $2.00-$4.00');
+  assert.equal(helpers.costLine({range:'about 20-40 min', estimate:{minutes:40}}), 'Estimate: about 40 min');
+  assert.equal(helpers.costLine({range:'about 20-40 min', spend:{seconds:600, cost:0.3}}), 'So far: 10 min · $0.30');
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(src, /costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null/);
 });

@@ -51,6 +51,21 @@ history shows Done or Stopped. A script that fails asks one question on the tick
 script the person asked for.
 {{#relay}}
 
+**Several scripts on one repeat** (one line in the Automation list instead of one per script)
+
+    orch automation repeat <id> "every 5 minutes" --script watcher --script "reviewer=every 15 minutes" --script "tester=daily 06:30"
+
+Each script runs on its own plan (a script without a plan runs on the repeat's), with its own lock, so a slow one never
+holds back the others; the run history names the script. Run one by hand: `orch automation script run <id> --name <script>`.
+
+**Only when something changed** (no run and no tokens by the clock alone)
+
+    orch automation repeat <id> "every 6 hours" --when-changed orch@origin/develop    # off: --when-changed off
+
+`<folder in this workspace>@<git branch>`: when the repeat is due, it starts only if the branch points at another commit
+than at its last run (read locally, no network: something else must fetch the folder). Otherwise it waits and starts
+as soon as the branch moves.
+
 **Problem reports become tickets** (a workspace setting, no script and no agent for the pick-up)
 
     orch config set diag.report_tickets on   # new reports here or shared through the relay: a ticket and a helper

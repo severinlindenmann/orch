@@ -364,11 +364,24 @@ def _clean_full(t: str) -> str:
 def _has_secret(data: bytes) -> bool:
     """The file scan uses the SAME detection as redact (_scrub_text: patterns, key=value, spaced values, flag
     values and URL userinfo): a text hides something when the scrub changes it, in its raw, NFKC and cleaned
-    (invisible characters and comments gone) form. Over-hiding is accepted: such a file is not sent."""
+    (invisible characters and comments gone) form. Over-hiding is accepted: such a file is not sent. A PNG
+    whose compressed pixel runs are proven (secretscan.passes) gets the full scrub on its label_view and the
+    token patterns on every byte."""
+    return any(_scrubbed(blob, labels) for blob, labels in secretscan.passes(data))
+
+
+def _tokens_only(t: str) -> str:
+    for rx in _SECRET_PATTERNS:
+        t = rx.sub(HIDDEN, t)
+    return t
+
+
+def _scrubbed(data: bytes, labels: bool) -> bool:
     text = data.decode(errors="ignore")
     cleaned = _clean_full(text)
     forms = (text, cleaned, unicodedata.normalize("NFKC", text), unicodedata.normalize("NFKC", cleaned))
-    return any(_scrub_text(t) != t for t in dict.fromkeys(forms))
+    scrub = _scrub_text if labels else _tokens_only
+    return any(scrub(t) != t for t in dict.fromkeys(forms))
 
 
 def _holds_stored_value(root: Path, data: bytes, texts: list[str]) -> bool:
@@ -510,6 +523,9 @@ _SPACED_VALUES = (
 # - text drawn in pixels (a terminal screenshot) and bytes inside compressed image data (IDAT): only the raw
 #   bytes of an image are scanned; JPEG, GIF and WebP get no structural walk (_image_clean): they are
 #   "unknown" and not sent, never checked as clean;
+# - a PNG's proven Huffman-coded pixel bytes (pngpixels) skip the label rules (key=value, spaced and flag
+#   values; they match there by chance, #1022): a Huffman table chosen on purpose so the coded bytes spell a
+#   label and value gets through (an encoding, like base64); token patterns and stored values still apply;
 # - HTML and SVG artifacts are active content: entities (`&#112;assword=`) or script (atob) can build any
 #   text when the file is shown; the scan sees the source only;
 # - past TEXT_CUT redact shows nothing (the text ends in [hidden]); a file is scanned whole;

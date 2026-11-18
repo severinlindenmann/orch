@@ -43,6 +43,8 @@
       },
       "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
       "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
+      "guard_hooks": { "PreToolUse": "Bash" },
+      "step_hooks": { "PostToolUse": "orch work-check --hook claude", "PostToolUseFailure": "orch work-check --hook claude" },
       "record_hooks": { "PreToolUse": "orch record hook", "PostToolUse": "orch record hook", "PostToolUseFailure": "orch record hook" },
       "login": {
         "status": ["auth", "status", "--json"], "logged_in": "loggedIn", "ends": "loginExpiresAt",

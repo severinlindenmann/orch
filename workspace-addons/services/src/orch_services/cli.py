@@ -1,4 +1,4 @@
-"""orch services list|found|add|adopt|start|stop|restart|auto|remove|log|act|view (contract: contracts/addons/services/README.md)."""
+"""orch services list|check|found|add|adopt|start|stop|restart|auto|remove|log|act|view (contract: contracts/addons/services/README.md)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,11 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
-from . import drivers, store
+from . import drivers, store, watch
 from .store import Refused
 
 MASK = "••••••"
@@ -37,6 +38,19 @@ def _workspace_id(root: Path) -> str:
     return wid.lower()
 
 
+def _key_from_files(root: Path, ref: str) -> str:
+    """A ticket key (DM1-12, any case) to its id from the plain ticket files; anything else comes back as is."""
+    want = ref.strip().upper()
+    for p in sorted((root / ".orch" / "tickets").glob("t_*.json")):
+        try:
+            t = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(t, dict) and t.get("id") == p.stem and str(t.get("key", "")).upper() == want:
+            return p.stem
+    return ref
+
+
 def _ticket_key(root: Path, ref: str | None) -> str | None:
     if not ref:
         return None
@@ -48,6 +62,7 @@ def _ticket_key(root: Path, ref: str | None) -> str | None:
     except Exception as e:  # noqa: BLE001 - Refused from the core already says what to do
         if e.__class__.__name__ == "Refused":
             raise Refused(str(e)) from None
+        tid = _key_from_files(root, tid)  # the core could not be asked: read the ticket files themselves
     f = root / ".orch" / "tickets" / f"{tid}.json"
     if not isinstance(tid, str) or not re.fullmatch(r"t_[a-z0-9]{6,16}", tid) or not f.is_file():
         raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
@@ -141,6 +156,9 @@ def _row(root: Path, rec: dict, st: drivers.Status | None) -> dict:
     }
     if running and st and st.pid:
         row["pid"] = st.pid
+    row.update(watch.row_extra(root, rec, st))
+    if row["failing"]:
+        row["state"] = "failing"
     return row
 
 
@@ -276,6 +294,8 @@ def _list_text(rows: list[dict], bad: int, note: str | None) -> str:
     lines = []
     for r in rows:
         bits = [r["state"].capitalize()]
+        if r.get("health") and r["state"] != "stopped":
+            bits.append(r["health"]["text"])
         if r["auto"]:
             bits.append("starts by itself")
         if r.get("port"):
@@ -332,13 +352,24 @@ def cmd_add(args, root: Path) -> int:
     if args.start:
         drv.start(spec)
         store.mark(root, sid, True)
+        watch.note_own_start(root, drv, spec)
     row = _state(root, drv, rec, wid)
     nxt = (
         f"Added {rec['name']}; it is running."
         if row["state"] == "running"
         else f"Added {rec['name']}. Start it: orch services start {sid}"
     )
-    return _emit(args, {"service": row, "next": nxt}, nxt)
+    return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
+
+
+def _emit_kept(args, drv, data: dict, text: str) -> int:
+    """Linux: services keep running after logout (owner 17 Nov, ORCH-328); the one line it says, if any."""
+    keep = getattr(drv, "keep_running", None)
+    line = keep() if keep else None
+    if line:
+        data["note"] = line
+        text = f"{text}\n{line}"
+    return _emit(args, data, text)
 
 
 def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
@@ -375,6 +406,8 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     spec = _spec(root, rec, wid, strict=verb != "stop")
     getattr(drv, verb)(spec)
     store.mark(root, sid, verb != "stop")
+    if verb != "stop":
+        watch.note_own_start(root, drv, spec)
     row = _state(root, drv, rec, wid)
     words = {"start": "Started", "stop": "Stopped", "restart": "Restarted"}[verb]
     nxt = f"{words} {rec['name']}."
@@ -490,7 +523,34 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     store.save(root, rec)
     row = _state(root, drv, rec, wid)
     nxt = f"{name} is now managed by orch (id {sid}); it was not moved, changed or restarted."
-    return _emit(args, {"service": row, "next": nxt}, nxt)
+    return _emit_kept(args, drv, {"service": row, "next": nxt}, nxt)
+
+
+def cmd_check(args, root: Path) -> int:
+    """One pass over every service: health, failing, the one question and acting on its answer (no loop)."""
+    recs, bad = store.load_all(root)
+    drv = _driver()
+    wid = _workspace_id(root)
+    out, said = [], []
+    for rec in recs:
+        try:
+            _same_kind(drv, rec)
+            res = watch.check_one(root, drv, rec, _spec(root, rec, wid, strict=False))
+        except Refused as e:
+            res = {"id": rec["id"], "name": rec["name"], "error": str(e)}
+            said.append(f"{rec['name']}: {e}")
+        else:
+            if res.get("did"):
+                said.append(res["did"])
+            elif res["failing"]:
+                said.append(f"{rec['name']} keeps stopping; the question is open.")
+        out.append(res)
+    if not recs:
+        said.append("No services yet.")
+    elif not said:
+        said.append(f"Checked {len(recs)} service(s); all as expected.")
+    data: dict = {"checked": out, "unreadable": bad}
+    return _emit(args, data, "\n".join(said))
 
 
 def run(args) -> int:
@@ -504,10 +564,15 @@ def run(args) -> int:
         return _emit(args, data, _list_text(rows, bad, note))
     if cmd == "add":
         return cmd_add(args, root)
+    if cmd == "check":
+        return cmd_check(args, root)
     if cmd == "found":
         from . import found
 
         items = found.scan(root)
+        note = found.note()
+        if note:
+            return _emit(args, {"found": items, "note": note}, note)
         return _emit(args, {"found": items}, _found_text(items))
     if cmd == "adopt":
         return cmd_adopt(args, root, args.found_id)
@@ -524,7 +589,13 @@ def run(args) -> int:
     if cmd == "view":
         from .view import build
 
-        print(json.dumps(build(root, _rows(root)), ensure_ascii=False))
+        try:  # read-only; a computer that cannot list its jobs simply shows no Found group
+            from . import found
+
+            found_items = found.scan(root)
+        except (OSError, ValueError, Refused, subprocess.SubprocessError):
+            found_items = []
+        print(json.dumps(build(root, _rows(root), found_items), ensure_ascii=False))
         return 0
     raise Refused(f"Unknown command {cmd}.")
 
@@ -545,6 +616,7 @@ def main(argv=None) -> int:
         return s
 
     p("list")
+    p("check")
     p("found")
     s = p("adopt")
     s.add_argument("found_id")

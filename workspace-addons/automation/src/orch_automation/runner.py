@@ -75,7 +75,8 @@ def update_state(root: Path, tid: str, **kw) -> None:
     save_state(root, st)
 
 
-def history(root: Path, tid: str, at: str, took: int, code: int) -> None:
-    """One line per finished run in runs.jsonl (the dashboard view reads it)."""
+def history(root: Path, tid: str, at: str, took: int, code: int, script: str | None = None) -> None:
+    """One line per finished run in runs.jsonl (the dashboard view reads it); a group's script adds its name."""
+    line = {"ticket": tid, "at": at, "took": took, "exit": code, **({"script": script} if script else {})}
     with runfiles.open_append(sdir(root) / "runs.jsonl") as f:
-        f.write(json.dumps({"ticket": tid, "at": at, "took": took, "exit": code}) + "\n")
+        f.write(json.dumps(line) + "\n")

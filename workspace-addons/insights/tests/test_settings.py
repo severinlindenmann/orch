@@ -477,6 +477,7 @@ def test_gets_never_write(server, fake_orch):
     assert writes(fake_orch) == []
     assert {tuple(a) for a in seen} == {
         ("record", "counts", "--days", "30", "--json"),
+        ("github", "retries", "--days", "30", "--json"),
         ("record", "settings", "--json"),
         ("ticket", "list", "--all", "--json"),
     }

@@ -106,3 +106,13 @@ test('a shared read-only copy shows the rows without buttons; other rows are not
   assert.equal(helpers.needsYouCount([UNMERGED], []), 0);  // listed on Home, not in the number (no question, ORCH-63)
   assert.equal(helpers.isNotice(IDLE), false);
 });
+
+// ORCH-295: Changes asked is derived, same rule as the core (tickets.changes_asked)
+test('changesAsked: Ready with an open change_request task only', () => {
+  const ask = {origin:'change_request', done:false};
+  assert.equal(helpers.changesAsked({status:'ready', checklist:[ask]}), true);
+  assert.equal(helpers.changesAsked({status:'ready', checklist:[{...ask, done:true}]}), false);
+  assert.equal(helpers.changesAsked({status:'ready', checklist:[{...ask, wont_do:true}]}), false);
+  assert.equal(helpers.changesAsked({status:'review', checklist:[ask]}), false);
+  assert.equal(helpers.changesAsked({status:'ready', checklist:[{done:false}]}), false);
+});

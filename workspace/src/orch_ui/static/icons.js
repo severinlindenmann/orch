@@ -43,6 +43,7 @@
     comment: '<path d="M4 5h16v11H9l-5 4z"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
     pin: '<path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2"/>',
+    pinned: '<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',  // a session kept first (live bar, wall); pin is a place
     minus: '<path d="M5 12h14"/>',
     cards: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
@@ -57,6 +58,12 @@
     jira: '<path d="M12 2.5 21.5 12 12 21.5 2.5 12z"/><path d="m12 8 4 4-4 4-4-4z"/>',
     ticket: '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a3 3 0 0 0 0 6v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a3 3 0 0 0 0-6z"/><path d="M10 9h4m-4 3h4m-4 3h2"/>',
     users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5 6.5-5s5.7 1.5 6.5 5M16 4.7a3.5 3.5 0 0 1 0 6.6M18 15.3c1.8.7 3 2.3 3.5 4.7"/>',
+    // The live layer's places (ORCH-338, draft D): at the bottom, on the right, closed to the side, full screen and back
+    'dock-bottom': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 13h18"/>',
+    'dock-right': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/>',
+    'dock-side': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M18 4v16"/><path d="m10 9 3 3-3 3"/>',
+    'full-screen': '<path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5"/>',
+    'full-exit': '<path d="M3 8h5V3m8 0v5h5M3 16h5v5m8 0v-5h5"/>',
   };
   window.iconNames = () => Object.keys(P);
   window.icon = (name, size = 16, cls = '') =>

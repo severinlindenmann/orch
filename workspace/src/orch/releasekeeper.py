@@ -23,6 +23,9 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
            settings and data changes listed) and a deploy card asked (production: the owner's go; on "Deploy
            now" a helper ticket gets the prepared program), the highlights as a short note on the role ticket,
            the release worktree removed -> idle.
+Every pass also runs the security check (secreview.py, ORCH-317): pull requests touching the servers, sign-in,
+secrets or what leaves this computer get a security review helper by themselves, and the idle phase cuts
+nothing until each of them in the release has an OK.
 A release pull request the keeper did not cut is only watched. `orch github release-hold "<why>"` stops
 cutting (a running release goes on); `orch github release-hold off` lifts it.
 
@@ -47,7 +50,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import brake, config, runs, tickets
+from orch import brake, config, runs, secreview, tickets
 from orch.errors import Refused
 
 BY = "agent:release-keeper"
@@ -72,6 +75,7 @@ DONE = {"done", "dropped", "wontdo", "archived"}
 STATE_MAX = 512 * 1024
 NOTE_MAX = 1900
 TITLE_MAX = 90
+MERGE_LINE = re.compile(r"^Merge pull request #(\d+) from \S")  # GitHub's own merge commit subject
 RELEASE_MERGE = re.compile(r"Release \d+: merge main")
 DEPLOY_ASK = "changed the"  # words of the deploy card, found again in the answer
 
@@ -89,6 +93,8 @@ SETTINGS = {
     "github.release_deploy_host": "user@host of production, read only over ssh (program checksum)",
     "github.release_deploy_key": "the ssh key for that read",
     "github.release_deploy_script": "the install command the deploy helper runs after the owner's go",
+    "github.release_security_paths": "files whose change needs a security review before a release "
+    "(default: servers, sign-in, secrets, what leaves this computer, CI)",
 }
 SETTING_KEYS = tuple(SETTINGS)
 
@@ -151,6 +157,8 @@ def set_setting(root: Path, key: str, value: str) -> str | None:
         v = ",".join(parts)
     elif name == "release_deploy_script":
         v = _path_ok(v)
+    elif name == "release_security_paths":
+        v = secreview.check_patterns(v)
     config.set_key(root, "github", name, v)
     return v
 
@@ -187,6 +195,7 @@ class Cfg:
         self.deploy_host = g("deploy_host")
         self.deploy_key = Path(g("deploy_key")) if g("deploy_key") else None
         self.deploy_script = g("deploy_script")
+        self.security_paths = g("security_paths")
         self.run_dir = runs.run_dir(root) if root is not None else Path(over.get("run_dir") or ".")
 
     @property
@@ -426,6 +435,69 @@ class World:
                 "number,url,state,isDraft,headRefOid,statusCheckRollup,mergedAt,body,title",
             ]
         )
+
+    _PR_FIELDS = "number,title,url,headRefOid,isDraft,files"  # open pull requests (security check)
+
+    def changes(self) -> list[dict]:
+        """Every first-parent change on develop since main (after heads() fetched): {sha, files, pr, head,
+        title, url}. files is git's full list with renames as both names; pr and head come from GitHub's merge
+        line ("Merge pull request #N from ...", head = the second parent), else None. Only a hint: the
+        security check confirms them with GitHub (pr_for_commit)."""
+        if self.sim is not None:
+            return list(self.sim.get("changes") or [])
+        lg = self._git("log", "--first-parent", "--format=%H%x1f%P%x1f%s", "origin/main..origin/develop")
+        if lg.returncode != 0:
+            raise Refused("git log could not read what develop has since main")
+        out = []
+        for ln in lg.stdout.splitlines():
+            p = ln.split("\x1f", 2)
+            if len(p) != 3 or not re.fullmatch(r"[0-9a-f]{40}", p[0]) or not p[1].split():
+                raise Refused("git log gave a change it could not read: the release waits")
+            sha, parents, subject = p[0], p[1].split(), p[2]
+            d = self._git("diff", "--no-renames", "--name-only", "-z", parents[0], sha)
+            if d.returncode != 0:
+                raise Refused(f"git diff could not read the change {sha[:8]}")
+            m = MERGE_LINE.match(subject)
+            pr = int(m[1]) if m and len(parents) == 2 else None
+            out.append(
+                {
+                    "sha": sha,
+                    "files": [x for x in d.stdout.split("\0") if x],
+                    "pr": pr,
+                    "head": parents[1] if pr else None,
+                    "title": subject[:120],
+                    "url": f"https://github.com/{self.cfg.repo}/pull/{pr}" if pr else None,
+                }
+            )
+        return out
+
+    def pr_for_commit(self, sha: str) -> dict:
+        """The pull request GitHub merged as this very commit (a squash or rebase merge): {pr, head, title,
+        url}, or {} when there is none."""
+        if self.sim is not None:
+            return dict((self.sim.get("pr_for_commit") or {}).get(sha) or {})
+        rows = self._gh_json(["api", f"repos/{self.cfg.repo}/commits/{sha}/pulls"]) or []
+        for r in rows if isinstance(rows, list) else []:
+            if isinstance(r, dict) and r.get("merge_commit_sha") == sha and r.get("number"):
+                return {
+                    "pr": int(r["number"]),
+                    "head": ((r.get("head") or {}).get("sha")),
+                    "title": str(r.get("title") or "")[:120],
+                    "url": r.get("html_url"),
+                }
+        return {}
+
+    def open_prs(self) -> list[dict]:
+        """The open pull requests into develop, with their files (security check)."""
+        if self.sim is not None:
+            return list(self.sim.get("open_prs") or [])
+        args = ["pr", "list", "--repo", self.cfg.repo, "--state", "open", "--base", "develop"]
+        return self._gh_json([*args, "--limit", "60", "--json", self._PR_FIELDS]) or []
+
+    def security_verdicts(self) -> dict:
+        if self.sim is not None:
+            return dict(self.sim.get("security_verdicts") or {})
+        return secreview.read_verdicts(self.root)
 
     def required(self, branch: str) -> list[str] | None:
         """The required checks of `branch`'s rules ([] when it has none), None when GitHub did not say."""
@@ -1090,10 +1162,15 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     out: list[str] = []
     h = w.heads()
+    try:  # every pass, so a review starts while a pull request is still open
+        sec_lines, sec_holds = secreview.tend(w, st, role)
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        sec_lines, sec_holds = [f"security check could not run: {e}"], ["the security check could not run"]
+    out += sec_lines
     rel = st.get("release")
     foreign = w.open_release()
     if foreign and not (rel and rel.get("pr") == foreign.get("number")):
-        return [f"release PR {foreign['number']} is open and was not cut by the keeper: watching only"]
+        return out + [f"release PR {foreign['number']} is open and was not cut by the keeper: watching only"]
 
     if rel and rel.get("phase") in ("gate", "card"):
         p = w.pr(rel["pr"])
@@ -1231,6 +1308,8 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + ["develop has nothing main does not have"]
     if hold:
         return out + [f"on hold: {hold}"]
+    if sec_holds:
+        return out + ["waits for every security OK: " + ", ".join(sec_holds)]
     nums = {int(m[1]) for u in un if (m := re.search(r"#(\d+)", u["subject"]))}
     urgent = sorted(nums & w.urgent())
     last = max([x for x in (w.last_release_at(), ts(st.get("last_cut_at"))) if x], default=None)

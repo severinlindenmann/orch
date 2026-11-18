@@ -134,6 +134,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"superseded_by": 5}, "if_revision": 1}),
         ("run.start", {"ticket": "t_abcdef", "fresh": "yes"}),
         ("run.start", {"ticket": "t_abcdef", "agent": "x"}),
+        ("session.reopen", {"ticket": "t_abcdef", "session": "../x"}),
+        ("session.reopen", {"ticket": "t_abcdef", "session": "-rf"}),
+        ("session.reopen", {"ticket": "t_abcdef", "session": "s-1", "fresh": True}),
         ("addon.start", {"name": "x"}),
         (
             "pull.merge",
@@ -299,6 +302,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             {"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
+        (  # ORCH-363: Reopen in the History tab continues that earlier session
+            {"op": "session.reopen", "args": {"ticket": "t_abcdef", "session": "s-1"}},
+            ["run", "start", "t_abcdef", "--session", "s-1", *common],
+        ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
         (
             {
@@ -385,6 +392,22 @@ def test_refusal_comes_back_as_plain_text(act_server, act_orch):
     (act_orch.parent / "mode.txt").write_text("refuse")
     code, text, _ = post(act_server, {"op": "run.stop", "args": {"ticket": "t_abcdef"}})
     assert code == 422 and text == "Nope, not allowed."
+
+
+def test_every_click_leaves_one_act_event_in_the_debug_log(act_server, act_orch, monkeypatch):
+    """ORCH-341: a click that left the ticket where it was must show in a problem report: op, ticket and the
+    answer's status (no arguments)."""
+    from orch_dashboard import server
+
+    seen = []
+    monkeypatch.setattr(server.diag, "log", lambda ev, lvl="debug", **kv: seen.append((ev, kv)))
+    (act_orch.parent / "mode.txt").write_text("refuse")
+    code, _, _ = post(act_server, {"op": "run.stop", "args": {"ticket": "t_abcdef"}})
+    assert code == 422
+    acts_ = [kv for ev, kv in seen if ev == "dashboard.act"]
+    assert len(acts_) == 1
+    assert acts_[0]["op"] == "run.stop" and acts_[0]["ticket"] == "t_abcdef" and acts_[0]["status"] == 422
+    assert set(acts_[0]) <= {"root", "op", "ticket", "status", "ms"}
 
 
 def test_no_orch_command_is_a_plain_503(ws):

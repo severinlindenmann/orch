@@ -321,6 +321,21 @@ def test_idea_adopts_a_ticket_made_from_chat(ws, run, proposal):
     assert p["order"] == plain["id"] and run("show", plain["id"])["proposal"] == 1
 
 
+def test_idea_from_a_ticket_links_both_ways(ws, run):
+    """ORCH-267: the order and the ticket the idea came from refer to each other, once."""
+    src = core(ws, "ticket", "new", "Focus redesign")
+    r = run("idea", "Lessons run", "--from", src["id"])
+    assert r["source"] == src["id"]
+    load = lambda tid: json.loads((ws / "fake-tickets" / f"{tid}.json").read_text())
+    assert load(r["order"])["refs"] == [{"kind": "ticket", "ticket": src["id"]}]
+    assert load(src["id"])["refs"] == [{"kind": "ticket", "ticket": r["order"]}]
+    plain = core(ws, "ticket", "new", "From Chat")
+    a = run("idea", "--ticket", plain["id"], "--from", src["id"])
+    assert a["adopted"] is True and load(plain["id"])["refs"] == [{"kind": "ticket", "ticket": src["id"]}]
+    run("idea", "--ticket", plain["id"], "--from", src["id"])  # again: no second link
+    assert len(load(src["id"])["refs"]) == 2
+
+
 def test_idea_needs_a_title_or_a_ticket_and_refuses_finished_or_sub_tickets(ws, run):
     assert run("idea", code=2)["code"] == "invalid"
     assert run("idea", "Title", "--ticket", "t_000001", code=2)["code"] == "invalid"
@@ -477,3 +492,33 @@ def test_skill_tells_the_manager_to_file_the_testers_pictures_with_the_stop():
 
     text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
     assert ".orch/addons/factory/stops/<order>/s<round>/" in text and '"after": "s1/make-poll.png"' in text
+
+
+def test_skill_tells_the_manager_to_wait_for_real_instead_of_ending_its_turn():
+    import orch_factory
+
+    text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
+    # ORCH-333: after start-crew the manager records what it waits for, so orch can wake it
+    assert "orch wait <order> --on ticket:<crew ticket>" in text
+    assert "Never\n  just end your turn" in text
+
+
+def test_a_proposal_with_several_problems_names_them_all_at_once(ws, run, proposal):
+    """ORCH-267: the proposal was refused three times in a row, one long line each, and the contract said 240
+    where the card's real limit is 120. Now one refusal lists every problem, with the real limit."""
+    order = run("idea", "Booking page")["order"]
+    p = json.loads(proposal)
+    p["goal"] = "g" * 130
+    p["done_means"][0] = "d" * 121
+    p["tasks"][0]["title"] = "t" * 150
+    r = run("propose", order, "--file", "-", data=json.dumps(p).encode(), code=2)
+    assert "3 problems" in r["error"] and "goal: 130 characters, at most 120" in r["error"]
+    assert "done_means[0]: 121 characters" in r["error"] and "tasks[0].title: 150 characters" in r["error"]
+    # the shape is fine, the rules between the parts are not: still every one at once
+    p = json.loads(proposal)
+    p["tasks"][0]["stage"] = "nowhere"
+    p["tasks"].append(dict(p["tasks"][1]))
+    r = run("propose", order, "--file", "-", data=json.dumps(p).encode(), code=2)
+    assert (
+        r["error"].startswith("2 problems") and "stage in the line" in r["error"] and "own name" in r["error"]
+    )
