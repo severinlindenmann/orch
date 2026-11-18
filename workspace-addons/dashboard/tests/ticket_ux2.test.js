@@ -82,6 +82,12 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.deepEqual(all.filter(n => n.attrs.role === 'tab').map(n => n.attrs['data-tab']), ['overview', 'tasks', 'files', 'activity']);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
   assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-resume') && /Resume/.test(body) && !/Start helper/.test(body));
+  // ORCH-415 (UX D2): a start is outlined, never filled, with its cost in one line above it
+  assert.match(all.find(n => n.attrs['data-key'] === 'ticket-resume').attrs.className, /\boutline\b/);
+  assert.ok(!/\bprimary\b/.test(all.find(n => n.attrs['data-key'] === 'ticket-resume').attrs.className));
+  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-start-pick'), 'the start sits in a cost pick');
+  assert.match(text(all.find(n => n.attrs['data-key'] === 'ticket-start-cost')), /paid helper time|estimate about|used so far/);
+  assert.equal(all.filter(n => n.tag === 'h2' && /What (was|you) asked/.test(text(n))).length, 1, 'one heading for the ask');
   assert.ok(!all.find(n => n.attrs.id === 'ticket-panel-tasks').attrs.hidden, 'the Tasks choice opens the Tasks tab');
   assert.ok(nodes(all.find(n => n.attrs.id === 'ticket-panel-overview')).some(n => n.attrs['data-field'] === 'note'), 'Note in Overview');
   assert.match(text(all.find(n => n.attrs.className === 'side-panel properties')), /Properties.*Owner.*Due.*Done when/);
