@@ -1723,6 +1723,7 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
             via=via,
             digest=asked_digest,
             phone=frm,
+            person=True,  # a paired phone, checked above (ORCH-582: may answer a draft)
             pid="p_" + answer_id[2:],
         )
     except review.BadVerdict as e:
@@ -1972,6 +1973,7 @@ def _card_plain(root: Path, msg: dict, asked: dict) -> tuple[str, str | None] | 
             by=by,
             via=via,
             digest=asked.get("question_digest"),
+            person=True,  # a paired phone, checked above (ORCH-582: may answer a draft)
         )
     except Refused as e:
         return f"not applied to {asked['ticket']}: {e}", None

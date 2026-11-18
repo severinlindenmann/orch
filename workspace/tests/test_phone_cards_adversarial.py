@@ -134,8 +134,8 @@ def test_an_old_verdict_does_not_answer_the_changed_follow_up(proj, run, new_tic
     tid = new_ticket()
     install(proj, tid)
     qmsg = send_card(proj, conn, tid, "q4")
-    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page")
-    new = review.change(proj, tid, "q4", "ok", "B", None, by="human:me", via="page")
+    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page", person=True)
+    new = review.change(proj, tid, "q4", "ok", "B", None, by="human:me", via="page", person=True)
     put_answer(conn, qmsg, _case("choice-ok-picked"), 1)
     run("relay", "inbox")
     assert question(proj, tid, new["id"])["decision"]["picked"] == "B"
@@ -234,7 +234,7 @@ def test_a_copy_outside_the_reviewed_folder_is_never_read(proj, new_ticket, conn
 def test_sync_cards_never_sends_an_answered_or_cardless_question(proj, new_ticket, conn):
     tid = new_ticket()
     install(proj, tid)
-    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page")
+    review.decide(proj, tid, "q4", "ok", "A", None, by="human:me", via="page", person=True)
     tickets.ask(proj, tid, "Plain?", ["Yes"], None, "agent:claude")
     sent = phone_view.sync_cards(proj)
     assert f"{tid}:q4" not in sent

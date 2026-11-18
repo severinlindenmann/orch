@@ -43,6 +43,7 @@ from orch import (
     mobile_mode,
     net,
     nextstep,
+    ownerpick,
     refs,
     relay,
     review,
@@ -1494,8 +1495,17 @@ def run(args: argparse.Namespace) -> None:
         who = tickets.acting_by(args)
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
+        # ORCH-582: a draft is answered only with the signed-in dashboard's one-time person grant
+        person = ownerpick.is_draft_card(shown_q) and ownerpick.person_granted(root, who)
         t, q = tickets.answer(
-            root, args.id, args.question, args.answer, who, args.via, expected_question_digest=shown_digest
+            root,
+            args.id,
+            args.question,
+            args.answer,
+            who,
+            args.via,
+            expected_question_digest=shown_digest,
+            person=person,
         )
         with contextlib.suppress(
             Refused

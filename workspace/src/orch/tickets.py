@@ -20,7 +20,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import config, diag, history, net, procs, saferead, syncgate, term
+from orch import config, diag, history, net, ownerpick, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -1355,6 +1355,9 @@ def accept_for_owner(root: Path, tid: str, reasons: str) -> dict:
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not in Review.")
+        ownerpick.refuse_ticket(
+            ticket, person=False
+        )  # ORCH-582: a draft is the owner's, never the Reviewer's
         _check_can_finish(ticket)
         if _open_questions(ticket):
             raise Refused("A question on this ticket still waits for an answer.")
@@ -1391,6 +1394,7 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str) -> d
             raise Refused(f"{qid} is already answered.")
         if question_digest(q) != digest:
             raise Refused(f"{qid} changed after the Reviewer looked at it.")
+        ownerpick.refuse_card(q, person=False)  # ORCH-582: said first, in its own words
         if q.get("card") is not None or q.get("action") is not None or q.get("kind") not in (None, "plain"):
             raise Refused(f"{qid} waits for the owner.")
         rec = q.get("recommended")
@@ -3587,8 +3591,11 @@ def answer(
     *,
     expected_question_digest: str | None = None,
     decision: dict | None = None,
+    person: bool = False,
 ) -> tuple[dict, dict]:
     """decision: the Review stack's structured answer (orch/review.py); `answer` is then its plain summary.
+    person: a signed-in person on the dashboard (a one-time person grant) or a paired phone; only then is a
+    draft card answered (ORCH-582, orch/ownerpick.py), whatever `by` and `via` say.
     expected_question_digest: question_digest of the question as the person was shown it; the answer is
     refused when the question is no longer that one, or could not be encoded. None: not checked (a caller that
     kept no digest, e.g. a relay record from before digests)."""
@@ -3611,6 +3618,7 @@ def answer(
             raise Refused(
                 "This card waits for the owner. Ask with orch review add and wait with orch review wait."
             )
+        ownerpick.refuse_card(q, person and str(by).startswith("human:"))
         if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
             raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
         if expected_question_digest is not None and (
@@ -3655,7 +3663,7 @@ def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None
 
 
 def record_answered(
-    root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None
+    root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None, person: bool = False
 ) -> dict:
     """Append one already-answered questions[] entry (a Review stack decision that was not an open question:
     a Check result, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
@@ -3668,6 +3676,7 @@ def record_answered(
         raise Refused(
             "This card waits for the owner. Ask with orch review add and wait with orch review wait."
         )
+    ownerpick.refuse_card(entry, person and str(by).startswith("human:"))
 
     def op(ticket):
         old = None

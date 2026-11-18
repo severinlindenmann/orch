@@ -155,3 +155,26 @@ def test_the_status_poll_carries_a_grant_and_only_with_a_session(ws, monkeypatch
     assert len(list(renew._grants(ws).iterdir())) == n  # a poll leaves no grant file behind
     actions.run_op(ws, SELF, "logins.check", {}, session=True)
     assert renew.GRANT_ENV + "_FD" not in seen["env"]  # a plain check needs no grant
+
+
+def test_a_card_answer_carries_a_person_grant_only_with_a_session(ws, monkeypatch):
+    """ORCH-582: only a signed-in answer may pick a draft; the core takes the one-time grant as the proof."""
+    from orch import renew
+    from orch.pagesession import SELF
+
+    seen = {}
+
+    class _Ok:
+        returncode, stdout, stderr = 0, json.dumps({"id": "q1", "answer": "Build it"}), ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: seen.update(env=kw["env"], kw=kw) or _Ok())
+    args = {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": "a" * 64}
+    with pytest.raises(actions.NeedsPerson):  # no session: no answer at all, so no grant either
+        actions.run_op(ws, SELF, "review.answer", args)
+    assert seen == {}
+    actions.run_op(ws, SELF, "review.answer", args, session=True)
+    assert seen["env"].get(renew.GRANT_ENV + "_FD") or seen["env"].get(renew.GRANT_ENV)
+    actions.run_op(
+        ws, SELF, "answer", {"ticket": "t_abcdef", "question": "q1", "answer": "Yes", "digest": "a" * 64}, session=True
+    )
+    assert seen["env"].get(renew.GRANT_ENV + "_FD") or seen["env"].get(renew.GRANT_ENV)
