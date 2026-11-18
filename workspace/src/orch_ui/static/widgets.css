@@ -1290,6 +1290,16 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
 .swipe-preview:has(>.doc):not(:has(.doc-rows)){background:linear-gradient(transparent,var(--ink) 70%) 0 100%/100% 32px no-repeat local,linear-gradient(transparent,color-mix(in srgb,var(--text) 22%,transparent)) 0 100%/100% 16px no-repeat scroll,var(--ink)}
 /* a toast never covers the comment sheet's buttons: while a sheet is open it shows at the top (ORCH-422 look check) */
 body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:auto}
+/* A choice card that fills its grid cell: a two-line .live-opt, pressed when in use (Usage "How work is spread", ORCH-657) */
+.live-opt.tall{align-items:flex-start;height:100%;padding:var(--s4)}
+.live-opt.tall .live-opt-t{gap:var(--s1)}
+.live-opt.tall[aria-pressed=true]{background:var(--surface-2)}
+/* A number stepper: − value + ; the value is an <output> (ORCH-657) */
+.num-step{display:inline-flex;align-items:center;gap:var(--s1)}
+.num-step output{min-width:var(--s9);text-align:center;font-variant-numeric:tabular-nums;font-weight:500}
+.settings-row .ctl{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--s2)}
+.settings-row .ctl select{width:auto}
+@media(max-width:600px){.settings-row .ctl{justify-content:flex-start}}
 
 /* ---- Live groups (ORCH-345, draft A on draft D): an epic or a factory order on the new live page. ONE tree (.gtree)
    in three modes: preview (the small tree on a wall tile), tree (the switcher beside a pane: main helper, its tickets
