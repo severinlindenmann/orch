@@ -117,7 +117,7 @@
     const askRemove = go => {
       const box = h('span', {className: 'row', role: 'group', 'aria-label': 'Remove the limit of ' + a.label},
         h('span', {className: 'meta', text: 'Remove this limit?'}),
-        h('button', {type: 'button', className: 'btn sm', onclick: go}, 'Remove'),
+        h('button', {type: 'button', className: 'btn danger sm', onclick: go}, 'Remove'),
         h('button', {type: 'button', className: 'btn ghost sm', onclick: () => { value.value = lim ? num(lim.value) : ''; box.replaceWith(row); }}, 'Keep it'));
       row.replaceWith(box);
       box.querySelector('button').focus();
@@ -226,7 +226,7 @@
     if (m.flapping) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
         h('h3', {text: 'Accounts switched ' + m.flapping.count + ' times back and forth'}),
-        h('p', {text: 'From ' + stamp(m.flapping.from) + ' to ' + stamp(m.flapping.to) + '. Another program may be switching accounts too. Turn switching off here or in the other program.'}))));
+        h('p', {text: 'Between ' + stamp(m.flapping.from) + ' and ' + window.UI.clock(m.flapping.to) + '. Another program may be switching accounts too. Turn switching off here or in the other program.'}))));
     }
     for (const w of m.warnings || []) if (w && !/switcher is not installed/.test(w)) parts.push(h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w})));
     if (!m.accounts.length) {
