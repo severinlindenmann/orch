@@ -67,6 +67,20 @@ def test_a_red_group_of_ten_runs_the_nine_first_and_the_suspect_alone(ws):
     assert any("#7 touch that; the other 9 run again first" in x for x in lines)
 
 
+def test_a_green_group_of_ten_merges_all_ten_after_one_run(ws):
+    """Done-when of ORCH-557: 10 waiting, one group of 10 on top of develop, one full run, all 10 merged."""
+    (ws / ".orch").mkdir(exist_ok=True)
+    (ws / ".orch" / "config.toml").write_text("[pull_requests]\nmax_group = 10\nmerge_alone = false\n")
+    for n in TEN:
+        store.add(ws, url(n), None, "agent:t", login="bot")
+    gh, git = FakeGitHub(_ten()), FakeGit()
+    r, calls = make(ws, gh, git)
+    r.run()
+    assert len(calls) == 1 and gh.groups[calls[0]] == TEN  # one group, one run of the checks
+    assert gh.direct == [] and len(git.pushed) == 1  # no member merged on its own light checks
+    assert states(ws) == {n: "merged" for n in TEN}
+
+
 def test_without_a_telling_check_name_a_red_group_is_split_in_halves(ws):
     for n in range(1, 5):
         store.add(ws, url(n), None, "agent:t", login="bot")
