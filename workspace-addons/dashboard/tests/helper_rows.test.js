@@ -142,3 +142,14 @@ test('stuck rows never merge with a question of the same ticket', () => {
   const groups = c.homeNeeds([question, PERMISSION, FAILING]);
   assert.deepEqual([...groups.map(g => g.row.id)], [question.id, PERMISSION.id, FAILING.id]);
 });
+
+test('work that stopped carries the Helpers list word as a pill: Stuck, or Idle for an idle helper', () => {
+  const {c} = context();
+  c.window.UI = {helperPill:(state, word) => node('span', {className:'pill helper-pill', 'data-state':state}, [word])};
+  const pill = row => all(c.needRow(row, null), x => /helper-pill/.test(x.attrs.className || '')).map(text);
+  assert.deepEqual(pill(PERMISSION), ['Stuck']);
+  assert.deepEqual(pill(FAILING), ['Stuck']);
+  assert.deepEqual(pill(UNSURE), ['Stuck']);
+  assert.deepEqual(pill(UNMERGED), ['Stuck']);
+  assert.deepEqual(pill(IDLE), ['Idle']);
+});
