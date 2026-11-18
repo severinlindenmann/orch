@@ -700,13 +700,13 @@ async function needsYou(page, dash) {
     ? { ...s, status: 'working', word: 'Working', detail: 'Keeps the old file name', question: null } : s));
   const need = await page.$$eval('[data-band="need"] .wall-tile', els => els.map(el => [el.dataset.tile, el.dataset.s]));
   if (need.slice(0, 3).some(([, s]) => s !== 'needs-you') || need.slice(3).some(([, s]) => s === 'needs-you')) throw new Error('the needs-you tiles are not first: ' + need.map(x => x.join(' ')).join(', '));
-  const [orange, plain, sign] = await page.evaluate(([a, b]) => {
+  const [orange, plain, want] = await page.evaluate(([a, b]) => {
     const c = el => getComputedStyle(el).borderTopColor, t = document.createElement('span');
     t.style.color = 'var(--needs-you)'; document.body.append(t);
-    const want = getComputedStyle(t).color; t.remove();
-    return [c(document.querySelector(a)), c(document.querySelector(b)), want];
+    const goal = getComputedStyle(t).color; t.remove();
+    return [c(document.querySelector(a)), c(document.querySelector(b)), goal];
   }, [tileOf('t_bar238'), tileOf('t_bar232')]);
-  if (orange !== sign || orange === plain) throw new Error(`the needs-you tile is not orange (${orange}, working ${plain}, orange ${sign})`);
+  if (orange !== want || orange === plain) throw new Error(`the needs-you tile is not orange (${orange}, working ${plain}, orange ${want})`);
   if (!/Keep the old file name/.test(await page.textContent(`${tileOf('t_bar238')} [data-wall-now]`))) throw new Error('the orange tile does not say the question');
   if (await page.$(`${tileOf('t_bar238')} :is(input, textarea, select, [data-answer], .question-card)`)) throw new Error('the wall itself offers an answer');
   await page.click(`${tileOf('t_bar238')} [data-wall-open]`);
