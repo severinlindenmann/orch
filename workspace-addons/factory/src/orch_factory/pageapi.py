@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import re
 import stat
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -415,10 +416,30 @@ def _broken(ticket, error):
     }
 
 
+MEASURE_TTL = 20  # seconds a page keeps an order's measured active time (the record is read per crew ticket)
+_measured: dict = {}
+
+
 def _derive(root, store, ticket, tickets):
     d = flow.derive(root, store, ticket, tickets)
     d["store"] = store
+    _show_measured(root, d)
     return d
+
+
+def _show_measured(root, d):
+    """The shown active time is measured from core's record, as `next` and the watcher do; the cached value is only
+    what is left when nobody measured (watcher off) or the record can't be read (never a made-up 0 %)."""
+    if d.get("phase") != "started" or d.get("kind") != "run":
+        return
+    key = (str(root), d["tid"])
+    seen = _measured.get(key)
+    if seen and time.monotonic() - seen[0] < MEASURE_TTL:
+        d["used"] = seen[1]
+        return
+    flow._measure(root, d)
+    if d.get("measured"):
+        _measured[key] = (time.monotonic(), d["used"])
 
 
 def _day(row):

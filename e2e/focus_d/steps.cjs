@@ -121,7 +121,8 @@ async function previewOn(page) {
 }
 
 // Step 9. The test dashboard has no running helpers, so the step gives the page draft D's 24 sessions (3 need you,
-// 1 pinned, 3 working, 9 in line, 8 idle) as runs of extra tickets in its state, with the Preview switch on. Pinning is
+// 1 pinned, 3 working, 9 in line, 8 idle) as extra tickets in its state and as the answer of the live sessions API
+// (/api/sessions, ORCH-359: the bar and the panes read it), with the Preview switch on. Pinning is
 // kept in the browser until the wall stores it. Everything else is the real page: the bar, its fold, list and search.
 const BAR_SESSIONS = [
   ['wait', 'ORCH-238', 'Add files and notes to a ticket'], ['wait', 'ORCH-201', 'Send the weekly summary'],
@@ -158,6 +159,45 @@ async function liveBarState(page) {
       addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
     route.fulfill({ response: res, json: st });
   });
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: barSessions(), lines: 8, age_ms: 0 } }));
+}
+// The same 24 sessions as the live sessions API gives them (the shape in workspace-addons/dashboard/.../sessions.py).
+const BAR_STATUS = { wait: 'needs-you', run: 'working', queue: 'in-line', idle: 'idle' };
+const BAR_WORD = { wait: 'Waits for you', run: 'Working', queue: 'In line', idle: 'Idle' };
+function barSessions() {
+  return BAR_SESSIONS.map(([s, key, title], i) => {
+    const live = s !== 'queue';
+    return { id: 't_bar' + key.slice(5), key, title, status: BAR_STATUS[s], word: BAR_WORD[s],
+      detail: s === 'run' ? 'Running the tests' : '', waiting_on: [],
+      question: s === 'wait' ? 'Keep the old file name when the same file is added twice?' : null,
+      lines: live ? ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)',
+        '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ ' + title + ': step ' + (2 + (i % 3)) + ' of 5'] : [],
+      tool: live ? 'Helper' : null, model: i % 2 ? 'Opus' : 'Sonnet', mode: live ? 'live' : null,
+      opened_at: null, open_seconds: live ? (20 + 3 * i) * 60 : null, idle_seconds: s === 'idle' ? 18 * 60 : null,
+      closes_in_seconds: s === 'idle' ? 42 * 60 : live ? 3600 : null, last_at: null };
+  });
+}
+// Step 16: every pane says what its session does, its last lines, tool and model, how long it is open and how long it
+// stays, from the live sessions API, and keeps it current without a repaint (the keyboard place stays).
+async function paneData(page, dash) {
+  await liveBarState(page);
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
+  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+  await page.click('#live-bar [data-lbar-open="t_bar238"]');
+  const body = '#live-dock .live-pane[data-session="t_bar238"] [data-live-body]';
+  await page.waitForFunction(b => /Keep the old file name/.test(document.querySelector(b)?.textContent || ''), body, { timeout: 10000 });
+  const got = await page.$eval(body, el => ({ now: el.querySelector('[data-live-now]').textContent,
+    lines: el.querySelector('[data-live-lines]').textContent, meta: el.querySelector('[data-live-meta]').textContent }));
+  if (!/step \d of 5/.test(got.lines)) throw new Error('the pane does not show the last lines: ' + got.lines);
+  if (!/^Helper · Sonnet · open \d+ min · stays warm while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
+  const link = `${body} [data-key="live-open-ticket"]`;
+  await page.focus(link);
+  await page.evaluate(() => window.LiveSessions.refresh());
+  await page.waitForTimeout(300);
+  if (!(await page.evaluate(l => document.activeElement === document.querySelector(l), link))) throw new Error('a new answer moved the keyboard place');
+  await noSideways(page);
 }
 
 // Step 13 until the layer exists (crew task layer replaces the stand-in with the real layer): a small open dialog with
@@ -231,6 +271,7 @@ async function barIsOneRow(page) {
 // The new page with Preview on, for the steps after step 3: the same dressing of the page's state as previewSwitch
 // (the live-session add-on and the setting), plus the one ticket of the test workspace marked as having a working helper.
 async function livePreview(page) {
+  let one = null;
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
     dashboard: { label: 'Focus', icon: 'target', order: 20 } };
@@ -243,8 +284,14 @@ async function livePreview(page) {
     const first = (st.tickets || [])[0];
     if (first) st.runs = { ...(st.runs || {}), [first.id]: { running: true, state: 'alive' } };
     if (first && !first.key) first.key = 'ORCH-238';  // the test ticket has no key; the pane shows the key, never the raw id
+    if (first) one = { id: first.id, key: first.key, title: first.title };
     route.fulfill({ response: res, json: st });
   });
+  // the live sessions API (ORCH-359) says the same: the first ticket has a working session
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: one ? [{ ...one,
+    status: 'working', word: 'Working', detail: 'Running the tests', waiting_on: [], question: null, lines: ['⏺ Running the tests'],
+    tool: 'Helper', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 1500, idle_seconds: null, closes_in_seconds: 3600,
+    last_at: null }] : [] } }));
   await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
     body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
 }
@@ -330,6 +377,236 @@ async function layer(page, dash, width) {
 
 // Step 12: the split. The test workspace has one ticket, so the step uses the bar's 24 sessions of draft D (step 9).
 // Every pane has pin, add beside, place, minimise and close; narrow panes keep pin and place in More (draft D).
+// Step 26 (ORCH-363): the History tab of a pane lists the ticket's earlier sessions (the last 10, newest first) and
+// Reopen starts the helper on one. The list comes from GET /api/sessions/<ticket>; here it is fake data, and the
+// Reopen action is caught before orch so nothing starts. The ticket has no working helper, so Reopen can be pressed.
+async function history(page, dash) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  let tid = '', st0 = null;
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    const first = (st.tickets || [])[0];
+    if (first) { tid = first.id; if (!first.key) first.key = 'ORCH-189'; st0 = st; }  // a full state, for the fake Reopen answer
+    route.fulfill({ response: res, json: st });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+  const at = h => new Date(Date.now() - h * 3600e3).toISOString();
+  const rows = [
+    { id: 's-now', label: 'Helper', last_used: at(1), title: 'Write the summary from the survey answers', turns: 24, current: true, reopenable: false },
+    { id: 's-mon', label: 'Helper', last_used: at(30), title: 'Read the survey answers and group them', turns: 12, current: false, reopenable: true },
+    { id: 's-old', label: 'Helper', last_used: at(200), title: 'First draft of the newsletter', turns: 1, current: false, reopenable: true },
+    { id: 's-gone', label: 'Helper', last_used: at(400), title: '', turns: 0, current: false, reopenable: false },
+  ];
+  await page.route(/\/api\/sessions\/t_[a-z0-9]+$/, route => route.fulfill({ json: { available: true, sessions: rows } }));
+  let asked = null;
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'session.reopen') return route.continue();
+    asked = body.args;
+    route.fulfill({ json: st0 });
+  });
+  await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
+  await page.evaluate(id => window.LiveLayer.open(id), tid);
+  const pane = '#live-dock .live-pane';
+  // History is a button in the pane header; a narrow pane (the phone) has it in its More menu
+  const toggle = async (dom = false) => {
+    await page.waitForSelector(pane + ' :is([data-key="live-history"], [data-key="live-pane-more"])', { timeout: 5000 });
+    const press = sel => dom ? page.$eval(sel, el => el.click()) : page.click(sel);
+    if (await page.$(pane + ' [data-key="live-history"]')) return press(pane + ' [data-key="live-history"]');
+    await press(pane + ' [data-key="live-pane-more"]');
+    await page.waitForSelector(pane + ' [data-key="live-history-item"]', { timeout: 5000 });
+    await press(pane + ' [data-key="live-history-item"]');
+  };
+  await toggle();
+  await page.waitForSelector(pane + ' .live-hist-row', { timeout: 5000 });
+  if (await page.$(pane + ' [data-key="live-history"][aria-pressed="false"]')) throw new Error('History is not marked as open');
+  if (await page.$(pane + ' [data-key="live-more-menu"]')) throw new Error('the More menu stayed open after History');
+  const seen = await page.$$eval(pane + ' .live-hist-row', els => els.map(el => ({
+    t: el.querySelector('.live-hist-t').textContent, f: el.querySelector('.live-hist-f').textContent,
+    use: !!el.querySelector('.chip'), reopen: !!el.querySelector('button'), off: !!el.querySelector('button[disabled]') })));
+  if (seen.length !== 4) throw new Error(`the History tab shows ${seen.length} sessions, not 4`);
+  if (!seen[0].use || seen[0].reopen) throw new Error('the session in use is not marked In use');
+  if (!seen[1].reopen || !seen[2].reopen || seen[1].off) throw new Error('an earlier session has no Reopen');
+  if (seen[3].reopen || !/Not on this computer/.test(seen[3].f)) throw new Error('a session that is not on this computer offers Reopen');
+  if (seen[2].f.indexOf('1 message ') !== 0) throw new Error(`the plural is wrong: ${seen[2].f}`);
+  await noSideways(page);
+  await page.click(pane + ' .live-hist-row:nth-child(2) [data-live-hist="reopen"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock .live-pb-hist'), null, { timeout: 5000 });
+  if (!asked || asked.session !== 's-mon' || asked.ticket !== tid) throw new Error('Reopen did not ask orch for that session: ' + JSON.stringify(asked));
+  // open it again for the picture (the "continues that conversation" toast may sit over the pane's corner)
+  await toggle(true);
+  await page.waitForSelector(pane + ' .live-hist-row', { timeout: 5000 });
+}
+
+// Step 14 (ORCH-362): the Start choice of a ticket with no helper. Continue the last conversation, a fresh start on a
+// tool and model (the usual ones preselected), or reopen an earlier session; the helper places in use and the line.
+// The tools, places and earlier sessions are fake data; run.start and ticket.model are caught before orch, so
+// nothing starts. Then every place is taken: the line shows and a start answers that it waits in line.
+async function startChoice(page, dash) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  let tid = '', st0 = null, full = false;
+  const others = n => Object.fromEntries(Array.from({ length: n }, (_, i) => ['t_other' + i, { running: true, claim: { mode: 'live' } }]));
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    // always the full state (never "unchanged since"), so the fake places below reach the page
+    const res = await route.fetch({ url: route.request().url().replace(/\?.*$/, '') });
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.rev = 'fake-' + (full ? 'full' : 'free');
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true, live_max: full ? 4 : 6,
+      agents: [{ name: 'claude', label: 'Claude Code', found: true, chosen: true, models: true },
+        { name: 'codex', label: 'Codex', found: true, chosen: false, models: false }] };
+    const first = (st.tickets || [])[0];
+    if (first) { tid = first.id; if (!first.key) first.key = 'ORCH-189'; first.model = { name: 'sonnet', by: 'orch' }; }
+    st.runs = { ...Object.fromEntries(Object.entries(st.runs || {}).filter(([k]) => k !== tid)), ...others(4) };
+    st.start_line = full ? { waiting: ['t_other8', 't_other9'], why: '4 helpers are working at once, the most you allowed', limit: 4 } : null;
+    st0 = st;
+    route.fulfill({ response: res, json: st });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+  const at = h => new Date(Date.now() - h * 3600e3).toISOString();
+  const rows = [
+    { id: 's-mon', label: 'Claude Code', last_used: at(30), title: 'Read the survey answers and group them', turns: 12, current: false, reopenable: true },
+    { id: 's-old', label: 'Claude Code', last_used: at(200), title: 'First draft of the newsletter', turns: 1, current: false, reopenable: true },
+  ];
+  await page.route(/\/api\/sessions\/t_[a-z0-9]+$/, route => route.fulfill({ json: { available: true, sessions: rows } }));
+  const asked = [];
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (!['run.start', 'ticket.model', 'session.reopen'].includes(body.op)) return route.continue();
+    asked.push(body);
+    if (full && body.op === 'run.start') return route.fulfill({ status: 422, contentType: 'text/plain',
+      body: '4 helpers are working at once, the most you allowed. ORCH-189 waits in line and starts when one is finished.' });
+    route.fulfill({ json: st0 });
+  });
+  await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
+  await page.evaluate(id => window.LiveLayer.open(id), tid);
+  const pane = '#live-dock .live-pane [data-key="live-start"]';
+  await page.waitForSelector(pane + ' [data-key="live-start-earlier"] .live-hist-row', { timeout: 8000 });
+  const seen = await page.$eval(pane, el => ({
+    places: el.querySelector('[data-key="live-start-places"]').textContent,
+    cont: el.querySelector('[data-key="live-start-continue"]')?.textContent || '',
+    tools: [...el.querySelectorAll('[data-what="tool"]')].map(b => [b.textContent, b.getAttribute('aria-pressed')]),
+    models: [...el.querySelectorAll('[data-what="model"]')].map(b => [b.textContent, b.getAttribute('aria-pressed')]),
+    earlier: el.querySelectorAll('[data-key="live-start-earlier"] .live-hist-row [data-live-hist="reopen"]').length }));
+  if (seen.places !== 'A start uses 1 of 6 helper places. Now 4 of 6 are in use.') throw new Error('places: ' + seen.places);
+  if (!/Continue where it stopped/.test(seen.cont) || !/from /.test(seen.cont)) throw new Error('no Continue with the last conversation: ' + seen.cont);
+  if (JSON.stringify(seen.tools) !== JSON.stringify([['Claude Code', 'true'], ['Codex', 'false']])) throw new Error('tools: ' + JSON.stringify(seen.tools));
+  if (!seen.models.some(m => m[0] === 'Sonnet' && m[1] === 'true')) throw new Error('the usual model is not preselected: ' + JSON.stringify(seen.models));
+  if (seen.earlier !== 2) throw new Error(`${seen.earlier} earlier sessions offer Reopen, not 2`);
+  await noSideways(page);
+  // one click starts fresh with the usual tool and model: only run.start --fresh goes to orch
+  await page.click(pane + ' [data-live-start="fresh"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-start"][aria-busy]'), null, { timeout: 5000 });
+  if (asked.length !== 1 || asked[0].op !== 'run.start' || !asked[0].args.fresh || asked[0].args.agent) throw new Error('one-click fresh start: ' + JSON.stringify(asked));
+  // continue the last conversation
+  await page.click(pane + ' [data-live-start="continue"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-start"][aria-busy]'), null, { timeout: 5000 });
+  const c = asked[asked.length - 1];
+  if (c.op !== 'run.start' || c.args.fresh || c.args.ticket !== tid) throw new Error('Continue did not continue: ' + JSON.stringify(c));
+  // pick Opus, then another tool (it uses its own model), and start again: the model first, then the start on that tool
+  await page.click(pane + ' [data-what="model"][data-v="opus"]');
+  await page.click(pane + ' [data-what="tool"][data-v="codex"]');
+  await page.waitForSelector(pane + ' [data-key="live-start-pick"] .meta', { timeout: 3000 });
+  asked.length = 0;
+  await page.click(pane + ' [data-live-start="fresh"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-start"][aria-busy]'), null, { timeout: 5000 });
+  if (asked.map(a => a.op).join() !== 'ticket.model,run.start' || asked[0].args.model !== 'opus' || asked[1].args.agent !== 'codex')
+    throw new Error('fresh start on the picked tool and model: ' + JSON.stringify(asked));
+  // every place taken: the places line says so with the line, and a start says it waits in line (no error)
+  full = true;
+  await page.evaluate(() => refresh());  // the next state read (the page polls every few seconds)
+  await page.waitForFunction(() => /All 4 helper places are in use\. 2 tickets wait in line\./.test(document.querySelector('#live-dock [data-key="live-start-places"]')?.textContent || ''), null, { timeout: 15000 });
+  await page.click(pane + ' [data-live-start="continue"]');
+  await page.waitForFunction(() => [...document.querySelectorAll('.toast, [role="status"], [role="alert"]')].some(el => /waits in line for a free helper place/.test(el.textContent)), null, { timeout: 5000 });
+  if ([...await page.$$eval('.toast', els => els.map(e => e.textContent))].some(t => /Could not start/.test(t))) throw new Error('a start in line shows as a failure');
+  await noSideways(page);
+}
+
+// Step 16, second part (ORCH-362): the model button at the top of a working session's pane opens the model choice;
+// the pane's line (ORCH-359) says tool, model, open time and when it closes. The running helper and its live data are
+// fake and ticket.model is caught before orch.
+async function toolModel(page, dash) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  let tid = '', st0 = null;
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch({ url: route.request().url().replace(/\?.*$/, '') });
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.rev = 'fake-tool-model';
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+      agents: [{ name: 'claude', label: 'Claude Code', found: true, chosen: true, models: true }] };
+    const first = (st.tickets || [])[0];
+    if (first) {
+      tid = first.id; if (!first.key) first.key = 'ORCH-247';
+      first.model = { name: 'opus', by: 'orch' };
+      first.warmth = { seconds_left: 42 * 60 };
+      st.runs = { ...(st.runs || {}), [tid]: { ticket: tid, running: true, state: 'alive', pending: [],
+        claim: { agent: 'claude', mode: 'live', run: 'r-fake', started_at: new Date(Date.now() - 96 * 60e3).toISOString(),
+          live: { state: 'idle', since: new Date(Date.now() - 18 * 60e3).toISOString() } } } };
+    }
+    st0 = st;
+    route.fulfill({ response: res, json: st });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: tid ? [{ id: tid,
+    key: 'ORCH-247', title: 'Tool and model', status: 'idle', word: 'Idle', detail: '', waiting_on: [], question: null, lines: [],
+    tool: 'Claude Code', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 96 * 60, idle_seconds: 18 * 60,
+    closes_in_seconds: 42 * 60, last_at: null }] : [] } }));
+  const asked = [];
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'ticket.model') return route.continue();
+    asked.push(body);
+    route.fulfill({ json: st0 });
+  });
+  await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
+  await page.evaluate(id => window.LiveLayer.open(id), tid);
+  const row = '#live-dock .live-pane [data-key="live-model-row"]';
+  await page.waitForSelector(row, { timeout: 8000 });
+  const text = await page.$eval(row, el => el.textContent);
+  if (text !== 'Model: Opus') throw new Error('the model button reads: ' + text);
+  const meta = '#live-dock .live-pane [data-live-meta]';
+  await page.waitForFunction(m => /open/.test(document.querySelector(m)?.textContent || ''), meta, { timeout: 8000 });
+  const line = await page.$eval(meta, el => el.textContent);
+  if (line !== 'Claude Code · Opus · open 1 h 36 min · closes in 42 min if left idle') throw new Error('the pane line reads: ' + line);
+  if (await page.$('#live-dock [data-key="live-start"]')) throw new Error('a working session offers the Start choice');
+  await noSideways(page);
+  await page.click(row + ' [data-key="live-model"]');
+  await page.waitForSelector('#live-dock [data-key="live-model-menu"]', { timeout: 3000 });
+  const menu = await page.$eval('#live-dock [data-key="live-model-menu"]', el => el.textContent);
+  if (!/Opus \(now\)/.test(menu) || !/applies when the helper finishes its current step/.test(menu)) throw new Error('model menu: ' + menu);
+  await page.click('#live-dock [data-live-model="haiku"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-model-menu"]'), null, { timeout: 3000 });
+  if (asked.length !== 1 || asked[0].args.model !== 'haiku' || asked[0].args.ticket !== tid) throw new Error('the new model did not go to orch: ' + JSON.stringify(asked));
+  // open the menu again for the picture
+  await page.click(row + ' [data-key="live-model"]');
+  await page.waitForSelector('#live-dock [data-key="live-model-menu"]', { timeout: 3000 });
+}
+
 async function split(page, dash, width) {
   const phone = width <= 720;
   const panes = () => page.$$eval('#live-dock .live-pane', els => els.map(el => {
@@ -472,6 +749,8 @@ async function focusButton(page, dash, width) {
   });
   // the added tickets have no files on disk: their ticket pages get an empty list of results
   await page.route(/\/api\/artifacts\/t_fb/, route => route.fulfill({ json: { files: [] } }));
+  // the Start choice of a ticket with no helper lists its earlier sessions (ORCH-362): none for these fake tickets
+  await page.route(/\/api\/sessions\/t_fb/, route => route.fulfill({ json: { available: true, sessions: [] } }));
   await page.goto(dash + '/#tickets');
   await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
   await page.reload();
@@ -687,11 +966,15 @@ const STEPS = [
   },
   {
     n: 14, pic: 'fd-14-start', area: 'sessions', title: 'Start: continue, fresh start or an earlier session', feature: [4, 12],
-    waits: T.sessions,
     do: ['Open a ticket that has no session and press Start.', 'Look at the three choices and the earlier sessions list.',
       'Pick tool and model and start fresh.'],
     see: ['One question: continue the last conversation, fresh start, or reopen an earlier session.',
-      'Up to 10 earlier sessions with date and step.', 'The usual tool and model are preselected: one click starts it.'],
+      'Up to 10 earlier sessions with date and step.', 'The usual tool and model are preselected: one click starts it.',
+      'How many helper places are in use; when all are taken, how many wait in line, and a start waits in line.'],
+    async run({ page, dash }) {
+      await startChoice(page, dash);
+    },
+    okConsole: /status of 422 \(Unprocessable/i,  // the start that waits in line: orch refuses it and puts it in line
     draft: { q: '?page=focus&cur=ORCH-189&view=zoom&ask=1' },
   },
   {
@@ -703,10 +986,18 @@ const STEPS = [
   },
   {
     n: 16, pic: 'fd-16-tool-model', area: 'sessions', title: 'Tool, model and open time on every session', feature: [12],
-    waits: T.data,
-    do: ['Look at a tile and at a pane header.', 'Open the model choice of a running session.'],
-    see: ['Tool and model are shown (for example "Claude CLI · Opus").', 'How long it is open and when it closes for being idle.',
-      'A new model applies from the next fresh start and says so.'],
+    do: ['Open a session that needs you from the bar.', 'Look at the pane: what it does now, its last lines and the line under them.',
+      'Open the model choice of a working session and pick another model.'],
+    see: ['The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").',
+      'How long it is open and how long it stays (warm while it works, or when it closes for being idle).',
+      'All of it stays current while you look; the keyboard place does not jump.',
+      'A new model applies when the helper finishes its current step (or at its next start) and says so.'],
+    async run({ page, dash }) {
+      await paneData(page, dash);
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await page.goto('about:blank');  // the same #home address would not load the page again
+      await toolModel(page, dash);
+    },
     draft: { q: '?page=focus&cur=ORCH-247&view=zoom&pm=ORCH-247:model' },
   },
   {
@@ -776,6 +1067,24 @@ const STEPS = [
     see: ['The wall is one column.', 'The layer opens at the bottom and shows one session; right falls back to bottom.',
       'Nothing scrolls sideways; every button can be reached.'],
     draft: { q: '?page=focus&cur=ORCH-238&mode=right' },
+  },
+  {
+    n: 26, pic: 'fd-26-history', area: 'sessions', title: 'Earlier sessions in the History tab, reopened with one click', feature: [4],
+    do: ['Open a session in the layer and press History (in More when the pane is narrow).', 'Press Reopen on an earlier session.'],
+    see: ['Up to 10 sessions of the ticket, newest first, each with its time, first message and number of messages.',
+      'The session in use says In use; one that is not on this computer has no Reopen.',
+      'Reopen starts the helper on that conversation and the list closes.'],
+    async run({ page, dash }) {
+      await history(page, dash);
+    },
+    draft: { q: '?page=focus&cur=ORCH-189&view=zoom&ask=1' },
+  },
+  {
+    n: 27, pic: 'fd-27-model-choice', area: 'sessions', title: 'Change the model of a running session', feature: [12],
+    waits: T.sessions,
+    do: ['Open the model choice of a running session.'],
+    see: ['A new model applies from the next fresh start and says so.'],
+    draft: { q: '?page=focus&cur=ORCH-247&view=zoom&pm=ORCH-247:model' },
   },
 ];
 

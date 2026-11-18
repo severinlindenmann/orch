@@ -88,10 +88,8 @@ def start_runner(root: Path) -> None:
     d.mkdir(parents=True, exist_ok=True)
     argv = [sys.executable, "-I", "-P", "-m", "orch_pull_requests", "queue", "run", "--root", str(root)]
     with open(d / "runner.log", "a", encoding="utf-8") as log:
-        subprocess.Popen(
-            argv, cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-            start_new_session=os.name != "nt", **procs.background_popen_kwargs(),
-        )  # fmt: skip
+        # background_popen_kwargs sets stdin and the own session (or the hidden Windows console): never pass them here too
+        subprocess.Popen(argv, cwd=root, stdout=log, stderr=log, **procs.background_popen_kwargs())
 
 
 def _github():
@@ -295,6 +293,10 @@ def main(argv: list[str] | None = None) -> int:
     a = q.add_parser("add", help="put a pull request in the merge queue")
     a.add_argument("url")
     a.add_argument("--ticket")
+    a.add_argument(
+        "--first", action="store_true",
+        help="it fixes the red base branch: ahead of the line, alone, also while the base branch is red",
+    )  # fmt: skip
     a.add_argument("--wait", action="store_true", help="wait until it is merged or left the queue")
     a.add_argument("--max-wait", type=float, default=240, help="minutes (with --wait)")
     a.add_argument("--json", action="store_true")
@@ -358,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
         ticket = _ticket(root, args.ticket, url)
         old = store.find(store.read(root), url)
         seen = {} if old and old.get("state") not in FINISHED else admit(root, _github(), url)
-        row, new = store.add(root, url, ticket, _actor(), **seen)
+        row, new = store.add(root, url, ticket, _actor(), first=args.first, **seen)
         start_runner(root)
         if not args.wait:
             ahead = [x for x in store.read(root) if x.get("state") not in FINISHED and x["url"] != url]
