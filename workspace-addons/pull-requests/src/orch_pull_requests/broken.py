@@ -330,20 +330,24 @@ def ask(root: Path, t: dict) -> None:
 def answers(root: Path, data: dict) -> None:
     """Broken tests whose question a person answered with Put it aside since the last pass: set aside now.
     An answer not written by a person (human:...) is never acted on."""
-    from orch import tickets
+    from orch import history, tickets
 
     for t in data["tests"].values():
         if t.get("aside") or t.get("fixed") or not t.get("question") or not t.get("ticket"):
             continue
         try:
-            tk = tickets.load(root, t["ticket"])
+            raw = tickets.load(root, t["ticket"])
         except Exception:  # noqa: BLE001, S112 - a ticket that went away: nobody answers it
             continue
+        tk = history.shown_ticket(root, raw)  # answered_by: as proven on this machine
         q = next((q for q in tk.get("questions") or [] if q.get("id") == t["question"]), None)
         if q is None or q.get("answer") is None or q.get("kind") != KIND:
             continue
         if not str(q.get("answered_by") or "").startswith("human:"):
             continue  # only a person sets a test aside; an agent's answer is left as it is
+        raw_q = next((x for x in raw.get("questions") or [] if x.get("id") == t["question"]), None)
+        if not history.answer_proven(root, raw, raw_q):
+            continue  # a synced answer this machine cannot prove never sets a test aside
         if q["answer"] == ASIDE:
             t["aside"] = True
             data["publish"][t["repo"]] = True
