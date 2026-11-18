@@ -29,7 +29,7 @@ module.exports = {
     await act('chat.send_ws', () => page.getByRole('button', { name: 'Send' }).click());
     await page.getByText('Delivered').first().waitFor({ timeout: 20000 }).catch(async () => { throw new Error('the message was not delivered:\n' + (await text()).slice(0, 500)); });
     await reload();
-    await page.getByText('Can you cook for twelve on Friday?').first().waitFor({ timeout: 20000 })
+    await page.locator('text=Can you cook for twelve on Friday? >> visible=true').first().waitFor({ timeout: 20000 })
       .catch(() => { throw new Error('the message to Kitchen is gone after a reload'); });
 
     // a group chat on a ticket, with Kitchen in it
@@ -61,7 +61,7 @@ module.exports = {
     await open('#ticket/' + tid);
     const share = page.getByRole('button', { name: 'Share with group' }).first();
     await share.waitFor({ timeout: 20000 }).catch(async () => { throw new Error('no Share with group button on the ticket:\n' + (await text()).slice(0, 600)); });
-    await shot('share-with-group');
+    await shot('share-with-group', share);
     await act('group.share', () => share.click());
     await page.getByText('Shared with the group.').first().waitFor({ timeout: 20000 });
     orchAsPerson('addon', 'remove', 'relay');   // off again

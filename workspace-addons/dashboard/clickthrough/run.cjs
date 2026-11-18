@@ -258,8 +258,20 @@ function tools(page, srv, rec, shots = null) {
         path.join(srv.dir, 'Pilatus'), name);
       return t.orchAsPerson('addon', 'add', name, '--project-only');
     },
-    /** with --out: keep a picture of the page now as <file>-<name>.png (a state worth showing in a review) */
-    async shot(name) { if (shots) await page.screenshot({ path: `${shots}-${name}.png` }); },
+    /** with --out: keep pictures of the page now at the UX checklist sizes, <file>-<name>-<w>.png (a state worth
+     *  showing in a review), with `el` (a locator) scrolled into view; the window goes back to its size after */
+    async shot(name, el = null) {
+      if (!shots) return;
+      const was = page.viewportSize();
+      for (const [w, h] of [[1280, 800], [1920, 1080], [390, 844]]) {
+        await page.setViewportSize({ width: w, height: h });
+        await page.waitForTimeout(400);
+        if (el) await el.scrollIntoViewIfNeeded().catch(() => {});
+        await page.screenshot({ path: `${shots}-${name}-${w}.png` });
+      }
+      await page.setViewportSize(was);
+      await page.waitForTimeout(200);
+    },
     /** fail with a plain message unless cond */
     must(cond, msg) { if (!cond) throw new Error(msg); },
     /** the visible text of the page's main area */
