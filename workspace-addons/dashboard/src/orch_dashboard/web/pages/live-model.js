@@ -30,7 +30,7 @@ function liveModelLine(run, t, agents, now, live) {
     : claim.live?.state === 'attention' || live?.status === 'needs-you' ? 'stays warm while it waits for you' : 'stays warm while it works';
   return {tool, model, name, next:next && next !== model ? next : '', canPick, open:open === null ? '' : 'open ' + liveModelDur(open), warm};
 }
-// What the button says: "Claude Code · Opus", with "→ Haiku after this step" while a switch waits.
+// What the button says: "Tool · Opus", with "→ Haiku after this step" while a switch waits.
 function liveModelText(line) {
   return [line.tool, line.model].filter(Boolean).join(' · ') + (line.next ? ' → ' + line.next + ' after this step' : '');
 }

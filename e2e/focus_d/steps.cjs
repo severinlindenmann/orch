@@ -696,6 +696,8 @@ async function focusButton(page, dash, width) {
   });
   // the added tickets have no files on disk: their ticket pages get an empty list of results
   await page.route(/\/api\/artifacts\/t_fb/, route => route.fulfill({ json: { files: [] } }));
+  // the Start choice of a ticket with no helper lists its earlier sessions (ORCH-362): none for these fake tickets
+  await page.route(/\/api\/sessions\/t_fb/, route => route.fulfill({ json: { available: true, sessions: [] } }));
   await page.goto(dash + '/#tickets');
   await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
   await page.reload();
