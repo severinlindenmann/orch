@@ -32,3 +32,10 @@
   outlined, in place of the three answers; the arrow keys do not answer it.
 - 17 Nov (ORCH-294): picture tiles of a card (Home row, ticket page, Answered) fill the row: Before and After, or A and B, side by side, each at least 320 px wide and 216-360 px tall (kit `.decision-shown` / `.decision-shot`, no page CSS). A card alone on Home shows all its pictures; a set shows the proposal of each card. A long "why" line on the ticket page folds to three lines with Show more / Show less (kit `UI.moreText`). Click or Enter still opens a picture large; every row names its ticket key. UX checklist at 1280, 1920 and 390 run in the PR.
 - 18 Nov (ORCH-295, owner choice A): after Send back the ticket says "Changes asked" (in place of Ready) until the task made from the person's words is done or set aside; Undo never leaves it behind. The Comment sheet has a second button, "Add note", between Cancel and Send back: it saves the words on the ticket (queued to its helper), answers nothing, keeps the card on top and the work running; Send back stays the one that asks for changes. Shown only when the page can save notes (`api.note`).
+
+## Factory draft ready (18 Nov 2026, ORCH-479)
+
+- A Factory draft that is ready for Plan the run is a card in the stack (group "Factory", kind Draft): its title, "Read
+  the draft, then plan the run or ask for changes.", the link Read draft, and the buttons Ask for changes (opens the
+  comment sheet; the words go to the agent as "Change the draft: …") and Plan the run. A Factory proposal card has
+  the link Read proposal. Drawn on Home (`home.html?draft=1`); the product draws the card with the kit deck as is.
