@@ -68,6 +68,11 @@ test('with an earlier session here the main button says Continue', () => {
   assert.equal(m.main().textContent, 'Continue');
 });
 
+test('ORCH-667: after a stop the kept conversation (in use, not reopenable) gives Continue', () => {
+  const m = mount({sessions: {available: true, sessions: [{id: 's1', title: 'Ship it', current: true, reopenable: false, readable: true, turns: 3, last_used: '2026-11-18T20:30:00Z'}]}});
+  assert.equal(m.main().textContent, 'Continue');
+});
+
 test('Starting… until the helper runs; a double click and a second button for the same ticket send one start', async () => {
   const m = mount();
   const other = new N('div');
