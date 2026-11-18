@@ -6,15 +6,16 @@ const idOf = out => (/\[(t_[A-Za-z0-9]+)\]/.exec(out) || [])[1];
 
 module.exports = {
   name: 'Start button: the Start choice, Starting and one run per double click',
-  covers: ['run.start', 'run.stop'],
+  covers: ['run.start'],
   async run({ page, open, reload, act, must, orch }) {
     const shots = process.env.START_SHOTS || '';
     const starts = [];
     page.on('request', r => { if (r.url().endsWith('/api/act') && r.headers()['x-orch-op'] === 'run.start') starts.push(r.url()); });
+    // tidy up: stop the stand-in when it still runs (it may end by itself first; b-run checks Stop itself)
     const stopIt = async () => {
       const stop = page.getByRole('button', { name: 'Stop', exact: true });
-      await stop.waitFor({ timeout: 15000 });
-      await act('run.stop', () => stop.click());
+      await stop.waitFor({ timeout: 15000 }).catch(() => {});
+      if (await stop.isVisible()) await stop.click({ timeout: 5000 }).catch(() => {});
     };
 
     // the caret opens the choice: Fresh start with tool and model, the places line

@@ -13,7 +13,8 @@
        picked, toast(text, kind), fresh (true: the main button is a fresh start on the usual tool and model, Home's Start
        fresh), caretOnly (true: only the caret and the Start choice; the page keeps its own main button, the composer's
        Send and start helper, given as mainEl: it sits left of the caret and is disabled while it starts), caretHidden
-       (true: no caret now, e.g. a helper already works), inline (true: the Start choice itself, drawn in place with no
+       (true: no caret now, e.g. a helper already works), hasSessions (false: the ticket never ran, so no Continue while
+       the earlier sessions load), inline (true: the Start choice itself, drawn in place with no
        button or caret: the live page's pane of a ticket with no helper)}
    Returns {el, update(changes), open(), close()}. Pages call update({running, sessions, runs, ...}) on every refresh;
    update({running:true}) also ends Starting. */
@@ -117,7 +118,8 @@
       return li;
     }
     function body() {
-      const v = view(), lastRow = S.last(v.rows), hasLast = !!lastRow || v.state === 'loading', name = o.name || 'this ticket';
+      /* while the list loads, Continue shows only when the page does not know the ticket never ran (o.hasSessions) */
+      const v = view(), lastRow = S.last(v.rows), hasLast = !!lastRow || (v.state === 'loading' && o.hasSessions !== false), name = o.name || 'this ticket';
       const p = S.places(o.runs, o.settings, o.line), at = S.inLine(p, o.ticket);
       const box = el('div', 'live-start');
       if (starter.starting(o.ticket)) box.setAttribute('aria-busy', 'true');
@@ -284,7 +286,7 @@
         if (changes && changes.send) sendNow = changes.send;
         if (o.running) starter.seen(o.ticket, true);
         /* polling calls this often: draw again only when what the button shows changed, so an open picker stays open */
-        const sig = JSON.stringify([o.sessions, !!o.running, S.places(o.runs, o.settings, o.line), o.agents, o.model, o.label, o.continueLabel, o.style, !!o.caretHidden, !!o.fresh, starter.starting(o.ticket)]);
+        const sig = JSON.stringify([o.sessions, !!o.running, S.places(o.runs, o.settings, o.line), o.agents, o.model, o.hasSessions, o.label, o.continueLabel, o.style, !!o.caretHidden, !!o.fresh, starter.starting(o.ticket)]);
         if (sig === lastSig) return;
         lastSig = sig;
         render();

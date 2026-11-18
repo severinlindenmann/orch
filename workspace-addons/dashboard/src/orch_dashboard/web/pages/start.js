@@ -23,7 +23,7 @@ function startSessions(id) {
 function startFacts(t, o = {}) {
   const run = state?.runs?.[t.id];
   return {name:window.DashHelpers.ticketKey(t) || clean(t.title), sessions:startSessions(t.id), runs:state?.runs || {}, settings:state?.settings || {},
-    line:state?.start_line || {}, agents:state?.settings?.agents || [], model:t.model || null,
+    line:state?.start_line || {}, agents:state?.settings?.agents || [], model:t.model || null, hasSessions:array(t.sessions).length > 0,
     running:o.running !== undefined ? o.running : run?.running === true};
 }
 // The place of a Start button: a host the page draws like any other node.

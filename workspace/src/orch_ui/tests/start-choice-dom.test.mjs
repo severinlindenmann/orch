@@ -202,3 +202,12 @@ test('caretOnly: only the caret; before gets the start the person picked', async
   assert.deepEqual(m.sent.map(s => s[0]), ['run.send', 'run.start']);
   assert.equal(m.btn.starting(), true);
 });
+
+test('while the earlier sessions load, Continue shows only for a ticket that ran before', () => {
+  const never = mount({sessions: null, hasSessions: false});
+  never.btn.open();
+  assert.equal(never.q(n => n.dataset.start === 'continue'), null);
+  const ran = mount({sessions: null, hasSessions: true});
+  ran.btn.open();
+  assert.ok(ran.q(n => n.dataset.start === 'continue'));
+});
