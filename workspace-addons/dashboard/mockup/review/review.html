@@ -33,7 +33,7 @@ const drawSide=()=>{if(!deck)return;const g=new Map();items.forEach((it,i)=>{con
    const ic=document.createElement('span');ic.style.flex='none';ic.innerHTML=icon(it.icon,16);const t=document.createElement('span');t.className='review-queue-title';t.textContent=it.title;
    const st=document.createElement('span');st.className='swipe-ov-state '+(a?a.verdict:'wait');st.textContent=a?word(a):i===deck.index?'Now':'';r.append(ic,t);if(st.textContent)r.append(st);
    r.onclick=()=>deck.jump(i);sec.append(r)});q.append(sec)})};
-deck=UI.swipeDeck(document.getElementById('deck'),items,{mode:'desk',attach:true,record:true,onNote:async()=>({ok:true}),onChange:()=>setTimeout(drawSide)});
+deck=UI.swipeDeck(document.getElementById('deck'),items,{mode:'desk',onNote:async()=>({ok:true}),onChange:()=>setTimeout(drawSide)});
 /* Answered (ORCH-172): records from the master (UI.answerRecord): ticket key and title on every card, tiles about 344x216, a click or Enter opens one large */
 const ans=document.getElementById('answered'),fu=(e,r)=>'assets/'+String(r).split('/').pop(),tk=()=>'../ticket/ticket.html',ago=h=>Date.now()-h*36e5;
 [{id:'a1',ticket:'DT-50',ticket_key:'DT-50',ticket_title:'Home look',by:'Severin',via:'dashboard',at:ago(1),card:{kind:'draft',title:'Home: one list of what needs you',preview:{type:'compare',before:{type:'img',src:'reviewed/aa/home-today.jpg'},after:{type:'img',src:'reviewed/aa/home-proposal.jpg'}}},shown:{copy:'reviewed/aa/',files:{'home-proposal.jpg':'x'}},decision:{action:'approve',summary:'Build it'}},

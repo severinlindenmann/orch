@@ -227,38 +227,3 @@ test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle 
   assert.match(text(c.reviewAllButton()), new RegExp('^Review all' + total + '$'));
   assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
 });
-
-const J = v => JSON.parse(JSON.stringify(v));  // objects made inside the page's context compare by value
-test('ORCH-420: feedback files are kept with the ticket first, then the words name them and say what each voice note said', async () => {
-  const sent = [];
-  const act = async (op, args) => { sent.push([op, args]); return op === 'ticket.attach' ? {ok:true, status:200, state:{attached:{saved:['Screenshot 09-30.png', 'Voice 09-31-02.webm'], failed:[]}}} : {ok:true, status:200}; };
-  const c = ctx({}, {act, btoa:s => Buffer.from(s, 'binary').toString('base64')});
-  const file = (name, bytes, voice) => ({name, size:bytes.length, arrayBuffer:async () => new Uint8Array(bytes).buffer, ...(voice ? {orchVoice:voice} : {})});
-  const api = c.reviewApi();
-  assert.equal(api.attach, true); assert.equal(api.speech, 'local');
-  const files = [file('Screenshot 09-30.png', [137, 80, 78, 71]), file('Voice 09-31-02.webm', [26, 69, 223, 163], {secs:7, text:'Make the button green'})];
-  const r = await api.answer({id:'core:review:t_abcdef', digest:'d', verdict:'talk', note:{text:'Too small', pins:[]}, files});
-  assert.equal(r.ok, true);
-  assert.equal(sent[0][0], 'ticket.attach');
-  assert.deepEqual(J(sent[0][1]), {ticket:'t_abcdef', files:[{name:'Screenshot 09-30.png', data:'iVBORw=='}, {name:'Voice 09-31-02.webm', data:'GkXfow=='}], feedback:true});
-  const [op, args] = sent[1];
-  assert.equal(op, 'review.answer');
-  assert.deepEqual(J(args.note.changes), ['Too small', 'Voice note (0:07): Make the button green', 'I added 2 files to this ticket: Screenshot 09-30.png, Voice 09-31-02.webm. Read them first.']);
-  assert.deepEqual(J(args.note.words), {text:'Too small', voice:[{secs:7, text:'Make the button green', file:'Voice 09-31-02.webm'}]});
-});
-test('ORCH-420: a file orch refuses stops the answer before anything is sent', async () => {
-  const sent = [];
-  const act = async (op, args) => { sent.push(op); return {ok:false, status:400, text:'Refused: x.exe: only text files, pictures, PDFs and voice notes can be added.'}; };
-  const c = ctx({}, {act, btoa:s => Buffer.from(s, 'binary').toString('base64')});
-  const r = await c.reviewApi().answer({id:'core:review:t_abcdef', digest:'d', verdict:'talk', note:{text:'x'}, files:[{name:'x.exe', size:1, arrayBuffer:async () => new Uint8Array([1]).buffer}]});
-  assert.equal(r.ok, false); assert.match(r.error.message, /^x\.exe: only text files/);
-  assert.deepEqual(sent, ['ticket.attach']);
-});
-test('ORCH-420: Add note with only a picture sends the file line to the helper', async () => {
-  const sent = [];
-  const act = async (op, args) => { sent.push([op, args]); return op === 'ticket.attach' ? {ok:true, status:200, state:{attached:{saved:['shot.png'], failed:[]}}} : {ok:true, status:200}; };
-  const c = ctx({}, {act, btoa:s => Buffer.from(s, 'binary').toString('base64')});
-  const r = await c.reviewApi().note({ticket:'t_abcdef', text:'', files:[{name:'shot.png', size:4, arrayBuffer:async () => new Uint8Array([137, 80, 78, 71]).buffer}]});
-  assert.equal(r.ok, true);
-  assert.deepEqual(J(sent[1]), ['run.send', {ticket:'t_abcdef', text:'I added a file to this ticket: shot.png. Read it first.'}]);
-});

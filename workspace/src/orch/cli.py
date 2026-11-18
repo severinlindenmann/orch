@@ -589,17 +589,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--goal", required=True)
     x.add_argument("--not-included", dest="not_included")
     x = t.add_parser(
-        "attach",
-        parents=[common],
-        help="keep a text file, picture, PDF or voice note (read from stdin) with the ticket",
+        "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
     )
     x.add_argument("id")
     x.add_argument("--name", required=True, help="a name hint; orch picks the final name")
-    x.add_argument(
-        "--feedback",
-        action="store_true",
-        help="a person's feedback file: kept in the artifacts' feedback folder",
-    )
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
     x.add_argument("id")
     x = t.add_parser("wait", parents=[common])
@@ -667,9 +660,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     for k in ("command", "note", "pr", "commit", "url"):
         x.add_argument(f"--{k}", metavar="TEXT", help=f"evidence: a {k}")
     # several pictures (1280, 1920, 390) are one step's evidence: each --file is kept, not only the last
-    x.add_argument(
-        "--file", action="append", default=[], metavar="FILE", help="evidence: a file (up to 10 times)"
-    )
+    x.add_argument("--file", action="append", default=[], metavar="FILE", help="evidence: a file (up to 10 times)")
     x.add_argument("--title", help="short name of the evidence")
     x.add_argument("--role", help="result, check or support")
     x.add_argument("--summary", help="one line: what came out of this step (shown on the task)")
@@ -1229,9 +1220,7 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, "Plan written.")
     elif cmd == "ticket" and sub == "attach":
         data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
-        r = tickets.attach(
-            root, args.id, args.name, data, by(), folder=tickets.FEEDBACK_DIR if args.feedback else None
-        )
+        r = tickets.attach(root, args.id, args.name, data, by())
         _out(args, r, f"Attached {r['name']} ({tickets._size_text(r['size'])}): {r['path']}")
     elif cmd == "ticket" and sub == "artifacts-dir":
         d = tickets.artifacts_dir(root, args.id)
