@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store, switching
+from . import store, switching, when
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
@@ -82,9 +82,11 @@ def _state(row: dict) -> str:
 def build(data: dict, root: Path) -> dict:
     """The page model from `cli.gather()` (accounts with use) plus switching, the warning and the history."""
     memory = switching._read(switching.memory_path(root))
+    tz, now = when.zone(root), datetime.now(UTC)
     accounts = []
     for row in data["accounts"]:
         rule = row["rule"]
+        reset = when.next_reset(row, now, tz)
         accounts.append(
             {
                 "id": row["id"],
@@ -98,6 +100,9 @@ def build(data: dict, root: Path) -> dict:
                 "periods": list(store.allowed_periods(row)),
                 "unit": store.default_unit(row),
                 "ends": rule.get("ends"),
+                # the workspace's wall clock ('YYYY-MM-DD' = to the end of that day); the page writes it with UI.stamp
+                "ends_local": when.local(rule["ends"], tz) if rule.get("ends") else None,
+                "next_reset_local": when.local(reset, tz) if reset else None,
                 "falls_back": bool(row.get("prev")),
                 "fetched_at": row.get("fetched_at"),
             }
