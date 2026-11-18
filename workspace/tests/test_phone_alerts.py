@@ -170,3 +170,21 @@ def test_inbox_pull_runs_it(tmp_path, monkeypatch):
     monkeypatch.setattr(phone_alerts, "sync", lambda root: calls.append(root) or [])
     relay.sync_phone_views(tmp_path)
     assert calls == [tmp_path]
+
+
+def test_the_phone_names_the_sign_in_command_of_the_known_check(tmp_path, wired):
+    """ORCH-218: with the check's sign-in command the phone says which command to run, not just 'Renew it'."""
+    case = VECTORS["workspace"][0]
+    _seed(wired, case)
+    row = case["items"][0]
+    wired["recipes"] = [{"name": row["name"], "label": "Azure CLI", "kind": "login", "sign_in": "az login"}]
+    wired["doc"]["items"] = [{**row, "sign_in": "evil; rm -rf ~"}]  # the saved row never supplies it
+    phone_alerts.sync(tmp_path, now=NOW, tz=UTC)
+    text = wired["sent"][0]["body"]["text"]
+    assert text.endswith("Sign in again on your computer: az login") and "evil" not in text
+    a = phone_alerts.alert(
+        {"name": "az", "label": "Azure CLI", "kind": "login", "state": "renew", "ends_at": None, "stops": []}
+    )
+    assert phone_alerts.text(a, sign_in="az login") == (
+        "The Azure CLI login stopped working. Sign in again on your computer: az login"
+    )
