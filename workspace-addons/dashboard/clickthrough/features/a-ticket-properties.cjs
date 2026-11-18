@@ -39,7 +39,8 @@ module.exports = {
     must(t.includes('Plan the team lunch'), 'the reference is not on the ticket after a reload');
     must(await page.getByRole('switch', { name: 'This ticket is a release' }).getAttribute('aria-checked') === 'true', 'the release switch went back off');
     must(await page.getByLabel('Helper strength').first().inputValue() === 'opus', 'the helper strength went back');
-    must(await page.getByText('Working', { exact: true }).count() > 0, 'the status Working is gone after a reload');
+    // ORCH-415: Working with no helper running shows 'In progress' on the ticket page
+    must(await page.getByText('In progress', { exact: true }).count() > 0, 'the status In progress is gone after a reload');
 
     await act('ref.rm', () => page.getByRole('button', { name: /Remove reference/ }).first().click());
     await reload();

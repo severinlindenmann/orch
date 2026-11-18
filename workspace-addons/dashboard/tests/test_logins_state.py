@@ -105,3 +105,18 @@ def test_a_check_a_helper_wrote_into_the_project_is_never_shown(ws):
     health.save(ws, [ROW])
     assert [r["name"] for r in load_logins(ws)["items"]] == ["claude"]
     assert not (ws / ".orch" / "run" / "health.json").exists()  # the old place is cleared on the next check
+
+
+def test_the_sign_in_command_passes_only_when_it_is_plain(ws):
+    """ORCH-218: the terminal command a tool signs in with reaches the page; anything else is dropped."""
+    health.save(
+        ws,
+        [
+            {**ROW, "sign_in": "az login"},
+            {**ROW, "name": "b", "sign_in": "az login; curl x | sh"},
+            {**ROW, "name": "c", "sign_in": "<b>x</b>"},
+        ],
+    )
+    first, second, third = load_logins(ws)["items"]
+    assert first["sign_in"] == "az login"
+    assert "sign_in" not in second and "sign_in" not in third

@@ -33,7 +33,7 @@ test('ORCH-69: board and list cards carry no Start helper or Resume button; a pa
   const c = listCtx();
   const paused = c.ticketNext({id:'p', status:'open', sessions:[{id:'s1'}], updated_at:'2026-11-12T10:00:00Z'});
   assert.match(text(paused), /^Paused /);
-  assert.doesNotMatch(text(paused), /Resume|Start helper/);
+  assert.doesNotMatch(text(paused), /Continue|Start helper/);
   assert.equal(c.ticketNext({id:'n', status:'open'}), null, 'a To do card has no button');
   assert.equal(c.ticketNext({id:'t', status:'open', checklist:[{text:'typed by me'}]}), null, 'typed tasks alone: no button');
 });
@@ -81,7 +81,7 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(!/\bTasks\b/.test(body), 'no "Tasks" word on the ticket page');
   assert.deepEqual(all.filter(n => n.attrs.role === 'tab').map(n => n.attrs['data-tab']), ['overview', 'tasks', 'files', 'activity']);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
-  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-resume') && /Resume/.test(body) && !/Start helper/.test(body));
+  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-resume') && /Continue/.test(body) && !/Start helper/.test(body));
   // ORCH-415 (UX D2): a start is outlined, never filled, with its cost in one line above it
   assert.match(all.find(n => n.attrs['data-key'] === 'ticket-resume').attrs.className, /\boutline\b/);
   assert.ok(!/\bprimary\b/.test(all.find(n => n.attrs['data-key'] === 'ticket-resume').attrs.className));
@@ -97,7 +97,10 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   const typed = {...t, id:'t2', sessions:[]};
   ctx.tickets = () => [typed];
   const fresh = text(ctx.detail(typed));
-  assert.ok(/Start helper/.test(fresh) && !/Resume/.test(fresh), 'tasks typed before any helper ran: Start helper, not Resume');
+  assert.ok(/Start helper/.test(fresh) && !/Continue/.test(fresh), 'tasks typed before any helper ran: Start helper, not Continue');
+  ctx.justStarted = id => id === 't2';  // ORCH-250: Start was just pressed, the server has no session yet
+  const started = text(ctx.detail(typed));
+  assert.ok(!/Start helper|Not started/.test(started), 'right after Start the page never falls back to Not started / Start helper');
 });
 
 test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, and a change sends ticket.model', async () => {
@@ -237,6 +240,20 @@ test('ORCH-156: a failed save puts the cards back and says why', async () => {
   await c.laneStep('b', 'ready', -1);
   assert.deepEqual(c.laneTickets('ready').map(t => t.id), ['a', 'b']);
   assert.deepEqual(toasts[0], ['Saving did not work.', 'error']);
+});
+
+test('ORCH-250: Looks good is off while a step is open, and the page says why; wont-do steps do not count', () => {
+  const hh = (...a) => Object.assign(h(...a), {append(...k) { this.children.push(...k); }});
+  const c = {h:hh, document:{addEventListener(){}}, addEventListener(){}, array:v => Array.isArray(v) ? v : [], locks:new Set(), snapshot:false, render(){}, iconEl:n => n, window:{orch:{toast(){}}}, moveTicket(){},
+    ticketButton:(label, cls, fn, attrs = {}) => { const b = hh('button', {className:'btn ' + cls, ...attrs}, label); return b; }};
+  vm.createContext(c); vm.runInContext(ticketSrc, c);
+  const view = t => nodes(c.ticketChangesEditor(t));
+  const open = view({id:'a', status:'review', checklist:[{done:true}, {done:false}]});
+  assert.equal(open.find(n => /Looks good/.test(text(n)) && n.tag === 'button').disabled, true);
+  assert.match(text(open.find(n => n.attrs['data-key'] === 'ticket-review-open-steps')), /1 step is not finished/);
+  const ok = view({id:'b', status:'review', checklist:[{done:true}, {done:false, wont_do:true}]});
+  assert.notEqual(ok.find(n => /Looks good/.test(text(n)) && n.tag === 'button').disabled, true);
+  assert.ok(!ok.some(n => n.attrs['data-key'] === 'ticket-review-open-steps'));
 });
 
 // ---- ORCH-236 (bug hunt round 2 on the Tickets page and the ticket page)
