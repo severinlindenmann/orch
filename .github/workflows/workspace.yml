@@ -28,6 +28,12 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      # Windows: orch's safe git runs the python of the virtual environment as its `true`, and refuses a python that
+      # sits inside the project folder, so ~25 git tests failed. Keep the environment outside the project (ORCH-32).
+      - name: Virtual environment outside the project (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "UV_PROJECT_ENVIRONMENT=$RUNNER_TEMP/orch-venv" >> "$GITHUB_ENV"
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
