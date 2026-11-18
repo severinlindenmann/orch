@@ -150,3 +150,23 @@ def test_cut_fix_takes_only_the_fix_onto_main(tmp_path):
         wt, "rev-parse", "HEAD"
     )
     assert _git(origin, "rev-parse", got["branch"]) == got["sha"]  # pushed
+
+
+def test_a_fix_waits_for_its_own_security_ok(tmp_path, monkeypatch):
+    w = rk.World(None, cfg(tmp_path), {"fixes": [FIX], "last_release": 30})
+    st = {}
+    lines = rk.fix_lane(
+        w, st, None, ["#50 (security review not started yet)", "#7 (security review running)"]
+    )
+    assert w.did == [] and "waits for its security OK: #50 (security review not started yet)" in lines[-1]
+    assert st.get("fixes_shipped") == []  # not marked shipped: it is cut once the OK is there
+    lines = rk.fix_lane(w, st, None, ["#7 (security review running)"])  # another pull request's hold
+    assert w.did == ["cut:release 30.1 with #50"]
+
+
+def test_the_pass_hands_the_security_holds_to_the_fix_lane(tmp_path, monkeypatch):
+    from orch import secreview
+
+    monkeypatch.setattr(secreview, "tend", lambda w, st, role: ([], ["#50 (security review found problems)"]))
+    out = go(tmp_path, fixes=[FIX])
+    assert out["did"] == [] and any("waits for its security OK" in x for x in out["lines"])

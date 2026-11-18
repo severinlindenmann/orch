@@ -102,7 +102,7 @@ def changes_from(messages: list[str]) -> list[str]:
 def _local_messages(kind: str, a: str, b: str | None) -> list[str] | None:
     from orch import safegit
 
-    folder = Path(addons.repo())
+    folder = addons.file_repo(addons.repo()) or Path(addons.repo())
     # 'at' follows the main line (release merges); 'between' sees every merged pull request in the range
     args = ["log", *(["--first-parent"] if kind == "at" else []), "-n", "100" if kind == "at" else "250"]
     args.append("--format=%B%x00")
@@ -140,7 +140,7 @@ def _github_messages(kind: str, a: str, b: str | None) -> list[str] | None:
 def _fetch_messages(kind: str, a: str, b: str | None = None) -> list[str] | None:
     """Commit messages, newest first. kind 'at': the history up to commit/ref `a`; 'between': a..b."""
     try:
-        if addons._is_local(addons.repo()):
+        if addons._is_local(addons.repo()) or addons.file_repo(addons.repo()) is not None:
             return _local_messages(kind, a, b)
         return _github_messages(kind, a, b)
     except Exception:  # noqa: BLE001 - best effort: no network, rate limit, odd answer
@@ -194,8 +194,8 @@ def release_line() -> list[tuple[int | str, str]] | None:
     after 33), one entry per release; None when they cannot be read (no network, unknown host)."""
     try:
         r = addons.repo()
-        if r.startswith("file://"):
-            got = _git_release_line(Path(r.removeprefix("file://")))
+        if addons.file_repo(r) is not None:
+            got = _git_release_line(addons.file_repo(r))
         elif addons._is_local(r):
             got = _git_release_line(Path(r))
         else:

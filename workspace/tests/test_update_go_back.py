@@ -188,6 +188,8 @@ def test_release_line_from_a_git_source(monkeypatch, tmp_path):
     monkeypatch.delenv("ORCH_REPO", raising=False)
     monkeypatch.delenv("ORCH_REF", raising=False)
     assert updateinfo.release_line() == [(32, out[0]), (31, out[2])]
+    # a file:// source has commits and releases like GitHub: the newest commit and its release
+    assert addons._source_sha() == out[0] and updateinfo.release_now(out[1]) == 31
 
 
 # ---- fix releases (ORCH-552): release/part33.1 is "33.1", after 33 and before 34

@@ -2399,11 +2399,36 @@ def _github_api() -> str | None:
     return f"https://api.github.com/repos/{match[1]}/{match[2]}" if match else None
 
 
+def file_repo(r: str) -> Path | None:
+    """A git source on this computer given as file:///path (a throwaway source for tests and trials): its
+    folder, else None. Unlike a folder install, uv installs it at a ref, so it has commits and releases."""
+    if not r.startswith("file://"):
+        return None
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    folder = Path(url2pathname(urlparse(r).path))
+    return folder if folder.is_absolute() and folder.is_dir() else None
+
+
 def _source_sha() -> str | None:
     from urllib.parse import quote
     from urllib.request import Request, urlopen
 
     try:
+        fr = file_repo(repo())
+        if fr is not None:
+            from orch import safegit
+
+            rc, out, _ = safegit.run(
+                ["rev-parse", "--verify", "-q", f"{ref()}^{{commit}}"],
+                fr,
+                5,
+                read_only=True,
+                filters=False,
+                root=fr,
+            )
+            return _sha_or_none(out) if rc == 0 else None
         if _is_local(repo()):
             from orch import safegit
 

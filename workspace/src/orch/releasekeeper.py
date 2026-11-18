@@ -1545,7 +1545,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + [f"release PR {foreign['number']} is open and was not cut by the keeper: watching only"]
 
     if not rel or rel.get("phase") == "testing":  # a fix for the newest release goes before anything else
-        lane = fix_lane(w, st, hold)
+        lane = fix_lane(w, st, hold, sec_holds)
         if st.get("release") is not rel:
             return out + lane
         out += lane
@@ -1755,7 +1755,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     return out + [f"release {n}: {len(un)} pull requests waiting; started {names} on {sha[:8]}"]
 
 
-def fix_lane(w: World, st: dict, hold: str | None) -> list[str]:
+def fix_lane(w: World, st: dict, hold: str | None, sec_holds: list[str] | None = None) -> list[str]:
     """A merged pull request labelled "fix for release N", N the newest release on main, not shipped yet: cut
     release N.k from main with only that change, at once (no pace, no other work, no walks). Its checks, Merge
     card and update then go the normal way. A release that was being tested waits; it is tested after."""
@@ -1781,6 +1781,11 @@ def fix_lane(w: World, st: dict, hold: str | None) -> list[str]:
     if hold:
         return out + [f"fix #{todo[0]['number']} for release {newest} waits: on hold: {hold}"]
     fix = sorted(todo, key=lambda f: f["number"])[0]
+    mine = [x for x in sec_holds or [] if x.startswith((f"#{fix['number']} ", fix["sha"][:8]))]
+    if mine:  # the same rule as every release: no cut before the security OK of what it ships
+        return out + [
+            f"fix #{fix['number']} for release {newest} waits for its security OK: " + ", ".join(mine)
+        ]
     k = w.fix_count(newest) + 1
     label = f"{newest}.{k}"
     rel = st.get("release")
