@@ -1,9 +1,12 @@
-"""Earlier chat sessions of a ticket: list them and read one back as plain turns (read-only).
+"""Earlier chat sessions of a ticket: list them, read one back as plain turns, and reopen one.
 
-The ticket already remembers each helper session (tickets.record_session). The conversation itself stays in
-the tool's own folder; this module only reads it, where the adapter says it is (adapters.history_file).
-Nothing is written, copied or sent anywhere. A tool whose conversation cannot be found (or keeps none, like a
-generic command) answers "not found".
+The ticket remembers each helper session, the last tickets.SESSIONS_KEPT per ticket (tickets.record_session).
+The conversation itself stays in the tool's own folder; this module only reads it, where the adapter says it
+is (adapters.history_file). Nothing is copied or sent anywhere. A tool whose conversation cannot be found (or
+keeps none, like a generic command) answers "not found".
+
+Reopen (`reopen`) only changes which remembered id the next start of the helper continues; it starts nothing
+itself. `orch run start <ticket> --session <id>` reopens and starts in one step.
 """
 
 from __future__ import annotations
@@ -110,6 +113,8 @@ def sessions(ticket: dict, environ: dict | None = None, root: Path | None = None
                 "turns": len(h["turns"]),
                 "readable": h["found"],
                 "current": bool(s.get("current")),
+                # a person can continue it on this computer (the one in use is continued by a plain start)
+                "reopenable": h["found"] and not s.get("current"),
             }
         )
     out.sort(key=lambda x: x.get("last_used") or "", reverse=True)
@@ -121,3 +126,28 @@ def _label(agent: str, root: Path | None) -> str:
         return adapters.load(agent, root)["label"]
     except Exception:  # noqa: BLE001 - an agent that is gone still shows under its name
         return agent
+
+
+def reopen(root: Path, tid: str, sid: str, by: str) -> dict:
+    """Make the remembered session `sid` the one the next start of the helper continues. Only a person picks
+    it, only while no helper works on the ticket, and only a conversation that is on this computer. Returns
+    the session's row of `sessions` (its agent is the tool that must continue it)."""
+    from orch import runs, tickets
+    from orch.errors import Refused
+
+    if not str(by or "").startswith("human:"):
+        raise Refused("Only a person can pick the conversation a helper continues.")
+    if not valid_session_id(sid):
+        raise Refused("That is not a session id. List them: orch run history <ticket>")
+    t = tickets.load(root, tid)
+    rec = next((r for r in sessions(t, root=root) if r["id"] == sid), None)
+    if rec is None:
+        raise Refused("That session does not belong to this ticket. List them: orch run history <ticket>")
+    run = runs.read(root, tid)
+    if run and isinstance(run.get("pid"), int) and runs.state(run) == "alive":
+        raise Refused("A helper is working on this ticket. Stop it first, then continue the other chat.")
+    if not rec["readable"]:
+        raise Refused("That conversation is not on this computer, so it cannot be continued.")
+    if not rec["current"]:
+        tickets.record_session(root, tid, rec["agent"], sid, runs.host())
+    return rec
