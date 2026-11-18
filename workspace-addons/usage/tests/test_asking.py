@@ -152,7 +152,11 @@ def test_off_or_other_kinds_are_not_answers(ws, tmp_path, no_switcher):
     assert asking.ask(ws, "code", "openai", at=AT) == {"go": True}  # not allowed for Code: nothing set for it
     with store.change(ws) as (accounts, rows):
         store.set_on(accounts[0], rows, "human:owner", False)
-    assert asking.ask(ws, "reviews", "openai", at=AT) == {"go": True}
+    # a subagent asking for Reviews skips the off credit (nothing else set: do as today) ...
+    assert asking.ask(ws, "reviews", at=AT) == {"go": True}
+    # ... but the credit skill that would spend on it is refused (ORCH-627)
+    ans = asking.ask(ws, "reviews", "openai", at=AT)
+    assert ans == {"go": False, "why": "OpenAI credit is switched off. Turn it on on the Usage page."}
 
 
 def test_a_whole_kind_without_room_waits_on_home_and_clears(ws, tmp_path, monkeypatch, no_switcher):
@@ -265,3 +269,105 @@ def test_month_window_keeps_the_local_reset_hour_over_summer_time(monkeypatch):
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+# ORCH-627: a credit at 0, switched off, past its end or removed is refused before the call; one with money left is
+# answered as before. Every case runs on the fixed clock AT.
+
+
+def _one_credit(ws, tmp_path, rows=(), **fields):
+    """The OpenAI credit listed by its skill, then `fields` set on the account as the person would."""
+    log = _log(tmp_path / "openai.jsonl", list(rows))
+    known = [store.check_known(k) for k in openai_known(log)]
+    asking.ask(ws, "reviews", "openai", known=known, at=AT)
+    with store.change(ws) as (accounts, _):
+        accounts[0].update(fields)
+    return log
+
+
+def test_a_credit_with_money_left_is_answered_as_today(ws, tmp_path):
+    _one_credit(ws, tmp_path, [{"t": "2026-11-18 10:00:00", "usd": 30.5}])
+    before = asking.ask(ws, "reviews", "openai", at=AT)
+    assert before == {
+        "go": True,
+        "account": "OpenAI credit",
+        "provider": "openai",
+        "name": "openai",
+        "left": 69.5,
+    }
+    # the person set what is left after that spend: the answer is the same, left counted down from their figure
+    with store.change(ws) as (accounts, _):
+        accounts[0]["left"] = {"value": 91.2, "at": "2026-11-19T00:00:00Z"}
+        accounts[0]["credit_ends"] = "2026-11-30T23:59:00Z"  # an end still ahead does not stop it
+    ans = asking.ask(ws, "reviews", "openai", at=AT)
+    assert ans == {**before, "left": 69.5}  # the tighter of $100 a month and 91.20 left
+    with store.change(ws) as (accounts, _):
+        accounts[0]["left"] = {"value": 12.0, "at": "2026-11-19T00:00:00Z"}
+    assert asking.ask(ws, "reviews", "openai", at=AT) == {**before, "left": 12.0}
+
+
+def test_a_credit_at_zero_is_refused(ws, tmp_path):
+    _one_credit(ws, tmp_path, left={"value": 0, "at": "2026-11-18T18:00:00Z"})
+    ans = asking.ask(ws, "reviews", "openai", at=AT)
+    assert ans == {"go": False, "why": "OpenAI credit has nothing left. Set what is left on the Usage page."}
+    assert asking.ask(ws, "reviews", "openai", name="openai", at=AT)["go"] is False
+    # a kind ask is refused too: no credit for Reviews has money
+    assert asking.ask(ws, "reviews", at=AT)["go"] is False
+
+
+def test_a_credit_counted_down_to_zero_is_refused(ws, tmp_path):
+    rows = [
+        {
+            "t": "2026-11-18 09:00:00",
+            "usd": 50,
+        },  # before the person set what is left: already in their figure
+        {"t": "2026-11-19 10:00:00", "usd": 4.0},
+        {"t": "2026-11-20 11:00:00", "usd": 1.0},
+    ]
+    _one_credit(ws, tmp_path, rows, left={"value": 5, "at": "2026-11-19T00:00:00Z"})
+    assert (
+        asking.left_now(store.load(ws)["accounts"][0], AT) == 0.0
+    )  # 5 - 4 - 1; the $50 before does not count
+    assert asking.ask(ws, "reviews", "openai", at=AT)["go"] is False
+
+
+def test_a_credit_past_its_end_is_refused_with_a_fixed_clock(ws, tmp_path):
+    _one_credit(ws, tmp_path, credit_ends="2026-11-20T12:00:00Z")
+    a = store.load(ws)["accounts"][0]
+    assert asking.stopped(a, datetime(2026, 11, 20, 11, 59, tzinfo=UTC)) is None  # a minute before: goes
+    ans = asking.ask(ws, "reviews", "openai", at=AT)  # AT is the end itself
+    assert ans["go"] is False and ans["why"].startswith("OpenAI credit ended on ")
+    later = datetime(2026, 12, 1, tzinfo=UTC)
+    assert asking.ask(ws, "reviews", "openai", at=later)["go"] is False
+
+
+def test_a_removed_credit_is_refused(ws, tmp_path):
+    _one_credit(ws, tmp_path, removed=True)
+    ans = asking.ask(ws, "reviews", "openai", at=AT)
+    assert ans == {"go": False, "why": "OpenAI credit was removed. Bring it back on the Usage page."}
+
+
+def test_a_stopped_credit_hands_over_to_the_next_with_room(ws, tmp_path):
+    log = _log(tmp_path / "claude.jsonl", [])
+    known = [store.check_known(k) for k in claude_known(log)]
+    asking.ask(ws, "reviews", "anthropic", known=known, at=AT)
+    with store.change(ws) as (accounts, _):
+        accounts[0]["left"] = {"value": 0, "at": "2026-11-18T18:00:00Z"}  # main: nothing left
+    ans = asking.ask(ws, "reviews", "anthropic", at=AT)
+    assert ans["go"] is True and ans["name"] == "second"
+    # the person names the stopped one: it is refused, the other is never picked for it
+    ans = asking.ask(ws, "reviews", "anthropic", name="main", at=AT)
+    assert ans["go"] is False and "nothing left" in ans["why"]
+    with store.change(ws) as (accounts, rows):
+        store.set_on(accounts[1], rows, "human:owner", False)
+    ans = asking.ask(ws, "reviews", "anthropic", at=AT)
+    assert ans == {
+        "go": False,
+        "why": "Claude API credit (main) has nothing left. Set what is left on the Usage page.",
+    }
+
+
+def test_a_stopped_credit_through_the_cli_is_exit_3(cli, ws, tmp_path, monkeypatch, no_switcher):
+    _one_credit(ws, tmp_path, left={"value": 0, "at": "2026-11-18T18:00:00Z"})
+    code, ans = _ask(cli, monkeypatch, "reviews", "--provider", "openai")
+    assert code == 3 and ans["go"] is False and "nothing left" in ans["why"]

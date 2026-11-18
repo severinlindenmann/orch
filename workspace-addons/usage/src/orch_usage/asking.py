@@ -13,6 +13,10 @@
    for it>, "left": <$ left, when known>}`; `{"go": true}` alone when nothing is set for this kind (do as today); or
    `{"go": false, "why": <plain words>, "until": <UTC time, when known>}`. A refusal for the whole kind of work (no
    `--provider`) shows on the Usage page and Home like a held helper start, and goes when the kind has room again.
+5. An API credit is refused before the call (ORCH-627) when it was removed, is switched off, is past its end
+   (`credit_ends`, a UTC time) or has nothing left (the amount the person set, `left`, minus what its spend reader
+   counted since then). Off or removed only refuses a caller that spends on credits (`--provider` or `--name`): a
+   subagent asking for a kind of work just skips that credit, as before. The next credit with room still wins.
 
 Only labels, names, numbers and times: never a key or login.
 """
@@ -45,6 +49,43 @@ def _left(a: dict, at: datetime) -> float | None:
     return left
 
 
+def left_now(a: dict, at: datetime) -> float | None:
+    """Dollars left on a credit: what the person set (`left`: {value, at}) minus what was spent since. None when not set
+    yet (calls go ahead and are counted). Spend that cannot be read counts as none."""
+    left = a.get("left")
+    if not isinstance(left, dict) or not isinstance(left.get("value"), (int, float)):
+        return None
+    try:
+        since = store.to_time(str(left.get("at")))
+    except ValueError:
+        return None
+    src = a.get("source", {})
+    reader = credit_reader(src.get("reader", "none")) or credit_reader("none")
+    spent = reader(src, store.utc_text(since)).spent if since <= at else 0.0
+    return round(float(left["value"]) - (spent or 0.0), 4)
+
+
+def stopped(a: dict, at: datetime) -> str | None:
+    """Why an API credit may not be spent now, in one plain sentence; None when it may."""
+    label = a["label"]
+    if a.get("removed"):
+        return f"{label} was removed. Bring it back on the Usage page."
+    if not a.get("on"):
+        return f"{label} is switched off. Turn it on on the Usage page."
+    ends = a.get("credit_ends")
+    if ends:
+        try:
+            end = store.to_time(str(ends))
+        except ValueError:
+            end = None
+        if end is not None and end <= at:
+            return f"{label} ended on {routing._words_time(store.utc_text(end))}."
+    left = left_now(a, at)
+    if left is not None and left <= 0:
+        return f"{label} has nothing left. Set what is left on the Usage page."
+    return None
+
+
 def ask(
     root: Path,
     kind: str,
@@ -67,7 +108,15 @@ def ask(
             store.sync_known(accounts, rows, provider, known)
     doc = store.load(root)
     accounts = doc["accounts"]
-    allowed = [a for a in accounts if a["on"] and (not a["rule"].get("for") or kind in a["rule"]["for"])]
+    spends = (
+        provider is not None or name is not None
+    )  # the caller spends on a credit: an off one is a refusal
+    allowed = [
+        a
+        for a in accounts
+        if (a["on"] or (spends and a["type"] == "api-key"))
+        and (not a["rule"].get("for") or kind in a["rule"]["for"])
+    ]
     if provider is not None:
         allowed = [a for a in allowed if a["type"] == "api-key" and a.get("provider") == provider]
     if name is not None:
@@ -79,6 +128,7 @@ def ask(
 
     reasons: list[str] = []
     wakes: list[str] = []
+    stop_first = False  # the first reason is a whole sentence about a stopped credit
     found = None
     for a in allowed:
         if a["type"] == "subscription":
@@ -101,6 +151,11 @@ def ask(
             if r:
                 wakes.append(r)
         elif a["type"] == "api-key":
+            stop = stopped(a, at)
+            if stop:
+                stop_first = stop_first or not reasons
+                reasons.append(stop)
+                continue
             room, why, nxt = routing._credit_room(a, at, accounts, doc["together"])
             if room:
                 return _go(root, kind, a, provider, at, accounts, doc["together"])
@@ -113,7 +168,7 @@ def ask(
             routing._room_again(root, kind, at)
         return {"go": True}
     until = min(wakes) if wakes else None
-    why = f"No room for {word}: {reasons[0]}."
+    why = reasons[0] if stop_first else f"No room for {word}: {reasons[0]}."
     if until:
         why += f" Waits until {routing._words_time(until)}."
     if provider is None:  # the whole kind of work has no room: show it like a held helper start
@@ -140,6 +195,9 @@ def _go(
         if isinstance(nm, str):
             out["name"] = nm
         left = _left(a, at)
+        own = left_now(a, at)  # what the person set, counted down
+        if own is not None:
+            left = own if left is None else min(left, own)
         for t in together or []:  # a limit over every account of the provider leaves less
             if t["provider"] == a.get("provider"):
                 spent = routing.together_spent(accounts or [a], t, at)

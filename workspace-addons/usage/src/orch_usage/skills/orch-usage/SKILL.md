@@ -61,6 +61,8 @@ never a key), "nothing is set" (go ahead as usual), or No room with when it star
 start the work: say so on the ticket and wait. API credits count what their spend log says since the start of the
 month (or since their reset day: `orch usage limit <account> $100 --period month --resets 2026-11-17`). A credit
 skill lists the credits it knows the first time it asks; the person changes their rules afterwards like any other.
+A credit that is switched off, removed, past its end or has nothing left (what the person set minus what was spent
+since) is refused the same way (exit 3, the reason in one sentence); the next credit with room is picked instead.
 
 **Switching early** (subscriptions, through the account switcher)
 
