@@ -271,13 +271,14 @@ def test_found_on_linux_keeps_only_the_persons_own_units(cli, linux, tools, monk
     code, out = jrun(cli, "found")
     assert code == 0, out
     items = {i["id"]: i for i in out["found"]}
-    assert set(items) == {"systemd:notes-sync.service", "process:900"}
+    assert set(items) == {"systemd:notes-sync.service"}  # a plain program is no item (ORCH-622)
+    assert out["others"] == 1  # server.js: counted, not listed
     unit = items["systemd:notes-sync.service"]
     assert unit["name"] == "notes-sync" and unit["what"] == "Keeps my notes in sync" and unit["auto"] is True
     assert unit["since"] == "2026-11-17T16:19:15Z" and unit["how"]["unit"] == "notes-sync.service"
-    proc_item = items["process:900"]
-    assert proc_item["name"] == "server.js" and proc_item["how"] == {"kind": "process", "pid": 900}
-    assert proc_item["command"][-1] == "••••••" and TOKEN not in json.dumps(out)
+    assert TOKEN not in json.dumps(out)
+    code, text, _ = cli("found")
+    assert "1 other program runs here." in text and "server.js" not in text
 
 
 def test_on_a_mac_processes_come_from_lsof_and_are_skipped_without_it(
@@ -288,11 +289,11 @@ def test_on_a_mac_processes_come_from_lsof_and_are_skipped_without_it(
         lsof={"950": str(ws)},
     )
     _code, out = jrun(cli, "found")
-    assert "process:950" in {i["id"] for i in out["found"]}
+    assert "process:950" not in {i["id"] for i in out["found"]} and out["others"] == 1
     (tmp_path / "bin" / "lsof").unlink()
     monkeypatch.setattr("orch_services.found.LSOF", str(tmp_path / "no-lsof"))
     _code, out = jrun(cli, "found")
-    assert "process:950" not in {i["id"] for i in out["found"]}
+    assert "others" not in out
 
 
 def test_found_and_list_never_write_or_change_anything(cli, mac, tools, ws):
@@ -495,6 +496,6 @@ def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
         ],
         lsof={"960": str(ws), "961": str(ws), "962": str(ws)},
     )
-    found = {i["id"]: i for i in jrun(cli, "found")[1]["found"]}
-    assert "process:960" not in found and "process:961" not in found
-    assert found["process:962"]["name"] == "watcher.py"  # an interpreter shows the script, also as Python
+    out = jrun(cli, "found")[1]
+    assert out["found"] == [] or all(not i["id"].startswith("process:") for i in out["found"])
+    assert out["others"] == 1  # only watcher.py; orch's own pages are not counted
