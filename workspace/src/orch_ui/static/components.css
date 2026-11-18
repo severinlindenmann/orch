@@ -327,6 +327,18 @@ details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-
 /* A menu that holds a short form (a title, choices, one action): wide enough for one-line choices, never past the screen. */
 .menu-pop.menu-pop-wide{min-width:320px;max-width:min(380px,calc(100vw - 32px));padding:8px;gap:8px}
 .menu-pop-wide .grid-2{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px}
+/* Start button (ORCH-475): one click starts the usual way (Continue, or Start with no earlier session); the caret opens the
+   Start choice (.live-start from widgets.css). While it starts both halves are disabled and the main half says Starting… */
+.start-split{display:inline-flex;align-items:stretch;position:relative}
+.start-split>.btn{border-top-right-radius:0;border-bottom-right-radius:0}
+.start-split>details.menu{position:static}
+.start-split[data-align=start] .start-pop{left:0;right:auto}
+.start-split>details.menu>summary.btn{height:100%;border-top-left-radius:0;border-bottom-left-radius:0;border-left-color:color-mix(in srgb,currentColor 35%,transparent);padding-inline:6px}
+.start-split .btn[aria-busy=true] .spinner{width:14px;height:14px}
+.start-pop.menu-pop{width:min(440px,calc(100vw - 32px));max-width:none;padding:var(--s3);gap:var(--s3);text-align:left}
+.start-pop .live-choices{grid-template-columns:1fr}
+.start-pop .live-hist-list{max-height:200px;overflow:auto}
+.start-why{margin:0;color:var(--text-muted);font-size:var(--fs-meta)}
 .dropdown>.menu{position:absolute;right:0;top:calc(100% + 8px);z-index:40}
 .menu-item{display:flex;align-items:center;gap:8px;min-height:36px;width:100%;padding:8px 12px;border:0;border-radius:4px;background:none;color:var(--text);font-size:14px;text-decoration:none;text-align:left}
 .menu-item:hover,.menu-item:focus-visible{background:var(--surface-3)}
