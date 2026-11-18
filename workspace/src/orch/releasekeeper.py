@@ -1197,9 +1197,47 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
     return [f"red: opened top ticket {tid} ({title})"]
 
 
+def develop_red(w: World, st: dict, role: str) -> list[str]:
+    """macOS and Windows run on develop only (every push, at night, the release check), not in the merge
+    queue (ORCH-315): the newest FINISHED push or nightly run on develop that is red opens the red-develop
+    ticket, once per commit (the same words as a red release run, so it is one ticket). Judged job by job."""
+    wf = w.cfg.workflows[0][0] if w.cfg.workflows else "ci.yml"
+    known = w.known_red()
+    rows = [r for e in ("push", "schedule") for r in w.runs(wf, e) if r.get("event") == e]
+    seen: set[str] = set()
+    for r in sorted(rows, key=lambda x: str(x.get("createdAt")), reverse=True):
+        sha = r.get("headSha")
+        if not sha or sha in seen:
+            continue
+        seen.add(sha)
+        state, run_, _ = run_state(w, wf, sha, None, ("push", "schedule"), known)
+        if state in ("pending", "none"):
+            continue
+        if state == "green" or st.get("develop_red_sha") == sha:
+            return []
+        st["develop_red_sha"] = sha
+        name = _wf_name(wf)
+        return red(
+            w,
+            st,
+            role,
+            f"{name} run is red on develop ({sha[:8]})",
+            f"{name} run is red on develop",
+            f"The {name} run on develop {sha[:8]} failed: {(run_ or {}).get('url')}. macOS and Windows run "
+            "only on develop (not in the merge queue), so fix it on develop with a normal pull request "
+            "(orch pull-requests queue add --first).",
+            f"The next {name} run on develop is green",
+        )
+    return []
+
+
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     out: list[str] = []
     h = w.heads()
+    try:
+        out += develop_red(w, st, role)
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        out.append(f"the develop check could not run: {e}")
     try:  # every pass, so a review starts while a pull request is still open
         sec_lines, sec_holds = secreview.tend(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
@@ -1352,7 +1390,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + ["waits for every security OK: " + ", ".join(sec_holds)]
     nums = {int(m[1]) for u in un if (m := re.search(r"#(\d+)", u["subject"]))}
     urgent = sorted(nums & w.urgent())
-    last = max([x for x in (w.last_release_at(), ts(st.get("last_cut_at"))) if x], default=None)
+    last = w.last_release_at()  # only a merged release moves the pace; a blocked or red try does not
     gap_h = (now() - last).total_seconds() / 3600 if last else 999
     if not urgent and gap_h < MIN_GAP_H:
         return out + [
@@ -1364,7 +1402,6 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out + [f"develop {sha[:8]} was red; waiting for develop to move"]
     n = w.last_release() + 1
     rel = {"n": n, "sha": sha, "unreleased": un, "phase": "testing", "dispatched_at": now().isoformat()}
-    st["last_cut_at"] = now().isoformat()  # the pace counts from the start of a try, so a red one waits too
     if urgent:
         out.append(f"urgent pull request(s) {', '.join('#' + str(x) for x in urgent)}: release now")
     known = w.known_red()

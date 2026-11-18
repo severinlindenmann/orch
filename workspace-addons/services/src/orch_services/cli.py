@@ -499,6 +499,9 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     if how.get("kind") != drv.name:
         raise Refused(f"{it['name']} cannot be managed on this computer. Run orch services found again.")
     name = store.clean_name(getattr(args, "name", None) or it["name"])
+    _no_secret(
+        root, {"name": name, "command": []}
+    )  # the name shows in list, questions and the page, as with add
     sid = _free_id(root, getattr(args, "id", None), name)
     try:
         command = store.clean_command(it["command"])

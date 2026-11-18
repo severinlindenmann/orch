@@ -226,3 +226,37 @@ def test_attach_works_where_links_cannot_be_followed_or_made(proj, run, monkeypa
     r2 = tickets.attach(proj, tid, "b.md", b"two", "human:t")
     assert (proj / r2["path"]).read_bytes() == b"two"
     assert [p.name for p in (proj / r["path"]).parent.iterdir() if p.name.startswith(".")] == []
+
+
+@pytest.mark.parametrize(
+    "hint,data",
+    [
+        ("voice-note.webm", b"\x1a\x45\xdf\xa3\x9fB\x86\x81\x01"),
+        ("voice-note.ogg", b"OggS\x00\x02rest"),
+        ("voice-note.m4a", b"\x00\x00\x00\x1cftypM4A \x00\x00"),
+        ("voice-note.mp3", b"ID3\x04\x00rest"),
+        ("voice-note.wav", b"RIFF\x24\x00\x00\x00WAVEfmt "),
+    ],
+)
+def test_attach_keeps_a_voice_recording(proj, run, hint, data):
+    """ORCH-422: a voice note from the browser lands on the ticket like a picture, checked by first bytes."""
+    tid = _new(run)
+    r = tickets.attach(proj, tid, hint, data, "human:t")
+    assert r["name"] == hint and (proj / r["path"]).read_bytes() == data
+
+
+@pytest.mark.parametrize(
+    "hint,data",
+    [
+        ("v.webm", b"<html>no</html>"),
+        ("v.ogg", b"#!/bin/sh"),
+        ("v.m4a", b"\x00\x00\x00\x1cmoov...."),
+        ("v.mp3", b"plain text"),
+        ("v.wav", b"RIFF1234WEBPVP8 "),
+    ],
+)
+def test_attach_refuses_a_recording_that_is_not_one(proj, run, hint, data):
+    tid = _new(run)
+    with pytest.raises(Refused, match="recording"):
+        tickets.attach(proj, tid, hint, data, "human:t")
+    assert tickets.artifacts_list(proj, tid) == []
