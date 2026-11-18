@@ -1,5 +1,6 @@
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
 
 HERE = Path(__file__).parent
+
+# A fixed clock (issue 1421, like the phone chip fix 4deb7848): the page sees 12:00 today in this computer's time and
+# the fake service started at 10:00 the same day, so "Running since today 10:00" holds whatever hour CI runs.
+NOW = datetime.now().astimezone().replace(hour=12, minute=0, second=0, microsecond=0)
+STARTED = (NOW - timedelta(hours=2)).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class FixedDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return NOW.astimezone(tz) if tz else NOW.replace(tzinfo=None)
+
+
 sys.path.insert(0, str(HERE.parents[2] / "workspace" / "src"))
 CONTRACTS = HERE.parents[2] / "contracts"
 WID = "0123456789abcdef0123456789abcdef"
@@ -37,6 +51,9 @@ class FakeDriver:
         self.entries: dict[str, dict] = {}
         self.calls: list[tuple[str, str]] = []
         self.unavailable: str | None = None
+        self.run_counts: dict[
+            str, int
+        ] = {}  # sid -> starts so far (launchd `runs`); none = the tool cannot say
 
     def check(self):
         from orch_services.drivers import Unavailable
@@ -75,7 +92,10 @@ class FakeDriver:
 
         e = self.entries.get(spec.sid)
         on = bool(e and e["running"])
-        return Status(running=on, pid=4242 if on else None, since="2026-11-17T10:00:00Z" if on else None)
+        return Status(running=on, pid=4242 if on else None, since=STARTED if on else None)
+
+    def runs(self, spec):
+        return self.run_counts.get(spec.sid)
 
     def uninstall(self, spec):
         self.calls.append(("uninstall", spec.sid))
@@ -85,10 +105,11 @@ class FakeDriver:
 
 @pytest.fixture
 def fake(monkeypatch):
-    from orch_services import drivers
+    from orch_services import drivers, view
 
     d = FakeDriver()
     monkeypatch.setattr(drivers, "get", lambda: d)
+    monkeypatch.setattr(view, "datetime", FixedDatetime)  # the page's "today" comes from the fixed clock
     return d
 
 

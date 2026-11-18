@@ -223,13 +223,15 @@ function livePlaceMenu(where, inPane) {
 }
 // The More menu of a narrow pane: pin and the places.
 function liveMoreMenu(key, label, where, pinned) {
-  const phone = liveLayerPhone(), item = (act, glyph, words, extra = {}) => h('button', {type:'button', className:'live-opt', 'data-live':act, 'data-session':key, ...extra}, liveIc(glyph), h('span', {}, words));
+  const sess = liveLayerSession(key), phone = liveLayerPhone(), item = (act, glyph, words, extra = {}) => h('button', {type:'button', className:'live-opt', 'data-live':act, 'data-session':key, ...extra}, liveIc(glyph), h('span', {}, words));
   return h('div', {className:'live-pop', role:'group', 'aria-label':'More for ' + label, 'data-key':'live-more-menu'},
     h('p', {className:'live-pop-h'}, 'More for ' + label),
     item('pin', 'pinned', pinned ? 'Unpin' : 'Pin', {'aria-pressed':String(pinned), 'data-key':'live-pin'}),
+    typeof liveHistMenuItem === 'function' ? liveHistMenuItem(key) : null,
     h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
     liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
-    phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'));
+    phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
+    sess ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null);
 }
 function livePane(key, where, s, o) {
   const sess = liveLayerSession(key), name = liveLayerName(), n = o.n;
@@ -248,6 +250,7 @@ function livePane(key, where, s, o) {
         ? h('button', {type:'button', className:'live-pt', 'data-live':'select', 'data-session':key, title, 'aria-label':'Select the pane of ' + label}, title)
         : h('span', {className:'live-pt', title}, title),
       h('span', {className:'live-ctl'},
+        o.narrow || typeof liveHistButton !== 'function' ? null : liveHistButton(sess, label),
         o.narrow ? null : liveBtn('btn icon sm ghost', 'pin', (pinned ? 'Unpin ' : 'Pin ') + label, 'pinned', {'data-session':key, 'aria-pressed':String(pinned), 'data-key':'live-pin'}),
         o.phone ? null : liveBtn('btn icon sm ghost', 'beside', besideWhy, 'plus', {'data-key':'live-beside', disabled:o.total >= LIVE_MAX || !o.next}),
         o.narrow || where === 'full' ? null : liveBtn('btn icon sm ghost', 'menu', 'Where ' + name + ' sits', where === 'right' ? 'dock-right' : 'dock-bottom', {'data-menu':placeMenu, 'aria-expanded':String(s.menu === placeMenu), 'data-key':'live-pane-place'}),
@@ -257,9 +260,9 @@ function livePane(key, where, s, o) {
         o.narrow ? liveBtn('btn icon sm ghost', 'menu', 'More for ' + label, 'more', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}) : null,
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned) : null)),
-    h('div', {className:'live-pb'},
+    typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess)) : h('div', {className:'live-pb'},
       h('p', {}, sess ? (sess.running ? 'The helper’s session shows here.' : 'No helper is working on this ticket right now.') : 'This session is no longer in the list.'),
-      sess ? h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket'}, 'Open ticket') : null,
+      sess ? h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket') : null,
       h('p', {className:'meta'}, 'The chat and the terminal of ' + name + ' come here next.')));
 }
 // The layer's part of the bar: Open (when only the bar shows), Place with its menu, and in full screen the way out.
@@ -311,7 +314,7 @@ function liveLayerPaint() {
   const host = liveDockHost(), s = liveLayerModel(), where = liveLayerWhere(s, liveLayerPhone());
   const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '']);
   const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
-  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, v && [v.narrow, v.pins.filter(k => s.panes.includes(k)), !!v.next], liveLayerName(), liveLayerPage()?.name]);
+  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, v && [v.narrow, v.pins.filter(k => s.panes.includes(k)), !!v.next], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null]);
   host.dataset.mode = where;
   host.style.setProperty('--live-h', s.height ? s.height + 'px' : '');
   host.style.setProperty('--live-w', s.width ? s.width + 'px' : '');
@@ -379,7 +382,10 @@ function liveDockSync() {
 }
 // For the bar, the wall and the ticket page: open a session in the layer.
 window.LiveLayer = {
-  open(key) { liveLayerDo({type:'open', key:liveLayerSession(key)?.id || key}); },  // the bar marks chips by ticket id
+  open(key, into = false) {  // the bar marks chips by ticket id; a ticket's session button moves the keyboard into the pane
+    const id = liveLayerSession(key)?.id || key;
+    liveLayerDo({type:'open', key:id}, into ? liveSel(id, 'live-open-ticket') : undefined);
+  },
   place(mode) { liveLayerDo({type:'place', mode}); },
   beside(key) { liveLayerDo({type:liveLayerPhone() ? 'open' : 'beside', key:liveLayerSession(key)?.id || key}); },  // a wall tile's Add beside
   pin(key) { return liveLayerPin(liveLayerSession(key)?.id || key); },
@@ -388,7 +394,22 @@ window.LiveLayer = {
   get pins() { return liveLayerPins(); },
 };
 
+// The session button of a ticket (draft D feature 3): on the ticket page (long: "Watch in" + the page's name) and on every ticket row.
+// It opens the ticket's session in the layer; with no helper running the pane offers the start (Start choice task).
+// Only with the Preview switch on; otherwise null and the page keeps what it had (Watch live, Answer).
+function liveFocusButton(t, long = false) {
+  if (!t?.id || snapshot || !livePreviewOn() || !liveLayerPage() || !window.DashHelpers?.helperState) return null;
+  const verb = liveFocusVerb(t, state.runs?.[t.id], window.DashHelpers.helperState);
+  if (!verb) return null;
+  const name = liveLayerName(), key = window.DashHelpers.ticketKey?.(t) || clean(t.title) || 'this ticket';
+  const b = h('button', {type:'button', className:'btn outline sm', 'data-key':'live-session-btn', 'data-ticket':t.id,
+    'data-verb':verb, 'aria-label':verb + ' ' + key + ' in ' + name}, long ? verb + ' in ' + name : verb);
+  b.addEventListener('click', e => { e.stopPropagation(); window.LiveLayer.open(t.id, true); });
+  return b;
+}
 document.addEventListener('click', e => {
+  // Open ticket from full screen: the ticket page would stay hidden behind it, so full screen steps back first
+  if (e.target.closest?.('#live-dock [data-live-ticket]') && liveLayerModel().mode === 'full') liveLayerDo({type:'leave-full'});
   const b = e.target.closest?.('#live-dock [data-live]');
   if (!b) {
     if (liveLayer?.menu && !e.target.closest?.('#live-dock .live-pop')) liveLayerDo({type:'menu', menu:liveLayer.menu});

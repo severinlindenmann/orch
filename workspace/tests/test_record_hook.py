@@ -163,10 +163,36 @@ def test_no_hider_refuses_and_writes_nothing(proj, monkeypatch):
     monkeypatch.setenv("ORCH_RUN", rec["run"])
     monkeypatch.setenv("ORCH_TICKET", t["id"])
     monkeypatch.setattr(hider, "_registered", None)
+    from orch import errors, secretrun
+
+    def refuse(root):
+        raise errors.Refused("key store refuses")
+
+    monkeypatch.setattr(secretrun, "record_writer", refuse)  # a key store that refuses: recording is off
     with pytest.raises(record_hook.NotRecorded, match="key hiding"):
         record_hook.hook(proj, line())
     assert not (proj / ".orch/record/runs").exists()
     assert "hider_off" in lost_notes(proj)
+
+
+def test_workspace_without_keys_still_records(proj, monkeypatch):
+    """ORCH-297 (issue 1200): no stored key used to mean an empty hider and recording off for good; Insights
+    counted nothing. The writer now works with no keys, and a key added later is still hidden."""
+    from orch import secretrun
+
+    t = tickets.create(proj, "No keys at all", "human:t")
+    rec = runs.claim(proj, t["id"], "agent:x", "claude", pid=os.getpid())
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    monkeypatch.setenv("ORCH_TICKET", t["id"])
+    monkeypatch.setattr(hider, "_registered", None)
+    monkeypatch.setattr("orch.keystore.all_needles", lambda root: {})
+    got = record_hook.hook(proj, line())
+    assert got["run"] == rec["run"]
+    assert [e["id"] for e in events(proj, rec["run"])] == ["toolu_01X"]
+    assert "hider_off" not in lost_notes(proj)
+    monkeypatch.setattr("orch.keystore.all_needles", lambda root: {"deploy-key": SECRET})
+    writer = secretrun.record_writer(proj)
+    assert SECRET not in writer.hider.hide_text("token " + SECRET)
 
 
 def test_cli_never_blocks_the_agent_but_strict_refuses(live, monkeypatch, capsys):
@@ -1138,6 +1164,12 @@ def test_the_wrapper_records_nothing_while_key_hiding_is_not_ready(proj, tmp_pat
     t = tickets.create(proj, "No hider", "human:t")
     rec = runs.claim(proj, t["id"], "agent:x", "claude", pid=os.getpid())
     monkeypatch.setattr(hider, "_registered", None)
+    from orch import errors
+
+    def refuse(root):
+        raise errors.Refused("key store refuses")
+
+    monkeypatch.setattr("orch.keystore.all_needles", refuse)  # ORCH-297: only a refusing key store means off
     monkeypatch.setattr(runs, "_on_term", lambda *a: None)
     real, results = run_record.collect_turn, []
     monkeypatch.setattr(run_record, "collect_turn", lambda *a: results.append(real(*a)))

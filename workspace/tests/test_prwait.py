@@ -321,6 +321,26 @@ def test_overlap_with_red_checks_after_taking_develop_in_is_not_merged(proj, tk,
     assert code == 1 and merges == [] and "after taking develop in: NOT green" in out
 
 
+def test_queue_mode_never_takes_develop_in_it_says_behind(fake_gh):
+    pulls, merges = fake_gh
+    pull = FakePull(PR, _case("pr978-second-run"), landed=[["workspace/src/orch/prwait.py"]])
+    o = prwait.run_one(PR, True, src=pull, queue=True)
+    assert o.status == "behind" and not o.ok and pull.updates == [] and merges == []
+    assert "develop changed files of" in o.line and "prwait.py" in o.line
+
+
+def test_queue_mode_merges_without_waiting_for_the_hourly_merge_count_but_counts_it(fake_gh):
+    pulls, merges = fake_gh
+    pull = FakePull(PR, _case("pr978-second-run"))
+    pull.take = lambda kind, what: False  # no room in the hour: ref wait --merge would stop here
+    assert prwait.run_one(PR, True, src=pull).status == "checks passed" and merges == []
+    pull = FakePull(PR, _case("pr978-second-run"))
+    pull.take = lambda kind, what: False
+    o = prwait.run_one(PR, True, src=pull, queue=True)
+    assert o.ok and o.status == "merged" and len(merges) == 1
+    assert pull.counted == [("merge", PR)]
+
+
 def test_overlap_that_github_cannot_take_in_is_left_to_the_helper(proj, tk, run, fake_gh):
     pulls, merges = fake_gh
     pulls[PR] = FakePull(

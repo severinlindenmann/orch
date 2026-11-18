@@ -330,6 +330,77 @@ async function layer(page, dash, width) {
 
 // Step 12: the split. The test workspace has one ticket, so the step uses the bar's 24 sessions of draft D (step 9).
 // Every pane has pin, add beside, place, minimise and close; narrow panes keep pin and place in More (draft D).
+// Step 26 (ORCH-363): the History tab of a pane lists the ticket's earlier sessions (the last 10, newest first) and
+// Reopen starts the helper on one. The list comes from GET /api/sessions/<ticket>; here it is fake data, and the
+// Reopen action is caught before orch so nothing starts. The ticket has no working helper, so Reopen can be pressed.
+async function history(page, dash) {
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  let tid = '', st0 = null;
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    const first = (st.tickets || [])[0];
+    if (first) { tid = first.id; if (!first.key) first.key = 'ORCH-189'; st0 = st; }  // a full state, for the fake Reopen answer
+    route.fulfill({ response: res, json: st });
+  });
+  await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
+  const at = h => new Date(Date.now() - h * 3600e3).toISOString();
+  const rows = [
+    { id: 's-now', label: 'Helper', last_used: at(1), title: 'Write the summary from the survey answers', turns: 24, current: true, reopenable: false },
+    { id: 's-mon', label: 'Helper', last_used: at(30), title: 'Read the survey answers and group them', turns: 12, current: false, reopenable: true },
+    { id: 's-old', label: 'Helper', last_used: at(200), title: 'First draft of the newsletter', turns: 1, current: false, reopenable: true },
+    { id: 's-gone', label: 'Helper', last_used: at(400), title: '', turns: 0, current: false, reopenable: false },
+  ];
+  await page.route(/\/api\/sessions\/t_[a-z0-9]+$/, route => route.fulfill({ json: { available: true, sessions: rows } }));
+  let asked = null;
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'session.reopen') return route.continue();
+    asked = body.args;
+    route.fulfill({ json: st0 });
+  });
+  await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
+  await page.evaluate(id => window.LiveLayer.open(id), tid);
+  const pane = '#live-dock .live-pane';
+  // History is a button in the pane header; a narrow pane (the phone) has it in its More menu
+  const toggle = async (dom = false) => {
+    await page.waitForSelector(pane + ' :is([data-key="live-history"], [data-key="live-pane-more"])', { timeout: 5000 });
+    const press = sel => dom ? page.$eval(sel, el => el.click()) : page.click(sel);
+    if (await page.$(pane + ' [data-key="live-history"]')) return press(pane + ' [data-key="live-history"]');
+    await press(pane + ' [data-key="live-pane-more"]');
+    await page.waitForSelector(pane + ' [data-key="live-history-item"]', { timeout: 5000 });
+    await press(pane + ' [data-key="live-history-item"]');
+  };
+  await toggle();
+  await page.waitForSelector(pane + ' .live-hist-row', { timeout: 5000 });
+  if (await page.$(pane + ' [data-key="live-history"][aria-pressed="false"]')) throw new Error('History is not marked as open');
+  if (await page.$(pane + ' [data-key="live-more-menu"]')) throw new Error('the More menu stayed open after History');
+  const seen = await page.$$eval(pane + ' .live-hist-row', els => els.map(el => ({
+    t: el.querySelector('.live-hist-t').textContent, f: el.querySelector('.live-hist-f').textContent,
+    use: !!el.querySelector('.chip'), reopen: !!el.querySelector('button'), off: !!el.querySelector('button[disabled]') })));
+  if (seen.length !== 4) throw new Error(`the History tab shows ${seen.length} sessions, not 4`);
+  if (!seen[0].use || seen[0].reopen) throw new Error('the session in use is not marked In use');
+  if (!seen[1].reopen || !seen[2].reopen || seen[1].off) throw new Error('an earlier session has no Reopen');
+  if (seen[3].reopen || !/Not on this computer/.test(seen[3].f)) throw new Error('a session that is not on this computer offers Reopen');
+  if (seen[2].f.indexOf('1 message ') !== 0) throw new Error(`the plural is wrong: ${seen[2].f}`);
+  await noSideways(page);
+  await page.click(pane + ' .live-hist-row:nth-child(2) [data-live-hist="reopen"]');
+  await page.waitForFunction(() => !document.querySelector('#live-dock .live-hist'), null, { timeout: 5000 });
+  if (!asked || asked.session !== 's-mon' || asked.ticket !== tid) throw new Error('Reopen did not ask orch for that session: ' + JSON.stringify(asked));
+  // open it again for the picture (the "continues that conversation" toast may sit over the pane's corner)
+  await toggle(true);
+  await page.waitForSelector(pane + ' .live-hist-row', { timeout: 5000 });
+}
+
 async function split(page, dash, width) {
   const phone = width <= 720;
   const panes = () => page.$$eval('#live-dock .live-pane', els => els.map(el => {
@@ -443,6 +514,97 @@ async function split(page, dash, width) {
   await noSideways(page);
 }
 
+// Step 6: the Focus button on the ticket page and on every ticket row, and Open ticket back from the session. The test
+// workspace has one ticket, so the step adds four with the run states the button speaks for (Preview on).
+const FOCUS_TICKETS = [['run', 'ORCH-189', 'New price list for the shop', 'Watch'], ['wait', 'ORCH-190', 'Send the weekly summary', 'Answer'],
+  ['idle', 'ORCH-191', 'Tidy the release notes', 'Open'], ['none', 'ORCH-192', 'Opening hours page', 'Start']];
+async function focusButton(page, dash, width) {
+  const phone = width <= 720;
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const HELPER = { wait: 'you', run: 'working', idle: 'idle' };
+  const id = key => 't_fb' + key.slice(5);
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    const base = (st.tickets || [])[0] || {};
+    const extra = FOCUS_TICKETS.map(([s, key, title]) => ({ ...base, id: id(key), key, title, status: s === 'none' ? 'ready' : 'active',
+      questions: s === 'wait' ? [{ id: 'q1', text: 'Send it to the whole team or only to sales?', options: ['Whole team', 'Only sales'] }] : [],
+      checks: [], sessions: [] }));
+    st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_fb')), ...extra];
+    st.runs = { ...(st.runs || {}) };
+    FOCUS_TICKETS.forEach(([s, key]) => { if (s !== 'none') st.runs[id(key)] = { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } }; });
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    route.fulfill({ response: res, json: st });
+  });
+  // the added tickets have no files on disk: their ticket pages get an empty list of results
+  await page.route(/\/api\/artifacts\/t_fb/, route => route.fulfill({ json: { files: [] } }));
+  await page.goto(dash + '/#tickets');
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.reload();
+  await mainHasText(page);
+  // every ticket row has its Focus button, with the word that fits the ticket
+  const rowSel = phone ? k => `[data-key="short-${id(k)}"]` : k => `[data-key="tree-${id(k)}"]`;
+  for (const [, key, , verb] of FOCUS_TICKETS) {
+    const b = `${rowSel(key)} [data-key="live-session-btn"]`;
+    await page.waitForSelector(b, { timeout: 10000 });
+    const word = (await page.textContent(b)).trim();
+    if (word !== verb) throw new Error(`the row of ${key} says "${word}", not "${verb}"`);
+    if (await page.$$eval(`${rowSel(key)} button`, els => els.filter(e => e.textContent.trim() === 'Answer').length) > 1) throw new Error(`the row of ${key} shows two Answer buttons`);
+  }
+  // a row's button opens that session in the layer, the list stays
+  await page.click(`${rowSel('ORCH-191')} [data-key="live-session-btn"]`);
+  await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-191')}"]`, { timeout: 5000 });
+  if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('the row\'s Focus button left the list');
+  if (!await page.evaluate(() => !!document.activeElement?.closest('#live-dock'))) throw new Error('the keyboard did not move into the session');
+  // the ticket page: "Watch in Focus" opens its session; Open ticket comes back to the same page
+  await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-189'));
+  await mainHasText(page);
+  const strip = `[data-key="ticket-strip-${id('ORCH-189')}"] [data-key="live-session-btn"]`;
+  await page.waitForSelector(strip, { timeout: 10000 });
+  if ((await page.textContent(strip)).trim() !== 'Watch in Focus') throw new Error('the ticket page does not say Watch in Focus');
+  if (await page.$('[data-key="watch-live"]')) throw new Error('today\'s Watch live still shows with Preview on');
+  await page.click(strip);
+  const pane = `#live-dock .live-pane[data-session="${id('ORCH-189')}"]`;
+  await page.waitForSelector(pane, { timeout: 5000 });
+  if (!await page.$eval(`${pane} .key`, el => el.textContent.trim() === 'ORCH-189')) throw new Error('the pane does not show the ticket key');
+  // from full screen too: Open ticket steps out of it so the ticket page shows
+  await page.click(`${pane} [data-key="live-full"]`);
+  await page.waitForSelector('#live-dock[data-mode="full"]', { timeout: 5000 });
+  await page.evaluate(() => { location.hash = '#home'; });
+  await mainHasText(page);
+  await page.click(`${pane} [data-key="live-open-ticket"]`);
+  await page.waitForFunction(h => location.hash === h, '#ticket/' + id('ORCH-189'), { timeout: 10000 });
+  await page.waitForSelector(`[data-key="ticket-strip-${id('ORCH-189')}"]`, { timeout: 10000 });
+  if (await page.$('#live-dock[data-mode="full"]')) throw new Error('Open ticket left the ticket page hidden behind full screen');
+  if (!await page.$(pane)) throw new Error('the session closed when Open ticket was pressed');
+  // a narrow pane keeps Open ticket in More as well (draft D)
+  if (await page.$(`${pane} [data-key="live-pane-more"]`)) {
+    await page.click(`${pane} [data-key="live-pane-more"]`);
+    await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-more-ticket"]', { timeout: 5000 });
+    await page.keyboard.press('Escape');
+  }
+  // a ticket with no helper: "Start in Focus" opens its pane, where the start is offered
+  await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-192'));
+  await mainHasText(page);
+  const start = `[data-key="ticket-strip-${id('ORCH-192')}"] [data-key="live-session-btn"]`;
+  await page.waitForSelector(start, { timeout: 10000 });
+  if ((await page.textContent(start)).trim() !== 'Start in Focus') throw new Error('a ticket with no helper does not say Start in Focus');
+  await page.click(start);
+  await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-192')}"]`, { timeout: 5000 });
+  // the picture: the working ticket's page with its session open, as in draft D
+  await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-189'));
+  await mainHasText(page);
+  await page.click(strip);
+  await page.waitForSelector(pane, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  await noSideways(page);
+}
+
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -494,10 +656,14 @@ const STEPS = [
   },
   {
     n: 6, pic: 'fd-06-focus-button', area: 'wall', title: 'Focus button on a ticket and Open ticket on a session',
-    feature: [3], waits: T.wall,
-    do: ['Open a ticket page.', 'Press its Focus button.', 'In the session press Open ticket.'],
-    see: ['The button says Watch, Answer, Open or Start to fit the ticket.', 'The session opens in the layer.',
-      'Open ticket goes back to the same ticket page.'],
+    feature: [3],
+    do: ['Open Tickets and press the Focus button of a row.', 'Open a ticket page and press its Focus button.',
+      'In the session press Open ticket, also from full screen.'],
+    see: ['Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.',
+      'The session opens in the layer and the page stays.', 'Open ticket goes back to the same ticket page; the session stays open.'],
+    async run({ page, dash, width }) {
+      await focusButton(page, dash, width);
+    },
     draft: { q: '?page=ticket&tk=ORCH-189' },
   },
   {
@@ -681,6 +847,17 @@ const STEPS = [
     see: ['The wall is one column.', 'The layer opens at the bottom and shows one session; right falls back to bottom.',
       'Nothing scrolls sideways; every button can be reached.'],
     draft: { q: '?page=focus&cur=ORCH-238&mode=right' },
+  },
+  {
+    n: 26, pic: 'fd-26-history', area: 'sessions', title: 'Earlier sessions in the History tab, reopened with one click', feature: [4],
+    do: ['Open a session in the layer and press History (in More when the pane is narrow).', 'Press Reopen on an earlier session.'],
+    see: ['Up to 10 sessions of the ticket, newest first, each with its time, first message and number of messages.',
+      'The session in use says In use; one that is not on this computer has no Reopen.',
+      'Reopen starts the helper on that conversation and the list closes.'],
+    async run({ page, dash }) {
+      await history(page, dash);
+    },
+    draft: { q: '?page=focus&cur=ORCH-189&view=zoom&ask=1' },
   },
 ];
 

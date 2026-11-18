@@ -18,19 +18,34 @@ def order_ticket(root, order):
 ADOPTABLE = {"open", "ready", "waiting", "active"}  # active: the helper adopts the ticket it was started on
 
 
-def idea(root, title, data, ticket_id=None):
+def idea(root, title, data, ticket_id=None, source=None):
     """A new order, or (`--ticket`) an existing ticket turned into one: e.g. the ticket the owner made from Chat
-    while asking for a Factory run. Its note becomes draft v1 when no draft text is given."""
+    while asking for a Factory run. Its note becomes draft v1 when no draft text is given. `--from`: the ticket
+    the idea came from; the order and that ticket refer to each other (ORCH-267: the owner had to ask)."""
     store = Store(root)
     with store.locked():
+        src = orchcli.ticket(root, source)["id"] if source else None
         if ticket_id is not None:
-            return _adopt(root, store, ticket_id, data)
-        ticket = orchcli.call(root, "ticket", "new", title, write=True)
-        path = f"drafts/{ticket['id']}/v1.md"
-        # no draft text given: the title is v1, never an empty file (bug hunt 17 Nov: Read draft showed an empty box)
-        store.write(path, data if data.strip() else title.encode() + b"\n", frozen=True)
-        orchcli.set_ext(root, ticket, role="order", kind="run", stage="draft", draft=1)
-    return {"order": ticket["id"], "draft": str(store.path(path))}
+            result = _adopt(root, store, ticket_id, data)
+        else:
+            ticket = orchcli.call(root, "ticket", "new", title, write=True)
+            path = f"drafts/{ticket['id']}/v1.md"
+            # no draft text given: the title is v1, never an empty file (bug hunt 17 Nov: Read draft showed an empty box)
+            store.write(path, data if data.strip() else title.encode() + b"\n", frozen=True)
+            orchcli.set_ext(root, ticket, role="order", kind="run", stage="draft", draft=1)
+            result = {"order": ticket["id"], "draft": str(store.path(path))}
+    if src is not None and src != result["order"]:
+        _link(root, result["order"], src)
+        result["source"] = src
+    return result
+
+
+def _link(root, order, src):
+    """The order and the ticket it came from refer to each other; a link that is already there is kept."""
+    for a, b in ((order, src), (src, order)):
+        refs = orchcli.ticket(root, a).get("refs") or []
+        if not any(isinstance(r, dict) and r.get("ticket") == b for r in refs):
+            orchcli.call(root, "ref", "add", a, b, write=True)
 
 
 IDEA_MAX = 500
@@ -274,9 +289,25 @@ def show(root, order):
 
 
 def listing(root):
+    """Every order; one that cannot be read is listed with its problem instead of hiding the others."""
     store = Store(root)
-    return [
-        describe(store, t)
-        for t in orchcli.tickets(root)
-        if t.get("ext", {}).get("factory", {}).get("role") == "order"
-    ]
+    result = []
+    for t in orchcli.tickets(root):
+        if t.get("ext", {}).get("factory", {}).get("role") != "order":
+            continue
+        try:
+            result.append(describe(store, t))
+        except Refused as error:
+            ext = t.get("ext", {}).get("factory", {})
+            result.append(
+                {
+                    "order": t["id"],
+                    "title": t.get("title"),
+                    "stage": ext.get("stage"),
+                    "proposal": ext.get("proposal", {}).get("n"),
+                    "questions": [],
+                    "started": False,
+                    "broken": " ".join(str(error).split()),
+                }
+            )
+    return result

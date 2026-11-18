@@ -795,6 +795,16 @@ def _run_start(a):
     return ["run", "start", _tid(a.get("ticket"))], flags, []
 
 
+def _session_reopen(a):
+    """Reopen an earlier session of the ticket: the helper starts and continues that conversation (a person only;
+    orch refuses while a helper works on the ticket, or when the conversation is not on this computer)."""
+    _only(a, ("ticket", "session"))
+    sid = a.get("session")
+    if not isinstance(sid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", sid):
+        raise BadRequest("That is not a session id.")
+    return ["run", "start", _tid(a.get("ticket"))], ["--session", sid], []
+
+
 def _run_send(a):
     _only(a, ("ticket", "text"))
     return ["run", "send"], [], [_tid(a.get("ticket")), _text(a.get("text"), "message")]
@@ -1119,6 +1129,7 @@ OPS = {
     "check.remove": _check_remove,
     "check.move": _check_move,
     "run.start": _run_start,
+    "session.reopen": _session_reopen,
     "run.stop": _run_stop,
     "run.send": _run_send,
     "run.take_back": _run_take_back,
