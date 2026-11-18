@@ -134,7 +134,16 @@ def test_check_card_reaches_the_page_and_not_now_needs_a_session(ws, act_orch):
 
 
 @pytest.mark.parametrize(
-    ("to", "ok"), [(None, True), ("release", True), ("32", True), ("33.1", True), ("0", False), ("3x", False), ("33.", False)]
+    ("to", "ok"),
+    [
+        (None, True),
+        ("release", True),
+        ("32", True),
+        ("33.1", True),
+        ("0", False),
+        ("3x", False),
+        ("33.", False),
+    ],
 )
 def test_update_start_takes_a_release_number(to, ok):
     assert update.target_ok(to) is ok
