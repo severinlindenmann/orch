@@ -2,9 +2,6 @@
 // remembers two helper conversations, the older one still on this computer (a stand-in conversation file in the
 // throw-away home). The person opens the ticket's pane, opens History, presses Reopen on the earlier conversation,
 // and the ticket now continues that one (the stand-in agent program of server.py is what starts).
-const fs = require('node:fs');
-const path = require('node:path');
-
 const OLD = 'standin-session-old1', NEW = 'standin-session-new2';
 
 module.exports = {
@@ -14,14 +11,18 @@ module.exports = {
     addonOn('focus');
     orchAsPerson('config', 'set', 'focus.preview', 'on');
     const tid = JSON.parse(orch('ticket', 'new', 'Write the party invite', '--json')).id;
-    // two conversations of the stand-in "claude" on this computer; recording the second keeps the first as earlier
-    python('import sys; from pathlib import Path; from orch import tickets, runs\n' +
-      'for sid in sys.argv[3:]: tickets.record_session(Path(sys.argv[1]), sys.argv[2], "claude", sid, runs.host())',
-    workspace, tid, OLD, NEW);
-    const conv = path.join(home, '.claude', 'projects', 'standin');
-    fs.mkdirSync(conv, { recursive: true });
-    fs.writeFileSync(path.join(conv, OLD + '.jsonl'), JSON.stringify({ type: 'user', timestamp: new Date().toISOString(),
-      message: { role: 'user', content: 'Draft the invite for the summer party' } }) + '\n');
+    // two conversations of a built-in helper tool whose conversations orch can read (from orch's adapter list; this
+    // file names no tool), the older one saved where that tool keeps it in the throw-away home; recording the
+    // second keeps the first as earlier
+    python('import json, sys, time; from pathlib import Path; from orch import adapters, tickets, runs\n' +
+      'root, tid, old, new, home = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], Path(sys.argv[5])\n' +
+      'name, h = next((n, a["session"]["chat_files"]) for n in sorted(adapters.builtin_names()) for a in [adapters.load(n)]\n' +
+      '               if (a.get("session") or {}).get("chat_files", {}).get("lines") == "chat")\n' +
+      'f = home / h["home"] / h["glob"].replace("*", "standin").replace("{session}", old)\n' +
+      'f.parent.mkdir(parents=True, exist_ok=True)\n' +
+      'f.write_text(json.dumps({"type": "user", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),\n' +
+      '  "message": {"role": "user", "content": "Draft the invite for the summer party"}}) + "\\n")\n' +
+      'for sid in (old, new): tickets.record_session(root, tid, name, sid, runs.host())', workspace, tid, OLD, NEW, home);
 
     await open('#home');
     await until(s => s.settings?.focus_preview_on === true && (s.tickets || []).some(t => t.id === tid), 'the Preview on and the ticket there');
@@ -43,7 +44,7 @@ module.exports = {
     await act('session.reopen', async () => { await reopen.focus(); await page.keyboard.press('Enter'); });
     await reload();
     const sessions = JSON.parse(orch('ticket', 'show', tid, '--json')).sessions || [];
-    must(sessions.some(s => s.agent === 'claude' && s.id === OLD), 'the ticket does not continue the earlier conversation: ' + JSON.stringify(sessions.map(s => s.id)));
+    must(sessions.some(s => s.id === OLD), 'the ticket does not continue the earlier conversation: ' + JSON.stringify(sessions.map(s => s.id)));
     try { orchAsPerson('run', 'stop', tid); } catch (e) { /* the stand-in already ended */ }
     orchAsPerson('config', 'set', 'focus.preview', 'off');
     orchAsPerson('addon', 'remove', 'focus');

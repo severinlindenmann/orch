@@ -5,9 +5,9 @@
 module.exports = {
   name: 'Logins: renew a helper login with a code',
   covers: ['logins.status', 'logins.code', 'page:settings/agent'],
-  async run({ page, open, reload, act, must, text, orch, until }) {
+  async run({ page, base, open, reload, act, must, text, orch, until }) {
     // nothing may leave this computer: the sign-in page of the stand-in link is never loaded
-    await page.context().route(/^https:\/\/(claude\.ai|claude\.com|platform\.claude\.com|console\.anthropic\.com)\//, r => r.abort());
+    await page.context().route(u => !u.href.startsWith(base + '/'), r => r.abort());
     orch('logins');   // the checks once; the page shows their result
     await open('#settings/agent');
     const needsRenew = s => (s.logins?.items || []).find(x => x.renew && /renew|soon|unreachable/.test(x.state || ''));

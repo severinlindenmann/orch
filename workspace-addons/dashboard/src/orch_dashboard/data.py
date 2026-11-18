@@ -1033,7 +1033,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "consent": _consent(r),
                 "detail": _addon_detail(root, r["name"]),
                 "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
-                # the add-on page of a live-session add-on (Focus) carries the Typing and Preview switches
+                # the add-on page of a live-session add-on carries the Typing and Preview switches
                 **(
                     {"page": {"live_session": True}}
                     if isinstance(r.get("page"), dict) and r["page"].get("live_session") is True

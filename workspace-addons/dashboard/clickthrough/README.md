@@ -32,7 +32,8 @@ because the page never sends it.
   `standins`), and it turns them off again at its end;
 - a `gh` program that answers only for pull requests of the made-up repository `standin/lunch` (open, green,
   one head commit `standins.head`) and "merges" by writing a line;
-- the agent programs (claude, codex): their login check says signed out until their sign-in got a code;
+- the built-in agent programs (from orch's adapter list): their login check says signed out until their sign-in
+  got a code;
 - the add-ons Focus, Lessons and Pull requests of this checkout (`run.cjs` layers them into every orch of the
   run): installed and allowed but off; a click-through turns one on with `orch addon add <name> --project-only`;
 - `ORCH_REPO` is this checkout, so "the newest orch" is read from here. An update or an uninstall then stops with

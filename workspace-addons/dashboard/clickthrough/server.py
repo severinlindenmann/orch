@@ -35,24 +35,37 @@ if not str(D).startswith(str(ACCOUNT / ".orch-test") + os.sep) or os.environ.get
 WS = D / "Pilatus"
 WS.mkdir(parents=True, exist_ok=True)
 
+
 # No real agent tool may ever run here: stand-ins named like the built-in agent programs come first on PATH for
 # this server and everything it starts (a helper run, a Test click, a ticket pinned to a built-in tool). Each writes one log
 # line, waits a little (so Stop has something to stop) and ends.
-STUB = (
-    "#!/bin/sh\n"
-    'D="$(dirname "$0")/.."\n'
-    'echo "$(date) $(basename "$0") $*" >> "$D/fake-agent.log"\n'
-    'case " $* " in\n'
-    '  *" --session-id "*|*" -p "*|*" exec "*) sleep 20 ;;\n'
-    # the login check: signed out until the stand-in sign-in below finished
-    '  *" auth status "*) if [ -f "$D/standin-logged-in" ]; then echo \'{"loggedIn": true}\';'
-    " else echo '{\"loggedIn\": false}'; fi ;;\n"
-    # the sign-in: a link that goes nowhere, then one line (the code) on stdin, then signed in
-    '  *" auth login "*) echo "Open https://claude.ai/standin-sign-in to sign in"; read -r code;'
-    ' echo "$code" > "$D/standin-logged-in" ;;\n'
-    '  *) echo "stand-in 0.0 (not a real agent)" ;;\n'
-    "esac\n"
-)  # a version or help question is answered at once (orch asks it to list the agents); only a session waits
+def stub(name: str) -> str:
+    """The stand-in for one built-in agent program, from its own adapter entry (this file names no tool)."""
+    login = adapters.load(name).get("login") or {}
+    status, key = " ".join(login.get("status") or []), login.get("logged_in")
+    renew, links = " ".join(login.get("renew") or []), login.get("links") or []
+    lines = [
+        "#!/bin/sh",
+        'D="$(dirname "$0")/.."',
+        'echo "$(date) $(basename "$0") $*" >> "$D/fake-agent.log"',
+        'case " $* " in',
+        '  *" --session-id "*|*" -p "*|*" exec "*) sleep 20 ;;',
+    ]
+    if status and isinstance(
+        key, str
+    ):  # the login check: signed out until the stand-in sign-in below finished
+        lines.append(
+            f'  *" {status} "*) if [ -f "$D/standin-logged-in-{name}" ]; then echo \'{{"{key}": true}}\';'
+            f" else echo '{{\"{key}\": false}}'; fi ;;"
+        )
+    if renew and links:  # the sign-in: a link that goes nowhere, then one line (the code) on stdin, signed in
+        lines.append(
+            f'  *" {renew} "*) echo "Open {links[0]}standin-sign-in to sign in"; read -r code;'
+            f' echo "$code" > "$D/standin-logged-in-{name}" ;;'
+        )
+    lines += ['  *) echo "stand-in 0.0 (not a real agent)" ;;', "esac", ""]
+    return "\n".join(lines)  # a version or help question is answered at once; only a session waits
+
 
 # GitHub is never reached: a stand-in `gh` answers the few questions orch asks about a pull request (open, green,
 # not reviewed, one head commit) and "merges" by writing a line. Only pull requests of the made-up repository
@@ -87,7 +100,11 @@ if not PROGRAMS:
     sys.exit("no built-in agent programs found in orch's adapter list: refusing to start")
 if "gh" in PROGRAMS:
     sys.exit("an agent program is named gh: refusing to start")
-for name, body in [*((n, STUB) for n in PROGRAMS), ("gh", GH)]:
+BY_PROGRAM = {
+    (adapters.load(n).get("detect") or {}).get("binary"): n
+    for n in sorted(adapters.builtin_names(), reverse=True)
+}
+for name, body in [*((p, stub(BY_PROGRAM[p])) for p in PROGRAMS), ("gh", GH)]:
     (BIN / name).write_text(body)
     (BIN / name).chmod(0o755)
 os.environ["PATH"] = f"{BIN}{os.pathsep}{os.environ.get('PATH', '')}"
