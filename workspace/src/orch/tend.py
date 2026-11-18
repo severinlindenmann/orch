@@ -29,7 +29,8 @@
 
 Every action is a line in the ticket's history. Nothing happens while automation is paused (`orch pause`). No
 daemon: a repeating automation script runs the pass. A session with input still waiting to go in, a running
-command (a CI watcher, a test run) or a question on its screen is never touched.
+command (a CI watcher, a test run), helpers of its own still running in the background, a question on its
+screen, or a person who typed to it in its window in the last bgwork.TALK_MINUTES is never touched (ORCH-267).
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ import json
 import time
 from pathlib import Path
 
-from orch import adapters, brake, history, limitstop, runs, runs_live, runwatch, stuck, tickets
+from orch import adapters, bgwork, brake, history, limitstop, runs, runs_live, runwatch, stuck, tickets
 
 BY = "agent:helper-watcher"
 VIA = "watcher"
@@ -238,7 +239,9 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
         info = runwatch.describe(root, tid, rec, table)
         waits = _waits(info)
         if any(w.get("kind") == "command" for w in waits):
-            continue  # a CI watcher or a test run: it is waiting on purpose
+            continue  # a CI watcher, a test run or its own background helpers: it is waiting on purpose
+        if bgwork.talking(root, rec, now):
+            continue  # ORCH-267: a person typed to it in its window lately: never ended, restarted or nudged
         quiet = info.get("idle_seconds")
         if quiet is None:
             continue

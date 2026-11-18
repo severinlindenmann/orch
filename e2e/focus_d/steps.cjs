@@ -539,6 +539,97 @@ async function noTicket(page, dash, width) {
   await noSideways(page);
 }
 
+// Step 6: the Focus button on the ticket page and on every ticket row, and Open ticket back from the session. The test
+// workspace has one ticket, so the step adds four with the run states the button speaks for (Preview on).
+const FOCUS_TICKETS = [['run', 'ORCH-189', 'New price list for the shop', 'Watch'], ['wait', 'ORCH-190', 'Send the weekly summary', 'Answer'],
+  ['idle', 'ORCH-191', 'Tidy the release notes', 'Open'], ['none', 'ORCH-192', 'Opening hours page', 'Start']];
+async function focusButton(page, dash, width) {
+  const phone = width <= 720;
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const HELPER = { wait: 'you', run: 'working', idle: 'idle' };
+  const id = key => 't_fb' + key.slice(5);
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    const base = (st.tickets || [])[0] || {};
+    const extra = FOCUS_TICKETS.map(([s, key, title]) => ({ ...base, id: id(key), key, title, status: s === 'none' ? 'ready' : 'active',
+      questions: s === 'wait' ? [{ id: 'q1', text: 'Send it to the whole team or only to sales?', options: ['Whole team', 'Only sales'] }] : [],
+      checks: [], sessions: [] }));
+    st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_fb')), ...extra];
+    st.runs = { ...(st.runs || {}) };
+    FOCUS_TICKETS.forEach(([s, key]) => { if (s !== 'none') st.runs[id(key)] = { running: true, helper: { state: HELPER[s] }, claim: { agent: 'agent:claude' } }; });
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true,
+      addons: [...((st.settings || {}).addons || []).filter(a => a.name !== live.name), live] };
+    route.fulfill({ response: res, json: st });
+  });
+  // the added tickets have no files on disk: their ticket pages get an empty list of results
+  await page.route(/\/api\/artifacts\/t_fb/, route => route.fulfill({ json: { files: [] } }));
+  await page.goto(dash + '/#tickets');
+  await page.evaluate(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+  await page.reload();
+  await mainHasText(page);
+  // every ticket row has its Focus button, with the word that fits the ticket
+  const rowSel = phone ? k => `[data-key="short-${id(k)}"]` : k => `[data-key="tree-${id(k)}"]`;
+  for (const [, key, , verb] of FOCUS_TICKETS) {
+    const b = `${rowSel(key)} [data-key="live-session-btn"]`;
+    await page.waitForSelector(b, { timeout: 10000 });
+    const word = (await page.textContent(b)).trim();
+    if (word !== verb) throw new Error(`the row of ${key} says "${word}", not "${verb}"`);
+    if (await page.$$eval(`${rowSel(key)} button`, els => els.filter(e => e.textContent.trim() === 'Answer').length) > 1) throw new Error(`the row of ${key} shows two Answer buttons`);
+  }
+  // a row's button opens that session in the layer, the list stays
+  await page.click(`${rowSel('ORCH-191')} [data-key="live-session-btn"]`);
+  await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-191')}"]`, { timeout: 5000 });
+  if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('the row\'s Focus button left the list');
+  if (!await page.evaluate(() => !!document.activeElement?.closest('#live-dock'))) throw new Error('the keyboard did not move into the session');
+  // the ticket page: "Watch in Focus" opens its session; Open ticket comes back to the same page
+  await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-189'));
+  await mainHasText(page);
+  const strip = `[data-key="ticket-strip-${id('ORCH-189')}"] [data-key="live-session-btn"]`;
+  await page.waitForSelector(strip, { timeout: 10000 });
+  if ((await page.textContent(strip)).trim() !== 'Watch in Focus') throw new Error('the ticket page does not say Watch in Focus');
+  if (await page.$('[data-key="watch-live"]')) throw new Error('today\'s Watch live still shows with Preview on');
+  await page.click(strip);
+  const pane = `#live-dock .live-pane[data-session="${id('ORCH-189')}"]`;
+  await page.waitForSelector(pane, { timeout: 5000 });
+  if (!await page.$eval(`${pane} .key`, el => el.textContent.trim() === 'ORCH-189')) throw new Error('the pane does not show the ticket key');
+  // from full screen too: Open ticket steps out of it so the ticket page shows
+  await page.click(`${pane} [data-key="live-full"]`);
+  await page.waitForSelector('#live-dock[data-mode="full"]', { timeout: 5000 });
+  await page.evaluate(() => { location.hash = '#home'; });
+  await mainHasText(page);
+  await page.click(`${pane} [data-key="live-open-ticket"]`);
+  await page.waitForFunction(h => location.hash === h, '#ticket/' + id('ORCH-189'), { timeout: 10000 });
+  await page.waitForSelector(`[data-key="ticket-strip-${id('ORCH-189')}"]`, { timeout: 10000 });
+  if (await page.$('#live-dock[data-mode="full"]')) throw new Error('Open ticket left the ticket page hidden behind full screen');
+  if (!await page.$(pane)) throw new Error('the session closed when Open ticket was pressed');
+  // a narrow pane keeps Open ticket in More as well (draft D)
+  if (await page.$(`${pane} [data-key="live-pane-more"]`)) {
+    await page.click(`${pane} [data-key="live-pane-more"]`);
+    await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-more-ticket"]', { timeout: 5000 });
+    await page.keyboard.press('Escape');
+  }
+  // a ticket with no helper: "Start in Focus" opens its pane, where the start is offered
+  await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-192'));
+  await mainHasText(page);
+  const start = `[data-key="ticket-strip-${id('ORCH-192')}"] [data-key="live-session-btn"]`;
+  await page.waitForSelector(start, { timeout: 10000 });
+  if ((await page.textContent(start)).trim() !== 'Start in Focus') throw new Error('a ticket with no helper does not say Start in Focus');
+  await page.click(start);
+  await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-192')}"]`, { timeout: 5000 });
+  // the picture: the working ticket's page with its session open, as in draft D
+  await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-189'));
+  await mainHasText(page);
+  await page.click(strip);
+  await page.waitForSelector(pane, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  await noSideways(page);
+}
+
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -590,10 +681,14 @@ const STEPS = [
   },
   {
     n: 6, pic: 'fd-06-focus-button', area: 'wall', title: 'Focus button on a ticket and Open ticket on a session',
-    feature: [3], waits: T.wall,
-    do: ['Open a ticket page.', 'Press its Focus button.', 'In the session press Open ticket.'],
-    see: ['The button says Watch, Answer, Open or Start to fit the ticket.', 'The session opens in the layer.',
-      'Open ticket goes back to the same ticket page.'],
+    feature: [3],
+    do: ['Open Tickets and press the Focus button of a row.', 'Open a ticket page and press its Focus button.',
+      'In the session press Open ticket, also from full screen.'],
+    see: ['Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.',
+      'The session opens in the layer and the page stays.', 'Open ticket goes back to the same ticket page; the session stays open.'],
+    async run({ page, dash, width }) {
+      await focusButton(page, dash, width);
+    },
     draft: { q: '?page=ticket&tk=ORCH-189' },
   },
   {

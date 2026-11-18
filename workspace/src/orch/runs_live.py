@@ -178,6 +178,16 @@ def _runs_check_wait(rec: dict) -> bool:
     return False
 
 
+def _keeps_busy(root: Path, rec: dict) -> bool:
+    """Idle at its prompt, but helpers it started in the background still run (closing loses their work), or
+    a person typed to it in its window within bgwork.TALK_MINUTES (ORCH-267)."""
+    from orch import bgwork
+
+    with contextlib.suppress(Exception):
+        return bool(bgwork.subagents(root, rec)) or bgwork.talking(root, rec)
+    return False
+
+
 def live_alive(root: Path) -> list[dict]:
     """Live runs that count against the limit. A session that is idle or waiting for a person on a ticket in
     Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS), nor does one idle
@@ -1616,6 +1626,8 @@ def cleanup(root: Path) -> list[str]:
             continue  # ORCH-147: the Manager is always on; only the person stops it or starts it fresh
         if _runs_check_wait(rec):
             continue  # it waits for pull request checks on purpose: a close would kill the merge (ORCH-221)
+        if _keeps_busy(root, rec):
+            continue  # its own helpers still run in the background, or a person talks to it (ORCH-267)
         try:
             idle = time.time() - runs._parse(live["since"])
         except (KeyError, ValueError):

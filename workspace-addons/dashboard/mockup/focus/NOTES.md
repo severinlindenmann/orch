@@ -218,3 +218,14 @@ Narrow panes (three at 1280, more than one on the right, a phone) fold pin and p
 phone shows only the selected session and has no add beside. The split and the selection are kept per browser and
 stay while the page changes. Pins are kept in this browser (the bar's key) until the wall stores them in orch.
 Master: `.live-*` in widgets.css (style guide: Live layer); click-through step 12.
+
+## The Focus button and Open ticket, built (ORCH-365, 17 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch every ticket page and
+every ticket row (table and phone) has one button with the draft's words: Watch, Answer, Open, In line or Start, from
+the same session states as the bar. It opens the ticket's session in the layer and moves the keyboard into it; on the
+ticket page it says "… in Focus" and sits in the header with the other actions (the draft has it under the steps),
+where it takes the place of Watch live while a helper runs. A row's own Answer gives way to it, so no row shows two.
+Every pane has Open ticket (also in More when the pane is narrow, as in the draft); from full screen it steps back so
+the ticket page shows. Finished tickets without a helper get no button. Wall tiles come with the wall task. No new
+master rules (kit buttons only); click-through step 6.

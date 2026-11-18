@@ -103,3 +103,31 @@ test('sessions without a ticket (ORCH-364): open ones join the bar by their titl
   assert.equal(bar.liveBarNewOpen(null, 'empty'), null);
   assert.deepEqual(bar.LIVEBAR_NEW.map(n => n.title), ['Empty helper', 'Chat helper', 'Plain terminal', 'Manager'], 'draft D words, in its order');
 });
+
+// ORCH-365: the Focus button on every ticket says what pressing it does, from the same session states as the bar.
+test('the Focus button word: Answer, Watch, Open, In line, Start; none on a finished ticket without a helper', () => {
+  const ask = {questions:[{id:'q1', text:'Which one?'}]};
+  const verb = (tk, r) => bar.liveFocusVerb(tk, r, helpers.helperState);
+  assert.equal(verb(t('t_a', 'ORCH-1'), run('you')), 'Answer');
+  assert.equal(verb(t('t_b', 'ORCH-2'), run('working')), 'Watch');
+  assert.equal(verb(t('t_c', 'ORCH-3'), run('idle')), 'Open');
+  assert.equal(verb(t('t_d', 'ORCH-4'), {running:false, hold:'Waits for a free place'}), 'In line');
+  assert.equal(verb(t('t_e', 'ORCH-5', {status:'ready'}), undefined), 'Start');
+  assert.equal(verb(t('t_f', 'ORCH-6', {status:'waiting', ...ask}), undefined), 'Answer', 'an open question with no helper');
+  assert.equal(verb(t('t_g', 'ORCH-7', {questions:[{id:'q1', text:'x', answer:'yes'}]}), undefined), 'Start', 'an answered question is not one');
+  for (const status of ['done', 'dropped', 'superseded']) assert.equal(verb(t('t_h', 'ORCH-8', {status, ...ask}), undefined), '', status);
+  assert.equal(verb(t('t_i', 'ORCH-9', {status:'done'}), run('working')), 'Watch', 'a helper still running on a done ticket can be watched');
+  assert.equal(verb(null, null), '');
+});
+
+test('the ticket page and every ticket row use the one Focus button; a pane has Open ticket, also in More', () => {
+  const read = f => fs.readFileSync(path.join(WEB, 'pages', f), 'utf8');
+  const ticket = read('ticket.js'), list = read('tickets.js'), layer = read('live-layer.js');
+  assert.equal((ticket.match(/liveFocusButton\(t, true\)/g) || []).length, 2, 'both ticket page headers (working and not)');
+  assert.match(list, /function ticketRowFocus/);
+  assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');
+  assert.match(list, /function shortSide[^]*?liveFocusButton\(t\)/, 'the phone row');
+  assert.match(layer, /function liveFocusButton[^]*?livePreviewOn\(\)/, 'only behind the Preview switch');
+  assert.match(layer, /'data-key':'live-open-ticket'/);
+  assert.match(layer, /'data-key':'live-more-ticket'/);
+});

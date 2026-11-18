@@ -16,6 +16,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+import lib
 from lib import Fail, check, scenario
 from scenarios_v2 import W, wait_for
 
@@ -41,6 +42,8 @@ class F:
         self.base = real / ".orch-test" / f"e2e-{sid.lower()}-{os.getpid()}"
         (self.base / "home").mkdir(parents=True)
         e.cleanup.append(lambda: shutil.rmtree(self.base, ignore_errors=True))
+        e.cleanup.append(self.stop_services)  # runs before the folder goes (cleanup runs last to first), also after a failure
+        lib.EXTRA_ROOTS.append(self.base)  # the run's LEAK check looks here too
         env = {"ORCH_HOME": str(self.base / "home"), "ORCH_HOME_STRICT": "1"}
         # the install record of a TEST install (only in this run's own tool environment; restored afterwards)
         rc, out, err = e.sh([self.py, "-c", "import os, sys; print(os.path.realpath(sys.prefix))"], env=env)
@@ -69,7 +72,18 @@ class F:
             rc, out, err = self.w.sh(["orch", "addon", "add", a, "--yes"], timeout=600)
             check(rc == 0, f"addon add {a}: {(err or out)[-300:]}")
 
+    def stop_services(self):
+        """End the Factory watcher (and any other add-on process) of this scenario's workspace, so no scenario leaves
+        one behind (they used to run for days: `orch stop --all` in the run's temp root never saw this workspace)."""
+        if (self.base / "ws").exists():
+            try:
+                self.w.sh(["orch", "stop", "--all"], timeout=120)
+            except Exception:  # noqa: BLE001
+                pass
+        lib.end_processes([pid for pid, _ in lib.orch_processes_under([self.base])])
+
     def done(self):
+        self.stop_services()
         self._restore()
 
     # -- plain orch --

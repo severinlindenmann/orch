@@ -167,6 +167,12 @@ elif args[:2] == ["relay", "outbox"]:
         "waiting": json.loads((root / "outbox.json").read_text()) if (root / "outbox.json").exists() else []
     }
 # ---- end #816 A
+elif args[:2] == ["ref", "add"]:
+    t = load(args[2])
+    load(args[3])  # the other ticket must exist
+    t.setdefault("refs", []).append({"kind": "ticket", "ticket": args[3]})
+    save(t)
+    result = t
 elif args[0] == "ask":
     if (root / "fail-ask").exists():
         print(json.dumps({"error": "Ask unavailable.", "code": "not_available"}))
