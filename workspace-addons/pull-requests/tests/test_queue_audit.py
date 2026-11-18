@@ -66,6 +66,16 @@ def test_merges_are_sorted_into_through_the_queue_by_a_person_and_past_it(ws):
     assert "1 past the queue" in out and "past the queue: #3" in out
 
 
+def test_a_pull_request_the_queue_merged_alone_counts_as_the_queues(ws):
+    """Owner, ORCH-432 q2: one alone, green, develop did not touch its files: merged by the queue, no group."""
+    entry(ws, 5, at(22), at(22, 10))  # the queue's file: merged
+    gh = AuditGitHub([pr(5), pr(6)])
+    b = audit.run(ws, gh, 14, now=NOW)["bases"][0]
+    assert [r["number"] for r in b["alone"]] == [5] and [r["number"] for r in b["past"]] == [6]
+    assert "1 merged alone by the queue" in audit.text(audit.run(ws, gh, 14, now=NOW))
+    assert [r["number"] for r in audit.as_json(audit.run(ws, gh, 14, now=NOW))["bases"][0]["alone"]] == [5]
+
+
 def test_a_stand_still_is_30_minutes_in_line_without_a_merge(ws):
     # #1 waits from 02:10; the fix waits behind it; nothing merges until 03:07: 57 minutes still
     entry(ws, 1, at(2, 10), at(3, 7), why="develop itself is red in the same checks; waits for the fix")
@@ -110,7 +120,7 @@ def test_github_not_answering_is_said_not_counted(ws):
 
 
 def test_the_audit_command_prints_json(ws, monkeypatch, capsys):
-    entry(ws, 1, at(22), at(22, 5))
+    entry(ws, 1, at(22), at(22, 5), state=store.OUT)  # left the queue, then merged by hand: past it
     monkeypatch.setattr(cli, "_github", lambda: AuditGitHub([pr(1)]))
     monkeypatch.chdir(ws)
     assert cli.main(["queue", "audit", "--hours", "24", "--json"]) == 0

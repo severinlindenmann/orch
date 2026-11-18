@@ -77,9 +77,11 @@ decision in `reviews` (approved, changes requested or dismissed; a later comment
 back), because `reviewDecision` is empty when the base branch's rules require no reviews. A hold whose members
 did not change counts as a try. A member that changed is taken out (closed, draft, base not allowed, review, Merge card) or
 put back in line (new commit, another allowed base branch); a group that was stopped this way is closed and the
-rest wait again. Every merge is checked in a queue group (ORCH-450): one left runs as a group of one (a group
-commit of just that pull request on top of the base, its own group pull request "Merge queue: #a"), never on its
-own branch's checks; red or a conflict with the base then leaves the queue with what to do. The queue never takes
+rest wait again. One left alone (owner, ORCH-432 q2): its own checks green and the base branch changed none of its
+files since it took the base in (a file it changes, or a test file of the same module): the queue sets its mark on
+the checked head right before the merge and merges it, no second run (mark not set: not merged, tried again). The
+base changed its files: it runs as a group of one (a group commit of just that pull request on top of the base, its
+own group pull request "Merge queue: #a"); red or a conflict with the base then leaves the queue with what to do. The queue never takes
 the base branch into a pull request's branch, so no pull request runs its checks again after each merge. A pull
 request from a fork is never put on a branch of the repository: it leaves the queue (reference state `fork`, nobody
 woken) and a person merges it. Several: a group commit built in a bare blobless copy

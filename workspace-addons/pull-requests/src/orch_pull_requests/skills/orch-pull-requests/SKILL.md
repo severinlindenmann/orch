@@ -4,9 +4,10 @@ description: See each pull request's checks and merge state (on the Pull request
 ---
 # orch merge queue
 
-Every merge into develop goes through the merge queue: it checks each pull request on top of develop in a queue
-group (several together on one group branch, or one alone as a group of one), the checks run once, and all of them
-are merged together on green. A red group is split in halves and tried again, so the good ones still get merged. No
+Every merge into develop goes through the merge queue: it checks pull requests on top of develop in a queue group
+(several together on one group branch), the checks run once, and all of them are merged together on green. One alone
+whose own checks are green is merged directly when develop changed none of its files; otherwise it runs as a group of
+one. A red group is split in halves and tried again, so the good ones still get merged. No
 merge by hand, no merge ahead of the queue. No AI call: a program does the waiting and merging.
 
 ## When to use
@@ -80,8 +81,8 @@ Merges into develop checked in a queue group, checked alone and merged by a pers
 the queue stood still (30 minutes or more with a pull request in line and no merge) with the reasons.
 
 ## Rules
-- Every merge into develop is checked in a queue group; the queue sets the mark `orch/merge-queue` on each group
-  commit it built (a develop rule can require it).
+- Every merge into develop goes through the queue; it sets the mark `orch/merge-queue` on each group commit it
+  built and on each head it merges alone (a develop rule can require it).
 - A pull request a person merges with a Merge card is only checked by the queue (alone, then marked); a Merge
   card made while it waits takes it out.
 - A pull request from a fork is never put on a branch of the repository: it leaves the queue, a person merges it.
