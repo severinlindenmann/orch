@@ -69,8 +69,8 @@
       const timer = setTimeout(() => finish({ok: false, error: 'The dashboard did not answer. Reload the page and try again.'}), 30000);
       function finish(r) { clearTimeout(timer); asked.delete(id); resolve(r); }
       asked.set(id, finish);
-      // sandboxed frame: its own origin is opaque, so the dashboard checks this frame and its code (kit/frame.js), not an origin
-      window.parent.postMessage({type: 'orch.act', id, verb, target, chan: (window.OrchFrame || {}).chan}, '*');
+      // sandboxed frame: its own origin is opaque (location.origin is still the dashboard's address), so the dashboard checks this frame and its code (kit/frame.js), not an origin
+      window.parent.postMessage({type: 'orch.act', id, verb, target, chan: (window.OrchFrame || {}).chan}, location.origin);
     });
   }
   function say(text, kind) {
