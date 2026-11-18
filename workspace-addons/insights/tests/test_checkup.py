@@ -277,7 +277,10 @@ def test_needs_cli_prints_json_from_own_files_without_orch(core, ws, monkeypatch
     assert cli.main(["--dir", str(ws), "needs", "--json"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert [r["kind"] for r in out] == ["insights:checkup"] and seen == [True]
-    assert not (core.parent / "calls.jsonl").exists() or "checkup" not in (core.parent / "calls.jsonl").read_text()
+    assert (
+        not (core.parent / "calls.jsonl").exists()
+        or "checkup" not in (core.parent / "calls.jsonl").read_text()
+    )
 
     def broken(root, light=False):
         raise checkup_core.CheckupError("The check-up file cannot be read.", "not_available")

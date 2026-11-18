@@ -13,7 +13,7 @@ def add_parsers(sub, common) -> None:
     x = sub.add_parser("needs", parents=[common], help="what waits for a person")
     # orch's own detached run: asks GitHub about pull requests left open (stuck.py), prints nothing
     x.add_argument("--look-at-pulls", action="store_true", help=argparse.SUPPRESS)
-    # orch's own detached run: saves a fresh answer of one add-on that was late (needs.refresh), prints nothing
+    # orch's own detached run: saves a fresh answer of an add-on that was late (needs.refresh), prints nothing
     x.add_argument("--refresh-addon", metavar="NAME", help=argparse.SUPPRESS)
 
 

@@ -30,6 +30,15 @@ if sys.argv[1:2] == ["needs"]:
         time.sleep(5)
     if mode == "late":  # later than FAST_BUDGET, within PULL_TIMEOUT
         time.sleep(1.2)
+    if mode == "spawns":  # starts a child of its own (as Factory runs orch ticket list), then hangs
+        import subprocess
+        kid = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        (root / "kid.pid").write_text(str(kid.pid))
+        time.sleep(30)
+    if mode == "umlaut":
+        row = dict(json.loads((root / "rows.json").read_text())[0], text="Grüße")
+        print(json.dumps([row], ensure_ascii=False))
+        sys.exit(0)
     if mode == "broken":
         print("not json")
         sys.exit(1)
@@ -205,6 +214,49 @@ def test_refresh_command_saves_the_answer_and_prints_nothing(na, proj, run):
     saved = json.loads((proj / ".orch/run/needs-cache/hello.json").read_text(encoding="utf-8"))
     assert [r["id"] for r in saved] == ["hello:x"]
     assert run("needs", "--refresh-addon", "nope")[0] == 0  # not an add-on with needs: nothing
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process groups: POSIX; Windows stops the tree with taskkill /T")
+def test_a_late_addon_is_stopped_with_what_it_started(na, proj, run):
+    _rows(run)
+    (proj / "mode.txt").write_text("spawns")
+    assert [r["id"] for r in compute(proj)] == ["hello:x"]
+    pid = int((proj / "kid.pid").read_text()) if (proj / "kid.pid").exists() else None
+    if pid is None:  # the add-on was stopped before it started its child: nothing left behind either
+        return
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    pytest.fail("the add-on's own child kept running")
+
+
+def test_non_ascii_rows_come_through(na, proj, run):
+    (proj / "mode.txt").write_text("umlaut")
+    assert [r["text"] for r in compute(proj)] == ["Grüße"]
+
+
+def test_two_callers_at_once_start_one_refresh(proj, monkeypatch):
+    import threading
+
+    started = []
+    monkeypatch.delenv("ORCH_NO_NEEDS_REFRESH", raising=False)
+    monkeypatch.setattr(needs_mod.subprocess, "Popen", lambda *a, **k: started.append(a[0]))
+    go = threading.Barrier(8)
+    results = []
+
+    def call():
+        go.wait()
+        results.append(needs_mod._spawn_refresh(proj, "hello"))
+
+    threads = [threading.Thread(target=call) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(started) == 1 and results.count(True) == 1
 
 
 def test_refresh_is_started_once_while_one_runs(proj, monkeypatch):

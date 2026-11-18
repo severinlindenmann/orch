@@ -259,7 +259,13 @@ class _Pull(threading.Thread):
             "ORCH_ADDON": self.name_,
             "ORCH_ROOT": str(self.root),
             "ORCH_BIN": addons.orch_bin(),
+            "PYTHONIOENCODING": "utf-8",  # read as UTF-8 below, whatever the system's code page
         }
+        own_group = (
+            {"creationflags": 0x00000200}  # CREATE_NEW_PROCESS_GROUP: stopped as a tree (taskkill /T)
+            if os.name == "nt"
+            else {"start_new_session": True}  # its own process group: stopped with what it started
+        )
         try:
             with self._lock:
                 if self._stopped:
@@ -274,6 +280,7 @@ class _Pull(threading.Thread):
                     text=True,
                     encoding="utf-8",
                     errors="replace",
+                    **own_group,
                 )
             out, _ = self.proc.communicate(timeout=PULL_TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -289,11 +296,31 @@ class _Pull(threading.Thread):
             self._stopped = True
             p = self.proc
         if p is not None and p.poll() is None:
-            try:
-                p.kill()
-                p.wait(timeout=1)
-            except (OSError, subprocess.SubprocessError):
-                pass
+            _kill_tree(p)
+
+
+def _kill_tree(p: subprocess.Popen) -> None:
+    """Stop a late add-on and what it started (Factory runs `orch ticket list`): its own process group on
+    POSIX, taskkill /T on Windows. Only the child this process started; never raises."""
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(p.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=5,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+        else:
+            import signal
+
+            os.killpg(p.pid, signal.SIGKILL)  # start_new_session: the group id is the child's pid
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        p.kill()
+        p.wait(timeout=1)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def _pull(root: Path, name: str, m: dict) -> list[dict] | None:
@@ -312,19 +339,23 @@ def _refresh_mark(root: Path, name: str) -> Path:
 
 
 def _spawn_refresh(root: Path, name: str) -> bool:
-    """Start one detached `orch needs --refresh-addon <name>` that saves a fresh answer, at most one per add-on
-    at a time (a mark younger than PULL_TIMEOUT + 3 s means one is under way). Never raises, never waits."""
+    """Start one detached `orch needs --refresh-addon <name>` that saves a fresh answer, at most one per
+    add-on at a time (the mark is made atomically; one older than PULL_TIMEOUT + 3 s was left behind and is
+    taken over). Never raises, never waits."""
     try:
         if os.environ.get("ORCH_NO_NEEDS_REFRESH"):
             return False
         mark = _refresh_mark(root, name)
+        mark.parent.mkdir(parents=True, exist_ok=True)
         try:
-            if time.time() - mark.stat().st_mtime < PULL_TIMEOUT + 3:
-                return False
+            if time.time() - mark.stat().st_mtime >= PULL_TIMEOUT + 3:
+                mark.unlink()  # left by a refresh that never finished
         except OSError:
             pass
-        mark.parent.mkdir(parents=True, exist_ok=True)
-        mark.touch()
+        try:
+            os.close(os.open(mark, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))  # one caller wins
+        except FileExistsError:
+            return False
         from orch import procs
 
         subprocess.Popen(
