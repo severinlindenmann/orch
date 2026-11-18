@@ -116,7 +116,7 @@ def test_three_failures_in_ten_minutes_raise_exactly_one_question(cli, fake, ws,
         "ticket": "DM1-12",
         "id": "q1",
         "title": "Budget guard keeps stopping",
-        "text": "Restart, Stop or Look into it?",
+        "text": "It failed 4 times in the last 10 minutes. Restart, Stop or Look into it?",
     }
     assert row["health"] == {"ok": True, "how": "process alive", "text": "Process alive"}
 
@@ -348,3 +348,21 @@ def test_an_answer_that_cannot_be_carried_out_is_asked_again(cli, fake, ws, cloc
     clock["t"] = T0 + 360
     _check(cli)
     assert len(orch.asks()) == 2
+
+
+def test_one_bad_pass_counts_once_even_when_it_was_also_started_again(
+    cli, fake, ws, clock, orch, monkeypatch
+):
+    # ORCH-371 bug 5: "not alive" and a restart by the computer in the same pass counted as two failures
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    _add(cli, "--port", "5173")
+    for i in range(2):
+        clock["t"] = T0 + 60 * (i + 1)
+        _crash(fake)
+        assert _check(cli)["failing"] is False and not orch.asks()
+    clock["t"] = T0 + 180
+    _crash(fake)
+    assert _check(cli)["failing"] is True and len(orch.asks()) == 1
+    assert "3 times" in orch.ticket()["questions"][0]["text"]

@@ -205,6 +205,12 @@ const entry = (decision, extra = {}) => ({
   decision, ...extra,
 });
 
+test('answerRecord: a sent-back Check says what happens next', () => {
+  const {UI} = load();
+  const t = UI.answerRecord(entry({action: 'send_back', changes: ['Add shipping']}, {card: {kind: 'check', title: 'Result'}}), {now: NOW}).textContent;
+  assert.match(t, /Your note went to the helper for a new version\./); assert.doesNotMatch(t, /Kept exactly/);
+});
+
 test('answerRecord: title, verdict words, by · via · time, taken option, pins and words', () => {
   const {UI} = load();
   const rec = UI.answerRecord(entry({action: 'use_with_changes', picked: 'C', changes: ['Put questions on top', 'Show the month'],

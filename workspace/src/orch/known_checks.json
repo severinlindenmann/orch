@@ -1,5 +1,5 @@
 {
-  "_doc": "Other tools a helper often needs (health.known_recipes, ORCH-48). Same entry as a workspace's own check (orch logins add), plus set_if / env_if: the check only runs when the tool is installed AND one of these settings files exists or environment names is set, so an unused tool never warns. No end date from these tools: orch says only whether the login works; the exit code answers and what the command prints is never read. sign_in is the terminal command the warning shows with a Copy button (ORCH-218); orch never runs it.",
+  "_doc": "Built-in checks (ORCH-48), since ORCH-529 a library of templates: a workspace adds the ones it needs as check files (orch checks add <name> [--profile X], checkfiles.py). Only a workspace without a .orch/checks folder still runs them by itself (the old way, for one release): each only when the tool is installed AND one of its set_if files exists or env_if names is set. profile: the per-profile form (label, command, sign_in with {profile}), one check per profile, so an unused or expired other profile never warns. No end date from these tools: the exit code answers and what the command prints is never read. sign_in is the terminal command the warning shows with a Copy button (ORCH-218); orch never runs it.",
   "checks": {
     "github": {
       "label": "GitHub",
@@ -14,7 +14,12 @@
       "works": "profiles.*.valid",
       "set_if": ["{home}/.databrickscfg"],
       "env_if": ["DATABRICKS_CONFIG_FILE"],
-      "sign_in": "databricks auth login"
+      "sign_in": "databricks auth login",
+      "profile": {
+        "label": "Databricks {profile}",
+        "command": ["databricks", "current-user", "me", "--profile", "{profile}"],
+        "sign_in": "databricks auth login --profile {profile}"
+      }
     },
     "azure": {
       "label": "Azure CLI",
@@ -35,7 +40,12 @@
       "command": ["aws", "sts", "get-caller-identity"],
       "set_if": ["{home}/.aws/config", "{home}/.aws/credentials"],
       "env_if": ["AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_PROFILE"],
-      "sign_in": "aws sso login"
+      "sign_in": "aws sso login",
+      "profile": {
+        "label": "AWS {profile}",
+        "command": ["aws", "sts", "get-caller-identity", "--profile", "{profile}"],
+        "sign_in": "aws sso login --profile {profile}"
+      }
     }
   }
 }
