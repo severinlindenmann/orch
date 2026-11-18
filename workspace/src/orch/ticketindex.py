@@ -34,7 +34,9 @@ def index_path(root: Path) -> Path:
 
 
 def _sig(st: os.stat_result) -> list[int]:
-    return [st.st_ino, st.st_size, st.st_mtime_ns]
+    """What tells a changed file: inode, size, modified time and, outside Windows, the change time, which no
+    one can set back by hand (an in-place edit that keeps the size and resets the modified time is seen)."""
+    return [st.st_ino, st.st_size, st.st_mtime_ns] + ([st.st_ctime_ns] if os.name != "nt" else [])
 
 
 def _hidden(t: dict) -> str | None:

@@ -166,3 +166,24 @@ def test_sync_traces_seen_through_the_index(proj, run):
     p.write_text(json.dumps(t), encoding="utf-8")
     assert ticketindex.any_shows_sync(proj) is True
     assert ticketindex.any_shows_sync(proj) == history.tickets_show_sync(proj)
+
+
+def test_in_place_edit_with_time_set_back_is_seen(proj, run):
+    """A hand edit in place that keeps the size and sets the modified time back is still read again."""
+    import sys
+
+    if sys.platform == "win32":
+        return  # no change time to compare there; orch's own writes replace the file (new identity)
+    run("init")
+    tid = _new(run, "Invoice export")
+    ticketindex.rows(proj)
+    p = tickets.ticket_path(proj, tid)
+    st = p.stat()
+    t = json.loads(p.read_text(encoding="utf-8"))
+    t["title"] = "Invoice export"[::-1]
+    with open(p, "r+", encoding="utf-8") as f:  # same file, same size
+        f.write(json.dumps(t, indent=2, ensure_ascii=False) + "\n")
+        f.truncate()
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert p.stat().st_size == st.st_size and p.stat().st_mtime_ns == st.st_mtime_ns
+    assert ticketindex.rows(proj)[0]["title"] == t["title"]
