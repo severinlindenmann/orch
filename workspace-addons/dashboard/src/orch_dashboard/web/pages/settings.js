@@ -997,7 +997,7 @@ const frameEntry = path => /^[A-Za-z0-9_\/-]{0,300}$/.test(path) && !/^(api|page
 // Only while that same frame is still on screen: a new frame (back from another page) opens at the address's place.
 let frameKeep = null;
 const frameShown = () => document.querySelector('iframe.embed[data-key="embed"]');
-// The shown add-on page takes the keyboard once it has loaded, so its own keys (Focus: 1 to 4) work without a click
+// The shown add-on page takes the keyboard once it has loaded, so its own keys (such as 1 to 4) work without a click
 // first (ORCH-465); never while the person types in a field of the dashboard or a dialog is open.
 function frameTakesKeys(frame, doc = document) {
   const a = doc.activeElement;
