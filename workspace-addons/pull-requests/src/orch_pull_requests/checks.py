@@ -323,26 +323,32 @@ def tend(root: Path, gh, take=None, wake_fn=None, clock=time.time, log=print) ->
             if not failed:
                 continue
             fork = v.get("isCrossRepository") is not False
-            read = {} if fork else _logs(gh, failed)
-            mine, theirs, tests = [], [], {}
-            for r in failed:  # a fork's log is not read: its failures never count as a broken test
-                test = tests[r["name"]] = broken.failing_test(read.get(r["name"], ""))
-                t = None if fork or not test else broken.note(bdata, repo, k, tid, r["name"], test, now)
+            read = {} if fork else _logs(gh, failed)  # a fork's log is not read: never a broken test
+            tests = {
+                r["name"]: "" if fork else broken.failing_test(read.get(r["name"], ""), root) for r in failed
+            }
+            mine, theirs = [], []
+            for r in failed:
+                if not tests[r["name"]]:
+                    continue  # names no failing test: decided below
+                alone = all(
+                    not tests[o["name"]] and broken.sums_up(read.get(o["name"], ""), [r["name"]])
+                    for o in failed
+                    if o is not r
+                )
+                t = broken.note(bdata, repo, k, tid, r["name"], tests[r["name"]], now, alone)
                 if t is not None and t.pop("new", False):
                     _found(root, gh, take, wake_fn, bdata, t, read.get(r["name"], ""), k, log, out)
                 (theirs if t is not None else mine).append((r, t))
-            if theirs:  # a check whose log names no failure of its own only sums up the others
-                along = [r for r, _ in mine if r["name"] in read and not tests.get(r["name"])]
-                mine = [(r, t) for r, t in mine if r not in along]
-                for _, t in theirs:
-                    t["along"] = sorted(set(t.get("along") or []) | {r["name"] for r in along})
+            for r in failed:  # one that only sums up a broken check of this run is not the helper's either
+                if not tests[r["name"]] and not (theirs and broken.sums_up(read.get(r["name"], ""), [x["name"] for x, _ in theirs])):  # fmt: skip
+                    mine.append((r, None))
             mem["woke"] = True
             names = ", ".join(r["name"] for r in failed[:5]) + (" ..." if len(failed) > 5 else "")
             if not mine and all(t.get("aside") for _, t in theirs):
                 line = f"Checks of {url} failed at {head[:7]} ({names}) only in tests set aside: helper not woken."
             elif not mine:
-                t = theirs[0][1]
-                how = wake_fn(root, tid, broken.told_text(t, url))
+                how = wake_fn(root, tid, broken.told_text(theirs[0][1], url))
                 for _, t in theirs:
                     t["told"] = sorted(set(t["told"]) | {k})
                 out["told"].append(url)
@@ -356,16 +362,13 @@ def tend(root: Path, gh, take=None, wake_fn=None, clock=time.time, log=print) ->
             log(f"{key}: {line}")
             _history(root, tid, line)
     _write(root, {k: v for k, v in seen.items() if k in keep})
-    for t in bdata["tests"].values():  # what an earlier pass could not do
-        if broken.wants_issue(t) and take("other", f"issue for the broken test {t['check']}", wait=0):
-            title, body = broken.issue_text(t, [_url(p) for p in t["prs"]], "")
-            t["issue"] = gh.create_issue(t["repo"], title, body) if hasattr(gh, "create_issue") else None
-        if not t.get("fixed") and not t.get("question"):
-            with contextlib.suppress(Exception):
-                broken.ask(root, t)
-    changed = broken.answers(root, bdata) + broken.fixed(root, gh, bdata, now)
-    changed += [t for t in bdata["tests"].values() if t.get("publish")]
-    for repo in sorted({t["repo"] for t in changed}):
+    for t in list(bdata["tests"].values()):  # what an earlier pass could not do
+        _issue(root, gh, take, bdata, t, "")
+        with contextlib.suppress(Exception):
+            broken.ask(root, t)
+    broken.answers(root, bdata)
+    broken.fixed(root, gh, bdata, now)
+    for repo in sorted(bdata["publish"]):
         _publish(gh, take, bdata, repo, log, out)
     broken.write(root, bdata)
     return out
@@ -389,26 +392,43 @@ def _url(pr: str) -> str:
     return f"https://github.com/{repo}/pull/{n}"
 
 
+def _issue(root: Path, gh, take, bdata: dict, t: dict, log_text: str) -> None:
+    """Open the one issue of a broken test, unless it has one. One GitHub already holds (a pass that stopped
+    after GitHub took it) is found by its marker first; the address is saved at once."""
+    if t.get("issue") or t.get("fixed"):
+        return
+    find = getattr(gh, "find_issue", None)
+    found = find(t["repo"], t["key"]) if find else None
+    if not found:
+        if not take("other", f"issue for the broken test {t['check']}", wait=0):
+            return
+        title, body = broken.issue_text(t, [_url(p) for p in t["prs"]], log_end(log_text, root))
+        found = gh.create_issue(t["repo"], title, body) if hasattr(gh, "create_issue") else None
+    if found:
+        t["issue"] = found
+        broken.write(root, bdata)
+
+
 def _found(root: Path, gh, take, wake_fn, bdata: dict, t: dict, log_text: str, now_pr: str, log, out) -> None:
     """A test just turned out broken: one issue, the helpers told before are told it is not theirs, one question
-    for a person. Each step is tried once here; a missing issue is opened on a later pass."""
+    for a person. Each step is tried once here; a missing issue (and so the question) comes on a later pass."""
     out["broken"].append(t["key"])
-    urls = [_url(p) for p in t["prs"]]
-    if take("other", f"issue for the broken test {t['check']}", wait=0):
-        title, body = broken.issue_text(t, urls, log_end(log_text, root))
-        t["issue"] = gh.create_issue(t["repo"], title, body) if hasattr(gh, "create_issue") else None
+    _issue(root, gh, take, bdata, t, log_text)
     log(
         f"Broken test {broken.name(t)} on {len(t['prs'])} pull requests"
         + (f": {t['issue']}" if t["issue"] else "")
     )
-    who = {h["pr"]: h.get("ticket") for h in bdata["hits"] if h.get("key") == t["key"]}
     for p in t["prs"]:
-        if p == now_pr or p in t["told"] or not who.get(p):
+        hit = broken.hit_of(bdata, t, p)
+        if p == now_pr or p in t["told"] or not hit or not hit.get("ticket"):
             continue  # the pull request of this pass is told by the caller
-        how = wake_fn(root, who[p], broken.told_text(t, _url(p)))
+        alone = hit.get("alone")
+        how = wake_fn(root, hit["ticket"], (broken.told_text if alone else broken.part_text)(t, _url(p)))
         t["told"].append(p)
         out["told"].append(_url(p))
-        _history(root, who[p], f"{_url(p)} failed in a broken test, not because of its change: {how}.")
+        what = "only in a broken test" if alone else "also in a broken test"
+        _history(root, hit["ticket"], f"{_url(p)} failed {what}, not because of its change: {how}.")
+        broken.write(root, bdata)
     try:
         broken.ask(root, t)
     except Exception as e:  # noqa: BLE001 - asked again on the next pass
@@ -416,19 +436,16 @@ def _found(root: Path, gh, take, wake_fn, bdata: dict, t: dict, log_text: str, n
 
 
 def _publish(gh, take, bdata: dict, repo: str, log, out) -> None:
-    """Tell the repository which tests are set aside (its Actions variable ORCH_ASIDE)."""
+    """Tell the repository which tests are set aside (its Actions variable ORCH_ASIDE). Not done: the next
+    pass tries again (the wish is kept per repository, apart from the tests)."""
     value = broken.published(bdata, repo)
     if not take("other", f"{repo} variable {broken.VARIABLE}", wait=0):
         out["skipped"].append((repo, "this computer's GitHub write limit had no room for the set-aside list"))
-        for t in bdata["tests"].values():  # looked at again next pass
-            if t.get("repo") == repo:
-                t["publish"] = True
         return
     ok = gh.set_variable(repo, broken.VARIABLE, value) if hasattr(gh, "set_variable") else False
-    for t in bdata["tests"].values():
-        if t.get("repo") == repo:
-            t["publish"] = not ok
-    log(f"{repo}: set-aside tests {value}" + ("" if ok else " (GitHub refused the variable)"))
+    if ok:
+        bdata["publish"].pop(repo, None)
+    log(f"{repo}: set-aside tests {value}" + ("" if ok else " (GitHub refused the variable; tried again)"))
 
 
 def _history(root: Path, tid: str, line: str) -> None:

@@ -138,6 +138,21 @@ class GitHub:
         ]
         return lines[-1] if got.returncode == 0 and lines else None
 
+    def find_issue(self, repo: str, mark: str) -> str | None:
+        """The issue whose text carries `mark` (a broken test's key), still open; None: none or no answer."""
+        v = self._json(
+            "issue", "list", "--repo", repo, "--state", "open", "--search", f"{mark} in:body", "--json", "url,body",
+            "--limit", "5",
+        )  # fmt: skip
+        for i in v if isinstance(v, list) else []:
+            if (
+                isinstance(i, dict)
+                and mark in str(i.get("body") or "")
+                and str(i.get("url") or "").startswith("https://")
+            ):
+                return i["url"]
+        return None
+
     def issue_state(self, url: str) -> str | None:
         """OPEN or CLOSED, None when GitHub did not answer (one read)."""
         v = self._json("issue", "view", url, "--json", "state")
