@@ -129,6 +129,9 @@ def test_stale_digest_is_refused(tk):
 # 4. check cards
 def _in_review(root, tid):
     tickets.check_add(root, tid, "Write it", "agent:claude")
+    tickets.check_done(
+        root, tid, "c1", ['{"type":"note","ref":"wrote it"}'], "agent:claude"
+    )  # open: Looks good is off
     tickets.set_status(root, tid, "review", "agent:claude")
 
 
