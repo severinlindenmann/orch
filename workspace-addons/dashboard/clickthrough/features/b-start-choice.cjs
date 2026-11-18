@@ -42,7 +42,20 @@ module.exports = {
     // Fresh start from the choice: a fresh run starts
     const fresh = [];
     page.on('request', r => { if (r.url().endsWith('/api/act') && r.headers()['x-orch-op'] === 'run.start') fresh.push(JSON.parse(r.postData() || '{}').args || {}); });
-    await act('run.start', () => choice.getByRole('button', { name: /^Fresh start on/ }).click());
+    // On a slow runner this click once timed out with no clue: say what the page showed (menu open, button greyed, covered)
+    const freshBtn = choice.getByRole('button', { name: /^Fresh start on/ });
+    await act('run.start', () => freshBtn.click({ timeout: 20000 }).catch(async err => {
+      const seen = await page.evaluate(() => {
+        const host = document.querySelector('[data-key="ticket-start"]'), menu = host?.querySelector('details.menu');
+        const b = host?.querySelector('[aria-label^="Fresh start on"]'), r = b?.getBoundingClientRect();
+        const top = r ? document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) : null;
+        return {host: !!host, open: !!menu?.open, button: !!b, disabled: !!b?.disabled, box: r ? [r.x, r.y, r.width, r.height].map(Math.round) : null,
+          on: top ? top.tagName + '.' + top.className + ' ' + (top.getAttribute('aria-label') || top.textContent.trim().slice(0, 40)) : null,
+          view: [innerWidth, innerHeight], text: (host?.textContent || '').replace(/\s+/g, ' ').slice(0, 300)};
+      }).catch(e => ({evaluate: String(e)}));
+      throw new Error(String(err.message).split('\n').filter(l => /waiting|retrying|intercept|not (visible|enabled|stable)|detached/.test(l)).slice(-6).join(' | ')
+        + ' || page: ' + JSON.stringify(seen));
+    }));
     must(fresh.length === 1 && fresh[0].fresh === true, 'Fresh start did not start fresh: ' + JSON.stringify(fresh));
     await stopIt();
 
