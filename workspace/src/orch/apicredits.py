@@ -36,10 +36,13 @@ PROVIDER_MAX = 40
 BALANCE_MAX = 300
 HIDDEN = ("key", "balance")  # never repeated in a message
 
-_NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-_KEY_REF = re.compile(r"^(?:pass:[^/\s][^/]{0,79}/[^/\n\r]{1,120}|orch:[a-z0-9][a-z0-9._-]{0,63})$")
-_REL = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]{0,199}$")
-_PLAIN = re.compile(r"^[^\x00-\x1f<>]+$")
+# all used with fullmatch: no control character (a terminal escape) and no trailing newline gets through
+_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+_KEY_REF = re.compile(
+    r"pass:[^/\s\x00-\x1f\x7f][^/\x00-\x1f\x7f]{0,79}/[^/\x00-\x1f\x7f]{1,120}|orch:[a-z0-9][a-z0-9._-]{0,63}"
+)
+_REL = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]{0,199}")
+_PLAIN = re.compile(r"[^\x00-\x1f\x7f<>]+")
 
 
 class _Bad(Exception):
@@ -48,16 +51,20 @@ class _Bad(Exception):
         self.field, self.message = field, message
 
 
-def _looks_like_a_key(value: str) -> bool:
-    """A value one of orch's secret patterns matches (an API key, a token, a private key)."""
+def _looks_like_a_key(value: str, *, full: bool = True) -> bool:
+    """A value orch's secret scan finds a key in (an API key, a token, a private key; with `full` also a
+    credential flag or key=value, as in a balance command). Never reads the stored keys. The `key` field itself
+    is checked with full=False: "pass:Agents/Claude API key 1" is the agreed form and the line scrub flags it."""
     from orch import secretscan
 
-    return any(rx.search(value) for _, rx in secretscan.PATTERNS)
+    if any(rx.search(value) for _, rx in secretscan.PATTERNS):
+        return True
+    return full and bool(secretscan.find(value, None))
 
 
 def _inside(base: Path, rel: str) -> Path | None:
     """base/rel when rel is a plain relative path that stays inside base, else None."""
-    if not isinstance(rel, str) or not _REL.match(rel) or ".." in rel.split("/"):
+    if not isinstance(rel, str) or not _REL.fullmatch(rel) or ".." in rel.split("/"):
         return None
     p = base / rel
     try:
@@ -73,7 +80,7 @@ def _check_credit(c: object, i: int, base: Path) -> dict:
     if not isinstance(c, dict):
         raise _Bad("credit", f"{where} is not a [[credit]] table.")
     name = c.get("name")
-    if isinstance(name, str) and _NAME.match(name) and len(name) <= 32 and not _looks_like_a_key(name):
+    if isinstance(name, str) and _NAME.fullmatch(name) and len(name) <= 32 and not _looks_like_a_key(name):
         where = f"credit {name!r}"
     extra = sorted(set(c) - set(FIELDS))
     if extra:
@@ -86,18 +93,18 @@ def _check_credit(c: object, i: int, base: Path) -> dict:
         if f in c and not isinstance(c[f], str):
             raise _Bad(f, f"{where}: {f} must be text in quotes.")
     for f in FIELDS:  # before any message could quote a value
-        if f in c and _looks_like_a_key(c[f]):
+        if f in c and _looks_like_a_key(c[f], full=f != "key"):
             raise _Bad(
                 f,
                 f"{where}: {f} looks like a key value. Write where the key lives (pass:<vault>/<item> or orch:<name>), never the key.",
             )
-    if not (_NAME.match(name) and len(name) <= 32):
+    if not (_NAME.fullmatch(name) and len(name) <= 32):
         raise _Bad("name", f"{where}: name is lowercase letters, digits and single dashes, at most 32.")
     for f, size in (("label", LABEL_MAX), ("provider", PROVIDER_MAX)):
         v = c[f].strip()
-        if not v or len(v) > size or not _PLAIN.match(v):
+        if not v or len(v) > size or not _PLAIN.fullmatch(v):
             raise _Bad(f, f"{where}: {f} is plain text of 1 to {size} characters.")
-    if not _KEY_REF.match(c["key"]):
+    if not _KEY_REF.fullmatch(c["key"]):
         raise _Bad(
             "key",
             f"{where}: key says where the key lives: pass:<vault>/<item> (Proton Pass) or orch:<name> (orch secret store).",
@@ -112,7 +119,7 @@ def _check_credit(c: object, i: int, base: Path) -> dict:
                 f'{where}: spend is "report" (the skill runs orch usage spent) or "log:<file next to it>".',
             )
     balance = c.get("balance", "")
-    if balance and (len(balance) > BALANCE_MAX or not _PLAIN.match(balance)):
+    if balance and (len(balance) > BALANCE_MAX or not _PLAIN.fullmatch(balance)):
         raise _Bad("balance", f"{where}: balance is one command line of at most {BALANCE_MAX} characters.")
     return {
         "name": name,
@@ -177,6 +184,15 @@ def _declared_in(base: Path, rel: object, owner: str, source: str) -> tuple[list
     tag = lambda ps: [{"owner": owner, "source": source, **p} for p in ps]  # noqa: E731
     if not isinstance(rel, str) or not rel.strip():
         return [], tag([{"field": FILE_KEY, "message": f"{FILE_KEY} names no file."}])
+    if _looks_like_a_key(rel):  # never repeated below
+        return [], tag(
+            [
+                {
+                    "field": FILE_KEY,
+                    "message": f'{FILE_KEY} looks like a key value; name the file, like "api-credits.toml".',
+                }
+            ]
+        )
     p = _inside(base, rel.strip())
     if p is None:
         return [], tag(

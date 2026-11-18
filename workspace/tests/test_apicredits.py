@@ -159,6 +159,10 @@ BROKEN = [
     (one(key="Agents/Maps key"), "key says where the key lives"),
     (one(key=FAKE_KEY), "looks like a key value"),
     (one(balance=f"echo {FAKE_KEY}"), "looks like a key value"),
+    (one(balance="curl --api-key abcdefghijklmnopqrstuv"), "looks like a key value"),
+    (one(label="Maps \x1b[31mkey"), "label is plain text"),
+    (one(key="pass:Agents/Maps\x1b[2Jkey"), "key says where the key lives"),
+    (one(key="orch:maps\n"), "key says where the key lives"),
     (one(provider=None), "has no provider"),
     (one(name="Main Key"), "name is lowercase"),
     (one(spend="log:../../elsewhere.jsonl"), "spend is"),
@@ -192,6 +196,7 @@ def test_skill_check_flags_a_broken_declaration(ws, capsys, toml, says):
 @pytest.mark.parametrize(
     ("file", "says"),
     [
+        (FAKE_KEY + ".toml", "looks like a key value"),
         ("missing.toml", "there is no such file"),
         ("../outside.toml", "inside the folder"),
         ("", "names no file"),
@@ -202,6 +207,7 @@ def test_skill_check_flags_a_declaration_that_names_no_good_file(ws, capsys, fil
     (ws / ".agents" / "outside.toml").write_text(GOOD, encoding="utf-8")
     code, out = run(capsys, "check", "maps-helper", "--json")
     assert code == 2 and any(says in f["message"] for f in json.loads(out)["findings"])
+    assert FAKE_KEY not in out
 
 
 def test_check_path_flags_a_skill_folder_outside_the_workspace(ws, capsys, tmp_path):
@@ -268,10 +274,13 @@ def test_an_addon_manifest_may_name_its_credits_file(tmp_path):
     )  # content: apicredits.py, not the add-on
     rows, problems = apicredits._declared_in(tmp_path, "api-credits.toml", "scan", "addon:scan")
     assert rows == [] and "not valid TOML" in problems[0]["message"]
-    for bad in ("../x.toml", "missing.toml"):
-        m.write_text(MANIFEST.format(file=bad), encoding="utf-8")
-        with pytest.raises(Refused):
-            addons.parse_manifest(m)
+    m.write_text(MANIFEST.format(file="missing.toml"), encoding="utf-8")
+    assert addons.parse_manifest(m)["api-credits"] == "missing.toml"  # the add-on stays; the reader says it
+    rows, problems = apicredits._declared_in(tmp_path, "missing.toml", "scan", "addon:scan")
+    assert rows == [] and "no such file" in problems[0]["message"]
+    m.write_text(MANIFEST.format(file="../x.toml"), encoding="utf-8")
+    with pytest.raises(Refused):
+        addons.parse_manifest(m)
 
 
 def test_orchs_own_skills_still_pass_with_the_credit_check():

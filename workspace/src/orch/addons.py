@@ -1158,8 +1158,10 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     block = m.get("agents_block", f"{m['skill']}/AGENTS-block.md")
     m["agents_block"] = block
     _inside(base, block, "agents_block", "file")
-    if "api-credits" in m:  # its content is checked by apicredits.py, so a typo there hides no add-on
-        _inside(base, m["api-credits"], "api-credits", "file")
+    if (
+        "api-credits" in m
+    ):  # only where it points: apicredits.py reads the file and reports a missing or wrong
+        _inside(base, m["api-credits"], "api-credits", "any")  # one, so it hides no add-on
     if "ticket_ext" in m:
         _ext_schema(base, m["ticket_ext"], "ticket_ext")
     _ticket_links_fields_acts(base, m)
