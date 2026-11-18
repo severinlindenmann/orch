@@ -162,6 +162,9 @@ def _adopt(root, store, ticket_id, data):
 
 
 def draft(root, order, data):
+    # an empty draft would wait for the person with nothing to read (persona test 18 Nov)
+    if not (data or b"").strip():
+        raise Refused("The draft is empty. Write the draft text first.", "invalid")
     store = Store(root)
     with store.locked():
         ticket = order_ticket(root, order)
