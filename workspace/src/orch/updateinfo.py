@@ -117,6 +117,69 @@ def _fetch_messages(kind: str, a: str, b: str | None = None) -> list[str] | None
         return None
 
 
+RELEASE_BRANCH = re.compile(r"^release/part(\d+)(?:-|$)")
+
+
+def _github_release_line() -> list[tuple[int, str]] | None:
+    from urllib.request import Request, urlopen
+
+    api = addons._github_api()
+    if not api:
+        return None
+    url = f"{api}/pulls?state=closed&base={addons.RELEASE_REF}&sort=updated&direction=desc&per_page=100"
+    with urlopen(Request(url, headers={"Accept": "application/vnd.github+json"}), timeout=8) as r:  # noqa: S310
+        rows = json.load(r)
+    if not isinstance(rows, list):
+        return None
+    out = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("merged_at"):
+            continue
+        head = row.get("head") if isinstance(row.get("head"), dict) else {}
+        hit = RELEASE_BRANCH.match(head.get("ref") or "")
+        sha = addons._sha_or_none(row.get("merge_commit_sha"))
+        if hit and sha:
+            out.append((int(hit[1]), sha))
+    return out
+
+
+def _git_release_line(folder: Path) -> list[tuple[int, str]] | None:
+    from orch import safegit
+
+    args = ["log", "--first-parent", "-n", "400", "--format=%H%x01%B%x00", addons.RELEASE_REF]
+    rc, out, _ = safegit.run(args, folder, 10, read_only=True, filters=True, root=folder)
+    if rc != 0:
+        return None
+    line = []
+    for chunk in out.split("\x00"):
+        sha, _, msg = chunk.strip().partition("\x01")
+        hit = RELEASE_MERGE.match(msg)
+        if hit and addons._sha_or_none(sha):
+            line.append((int(hit[1]), sha.strip()))
+    return line
+
+
+def release_line() -> list[tuple[int, str]] | None:
+    """The releases of the install source's release branch as (number, merge commit), newest number first,
+    one entry per number; None when they cannot be read (no network, unknown host)."""
+    try:
+        r = addons.repo()
+        if r.startswith("file://"):
+            got = _git_release_line(Path(r.removeprefix("file://")))
+        elif addons._is_local(r):
+            got = _git_release_line(Path(r))
+        else:
+            got = _github_release_line()
+    except Exception:  # noqa: BLE001 - best effort: no network, rate limit, odd answer
+        return None
+    if got is None:
+        return None
+    seen: dict[int, str] = {}
+    for n, sha in got:
+        seen.setdefault(n, sha)  # the newest merge of a number wins (a release merged twice)
+    return sorted(seen.items(), reverse=True)
+
+
 def installed() -> dict:
     """{"sha", "release"} of this install (None for what is not recorded)."""
     try:
@@ -165,9 +228,34 @@ def release_now(sha: str | None) -> int | None:
     return release_in(msgs) if msgs else None
 
 
+def _compute_held(held: dict, have: dict) -> dict:
+    """Held at a release it went back to: an update is offered only once a release newer than the one left
+    is out (that update leaves the hold and takes the release branch again)."""
+    out = {
+        "installed": {**have, "label": label(have["release"] or held["release"], have["sha"], "main")},
+        "newest": None,
+        "update_available": False,
+        "changes": [],
+        "held": {"release": held["release"], "left": held["left"]},
+    }
+    line = release_line()
+    if not line:
+        return out
+    n, sha = line[0]
+    out["newest"] = {"sha": sha, "release": n, "label": label(n, sha, "main")}
+    if n > held["left"]:
+        out["update_available"] = True
+        if have["sha"]:
+            out["changes"] = changes_from(_fetch_messages("between", have["sha"], sha) or [])
+    return out
+
+
 def _compute() -> dict:
     ref = addons.ref()
     have = installed()
+    held = addons.pinned()
+    if held:
+        return _compute_held(held, have)
     newest_sha = addons._source_sha()
     out = {
         "installed": {**have, "label": label(have["release"], have["sha"], ref)},

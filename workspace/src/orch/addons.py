@@ -203,14 +203,103 @@ _SWITCH_TO: str | None = (
 )
 
 
+_SWITCH_REPO: str | None = None  # set with _SWITCH_TO when going back to a release: stay on this source
+_RELEASE_NO = re.compile(r"[1-9][0-9]{0,5}")
+
+
 def switch_to(build: str) -> None:
-    """`orch update --to release|development`: this update installs from the official source at that build's
-    branch (never from ORCH_REPO / ORCH_REF or a folder). uv records the new source, so every later update and
-    add-on stays on it."""
-    global _SWITCH_TO
-    if build not in BUILDS:
-        raise Refused("Choose release or development.")
-    _SWITCH_TO = BUILDS[build]
+    """`orch update --to release|development|<N>`. A build: this update installs from the official
+    source at that build's branch (never from ORCH_REPO / ORCH_REF or a folder). uv records the new source, so
+    every later update and add-on stays on it. A release number: see go_back_to."""
+    global _SWITCH_TO, _SWITCH_REPO
+    if build in BUILDS:
+        _SWITCH_TO, _SWITCH_REPO = BUILDS[build], None
+        _unpin()
+        return
+    if _RELEASE_NO.fullmatch(build or ""):
+        go_back_to(int(build))
+        return
+    raise Refused("Choose release, development or a release number (for example: orch update --to 32).")
+
+
+def _pin_path() -> Path:
+    return home() / "pinned.json"
+
+
+def _unpin() -> None:
+    try:
+        _pin_path().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def pinned() -> dict | None:
+    """{"release", "sha", "left", "repo"} while this install is held at a release it went back to (the
+    install source's ref is that release's commit), else None. A pin whose commit is no longer the source's
+    ref is stale and does not count."""
+    try:
+        d = json.loads(_pin_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    sha, rel, left = _sha_or_none(d.get("sha")), d.get("release"), d.get("left")
+    if not sha or not isinstance(rel, int) or isinstance(rel, bool) or not isinstance(d.get("repo"), str):
+        return None
+    try:
+        if ref() != sha:
+            return None
+    except Refused:
+        return None
+    ok_left = isinstance(left, int) and not isinstance(left, bool)
+    return {"release": rel, "sha": sha, "left": left if ok_left else rel, "repo": d["repo"]}
+
+
+def go_back_to(number: int) -> None:
+    """`orch update --to <N>`: this update installs release N of the current install source (the commit of
+    its release merge) and holds it there: later updates stay on N until a release newer than the one left
+    is out (leave_pin_if_newer). A folder source has no releases to go back to."""
+    global _SWITCH_TO, _SWITCH_REPO
+    from orch import updateinfo
+
+    r = repo()
+    if _is_local(r):
+        raise Refused("This orch is installed from a folder: it has no releases to go back to.")
+    line = updateinfo.release_line()
+    if line is None:
+        raise Refused("Could not read the list of releases (no network?). Try again in a moment.")
+    sha = dict(line).get(number)
+    if not sha:
+        have = ", ".join(str(n) for n, _ in line[:5]) or "none"
+        raise Refused(f"Release {number} was not found. The newest releases are: {have}.")
+    current = updateinfo.installed()["release"]
+    held = pinned()
+    left = max(x for x in (current, held and held["left"], number) if x)
+    _SWITCH_TO, _SWITCH_REPO = sha, r
+    _write_atomic(_pin_path(), json.dumps({"release": number, "sha": sha, "left": left, "repo": r}))
+
+
+def leave_pin_if_newer() -> tuple[str, str | None]:
+    """Before a plain update: ('free', None) when nothing is held; ('leave', text) when a release newer than
+    the one this install went back from is out (this update takes the release branch again); ('stay', text)
+    when not (or unknown): the update then does nothing."""
+    global _SWITCH_TO, _SWITCH_REPO
+    from orch import updateinfo
+
+    held = pinned()
+    if not held:
+        return "free", None
+    line = updateinfo.release_line()
+    newest = line[0][0] if line else None
+    if newest is not None and newest > held["left"]:
+        _SWITCH_TO, _SWITCH_REPO = RELEASE_REF, held["repo"]
+        _unpin()
+        return "leave", f"Release {newest} is out: leaving release {held['release']}."
+    why = "no newer release is out yet" if line is not None else "could not check for a newer release"
+    return "stay", (
+        f"Staying on orch {held['release']}: you went back from {held['left']} and {why}. "
+        f"Take the newest release again with: orch update --to release"
+    )
 
 
 def build() -> str:
@@ -227,12 +316,14 @@ def build() -> str:
             return "development"
     if _is_local(r) or r.removesuffix(".git").rstrip("/") != DEFAULT_REPO:
         return "development"
+    if f != RELEASE_REF and pinned():
+        return "release"  # held at an earlier release of the official source
     return "release" if f == RELEASE_REF else "development"
 
 
 def repo() -> str:
     if _SWITCH_TO is not None:
-        return DEFAULT_REPO
+        return _SWITCH_REPO or DEFAULT_REPO
     return _src_env("ORCH_REPO") or _install_origin().get("repo") or DEFAULT_REPO
 
 
