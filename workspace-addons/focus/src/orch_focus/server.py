@@ -103,6 +103,7 @@ def _kit(name: str) -> bytes | None:
 # #addon/focus/ (report r-1118-0544), and t/t/<ticket> when a surface joins the path twice.
 PAGE_PATH = re.compile(r"(?:/t){0,2}/t_[a-z0-9]{6,16}")
 
+
 class Tracker:
     """Per ticket: turns ticket changes into run events (written to the log) and folds the log into a Board."""
 
