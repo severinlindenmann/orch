@@ -12,6 +12,9 @@ While pull requests wait, it takes up to MAX_GROUP of one repository and base br
 - a red group is closed and split in halves; each half runs again (a half of one runs alone). So a bad pull
   request costs about log2(n) extra runs and the good ones still merge. A red group of one leaves the queue.
 - a pull request from a fork always runs alone: its code never lands on a branch of the repository unchecked.
+- a red base branch (its last finished push run failed): no groups, one at a time, its fixes first (`--first`,
+  or a red-run ticket of the release keeper). Whatever is red only in the checks the base branch fails is not
+  blamed: not split, no try used, it waits for the fix.
 
 Every member is looked at again before its group is built, just before the group pull request is opened and
 right before the merge (the waiter asks before_merge): one that was closed, made a draft, moved to another base
@@ -43,6 +46,8 @@ MAX_GROUP = 5
 MAX_TRIES = 3
 PAUSE_SECS = 120  # before a group that hit trouble is tried again
 MARK_SECS = 60  # how long GitHub may take to mark the members of a merged group merged
+RED_PAUSE_SECS = 300  # an entry that waits for the fix of a red base branch is looked at again after this
+RED_LOOK_SECS = 60  # how long one look at the base branch's last push run is used
 SILENT_SECS = 1800  # a login lookup without an answer this long: the runner stops (the next add starts one)
 TIDY_TRIES = 5  # failed deletes of one group branch before it is left to a person
 BY = "agent:merge-queue"
@@ -76,6 +81,7 @@ class Runner:
         self.take = take or ghlimit.take
         self.wake = wake or _wake
         self.me: str | None = None
+        self._red: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
 
     # -- the loop ----------------------------------------------------------------------------------------
     def run(self) -> int:
@@ -144,6 +150,63 @@ class Runner:
     def has_work(self) -> bool:
         return bool(self.me) and bool(self.mine())
 
+    # -- a red base branch -------------------------------------------------------------------------------
+    def red_base(self, repo: str, base: str) -> frozenset[str]:
+        """The failed jobs of the base branch's last finished push run; empty when it is green or not known
+        (then the last answer stays). One look is used RED_LOOK_SECS."""
+        if not base:
+            return frozenset()
+        key, now = (repo, base), self.clock()
+        old = self._red.get(key)
+        if old and now - old[0] < RED_LOOK_SECS:
+            return old[1]
+        look = getattr(self.gh, "base_failed", None)
+        got = look(repo, base) if look else frozenset()
+        jobs = frozenset(got) if got is not None else (old[1] if old else frozenset())
+        self._red[key] = (now, jobs)
+        was = bool(old and old[1])
+        if jobs and not was:
+            self.log(
+                f"{base} itself is red ({_names(jobs)}): no groups until it is green; its fix goes first."
+            )
+        elif was and not jobs:
+            self.log(f"{base} is green again; the merge queue builds groups again.")
+        return jobs
+
+    def failed_checks(self, url: str) -> frozenset[str]:
+        """The names of a pull request's checks that have already failed."""
+        look = getattr(self.gh, "failed_checks", None)
+        if look is not None:
+            return frozenset(look(url))
+        return frozenset({"(a check)"}) if self.gh.own_checks_failed(url) else frozenset()
+
+    def is_fix(self, e: dict) -> bool:
+        """Marked as the fix of the red base branch: added with --first, or its ticket is a red-run ticket of
+        the release keeper."""
+        return bool(e.get("first")) or _release_fix(self.root, e.get("ticket"))
+
+    def base_to_blame(
+        self, repo: str, base: str, url: str, entries: list[dict], failed: frozenset[str] | None = None
+    ) -> bool:
+        """When every failed check of url also failed on the red base branch, the entries are not blamed: they
+        wait for the fix (no try used, except for a fix, which did not fix it). True when that happened."""
+        red = self.red_base(repo, base)
+        if not red:
+            return False
+        failed = self.failed_checks(url) if failed is None else failed
+        if not failed or not failed <= red:
+            return False
+        why = f"{base} itself is red in the same checks ({_names(failed)}); waits for the fix"
+        for e in entries:
+            if self.is_fix(e):  # it was meant to fix those very checks: a counted try
+                self.retry([e], f"{url} is still red in the checks {base} fails ({_names(failed)})")
+            elif _state(self.root, e["url"]) == RUNNING:
+                store.back_to_front(self.root, [e["url"]], why, not_before=self.clock() + RED_PAUSE_SECS)
+            else:
+                store.set_state(self.root, e["url"], WAITING, why, not_before=self.clock() + RED_PAUSE_SECS)
+        self.log(f"Not blamed ({why}): " + ", ".join(e["url"] for e in entries))
+        return True
+
     def recover(self) -> None:
         """Entries a dead runner left 'running' go back to the front; group branches left behind are cleaned."""
         stuck = [r for r in store.read(self.root) if r.get("state") == RUNNING]
@@ -170,8 +233,13 @@ class Runner:
             return []
         bases = settings.bases(self.root)
         repo, base, batch, unseen, answered = rows[0]["repo"], None, [], [], False
+        red = self.red_base(repo, str(rows[0].get("base") or ""))
+        most = MAX_GROUP
+        if red:  # the base branch itself is red: no groups, one at a time, its fixes first
+            most = 1
+            rows = sorted(rows, key=lambda r: not self.is_fix(r))
         for r in rows:
-            if r["repo"] != repo or len(batch) >= MAX_GROUP:
+            if r["repo"] != repo or len(batch) >= most:
                 continue
             v, kind, line, status = self.look(dict(r, head=None), cards, bases)
             answered = answered or kind != UNKNOWN
@@ -181,14 +249,17 @@ class Runner:
             if kind != OK:
                 self.settle(r, kind, line, status)
                 continue
-            if self.gh.own_checks_failed(r["url"]):
+            b = v.get("baseRefName") or ""
+            if base and b != base:
+                continue
+            failed = self.failed_checks(r["url"])
+            if failed:
+                if self.base_to_blame(repo, b, r["url"], [r], failed):
+                    continue
                 line = f"Checks of {r['url']} failed: fix them, push, then add it to the merge queue again."
                 self.finish(r, OUT, line, "checks failed")
                 continue
-            b = v.get("baseRefName") or ""
             base = base or b
-            if b != base:
-                continue
             r.update(
                 base=b, head=v["headRefOid"], fork=bool(v.get("isCrossRepository")),
                 title=str(v.get("title") or "")[:200], closes=_closes(r["repo"], v),
@@ -320,6 +391,10 @@ class Runner:
         if o.ok and o.status == "merged":
             self.finish(e, MERGED, line, o.status)
         elif o.status == "behind":  # the base changed its files: checked once on top of it, never taken in
+            if self.red_base(e["repo"], base) and not self.is_fix(e):  # it would only be red on top of it
+                why = f"{base} itself is red; checked on top of it once it is green"
+                store.back_to_front(self.root, [e["url"]], why, not_before=self.clock() + RED_PAUSE_SECS)
+                return
             self.on_base(e, o.line)
         elif o.status == "held":
             if self.check_members([dict(e, head=None)], base):  # held for another reason: a counted try
@@ -330,6 +405,8 @@ class Runner:
             )
         elif unknown or o.status in ("", "checks passed"):  # GitHub did not answer, or no room: not red
             self.retry([e], o.line)
+        elif o.status == "checks failed" and self.base_to_blame(e["repo"], base, e["url"], [e]):
+            return
         else:
             self.finish(e, OUT, line, o.status)
 
@@ -462,6 +539,8 @@ class Runner:
             return []
         unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
         if o.status == "checks failed" and not unknown:
+            if self.base_to_blame(repo, base, url, inside):
+                return []  # red in what the base branch is red in: not split, nobody blamed
             for e in inside:
                 why = f"its group {url} was red; checked in a smaller group"
                 store.set_state(self.root, e["url"], RUNNING, why, group=None)
@@ -566,6 +645,31 @@ class Runner:
             how = f"the helper could not be woken ({x.__class__.__name__})"
         with contextlib.suppress(CoreRefused, OSError, KeyError, ValueError):
             tickets.note_history(self.root, tid, BY, f"{e['url']} left the merge queue: {how}.")
+
+
+def _names(jobs) -> str:
+    names = sorted(str(j) for j in jobs)
+    return ", ".join(names[:4]) + (f" and {len(names) - 4} more" if len(names) > 4 else "")
+
+
+def _release_fix(root: Path, tid: str | None) -> bool:
+    """The ticket is one the release keeper opened for a red run (a child of its role ticket that is done when a
+    run is green again): its pull request fixes the base branch."""
+    if not tid:
+        return False
+    try:
+        from orch import releasekeeper, tickets
+
+        role = releasekeeper.get(root, "github.release_keeper")
+        if not role:
+            return False
+        t = tickets.load(root, tid)
+        if t.get("parent") != tickets.resolve(root, role):
+            return False
+    except Exception:  # noqa: BLE001 - not readable: not a fix (it waits its turn like any other)
+        return False
+    made = (t.get("history") or [{}])[0]
+    return made.get("by") == "agent:release-keeper" and "green" in str(t.get("done_when") or "")
 
 
 def wake_text(e: dict, line: str) -> str:

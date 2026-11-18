@@ -50,12 +50,53 @@ class GitHub:
 
     def own_checks_failed(self, url: str) -> bool:
         """True when one of the pull request's own checks has already failed (gh exits 8 while some run)."""
+        return bool(self.failed_checks(url))
+
+    def failed_checks(self, url: str) -> frozenset[str]:
+        """The names of the pull request's checks that have already failed (empty: none, or unreadable)."""
         got = self._run("pr", "checks", url, "--json", "name,bucket")
         try:
             rows = json.loads(got.stdout or "[]")
         except ValueError:
-            return False
-        return any(isinstance(r, dict) and r.get("bucket") == "fail" for r in rows)
+            return frozenset()
+        if not isinstance(rows, list):
+            return frozenset()
+        return frozenset(
+            str(r.get("name") or "") for r in rows if isinstance(r, dict) and r.get("bucket") == "fail"
+        )
+
+    def base_failed(self, repo: str, base: str) -> frozenset[str] | None:
+        """The failed jobs of the base branch's last finished push run of each workflow (cancelled runs and
+        runs still going are skipped): empty when the base branch is green, None when GitHub did not answer."""
+        runs = self._json(
+            "run", "list", "--repo", repo, "--branch", base, "--event", "push", "--limit", "20",
+            "--json", "databaseId,workflowName,status,conclusion",
+        )  # fmt: skip
+        if not isinstance(runs, list):
+            return None
+        seen, bad = set(), set()
+        for r in runs:  # newest first, as gh lists them
+            if not isinstance(r, dict) or r.get("status") != "completed":
+                continue
+            if r.get("conclusion") in ("cancelled", "skipped", "stale", None, ""):
+                continue
+            wf = r.get("workflowName")
+            if wf in seen:
+                continue
+            seen.add(wf)
+            if r.get("conclusion") in ("success", "neutral"):
+                continue
+            v = self._json(
+                "run", "view", str(int(r.get("databaseId") or 0)), "--repo", repo, "--json", "jobs"
+            )
+            if not isinstance(v, dict) or not isinstance(v.get("jobs"), list):
+                return None
+            bad |= {
+                str(j.get("name") or "")
+                for j in v["jobs"]
+                if isinstance(j, dict) and j.get("conclusion") in ("failure", "timed_out")
+            }
+        return frozenset(bad)
 
     def checks(self, url: str) -> dict | None:
         """{state, isDraft, isCrossRepository, headRefOid, statusCheckRollup} of the pull request (one read), or None when GitHub
