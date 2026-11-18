@@ -20,19 +20,19 @@ STORM = [(0.5, TAIL.format(i)) for i in range(54)]
 
 
 def test_a_low_load_holds_nothing(monkeypatch, cores):
-    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (12.0, 10.0, 8.0))
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (12.0, 10.0, 8.0), raising=False)
     _ps(monkeypatch, [(1200.0, "work")])
     assert runs_live._load_words() is None
 
 
 def test_a_high_load_from_a_stream_of_short_commands_is_not_work(monkeypatch, cores):
-    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (31.0, 28.0, 22.0))
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (31.0, 28.0, 22.0), raising=False)
     _ps(monkeypatch, [*STORM, (40.0, "Claude")])
     assert runs_live._load_words() is None
 
 
 def test_a_high_load_with_real_work_holds_and_names_a_storm(monkeypatch, cores):
-    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (40.0, 35.0, 30.0))
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (40.0, 35.0, 30.0), raising=False)
     _ps(monkeypatch, [*STORM, (900.0, "cargo")])
     assert runs_live._load_words() == "the computer is very busy (54 'orch record tail' at once)"
     _ps(monkeypatch, [(900.0, "cargo"), (100.0, "rustc")])
@@ -40,14 +40,14 @@ def test_a_high_load_with_real_work_holds_and_names_a_storm(monkeypatch, cores):
 
 
 def test_unknown_cpu_use_falls_back_to_the_load(monkeypatch, cores):
-    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (40.0, 35.0, 30.0))
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (40.0, 35.0, 30.0), raising=False)
     _ps(monkeypatch, None)
     assert runs_live._load_words() == "the computer is very busy"
 
 
 def test_a_big_machine_takes_more_load(monkeypatch):
     monkeypatch.setattr(runs_live.os, "cpu_count", lambda: 32)
-    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (60.0, 50.0, 40.0))
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (60.0, 50.0, 40.0), raising=False)
     _ps(monkeypatch, [(3200.0, "work")])
     assert runs_live._load_words() is None  # 2.5 per core = 80
 
