@@ -92,11 +92,12 @@ function needRow(row, newest, questionCount = 1, same = []) {
   }
   // An add-on's own row (no ticket) is named by the add-on's display name, never its id ("sync").
   const source = !t && row.source ? addonName(row.source) : '', asked = source || whoAsked(t);
-  const question = needQuestion(row), when = typeof age === 'function' ? age(row.since) : '';
+  const question = (window.DashHelpers.questionWords || String)(needQuestion(row)), when = typeof age === 'function' ? age(row.since) : '';
   return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
     h('h2', {className:'question-title'}, clean(source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper'))),
     h('p', {className:'meta question-context'}, asked + ' asked' + (when ? ' ' + when : ''),
       t ? [(clean(t.title).toLowerCase() === String(window.DashHelpers.plainWhy(question, 'The helper')).trim().toLowerCase() ? ' · ' : ' on ' + (window.DashHelpers.ticketKey(t) ? window.DashHelpers.ticketKey(t) + ' ' : '') + '‘' + clean(t.title) + '’ · '), h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
+    questionCommandRows(needQuestion(row), key),
     actions && options.length ? h('p', {className:'meta choose-line'}, 'Needs you · Choose an answer') : null,
     same.length ? h('p', {className:'meta', 'data-key':key + '-same'}, 'Asked on ' + (same.length + 1) + ' tickets – answer once') : null,
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null,
@@ -143,6 +144,11 @@ function whoAsked(t) {
 function addonName(id) {
   const a = typeof addons === 'function' ? addons().find(x => x.name === id) : null;
   return typeof addonLabel === 'function' && a ? addonLabel(a) : String(id).replace(/^./, c => c.toUpperCase());
+}
+// A command the helper wrote in backticks in its question ("Sign in again with `az login`") shows with a Copy button (ORCH-218).
+function questionCommandRows(text, key) {
+  if (!window.UI?.commandCopy || !window.DashHelpers.questionCommands) return null;
+  return window.DashHelpers.questionCommands(text).map((c, i) => window.UI.commandCopy(c, {dataKey:key + '-cmd-' + i}));
 }
 function needQuestion(row) { return array(ticketOf(row.ticket)?.questions).find(q => q.id === row.answer?.question)?.text || row.title || row.text; }
 // An add-on row that names its own buttons (needs.schema.json `actions`, e.g. sync): each runs that add-on's verb on
@@ -592,14 +598,12 @@ function loginAction(item, key, quiet = false) {
   control.dataset.key = key + '-check';
   return control;
 }
-// A tool orch cannot renew itself says the one step the person takes (ORCH-48).
-// (page scope: Settings uses it too). Nothing when a Renew or Replace button is there, or it works.
-function loginHowText(item) {
-  return item && item.state !== 'works' && !item.renew && !item.key && typeof item.how === 'string' ? item.how : '';
-}
-function loginHow(item) {
-  const how = loginHowText(item);
-  return how ? h('p', {className:'meta', 'data-key':'login-how-' + item.name}, how) : null;
+// A tool orch cannot renew itself says the one step the person takes (ORCH-48); with its sign-in command the command
+// itself and one Copy button (ORCH-218).
+function loginHow(item, key = 'login-how-' + item.name) {
+  const how = window.DashHelpers.needHow(item), cmd = window.DashHelpers.needSignIn(item);
+  if (cmd && window.UI?.commandCopy) return window.UI.commandCopy(cmd, {lead:how, dataKey:key});
+  return how ? h('p', {className:'meta', 'data-key':key}, how + (cmd ? ' ' + cmd : '')) : null;
 }
 function loginSoonRow(item) {
   const key = 'login-soon-' + item.name, n = item.stops.length;

@@ -1261,6 +1261,10 @@ function ticketChangesEditor(t) {
   // new changes arrived after you looked (the Done still happens; bringing them back then needs your OK).
   const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
   const done = ticketButton('Looks good', 'primary sm', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}), {'data-key':'ticket-button-Accept-' + (tip ? tip.slice(0, 20) : 'none')}); // keyed by the tip: a refresh never keeps a handler with a stale one
+  // ORCH-250: with a step still open Looks good is off and says why; Send back is the way on.
+  const unfinished = array(t.checklist).filter(c => !c.done && !c.wont_do).length;
+  if (unfinished) { done.disabled = true; done.setAttribute('aria-disabled', 'true'); }
+  const unfinishedNote = unfinished ? h('span', {className:'meta warn', 'data-key':'ticket-review-open-steps'}, '! ' + (unfinished === 1 ? '1 step is' : unfinished + ' steps are') + ' not finished. Send it back to get ' + (unfinished === 1 ? 'it' : 'them') + ' done.') : null;
   const row = h('div', {className:'row ticket-review-actions'});
   const open_parts = array(t.proof?.uncovered).length;
   const uncovered = open_parts ? h('span', {className:'meta warn', 'data-key':'ticket-review-uncovered'}, '! ' + (open_parts === 1 ? '1 part' : open_parts + ' parts') + ' of “Done when” ' + (open_parts === 1 ? 'has' : 'have') + ' no task') : null;
@@ -1289,13 +1293,13 @@ function ticketChangesEditor(t) {
     };
     host.replaceChildren(h('div', {className:'stack-sm'}, h('label', {className:'ticket-ask-label', for:fid}, 'What should change?'), input, h('div', {className:'row'}, send, cancel))); input.focus();
   });
-  row.append(...[done, open, uncovered, shown].filter(Boolean)); host.append(row); return host;
+  row.append(...[done, open, unfinishedNote, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
   const card = q.card && typeof q.card === 'object' ? q.card : null;
   return h('section', {className:next ? 'card next-step next-question' : 'ticket-question'},
     h('div', {className:'meta ticket-eyeline'}, (next ? 'Next step · ' : '') + clean((card && card.title) || q.title || 'Your answer'), ticketPhone(q)),
-    h('h2', {}, clean(q.text)), card ? ticketCardShown(t, q, card) : snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
+    h('h2', {}, clean(window.DashHelpers.questionWords ? window.DashHelpers.questionWords(q.text) : q.text)), typeof questionCommandRows === 'function' ? questionCommandRows(q.text, 'question-' + q.id) : null, card ? ticketCardShown(t, q, card) : snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
 }
 // A question with a card (orch ask --draft/--choose/...): the text and the card's pictures together, answered on the
 // card itself (Review opens at this card), so the answer keeps what was picked, the comment and the marked spots.
@@ -1527,7 +1531,7 @@ function ticketStripModel(t, run, fresh) {
     return m('Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + ticketActor(ev.by) : '') + '.');
   }
   if (q) {
-    const ask = clean(q.text || '').replace(/\s+/g, ' ').trim();
+    const ask = clean(window.DashHelpers.questionWords ? window.DashHelpers.questionWords(q.text || '') : q.text || '').replace(/\s+/g, ' ').trim();
     // who asked: the agent on the ticket by its own name (as Home says it), "Helper" only when none is known
     const asker = window.DashHelpers?.agentLabel ? window.DashHelpers.agentLabel(state?.settings, (run || state?.runs?.[t.id])?.claim) : 'Helper';
     return m(asker + ' asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask));
@@ -1694,8 +1698,8 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', e => focusTicketAnswer(t.id, e?.currentTarget), {'data-key':'ticket-answer'})); }
     else if (kidsDone) actions.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'}));
     else if (fresh) { startShown = true; actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'})); }
-    else if (ticketPaused(t, run)) { startShown = true; actions.push(ticketButton('Resume', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'})); }
-    // ORCH-255: Continue is on the page in every state while no helper runs; Start helper / Resume already do that job
+    else if (ticketPaused(t, run)) { startShown = true; actions.push(ticketButton('Continue', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'})); }
+    // ORCH-255: Continue is on the page in every state while no helper runs; Start helper / Continue (paused) already do that job
     if (!run?.running && !startShown) actions.push(ticketButton('Continue', actions.length ? 'outline sm' : 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-continue'}));
     // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
     const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
@@ -1769,7 +1773,7 @@ function detail(t) {
   const parent = window.DashHelpers.parentOf(tickets(), t), children = window.DashHelpers.childrenOf(tickets(), t);
   loadArtifacts(t, selected === 'files');
   loadRelease(t);
-  const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
+  const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status) && !(typeof justStarted === 'function' && justStarted(t.id));
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';

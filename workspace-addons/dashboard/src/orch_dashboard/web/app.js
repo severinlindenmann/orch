@@ -110,6 +110,10 @@ const STATUS_CHOICES = window.DashHelpers.STATUS_CHOICES, MOVE_CHOICES = window.
 const moveHome = status => status === 'waiting' ? 'active' : window.DashHelpers.columnOf(status);
 const laneHere = t => window.DashHelpers.laneOf(t, shown(t).status, questions(t).length > 0);
 const starting = new Set();
+// A helper's session appears only after it registers, so right after a successful Start the server still says "no session":
+// for a minute the ticket page must not fall back to Not started / Start helper (ORCH-250).
+const startedAt = new Map();
+const justStarted = id => Date.now() - (startedAt.get(id) || 0) < 60000;
 // The one chip of a ticket: what the agent or the person has to do now ('' when nothing).
 function activityInfo(t) {
   const run = state.runs?.[t.id], live = run?.claim?.live;
@@ -558,6 +562,7 @@ async function act(op, args) {
     if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
     const next = await res.json();
     succeeded = true;
+    if (before) startedAt.set(args.ticket, Date.now());
     starting.delete(args.ticket);
     accept(next);
     return {ok:true, status:200, state:next};
