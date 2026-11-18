@@ -2241,7 +2241,7 @@ def _put_kind(ticket: dict, name: str, by: str) -> bool:
             raise Refused(f"A person set this ticket's kind ({KINDS[old]}); only a person changes it. {ask}")
         if old == "draft":  # a helper never turns a draft into work the Reviewer may accept
             raise Refused(f"Only a person moves a ticket out of Draft or design. {ask}")
-        if old and ticket.get("status") in ("review", "done", "closed"):
+        if ticket.get("status") in ("review", "done", "dropped"):
             raise Refused(f"The work is finished: only a person changes its kind now. {ask}")
         if by.startswith(
             "human:"

@@ -1706,7 +1706,7 @@ function ticketProperties(t, parent) {
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
     h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)), field('Human review needed', humanReviewField(t)),
-      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t), field('Helper strength', modelField(t)),
+      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t), field('Helper strength', modelField(t)), field('Kind', kindField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
     linksCard(t),
@@ -1933,6 +1933,22 @@ function humanReviewField(t) {
     sw.disabled = false;
   };
   return sw;
+}
+// What kind of work this ticket is (ORCH-645): the helper that tidies a new ticket sets it; a person changes it
+// here. Settings says which kinds are accepted for the person by themselves; Draft or design never.
+const KIND_NAMES = {bug:'Bug', small_bug:'Small bug', feature:'New feature', small_feature:'Small feature', draft:'Draft or design', other:'Other'};
+function kindField(t) {
+  const was = t.kind && KIND_NAMES[t.kind.name] ? t.kind.name : '';
+  if (snapshot) return el('span', 'ed-ro', was ? KIND_NAMES[was] : 'Not set yet');
+  const select = h('select', {'aria-label':'Kind', 'data-key':'kind-' + t.id},
+    was ? null : h('option', {value:''}, 'Not set yet'),
+    Object.entries(KIND_NAMES).map(([k, label]) => h('option', {value:k}, label)));
+  select.value = was;
+  select.onchange = async () => {
+    const result = await act('ticket.kind', {ticket:t.id, kind:select.value});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
+  };
+  return select;
 }
 function modelField(t) {
   const m = modelChoice(t);

@@ -178,8 +178,30 @@ function reviewerCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-reviewer'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Accept small finished work for me'),
-        settingsText('p', {className:'meta'}, 'Merged bug fixes with green checks and no change to looks, words or rules are marked Done for you. You see them on Review and can send any back.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')}))));
+        settingsText('p', {className:'meta'}, 'Merged work with green checks and no change to looks, words or rules is marked Done for you. You see it on Review and can send any back.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')})),
+      settings.reviewer_on ? reviewerKindsRow(settings) : null));
+}
+// ORCH-645: which kinds of tickets it accepts by itself (the helper sets a ticket's kind). Draft or design is shown
+// and never on: drafts, mockups and designs are only accepted by a person.
+const REVIEWER_KINDS = [['bug', 'Bug'], ['small_bug', 'Small bug'], ['feature', 'New feature'], ['small_feature', 'Small feature'], ['other', 'Other']];
+function reviewerKindsRow(settings) {
+  const on = new Set(Array.isArray(settings.reviewer_kinds) ? settings.reviewer_kinds : []);
+  const busy = snapshot || settingsBusy.has('reviewer_kinds');
+  return h('div', {className:'card-row', 'data-key':'settings-reviewer-kinds'},
+    h('div', {className:'grow stack'}, settingsText('p', {}, 'Which kinds of tickets'),
+      h('div', {className:'grid-2', role:'group', 'aria-label':'Kinds accepted for me'},
+        REVIEWER_KINDS.map(([k, label]) => h('label', {className:'check-label'},
+          h('input', {type:'checkbox', value:k, checked:on.has(k), disabled:busy, 'data-action':'reviewer-kind', 'data-kind':k}), label)),
+        h('label', {className:'check-label'}, h('input', {type:'checkbox', disabled:true, checked:false}), 'Draft or design')),
+      settingsText('p', {className:'meta'}, 'Drafts, mockups and designs always wait for you.')));
+}
+async function reviewerKindToggle(box) {
+  const now = new Set(state.settings?.reviewer_kinds || []);
+  if (box.checked) now.add(box.dataset.kind); else now.delete(box.dataset.kind);
+  const kinds = REVIEWER_KINDS.map(([k]) => k).filter(k => now.has(k));
+  const result = await settingsSend('reviewer.kinds', {kinds}, 'reviewer_kinds');
+  if (!result.ok) box.checked = !box.checked;
 }
 async function reviewerSwitch() {
   await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');

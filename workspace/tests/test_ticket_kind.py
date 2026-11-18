@@ -202,3 +202,10 @@ def test_a_ticket_without_a_kind_counts_as_a_small_bug(proj, run, new_ticket, fa
     assert run("config", "set", "workflow.reviewer_kinds", "bug,small_feature", "--by", "human:t")[0] == 0
     _finished(proj, run, new_ticket)
     assert _verdict(proj) == [("leave", "small bug work is not accepted by itself here (Settings).")]
+
+
+def test_a_helper_cannot_give_finished_work_its_first_kind(proj, run, new_ticket):
+    tid = new_ticket("fix login")
+    tickets.set_status(proj, tid, "review", "human:tester")
+    assert run("ticket", "kind", tid, "feature", "--by", "agent:claude")[0] == 2
+    assert tickets.kind(tickets.load(proj, tid)) is None

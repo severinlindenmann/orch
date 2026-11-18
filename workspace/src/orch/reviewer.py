@@ -320,10 +320,11 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
             "why": "this workspace lets the Reviewer accept no kind of work by itself.",
             "kind_block": True,
         }
-    if (kind or "small_bug") not in allowed:  # no kind (older tickets): counts as a small bug, today's rule
+    if (kind or "small_bug") not in allowed:  # no kind (older tickets) counts as a small bug, today's rule
         return {
             "verdict": "leave",
-            "why": f"{tickets.KINDS[kind or 'small_bug'].lower()} work is not accepted by itself here (Settings).",
+            "why": f"{tickets.KINDS[kind or 'small_bug'].lower()} work is not accepted by itself here "
+            "(Settings).",
             "kind_block": True,  # the second look leaves it too: the owner's setting covers every automation
         }
     why: list[str] = []

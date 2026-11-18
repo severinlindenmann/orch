@@ -54,6 +54,7 @@ SETTINGS_OPS = (
     "live.set",
     "workflow.set",
     "reviewer.set",
+    "reviewer.kinds",
     "release_merge.set",
     "diag.set",
     "typing.set",

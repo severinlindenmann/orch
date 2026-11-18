@@ -713,13 +713,30 @@ test('Settings: "Accept small finished work for me" is one switch that saves at 
   const card = c.reviewerCard(c.state.settings), sw = nodes(card, n => n.attrs?.role === 'switch')[0];
   assert.equal(sw.attrs['aria-label'], 'Accept small finished work for me'); assert.equal(sw.attrs['aria-checked'], false);
   assert.equal(sw.attrs['data-action'], 'reviewer-set');
-  assert.match(text(card), /Merged bug fixes with green checks and no change to looks, words or rules are marked Done for you\. You see them on Review and can send any back\./);
+  assert.match(text(card), /Merged work with green checks and no change to looks, words or rules is marked Done for you\. You see it on Review and can send any back\./);
   await c.reviewerSwitch();
   assert.deepEqual(calls, [JSON.stringify(['reviewer.set', {on:true}])]);
   c.state.settings.reviewer_on = true;
   assert.equal(nodes(c.reviewerCard(c.state.settings), n => n.attrs?.role === 'switch')[0].attrs['aria-checked'], true);
   await c.reviewerSwitch();
   assert.equal(calls[1], JSON.stringify(['reviewer.set', {on:false}]));
+});
+
+test('Settings: the kinds accepted for me are checkboxes under the switch; Draft or design is never on (ORCH-645)', async () => {
+  const calls = [];
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null},
+    act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
+  c.window.orch = {toast() {}};
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  c.state.settings = {reviewer_on:false, reviewer_kinds:['bug', 'small_bug']};
+  assert.equal(nodes(c.reviewerCard(c.state.settings), n => n.attrs?.type === 'checkbox').length, 0);
+  c.state.settings.reviewer_on = true;
+  const boxes = nodes(c.reviewerCard(c.state.settings), n => n.attrs?.type === 'checkbox');
+  assert.equal(boxes.length, 6);
+  assert.deepEqual(boxes.filter(b => b.attrs.checked).map(b => b.attrs['data-kind']), ['bug', 'small_bug']);
+  const draft = boxes[5]; assert.equal(draft.attrs.disabled, true); assert.equal(draft.attrs.checked, false);
+  await c.reviewerKindToggle({checked:true, dataset:{kind:'small_feature'}});
+  assert.deepEqual(calls, [JSON.stringify(['reviewer.kinds', {kinds:['bug', 'small_bug', 'small_feature']}])]);
 });
 
 // ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.
