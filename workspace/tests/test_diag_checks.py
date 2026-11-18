@@ -136,6 +136,15 @@ def test_ticket_op_refused_repeatedly(proj):
     assert c["verdict"] == "problem" and "t_aaaaaa done: refused 3x" in c["evidence"][0]
 
 
+def test_ticket_op_refused_names_the_caller(proj):
+    for _ in range(3):
+        diag.log("ticket.op_refused", "warn", root=proj, ticket="t_cccccc", op="op", guard="closed_ticket",
+                 actor="agent:pull-requests")  # fmt: skip
+    c = one(proj, "ticket_op_refused")
+    want = "t_cccccc: refused 3x in the last hour (guard closed_ticket), by agent:pull-requests"
+    assert c["evidence"] == [want]
+
+
 def _refused_at(proj, at: float, guard: str, ticket="t_bbbbbb"):
     d = diag._folder(proj)
     line = {"v": 1, "at": diag_collect._iso(at), "src": "cli", "lvl": "info", "ev": "ticket.op_refused",

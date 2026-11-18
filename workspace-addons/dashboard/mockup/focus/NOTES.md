@@ -283,6 +283,17 @@ the layer, then the wall. Not in this task: the pin button on a tile and renamin
 session buttons and Runs on (start tasks). Master: `.wall-*` in widgets.css (style guide: Live wall); click-through
 steps 4, 5, 8 and 11.
 
+## Pin and rename, built (ORCH-361, 18 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch every wall tile and
+line has the draft's pin button, and the panes keep theirs (in More when narrow). The selected pane's title is the
+draft's rename button: click, type, Enter (Esc leaves it); the own name shows on the tile, the pane and the chip, and
+the filter finds it. Pins and names are kept by orch for the workspace (`.orch/run/dashboard/sessions.json`, through
+the dashboard), not per browser (issue 1351); the layer's place and panes are kept per workspace too. A session
+without a ticket is pinned until it is unpinned. One change in the bar: at its last fold (needs you and More) More
+holds the pinned sessions too, so a pinned one is never hidden. Master: `.live-ren` in widgets.css (style guide: Live
+layer); click-through step 7.
+
 ## Groups: an epic or a run order, built (ORCH-345, 18 Nov)
 
 The owner picked draft A of ORCH-344 and the word "small helper" (17 Nov) and OK'd it on the new Focus. The mockup is

@@ -7,7 +7,10 @@ Each keeper pass (no AI call while nothing is new):
            matched against the security paths (github.release_security_paths, else DEFAULT_PATHS; test
            files never count). A match with no review of its current head gets one: a helper ticket
            "Security review: pull request #N" under the role ticket, with a fixed read-only brief, started
-           at once (at most PER_DAY a day).
+           at once. At most github.security_reviews_per_day (default PER_DAY) start for one release: the
+           count starts again after each release, not at midnight.
+  limit    when the limit holds merged pull requests back, ONE card on the role ticket: review these N now
+           (recommended; they start at once) or release without them. Only a person's answer counts.
   verdict  the review helper (or a person) records `orch review security <N> ok|problems "<one line>"`. It is
            kept in its own file (security-verdicts.json), so the keeper never writes over it.
   card     a "problems" verdict puts one card on the role ticket: keep waiting for the fix (recommended) or
@@ -23,14 +26,16 @@ import contextlib
 import fnmatch
 import json
 import re
-from datetime import datetime
 from pathlib import Path
 
 from orch import runs, tickets
 from orch.errors import Refused
 
 BY = "agent:release-keeper"
-PER_DAY = 8  # review helpers started a day at most
+PER_DAY = 8  # review helpers started for one release at most, unless github.security_reviews_per_day says
+LIMIT_MAX = 500
+REVIEW_NOW = "Review these {k} now"
+RELEASE_WITHOUT = "Release without them"
 FILES_SHOWN = 12  # matched files named in the brief
 VERDICTS = ("ok", "problems")
 OK = ("ok", "owner-ok")
@@ -103,6 +108,23 @@ def patterns(spec: str | None) -> tuple[str, ...]:
     """The configured paths (comma separated), else the defaults."""
     items = tuple(x.strip().lower() for x in (spec or "").split(",") if x.strip())
     return items or DEFAULT_PATHS
+
+
+def limit(spec: str | int | None) -> int:
+    """The configured number of review helpers for one release, else PER_DAY."""
+    try:
+        n = int(str(spec).strip()) if spec is not None else 0
+    except ValueError:
+        return PER_DAY
+    return n if 1 <= n <= LIMIT_MAX else PER_DAY
+
+
+def check_limit(value: str) -> str:
+    """`orch config set github.security_reviews_per_day <n>`: refused with a plain reason when wrong."""
+    v = str(value or "").strip()
+    if not v.isdigit() or not 1 <= int(v) <= LIMIT_MAX:
+        raise Refused(f"Give a whole number from 1 to {LIMIT_MAX}, for example 30.")
+    return str(int(v))
 
 
 def check_patterns(value: str) -> str:
@@ -212,8 +234,18 @@ def verdict(root: Path, n: int, word: str, line: str, by: str, sha: str = "") ->
 # ---------------------------------------------------------------- the keeper's part
 
 
-def _day(now: datetime | None = None) -> str:
-    return (now or datetime.now().astimezone()).strftime("%Y-%m-%d")
+def _window(w) -> str:
+    """The release window the limit counts in: everything since the last release (a release pull request
+    counts from when it is cut). A failed read stops the pass, like every other GitHub read here."""
+    return f"after-release-{int(w.last_release())}"
+
+
+def _used(sec: dict, window: str) -> int:
+    return int((sec.get("starts") or {}).get(window) or 0)
+
+
+def _allowed(sec: dict, window: str, cap: int) -> int:
+    return cap + int((sec.get("extra") or {}).get(window) or 0)
 
 
 def _open(w, tid: str | None) -> bool:
@@ -242,7 +274,7 @@ def _effective(e: dict, v: dict | None) -> str | None:
     return None
 
 
-def _start(w, sec: dict, role: str, pr: dict, hits: list[str], day: str) -> str:
+def _start(w, sec: dict, role: str, pr: dict, hits: list[str], window: str) -> str:
     n = int(pr["number"])
     sha = str(pr.get("headRefOid") or "")
     title = TITLE.format(n=n) + f" {str(pr.get('title') or '')[:80]}"
@@ -287,7 +319,7 @@ def _start(w, sec: dict, role: str, pr: dict, hits: list[str], day: str) -> str:
         return f"#{n}: could not open the security review: {r['err']}"
     entry.update(tid=r["tid"], key=r["key"])
     sec["prs"][str(n)] = entry
-    sec["starts"] = {day: int((sec.get("starts") or {}).get(day) or 0) + 1}
+    sec["starts"] = {window: _used(sec, window) + 1}
     return f"#{n}: security review {r['key']} opened ({len(hits)} file(s)); {r['how']}"
 
 
@@ -326,6 +358,77 @@ def _card(w, sec: dict, role: str, n: int, e: dict, v: dict) -> list[str]:
     return [f"#{n}: security review found problems; card on the role ticket"]
 
 
+def _limit_answered(w, sec: dict, role: str, window: str) -> list[str]:
+    """The person's answer to the limit card: start the waiting reviews now, or release without them."""
+    from orch import releasekeeper
+
+    c = sec.get("limit_card")
+    if not isinstance(c, dict) or c.get("done"):
+        return []
+    if c.get("window") != window:  # a release went out since: its card is old news
+        c["done"] = "a release went out"
+        return []
+    ans = releasekeeper.deploy_answer(
+        w.ticket(role), 0, c.get("qid") or "-", w.root if w.sim is None else None
+    )
+    prs = {str(k): v for k, v in (c.get("prs") or {}).items()}
+    if not ans:
+        return []
+    c["done"] = ans
+    names = ", ".join(f"#{k}" for k in prs)
+    if ans == RELEASE_WITHOUT:
+        for k, head in prs.items():
+            e = sec["prs"].get(k) or {}
+            if e.get("sha") == head and e.get("tid"):
+                continue  # a review of this very commit started after the card: its verdict decides
+            sec["prs"][k] = {"sha": head, "owner_ok": head, "url": e.get("url"), "at": tickets.now()}
+        w.note(role, f"The owner said release without a security review of {names}.")
+        return [f"security limit: the owner said release without a review of {names}"]
+    if ans == c.get("review"):
+        extra = dict(sec.get("extra") or {})
+        sec["extra"] = {window: int(extra.get(window) or 0) + len(prs)}
+        return [f"security limit: the owner said review {names} now"]
+    return [f"security limit: the owner said {ans}"]
+
+
+def _limit_card(w, sec: dict, role: str, window: str, cap: int, waiting: dict[str, str]) -> list[str]:
+    """ONE card while merged pull requests wait because the limit is used up; a second one only after the
+    first was answered."""
+    c = sec.get("limit_card")
+    if isinstance(c, dict) and not c.get("done") and c.get("window") == window:
+        return []
+    k = len(waiting)
+    names = ", ".join(f"#{n}" for n in waiting)
+    review = REVIEW_NOW.format(k=k)
+    args = [
+        role,
+        f"The {_used(sec, window)} security reviews this release may start are used up (limit {cap}, "
+        f"the setting github.security_reviews_per_day). Pull request(s) {names} wait for a review, so "
+        "no release goes out. Review them now, or release without a security review of them?",
+        "--option",
+        review,
+        "--option",
+        RELEASE_WITHOUT,
+        "--recommend",
+        review,
+        "--json",
+    ]
+    r = w.ask(args) if not (w.dry or w.sim is not None) else None
+    w.did.append(f"card:security-limit {names}")
+    if r is not None and r.returncode != 0:
+        return [f"security limit: the card was refused: {(r.stderr or r.stdout).strip()[:200]}"]
+    from orch import releasekeeper
+
+    sec["limit_card"] = {
+        "window": window,
+        "prs": dict(waiting),
+        "review": review,
+        "qid": releasekeeper._asked_id(r) if r is not None else None,
+        "at": tickets.now(),
+    }
+    return [f"security limit: card on the role ticket for {names}"]
+
+
 def _merged_rows(w, pats: tuple[str, ...]) -> tuple[list[dict], list[str]]:
     """What is really in the next release: every first-parent change on develop since main, its full file
     list (renames as both names) and its pull request. A matched change no pull request can be found for, or
@@ -354,7 +457,7 @@ def _merged_rows(w, pats: tuple[str, ...]) -> tuple[list[dict], list[str]]:
     return list(prs.values()), holds
 
 
-def tend(w, st: dict, role: str, now: datetime | None = None) -> tuple[list[str], list[str]]:
+def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
     """One pass: start the reviews that are missing and say what holds a release.
     Returns (lines, holds): holds is empty when every matched change in the next release has an OK."""
     sec = st.get("security") if isinstance(st.get("security"), dict) else {}
@@ -363,8 +466,10 @@ def tend(w, st: dict, role: str, now: datetime | None = None) -> tuple[list[str]
     st["security"] = sec
     pats = patterns(w.cfg.security_paths)
     verdicts = w.security_verdicts()
-    day = _day(now)
-    lines: list[str] = []
+    window = _window(w)
+    cap = limit(getattr(w.cfg, "security_limit", None))
+    lines: list[str] = _limit_answered(w, sec, role, window)
+    waiting: dict[str, str] = {}  # merged pull requests the limit holds back: {number: merged head}
     merged, holds = _merged_rows(w, pats)
     rows = [(p, True) for p in merged]
     rows += [(p, False) for p in w.open_prs() if not p.get("isDraft")]
@@ -383,12 +488,14 @@ def tend(w, st: dict, role: str, now: datetime | None = None) -> tuple[list[str]
             continue
         if not e or (e.get("sha") != head and not _open(w, e.get("tid"))) or (ended and e.get("sha") == head):
             tries = int(e.get("tries") or 1) + 1 if e and e.get("sha") == head else 1
-            if int((sec.get("starts") or {}).get(day) or 0) >= PER_DAY:
-                lines.append(f"#{n}: waits for a security review ({PER_DAY} started today already)")
+            if _used(sec, window) >= _allowed(sec, window, cap):
+                used = _used(sec, window)
+                lines.append(f"#{n}: waits for a security review ({used} started for this release already)")
                 if is_merged:
                     holds.append(f"#{n} (security review not started yet)")
+                    waiting[str(n)] = str(head or "")
                 continue
-            lines.append(_start(w, sec, role, pr, hits, day))
+            lines.append(_start(w, sec, role, pr, hits, window))
             e = sec["prs"].get(str(n))
             if e and e.get("sha") == head:
                 e["tries"] = tries
@@ -410,6 +517,8 @@ def tend(w, st: dict, role: str, now: datetime | None = None) -> tuple[list[str]
             holds.append(f"#{n} (security review found problems)")
         else:
             holds.append(f"#{n} (security review {e.get('key') or ''} running)".replace("  ", " "))
+    if waiting:
+        lines += _limit_card(w, sec, role, window, cap, waiting)
     if len(sec["prs"]) > KEEP:  # only pull requests no longer in a release or open are let go
         live = {str(p["number"]) for p, _ in rows}
         old = sorted(

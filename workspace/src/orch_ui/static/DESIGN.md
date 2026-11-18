@@ -316,6 +316,14 @@ has no peek. A working tile shows a peek of its last three lines (`.wall-peek`).
 (`.wall-line`). From 12 sessions the bands carry `data-many` and a long list scrolls inside itself; at 1100 px and wider
 the bands sit side by side. A tile opens its session in the layer; nothing is answered on the wall itself.
 
+### Pin and rename (ORCH-361)
+Every wall tile and line has a pin button (`btn icon sm ghost`, the `pinned` icon, `aria-pressed`); a pinned session
+moves to the Pinned band, gets a chip in the bar and comes first in the layer. A session without a ticket starts
+pinned. The selected pane's title is a button ("Click to rename"): it turns into `.live-ren`, one `.input` (60
+characters at most) and Save name; Enter keeps it, Esc leaves it. The own name shows on the tile, the pane and the chip
+(a chip shows the own name, else the ticket key); an empty name goes back to the title. Pins and names are kept by orch
+for the workspace, so every browser shows the same.
+
 ### Live groups (ORCH-345)
 An epic or a factory order whose helpers work on its sub-tickets is ONE tree, `.gtree`, in three modes
 (`data-mode`): `preview` on its wall tile (`.wall-tile[data-group]`: "5 helpers · 2 small helpers · 1 needs you", the

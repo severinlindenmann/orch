@@ -22,7 +22,7 @@ HELP = {
     "ship": "ship an order once the person said Ship it",
     "list": "every order",
     "view": "the dashboard view of all orders (takes no order: use show <order>)",
-    "needs": "what waits for a person (the dashboard shows Factory's questions)",
+    "needs": "the stage reviews that wait for your Looks good, with the commands that answer them",
     "reconcile": "check every order's record against its tickets",
 }
 NO_ORDER = {
@@ -242,8 +242,10 @@ def main(argv=None):
             result = commands.listing(root)
         elif args.cmd == "view":
             result = render_view(root)
-        else:  # needs: Factory's questions are shown by the dashboard view; nothing extra to list
-            result = []
+        else:  # needs: the stage reviews waiting for your Looks good (Factory's questions are core questions)
+            from . import pageapi
+
+            result = pageapi.needs(root)
         print(json.dumps(result))
         return 0
     except (Refused, OSError) as error:

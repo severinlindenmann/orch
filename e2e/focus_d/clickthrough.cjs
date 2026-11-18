@@ -17,6 +17,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('../headless.cjs'); // the keychain options (ORCH-615)
 const { spawn, execFileSync } = require('node:child_process');
 const { STEPS, SIZES } = require('./steps.cjs');
 
@@ -167,7 +168,7 @@ async function main() {
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
-    browser = await chromium.launchPersistentContext(profile, { args: ['--use-mock-keychain', '--password-store=basic'] });
+    browser = await headless.launchPersistent(chromium, profile);
     for (const s of steps) {
       if (!todo.includes(s)) {
         const why = s.waits ? `waits for: ${s.waits}` : 'not in draft D, today\'s page only';

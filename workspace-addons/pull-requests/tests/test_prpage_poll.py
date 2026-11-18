@@ -143,3 +143,13 @@ def test_gh_fetch_errors_are_plain():
         gh.fetch("acme/app", run=fail("GraphQL: Could not resolve to a Repository"))
     with pytest.raises(gh.GhError, match="repository name"):
         gh.fetch("acme/app; rm -rf /")
+
+
+def test_closed_tickets_are_never_refreshed(prws):
+    """The core refuses add-on writes to done/dropped tickets; asking every pass spams the refused-change check."""
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}], status="done")
+    add_ticket(prws, "t_aaaaa2", [{"url": PR.format(1)}], status="dropped")
+    add_ticket(prws, "t_aaaaa3", [{"url": PR.format(1)}])
+    res = poll.once(prws, fetch=FakeGitHub({"acme/app": [gql_pr(1)]}))
+    assert res["refreshed"] == ["t_aaaaa3"]
+    assert [r["args"][-1] for r in refreshes(prws)] == ["t_aaaaa3"]

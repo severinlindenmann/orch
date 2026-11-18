@@ -43,7 +43,7 @@ MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = (
     140 * 1024 * 1024
 )  # a new ticket with files: at most 100 MB of files (newticket.js) as base64, plus the text
-LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose")
+LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose", "session.pin", "session.name")
 # ops that name a ticket but change more than it (settings, add-ons, the workspace): answered with a full build
 WIDE_OPS = ("addon.act", "addon.set", "addon.uninstall", "addon.start", "update.start")
 # Settings choices that change only what Settings (or the phone switch) shows: answered at once with the Settings
@@ -820,7 +820,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(
                     200, json.dumps({"unchanged": True, "rev": rev}).encode(), "application/json", hdr
                 )
-            body = json.dumps(state).encode()
+            # a revision the page held a moment ago: only what changed since then (ORCH-517)
+            out = self.server.state_cache.answer(state, "" if fresh else have)
+            body = json.dumps(out).encode()
             if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
                 import gzip
 
@@ -885,8 +887,25 @@ class Handler(BaseHTTPRequestHandler):
             code, body, ctype, extra = ticketfiles.read_file(
                 self.root, one("t"), one("k"), one("n"), one("dl") == "1"
             )
+            # the content security policy this file is served with; a 304 below carries the same one
             if one("k") == "reviewed":  # a card's own copy: inert, sandboxed, never sniffed
-                return self._send(code, body, ctype, extra, csp=ticketfiles.REVIEWED_CSP)
+                csp = ticketfiles.REVIEWED_CSP
+            elif ctype == "application/pdf":
+                csp = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; object-src 'self'"
+            else:
+                csp = "default-src 'none'; img-src 'self'; media-src 'self'; sandbox"
+            if code == 200 and not self.headers.get("Range"):
+                # ORCH-517: the same pictures were sent again on every redraw (no-store). Now the browser keeps
+                # them and asks "still this?" by content hash; an unchanged file answers 304 with no body, and
+                # with the file's own sandbox rule (a 304's headers update the kept copy's headers).
+                tag = '"' + hashlib.blake2b(body, digest_size=12).hexdigest() + '"'
+                extra = {**extra, "ETag": tag, "Cache-Control": "private, no-cache"}
+                if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
+                    return self._send(
+                        304, b"", ctype, {"ETag": tag, "Cache-Control": "private, no-cache"}, csp=csp
+                    )
+            if one("k") == "reviewed":
+                return self._send(code, body, ctype, extra, csp=csp)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
             if (
                 code == 200
@@ -916,11 +935,7 @@ class Handler(BaseHTTPRequestHandler):
                 body,
                 ctype,
                 {"Accept-Ranges": "bytes", **extra} if ctype.startswith(("audio/", "video/")) else extra,
-                csp=(
-                    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; object-src 'self'"
-                    if ctype == "application/pdf"
-                    else "default-src 'none'; img-src 'self'; media-src 'self'; sandbox"
-                ),
+                csp=csp,
             )
         # a listed read-only add-on verb (the Sync card's status): the rights of /api/state, no page secret (ORCH-413)
         if path == "/api/addon-read":
@@ -956,7 +971,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions|livegroups|livewall)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions|livegroups|livewall)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])

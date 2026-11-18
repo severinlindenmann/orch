@@ -387,8 +387,9 @@ function render(arrived = new Set()) {
   menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
   const wait = document.getElementById('topbar-wait');
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
-    const ages = array(state.tickets).filter(t => t.status !== 'done' && questions(t).length).map(t => Date.parse(t.updated_at)).filter(Number.isFinite);
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · longest wait ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
+    // the age of the same needs the number counts (ORCH-407: an old question on a dropped ticket said "19 h ago")
+    const oldest = needCount && typeof needsOldestAt === 'function' ? needsOldestAt() : null;
+    const line = needCount ? window.DashHelpers.needsYou(needCount) + (oldest != null ? ' · longest wait ' + window.DashHelpers.ago(new Date(oldest).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) { wait.textContent = line; wait.title = line; }
   }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
@@ -429,8 +430,10 @@ function render(arrived = new Set()) {
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
+  if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
+  if (typeof startMount === 'function') startMount(main);  // every Start button (pages/start.js)
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
@@ -547,7 +550,8 @@ function busyOff(busy) {
   busy.control.removeAttribute('aria-busy');
   if (busy.was === null) busy.control.removeAttribute('aria-disabled'); else busy.control.setAttribute('aria-disabled', busy.was);
 }
-async function act(op, args) {
+// opts.quiet: no "Could not start" notice of its own (the kit's Start button says what went wrong, pages/start.js).
+async function act(op, args, opts = {}) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const busy = busyOn();
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
@@ -573,7 +577,7 @@ async function act(op, args) {
     if (before) {
       starting.delete(args.ticket);
       // a start orch put in line (every helper place in use) is not a failure: the caller says it waits in line
-      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); if (!queued) window.orch.toast('Could not start the helper' + (ticketOf(args.ticket)?.title ? ' on ' + ticketOf(args.ticket).title : '') + '.', 'error'); }
+      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); if (!queued && !opts.quiet) window.orch.toast('Could not start the helper' + (ticketOf(args.ticket)?.title ? ' on ' + ticketOf(args.ticket).title : '') + '.', 'error'); }
       render();
     }
   }
@@ -581,6 +585,7 @@ async function act(op, args) {
 // A notice that comes while a fetch or a change is under way is kept, never dropped: that fetch may have read the
 // tickets before the change (load_state reads tickets first, run status last), so one more fetch follows it.
 let refreshAgain = false;
+let wantFull = false;  // the last delta did not fit the state held: ask for the whole state once
 async function refresh() {
   if (snapshot) return;
   if (fetching || writing) { refreshAgain = true; return; }
@@ -591,9 +596,16 @@ async function refresh() {
   const connection = document.getElementById('connection');
   try {
     // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
-    const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
+    const have = state?.rev && !wantFull ? '?have=' + encodeURIComponent(state.rev) : '';
+    wantFull = false;
+    const res = await fetch('/api/state' + have, {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
-    const next = await res.json();
+    let next = await res.json();
+    if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
+      const merged = window.DashHelpers.applyStateDelta(state, next);
+      if (!merged) { wantFull = true; refreshAgain = true; return; }
+      next = merged;
+    }
     if (next.unchanged && state) {
       if (writing || version !== mutation) { refreshAgain = true; return; }
       connection.hidden = true;
@@ -974,11 +986,18 @@ main.addEventListener('click', async event => {
   if (action === 'start') {
     if (locks.has('background')) return;
     locks.add('background');
+    // Starting… while it starts (ORCH-475): disabled, so a double click starts it once. It starts background work, not a
+    // helper on a ticket, so there is no Start choice here.
+    const was = control.textContent;
     control.disabled = true;
+    control.setAttribute('aria-busy', 'true');
+    control.textContent = 'Starting…';
     const result = await act('addon.start', {});
     if (!result.ok) window.orch.toast(result.text, 'error');
     locks.delete('background');
     control.disabled = false;
+    control.removeAttribute('aria-busy');
+    control.textContent = was;
     render();
   }
 });

@@ -26,7 +26,7 @@ test('sessions by state from the live sessions API: needs you, working, in line,
   assert.deepEqual(keys('run'), ['ORCH-2']);
   assert.deepEqual(keys('queue'), ['ORCH-3']);
   assert.deepEqual(keys('idle'), ['ORCH-4']);
-  assert.deepEqual(keys('more'), ['ORCH-2', 'ORCH-3', 'ORCH-4'], 'More is everything that is not a chip');
+  assert.deepEqual(keys('more'), ['ORCH-5', 'ORCH-2', 'ORCH-3', 'ORCH-4'], 'More (the last fold) is everything that does not need you, pinned too: it has no other place there');
   assert.equal(all.find(o => o.key === 'ORCH-3').word, 'In line');
   assert.equal(all.find(o => o.key === 'ORCH-1').word, 'Needs you');
   assert.equal(all.find(o => o.key === 'ORCH-2').word, 'Working');

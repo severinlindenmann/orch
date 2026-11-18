@@ -20,7 +20,9 @@ def claude_found(monkeypatch):
 
 def git(proj, *args, check=True):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    return subprocess.run(["git", *args], cwd=proj, env=env, capture_output=True, text=True, check=check)
+    return subprocess.run(
+        ["git", *args], cwd=proj, env=env, capture_output=True, text=True, encoding="utf-8", check=check
+    )
 
 
 def repo(proj):
@@ -471,7 +473,7 @@ def test_move_counts_real_removals_and_non_utf8_names(proj):
     d.mkdir(parents=True)
     try:
         (d / os.fsdecode(b"bad\xff.json")).write_text("{}")
-    except OSError:
+    except (OSError, UnicodeError):  # Windows file names are Unicode: a lone 0xff byte has no name there
         pytest.skip("this file system refuses non-UTF-8 names")
     (d / "ok.json").write_text("{}")
     git(proj, "add", "-f", ".orch/tickets")

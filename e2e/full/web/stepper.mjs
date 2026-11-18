@@ -1,5 +1,6 @@
 import { chromium } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
+import headless from '../../headless.cjs'; // the keychain options (ORCH-615)
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -62,7 +63,7 @@ export async function run(opts) {
   const unclickable = new Set(), covered = new Set(), patterns = new Set(), skipped = new Set();
   const skipRegexes = (lane.census_skip || []).map(x => new RegExp(x, 'i'));
   const allowedOrigins = new Set(Object.values(env.urls).map(u => new URL(u).origin));
-  const browser = await chromium.launch({ headless: true });
+  const browser = await headless.launch(chromium, { headless: true });
   let context, current, blocked;
   try {
     context = await browser.newContext({ viewport: { width: widths[0], height: height(widths[0]) }, ignoreHTTPSErrors: true, serviceWorkers: 'block', extraHTTPHeaders: env.headers?.[lane.base] || {} });

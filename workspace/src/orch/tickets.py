@@ -545,10 +545,12 @@ def apply_op(
     expect: tuple[str, object] | None = None,
     if_revision: int | None = None,
     by: str,
+    person_click: bool = False,
 ):
-    """Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
+    """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {}
+    info: dict = {"person_click": person_click}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -602,7 +604,7 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         was_review = ticket.get("status") == "review"
         wont_before = _wont_view(ticket)
         result = fn(ticket)
-        if agent_tool():
+        if agent_tool() and not info.get("person_click"):
             ids = [c.get("id") for c in ticket.get("checklist") or [] if isinstance(c, dict)]
             if len(ids) != len(set(ids)):
                 raise Refused("Duplicate checklist step ids are not allowed.")
@@ -994,8 +996,11 @@ def create(
     plan_first: bool = False,
     epic: bool = False,
     release: bool = False,
+    human_review: bool | None = None,
 ) -> dict:
-    """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
+    """`human_review`: the Human review needed switch (ORCH-424); None = the workspace default (on, or off
+    while the Auto Reviewer is on: config.auto_reviewer_on).
+    `title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
     tid lets callers persist a reserved id before this write."""
     if tid is not None:
@@ -1038,6 +1043,11 @@ def create(
         release
     ):  # ORCH-37: a release holds the epics and tickets that ship together (set_release changes it later)
         ticket["release"] = True
+    if human_review is None:
+        human_review = not config.auto_reviewer_on(root)
+    if not human_review:  # ORCH-424: stored only when off; no field = on (also every older ticket)
+        ticket["human_review"] = False
+        add_history(ticket, by, HUMAN_REVIEW_OFF, at=t)
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -1661,7 +1671,16 @@ def set_status(root: Path, tid: str, status: str, by: str, superseded_by: str | 
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "release", "description", "description_by", "model")
+PROTECTED_FIELDS = (
+    "title_auto",
+    "plan_first",
+    "epic",
+    "release",
+    "human_review",
+    "description",
+    "description_by",
+    "model",
+)
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1922,6 +1941,34 @@ def set_release(root: Path, tid: str, on: bool, by: str, if_revision: int | None
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
+def human_review(ticket: dict) -> bool:
+    """ORCH-424: the Human review needed switch. On unless a person turned it off (the field is False only
+    then), so a ticket made before the switch existed counts as on. While it is on, nothing on the ticket is
+    accepted without a person."""
+    return ticket.get("human_review") is not False
+
+
+HUMAN_REVIEW_ON = "Human review needed: on"
+HUMAN_REVIEW_OFF = "Human review needed: off"
+
+
+def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-424: turn the Human review needed switch on or off. Who may turn it off is checked by the caller
+    (only a person: `orch ticket edit --human-review no`, the dashboard, a paired phone)."""
+    me = load(root, tid)
+    if human_review(me) == on:
+        return me  # nothing changes: no write, no history line
+
+    def op(ticket):
+        if on:
+            ticket.pop("human_review", None)
+        else:
+            ticket["human_review"] = False
+        add_history(ticket, by, HUMAN_REVIEW_ON if on else HUMAN_REVIEW_OFF)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
 PARENT_DEPTH = 50  # a parent chain longer than this is broken data: never followed further
 
 
@@ -2057,12 +2104,22 @@ def create_from_input(
     parent: str | None = None,
     fields: dict | None = None,
     ext: dict[str, dict] | None = None,
+    human_review: bool | None = None,
 ) -> dict:
     """THE way a ticket is made from what a person wrote or said (dashboard paste box, phone text, Open
     agent): the title is the first words (a placeholder, flag `title_auto`, when the text is long or has
     several lines)
     and the agent writes the real title and the description first (runs.fresh_prompt, `orch ticket title`)."""
-    return create(root, placeholder_title(text), by, parent, ext, fields, title_auto=needs_agent_title(text))
+    return create(
+        root,
+        placeholder_title(text),
+        by,
+        parent,
+        ext,
+        fields,
+        title_auto=needs_agent_title(text),
+        human_review=human_review,
+    )
 
 
 def set_auto_title(root: Path, tid: str, title: str, by: str, description: str | None = None) -> dict:
@@ -3541,6 +3598,8 @@ def answer(
         raise Refused("An answer needs text.")
     text = text.strip()
 
+    person_click = by.startswith("human:") and (via != "cli" or not agent_tool())
+
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
@@ -3570,13 +3629,15 @@ def answer(
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
-        if _is_person(by) and _wont_do_yes(q, ans):
+        # A click on the dashboard or a phone is a person even when that server was started from a helper's
+        # session (its environment then shows an agent tool, which only says who runs the CLI). #1354.
+        if person_click and _wont_do_yes(q, ans):
             item = _item(ticket, q["check"])
             if not item.get("done") and not item.get("wont_do"):
                 _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
-    return apply_op(root, tid, op, by=by)
+    return apply_op(root, tid, op, by=by, person_click=person_click)
 
 
 def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:
