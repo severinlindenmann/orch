@@ -85,6 +85,7 @@ if (typeof module === 'object' && module.exports) {
     const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, busy:''};
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
     const sessions = () => window.LiveSessions?.list || [];
+    const groups = () => window.LiveSessions?.groups || [];
     const pins = () => { try { return JSON.parse(localStorage.getItem(LIVEBAR_PINS) || '[]'); } catch (e) { return []; } };
     const phone = () => window.matchMedia('(max-width: 720px)').matches;
     const link = (a, o) => '#addon/' + encodeURIComponent(a.name) + '/t/' + encodeURIComponent(o.id);
@@ -93,9 +94,10 @@ if (typeof module === 'object' && module.exports) {
     const sym = (s, text) => h('span', {className:'lbar-sym', 'data-s':s, 'aria-hidden':'true'}, text);
 
     function chip(a, o) {
-      return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + o.id, 'data-lbar-open':o.id,
-        'aria-current':bar.panes.includes(o.id) ? 'true' : null, title:o.title + ' · ' + o.word},
-        sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)));
+      const open = (o.members || [o.id]).some(id => bar.panes.includes(id));
+      return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + (o.group || o.id), 'data-lbar-open':o.id,
+        'aria-current':open ? 'true' : null, title:o.title + ' · ' + (o.group ? o.line : o.word)},
+        sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)), o.group ? h('span', {className:'lbar-n', 'aria-label':o.line}, String(o.n)) : null);
     }
     function count(all, l, compact) {
       const n = all.filter(o => liveBarIn(o, l)).length;
@@ -129,7 +131,7 @@ if (typeof module === 'object' && module.exports) {
       const list = all.filter(o => liveBarIn(o, bar.list) && (!q || (o.key + ' ' + o.title).toLowerCase().includes(q)));
       return list.length ? list.map(o => h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id, 'data-lbar-open':o.id},
         h('span', {className:'lbar-st', 'data-s':o.s}, h('span', {className:'lbar-sym', 'aria-hidden':'true'}, LIVEBAR_LISTS[o.s].sym), o.word),
-        h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.title)))
+        h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.group ? o.title + ' · ' + o.line : o.title)))
         : [h('p', {className:'meta'}, 'No session matches.')];
     }
     function pop(a, all) {
@@ -217,7 +219,7 @@ if (typeof module === 'object' && module.exports) {
       }
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
-      const all = liveBarModel(sessions(), pins());
+      const all = liveBarModel(sessions(), pins(), groups());
       const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, bar.list, bar.menu, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
@@ -272,7 +274,7 @@ if (typeof module === 'object' && module.exports) {
       if (!e.target.matches?.('[data-lbar-q]') || !bar.el?.contains(e.target)) return;
       bar.q = e.target.value;
       const a = liveAddon(), box = bar.el.querySelector('[data-lbar-rows]');
-      if (a && box) box.replaceChildren(...rows(a, liveBarModel(sessions(), pins())));
+      if (a && box) box.replaceChildren(...rows(a, liveBarModel(sessions(), pins(), groups())));
     });
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape' || !bar.el?.contains(document.activeElement)) return;

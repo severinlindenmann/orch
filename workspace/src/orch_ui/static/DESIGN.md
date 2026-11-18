@@ -316,6 +316,18 @@ has no peek. A working tile shows a peek of its last three lines (`.wall-peek`).
 (`.wall-line`). From 12 sessions the bands carry `data-many` and a long list scrolls inside itself; at 1100 px and wider
 the bands sit side by side. A tile opens its session in the layer; nothing is answered on the wall itself.
 
+### Live groups (ORCH-345)
+An epic or a factory order whose helpers work on its sub-tickets is ONE tree, `.gtree`, in three modes
+(`data-mode`): `preview` on its wall tile (`.wall-tile[data-group]`: "5 helpers · 2 small helpers · 1 needs you", the
+first five rows), `tree` beside a pane (`.live-gwrap`: the switcher left, the session right) and `strip` (one line that
+scrolls inside itself) when the pane is narrow (`.live-pane[data-narrow]`: split, right side, phone). Rows are
+`.gtree-row` in `li[data-depth]` with a solid guide line; a small helper's row (`li[data-small]`) has a dashed guide and
+a dashed `.chip.gtree-tag` "Small helper", says "watch only" and opens its helper. Only "Main helper" and "Small helper"
+carry a tag. The selected row is `aria-current` (brand edge), a helper that needs you is orange (`data-s=needs-you`).
+A helper that needs you turns the whole tile orange. The pane's message box (`.live-msg`) starts with `.live-to`:
+"Message to: Write the texts (ORCH-301). Only this helper gets it." In the bar the group is one chip with the helper
+count (`.lbar-n`), the same number as its tile.
+
 ## Loading, errors and performance
 
 The brief asks for shell + skeleton within 100 ms while the numeric checklist says not to show indicators for sub-second work. Reconcile by expected latency (BP-05, BP-55–67):
