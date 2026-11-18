@@ -274,11 +274,29 @@ class Handler(BaseHTTPRequestHandler):
         diag.new_trace(self.headers.get("traceparent"))
         if self.path.startswith("/api/diag"):  # the page's own trail is not logged again as a request
             return
+        path = "/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200]
+        method = getattr(self, "command", "")
+        self._req = (method, path, time.monotonic())
+        diag.log("dashboard.request", "debug", method=method, path=path)
+
+    def _answer_log(self, code: int) -> None:
+        """The answer's status in the debug log (ORCH-386): every /api/act answer (an early refusal such as a
+        used sign-in link too, before any op runs) and every other refused or failed answer."""
+        req = getattr(self, "_req", None)
+        if not diag or req is None:
+            return
+        self._req = None
+        method, path, t0 = req
+        if code < 400 and not path.endswith("/api/act"):
+            return
         diag.log(
-            "dashboard.request",
-            "debug",
-            method=getattr(self, "command", ""),
-            path="/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200],
+            "dashboard.answer",
+            "info" if code >= 400 else "debug",
+            root=self.root,
+            method=method,
+            path=path,
+            status=int(code),
+            ms=int((time.monotonic() - t0) * 1000),
         )
 
     def log_message(self, *a):  # quiet
@@ -301,6 +319,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
+        self._answer_log(code)
         act = getattr(self, "_act", None)
         if act is not None:
             self._act = None
@@ -801,7 +820,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(
                     200, json.dumps({"unchanged": True, "rev": rev}).encode(), "application/json", hdr
                 )
-            body = json.dumps(state).encode()
+            # a revision the page held a moment ago: only what changed since then (ORCH-517)
+            out = self.server.state_cache.answer(state, "" if fresh else have)
+            body = json.dumps(out).encode()
             if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
                 import gzip
 
@@ -866,8 +887,25 @@ class Handler(BaseHTTPRequestHandler):
             code, body, ctype, extra = ticketfiles.read_file(
                 self.root, one("t"), one("k"), one("n"), one("dl") == "1"
             )
+            # the content security policy this file is served with; a 304 below carries the same one
             if one("k") == "reviewed":  # a card's own copy: inert, sandboxed, never sniffed
-                return self._send(code, body, ctype, extra, csp=ticketfiles.REVIEWED_CSP)
+                csp = ticketfiles.REVIEWED_CSP
+            elif ctype == "application/pdf":
+                csp = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; object-src 'self'"
+            else:
+                csp = "default-src 'none'; img-src 'self'; media-src 'self'; sandbox"
+            if code == 200 and not self.headers.get("Range"):
+                # ORCH-517: the same pictures were sent again on every redraw (no-store). Now the browser keeps
+                # them and asks "still this?" by content hash; an unchanged file answers 304 with no body, and
+                # with the file's own sandbox rule (a 304's headers update the kept copy's headers).
+                tag = '"' + hashlib.blake2b(body, digest_size=12).hexdigest() + '"'
+                extra = {**extra, "ETag": tag, "Cache-Control": "private, no-cache"}
+                if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
+                    return self._send(
+                        304, b"", ctype, {"ETag": tag, "Cache-Control": "private, no-cache"}, csp=csp
+                    )
+            if one("k") == "reviewed":
+                return self._send(code, body, ctype, extra, csp=csp)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
             if (
                 code == 200
@@ -897,11 +935,23 @@ class Handler(BaseHTTPRequestHandler):
                 body,
                 ctype,
                 {"Accept-Ranges": "bytes", **extra} if ctype.startswith(("audio/", "video/")) else extra,
-                csp=(
-                    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; object-src 'self'"
-                    if ctype == "application/pdf"
-                    else "default-src 'none'; img-src 'self'; media-src 'self'; sandbox"
-                ),
+                csp=csp,
+            )
+        # a listed read-only add-on verb (the Sync card's status): the rights of /api/state, no page secret (ORCH-413)
+        if path == "/api/addon-read":
+            q = parse_qs(query)
+            try:
+                code, text, out = actions.addon_read(
+                    self.root, self.orch_bin, (q.get("addon") or [""])[0], (q.get("verb") or [""])[0]
+                )
+            except actions.BadRequest as e:
+                return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
+            except actions.Unavailable as e:
+                return self._send(503, str(e).encode(), "text/plain; charset=utf-8")
+            if code != 200:
+                return self._send(code, text.encode(), "text/plain; charset=utf-8")
+            return self._send(
+                200, json.dumps(out).encode(), "application/json", {"Cache-Control": "no-store"}
             )
         if path.startswith("/api/addon/"):  # only names that are active here and have a tab
             name = path[len("/api/addon/") :]

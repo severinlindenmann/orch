@@ -545,10 +545,12 @@ def apply_op(
     expect: tuple[str, object] | None = None,
     if_revision: int | None = None,
     by: str,
+    person_click: bool = False,
 ):
-    """Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
+    """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {}
+    info: dict = {"person_click": person_click}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -602,7 +604,7 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         was_review = ticket.get("status") == "review"
         wont_before = _wont_view(ticket)
         result = fn(ticket)
-        if agent_tool():
+        if agent_tool() and not info.get("person_click"):
             ids = [c.get("id") for c in ticket.get("checklist") or [] if isinstance(c, dict)]
             if len(ids) != len(set(ids)):
                 raise Refused("Duplicate checklist step ids are not allowed.")
@@ -687,7 +689,7 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
                 continue
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten
-            if include_general or (t.get("general") is not True and t.get("manager") is not True):
+            if include_general or not is_hidden(t):
                 out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
@@ -713,6 +715,14 @@ def is_manager(root: Path, tid: str) -> bool:
     """True for the hidden Manager ticket: the workspace's always-on helper session (ORCH-147)."""
     try:
         return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("manager") is True
+    except (OSError, ValueError, Refused, AttributeError):
+        return False
+
+
+def is_session(root: Path, tid: str) -> bool:
+    """True for the hidden ticket of a session without a ticket (empty helper, plain terminal; ORCH-364)."""
+    try:
+        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("session") in SESSION_KINDS
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -747,6 +757,53 @@ def ensure_manager(root: Path, by: str) -> str:
         "manager": True,
         "status": "open",
         "note": MANAGER_NOTE,
+        "created_at": t,
+        "updated_at": t,
+        "checklist": [],
+        "refs": [],
+        "questions": [],
+        "history": [],
+    }
+    add_history(ticket, by, "Created", "cli", at=t)
+    save(root, ticket)
+    harness.protect_local(root)
+    return ticket["id"]
+
+
+# Sessions without a ticket (ORCH-364, draft D): the empty helper and the plain terminal, one of each per
+# workspace, each a hidden ticket like the Manager's (flag session: <kind>, no display key, kept out of git).
+SESSION_KINDS = ("empty", "terminal")
+SESSION_TITLES = {"empty": "Empty helper", "terminal": "Plain terminal"}
+SESSION_NOTES = {
+    "empty": "A helper with no ticket and no task yet: it waits for the person's first message.",
+    "terminal": "A plain terminal in this workspace, no helper.",
+}
+
+
+def session_id(root: Path, kind: str) -> str | None:
+    """The id of this workspace's hidden ticket of a session without a ticket of this kind, or None."""
+    for t in list_all(root, include_general=True):
+        if isinstance(t, dict) and t.get("session") == kind and hidden_kind(t) == kind:
+            return t["id"]
+    return None
+
+
+def ensure_session(root: Path, kind: str, by: str) -> str:
+    """The hidden ticket of a session without a ticket (empty helper or plain terminal), made once."""
+    from orch import harness
+
+    if kind not in SESSION_KINDS:
+        raise Refused(f"No such session without a ticket: {kind}.")
+    if tid := session_id(root, kind):
+        return tid
+    t = now()
+    ticket = {
+        "schema": "orch.ticket/1",
+        "id": new_id(root),
+        "title": SESSION_TITLES[kind],
+        "session": kind,
+        "status": "open",
+        "note": SESSION_NOTES[kind],
         "created_at": t,
         "updated_at": t,
         "checklist": [],
@@ -1170,20 +1227,36 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
 MANAGER_REFUSAL = "The Manager is not a ticket: it is never finished, dropped or reopened."
+SESSION_REFUSAL = "A session without a ticket is not a ticket: it is never finished, dropped or reopened."
 
 
 def hidden_kind(ticket: dict) -> str | None:
-    """'general' (Chat) or 'manager' for the two hidden tickets that hold a conversation, never a piece of
-    work: no status moves, never Working. None for every other ticket."""
+    """'general' (Chat), 'manager', or a session without a ticket ('empty' helper, 'terminal'; ORCH-364) for
+    the hidden tickets that hold a conversation, never a piece of work: no status moves, never Working. None
+    for every other ticket."""
     if ticket.get("general") is True:
         return "general"
     if ticket.get("manager") is True:
         return "manager"
+    if ticket.get("session") in SESSION_KINDS:
+        return str(ticket["session"])
     return None
 
 
+def is_hidden(ticket) -> bool:
+    """A hidden ticket (Chat, Manager, a session without a ticket): never in the ticket list."""
+    return isinstance(ticket, dict) and hidden_kind(ticket) is not None
+
+
 def _hidden_refusal(ticket: dict) -> str:
-    return MANAGER_REFUSAL if hidden_kind(ticket) == "manager" else GENERAL_REFUSAL
+    kind = hidden_kind(ticket)
+    return (
+        MANAGER_REFUSAL
+        if kind == "manager"
+        else SESSION_REFUSAL
+        if kind in SESSION_KINDS
+        else GENERAL_REFUSAL
+    )
 
 
 GENERAL_REFUSED = (
@@ -3470,6 +3543,8 @@ def answer(
         raise Refused("An answer needs text.")
     text = text.strip()
 
+    person_click = by.startswith("human:") and (via != "cli" or not agent_tool())
+
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
@@ -3499,13 +3574,15 @@ def answer(
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
-        if _is_person(by) and _wont_do_yes(q, ans):
+        # A click on the dashboard or a phone is a person even when that server was started from a helper's
+        # session (its environment then shows an agent tool, which only says who runs the CLI). #1354.
+        if person_click and _wont_do_yes(q, ans):
             item = _item(ticket, q["check"])
             if not item.get("done") and not item.get("wont_do"):
                 _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
-    return apply_op(root, tid, op, by=by)
+    return apply_op(root, tid, op, by=by, person_click=person_click)
 
 
 def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:
@@ -4095,7 +4172,7 @@ def _artifacts_dir_raw(root: Path, tid: str) -> Path:
     return d
 
 
-# What a person may attach to a ticket from the dashboard or the phone: plain text and pictures.
+# What a person may attach to a ticket from the dashboard or the phone: text, pictures and voice recordings.
 # Never a page or a program that runs: html, xml, svg and scripts are not accepted.
 # (The dashboard's actions.py mirrors these limits to refuse early; orch here is the one that decides.)
 ATTACH_TEXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "yml", "yaml", "toml", "ini"})
@@ -4105,6 +4182,16 @@ ATTACH_IMAGES = {
     "jpeg": (b"\xff\xd8\xff",),
     "gif": (b"GIF87a", b"GIF89a"),
     "webp": (b"RIFF",),
+}
+# A voice note recorded in the browser (ORCH-422): Chrome and Edge record webm, Firefox ogg,
+# Safari mp4 (kept as m4a).
+# Each is checked by its first bytes like a picture; nothing in it runs.
+ATTACH_AUDIO = {
+    "webm": (b"\x1a\x45\xdf\xa3",),
+    "ogg": (b"OggS",),
+    "m4a": (),  # an mp4 box: "ftyp" at byte 4 (checked below)
+    "mp3": (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
+    "wav": (b"RIFF",),
 }
 ATTACH_MAX = 25 * 1024 * 1024  # one attached file: the one limit (dashboard and Focus use it too)
 LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
@@ -4120,8 +4207,9 @@ def attach_name(hint) -> str:
     stem, dot, ext = base.rpartition(".")
     ext = ext.lower()
     stem = stem.strip()[:80].strip(". ")
-    if not dot or not stem.strip("._ -") or (ext not in ATTACH_TEXT and ext not in ATTACH_IMAGES):
-        raise Refused("That kind of file cannot be attached. Text files and pictures can.")
+    allowed = ext in ATTACH_TEXT or ext in ATTACH_IMAGES or ext in ATTACH_AUDIO
+    if not dot or not stem.strip("._ -") or not allowed:
+        raise Refused("That kind of file cannot be attached. Text files, pictures and voice recordings can.")
     if stem.split(".")[0].lower() in _WIN_RESERVED:
         stem = "_" + stem
     return stem + "." + ext
@@ -4136,6 +4224,14 @@ def _check_attach(name: str, data) -> str:
     if ext in ATTACH_IMAGES:
         if not data.startswith(ATTACH_IMAGES[ext]) or (ext == "webp" and data[8:12] != b"WEBP"):
             raise Refused("That picture is not what its name says.")
+    elif ext in ATTACH_AUDIO:
+        ok = (
+            data[4:8] == b"ftyp"
+            if ext == "m4a"
+            else data.startswith(ATTACH_AUDIO[ext]) and (ext != "wav" or data[8:12] == b"WAVE")
+        )
+        if not ok:
+            raise Refused("That recording is not what its name says.")
     else:
         if b"\x00" in data:
             raise Refused("That file is not plain text.")

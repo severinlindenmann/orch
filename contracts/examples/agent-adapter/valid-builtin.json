@@ -60,6 +60,7 @@
         { "file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"] },
         { "file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"] }
       ],
+      "skill_dirs": ["{home}/.claude/skills"],
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true, "activity": "live" },
       "files": { "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }
     },
@@ -81,10 +82,11 @@
       "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id", "chat_files": { "dir_env": "CODEX_HOME", "home": ".codex", "glob": "sessions/*/*/*/rollout-*-{session}.jsonl", "lines": "items" } },
-      "login": { "status": ["login", "status"], "how": "Open a terminal on this computer and run: codex login" },
+      "login": { "status": ["login", "status"], "sign_in": "codex login" },
       "mcp_settings": [
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],
+      "skill_dirs": ["{home}/.codex/skills"],
       "capabilities": { "resume": true, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
       "files": { "instructions": "AGENTS.md" }
     },

@@ -103,18 +103,18 @@ def row_extra(root: Path, rec: dict, st: drivers.Status | None) -> dict:
     wanted = state.get("running") if isinstance(state.get("running"), bool) else bool(st and st.running)
     h = health(rec, st, wanted)
     failing = w["failing"] and wanted
-    if failing and not h["ok"]:
-        n = len([t for t in w["events"] if t > clock() - WINDOW])
-        if n:
-            h["text"] += f": it failed {_times(n)} in the last 10 minutes"
+    n = len([t for t in w["events"] if t > clock() - WINDOW]) if failing else 0
+    if n and not h["ok"]:
+        h["text"] += f": it failed {_times(n)} in the last 10 minutes"
     out: dict = {"health": h, "failing": failing, "question": None}
     q = w["question"]
     if failing and q and q.get("open"):
+        ask = "Restart, Stop or Look into it?"
         out["question"] = {
             "ticket": q.get("ticket"),
             "id": q["id"],
             "title": _title(rec["name"]),
-            "text": "Restart, Stop or Look into it?",
+            "text": f"It failed {_times(n)} in the last 10 minutes. {ask}" if n else ask,
         }
     return out
 
@@ -213,15 +213,30 @@ def _act_on_answer(root: Path, drv, rec: dict, spec, w: dict) -> str | None:
     q["answer"] = str(answer)[:40]
     _save_watch(root, rec["id"], w)  # written before acting: an answer is acted on once, never twice
     word = str(answer).strip().lower()
+    if word in ("restart", "stop"):
+        try:
+            getattr(drv, word)(spec)
+        except Refused as e:  # the answer is used up: say why on the ticket and ask again on the next pass
+            w["question"] = None
+            _save_watch(root, rec["id"], w)
+            try:  # the tool's own words stay in this output, not on the ticket
+                orch(
+                    root,
+                    "log",
+                    q["ticket"],
+                    f"{rec['name']}: could not {word} it. orch asks again.",
+                    write=True,
+                )
+            except Refused:
+                pass
+            return f"Could not {word} {rec['name']} ({e}); orch asks again (answer on {q['ticket']})."
     if word == "restart":
-        drv.restart(spec)
         store.mark(root, rec["id"], True)
         _rebase(drv, spec, w)
         w.update(failing=False, events=[], healthy_since=None, question=None)
         _save_watch(root, rec["id"], w)
         return f"Restarted {rec['name']} (answer on {q['ticket']})."
     if word == "stop":
-        drv.stop(spec)
         store.mark(root, rec["id"], False)
         w.update(failing=False, events=[], healthy_since=None, question=None)
         _save_watch(root, rec["id"], w)
@@ -282,9 +297,9 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
     runs = _runs(drv, spec)
     last = w.get("runs")
     if isinstance(runs, int) and isinstance(last, int) and runs > last:
-        new += min(runs - last, MAX_EVENTS)  # the computer started it again by itself
+        new = min(runs - last, MAX_EVENTS)  # the computer started it again by itself
     if not h["ok"]:
-        new += 1
+        new = max(new, 1)  # one stop seen twice (not alive now, and started again) is still one failure
     w["runs"] = runs
     w["events"] = (events + [now] * new)[-MAX_EVENTS:]
 

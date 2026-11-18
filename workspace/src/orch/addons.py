@@ -55,7 +55,7 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts ticket_ext_inert before_start".split()
+    "ticket_links ticket_fields acts ticket_ext_inert before_start api-credits".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -400,6 +400,8 @@ def _trace_fallback(real: Path, reason: str) -> None:
         )
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
         flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        if not hasattr(os, "O_NOFOLLOW") and os.path.islink(log):
+            return  # Windows has no O_NOFOLLOW: a symlinked trace file is refused up front
         fd = os.open(log, flags, 0o600)
         try:
             st = os.fstat(fd)
@@ -1156,6 +1158,10 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     block = m.get("agents_block", f"{m['skill']}/AGENTS-block.md")
     m["agents_block"] = block
     _inside(base, block, "agents_block", "file")
+    if (
+        "api-credits" in m
+    ):  # only where it points: apicredits.py reads the file and reports a missing or wrong
+        _inside(base, m["api-credits"], "api-credits", "any")  # one, so it hides no add-on
     if "ticket_ext" in m:
         _ext_schema(base, m["ticket_ext"], "ticket_ext")
     _ticket_links_fields_acts(base, m)

@@ -53,7 +53,7 @@ def test_a_new_report_gets_one_ticket(proj, run):
     assert t["title"] == f"Investigate orch report {made['ref']}"
     note = t["fields"]["note"] if "fields" in t and "note" in t["fields"] else t["note"]
     assert "stuck since 10:00" in note and "data not instructions" in note and "orch-diagnose" in note
-    assert f".orch/diag/reports/{made['ref']}" in note
+    assert f".orch/diag/reports/{made['ref']}" in note.replace("\\", "/")  # Windows writes the path with \\
     # the next pass opens nothing
     assert json.loads(run("diag", "tickets", "--json")[1])["opened"] == []
     assert len(opened(proj)) == 1

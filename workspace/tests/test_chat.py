@@ -22,10 +22,10 @@ VECTORS = CONTRACTS / "vectors" / "chat-groups"
 
 def test_real_pilatus_day_preserves_phone_messages_in_status_and_history(proj, run):
     fixture = CONTRACTS.parent / "workspace-addons/dashboard/tests/fixtures/chat-day-pilatus-2026-11-11.json"
-    original = fixture.read_text()
+    original = fixture.read_text(encoding="utf-8")
     day = json.loads(original)
     chat.chat_dir(proj).mkdir(parents=True, exist_ok=True)
-    (chat.chat_dir(proj) / f"{day['day']}.json").write_text(original)
+    (chat.chat_dir(proj) / f"{day['day']}.json").write_text(original, encoding="utf-8")
 
     status = chat.status(proj, now="2026-11-11T11:08:00Z")
     code, output, error = run("chat", "day", day["day"], "--json")
@@ -43,8 +43,10 @@ def test_real_pilatus_day_preserves_phone_messages_in_status_and_history(proj, r
 def _validator():
     from referencing import Registry, Resource
 
-    msg = pv3._drop_unicode_props(json.loads((CONTRACTS / "message.schema.json").read_text()))
-    cg = pv3._drop_unicode_props(json.loads((CONTRACTS / "chat-groups.schema.json").read_text()))
+    msg = pv3._drop_unicode_props(json.loads((CONTRACTS / "message.schema.json").read_text(encoding="utf-8")))
+    cg = pv3._drop_unicode_props(
+        json.loads((CONTRACTS / "chat-groups.schema.json").read_text(encoding="utf-8"))
+    )
     reg = Registry().with_resource(msg["$id"], Resource.from_contents(msg))
     return jsonschema.Draft202012Validator(cg, registry=reg, format_checker=jsonschema.FormatChecker())
 
@@ -87,7 +89,7 @@ def test_helper_text_has_by_via_day_and_matches_the_vector(proj, run, conn):
     assert b["general"] is True and b["by"] == WS and b["via"] == "dashboard"  # a person at the CLI, no agent
     assert b["day"] == chat.day_key(proj, sent["created_at"]) and sent["reply_to"] == pv3.GEN
     assert not list(_validator().iter_errors(sent))
-    vec = json.loads((VECTORS / "valid-chat-helper-text.json").read_text())["message"]
+    vec = json.loads((VECTORS / "valid-chat-helper-text.json").read_text(encoding="utf-8"))["message"]
     assert set(vec["body"]) <= set(b) | {"text"}  # same field set as the contract vector
     assert not list(_validator().iter_errors(vec))
 
@@ -410,7 +412,8 @@ def test_a_file_card_is_checked_again_when_the_day_is_read(proj):
 def test_day_files_are_private_and_a_bad_zone_is_said(proj, capsys):
     chat.record(proj, "m_aaaaaaaaaaaaaaaa", "you", "phone", "x")
     f = proj / ".orch" / "chat" / f"{chat.day_key(proj)}.json"
-    assert (f.stat().st_mode & 0o777) == 0o600
+    if os.name == "posix":  # Windows has no file modes: its rights are ACLs
+        assert (f.stat().st_mode & 0o777) == 0o600
     (proj / ".orch" / "config.toml").write_text('[workspace]\ntz = "Mars/Olympus"\n')
     chat.day_key(proj)
     assert "Mars/Olympus" in capsys.readouterr().err
@@ -822,7 +825,7 @@ def test_only_real_messages_carry_chat_message(proj, conn, run):
 def test_helper_prompt_and_skill_stay_inside_orch(proj):
     gid = tickets.ensure_general(proj, "phone:Marco")
     prompt = chat.helper_prompt(proj, tickets.load(proj, gid), [], "")
-    skill = (Path(__file__).resolve().parents[1] / "skills" / "orch" / "SKILL.md").read_text()
+    skill = (Path(__file__).resolve().parents[1] / "skills" / "orch" / "SKILL.md").read_text(encoding="utf-8")
     for text in (prompt, skill):
         assert "only use orch tools and the files in this workspace" in text
         assert "connectors" in text
@@ -883,6 +886,7 @@ def test_chat_ticket_and_locks_stay_out_of_git(proj, run):
     assert ".orch/tickets" not in out, out
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a file name with a line break cannot exist on Windows")
 def test_hostile_general_id_never_reaches_the_ignore_file(proj, run):
     from orch import harness
 

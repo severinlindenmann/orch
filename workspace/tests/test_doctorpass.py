@@ -128,6 +128,19 @@ def test_two_processes_where_one_is_wanted(ws):
     assert res["problems"] == ["proc-guard"] and "runs 2 times" in res["opened"][0]["title"]
 
 
+def test_a_scripts_own_forked_shell_is_not_a_second_copy():
+    rows = [
+        "  100     1 /bin/zsh /x/guard.sh",
+        "  200   100 /bin/zsh /x/guard.sh",  # its fork for a pipe or $(...)
+        "  201   200 /bin/zsh /x/guard.sh",  # a fork inside the fork
+        "  300   100 awk /lindenmann/",
+        "  400     1 /bin/zsh /x/guard.sh",  # a real second copy
+        "garbage",
+    ]
+    kept = doctorpass.drop_forks(rows)
+    assert kept.count("/bin/zsh /x/guard.sh") == 2 and "awk /lindenmann/" in kept
+
+
 def test_load_counts_only_on_two_passes_in_a_row(ws):
     assert _pass(ws, load=50)["problems"] == []
     assert _pass(ws, load=50)["problems"] == ["load"]

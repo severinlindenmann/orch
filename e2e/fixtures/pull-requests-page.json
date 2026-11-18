@@ -10,7 +10,7 @@
    "order": 25,
    "panel": null,
    "place": "nav",
-   "subtitle": "Open pull requests of the repositories your tickets link, with their checks.",
+   "subtitle": "What needs you, what is being checked and what waits to be merged.",
    "title": null
   },
   "link_kinds": [
@@ -244,23 +244,6 @@
   "empty": {
    "blocks": [
     {
-     "label": "Open",
-     "type": "stat",
-     "value": 0
-    },
-    {
-     "label": "Checks failed",
-     "tone": "neutral",
-     "type": "stat",
-     "value": 0
-    },
-    {
-     "label": "Ready to merge",
-     "tone": "neutral",
-     "type": "stat",
-     "value": 0
-    },
-    {
      "empty": {
       "text": "Link a pull request to a ticket and it shows up here with its checks.",
       "title": "No pull requests yet"
@@ -268,6 +251,10 @@
      "items": [],
      "title": "Pull requests",
      "type": "list"
+    },
+    {
+     "text": "The merge queue checks up to 5 pull requests together and merges them when the checks pass.",
+     "type": "footnote"
     }
    ],
    "generated_at": "2026-11-17T09:41:00Z",
@@ -276,21 +263,28 @@
   "loaded": {
    "blocks": [
     {
-     "label": "Open",
-     "type": "stat",
-     "value": 6
+     "items": [
+      {
+       "subtitle": "Show the invoice number on the PDF; Round tax per line, not per invoice",
+       "title": "Group of 2 · checks running 12 min",
+       "tone": "neutral"
+      }
+     ],
+     "meta": "into develop · groups of up to 5",
+     "title": "Merge queue: acme/billing",
+     "type": "list"
     },
     {
-     "label": "Checks failed",
-     "tone": "bad",
-     "type": "stat",
-     "value": 1
-    },
-    {
-     "label": "Ready to merge",
-     "tone": "good",
-     "type": "stat",
-     "value": 2
+     "items": [
+      {
+       "subtitle": "Next: New pricing page",
+       "title": "1 waiting in line · longest 49 min",
+       "tone": "neutral"
+      }
+     ],
+     "meta": "into develop · groups of up to 5",
+     "title": "Merge queue: acme/website",
+     "type": "list"
     },
     {
      "columns": [
@@ -305,110 +299,85 @@
        "type": "text"
       },
       {
-       "key": "checks",
-       "label": "Checks",
+       "key": "state",
+       "label": "State",
        "type": "text"
       },
       {
-       "key": "merge",
-       "label": "Merge",
-       "type": "text"
+       "key": "in_line",
+       "label": "In line for",
+       "type": "duration"
       }
      ],
-     "meta": "5 open",
+     "meta": "6 open · 2 repositories",
      "rows": [
       {
        "cells": {
-        "checks": "Failed: lint",
-        "merge": "Blocked",
-        "pr": "#418 Add CSV export for invoices",
+        "in_line": null,
+        "pr": "Add CSV export for invoices",
+        "state": "Checks failed",
         "ticket": "BIL-1"
        },
        "link": "t_inv012",
-       "subtitle": "feat/x418 into develop · dev"
+       "subtitle": "Checks failed: lint. Open the ticket to fix it."
       },
       {
        "cells": {
-        "checks": "Passed (3)",
-        "merge": "Has a conflict",
-        "pr": "#417 Rename customer to client",
+        "in_line": null,
+        "pr": "Rename customer to client",
+        "state": "Has a conflict",
         "ticket": "BIL-4"
        },
        "link": "t_ren009",
-       "subtitle": "feat/x417 into develop · dev"
+       "subtitle": "Open the ticket to sort out the conflict."
       },
       {
        "cells": {
-        "checks": "Running (2 left)",
-        "merge": "Blocked",
-        "pr": "#420 Round tax per line, not per invoice",
-        "ticket": "BIL-3"
-       },
-       "link": "t_tax015",
-       "subtitle": "feat/x420 into develop · dev"
-      },
-      {
-       "cells": {
-        "checks": "Passed (3)",
-        "merge": "Ready to merge",
-        "pr": "#421 Show the invoice number on the PDF",
+        "in_line": 1740,
+        "pr": "Show the invoice number on the PDF",
+        "state": "Being checked",
         "ticket": "BIL-2"
        },
        "link": "t_pdf014",
-       "subtitle": "feat/x421 into develop · dev"
+       "subtitle": "acme/billing"
       },
       {
        "cells": {
-        "checks": "No checks",
-        "merge": "Draft",
-        "pr": "#419 Try a new PDF library",
-        "ticket": null
+        "in_line": 1560,
+        "pr": "Round tax per line, not per invoice",
+        "state": "Being checked",
+        "ticket": "BIL-3"
        },
-       "link": "https://github.com/acme/billing/pull/419",
-       "subtitle": "feat/x419 into develop · dev"
-      }
-     ],
-     "title": "acme/billing",
-     "type": "table"
-    },
-    {
-     "columns": [
-      {
-       "key": "pr",
-       "label": "Pull request",
-       "type": "text"
+       "link": "t_tax015",
+       "subtitle": "acme/billing"
       },
-      {
-       "key": "ticket",
-       "label": "Ticket",
-       "type": "text"
-      },
-      {
-       "key": "checks",
-       "label": "Checks",
-       "type": "text"
-      },
-      {
-       "key": "merge",
-       "label": "Merge",
-       "type": "text"
-      }
-     ],
-     "meta": "1 open",
-     "rows": [
       {
        "cells": {
-        "checks": "Passed (3)",
-        "merge": "Ready to merge",
-        "pr": "#88 New pricing page",
+        "in_line": 2940,
+        "pr": "New pricing page",
+        "state": "1st in line, paused",
         "ticket": null
        },
        "link": "https://github.com/acme/website/pull/88",
-       "subtitle": "feat/x88 into develop · dev"
+       "subtitle": "GitHub did not answer; tries again by itself in 6 min."
+      },
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Try a new PDF library",
+        "state": "Draft",
+        "ticket": null
+       },
+       "link": "https://github.com/acme/billing/pull/419",
+       "subtitle": "Not checked while it is a draft."
       }
      ],
-     "title": "acme/website",
+     "title": "Open pull requests",
      "type": "table"
+    },
+    {
+     "text": "The merge queue checks up to 5 pull requests together and merges them when the checks pass.",
+     "type": "footnote"
     }
    ],
    "generated_at": "2026-11-17T09:41:00Z",
@@ -417,21 +386,14 @@
   "stopped": {
    "blocks": [
     {
-     "label": "Open",
-     "type": "stat",
-     "value": 6
-    },
-    {
-     "label": "Checks failed",
-     "tone": "bad",
-     "type": "stat",
-     "value": 1
-    },
-    {
-     "label": "Ready to merge",
-     "tone": "good",
-     "type": "stat",
-     "value": 2
+     "empty": {
+      "text": "A pull request put in the merge queue shows here with the group it is checked in.",
+      "title": "Nothing in the merge queue"
+     },
+     "items": [],
+     "meta": "groups of up to 5",
+     "title": "Merge queue",
+     "type": "list"
     },
     {
      "columns": [
@@ -446,110 +408,85 @@
        "type": "text"
       },
       {
-       "key": "checks",
-       "label": "Checks",
+       "key": "state",
+       "label": "State",
        "type": "text"
       },
       {
-       "key": "merge",
-       "label": "Merge",
-       "type": "text"
+       "key": "in_line",
+       "label": "In line for",
+       "type": "duration"
       }
      ],
-     "meta": "5 open",
+     "meta": "6 open · 2 repositories",
      "rows": [
       {
        "cells": {
-        "checks": "Failed: lint",
-        "merge": "Blocked",
-        "pr": "#418 Add CSV export for invoices",
+        "in_line": null,
+        "pr": "Add CSV export for invoices",
+        "state": "Checks failed",
         "ticket": "BIL-1"
        },
        "link": "t_inv012",
-       "subtitle": "feat/x418 into develop · dev"
+       "subtitle": "Checks failed: lint. Open the ticket to fix it."
       },
       {
        "cells": {
-        "checks": "Passed (3)",
-        "merge": "Has a conflict",
-        "pr": "#417 Rename customer to client",
+        "in_line": null,
+        "pr": "Rename customer to client",
+        "state": "Has a conflict",
         "ticket": "BIL-4"
        },
        "link": "t_ren009",
-       "subtitle": "feat/x417 into develop · dev"
+       "subtitle": "Open the ticket to sort out the conflict."
       },
       {
        "cells": {
-        "checks": "Running (2 left)",
-        "merge": "Blocked",
-        "pr": "#420 Round tax per line, not per invoice",
+        "in_line": null,
+        "pr": "Round tax per line, not per invoice",
+        "state": "Checks running (2 left)",
         "ticket": "BIL-3"
        },
        "link": "t_tax015",
-       "subtitle": "feat/x420 into develop · dev"
+       "subtitle": "acme/billing"
       },
       {
        "cells": {
-        "checks": "Passed (3)",
-        "merge": "Ready to merge",
-        "pr": "#421 Show the invoice number on the PDF",
+        "in_line": null,
+        "pr": "Show the invoice number on the PDF",
+        "state": "Ready to merge",
         "ticket": "BIL-2"
        },
        "link": "t_pdf014",
-       "subtitle": "feat/x421 into develop · dev"
+       "subtitle": "Not in the merge queue."
       },
       {
        "cells": {
-        "checks": "No checks",
-        "merge": "Draft",
-        "pr": "#419 Try a new PDF library",
-        "ticket": null
-       },
-       "link": "https://github.com/acme/billing/pull/419",
-       "subtitle": "feat/x419 into develop · dev"
-      }
-     ],
-     "title": "acme/billing",
-     "type": "table"
-    },
-    {
-     "columns": [
-      {
-       "key": "pr",
-       "label": "Pull request",
-       "type": "text"
-      },
-      {
-       "key": "ticket",
-       "label": "Ticket",
-       "type": "text"
-      },
-      {
-       "key": "checks",
-       "label": "Checks",
-       "type": "text"
-      },
-      {
-       "key": "merge",
-       "label": "Merge",
-       "type": "text"
-      }
-     ],
-     "meta": "1 open",
-     "rows": [
-      {
-       "cells": {
-        "checks": "Passed (3)",
-        "merge": "Ready to merge",
-        "pr": "#88 New pricing page",
+        "in_line": null,
+        "pr": "New pricing page",
+        "state": "Ready to merge",
         "ticket": null
        },
        "link": "https://github.com/acme/website/pull/88",
-       "subtitle": "feat/x88 into develop · dev"
+       "subtitle": "Not in the merge queue."
+      },
+      {
+       "cells": {
+        "in_line": null,
+        "pr": "Try a new PDF library",
+        "state": "Draft",
+        "ticket": null
+       },
+       "link": "https://github.com/acme/billing/pull/419",
+       "subtitle": "Not checked while it is a draft."
       }
      ],
-     "title": "acme/website",
+     "title": "Open pull requests",
      "type": "table"
+    },
+    {
+     "text": "The merge queue checks up to 5 pull requests together and merges them when the checks pass.",
+     "type": "footnote"
     }
    ],
    "button": {

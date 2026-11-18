@@ -1,6 +1,9 @@
 ---
 name: orch-services
 description: Use when a ticket needs something to keep running in the background (a web preview, a local server, a watcher, a bot), when the person asks what is running, or to start, stop, restart or read the log of such a job. Services are kept running by this computer's own service tool, under the person's own account. Not for one-off commands (run them yourself) and not for repeating a ticket at a time (that is automation).
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch services
 

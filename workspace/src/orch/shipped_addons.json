@@ -276,7 +276,7 @@
    "icon": "check",
    "label": "Pull requests",
    "order": 25,
-   "subtitle": "Open pull requests of the repositories your tickets link, with their checks."
+   "subtitle": "What needs you, what is being checked and what waits to be merged."
   },
   "description": "Open pull requests with their checks, live on each ticket; merge when green and the merge queue.",
   "gitignore": [

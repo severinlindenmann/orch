@@ -170,7 +170,13 @@ test('the All cards list: one section per set (group, else ticket) with its own 
   const deck = {items:[item('a', {group:'Phone'}), item('b', {group:'Phone'}), item('c')], index:1, answers:{a:{verdict:'ok', item:item('a'), note:null}}, jump() {}};
   c.reviewDrawSide(queue, deck);
   assert.equal(secs.length, 2);
-  assert.match(text(secs[0]), /^Phone1 of 2 waiting/); assert.match(text(secs[1]), /^Home look1 of 1 waiting/);
+  assert.match(text(secs[0]), /^Phone1 of 2 waiting/);
+  // ORCH-420: a set of one card under its own ticket's name has no heading (it said the title twice)
+  assert.doesNotMatch(text(secs[1]), /Home look|waiting/); assert.match(text(secs[1]), /Card c/);
+});
+test('ORCH-420: the subtitle never says nothing waits above cards (a card put off on Home is still a card here)', () => {
+  const c = ctx({review:{cards:[CARD]}}, {needsYouTotal:() => 0});
+  assert.match(c.reviewSubtitle(), /^1 thing waits on you/);
 });
 
 test('Review opens at the card the ticket page asked for (#review?card=...)', () => {
@@ -220,4 +226,30 @@ test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle 
   assert.equal(total, 2);  // one question + one result to check, not the two cards
   assert.match(text(c.reviewAllButton()), new RegExp('^Review all' + total + '$'));
   assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
+});
+test('ORCH-422: Add note and Send back on Review carry screenshots, files and voice notes onto the ticket', async () => {
+  const attached = [];
+  const extra = {FEEDBACK_BOX:{accept:['png', 'webm'], voice:true, maxBytes:1},
+    ticketAttachFiles:async (tid, files) => { attached.push([tid, files.map(f => f.name)]); return files.some(f => f.name.endsWith('.pdf')) ? {ok:false, text:'x.pdf: no'} : {ok:true, names:files.map(f => 'kept-' + f.name)}; },
+    ticketTalkText:(text, names) => [text, names.length ? 'FILES ' + names.join(',') : ''].filter(Boolean).join(' | ')};
+  const c = ctx({review:{cards:[CARD]}}, extra);
+  const api = c.reviewApi();
+  assert.equal(api.box.voice, true, 'the comment sheet gets the feedback box with Record');
+  assert.equal(ctx({}, {...extra, snapshot:true}).reviewApi().box, null, 'a shared copy has no box');
+  assert.equal(ctx({}).reviewApi().box, null, 'no ticket page code, no box');
+  // Add note with only a voice note: files first, then the helper is told their names
+  const r = await api.note({ticket:'t_abcdef', text:'', files:[{name:'voice-note-0931.webm', url:'data:audio/webm;base64,GkXf'}]});
+  assert.equal(r.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(attached)), [['t_abcdef', ['voice-note-0931.webm']]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['run.send', {ticket:'t_abcdef', text:'FILES kept-voice-note-0931.webm'}]]);
+  // a refused file: nothing is told to the helper, the words stay
+  c.acts.length = 0;
+  const bad = await api.note({ticket:'t_abcdef', text:'see this', files:[{name:'x.pdf', url:'data:,x'}]});
+  assert.equal(bad.ok, false);
+  assert.equal(c.acts.length, 0);
+  // Send back on a card: the kit calls attach, then the answer (see the kit test); attach returns the kept names
+  const up = await api.attach({ticket:'t_abcdef', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}]});
+  assert.deepEqual(JSON.parse(JSON.stringify(up)), {ok:true, names:['kept-shot.png']});
+  // empty: no words and no files is refused before anything is sent
+  assert.equal((await api.note({ticket:'t_abcdef', text:' ', files:[]})).ok, false);
 });
