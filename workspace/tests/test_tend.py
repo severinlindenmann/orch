@@ -357,6 +357,7 @@ def test_free_slots_start_the_line_in_order_until_full(proj, new_ticket, monkeyp
     _queue(proj, c)
     started = []
     monkeypatch.setattr(runs_live, "_full", lambda root: 4 if len(started) >= 2 else None)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": None)  # busy CI runner
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
     assert runs_live.start_waiting(proj) == [b, c]
     assert started == [b, c]
@@ -369,6 +370,7 @@ def test_a_done_ticket_is_never_started_from_the_line(proj, new_ticket, monkeypa
     tickets.set_status(proj, a, "done", "test")
     started = []
     monkeypatch.setattr(runs_live, "_full", lambda root: None)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": None)  # busy CI runner
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
     assert runs_live.start_waiting(proj) == [b]
     assert started == [b]
