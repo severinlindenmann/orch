@@ -91,6 +91,16 @@ def answer(root: Path, argv: list[str]):
 
             return _plain(root, status_of(root, ids[0])[0])
         return _plain(root, run_status(root, ids))
+    if (
+        a[:2] == ["run", "screen"]
+        and len(a) > 5
+        and a[-2] == "--lines"
+        and a[-1].isdigit()
+        and all(tickets._ID_RE.fullmatch(x) for x in a[2:-2])
+    ):  # several sessions' last lines (one tmux call); one ticket keeps the command's own answer
+        from orch import runwatch
+
+        return {"screens": runwatch.tails(root, a[2:-2], int(a[-1]))}
     if a == ["review", "list"]:
         return _plain(root, review_cards(root))
     if a == ["review", "list", "--answered"]:
