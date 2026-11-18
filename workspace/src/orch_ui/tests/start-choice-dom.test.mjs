@@ -232,3 +232,14 @@ test('a refresh right after the caret opened the choice keeps it open (its toggl
   assert.equal(now.open, true, 'the refresh closed the Start choice');
   assert.ok(m.q(n => n.textContent === 'Fresh start'), 'the open choice shows its rows');
 });
+
+test('the Start choice is a group, not a menu: its buttons stay buttons however the page draws it (ORCH-555)', () => {
+  // components.js turns the buttons of a role-less .menu-pop into menuitems, but only when the pop already holds them
+  // on its first pass: a redraw with the choice open made Fresh start a menuitem, and the click-through missed it.
+  const m = mount();
+  const pop = m.q(n => n.className.includes('start-pop'));
+  assert.equal(pop.getAttribute('role'), 'group');
+  assert.equal(pop.getAttribute('aria-label'), 'Start choice');
+  m.q(n => n.tag === 'summary').click();
+  assert.equal(m.q(n => n.dataset.start === 'fresh').getAttribute('role'), null, 'Fresh start keeps the button role');
+});
