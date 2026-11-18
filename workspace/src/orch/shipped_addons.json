@@ -251,6 +251,39 @@
   "ticket_view": [],
   "version": "0.1.0"
  },
+ "personal": {
+  "acts": {},
+  "agents_block": "skills/orch-personal/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "user",
+   "label": "Personal",
+   "order": 15,
+   "subtitle": "What needs you, then each part at a glance. Helpers use only what you turned on."
+  },
+  "description": "Your notes (and next your meetings, calendar, messages and mail) in one place; helpers use only what you allow.",
+  "gitignore": [
+   ".orch/addons/personal/"
+  ],
+  "name": "personal",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Personal",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_personal",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-personal",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "pull-requests": {
   "acts": {
    "refresh": {
