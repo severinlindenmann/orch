@@ -288,10 +288,10 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
 def test_stop_on_a_stopped_service_says_it_is_already_stopped(cli, fake):
     _add(cli)
     code, out = jrun(cli, "stop", "web")
-    assert code == 0 and out["next"] == "web is already stopped." and out["service"]["state"] == "stopped"
+    assert code == 0 and out["next"] == "Web preview is already stopped." and out["service"]["state"] == "stopped"
     jrun(cli, "start", "web")
     code, out = jrun(cli, "stop", "web")
-    assert out["next"] == "Stopped web."
+    assert out["next"] == "Stopped Web preview."
 
 
 def test_the_log_of_an_adopted_job_without_a_log_file_says_orch_keeps_none(ws):
