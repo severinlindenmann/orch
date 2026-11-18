@@ -31,7 +31,7 @@ steps are marked `continue-on-error`, so its check stays green and only a warnin
 | CLI smoke, Windows + macOS | required | required | | | required |
 | e2e smoke (5 minutes) | required | required | | | required |
 | add-on suites, page smoke, click-throughs | required | required | runs | | required |
-| clock (suites at 22:30 and 23:59:40 UTC) | required | required | runs | runs | required |
+| clock (suites at 22:30 and 23:59:40 UTC) | only when it changes time code ² | required | | runs | required |
 | contracts, publish, relay | required | required | runs | | required |
 | mobile | required | required | runs | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits) | required | required | runs | runs | required |
@@ -47,6 +47,9 @@ in the queue.
 ¹ While Windows is known red, `scripts/touches_os_code.py --pr` answers `false` on every pull request, so the
 Windows parts run only on develop pushes, nightly and the release check (or a manual run with `windows=true`).
 Once Windows is green (KNOWN_RED empty), a pull request that changes file, process or path code runs them again.
+
+² `scripts/touches_time_code.py` decides which pull requests change time code (ORCH-451). The other tests read a
+shared test clock (`workspace/tests/testclock.py`, page tests `clock_edges.test.mjs`) instead of the real time of day.
 
 A draft pull request gets no CI run; marking it ready starts one.
 

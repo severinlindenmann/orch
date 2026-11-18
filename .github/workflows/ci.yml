@@ -45,6 +45,7 @@ jobs:
       dashshots: ${{ steps.f.outputs.dashshots }}
       clock: ${{ steps.f.outputs.clock }}
       oscode: ${{ steps.os.outputs.oscode }}
+      timecode: ${{ steps.time.outputs.timecode }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,7 +79,7 @@ jobs:
             dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
             # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
             clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
-            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
+            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py', 'scripts/touches_time_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
       # A pull request that changes file, process or path code also runs the Windows tests (ORCH-315), but not while
       # Windows is known red: then its parts run on queue groups and nightly only (--pr, docs/ci-checks.md, ORCH-453).
       - id: os
@@ -86,6 +87,12 @@ jobs:
         env:
           BASE: origin/${{ github.base_ref }}
         run: echo "oscode=$(python3 scripts/touches_os_code.py --base "$BASE" --pr --why)" >> "$GITHUB_OUTPUT"
+      # A pull request that changes time code also runs the whole suites at a fake hour (ORCH-451).
+      - id: time
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: echo "timecode=$(python3 scripts/touches_time_code.py --base "$BASE" --why)" >> "$GITHUB_OUTPUT"
       # A known-red system with no owner or end date, or past its end date: a warning on the run, never a red check.
       - name: known red has an owner and an end date (docs/ci-checks.md)
         run: python3 scripts/ci_known_red.py --warn
@@ -136,10 +143,20 @@ jobs:
     if: needs.changes.outputs.mobile == 'true' || github.event_name == 'schedule'
     uses: ./.github/workflows/mobile.yml
   # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
-  # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
+  # only passes by day goes red here, not on develop at night (ORCH-390, #1371, #1421). It runs where it guards
+  # develop: merge queue groups (what lands), pull requests into main and pushes to main (releases), the nightly
+  # and manual runs, and a pull request into develop only when it changes time code (scripts/touches_time_code.py).
+  # Every other pull request has the shared test clock and the focused midnight/time-zone tests in its own suites;
+  # in the night of 17/18 Nov this job took 1526 minutes, 16 % of all pull request time (ORCH-446, ORCH-451).
+  # Not on a push to develop: the queue group already checked that state.
   clock:
     needs: changes
-    if: needs.changes.outputs.clock == 'true' || github.event_name == 'schedule'
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (needs.changes.outputs.clock == 'true' && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'orch-queue/') ||
+          github.base_ref == 'main' || needs.changes.outputs.timecode == 'true'))))
     uses: ./.github/workflows/clock.yml
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
