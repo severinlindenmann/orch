@@ -33,7 +33,7 @@ jobs:
           # Known red works per STEP (continue-on-error on the test steps below), never on the job: a job-level
           # continue-on-error still reports a FAILURE check on the pull request, and the merge queue drops every
           # group with a failed check (18 Nov, after PR 1428). brand/tests/test_ci_known_red.py keeps it so.
-          KNOWN_RED: set[str] = set()
+          KNOWN_RED = set()
           parts = {"ubuntu-latest": 2}
           if os.environ["FULL"] == "true":
               parts["macos-latest"] = 5
