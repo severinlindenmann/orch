@@ -108,6 +108,7 @@ def test_owner_change_reads_workflows_and_code_owners():
     assert runner.owner_change({"files": [{"path": ".github/workflows/ci.yml"}]})
     assert runner.owner_change({"files": [{"path": ".github/CODEOWNERS"}]})
     assert runner.owner_change({"files": [{"path": "docs/CODEOWNERS"}]})
+    assert runner.owner_change({"files": [{"path": ".github/workflows/README.md"}]})
     assert not runner.owner_change({"files": [{"path": ".github/actions/a.yml"}]})
     assert runner.owner_change({})  # GitHub listed no files: a person merges it (fails closed)
 

@@ -739,14 +739,14 @@ def owner_change(v: dict) -> bool:
     """The pull request changes a CI workflow or the code owners file (or more files than GitHub lists, so one
     could be among them): GitHub holds it for the code owner, so a person merges it (ORCH-305) and the queue
     only checks it."""
-    from orch.ghmerge import is_workflow
+    from orch.ghmerge import WORKFLOW_DIR
 
     files = v.get("files")
     if not isinstance(files, list) or len(files) >= 100:  # not listed, or a workflow could be in the rest
         return True
     for f in files:
         path = str(f.get("path") or "") if isinstance(f, dict) else ""
-        if is_workflow(path) or path in OWNERS_FILES:
+        if path.startswith(WORKFLOW_DIR) or path in OWNERS_FILES:  # the folder is code-owned
             return True
     return False
 
