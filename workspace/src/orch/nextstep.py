@@ -275,6 +275,7 @@ HINTS = {
     "review tend": "orch review accepted  (what was accepted for you today)",
     "review tend-releases": "orch review list  (what still waits for the owner)",
     "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
+    "review security": "orch github release --dry-run  (what the release still waits for)",
     "review accepted": "orch needs",
     "github expert": "orch ticket list  (a red run opened a top ticket)",
     "github release": "orch ticket list  (a red run opened a top ticket)",

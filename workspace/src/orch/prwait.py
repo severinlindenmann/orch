@@ -12,6 +12,10 @@ are the tests in tests/fixtures/prwait/):
 - FAILURE, CANCELLED, TIMED_OUT, NEUTRAL, ACTION_REQUIRED, no checks in time, or still pending at the timeout:
   never green. Anything unreadable keeps waiting or reads as not green, never as green.
 
+A check that failed only by timeout (TIMED_OUT) or by a network error in its log is run once more by orch
+(`gh run rerun --failed`, one retry per pull request and commit) before the verdict says red; each retry is
+counted (checkretry.py, shown on Insights). A real failure is red after that one retry.
+
 Merging (`--merge`) takes only the commit that was checked (`--match-head-commit`) and runs with the helper's
 own GitHub login; GitHub's branch rules decide the rest. When the base branch got commits since the branch
 last took it in and they touch a file the pull request changes (or a test file of the same module), the
@@ -29,7 +33,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 
-from orch import ghlimit
+from orch import checkretry, ghlimit
 from orch.errors import Refused
 from orch.ghmerge import is_pr_url  # noqa: F401  (orch ref wait checks addresses with it)
 
@@ -45,6 +49,13 @@ NET_ERROR = re.compile(
     r"|network is unreachable",
     re.I,
 )
+# lines of a failed job's log that mean the job could not reach something, not that the code is wrong
+LOG_NET_ERROR = re.compile(
+    r"connection reset|connection timed out|connection refused|temporary failure in name resolution"
+    r"|could not resolve host|network is unreachable|econnreset|etimedout|econnrefused|socket hang up"
+    r"|tls handshake timeout|read timed out|received request to deprovision|runner has received a shutdown",
+    re.I,
+)
 UNEXPANDED = "${{"  # a draft-time matrix job whose name was never expanded
 
 
@@ -56,6 +67,7 @@ class Verdict:
     # not green because GitHub did not answer in time (unreadable, no checks, timeout), not because a check
     # failed: a caller that can try again later does not count it as red
     unknown: bool = False
+    retried: list = field(default_factory=list)  # check names orch ran once more before this verdict
 
     def line(self) -> str:
         return f"GREEN: {self.why}" if self.green else f"NOT green: {self.why}"
@@ -98,6 +110,26 @@ class Replay:
     def take(self, kind: str, what: str) -> bool:
         return True  # a recorded case writes nothing to GitHub
 
+    def count(self, kind: str, what: str) -> None:
+        self.counted = [*getattr(self, "counted", []), (kind, what)]  # a recorded case writes nothing
+
+    def retryable(self, names: list[str]) -> str:
+        """Why these failed checks may run again ('timeout', 'network'), or '' when one is a real failure."""
+        states = {c.get("name"): c.get("state") for c in self.polls_last()}
+        if names and all(states.get(n) == "TIMED_OUT" for n in names):
+            return "timeout"
+        net = set(self.data.get("networkFailed") or [])
+        return "network" if names and set(names) <= net else ""
+
+    def polls_last(self) -> list:
+        p = self.polls[min(max(self.n - 1, 0), len(self.polls) - 1)]
+        p = {"checks": p} if isinstance(p, list) else p
+        return [c for c in p.get("checks") or [] if isinstance(c, dict)]
+
+    def rerun(self, names: list[str]) -> bool:
+        self.reran = list(names)
+        return True
+
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
     """One gh call with the helper's own environment; a connection-level failure is retried (the request
@@ -131,10 +163,15 @@ class Live:
         self.gh, self.url, self.repo, self.num = gh, url, m[1], m[2]
         self.start = time.monotonic()
         self.base = ""
+        self.last: list = []
 
     def take(self, kind: str, what: str) -> bool:
         """Wait for room in this computer's hourly GitHub write limit (orch github writes), then count it."""
         return ghlimit.take(kind, what)
+
+    def count(self, kind: str, what: str) -> None:
+        """Count a write that did not wait for room (the merge queue's merges: one per run of the checks)."""
+        ghlimit.count(kind, what)
 
     def gh_json(self, *args: str):
         got = _run([self.gh, *args])
@@ -193,6 +230,7 @@ class Live:
             checks = json.loads(got.stdout) if got.stdout.strip() else []
         except ValueError:
             checks = []
+        self.last = [c for c in checks if isinstance(c, dict)] if isinstance(checks, list) else []
         if v is None:
             return checks if isinstance(checks, list) else [], "(pull request unreadable)"
         runs = self.gh_json("api", f"repos/{self.repo}/actions/runs?head_sha={v['headRefOid']}&per_page=100")
@@ -255,6 +293,50 @@ class Live:
         on_base = self.gh_json("api", f"repos/{self.repo}/compare/{self.base}...{parents[1]}")
         return isinstance(on_base, dict) and on_base.get("ahead_by") == 0
 
+    def failed_runs(self, head: str) -> list[dict]:
+        runs = self.gh_json("api", f"repos/{self.repo}/actions/runs?head_sha={head}&per_page=100")
+        rows = runs.get("workflow_runs") if isinstance(runs, dict) else None
+        return [
+            r for r in rows or []
+            if isinstance(r, dict) and str(r.get("event") or "").startswith("pull_request")
+            and r.get("conclusion") in ("failure", "timed_out")
+        ]  # fmt: skip
+
+    def retryable(self, names: list[str]) -> str:
+        """'timeout' when every failed check timed out, 'network' when every other failed job's log shows a
+        network error, else '' (a real failure is never retried)."""
+        v = self.view()
+        if not names or v is None:
+            return ""
+        states = {c.get("name"): c.get("state") for c in self.last}
+        if all(states.get(n) == "TIMED_OUT" for n in names):
+            return "timeout"
+        runs = self.failed_runs(v["headRefOid"])
+        if not runs or len(runs) > 6:
+            return ""
+        for r in runs:
+            got = _run([self.gh, "run", "view", str(r.get("id")), "--repo", self.repo, "--log-failed"], 90)
+            log = got.stdout[-200_000:] if got.returncode == 0 else ""
+            if not LOG_NET_ERROR.search(log):
+                return ""
+        return "network"
+
+    def rerun(self, names: list[str]) -> bool:
+        """Run the failed jobs of the head's failed workflow runs once more; False when GitHub would not."""
+        v = self.view()
+        if v is None:
+            return False
+        runs = self.failed_runs(v["headRefOid"])
+        if not runs or not self.take("other", f"{self.url} rerun failed checks"):
+            return False
+        ok = False
+        for r in runs:
+            got = _run([self.gh, "run", "rerun", str(r.get("id")), "--repo", self.repo, "--failed"], 60)
+            ok = ok or got.returncode == 0
+        if ok:
+            self.start = time.monotonic()  # the wait for the new checks starts now
+        return ok
+
     def sleep(self, secs: float) -> None:
         time.sleep(secs)
 
@@ -269,6 +351,29 @@ def _sorted(checks: list) -> list[tuple[str, str]]:
 
 
 def wait(src, no_checks: float = NO_CHECKS_SECS, timeout: float = TIMEOUT_SECS) -> Verdict:
+    """Wait for the checks; when they failed only by timeout or network error, run them once more (once per
+    call) and wait again before saying red. The retry is counted (checkretry)."""
+    v = _wait_once(src, no_checks, timeout)
+    if v.green or v.unknown or not v.checks:
+        return v
+    bad = [n for n, s in v.checks if s not in ("SUCCESS", "SKIPPED")]
+    try:
+        reason = src.retryable(bad) if bad else ""
+        if not reason or not src.rerun(bad):
+            return v
+    except Refused:
+        return v
+    print(f"{', '.join(bad)} failed by {reason}: running it once more.", file=sys.stderr, flush=True)
+    for n in bad:
+        checkretry.record(getattr(src, "repo", ""), getattr(src, "num", ""), n, reason)
+    v2 = _wait_once(src, no_checks, timeout)
+    v2.retried = bad
+    if not v2.green:
+        v2.why += f" (run once more after a {reason}, still not green)"
+    return v2
+
+
+def _wait_once(src, no_checks: float, timeout: float) -> Verdict:
     """Wait until the checks have finished, then say GREEN or NOT green. Never raises for GitHub trouble:
     what cannot be read keeps the wait going or ends NOT green."""
     draft = src.is_draft()
@@ -384,14 +489,23 @@ def _no_room(url: str, kind: str) -> str:
 
 
 def run_one(
-    url: str, merge: bool, timeout: float = TIMEOUT_SECS, src: Live | None = None, before_merge=None
+    url: str,
+    merge: bool,
+    timeout: float = TIMEOUT_SECS,
+    src: Live | None = None,
+    before_merge=None,
+    queue: bool = False,
 ) -> Outcome:
     """Wait for one pull request's checks; with merge, merge it on green as GitHub's branch rules allow, only
     its checked commit. When the base branch got commits since the branch last took it in, and they touch a
     file the pull request changes (or a test file of the same module), the base branch is taken in first and
     the checks are waited for once more: two green pull requests on the same code must not break it
     together. before_merge(head) is asked right before the merge: a reason (text) stops it, status
-    "held"; None lets it go on."""
+    "held"; None lets it go on.
+
+    queue=True is the merge queue's call: the base branch is never taken into the branch (status "behind"
+    instead; the queue checks it once on top of the base branch itself), and the merge does not wait for the
+    hourly merge count (the queue merges one group per run of the checks); it is still counted."""
     src = src or Live(url)
     v = src.view()
     if v is None:
@@ -427,6 +541,9 @@ def run_one(
             case = f"{base} moved ({len(landed)} files changed there), none of them touch this pull request"
             break
         shown = ", ".join(hits[:3]) + (" ..." if len(hits) > 3 else "")
+        if queue:  # the queue checks it on top of the base branch itself: no take-in, no second run here
+            line = f"{base} changed files of {url} since it took {base} in ({shown}); not merged alone."
+            return Outcome(url, False, "behind", line, verdict)
         if rounds >= UPDATE_ROUNDS:
             line = (
                 f"{base} keeps changing files of {url} ({shown}); not merged. Take {base} in, push, "
@@ -450,21 +567,25 @@ def run_one(
         if not verdict.green:
             line = f"Checks of {url} after taking {base} in: {verdict.line()}"
             return Outcome(url, False, "checks failed", line, verdict)
-    if not src.take("merge", url):
+    if not queue and not src.take("merge", url):
         return Outcome(url, False, "checks passed", _no_room(url, "merge"), verdict)
     try:  # after the wait for room, not before
         held = before_merge(head) if before_merge is not None else None
     except Exception as e:  # noqa: BLE001 - a check that broke never lets the merge through
         held = f"the last check before the merge failed ({e.__class__.__name__})"
     if held:
-        ghlimit.give_back("merge", url)  # no merge happened: the place goes back
+        if not queue:
+            ghlimit.give_back("merge", url)  # no merge happened: the place goes back
         return Outcome(url, False, "held", f"Checks of {url} passed; not merged: {held}", verdict)
     done = _run([src.gh, "pr", "merge", url, "--merge", "--match-head-commit", head], 60)
     if done.returncode != 0:
         why = next((x.strip() for x in (done.stderr or done.stdout).splitlines() if x.strip()), "no reason")
-        ghlimit.give_back("merge", url)  # no merge happened: the place goes back
+        if not queue:
+            ghlimit.give_back("merge", url)  # no merge happened: the place goes back
         line = f"Checks of {url} passed but GitHub did not merge it ({case}): {why[:200]}"
         return Outcome(url, False, "checks passed", line, verdict)
+    if queue:
+        src.count("merge", url)  # shown in orch github writes; it never waited for room
     took = f"; {base} taken in {rounds}x first" if rounds else ""
     return Outcome(
         url, True, "merged", f"Merged {url} on green checks ({verdict.why}); {case}{took}.", verdict

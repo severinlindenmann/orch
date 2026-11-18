@@ -17,7 +17,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, unquote_plus
 
-from . import actions, copychanges, diagapi, framepass, reffiles, selfupdate, ticketfiles
+from . import actions, copychanges, diagapi, framepass, reffiles, selfupdate, sessionlist, ticketfiles
 from .data import (
     forget_static,
     load_addons,
@@ -757,6 +757,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            from . import sessions
+
+            try:
+                n = int((parse_qs(query).get("lines") or [sessions.LINES])[0])
+            except ValueError:
+                n = sessions.LINES
+            state, age = self.server.state_cache.get()
+            body = sessions.answer(self.root, self.orch_bin, state, age, n)
+            return self._send(
+                200, json.dumps(body).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path == "/api/events":
             return self._events()
         if path == "/api/ref-file":
@@ -815,6 +829,13 @@ class Handler(BaseHTTPRequestHandler):
             if d is None:
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, json.dumps(d).encode(), "application/json")
+        m = re.fullmatch(r"/api/sessions/(t_[a-z0-9]{6,16})", path)
+        if m:  # the ticket's earlier sessions for a History tab (orch lists them); no conversation text here
+            return self._send(
+                200,
+                json.dumps(sessionlist.listing(self.root, self.orch_bin, m.group(1))).encode(),
+                "application/json",
+            )
         m = re.fullmatch(r"/api/artifacts/(t_[a-z0-9]{6,16})", path)
         if m:  # the file list of one ticket (orch lists them); no file content here
             return self._send(
@@ -900,7 +921,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live|soft|live-layer|livebar)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live|soft|live-layer|live-history|livebar|livesessions)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])

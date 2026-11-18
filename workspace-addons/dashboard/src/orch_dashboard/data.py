@@ -530,6 +530,22 @@ def add_spend(root: Path, tickets: list[dict]) -> None:
         t.pop("spend", None)
         if t.get("id") in got:
             t["spend"] = got[t["id"]]
+    add_range(root, tickets)
+
+
+def add_range(root: Path, tickets: list[dict]) -> None:
+    """`range` ("about 20-40 min · $2.00-$4.00") on tickets nobody has worked on yet: the time and cost range
+    before Start, from this workspace's own finished tickets (the core's usage.estimate_range; ORCH-297)."""
+    try:
+        from orch import usage
+
+        words = usage.range_words(usage.estimate_range(root))
+    except (ImportError, AttributeError, OSError, TypeError, ValueError):
+        words = ""
+    for t in tickets:
+        t.pop("range", None)
+        if words and t.get("status") in ("open", "ready") and not t.get("sessions") and "spend" not in t:
+            t["range"] = words
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
@@ -1095,11 +1111,8 @@ def load_runs(
             _RUN_SIGNATURES[str(root)] = signature
     claims = root / ".orch" / "run" / "tickets"  # a done ticket can still have its live session open
     ids = [t["id"] for t in tickets if t["status"] not in ("done", "dropped")][:RUNS_MAX]
-    ids += [
-        t["id"]
-        for t in tickets
-        if t["status"] in ("done", "dropped") and (claims / f"{t['id']}.json").exists()
-    ]
+    first = set(ids)  # every ticket with a run claim too: a live session past the first RUNS_MAX (ORCH-359)
+    ids += [t["id"] for t in tickets if t["id"] not in first and (claims / f"{t['id']}.json").exists()]
     now = time.monotonic()
     todo = [
         i for i in ids if fresh or (str(root), i) not in _RUNS or now - _RUNS[(str(root), i)][0] > RUNS_TTL

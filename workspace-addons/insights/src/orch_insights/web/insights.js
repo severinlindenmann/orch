@@ -186,6 +186,17 @@ function renderTeam(team) {
   }));
   byId('people').hidden = !team.people.length;
 }
+// ORCH-297: one bar for this week against the weekly budget set in Usage; no bar when there is none.
+function renderWeek(week) {
+  const host = byId('week');
+  if (!week) { host.hidden = true; return; }
+  host.hidden = false;
+  byId('week-label').textContent = week.label;
+  const bar = byId('week-bar');
+  bar.setAttribute('aria-valuenow', String(week.percent));
+  bar.setAttribute('aria-valuetext', week.label);
+  bar.firstElementChild.style.setProperty('--value', `${week.percent}%`);
+}
 function renderLost(view) {
   const note = byId('lost-note');
   note.hidden = !(view && view.lost);
@@ -195,6 +206,9 @@ async function loadModels() {
   let view = null;
   try { view = await read('/api/models'); } catch { view = null; }
   renderTeam(view && !view.error ? view.team : null);
+  let week = null;
+  try { week = (await read('/api/week')).week; } catch { week = null; }
+  renderWeek(view && !view.error && view.team ? week : null);
   renderModels(view);
 }
 
@@ -293,7 +307,15 @@ function renderServices() {
 function renderNeeds() {
   const needs = byId('needs');
   needs.replaceChildren();
-  needs.hidden = !overview.needs.length;
+  const retry = overview.retries;
+  needs.hidden = !overview.needs.length && !retry;
+  if (retry) {
+    const banner = node('article', undefined, `banner ${retry.tone === 'warn' ? 'attn' : 'info'}`);
+    const text = node('div', undefined, 'grow');
+    text.append(node('strong', retry.title), node('p', retry.text));
+    banner.append(text);
+    needs.append(banner);
+  }
   for (const card of overview.needs) {
     const banner = node('article', undefined, `banner ${card.tone === 'warn' ? 'attn' : 'info'}`);
     const text = node('div', undefined, 'grow');
@@ -304,7 +326,7 @@ function renderNeeds() {
     banner.append(text, button);
     needs.append(banner);
   }
-  const n = overview.needs.length;
+  const n = overview.needs.length + (retry && retry.tone === 'warn' ? 1 : 0);
   const health = byId('health');
   health.className = n ? 'badge attn insights-health' : 'badge done insights-health';
   health.textContent = n ? `▲ ${n} ${n === 1 ? 'needs' : 'need'} a look` : 'All good · nothing needs a look';

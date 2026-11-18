@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-25 steps: 6 ready (the script clicks them), 19 pending (not built yet).
+27 steps: 10 ready (the script clicks them), 17 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -95,20 +95,20 @@ Must be seen:
 ## 6. Focus button on a ticket and Open ticket on a session
 
 - Part: wall (draft D feature 3)
-- State: pending, waits for: The wall (crew task wall)
+- State: ready, clicked by the script
 - Pictures: `fd-06-focus-button-1280.png`, `fd-06-focus-button-1920.png`, `fd-06-focus-button-390.png`
 
 Do:
 
-1. Open a ticket page.
-2. Press its Focus button.
-3. In the session press Open ticket.
+1. Open Tickets and press the Focus button of a row.
+2. Open a ticket page and press its Focus button.
+3. In the session press Open ticket, also from full screen.
 
 Must be seen:
 
-- The button says Watch, Answer, Open or Start to fit the ticket.
-- The session opens in the layer.
-- Open ticket goes back to the same ticket page.
+- Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
+- The session opens in the layer and the page stays.
+- Open ticket goes back to the same ticket page; the session stays open.
 
 ## 7. Pin a session and give it your own name
 
@@ -181,6 +181,7 @@ Must be seen:
 - Each place works and the page stays usable behind it; on a phone there is no right.
 - The layer stays open while the page changes.
 - Esc goes back one step: full screen, then the panel, then the bar.
+- In full screen Tab stays in the layer.
 - Minimise leaves only the bar; to the side leaves a slim edge.
 - After the reload the layer opens where it was last, at the same size.
 
@@ -205,19 +206,22 @@ Must be seen:
 ## 12. Split into two and three sessions with the pane controls
 
 - Part: split (draft D feature 7)
-- State: pending, waits for: Split into one, two or three sessions (crew task split)
+- State: ready, clicked by the script
 - Pictures: `fd-12-split-1280.png`, `fd-12-split-1920.png`, `fd-12-split-390.png`
 
 Do:
 
 1. In the layer press Add beside twice.
-2. On one pane use pin, Place, minimise and close.
+2. Change to Tickets, Review and Home.
+3. On one pane use pin, Place, minimise and close.
 
 Must be seen:
 
-- Two, then three panes sit next to each other.
+- Two, then three panes sit next to each other; on the right they are stacked.
 - Every pane has pin, add beside, place, minimise and close.
+- The split stays while the page changes.
 - Closing a pane gives its room to the others.
+- On a phone one session shows at a time and there is no add beside.
 
 ## 13. Focus stays open with typed text and split while you change pages
 
@@ -273,19 +277,19 @@ Must be seen:
 ## 16. Tool, model and open time on every session
 
 - Part: sessions (draft D feature 12)
-- State: pending, waits for: Live data for every session (crew task live-data)
+- State: ready, clicked by the script
 - Pictures: `fd-16-tool-model-1280.png`, `fd-16-tool-model-1920.png`, `fd-16-tool-model-390.png`
 
 Do:
 
-1. Look at a tile and at a pane header.
-2. Open the model choice of a running session.
+1. Open a session that needs you from the bar.
+2. Look at the pane: what it does now, its last lines and the line under them.
 
 Must be seen:
 
-- Tool and model are shown (for example "Claude CLI · Opus").
-- How long it is open and when it closes for being idle.
-- A new model applies from the next fresh start and says so.
+- The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
+- How long it is open and how long it stays (warm while it works, or when it closes for being idle).
+- All of it stays current while you look; the keyboard place does not jump.
 
 ## 17. Chat: messages with the results inside
 
@@ -434,4 +438,35 @@ Must be seen:
 - The wall is one column.
 - The layer opens at the bottom and shows one session; right falls back to bottom.
 - Nothing scrolls sideways; every button can be reached.
+
+## 26. Earlier sessions in the History tab, reopened with one click
+
+- Part: sessions (draft D feature 4)
+- State: ready, clicked by the script
+- Pictures: `fd-26-history-1280.png`, `fd-26-history-1920.png`, `fd-26-history-390.png`
+
+Do:
+
+1. Open a session in the layer and press History (in More when the pane is narrow).
+2. Press Reopen on an earlier session.
+
+Must be seen:
+
+- Up to 10 sessions of the ticket, newest first, each with its time, first message and number of messages.
+- The session in use says In use; one that is not on this computer has no Reopen.
+- Reopen starts the helper on that conversation and the list closes.
+
+## 27. Change the model of a running session
+
+- Part: sessions (draft D feature 12)
+- State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
+- Pictures: `fd-27-model-choice-1280.png`, `fd-27-model-choice-1920.png`, `fd-27-model-choice-390.png`
+
+Do:
+
+1. Open the model choice of a running session.
+
+Must be seen:
+
+- A new model applies from the next fresh start and says so.
 

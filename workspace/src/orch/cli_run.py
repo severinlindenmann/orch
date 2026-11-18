@@ -64,7 +64,12 @@ def add_parsers(sub, common) -> None:
             x.add_argument("--dry-run", action="store_true", help="only say what it would do")
             continue
         x.add_argument(
-            "ticket", nargs="?" if name in ("event", "done", "input") else "+" if name == "status" else None
+            "ticket",
+            nargs="?"
+            if name in ("event", "done", "input")
+            else "+"
+            if name in ("status", "screen")
+            else None,
         )
         if name in ("claim", "argv"):
             x.add_argument("--mode", choices=("oneshot", "live"), default="oneshot")
@@ -103,6 +108,12 @@ def add_parsers(sub, common) -> None:
             )
         if name == "start":
             x.add_argument("--take-over", action="store_true", help="take over a claim nobody has written to")
+            x.add_argument(
+                "--session",
+                dest="reopen",
+                metavar="ID",
+                help="continue this earlier session of the ticket (a person only; see orch run history)",
+            )
             x.add_argument("--text", help="what to queue when the ticket is busy")
             x.add_argument(
                 "--priority",
@@ -410,14 +421,7 @@ def _history(args, root: Path, tid: str) -> None:
     if rec is None:
         raise Refused("That session does not belong to this ticket. List them: orch run history <ticket>")
     if args.resume:
-        if not str(args.by or tickets.current_actor()).startswith("human:"):
-            raise Refused("Only a person can pick the conversation a helper continues.")
-        run = runs.read(root, tid)
-        if run and isinstance(run.get("pid"), int) and runs.state(run) == "alive":
-            raise Refused("A helper is working on this ticket. Stop it first, then continue the other chat.")
-        if not rec["readable"]:
-            raise Refused("That conversation is not on this computer, so it cannot be continued.")
-        tickets.record_session(root, tid, rec["agent"], args.session, runs.host())
+        session_history.reopen(root, tid, args.session, str(args.by or tickets.current_actor()))
         _out(args, {"continued": args.session}, "The next run continues that conversation.")
         return
     h = session_history.read(rec["agent"], args.session, root=root)
@@ -456,8 +460,17 @@ def dispatch(args, root: Path) -> bool:
     if sub == "screen":  # read-only: nothing is typed into the session
         if not args.ticket:
             raise Refused("Say which ticket: orch run screen <ticket>")
-        data = runwatch.screen(root, args.ticket, args.lines)
-        _out(args, data, "\n".join(data["lines"]))
+        ids = args.ticket if isinstance(args.ticket, list) else [args.ticket]
+        if len(ids) == 1:  # the one-ticket answer is unchanged
+            data = runwatch.screen(root, ids[0], args.lines)
+            _out(args, data, "\n".join(data["lines"]))
+            return True
+        # several sessions in one tmux call (the dashboard's live sessions): only the lines, sessions that are
+        # gone are left out; orch.reads answers the same in-process
+        ids = [tickets.resolve(root, i) for i in ids]
+        shots = runwatch.tails(root, ids, args.lines)
+        text = "\n\n".join(f"{runs_live.ref(root, t)}:\n" + "\n".join(v["lines"]) for t, v in shots.items())
+        _out(args, {"screens": shots}, text or "No live session among these tickets.")
         return True
     if sub != "event":  # a hook must stay quiet; everything else first closes sessions idle for an hour
         with contextlib.suppress(Exception):
@@ -543,6 +556,14 @@ def dispatch(args, root: Path) -> bool:
         p = {k: v for k, v in p.items() if k not in ("stdin", "item_ids")}
         _out(args, p, "\n".join(p["argv"]))
     elif sub == "start":
+        agent = args.agent
+        if args.reopen:
+            if args.fresh:
+                raise Refused("Pick one: --fresh starts without a conversation, --session continues one.")
+            rec = session_history.reopen(root, tid, args.reopen, by)
+            if agent and agent != rec["agent"]:
+                raise Refused(f"That session belongs to {rec['label']}; it can only be continued there.")
+            agent = rec["agent"]
         r = runs.start(
             root,
             tid,
@@ -552,7 +573,7 @@ def dispatch(args, root: Path) -> bool:
             allow=args.allow,
             mode=args.mode,
             text=args.text,
-            agent=args.agent,
+            agent=agent,
             priority=args.priority,
         )
         for note in r["notes"]:

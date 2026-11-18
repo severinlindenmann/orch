@@ -8,8 +8,10 @@
 // A page that throws at load must never reach develop (#525 lost holdText; nothing caught it).
 // Then it runs the UX checks of the master gallery (workspace/src/orch_ui/tests/ux_checks.cjs: self-test first, then
 // sideways scroll, target size, focus mark, reduced motion, text contrast), and the click-through of the new Focus
-// (e2e/focus_d/clickthrough.cjs: its ready steps at three widths), and the five dashboard browser tests (e2e/dash_*.cjs:
-// Lessons, Run now, Allow script, Sync card, page health at 1280/1920/390/320). They run here because the CI job
+// (e2e/focus_d/clickthrough.cjs: its ready steps at three widths), and the six dashboard browser tests (e2e/dash_*.cjs:
+// Lessons, Run now, Allow script, Sync card, page health at 1280/1920/390/320, same numbers on every page), and the
+// dashboard click-throughs (workspace-addons/dashboard/clickthrough: every dashboard feature done, reloaded and checked
+// on a seeded demo workspace with the real server; a feature nobody clicked fails by name). They run here because the CI job
 // `page-smoke` is the one that has Chromium and the bot cannot add a workflow file.
 //
 //   node e2e/focus_insights_smoke.cjs        (exit 0 = all screens clean)
@@ -62,16 +64,20 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
   const ct = require('node:child_process').spawnSync(process.execPath, [require('node:path').join(__dirname, 'focus_d', 'clickthrough.cjs'), '--out', out], { stdio: 'inherit' });
   require('node:fs').rmSync(out, { recursive: true, force: true });
   if (ct.status !== 0) process.exit(1);
-  // The five dashboard tests (node --test files). They find Playwright through PW_DIR: the global install of the job.
+  // The six dashboard tests (node --test files). They find Playwright through PW_DIR: the global install of the job.
   const sp = require('node:child_process');
   const PW_DIR = process.env.PW_DIR || sp.execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim();
   const shots = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'dash-e2e-'));
   const failed = [];
-  for (const name of ['dash_lessons', 'dash_run_now', 'dash_allow_script', 'dash_sync_card', 'dash_page_health']) {
+  for (const name of ['dash_lessons', 'dash_run_now', 'dash_allow_script', 'dash_sync_card', 'dash_page_health', 'dash_same_numbers']) {
     const r = sp.spawnSync(process.execPath, ['--test', require('node:path').join(__dirname, name + '.cjs')],
       { stdio: 'inherit', env: { ...process.env, PW_DIR, SHOTS_DIR: require('node:path').join(shots, name) } });
     if (r.status !== 0) failed.push(name);
   }
   require('node:fs').rmSync(shots, { recursive: true, force: true });
   if (failed.length) { console.error('DASHBOARD E2E FAILED: ' + failed.join(', ')); process.exit(1); }
+  // Every dashboard feature's click-through (ORCH-308), on a seeded workspace with the real dashboard server.
+  const click = sp.spawnSync(process.execPath, [require('node:path').join(__dirname, '..', 'workspace-addons', 'dashboard', 'clickthrough', 'run.cjs')],
+    { stdio: 'inherit', env: { ...process.env, PW_DIR } });
+  if (click.status !== 0) { console.error('DASHBOARD CLICK-THROUGHS FAILED (see above)'); process.exit(1); }
 })().catch(e => { console.error(e); process.exit(1); });

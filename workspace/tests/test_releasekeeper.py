@@ -947,6 +947,22 @@ def test_a_helper_cannot_point_the_keeper_elsewhere(proj, run_cli, monkeypatch):
     assert run_cli("config", "set", "github.release_env", "off")[0] == 0
 
 
+def test_a_known_red_job_covers_its_parts():
+    # CI splits a test job into parts (ORCH-315): the known-red entry for the whole job covers every part
+    known = {"workspace / test (windows-latest)": "ORCH-32"}
+    assert (
+        rk.known_name("workspace / test (windows-latest, 3/6)", known) == "workspace / test (windows-latest)"
+    )
+    assert rk.known_name("workspace / test (windows-latest)", known) == "workspace / test (windows-latest)"
+    assert rk.known_name("workspace / test (macos-latest, 1/5)", known) is None
+    assert rk.known_name("workspace / test (windows-latest-arm, 1/2)", known) is None
+    red = {"name": "workspace / test (windows-latest, 2/6)", "status": "COMPLETED", "conclusion": "FAILURE"}
+    green = {"name": "workspace / test (ubuntu-latest, 1/2)", "status": "COMPLETED", "conclusion": "SUCCESS"}
+    assert rk.checks_green([red, green], frozenset(known)) == "green"
+    assert rk.failed_checks([red, green], frozenset(known)) == []
+    assert rk.checks_green([red, green]) == "red"
+
+
 # ---- ORCH-314: develop's push runs are never cancelled; releases are cut only from the last green commit
 G1, G2 = "a" * 40, "b" * 40
 
