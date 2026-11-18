@@ -18,8 +18,13 @@ module.exports = {
       const res = await route.fetch();
       if (res.status() !== 200) return route.fulfill({ response: res });
       const st = await res.json();
-      st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
-      st.settings = { ...(st.settings || {}), focus_preview_on: true };
+      // a full state, or a changes-only answer (ORCH-517) whose changed keys are in st.set; an unchanged answer
+      // is left alone
+      const into = st.delta ? st.set : st;
+      if (!st.unchanged && into) {
+        if (!st.delta || 'addons' in into) into.addons = [...(into.addons || []).filter(a => a.name !== live.name), live];
+        if (!st.delta || 'settings' in into) into.settings = { ...(into.settings || {}), focus_preview_on: true };
+      }
       route.fulfill({ response: res, json: st });
     });
     await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
