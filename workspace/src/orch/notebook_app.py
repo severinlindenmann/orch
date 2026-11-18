@@ -40,7 +40,7 @@ import tomllib
 import urllib.parse
 from pathlib import Path
 
-from orch import net, secretscan
+from orch import net, procs, secretscan
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -303,7 +303,7 @@ def _text_reply(code: int, raw: bytes, name: str) -> dict:
     if code != 0:
         return {"ok": False, "refused": f"{name} did not work (it ended with code {code})."}
     try:
-        text = raw.decode("utf-8")
+        text = raw.decode("utf-8").replace("\r\n", "\n")
     except UnicodeDecodeError:
         return {
             "ok": False,
@@ -514,7 +514,7 @@ def start() -> str:
     log = _private_dir(home() / "log")
     data = {
         "Label": LABEL,
-        "ProgramArguments": [sys.executable, "-m", "orch", "notebook", "run", "--service"],
+        "ProgramArguments": procs.orch_python_argv("notebook", "run", "--service"),
         "RunAtLoad": True,
         "KeepAlive": True,
         "ProcessType": "Background",
