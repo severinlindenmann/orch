@@ -18,10 +18,12 @@ WAIT = 600  # a repeat waits this long for the first run of its id (ticket.new w
 
 
 class Entry:
-    __slots__ = ("at", "done", "op", "reply", "result")
+    __slots__ = ("at", "caller", "done", "op", "reply", "result", "what")
 
-    def __init__(self, op: str):
+    def __init__(self, op: str, caller: tuple = (), what: str = ""):
         self.op = op
+        self.caller = caller  # who sent it: (has the person's session, the add-on page's pass or None)
+        self.what = what  # a hash of the op and its arguments: a repeat must send the same
         self.done = threading.Event()
         self.result: tuple[int, str, object] | None = None  # (status, text, extra) of the op
         self.reply: dict | None = (
@@ -45,7 +47,7 @@ class ActIds:
                 break
             del self.items[key]
 
-    def claim(self, act_id: str, op: str) -> tuple[Entry, bool]:
+    def claim(self, act_id: str, op: str, caller: tuple = (), what: str = "") -> tuple[Entry, bool]:
         """(entry, True) when this request runs the op; (entry, False) when an earlier request with the same id
         did or does: wait on `entry.done`, then use `entry.result` (None = it ran into a refusal; run it now)."""
         with self.lock:
@@ -53,7 +55,7 @@ class ActIds:
             e = self.items.get(act_id)
             if e is not None and (not e.done.is_set() or e.result is not None):
                 return e, False
-            e = Entry(op)
+            e = Entry(op, caller, what)
             self.items[act_id] = e
             return e, True
 
@@ -70,13 +72,13 @@ class ActIds:
                         del self.items[k]
             entry.done.set()
 
-    def status(self, act_id: str) -> dict:
+    def status(self, act_id: str, caller: tuple = ()) -> dict:
         """What the page's question "did my click go through?" gets: done (with its status and small reply),
         running, or unknown (never arrived, refused, or forgotten)."""
         with self.lock:
             self._prune()
             e = self.items.get(act_id)
-        if e is None:
+        if e is None or e.caller != caller:  # only who sent the click learns about it
             return {"state": "unknown"}
         if not e.done.is_set():
             return {"state": "running", "op": e.op}

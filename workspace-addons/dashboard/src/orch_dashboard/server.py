@@ -815,9 +815,8 @@ class Handler(BaseHTTPRequestHandler):
             act_id = parse_qs(query).get("id", [""])[0]
             if not actids.ID.fullmatch(act_id):
                 return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
-            return self._send(
-                200, json.dumps(self.server.act_ids.status(act_id)).encode(), "application/json"
-            )
+            st = self.server.act_ids.status(act_id, self._act_caller(self._can_act()))
+            return self._send(200, json.dumps(st).encode(), "application/json")
         if path == "/api/state":
             fresh = "fresh=1" in query.split(
                 "&"
@@ -1262,12 +1261,18 @@ class Handler(BaseHTTPRequestHandler):
         if not actids.ID.fullmatch(act_id):
             return actions.run_op(self.root, self.orch_bin, op, args, session=session)
         mem = self.server.act_ids
+        caller = self._act_caller(session)
+        what = hashlib.sha256(json.dumps([op, args], sort_keys=True, default=str).encode()).hexdigest()
         while True:
-            entry, first = mem.claim(act_id, str(op))
+            entry, first = mem.claim(act_id, str(op), caller, what)
             if first:
                 break
-            if entry.op != str(op):
+            if entry.caller != caller or entry.op != str(op):  # an id is only ever answered to who sent it
                 raise actions.BadRequest("That request could not be read.")
+            if entry.what != what:  # the same id with other contents: never run it as well, never answer it
+                raise actions.BadRequest(
+                    "This was already sent with other contents. Close this window and look in the ticket list."
+                )
             if not entry.done.wait(actids.WAIT):
                 raise actions.Unavailable("This is still being saved. Wait a moment, then look again.")
             if entry.result is not None:
@@ -1279,6 +1284,11 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             mem.finish(entry, result, act_reply(body, result[2]) if result and result[0] == 200 else None)
         return result
+
+    def _act_caller(self, session: bool) -> tuple:
+        """Who sends a click (ORCH-580): with the person's session or not, and through which add-on page's pass."""
+        frame = getattr(self, "_frame", None)
+        return (bool(session), frame[0] if frame else None)
 
     def _send_state(self, state: dict, reply: dict):
         """A click's answer: the state plus the click's own few keys. The page says which revision it holds

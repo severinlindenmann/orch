@@ -229,3 +229,26 @@ def test_a_slow_reader_gets_the_whole_answer(monkeypatch, srv, made_orch):
     assert time.monotonic() - started > 0.3
     assert len(rest) == length
     assert json.loads(rest)["created"] == {"id": "t_made0001"}
+
+
+def test_same_id_with_other_contents_is_refused_and_runs_nothing(srv, made_orch):
+    port = srv.server_address[1]
+    assert new_ticket(srv, "same-0123456789")[0] == 200
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+    body = json.dumps({"op": "ticket.new", "args": {"title": "Something else"}})
+    c.request("POST", "/api/act", body=body, headers=_headers(port, "same-0123456789"))
+    r = c.getresponse()
+    assert r.status == 400 and b"already sent with other contents" in r.read()
+    assert made(made_orch) == 1
+
+
+def test_a_click_is_only_told_to_who_sent_it():
+    from orch_dashboard.actids import ActIds
+
+    mem = ActIds()
+    entry, first = mem.claim("own-0123456789", "ticket.new", (True, None), "h")
+    assert first
+    mem.finish(entry, (200, "", {"id": "t_x"}), {"created": {"id": "t_x"}})
+    assert mem.status("own-0123456789", (True, None))["reply"] == {"created": {"id": "t_x"}}
+    assert mem.status("own-0123456789", (False, None)) == {"state": "unknown"}  # watch-only
+    assert mem.status("own-0123456789", (True, "sync")) == {"state": "unknown"}  # an add-on page's pass
