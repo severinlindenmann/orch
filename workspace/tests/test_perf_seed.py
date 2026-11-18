@@ -98,3 +98,37 @@ def test_refuses_without_a_strict_orch_home(proj, run, monkeypatch):
     seed = _seed_module()
     with pytest.raises(SystemExit, match="ORCH_HOME_STRICT"):
         seed.refuse_unsafe(ws)
+
+
+def _limits_module():
+    import sys
+
+    sys.path.insert(0, str(SEED.parent))  # check_limits imports baseline from its own folder
+    spec = importlib.util.spec_from_file_location("perf_check_limits", SEED.parent / "check_limits.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_limits_name_every_passed_limit():
+    """The CI check at 10,000 tickets (ORCH-525) fails on a slow command, a slow or failed page and a costly
+    idle minute, and passes when all are within the owner's limits."""
+    mod = _limits_module()
+    lim = json.loads((SEED.parent / "limits.json").read_text(encoding="utf-8"))
+    assert lim["tickets"] == 10000 and lim["page_seconds"] == 2.0 and lim["idle_minute_bytes"] == 204800
+    fast = {"ticket list": 0.4, "needs": 0.6}
+    rows = [{"page": "Home", "ms": 900}, {"page": "Idle Home 60 s", "ms": None, "enc": 50_000}]
+    assert mod.check(lim, fast, {"rows": rows})[1] == []
+    slow = {"ticket list": 5.9, "needs": 0.6}
+    rows = [
+        {"page": "Home", "ms": 2600},
+        {"page": "Tickets board", "ms": None, "err": "page.reload: Timeout"},
+        {"page": "Idle Home 60 s", "ms": None, "enc": 14_000_000},
+    ]
+    bad = mod.check(lim, slow, {"rows": rows})[1]
+    assert len(bad) == 4
+    assert bad[0].startswith("orch ticket list took 5.9 s")
+    assert any(b.startswith("Tickets board was usable after fails") for b in bad)
+    assert mod.check(lim, {"ticket list": 0.4}, None)[1] == ["orch needs took None s (limit 1.0 s)"]
+    short = [{"page": "Idle Home 20 s", "ms": None, "enc": 100_000}]  # 300 KB a minute
+    assert mod.check(lim, fast, {"rows": short})[1] == ["An idle Home minute fetched 293 KB (limit 200 KB)"]

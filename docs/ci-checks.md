@@ -46,6 +46,7 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | e2e smoke (5 minutes) | | required, always | | | required |
 | add-on suites, page smoke, click-throughs | in light (changed add-ons only) | required, always | runs unless proven | | required |
 | clock (suites at 22:30 and 23:59:40 UTC) | | required, always | runs unless proven | runs | required |
+| perf (10,000 seeded tickets: commands, pages, idle minute within `e2e/perf/limits.json`) | | required (when orch code changed) | | runs | |
 | contracts, publish, relay | required | required (contracts always) | runs unless proven | | required |
 | mobile | required | required | runs unless proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits) | in light | required, always | runs unless proven | runs | required |

@@ -1,0 +1,7 @@
+{
+ "about": "The owner's limits for orch at 10,000 tickets (ORCH-518, ORCH-525). check_limits.py fails when one is passed.",
+ "tickets": 10000,
+ "command_seconds": {"ticket list": 1.0, "needs": 1.0},
+ "page_seconds": 2.0,
+ "idle_minute_bytes": 204800
+}
