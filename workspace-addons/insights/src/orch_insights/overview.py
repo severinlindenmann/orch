@@ -250,7 +250,7 @@ def lost_view(counts):
         return None
     return {
         "lines": n,
-        "text": f"{n:,} helper actions in the last 30 days were not recorded, so the counts on this page are too low.",
+        "text": f"{n:,} helper actions in the last 30 days were not recorded, so the counts on this page are too low. They cannot be added back. If the number keeps growing, press Report a problem.",
     }
 
 
