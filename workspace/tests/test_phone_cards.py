@@ -19,9 +19,9 @@ from orch.errors import Refused
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
-VEC = json.loads((CONTRACTS / "vectors" / "review-card-v1.json").read_text())
-RQ = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text())
-SCHEMA = json.loads((CONTRACTS / "message.schema.json").read_text())
+VEC = json.loads((CONTRACTS / "vectors" / "review-card-v1.json").read_text(encoding="utf-8"))
+RQ = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text(encoding="utf-8"))
+SCHEMA = json.loads((CONTRACTS / "message.schema.json").read_text(encoding="utf-8"))
 MSG_V = jsonschema.Draft202012Validator(SCHEMA)
 
 

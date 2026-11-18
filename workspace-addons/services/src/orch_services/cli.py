@@ -192,10 +192,31 @@ def _no_secret(root: Path, rec: dict) -> None:
         from orch import secretscan
     except ImportError:  # the core is always there (python -m under orch); never a silent pass
         raise Refused("Could not check the command for secrets. Update orch and try again.") from None
-    if secretscan.find("\n".join([rec["name"], *rec["command"]]), root):
+    hits = secretscan.find("\n".join([rec["name"], *rec["command"]]), root)
+    if hits and all(h.get("kind") == "stored-key" for h in hits):
+        why = _stored_keys_unreadable(root)
+        if why:  # the comparison could not run: say why instead of blaming a harmless command
+            raise Refused(f"Could not compare the command with this workspace's stored keys: {why}")
+    if hits:
         raise Refused(
             "The name or command holds a secret. Leave it out and read it inside the command with orch secret exec."
         )
+
+
+def _stored_keys_unreadable(root: Path) -> str | None:
+    """The core's own words when the stored keys cannot be read (then every check reports a stored key)."""
+    try:
+        from orch import keystore
+
+        keystore.all_needles(root)
+    except Exception as e:  # noqa: BLE001 - only to say why; the add stays refused either way
+        return _plain_reason(e)
+    return None
+
+
+def _plain_reason(e: Exception) -> str:
+    text = " ".join(str(e).split())[:200]
+    return text if text else "orch could not read them. Try again in a moment."
 
 
 def _masked_command(root: Path, argv: list[str]) -> list[str]:
@@ -499,6 +520,9 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     if how.get("kind") != drv.name:
         raise Refused(f"{it['name']} cannot be managed on this computer. Run orch services found again.")
     name = store.clean_name(getattr(args, "name", None) or it["name"])
+    _no_secret(
+        root, {"name": name, "command": []}
+    )  # the name shows in list, questions and the page, as with add
     sid = _free_id(root, getattr(args, "id", None), name)
     try:
         command = store.clean_command(it["command"])

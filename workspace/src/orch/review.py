@@ -876,7 +876,7 @@ _CHECK_FILE_TYPES = {
     ".html": "page", ".htm": "page", ".pdf": "file",
 }  # fmt: skip
 _CHECK_FILE_NAME = re.compile(r"[^/\\\x00-\x1f\x7f]{1,200}(/[^/\\\x00-\x1f\x7f]{1,200}){0,3}")
-MAX_CHECK_FILES = 6
+MAX_CHECK_FILES = 24  # the card shows 5 tiles and a "+N more" tile (ORCH-421)
 
 
 def _check_files(ticket: dict, root: Path | None) -> list[dict]:
@@ -1403,6 +1403,8 @@ def applies_now_block(ticket: dict, root: Path | None = None) -> str:
             "none_of_these": "None of the options.",
         }.get(d.get("action"), d.get("summary", ""))
         then = card.get("then")
+        if d.get("action") == "send_back" and card.get("kind") == "check":
+            then = "The helper makes a new version."  # not the card's "The ticket is done."
         lines.append(
             f"{head}{' ' + then if then and d.get('action') not in ('dont', 'none_of_these') else ''}"
         )

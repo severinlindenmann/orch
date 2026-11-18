@@ -110,6 +110,10 @@ const STATUS_CHOICES = window.DashHelpers.STATUS_CHOICES, MOVE_CHOICES = window.
 const moveHome = status => status === 'waiting' ? 'active' : window.DashHelpers.columnOf(status);
 const laneHere = t => window.DashHelpers.laneOf(t, shown(t).status, questions(t).length > 0);
 const starting = new Set();
+// A helper's session appears only after it registers, so right after a successful Start the server still says "no session":
+// for a minute the ticket page must not fall back to Not started / Start helper (ORCH-250).
+const startedAt = new Map();
+const justStarted = id => Date.now() - (startedAt.get(id) || 0) < 60000;
 // The one chip of a ticket: what the agent or the person has to do now ('' when nothing).
 function activityInfo(t) {
   const run = state.runs?.[t.id], live = run?.claim?.live;
@@ -383,8 +387,9 @@ function render(arrived = new Set()) {
   menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
   const wait = document.getElementById('topbar-wait');
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
-    const ages = array(state.tickets).filter(t => t.status !== 'done' && questions(t).length).map(t => Date.parse(t.updated_at)).filter(Number.isFinite);
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · longest wait ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
+    // the age of the same needs the number counts (ORCH-407: an old question on a dropped ticket said "19 h ago")
+    const oldest = needCount && typeof needsOldestAt === 'function' ? needsOldestAt() : null;
+    const line = needCount ? window.DashHelpers.needsYou(needCount) + (oldest != null ? ' · longest wait ' + window.DashHelpers.ago(new Date(oldest).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) { wait.textContent = line; wait.title = line; }
   }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
@@ -425,6 +430,7 @@ function render(arrived = new Set()) {
   }
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
+  if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
   main.querySelectorAll('[data-question]').forEach(host => {
@@ -557,6 +563,7 @@ async function act(op, args) {
     if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
     const next = await res.json();
     succeeded = true;
+    if (before) startedAt.set(args.ticket, Date.now());
     starting.delete(args.ticket);
     accept(next);
     return {ok:true, status:200, state:next};
@@ -576,6 +583,7 @@ async function act(op, args) {
 // A notice that comes while a fetch or a change is under way is kept, never dropped: that fetch may have read the
 // tickets before the change (load_state reads tickets first, run status last), so one more fetch follows it.
 let refreshAgain = false;
+let wantFull = false;  // the last delta did not fit the state held: ask for the whole state once
 async function refresh() {
   if (snapshot) return;
   if (fetching || writing) { refreshAgain = true; return; }
@@ -586,9 +594,16 @@ async function refresh() {
   const connection = document.getElementById('connection');
   try {
     // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
-    const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
+    const have = state?.rev && !wantFull ? '?have=' + encodeURIComponent(state.rev) : '';
+    wantFull = false;
+    const res = await fetch('/api/state' + have, {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
-    const next = await res.json();
+    let next = await res.json();
+    if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
+      const merged = window.DashHelpers.applyStateDelta(state, next);
+      if (!merged) { wantFull = true; refreshAgain = true; return; }
+      next = merged;
+    }
     if (next.unchanged && state) {
       if (writing || version !== mutation) { refreshAgain = true; return; }
       connection.hidden = true;

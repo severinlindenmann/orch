@@ -51,7 +51,8 @@ def go(tmp_path, **sim):
         {c["sha"]: {"pr": c["pr"], "head": c["head"], "url": c["url"]} for c in sim["changes"] if c["pr"]},
     )
     st = json.loads(json.dumps(sim.pop("state", {})))
-    cfg = rk.Cfg(None, keeper="ORCH-79", repo="x/y", clone=str(tmp_path), run_dir=tmp_path)
+    over = sim.pop("cfg", {})
+    cfg = rk.Cfg(None, keeper="ORCH-79", repo="x/y", clone=str(tmp_path), run_dir=tmp_path, **over)
     w = rk.World(None, cfg, json.loads(json.dumps(sim)))
     lines = rk.pass_once(w, st, "ORCH-79", None)
     return json.loads(json.dumps({"state": st, "did": w.did, "lines": lines}, default=str))
@@ -260,10 +261,89 @@ def test_a_review_that_ended_twice_without_a_verdict_holds_and_says_so(tmp_path)
     assert once["did"] == ["security-review:#2"] and once["state"]["security"]["prs"]["2"]["tries"] == 2
 
 
-def test_the_daily_cap_holds_instead_of_starting(tmp_path):
-    out = go(tmp_path, state={"security": {"prs": {}, "starts": {secreview._day(): secreview.PER_DAY}}})
+W30 = "after-release-30"  # the window go() runs in (last_release 30)
+
+
+def used_up(n=secreview.PER_DAY, **sec):
+    return {"security": {"prs": {}, "starts": {W30: n}, **sec}}
+
+
+def test_the_limit_holds_and_puts_one_card_instead_of_waiting_silently(tmp_path):
+    out = go(tmp_path, state=used_up())
+    assert out["did"] == ["card:security-limit #2"]
+    assert "#2: waits for a security review (8 started for this release already)" in out["lines"]
+    assert out["lines"][-1] == "waits for every security OK: #2 (security review not started yet)"
+    card = out["state"]["security"]["limit_card"]
+    assert card["window"] == W30 and card["prs"] == {"2": "h2"} and card["review"] == "Review these 1 now"
+    again = go(tmp_path, state=out["state"])  # unanswered: no second card
+    assert again["did"] == []
+    assert again["lines"][-1] == "waits for every security OK: #2 (security review not started yet)"
+
+
+def test_the_limit_counts_per_release_not_per_day(tmp_path):
+    old = {"security": {"prs": {}, "starts": {"after-release-29": 50, "2026-11-18": 8}}}
+    out = go(tmp_path, state=old)
+    assert out["did"] == ["security-review:#2"]
+    assert out["state"]["security"]["starts"] == {W30: 1}
+
+
+def test_the_limit_is_a_setting(tmp_path):
+    out = go(tmp_path, state=used_up(), cfg={"security_limit": "30"})
+    assert out["did"] == ["security-review:#2"]
+    assert out["state"]["security"]["starts"] == {W30: 9}
+    assert secreview.limit(None) == secreview.limit("x") == secreview.limit("0") == secreview.PER_DAY
+    assert secreview.check_limit(" 30 ") == "30"
+    for bad in ("0", "-3", "abc", "1.5", str(secreview.LIMIT_MAX + 1)):
+        with pytest.raises(Refused):
+            secreview.check_limit(bad)
+
+
+def _limit_card_answered(tmp_path, answer, by="human:owner"):
+    first = go(tmp_path, state=used_up())
+    first["state"]["security"]["limit_card"]["qid"] = "q9"
+    q = {"id": "q9", "text": "...", "answer": answer, "answered_by": by}
+    return go(tmp_path, state=first["state"], ticket={"ORCH-79": {"questions": [q]}})
+
+
+def test_review_them_now_starts_the_waiting_reviews(tmp_path):
+    out = _limit_card_answered(tmp_path, "Review these 1 now")
+    assert "security limit: the owner said review #2 now" in out["lines"]
+    assert out["did"] == ["security-review:#2"]
+    assert out["state"]["security"]["extra"] == {W30: 1}
+    assert out["state"]["security"]["starts"] == {W30: 9}
+
+
+def test_release_without_them_lets_the_release_go(tmp_path):
+    out = _limit_card_answered(tmp_path, "Release without them")
+    assert "security limit: the owner said release without a review of #2" in out["lines"]
+    assert out["state"]["security"]["prs"]["2"]["owner_ok"] == "h2"
+    assert any(d.startswith("dispatch:") for d in out["did"])  # the normal cut path starts
+    assert not any(d.startswith("security-review:") for d in out["did"])
+
+
+def test_release_without_them_never_overrides_a_review_started_since(tmp_path):
+    first = go(tmp_path, state=used_up())
+    st = first["state"]
+    st["security"]["limit_card"]["qid"] = "q9"
+    st["security"]["prs"]["2"] = {"sha": "h2", "tid": "t_sec2", "key": "SEC-2"}
+    q = {"id": "q9", "text": "...", "answer": "Release without them", "answered_by": "human:owner"}
+    v = {"2": {"sha": "h2", "verdict": "problems", "line": "a way in without sign-in"}}
+    out = go(tmp_path, state=st, ticket={"ORCH-79": {"questions": [q]}}, security_verdicts=v)
+    assert "owner_ok" not in out["state"]["security"]["prs"]["2"]
+    assert out["lines"][-1] == "waits for every security OK: #2 (security review found problems)"
+
+
+def test_an_agents_answer_to_the_limit_card_does_not_count(tmp_path):
+    out = _limit_card_answered(tmp_path, "Release without them", by="agent:claude")
     assert out["did"] == []
     assert out["lines"][-1] == "waits for every security OK: #2 (security review not started yet)"
+
+
+def test_a_new_release_drops_the_old_limit_card(tmp_path):
+    first = go(tmp_path, state=used_up())
+    out = go(tmp_path, state=first["state"], last_release=31)
+    assert out["state"]["security"]["limit_card"]["done"] == "a release went out"
+    assert out["did"] == ["security-review:#2"]
 
 
 def test_a_failed_github_read_holds_the_cut(tmp_path, monkeypatch):

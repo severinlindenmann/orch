@@ -106,7 +106,7 @@ class World:
         p = self.prs[n]
         return {"state": p["state"], "isDraft": p["isDraft"], "baseRefName": p["base"],
                 "reviewDecision": p["review"], "reviews": p.get("reviews", []), "headRefOid": self.head(n), "number": n,
-                "title": f"Change {n}", "isCrossRepository": False}  # fmt: skip
+                "title": f"Change {n}", "isCrossRepository": False, "files": [{"path": f"src/m{n}.py"}]}  # fmt: skip
 
     def own_checks_failed(self, u):
         return False
@@ -206,7 +206,7 @@ def make(ws: Path, w: World, take=None, waiter=None, logs=None):
         t[0] += secs
 
     def real_waiter(u, before_merge):
-        return prwait.run_one(u, True, src=Src(w, u), before_merge=before_merge)
+        return prwait.run_one(u, True, src=Src(w, u), before_merge=before_merge, queue=True)
 
     return runner.Runner(
         ws, w, lambda repo: Git(store.folder(ws), REPO, url=str(w.bare)), waiter=waiter or real_waiter,
@@ -328,6 +328,19 @@ def test_only_allowed_base_branches_and_never_main(ws, world):
     make(ws, world).run()
     assert states(ws) == {1: "out", 2: "merged", 3: "merged"} and not world.landed(1)
     assert "goes into main" in why(ws, 1)
+
+
+def test_the_group_size_is_a_setting(ws, world):
+    assert settings.max_group(ws) == 5
+    for bad in ('"10"', "true", "0", "21", "-3", "2.5"):
+        _config(ws, f"[pull_requests]\nmax_group = {bad}\n")
+        assert settings.max_group(ws) == 5, bad
+    _config(ws, "[pull_requests]\nmax_group = 2\n")
+    assert settings.max_group(ws) == 2
+    add(ws, 1, 2, 3, 4)
+    make(ws, world).run()
+    assert states(ws) == {1: "merged", 2: "merged", 3: "merged", 4: "merged"}
+    assert [g["members"] for g in world.groups.values()] == [[1, 2], [3, 4]]
 
 
 def test_the_queue_add_command_refuses_main_and_requested_changes(ws, world, monkeypatch, capsys):

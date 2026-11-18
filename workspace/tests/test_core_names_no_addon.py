@@ -18,7 +18,11 @@ _TOKENS = "the record kind 'usage' / the providers' JSON key for token use, not 
 _KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), not the add-on"
 ALLOW = {
     "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
-    "orch/cli.py": {"dashboard": _MANIFEST},
+    "orch/cli.py": {
+        "dashboard": _MANIFEST,
+        "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
+        "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
+    },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
@@ -66,7 +70,7 @@ def test_core_has_no_addon_name_literals():
     names = set(ADDONS) | {f"orch_{n}" for n in ADDONS}
     bad = []
     for f in CORE:
-        rel = str(f.relative_to(ROOT / "workspace/src"))
+        rel = f.relative_to(ROOT / "workspace/src").as_posix()
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in names:
                 if node.value not in ALLOW.get(rel, {}):
@@ -80,7 +84,7 @@ def test_core_has_no_addon_name_literals():
 def test_allowlist_has_no_stale_entries():
     seen = {}
     for f in CORE:
-        rel = str(f.relative_to(ROOT / "workspace/src"))
+        rel = f.relative_to(ROOT / "workspace/src").as_posix()
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 seen.setdefault(rel, set()).add(node.value)
