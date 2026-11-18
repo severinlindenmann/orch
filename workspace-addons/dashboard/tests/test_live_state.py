@@ -88,6 +88,30 @@ def test_slim_row_keeps_tail_done_line_and_chat_lines():
     )
 
 
+def test_slim_row_cuts_page_only_parts_and_answer_cards():
+    t = {
+        "id": "t_a",
+        "history": [],
+        "refs": [{"url": "https://x"}],
+        "art": {"x": {}},
+        "questions": [
+            {
+                "id": "q1",
+                "text": "Pick",
+                "answer": "A",
+                "answered_by": "human:pat",
+                "card": {"big": 1},
+                "digest": "d",
+            },
+            {"id": "q2", "text": "Open", "answer": None, "card": {"kind": "draft"}, "digest": "e"},
+        ],
+    }
+    row = data.slim_row(t)
+    assert row["slim"] is True and "refs" not in row and "art" not in row
+    assert row["questions"][0] == {"id": "q1", "text": "Pick", "answer": "A", "answered_by": "human:pat"}
+    assert row["questions"][1] == t["questions"][1], "an open question stays whole (Home answers it)"
+
+
 def test_slim_row_leaves_a_short_ticket_whole():
     t = {"id": "t_a", "history": [{"text": "a"}], "checklist": []}
     assert data.slim_row(t) is t

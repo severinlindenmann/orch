@@ -602,9 +602,15 @@ def _done_entry(history: list) -> int | None:
     return None
 
 
+# only the ticket page reads these (it reads the whole ticket); a list row does without them
+PAGE_ONLY = ("refs", "art")
+ANSWER_KEEP = {"id", "text", "answer", "answered_by", "via", "at", "kind", "check"}
+
+
 def slim_row(t: dict) -> dict:
     """A ticket as a live-state row: the last HISTORY_TAIL history lines (and the line that marked it done, and
-    the lines shown in Chat), the last EVIDENCE_TAIL proofs per task. Marked "slim": true with what was left out
+    the lines shown in Chat), the last EVIDENCE_TAIL proofs per task, answered questions without their card,
+    no links (PAGE_ONLY). Marked "slim": true with what was left out
     ("history_more"), so the ticket page reads the whole ticket (GET /api/ticket/<id>). Unchanged when nothing
     was cut."""
     history = t.get("history") if isinstance(t.get("history"), list) else []
@@ -618,9 +624,24 @@ def slim_row(t: dict) -> dict:
         isinstance(c, dict) and isinstance(c.get("evidence"), list) and len(c["evidence"]) > EVIDENCE_TAIL
         for c in checklist
     )
-    if len(keep) == len(history) and not cut_evidence:
+    questions = t.get("questions") if isinstance(t.get("questions"), list) else []
+    answered = [q for q in questions if isinstance(q, dict) and q.get("answer") is not None]
+    cut_answers = any(set(q) - ANSWER_KEEP for q in answered)
+    page_only = [k for k in PAGE_ONLY if t.get(k)]
+    if len(keep) == len(history) and not (cut_evidence or cut_answers or page_only):
         return t
     out = dict(t)
+    for k in page_only:
+        out.pop(k)
+    if (
+        cut_answers
+    ):  # an answered question: what was answered, by whom (the card and its digest are the page's)
+        out["questions"] = [
+            {k: v for k, v in q.items() if k in ANSWER_KEEP}
+            if isinstance(q, dict) and q.get("answer") is not None
+            else q
+            for q in questions
+        ]
     out["history"] = [e for i, e in enumerate(history) if i in keep]
     out["history_more"] = len(history) - len(out["history"])
     if cut_evidence:
@@ -1484,9 +1505,7 @@ def _answered_newest(root: Path, orch_bin: str | None):
             from orch.cli_review import _answered
 
             return json.loads(json.dumps(_answered(root, limit=ANSWERED_MAX), ensure_ascii=False))
-        except TypeError:  # an older core without the limit
-            pass
-        except Exception:  # noqa: BLE001 - the command gets its chance
+        except Exception:  # noqa: BLE001, S110 - an older core without the limit: the command gets its chance
             pass
     return run_orch(orch_bin, ["review", "list", "--answered", "--json"], root)
 
