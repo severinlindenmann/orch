@@ -1290,7 +1290,7 @@ def not_in_review(root: Path, ticket: dict) -> str:
     if status == "done":
         if by == tickets.REVIEWER:
             return _clip(f"Already Done: the Reviewer accepted it for you{at}. Nothing more to press.", 300)
-        who = "you" if by.startswith("human:") else "a helper" if by.startswith("agent:") else "someone"
+        who = "you" if history.is_person_line(moved) else "a helper" if by.startswith("agent:") else "someone"
         return _clip(f"Already Done: {who} accepted it{at}. Nothing more to press.", 300)
     word = _STATUS_WORDS.get(status, status or "changed")
     then = f"It is {word} now and comes back to Check when the helper is done."
@@ -1298,7 +1298,7 @@ def not_in_review(root: Path, ticket: dict) -> str:
         return _clip(
             f"The Reviewer sent it back{at}" + (f": {back.rstrip('.')}" if back else "") + f". {then}", 300
         )
-    if by.startswith("human:"):
+    if history.is_person_line(moved):
         return _clip(f"You sent it back{at}. {then}", 300)
     return _clip(f"It is not in Check any more: it is {word} now. Open the ticket to see why.", 300)
 
