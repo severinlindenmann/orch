@@ -797,9 +797,7 @@ class Handler(BaseHTTPRequestHandler):
             ]
             tag = (
                 '"'
-                + hashlib.blake2b(
-                    json.dumps(stable, sort_keys=True).encode(), digest_size=12
-                ).hexdigest()
+                + hashlib.blake2b(json.dumps(stable, sort_keys=True).encode(), digest_size=12).hexdigest()
                 + '"'
             )
             hdr = {"ETag": tag, "Cache-Control": "private, no-cache"}
