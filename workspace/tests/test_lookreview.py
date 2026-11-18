@@ -224,7 +224,7 @@ def test_verdict_refusals(proj, run, new_ticket, facts, on, monkeypatch):
         lookreview.verdict(proj, tid, "accept", "x")
 
 
-def test_one_helper_at_a_time_and_at_most_four_a_day(proj, run, new_ticket, facts, on, starts):
+def test_one_helper_at_a_time_and_a_daily_limit_of_tickets(proj, run, new_ticket, facts, on, starts):
     a = _finished(proj, run, new_ticket, title="First look change")
     reviewer.run(proj)
     b = _finished(proj, run, new_ticket, title="Second look change")
@@ -234,11 +234,44 @@ def test_one_helper_at_a_time_and_at_most_four_a_day(proj, run, new_ticket, fact
     reviewer.run(proj)
     assert len(starts) == 2 and lookreview.read_state(proj)["open"]["items"] == [b]
     st = lookreview.read_state(proj)
-    st["open"], st["starts"] = None, {lookreview._day(datetime.now().astimezone()): lookreview.PER_DAY}
+    st["open"], st["looked"] = None, {lookreview._day(datetime.now().astimezone()): lookreview.PER_DAY}
     lookreview._write_state(proj, st)
     out = lookreview.tend(proj)
-    assert out == [f"1 wait for a second look; {lookreview.PER_DAY} second looks today already"]
+    assert out == [f"1 wait for a second look; {lookreview.PER_DAY} tickets looked at today already"]
     assert len(starts) == 2
+    full = lookreview.FULL_LINE.format(n=lookreview.PER_DAY)
+    assert _lines(proj, b)[-1] == full  # the ticket says no look comes today
+    lookreview.tend(proj)
+    assert _lines(proj, b).count(full) == 1  # once a day, not every pass
+
+
+def test_tickets_one_per_pass_all_get_a_look_the_same_day(proj, run, new_ticket, facts, on, starts):
+    """18 Nov: tickets came one per pass, each helper got one, and 4 helpers a day ran out by 06:00."""
+    for i in range(6):
+        tid = _finished(proj, run, new_ticket, title=f"Look change {i}")
+        reviewer.run(proj)
+        assert lookreview.read_state(proj)["open"]["items"] == [tid]
+        lookreview.verdict(proj, tid, "leave", "x")
+    assert len(starts) == 6
+    assert lookreview.read_state(proj)["looked"] == {lookreview._day(): 6}
+
+
+def test_a_batch_never_goes_past_the_daily_limit(proj, run, new_ticket, facts, on, starts):
+    ids = [_finished(proj, run, new_ticket, title=f"Look change {i}") for i in range(3)]
+    for tid in ids:
+        lookreview.queue(proj, tid, "changes how a page looks")
+    st = lookreview.read_state(proj)
+    st["looked"] = {lookreview._day(): lookreview.PER_DAY - 2}
+    lookreview._write_state(proj, st)
+    lookreview.tend(proj)
+    st = lookreview.read_state(proj)
+    assert len(st["open"]["items"]) == 2 and st["looked"] == {lookreview._day(): lookreview.PER_DAY}
+
+
+def test_the_waiting_line_does_not_also_say_you_look_yourself():
+    t = {"history": [], "checks": []}
+    res = {"verdict": "leave", "why": "no pull request to check, so you look at it yourself."}
+    assert lookreview.triage(t, [], res, 0) == {"verdict": "queue", "why": "no pull request to check"}
 
 
 def test_dry_run_starts_nothing(proj, run, new_ticket, facts, on, starts):

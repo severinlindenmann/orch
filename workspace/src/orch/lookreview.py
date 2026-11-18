@@ -10,7 +10,8 @@ Stage 1 is a program inside `orch review tend` (no AI, no tokens). For each tick
   pull request, a Done-when part with no task).
 
 Stage 2 starts only when the line is not empty: one ticket "Reviewer second look" with a fixed brief, on the
-small model, takes up to `BATCH` tickets; one is open at a time and at most `PER_DAY` start a day. Its helper
+small model, takes up to `BATCH` tickets; one is open at a time and at most `PER_DAY` tickets get a look a day
+(counted per ticket, not per helper: tickets come one at a time, owner's answer on ORCH-175). Its helper
 decides each ticket with `orch review verdict <ticket> accept|back|leave "<one line>" --point ...`. Look or
 words choices no answered card of the owner covers always stay with the owner (the brief says so).
 
@@ -28,12 +29,17 @@ from orch import config, runs, tickets
 from orch.errors import Refused
 
 BATCH = 5  # tickets per second-look helper
-PER_DAY = 4  # second-look helpers a day at most
+PER_DAY = 20  # tickets that get a second look a day at most (4 helpers x BATCH, counted per ticket)
 STATE_MAX = 256 * 1024
 MINE_MAX = 50  # second-look tickets remembered as its own
 PICTURE = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 VERDICTS = ("accept", "back", "leave")
 QUEUED_LINE = "Waits for a second look by the Reviewer: "
+FULL_LINE = (
+    "No second look today: the day's limit of {n} tickets is used. "
+    "It gets one tomorrow if it still waits, or you decide it yourself."
+)
+SELF_CLAUSE = ", so you look at it yourself"  # the small Reviewer's ending; wrong once a second look comes
 POINTS_LINE = "Second look, point by point: "
 NO_PICTURES = "a page, style or picture changed but no task has a picture of it (1280, 1920 and 390 px wide)"
 DONE = ("done", "dropped")
@@ -99,7 +105,7 @@ def triage(ticket: dict, facts: list[dict], res: dict, sent_back: int) -> dict |
         if sent_back:
             return None
         return {"verdict": "back", "why": NO_PICTURES}
-    return {"verdict": "queue", "why": str(res.get("why") or "").rstrip(".")}
+    return {"verdict": "queue", "why": str(res.get("why") or "").rstrip(".").removesuffix(SELF_CLAUSE)}
 
 
 # ------------------------------------------------------------------ state
@@ -110,7 +116,8 @@ def _state_path(root: Path) -> Path:
 
 
 def read_state(root: Path) -> dict:
-    """{"line": {tid: {why, at}}, "open": {ticket, items: [tid]} | None, "starts": {day: n}, "mine": [tid]}
+    """{"line": {tid: {why, at, full?}}, "open": {ticket, items: [tid]} | None, "looked": {day: tickets},
+    "mine": [tid]} (full: the day it was told the day's limit is used)
     (mine: the second-look tickets it opened, never looked at again by the second look itself)"""
     try:
         p = _state_path(root)
@@ -121,14 +128,14 @@ def read_state(root: Path) -> dict:
         data = {}
     line = data.get("line") if isinstance(data.get("line"), dict) else {}
     opened = data.get("open") if isinstance(data.get("open"), dict) else None
-    starts = data.get("starts") if isinstance(data.get("starts"), dict) else {}
+    looked = data.get("looked") if isinstance(data.get("looked"), dict) else {}  # "starts" (helpers) before
     mine = (
         [x for x in data.get("mine") or [] if isinstance(x, str)]
         if isinstance(data.get("mine"), list)
         else []
     )
     line = {k: v for k, v in line.items() if isinstance(v, dict)}
-    return {"line": line, "open": opened, "starts": starts, "mine": mine[-MINE_MAX:]}
+    return {"line": line, "open": opened, "looked": looked, "mine": mine[-MINE_MAX:]}
 
 
 def own(root: Path) -> set[str]:
@@ -185,15 +192,21 @@ def tend(root: Path, dry_run: bool = False, now: datetime | None = None) -> list
             return out
     if opened:
         st["open"] = None  # finished, dropped, gone, or every ticket on it has a verdict
-    todo = sorted(st["line"], key=lambda t: str(st["line"][t].get("at") or ""))[:BATCH]
-    if not todo:
+    day = _day(now)
+    used = int(st["looked"].get(day) or 0)
+    waiting = sorted(st["line"], key=lambda t: str(st["line"][t].get("at") or ""))
+    todo = waiting[: max(0, min(BATCH, PER_DAY - used))]
+    if waiting and not todo:
+        out.append(f"{len(waiting)} wait for a second look; {PER_DAY} tickets looked at today already")
         if not dry_run:
+            for tid in waiting:  # once a day on each ticket: nobody waits for a look that never comes
+                if st["line"][tid].get("full") != day:
+                    with contextlib.suppress(Refused, OSError, ValueError):
+                        tickets.log(root, tid, FULL_LINE.format(n=PER_DAY), tickets.REVIEWER)
+                    st["line"][tid]["full"] = day
             _write_state(root, st)
         return out
-    day = _day(now)
-    started = int(st["starts"].get(day) or 0)
-    if started >= PER_DAY:
-        out.append(f"{len(st['line'])} wait for a second look; {PER_DAY} second looks today already")
+    if not todo:
         if not dry_run:
             _write_state(root, st)
         return out
@@ -224,7 +237,7 @@ def tend(root: Path, dry_run: bool = False, now: datetime | None = None) -> list
         how = f"helper not started yet ({' '.join(str(e).split())[:100]})"
     st["open"] = {"ticket": rid, "ticket_key": t.get("key") or rid, "items": todo}
     st["mine"] = [*st["mine"], rid][-MINE_MAX:]
-    st["starts"] = {day: started + 1}
+    st["looked"] = {day: used + len(todo)}
     _write_state(root, st)
     return [*out, f"opened second look {t.get('key') or rid} on {', '.join(keys)}; {how}"]
 
