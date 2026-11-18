@@ -22,6 +22,20 @@ process.env.FOCUS_SHOTS_SETTLE_MS = process.env.FOCUS_SHOTS_SETTLE_MS || '2500';
 // Globals every Focus page must have after load (the ticket and start screens both use them).
 const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
 
+// Every dashboard feature's click-through (ORCH-308) runs alongside everything below from the start, in its own
+// throw-away home with its own server, and is waited for at the end: one after the other they no longer fit the job.
+const clickRun = (() => {
+  const sp = require('node:child_process');
+  const PW_DIR = process.env.PW_DIR || sp.execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim();
+  const c = sp.spawn(process.execPath, [require('node:path').join(__dirname, '..', 'workspace-addons', 'dashboard', 'clickthrough', 'run.cjs')],
+    { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PW_DIR } });
+  let out = '';
+  c.stdout.on('data', d => { out += d; });
+  c.stderr.on('data', d => { out += d; });
+  process.on('exit', () => { if (c.exitCode === null) { process.stdout.write(out); c.kill(); } });
+  return new Promise(ok => c.on('close', code => ok({ code, out })));
+})();
+
 (async () => {
   const { chromium } = playwright();
   const servers = { focus: await start(), ...(await startExtra(SCREENS)) };
@@ -77,7 +91,7 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
   require('node:fs').rmSync(shots, { recursive: true, force: true });
   if (failed.length) { console.error('DASHBOARD E2E FAILED: ' + failed.join(', ')); process.exit(1); }
   // Every dashboard feature's click-through (ORCH-308), on a seeded workspace with the real dashboard server.
-  const click = sp.spawnSync(process.execPath, [require('node:path').join(__dirname, '..', 'workspace-addons', 'dashboard', 'clickthrough', 'run.cjs')],
-    { stdio: 'inherit', env: { ...process.env, PW_DIR } });
-  if (click.status !== 0) { console.error('DASHBOARD CLICK-THROUGHS FAILED (see above)'); process.exit(1); }
+  const click = await clickRun;
+  process.stdout.write('\n--- dashboard click-throughs (ran alongside the checks above) ---\n' + click.out);
+  if (click.code !== 0) { console.error('DASHBOARD CLICK-THROUGHS FAILED (see above)'); process.exit(1); }
 })().catch(e => { console.error(e); process.exit(1); });
