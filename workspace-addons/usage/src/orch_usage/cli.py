@@ -14,7 +14,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import left, routing, store
+from . import left, page, routing, store
 from .readers import cswap
 from .store import PERIOD_WORDS, Refused
 
@@ -204,7 +204,9 @@ def gather(root: Path) -> dict:
     for a in d["accounts"]:
         row = {k: v for k, v in a.items() if k != "source"}
         row["reader"] = a.get("source", {}).get("reader", "none")
-        row["skill"] = a.get("source", {}).get("skill")  # the skill that declared the credit (its name only)
+        row["skill"] = page.skill_name(
+            a.get("source", {}).get("skill")
+        )  # the declaring skill's name, never a key
         use: dict = {}
         src = a.get("source", {})
         if a["type"] == "subscription":

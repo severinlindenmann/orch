@@ -92,6 +92,8 @@ def test_no_key_name_path_or_key_on_the_page(cli, ws, no_switcher, tmp_path):
     text = json.dumps(_model(ws))
     assert KEYISH not in text and "pass://" not in text and "spend.jsonl" not in text
     assert '"source"' not in text and "key-1" not in text  # nor the name the skill finds its key by
+    code, d = jrun(cli, "list")  # nor in orch usage list --json
+    assert code == 0 and KEYISH not in json.dumps(d)
 
 
 def test_remove_then_bring_back_from_the_page(cli, ws, no_switcher):

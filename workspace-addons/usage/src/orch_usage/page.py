@@ -112,6 +112,14 @@ _SKILL = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 _CREDIT_FIELDS = ("left", "set", "set_at", "spent_since", "spent_today", "spent_month", "over")
 
 
+def skill_name(v) -> str | None:
+    """The name of the skill that declared a credit, or None: a plain lowercase name only; anything key-shaped
+    (sk-, a long token) is dropped, so it never reaches `orch usage list` or the page."""
+    if isinstance(v, str) and _SKILL.fullmatch(v) and not store._SECRETISH.search(v):
+        return v
+    return None
+
+
 def _credit(row: dict) -> dict | None:
     """An API credit's amounts for the page (ORCH-628): what is left (the person's figure minus the spend since),
     spent today and this month, and its end. Numbers and times only; never the skill's key name, path or log."""
@@ -121,10 +129,7 @@ def _credit(row: dict) -> dict | None:
     out = {k: v.get(k) for k in _CREDIT_FIELDS}
     # the credit's own end (ORCH-627 refuses a call past it); without one the rule's end
     out["ends"] = row.get("credit_ends") or row["rule"].get("ends")
-    skill = row.get("skill")
-    # a skill's name only: anything key-shaped (sk-, a long token) never reaches the page
-    good = isinstance(skill, str) and _SKILL.fullmatch(skill) and not store._SECRETISH.search(skill)
-    out["skill"] = skill if good else None
+    out["skill"] = skill_name(row.get("skill"))
     return out
 
 
