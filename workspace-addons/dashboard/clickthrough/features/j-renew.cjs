@@ -11,7 +11,10 @@ module.exports = {
     orch('logins');   // the checks once; the page shows their result
     await open('#settings/agent');
     const needsRenew = s => (s.logins?.items || []).find(x => x.renew && /renew|soon|unreachable/.test(x.state || ''));
-    const item = needsRenew(await until(needsRenew, 'a helper login that needs renewing'));
+    const item = needsRenew(await until(needsRenew, 'a helper login that needs renewing', 60).catch(async e => {
+      const st = await page.evaluate(async () => (await fetch('/api/state', { cache: 'no-store' })).json());
+      throw new Error(`${e.message}; the logins it shows: ${JSON.stringify((st.logins?.items || []).map(x => [x.name, x.state, x.renew]))}`);
+    }));
     await reload();
     const renew = page.getByRole('button', { name: `Renew the ${item.label} login` }).first();
     await renew.waitFor({ timeout: 20000 }).catch(async () => { throw new Error('no Renew button:\n' + (await text()).slice(0, 600)); });

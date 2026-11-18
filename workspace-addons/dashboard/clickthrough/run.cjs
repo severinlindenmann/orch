@@ -139,14 +139,16 @@ async function signIn(browser, srv) {
 
 /** Record what the page does: ops sent (with their answer) and the router kinds it showed. */
 function recorder(page, base) {
-  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set() };
+  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [] };
+  page.on('response', r => { if (r.status() >= 400) rec.failed.push(`${r.status()} ${r.request().method()} ${r.url().replace(base, '')}`); });
   page.on('pageerror', e => rec.errors.push(`uncaught exception: ${String(e.message).slice(0, 300)}`));
   page.on('console', m => {
     if (m.type() !== 'error') return;
     const t = m.text();
     // Chromium logs every 4xx answer as a console error; an action a click-through expects to be refused is fine
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
-    rec.errors.push(`console error: ${t.slice(0, 300)}`);
+    // name the address of a failed load (Chromium's line does not)
+    rec.errors.push(`console error: ${t.slice(0, 300)}${/Failed to load resource/.test(t) && rec.failed.length ? ` (${rec.failed.at(-1)})` : ''}`);
   });
   page.on('response', async r => {
     const req = r.request();

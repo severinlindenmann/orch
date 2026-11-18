@@ -1,12 +1,11 @@
 // Updates, with this checkout as the update source (run.cjs sets ORCH_REPO to it, so nothing is downloaded):
 // - Home shows the note after an automatic update ("orch updated itself to ..."); the person presses Got it, reloads,
 //   and the note is gone.
-// - Settings > About & updates says a newer orch is ready (the demo home says it came from an older commit of this
-//   checkout); the person presses "Update to ...". The update starts and then stops with a plain reason, because
-//   this demo runs orch from its source folder: there is no installed tool folder to rebuild. Nothing is changed.
+// - Settings > About & updates says a newer orch is ready (the demo home says it came from another commit); the
+//   person presses "Update to ...". The update starts and then stops with a plain reason, because this demo runs
+//   orch from its source folder: there is no installed tool folder to rebuild. Nothing is changed.
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 
 module.exports = {
   name: 'Updates: dismiss the note after an update, start an update',
@@ -25,10 +24,8 @@ module.exports = {
     await reload();
     must(await ok.count() === 0, 'the note is still on Home after Got it and a reload');
 
-    // an older commit of this checkout is "installed": the checkout itself is the newer orch
-    const repo = path.resolve(__dirname, '..', '..', '..', '..');
-    const older = execFileSync('git', ['-C', repo, 'rev-list', '-n', '1', 'HEAD~5'], { encoding: 'utf8' }).trim();
-    fs.writeFileSync(path.join(orchHome, 'installed.json'), JSON.stringify({ sha: older }));
+    // another commit is "installed" (made up: a CI checkout holds only one commit), so this checkout is newer
+    fs.writeFileSync(path.join(orchHome, 'installed.json'), JSON.stringify({ sha: 'c0ffee' + '1'.repeat(34) }));
     await forgetUpdateInfo();   // an earlier page may have asked already: the server keeps the answer 10 minutes
     await open('#settings/about');
     const start = page.locator('[data-key="update-start"]');
