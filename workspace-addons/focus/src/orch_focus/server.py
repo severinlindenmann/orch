@@ -712,6 +712,21 @@ class Handler(BaseHTTPRequestHandler):
         signed_in = at_login or bool(self.session is not None and self.session.cookie_ok(self.headers, port))
         return check_request(method, self.headers, port, api=api, signed_in=signed_in)
 
+    def _may_read(self) -> bool:
+        """Every data read needs the sign-in: this server's session cookie, or the dashboard's word for the person
+        in front of it. This computer's own address is no sign-in (ORCH-481, owner 18 Nov): ticket files are
+        private on disk and any local user or process reaches 127.0.0.1. The page shell, its program files and a
+        ticket page by its unguessable key (/page/) open without it; they carry no workspace data of their own."""
+        return self.session is not None and self.session.may_read(self.headers, self.server.server_address[1])
+
+    def _signin_refused(self):
+        return self._send(
+            401,
+            actions.SIGNIN.encode(),  # the page shows the sign-in notice for these words
+            "text/plain; charset=utf-8",
+            {"WWW-Authenticate": 'OrchPage realm="orch"'},
+        )
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if (path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path)) and selfupdate.answer(self):
@@ -728,6 +743,8 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence("GET", path.startswith("/api/"))
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if path.startswith("/api/") and not self._may_read():
+            return self._signin_refused()
         if path.startswith("/api/"):
             self._keep_session_for_restart()
         if path == "/api/tickets":

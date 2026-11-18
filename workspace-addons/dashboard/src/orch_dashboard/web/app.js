@@ -73,6 +73,9 @@ const parse = value => {
 const date = value => window.UI?.stamp ? window.UI.stamp(value, {time:false}) : (parse(value)?.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) || '');
 const time = value => window.UI?.stamp ? window.UI.stamp(value) : (parse(value)?.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) || '');
 let state, renderedRoute = '', fetching = false, writing = 0, serial = 0, mutation = 0;
+// Not signed in: every data read needs the sign-in (ORCH-481). The page then shows only the sign-in notice
+// (session.js) and stops asking; a sign-in link reloads the page.
+let signedOut = false;
 const now = () => parse(state?.now) || new Date();
 const today = () => {
   const d = now();
@@ -577,7 +580,7 @@ async function act(op, args) {
 // tickets before the change (load_state reads tickets first, run status last), so one more fetch follows it.
 let refreshAgain = false;
 async function refresh() {
-  if (snapshot) return;
+  if (snapshot || signedOut) return;
   if (fetching || writing) { refreshAgain = true; return; }
   fetching = true;
   refreshAgain = false;
@@ -587,6 +590,12 @@ async function refresh() {
   try {
     // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
     const res = await fetch('/api/state' + (state?.rev ? '?have=' + encodeURIComponent(state.rev) : ''), {cache:'no-store'});
+    if (res.status === 401) {  // no sign-in: not a lost connection, and no loading shapes that never fill
+      signedOut = true;
+      connection.hidden = true;
+      if (!state) main.replaceChildren();
+      return;
+    }
     if (!res.ok) throw new Error('Could not load the workspace.');
     const next = await res.json();
     if (next.unchanged && state) {

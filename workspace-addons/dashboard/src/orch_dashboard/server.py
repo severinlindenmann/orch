@@ -225,8 +225,8 @@ def _link_msg(session, name: str) -> bytes:
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
 RESTARTING_OPS = ("addon.set", "addon.uninstall")
-# What a browser that has not signed in may load under a host name that is not this computer's (a proxy in front):
-# the page shell only, no data. Everything else there needs the session cookie of that host name.
+# What a browser that has not signed in may load under any host name, this computer's own too (ORCH-481): the page
+# shell only, no data. Everything else needs the session cookie of that host name.
 _PRIVATE_PREFIXES = ("/api/", "/view/", "/addon/", "/page/", "/ready", "/styleguide")
 
 
@@ -334,21 +334,24 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _host_ok(self, path: str = "/") -> bool:
-        """DNS-rebinding guard. This computer's names always pass. Any other well-formed name (a proxy in front,
-        another computer) passes with this server's session cookie, or for the page shell alone (no data):
-        after the sign-in it does not matter where the browser is."""
+        """DNS-rebinding guard and the sign-in for reads. Any well-formed host name passes with this server's
+        session cookie, or for the page shell alone (no data): after the sign-in it does not matter where the
+        browser is. This computer's own name is no sign-in either (ORCH-481, owner 18 Nov): ticket files are
+        private on disk, and any local user or process can reach 127.0.0.1, so every data read needs the cookie."""
         raw = (self.headers.get("Host") or "").strip().lower()
         host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
-        if host in ("127.0.0.1", "localhost", "[::1]") and not self._remote():
-            return True
-        try:
-            from orch_ui.origin import any_host_ok
-        except ImportError:
-            return False
-        if not any_host_ok(raw):
-            return False
+        local = host in ("127.0.0.1", "localhost", "[::1]") and not self._remote()
+        if not local:
+            try:
+                from orch_ui.origin import any_host_ok
+            except ImportError:
+                return False
+            if not any_host_ok(raw):
+                return False
         if self._signed_in() or getattr(self, "_frame", None) or self._frame_static(path):
             return True
+        if local and path == "/ready" and self.nonce:
+            return True  # orch's start/stop check: answered only with a proof of the start secret, no data
         # a sandboxed ticket page's own files: its origin is opaque, so the browser sends no cookie with them
         # (a cross-site load an attacker's page can show but never read); the page document itself needs one
         px = PROXY.fullmatch(path)
@@ -394,7 +397,8 @@ class Handler(BaseHTTPRequestHandler):
         return getattr(self.server, "page_port", None) or self.server.server_address[1]
 
     def _signed_in(self) -> bool:
-        """This server's session cookie (no page secret needed): enough to READ under any host name."""
+        """This server's session cookie (no page secret needed): enough to READ under any host name, this
+        computer's own name too; without it no data is read (ORCH-481)."""
         if getattr(self, "session", None) is None:  # a server without a page session: nobody signs in
             return False
         return self.session.cookie_ok(self.headers, self._page_port())
@@ -487,8 +491,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _frame_pass_post(self):
         """POST /api/frame-pass {"addon": name}: the dashboard page asks for a pass for the shipped add-on page
-        it is about to show. Only the dashboard page itself (same origin, never a frame); a signed-in page gets
-        a pass that acts, a page without sign-in on this computer a read-only one (it could read anyway)."""
+        it is about to show. Only the dashboard page itself (same origin, never a frame) and only after the sign-in:
+        with the page secret a pass that acts, with the session cookie alone a read-only one."""
         if getattr(self, "_frame", None) or self._frame_bad or self.headers.get(framepass.FRAME_HEADER):
             return self._send(403, b"forbidden", "text/plain")
         why = self._fence()
@@ -502,20 +506,17 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except (ValueError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        session = getattr(self, "session", None)
+        act = session is not None and session.can_act(self.headers, self._page_port())
+        if not (act or self._signed_in()):  # this computer's own address is no sign-in (ORCH-481)
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if not any(
             a["name"] == name and a.get("shipped") is True and a.get("page")
             for a in load_addons(self.root, self.orch_bin)
         ):
             return self._send(404, b"not found", "text/plain")
-        session = getattr(self, "session", None)
-        act = session is not None and session.can_act(self.headers, self._page_port())
-        raw = (self.headers.get("Host") or "").strip().lower()
-        host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
-        local_read = host in ("127.0.0.1", "localhost", "[::1]") and not self._remote()
-        if not (act or local_read or self._signed_in()):
-            from orch.pagesession import SIGNIN_MSG
-
-            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         passes = getattr(self.server, "frame_passes", None)
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
@@ -602,6 +603,12 @@ class Handler(BaseHTTPRequestHandler):
             key = vouch_key(self.root, create=True)
             if key:
                 up[VOUCH_HEADER] = key
+        elif self._signed_in() or getattr(self, "_frame", None):  # signed in to read only: vouch for the read
+            from orch.pagesession import READ_VOUCH_HEADER, read_vouch_key
+
+            key = read_vouch_key(self.root, create=True)
+            if key:
+                up[READ_VOUCH_HEADER] = key
         body = None
         if method == "POST":
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":

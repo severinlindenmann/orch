@@ -403,9 +403,10 @@ def test_update_result_is_shown_to_a_session_once(live):
                 **({"Cookie": cookie, "X-Orch-Page": SECRETS[cookie]} if cookie else {}),
             },
         )
-        return json.loads(c.getresponse().read())
+        r = c.getresponse()
+        return r.status if r.status == 401 else json.loads(r.read())
 
-    assert get() == {}  # no session: nothing, and nothing consumed
+    assert get() == 401  # no session: no read at all (ORCH-481), and nothing consumed
     ck = session(root, port)
     assert get(ck) == {"state": "failed", "reason": "The server said no."}
     assert get(ck) == {}  # once
@@ -934,9 +935,11 @@ def test_release_endpoint_gives_the_line_of_a_finished_ticket(live, monkeypatch)
 
     monkeypatch.setattr(released, "ticket_release", line)
 
+    ck = session(root, port)
+
     def get(q):
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        c.request("GET", "/api/release" + q, headers={"Host": f"127.0.0.1:{port}"})
+        c.request("GET", "/api/release" + q, headers={"Host": f"127.0.0.1:{port}", "Cookie": ck})
         r = c.getresponse()
         return r.status, json.loads(r.read())
 
@@ -948,7 +951,7 @@ def test_release_endpoint_gives_the_line_of_a_finished_ticket(live, monkeypatch)
 
 
 def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
-    _, port = live
+    root, port = live
     from orch import updateinfo
 
     monkeypatch.setattr(
@@ -961,8 +964,9 @@ def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
             "changes": ["Helpers tidy up new tickets"],
         },
     )
+    ck = session(root, port)
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    c.request("GET", "/api/update-info", headers={"Host": f"127.0.0.1:{port}"})
+    c.request("GET", "/api/update-info", headers={"Host": f"127.0.0.1:{port}", "Cookie": ck})
     r = c.getresponse()
     data = json.loads(r.read())
     assert (

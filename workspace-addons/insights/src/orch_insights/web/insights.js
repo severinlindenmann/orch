@@ -25,6 +25,11 @@ function node(tag, text, className) {
 
 async function read(path) {
   const response = await fetch(`${prefix}${path}`, {signal: AbortSignal.timeout(15000)});
+  if (response.status === 401) {  // not signed in: say how to sign in (every read needs it, ORCH-481)
+    const signin = new Error(await response.text());
+    signin.signin = true;
+    throw signin;
+  }
   if (!response.ok) throw new Error('read failed');
   return response.json();
 }
@@ -358,8 +363,8 @@ async function loadList(tab) {
     if (answer.error) { showMessage(answer.error); return false; }
     lists[tab] = answer;
     return true;
-  } catch {
-    showMessage('Insights could not read the workspace record.');
+  } catch (error) {
+    showMessage(error && error.signin ? error.message : 'Insights could not read the workspace record.');
     return false;
   }
 }
@@ -394,8 +399,8 @@ async function refresh() {
     for (const tab of ['connections', 'keys']) {
       if (overview.tabs[tab].count && await loadList(tab)) { renderServices(); if (tab === active) renderTable(); }
     }
-  } catch {
-    showMessage('Insights could not read the workspace record.');
+  } catch (error) {
+    showMessage(error && error.signin ? error.message : 'Insights could not read the workspace record.');
   } finally { loading = false; }
 }
 byId('trend-settings').addEventListener('click', () => byId('settings-link').click());
