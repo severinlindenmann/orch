@@ -978,6 +978,11 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .swipe-preview:has(>.doc) .swipe-expand{top:8px;bottom:auto}
 @media(max-width:720px){.doc-row{flex-wrap:wrap}.doc-row-title{flex-basis:100%}}
 
+/* A terminal command to copy (UI.commandCopy, ORCH-218): the command in mono on the sunken surface, Copy beside it;
+   a long command wraps inside its box, never past the card. */
+.cmd-copy{display:flex;flex-direction:column;gap:4px;margin-top:6px;min-width:0}
+.cmd-copy-row{display:flex;align-items:center;gap:8px;min-width:0}
+.cmd-copy-text{flex:1 1 auto;min-width:0;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);font-family:var(--font-mono);font-size:13px;line-height:20px;overflow-wrap:anywhere;user-select:all}
 /* Live layer (ORCH-338, Focus draft D): one dock under every page, outside the page content so it stays open when the
    page changes. The page (pages/live-layer.js) sets data-mode on .live-dock and the size in --live-h / --live-w, and
    body[data-live-layer] plus --live-pad / --live-padr keep the page usable behind it. Modes: bar (only the bar), bottom
