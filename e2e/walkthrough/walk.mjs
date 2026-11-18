@@ -1,6 +1,7 @@
 // Visual click-through of the live orch publish + relay and a workspace, one screenshot per step.
 // Usage: see run.sh. Env: E2E_PUBLISH_ADMIN_TOKEN, E2E_RELAY_ADMIN_TOKEN (never printed), WALK_TMP, WALK_OUT.
 import { chromium } from 'playwright';
+import headless from '../headless.cjs'; // the keychain options (ORCH-615)
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -101,7 +102,7 @@ try {
   for (const [k, d] of Object.entries(dirs)) { fs.mkdirSync(d, { recursive: true }); must('orch init', d); }
   must('orch addon add dashboard --yes', dirs.Pilatus);
 
-  const browser = await chromium.launch();
+  const browser = await headless.launch(chromium);
   page = await (await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: process.env.WALK_SCHEME || 'dark', acceptDownloads: true })).newPage();
 
   // ---------- 1. relay admin ----------
