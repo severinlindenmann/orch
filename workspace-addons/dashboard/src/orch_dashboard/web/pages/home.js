@@ -227,7 +227,15 @@ function helperRow(row, key) {
       [alive ? 'Nudge' : 'Start helper', 'outline sm', () => nudgeHelper(row.ticket, MERGE_ASK), alive ? 'Message sent' : 'Helper started']]
     : [['Nudge', 'outline sm', () => nudgeHelper(row.ticket, NUDGE), 'Message sent'],
       ['Start fresh', 'outline sm', () => restartFresh(row.ticket), 'Helper started fresh']];
+  // ORCH-475: the starts are the one Start button (pages/start.js): Starting… until it runs, the caret opens the Start choice.
+  // Start helper sends the merge ask first; Start fresh stops the idle helper first, then starts fresh on the usual tool.
+  const startOf = label => !t || alive && label === 'Start helper' ? null
+    : label === 'Start helper' ? startHost(t, key + '-start', {label, before:async () => [['run.send', {ticket:row.ticket, text:MERGE_ASK}]]})
+    : label === 'Start fresh' ? startHost(t, key + '-fresh', {label, fresh:true, running:false, before:async () => state.runs?.[row.ticket]?.running === true ? [['run.stop', {ticket:row.ticket}]] : []})
+    : null;
   const controls = snapshot ? [] : acts.map(([label, style, run, done]) => {
+    const kit = startOf(label);
+    if (kit) return kit;
     const control = button(label, style, async () => {
       if (changeUnavailable() || locks.has(key)) return;
       locks.add(key);
@@ -248,7 +256,7 @@ function helperRow(row, key) {
 function startFailedRow(t, sf) {
   return h('div', {className:'card-row home-need', 'data-key':'start-failed-' + t.id}, ticketTitle(t),
     h('p', {}, clean(sf.text)),
-    snapshot ? null : h('div', {className:'row'}, button('Retry', 'outline sm', async () => {
+    snapshot ? null : h('div', {className:'row'}, startHost(t, 'start-failed-' + t.id + '-retry', {label:'Retry', continueLabel:'Retry'}) || button('Retry', 'outline sm', async () => {
       if (changeUnavailable()) return;
       const result = await act('run.start', {ticket:t.id});
       window.orch.toast(result.ok ? 'Starting again' : changeError(result), result.ok ? 'ok' : 'error');
@@ -473,6 +481,13 @@ function needsToday() {
 }
 // The one needs-you number: the Review menu entry, Menu, top bar, Home, Review and Tickets headers all read it.
 function needsYouTotal() { return state ? needsToday().count : 0; }
+// When the oldest of exactly those needs came (the top bar's "longest wait"): a question row since it was asked, a
+// result since its ticket moved to Review. A dropped ticket's old question is no need, so it never counts (ORCH-407).
+function needsOldestAt() {
+  if (!state) return null;
+  const n = needsToday(), at = [...n.needs.map(r => Date.parse(r.since)), ...n.review.map(t => Date.parse(t.updated_at))].filter(Number.isFinite);
+  return at.length ? Math.min(...at) : null;
+}
 // Services that should run but do not (one that is off on purpose, like Sync before it is turned on, is not one).
 function stoppedServices() { return array(state.services).filter(s => s.running === false && !s.idle); }
 function backgroundBanner() {
@@ -507,6 +522,36 @@ function changedWords(t) {
   const n = typeof completionNotes === 'function' ? completionNotes(t)[0] : null;
   return n ? {head:n.head, detail:n.body} : null;
 }
+// At most about 3 plain lines per ticket (ORCH-407, report r-1118-0544: whole helper summaries with commit ids, file
+// and test names, 8+ lines each): the sentences without technical names, in order, up to CHANGED_CHARS; when no
+// sentence is plain, the first one, cut short.
+const CHANGED_CHARS = 200;
+const TECHNICAL = [
+  /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/,  // a commit id
+  /[\w/-]\.(py|js|cjs|mjs|ts|json|jsonl|md|css|html|sh|rs|toml|ya?ml|swift|txt|lock)\b/i,  // a file name
+  /\w_\w/, /\b[a-z_]+\.[a-z_]+\.[a-z_]+/, /\b[a-z]+[A-Z]\w*\(/,  // code names
+  /(^|\s)--?[a-z][\w-]*/, /[`<>{}]/, /\/\w+\//,  // flags, code marks, paths
+];
+function plainChanged(text, max = CHANGED_CHARS) {
+  const all = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!all) return '';
+  const sentences = all.split(/(?<=[.!?])\s+/), cut = s => s.length <= max ? s : s.slice(0, s.lastIndexOf(' ', max - 1) > 40 ? s.lastIndexOf(' ', max - 1) : max - 1).replace(/[\s,;:]+$/, '') + '…';
+  const plain = sentences.filter(s => !TECHNICAL.some(r => r.test(s)));
+  if (!plain.length) return cut(sentences[0]);
+  let out = '';
+  for (const s of plain) {
+    if (out && out.length + 1 + s.length > max) break;
+    out = out ? out + ' ' + s : s;
+  }
+  return cut(out);
+}
+// the head and its detail as sentences: a head the detail repeats is said once, a head without an end gets a full stop
+function changedText(words) {
+  const head = clean(words.head || '').trim(), detail = clean(words.detail || '').trim();
+  if (!detail) return head;
+  if (!head || detail.startsWith(head.replace(/…$/, ''))) return detail;
+  return head + (/[.!?…]$/.test(head) ? ' ' : '. ') + detail;
+}
 function changedList(items, limit = 5) {
   return items.filter(t => t.status === 'done').map(t => ({t, words:changedWords(t)})).filter(x => x.words)
     .sort((a, b) => (Date.parse(doneAt(b.t)) || 0) - (Date.parse(doneAt(a.t)) || 0)).slice(0, limit);
@@ -516,7 +561,7 @@ function whatChangedCard(list) {
   return h('section', {className:'card home-card what-changed', 'data-key':'what-changed'},
     h('div', {className:'card-h row between'}, h('h2', {}, 'What changed'), h('a', {className:'btn ghost sm', href:'#tickets?view=done-week'}, 'Done tickets →')),
     list.map(({t, words}) => h('a', {className:'home-note', href:href(t.id), 'data-key':'changed-' + t.id},
-      h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title)), h('p', {className:'muted preserve-lines'}, clean(words.head) + (words.detail ? ' ' + clean(words.detail) : ''))),
+      h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title)), h('p', {className:'muted'}, plainChanged(changedText(words)))),
       h('span', {className:'meta'}, [typeof ticketDoneEvent === 'function' && typeof ticketActor === 'function' ? ticketActor(ticketDoneEvent(t)?.by) : '', time(doneAt(t))].filter(Boolean).join(' · ')))));
 }
 // "Finished" on Home: the 5 newest finished today, then one link to all of them in the Tickets list (report r-1116-2215-ws:
@@ -611,7 +656,9 @@ function home() {
   const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, count:counted} = needsToday(), all = tickets();
   const needCount = counted;  // THE number: title, Needs you pill, Review all, Review badge and Tickets pill; a login is a row and a banner
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
-  const helpers = window.DashHelpers.helperRows(all, state.runs);
+  // a ticket waiting for review is the person's "Check result" row, never an idle helper with Stop (ORCH-407); its
+  // left-over session is closed by orch run tend
+  const helpers = window.DashHelpers.helperRows(all, state.runs).filter(r => !(r.ticket.status === 'review' && ['idle', 'stuck'].includes(r.state)));
   const quiet = working.filter(t => t.quiet_since);
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());

@@ -279,3 +279,28 @@ current step (or at its next start)" instead of "takes effect with a fresh start
 the wall task; with the live data of every session (ORCH-359) the line reads tool, model and times from it. Master:
 `.live-start`, `.live-choice*`, `.live-pick*`, `.live-places`, `.live-prow`, `.live-pop[data-down]` in widgets.css
 (style guide: Live layer); click-through steps 14 and 16.
+
+## The wall, built (ORCH-360, 18 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch the Focus page is the
+wall (`pages/livewall.js`) on the live sessions list: the summary line ("3 need you · 4 working · 9 in line · 8 idle",
+then "24 sessions"), the filter, then the draft's bands: Pinned, Needs you and working, In line, Idle and no session.
+Needs-you tiles are orange and first, their sentence is the question and they have no peek; a working tile shows its
+last three lines and adds the newest by itself (every 3 s). In line and idle are one line each. A band folds and stays
+folded (per workspace, in this browser); from 12 sessions a long band scrolls inside itself; at 1100 px and wider the
+bands sit side by side as in the draft. One change from the draft: clicking a tile zooms into it in the layer (the
+draft has a separate zoom view on the page), so full screen, split and Esc are the layer's; Esc goes full screen, then
+the layer, then the wall. Not in this task: the pin button on a tile and renaming (pin and rename task), the New
+session buttons and Runs on (start tasks). Master: `.wall-*` in widgets.css (style guide: Live wall); click-through
+steps 4, 5, 8 and 11.
+
+## Pin and rename, built (ORCH-361, 18 Nov)
+
+focus-v4d.html stays the source of truth; nothing in the draft changed. Behind the Preview switch every wall tile and
+line has the draft's pin button, and the panes keep theirs (in More when narrow). The selected pane's title is the
+draft's rename button: click, type, Enter (Esc leaves it); the own name shows on the tile, the pane and the chip, and
+the filter finds it. Pins and names are kept by orch for the workspace (`.orch/run/dashboard/sessions.json`, through
+the dashboard), not per browser (issue 1351); the layer's place and panes are kept per workspace too. A session
+without a ticket is pinned until it is unpinned. One change in the bar: at its last fold (needs you and More) More
+holds the pinned sessions too, so a pinned one is never hidden. Master: `.live-ren` in widgets.css (style guide: Live
+layer); click-through step 7.

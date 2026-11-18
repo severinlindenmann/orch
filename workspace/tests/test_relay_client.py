@@ -14,9 +14,11 @@ def ghome(proj, monkeypatch):
     """A usable guarded orch home for the proj workspace (the real pairing rules are tested in
     test_secret_store.py and test_humanproof.py)."""
     from orch import home as orch_home
+    from orch import winacl
 
     h = proj.parent / f"{proj.name}_ghome"
     h.mkdir(mode=0o700)
+    winacl.allow_home(h)  # Windows: like the real guarded_home, rights may be written inside it
     monkeypatch.setattr(orch_home, "guarded_home", lambda root: h)
     return h
 
@@ -345,8 +347,8 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, ghome, monke
         credentials={"DB_URL": "pg://db.example/x"},
     )
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
-    code, out, _ = run("relay", "refresh")
-    assert code == 0 and "1 workspace" in out and "acme-sql" in out
+    code, out, err = run("relay", "refresh")
+    assert code == 0 and "1 workspace" in out and "acme-sql" in out, err
     d = proj / ".agents/skills/acme-sql"
     assert (d / "ref/a.md").read_bytes() == b"x" and (d / ".orch-shared").exists()
     assert (proj / ".claude/skills/acme-sql/SKILL.md").exists()  # linked per skill
@@ -383,10 +385,10 @@ def test_refresh_never_overwrites_own_skills(proj, run, rel):
     rel.snapshot.update(version=4, skills=[skill_snapshot({"SKILL.md": b"x"})])
     rel.snapshot["skills"][0]["name"] = "mine"
     assert run("relay", "refresh")[0] == 2
-    assert (own / "SKILL.md").read_text() == "mine"
+    assert (own / "SKILL.md").read_text(encoding="utf-8") == "mine"
     rel.snapshot["skills"][0]["name"] = "orch"
     run("relay", "refresh")
-    assert "name: orch" in (proj / ".agents/skills/orch/SKILL.md").read_text()
+    assert "name: orch" in (proj / ".agents/skills/orch/SKILL.md").read_text(encoding="utf-8")
 
 
 def test_refresh_bad_snapshot_changes_nothing(proj, run, rel):
@@ -1275,6 +1277,19 @@ def test_phone_text_without_ticket_makes_one_ticket_and_one_ack(proj, run, rel):
     assert len(_tickets(run)) == 1 and len(rel.sent) == 1
 
 
+def test_phone_text_can_start_a_ticket_without_human_review(proj, run, rel):
+    """ORCH-424: a new topic with human_review false makes the ticket with the switch off; without it, on."""
+    _phone_setup(rel, run)
+    off = {"text": "Spring numbers", "human_review": False}
+    rel.inbox.append(msg("m_phone00000000424", "text", off, frm=PHONE))
+    rel.inbox.append(msg("m_phone00000000425", "text", {"text": "Autumn numbers"}, frm=PHONE))
+    code, _, _ = run("relay", "inbox")
+    assert code == 0
+    by_title = {t["title"]: t for t in _tickets(run)}
+    assert by_title["Spring numbers"]["human_review"] is False
+    assert "human_review" not in by_title["Autumn numbers"]
+
+
 def test_phone_long_text_is_kept_as_a_file_and_the_history_stays_short(proj, run, rel):
     _phone_setup(rel, run)
     long = "Point one.\n" + ("The inventory has many lines. " * 200)
@@ -2061,17 +2076,19 @@ def test_refresh_refuses_when_a_gitignore_shows_a_private_file_and_leaves_secret
     (proj / ".gitignore").write_text(
         "!/.orch/secrets/\n/.orch/secrets/*\n!/.orch/secrets/mcp.json\n", encoding="utf-8"
     )
-    git("add", "-f", ".")
+    # Windows keeps skill folders as copies, not links: committing them would make them the team's files
+    git("add", "-f", ".orch", ".gitignore") if os.name == "nt" else git("add", "-f", ".")
     git("commit", "-qm", "team")
     connect(run, rel)
-    before = sorted(p.name for p in (proj / ".orch/secrets").iterdir())
+    secrets = proj / ".orch/secrets"
+    before = sorted(p.name for p in secrets.iterdir()) if secrets.is_dir() else []
     rel.snapshot.update(version=7, skills=[], mcp={"sql": {"command": "x"}}, credentials={"DB_URL": "pg://x"})
     code, out, err = run("relay", "refresh")
     assert code != 0
     s = proj / ".orch/secrets"
     assert not (s / "credentials.json").exists() and not (s / "mcp.json").exists()
     assert not list((ghome / "keys").glob("*/keys.json"))  # nothing reached the key store either
-    assert sorted(p.name for p in s.iterdir()) == before
+    assert (sorted(p.name for p in s.iterdir()) if s.is_dir() else []) == before
 
 
 def test_outbox_write_checks_git_for_the_exact_file(proj, monkeypatch):

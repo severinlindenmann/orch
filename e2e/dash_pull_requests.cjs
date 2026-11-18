@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-pull-requests');
@@ -29,7 +30,7 @@ function state() {
 
 async function withPage(chromium, size, viewName, fn) {
   const s = state();
-  const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
+  const browser = await headless.launch(chromium);
   try {
     const context = await browser.newContext({viewport: {width: size[0], height: size[1]}});
     await context.route('**/*', async route => {
@@ -65,7 +66,9 @@ test('Pull requests page: nav entry, open pull requests with ticket, checks and 
       await page.goto(BASE + '/#addon/pull-requests');
       await page.getByText('Add CSV export for invoices').first().waitFor();
       await page.getByRole('heading', {name: 'Pull requests', level: 1}).waitFor();
-      for (const word of ['Failed: lint', 'Ready to merge', 'Has a conflict', 'Running (2 left)', 'Draft', 'acme/website'])
+      for (const word of ['Checks failed', 'Draft', 'Open pull requests', 'Merge queue: acme/billing',
+                         'Group of 2 · checks running 12 min', 'Being checked', '1st in line, paused', 'tries again by itself in 6 min', '29 min',
+                         'groups of up to 5'])
         assert.ok(await page.getByText(word).first().count(), word);
       await page.screenshot({path: path.join(OUT, `pull-requests-${size[0]}.png`), fullPage: true});
     });

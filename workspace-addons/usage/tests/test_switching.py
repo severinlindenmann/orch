@@ -305,6 +305,30 @@ def test_a_failed_switch_is_written_and_tried_again_after_ten_minutes(cli, switc
     assert switching.look(ws, at(601))["did"] == "switched"
 
 
+def test_a_switch_another_program_undoes_is_written_once_and_says_so(cli, switcher, ws):
+    """ORCH-591: three 'switched to' rows in a row hid that a second switcher kept moving the account back."""
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    assert switching.look(ws, at(0))["did"] == "switched"
+    for n in (1, 2, 3):
+        switcher.use(active=1)  # the other program switches back to the first account
+        assert switching.look(ws, at(120 * n))["did"] == "switched"  # Usage switches again, quietly
+    assert [h["what"] for h in usage_rows(ws)] == [
+        "switched to TEAMCO",
+        "another program switched back to first",
+    ]
+
+
+def test_a_switch_that_did_not_change_the_account_in_use_is_not_written_as_done(
+    cli, switcher, ws, monkeypatch
+):
+    seed(cli)
+    jrun(cli, "switching", "on", "--by", "human:owner")
+    monkeypatch.setattr(switching, "_stuck", lambda key, read=None: False)
+    assert switching.look(ws, at(0))["did"] == "switch failed"
+    assert [h["what"] for h in usage_rows(ws)] == ["could not switch to TEAMCO"]
+
+
 def test_a_rule_that_ended_falls_back_before_choosing(cli, switcher, ws):
     seed(cli)
     jrun(cli, "switching", "on", "--by", "human:owner")

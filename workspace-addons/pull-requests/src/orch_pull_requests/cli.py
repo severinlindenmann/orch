@@ -1,4 +1,4 @@
-"""orch pull-requests queue add|list|remove|run, tend, failed-checks, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
+"""orch pull-requests queue add|list|remove|run, tend, failed-checks, helper-stopped, start|stop|status (contract: contracts/addons/pull-requests/README.md)."""
 
 from __future__ import annotations
 
@@ -253,6 +253,24 @@ def _checks_cmd(args, root: Path) -> int:
     return 0
 
 
+def _stopped_cmd(args, root: Path) -> int:
+    """helper-stopped on|off|status: a ready pull request a helper left open goes into the merge queue."""
+    from . import switch
+
+    if args.state in ("on", "off"):
+        on = switch.set_stopped(root, args.state == "on")
+    else:
+        on = switch.stopped_is_on(root)
+    text = (
+        "Helper stopped: on. When no helper works on a ticket, its pull requests that are ready to merge go into "
+        "the merge queue (the Merge when green watcher, every minute)."
+        if on
+        else "Helper stopped: off."
+    )
+    print(json.dumps({"on": on}) if args.json else text, flush=True)
+    return 0
+
+
 def _switch_cmd(args, root: Path) -> int:
     """tend, start, stop, status, watch: the Merge when green switch and its background watcher."""
     from . import service
@@ -302,6 +320,12 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--json", action="store_true")
     ls = q.add_parser("list", help="what waits and what happened lately")
     ls.add_argument("--json", action="store_true")
+    au = q.add_parser(
+        "audit",
+        help="merges past the queue, times it stood still, check runs per merge and minutes to merged, for the last hours",
+    )
+    au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
+    au.add_argument("--json", action="store_true")
     rm = q.add_parser("remove", help="take a waiting pull request out of the queue")
     rm.add_argument("url")
     r = q.add_parser("run", help="the runner (add starts it by itself)")
@@ -326,6 +350,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     fc.add_argument("state", nargs="?", choices=("on", "off", "status", "tend"), default="status")
     fc.add_argument("--json", action="store_true")
+    hs = sub.add_parser(
+        "helper-stopped", help="a ready pull request a helper left open goes into the merge queue by itself"
+    )
+    hs.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
+    hs.add_argument("--json", action="store_true")
     w = sub.add_parser("watch", help=argparse.SUPPRESS)
     w.add_argument("--root", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
@@ -335,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
             return _page_cmd(args, root)
         if args.cmd == "failed-checks":
             return _checks_cmd(args, root)
+        if args.cmd == "helper-stopped":
+            return _stopped_cmd(args, root)
         if args.cmd != "queue":
             return _switch_cmd(args, root)
         if args.sub == "run":
@@ -345,8 +376,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"entries": rows, "running": runner_alive(root)}, indent=1))
             elif not rows:
                 print("The merge queue is empty.")
-            else:
-                print("\n".join(_show(x) for x in rows))
+            else:  # what waits, and the last 50 that ended (the file keeps more for the audit)
+                done = [x for x in rows if x.get("state") in FINISHED]
+                shown = done[-50:] + [x for x in rows if x.get("state") not in FINISHED]
+                print("\n".join(_show(x) for x in rows if x in shown))
+            return 0
+        if args.sub == "audit":
+            from . import audit
+
+            if args.hours <= 0:
+                raise Refused("--hours is a number of hours above 0.")
+            report = audit.run(root, _github(), args.hours)
+            print(json.dumps(audit.as_json(report), indent=1) if args.json else audit.text(report))
             return 0
         if args.sub == "remove":
             if store.remove(root, args.url, _actor()):

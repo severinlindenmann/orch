@@ -4,14 +4,13 @@
 // wraps: when the row is too narrow it folds step by step into counts (kit .lbar, data-fold). The dashboard names no
 // add-on: the live page is found by its live_session capability (pages/live.js).
 //
-// Data: the live sessions API (pages/livesessions.js, window.LiveSessions; ORCH-359). Pinning is not stored by orch
-// yet (the wall builds it): until then the pinned ids are read from this browser only (LIVEBAR_PINS).
+// Data: the live sessions API (pages/livesessions.js, window.LiveSessions; ORCH-359). Pins and own names are kept by
+// orch for the workspace (window.LiveSessions.pins, ORCH-361).
 //
 // Mount: the bar is one element (#live-bar). It goes into the dashboard's keep place ([data-keep], the mount point that
 // outlives page changes) when there is one, else at the end of .shell-body; LiveBar.mount(host) moves it anywhere else
 // and it stays the same element (its open list included). With the layer (window.LiveLayer.open) a chip opens its
 // session there; the layer's orch:live-layer event marks the open ones; LiveBar.end(fn) fills the right end.
-const LIVEBAR_PINS = 'orch.live.pins';
 const LIVEBAR_LISTS = {
   wait: {sym:'◆', word:'need you', head:'Needs you'},
   pin: {sym:'', word:'pinned', head:'Pinned'},
@@ -52,10 +51,11 @@ function liveFocusVerb(t, run, helperState) {
   if (o) return {run:'Watch', idle:'Open', queue:'In line'}[o.s];
   return ['done', 'dropped', 'superseded'].includes(t.status) ? '' : 'Start';
 }
-// Which sessions a list (or a chip group) holds. Needs you wins over pinned; pinned is taken out of the counts.
+// Which sessions a list (or a chip group) holds. Needs you wins over pinned; pinned is taken out of the counts. More
+// (the last fold, where pinned has no chip or count of its own) holds everything that does not need you, pinned too.
 function liveBarIn(o, l) {
   const w = o.s === 'wait';
-  return l === 'wait' ? w : l === 'pin' ? o.pin && !w : !w && !o.pin && (l === 'more' || o.s === l);
+  return l === 'wait' ? w : l === 'pin' ? o.pin && !w : l === 'more' ? !w : !w && !o.pin && o.s === l;
 }
 // The open session without a ticket of a kind (state.sessions), or null: New goes to it instead of a second one.
 function liveBarNewOpen(sessions, kind) {
@@ -69,17 +69,27 @@ function liveBarCountText(l, n, compact) {
   return l === 'pin' ? 'Pinned (' + n + ')' : l === 'more' ? 'More (' + n + ')' : n + ' ' + LIVEBAR_LISTS[l].word;
 }
 
+// The words of the "needs you" end of the bar: what is true for the person, not only for the live sessions. `total` is
+// the one number of things waiting on them (Review badge: questions, results, changes), `sessions` those of it that
+// are a live session. All calm only when nothing waits (ORCH-464).
+function liveBarNeedText(total, sessions) {
+  const n = Math.max(Number(total) || 0, Number(sessions) || 0);
+  if (!n) return 'All calm';
+  return n + (n === 1 ? ' needs you' : ' need you');
+}
+
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW};
+  module.exports = {liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW};
 } else {
   (() => {
     const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, busy:''};
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
     const sessions = () => window.LiveSessions?.list || [];
-    const pins = () => { try { return JSON.parse(localStorage.getItem(LIVEBAR_PINS) || '[]'); } catch (e) { return []; } };
+    const pins = () => window.LiveSessions?.pins || [];  // kept by orch for the workspace (ORCH-361)
     const phone = () => window.matchMedia('(max-width: 720px)').matches;
     const link = (a, o) => '#addon/' + encodeURIComponent(a.name) + '/t/' + encodeURIComponent(o.id);
-    const label = o => o.key || o.title;
+    const label = o => o.name || o.key || o.title;  // a chip shows the session's own name when it has one (draft D)
+    const needTotal = () => { try { return typeof needsYouTotal === 'function' ? needsYouTotal() : 0; } catch (e) { return 0; } };
     const sym = (s, text) => h('span', {className:'lbar-sym', 'data-s':s, 'aria-hidden':'true'}, text);
 
     function chip(a, o) {
@@ -103,10 +113,14 @@ if (typeof module === 'object' && module.exports) {
       if (fold >= 3) {
         const lists = fold >= 4 ? ['wait', 'more'] : ['wait', 'pin', 'run', 'queue', 'idle'];
         const counts = lists.map(l => count(all, l, true)).filter(Boolean);
+        const total = needTotal(), seen = all.filter(o => liveBarIn(o, 'wait')).length;
+        // things waiting on the person that are no live session: one orange count to Review, so the phone bar never reads calm
+        if (total > seen) counts.unshift(h('a', {className:'lbar-cnt', href:'#review', 'data-s':'wait', 'data-key':'lbar-cnt-need', 'aria-label':liveBarNeedText(total, seen)},
+          sym('wait', LIVEBAR_LISTS.wait.sym), h('span', {}, String(total))));
         return counts.length ? counts : [h('span', {className:'lbar-l'}, 'All calm')];
       }
       const need = all.filter(o => liveBarIn(o, 'wait')), pin = all.filter(o => liveBarIn(o, 'pin'));
-      return [group(a, 'wait', need.length ? 'Needs you' : 'All calm', need),
+      return [group(a, 'wait', liveBarNeedText(needTotal(), need.length), need),
         pin.length ? (fold >= 1 ? count(all, 'pin') : group(a, 'pin', '', pin)) : null,
         ...(fold >= 2 ? [count(all, 'more')] : ['run', 'queue', 'idle'].map(l => count(all, l)))].filter(Boolean);
     }
@@ -173,7 +187,7 @@ if (typeof module === 'object' && module.exports) {
       const made = r.ok ? liveBarNewOpen(state.sessions, kind) : null;
       bar.menu = !made && !r.ok;
       if (made) {
-        try { const p = pins(); if (!p.includes(made.id)) localStorage.setItem(LIVEBAR_PINS, JSON.stringify([...p, made.id])); } catch (e) { /* private window */ }
+        // a session without a ticket is pinned by orch until it is unpinned (sessionprefs, ORCH-361)
         window.dispatchEvent(new CustomEvent('orch:live-pins', {detail:{key:made.id, pinned:true}}));
         await window.LiveSessions?.refresh?.();  // the bar and the panes read the sessions API: show it now
       }
@@ -204,7 +218,7 @@ if (typeof module === 'object' && module.exports) {
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
       const all = liveBarModel(sessions(), pins());
-      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, bar.list, bar.menu, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth]);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, bar.list, bar.menu, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
       const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';

@@ -7,7 +7,7 @@ const OLD = 'standin-session-old1', NEW = 'standin-session-new2';
 module.exports = {
   name: 'Session history: reopen an earlier conversation of a ticket',
   covers: ['session.reopen'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, python, workspace, home, until }) {
+  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, python, workspace, home, until, addonOff }) {
     addonOn('focus');
     orchAsPerson('config', 'set', 'focus.preview', 'on');
     const tid = JSON.parse(orch('ticket', 'new', 'Write the party invite', '--json')).id;
@@ -26,8 +26,13 @@ module.exports = {
 
     await open('#home');
     await until(s => s.settings?.focus_preview_on === true && (s.tickets || []).some(t => t.id === tid), 'the Preview on and the ticket there');
-    // the layer remembers its open panes per browser: open the ticket's pane as a person who had it open
-    await page.evaluate(id => localStorage.setItem('orch.live.layer', JSON.stringify({ mode: 'bottom', last: 'bottom', back: 'bottom', panes: [id], cur: id })), tid);
+    // the layer remembers its open panes per workspace in this browser (orch.live.layer.<workspace>, issue 1351): open
+    // the ticket's pane as a person who had it open, and drop what earlier click-throughs left
+    await page.evaluate(id => {
+      Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k));
+      const ws = String((typeof state === 'object' && state && state.workspace) || '');
+      localStorage.setItem(ws ? 'orch.live.layer.' + ws : 'orch.live.layer', JSON.stringify({ mode: 'bottom', last: 'bottom', back: 'bottom', panes: [id], cur: id }));
+    }, tid);
     await reload();
     // a roomy pane shows History in its header; a compact one (smaller than 1200 px, ORCH-463) keeps it in More
     const tab = page.locator('#live-dock .live-pane :is([data-key="live-history"], [data-key="live-pane-more"])').first();
@@ -54,8 +59,7 @@ module.exports = {
     must(sessions.some(s => s.id === OLD), 'the ticket does not continue the earlier conversation: ' + JSON.stringify(sessions.map(s => s.id)));
     try { orchAsPerson('run', 'stop', tid); } catch (e) { /* the stand-in already ended */ }
     orchAsPerson('config', 'set', 'focus.preview', 'off');
-    orchAsPerson('addon', 'remove', 'focus');
-    await until(s => !(s.addons || []).some(a => a.name === 'focus'), 'focus off again');
-    await page.evaluate(() => localStorage.removeItem('orch.live.layer'));
+    await addonOff('focus');
+    await page.evaluate(() => Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)));
   },
 };

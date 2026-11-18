@@ -419,7 +419,11 @@ function agentBar(t) {
       : h('div', {className:'grow'}, h('p', {className:'ab-text truncate'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), lastLine),
     helper && window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : null, line.startFailed ? null : ticketWarmth(t, run, session),
     snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
-      alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
+      alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'})
+        // a plain start (Start, Continue, Retry, Try again) is the header's one Start button (ORCH-475), never a second one
+        // here; Start anyway takes over a stuck run
+        : line.primary?.op === 'run.start' && !line.primary.args?.take_over ? null
+        : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
 }
 
 // "X is also changing this folder": one quiet line from the core (orch run status), no banner. A hint, not a lock.
@@ -548,6 +552,7 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name);
   const key = url + '|' + (file.mtime || '');
   if (!ticketPreviewText.has(key)) ticketPreviewText.set(key, fetch(url).then(async r => {
+    if (r.status === 404) return {missing:true};  // listed, but not on this computer: say so instead of an empty tile
     if (!r.ok) return null;
     const mime = (r.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
     if (picture) return ['image/png', 'image/jpeg', 'image/webp'].includes(mime) ? {blob:await r.blob()} : null;
@@ -559,7 +564,8 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   }).catch(() => null));
   // A finished preview is drawn at once: the page redraws often, and a tile filled later would be thrown away.
   const fill = data => {
-    if (data?.blob) {
+    if (data?.missing) tile.append(h('p', {className:'meta file-missing'}, 'This file is missing. It is listed here, but not on this computer.'));
+    else if (data?.blob) {
       const src = URL.createObjectURL(data.blob), img = h('img', {src, alt:title, loading:'lazy'});
       img.onload = img.onerror = () => URL.revokeObjectURL(src); tile.append(img);
     } else if (data?.text) tile.append(previewText(t, kind, file, data.text));
@@ -1137,8 +1143,13 @@ function ticketPhone(q) {
 // screen (the dashboard's read-only /api/term) sits above the box, so the person sees the conversation it goes into.
 const TALK_SEND_MAX = 2000;  // run.send's limit (actions.MAX_TEXT)
 const TALK_TYPED_MAX = 1500;  // what the box takes; the rest is the line that names the files
-const TALK_TYPES = ['txt', 'md', 'csv', 'tsv', 'json', 'log', 'yml', 'yaml', 'toml', 'ini', 'png', 'jpg', 'jpeg', 'gif', 'webp'];  // orch ticket attach
+const TALK_TYPES = ['txt', 'md', 'csv', 'tsv', 'json', 'log', 'yml', 'yaml', 'toml', 'ini', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'webm', 'ogg', 'm4a', 'mp3', 'wav'];  // orch ticket attach
+const TALK_AUDIO = /\.(webm|ogg|m4a|mp3|wav)$/i;
 const TALK_FILE_MAX = 25 * 1024 * 1024, TALK_FILES = 10, TALK_POLL = 2000;
+// The one feedback box (ORCH-422): words, a pasted screenshot, a dropped or picked file and a voice note, on Send back,
+// Add note and Add to this ticket alike. Same limits as every ticket file (orch ticket attach decides).
+const FEEDBACK_BOX = {accept:TALK_TYPES, maxFiles:TALK_FILES, maxBytes:TALK_FILE_MAX, voice:true,
+  acceptError:'Only text files, pictures and voice recordings can be added.', attachLabel:'Add file'};
 function ticketTalkCard(t) {
   if (snapshot || !t || t.status === 'done') return null;
   return h('section', {className:'card ticket-talk', 'data-key':'ticket-talk-' + t.id}, h('h2', {}, 'Add to this ticket'),
@@ -1148,22 +1159,33 @@ function ticketTalkCard(t) {
 function ticketTalkText(typed, names) {
   const said = String(typed || '').trim();
   const count = names.length === 1 ? 'a file' : names.length + ' files';
-  let files = names.length ? 'I added ' + count + ' to this ticket: ' + names.join(', ') + '.' : '';
-  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to this ticket.';
+  // a voice note without its words (the browser could not turn it into text on this computer): say so plainly
+  const mute = names.some(n => TALK_AUDIO.test(n)) && !/(^|\n)Voice note: /.test(said) ? ' The voice note came without written words.' : '';
+  let files = names.length ? 'I added ' + count + ' to this ticket: ' + names.join(', ') + '.' + mute : '';
+  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to this ticket.' + mute;
   if (!said) return files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' and carry on.';
   return files ? said + '\n\n' + files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' first.' : said;
 }
 const talkFailed = result => result.status === 0 ? "Can't reach orch. Nothing was sent." : window.DashHelpers.scrubText(String(result.text || '')).slice(0, 300) || 'That did not work. Try again.';
+// The box's files onto the ticket in one ticket.attach call; the names orch kept come back (it may rename "x (2).png").
+async function ticketAttachFiles(tid, files) {
+  const list = array(files);
+  if (!list.length) return {ok:true, names:[]};
+  const added = await act('ticket.attach', {ticket:tid, files:list.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)}))});
+  if (!added.ok) return {ok:false, text:talkFailed(added)};
+  if (typeof artifactData !== 'undefined') artifactData.delete(tid);  // the Files tab counts the new files on the next draw
+  const saved = array(added.state?.attached?.saved).filter(n => typeof n === 'string');
+  const failed = array(added.state?.attached?.failed).filter(n => typeof n === 'string');
+  if (failed.length && !saved.length) return {ok:false, text:'These files could not be added: ' + failed.join(', ') + '.'};
+  return {ok:true, names:saved.length ? saved : list.map(f => f.name)};
+}
 async function ticketTalkSend(tid, message) {
   const t = ticketOf(tid);
   if (!t) return {ok:false, text:'This ticket is no longer here.'};
   const files = array(message.files);
-  if (files.length) {
-    const added = await act('ticket.attach', {ticket:tid, files:files.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)}))});
-    if (!added.ok) return {ok:false, text:talkFailed(added)};
-    artifactData.delete(tid);  // the Files tab counts the new files on the next draw
-  }
-  const text = ticketTalkText(message.text, files.map(f => f.name));
+  const kept = await ticketAttachFiles(tid, files);
+  if (!kept.ok) return kept;
+  const text = ticketTalkText(message.text, kept.names);
   const partial = r => ({ok:false, dropFiles:files.length > 0, text:(files.length ? 'The files are on the ticket, but the helper was not told: ' : '') + talkFailed(r)});
   if (t.status === 'review') {  // the same call as Send back: Ready, the note queued, a helper starts from it
     const back = await act('ticket.changes', {ticket:tid, text});
@@ -1176,11 +1198,19 @@ async function ticketTalkSend(tid, message) {
   if (!delivered && !(r && typeof r.id === 'string' && r.id)) return partial({status:200, text:'orch did not confirm that your message was saved.'});
   if (delivered) return {ok:true, text:'Sent. The helper reads it now.'};
   if (r.state !== 'none') return {ok:true, text:'Sent. The helper reads it when it finishes what it is doing.'};
-  const started = await act('run.start', {ticket:tid});  // nothing on the ticket: start a helper, it reads this first
+  // nothing on the ticket: start a helper, it reads this first. Through the one starter (ORCH-475): Starting… until it
+  // runs, one run for a double click, and the way the person picked in the Start choice (else the usual start).
+  const ops = talkStartOps.get(tid) || [['run.start', {ticket:tid}]];
+  talkStartOps.delete(tid);
+  const starter = window.UI?.startStarter;
+  const started = starter ? await starter.start(tid, ops) : await act('run.start', {ticket:tid});
+  if (started.again) return {ok:true, text:'Sent. The helper is starting and reads it first.'};
+  if (started.queued) return {ok:true, text:'Sent. The ticket waits in line for a free helper place; the helper reads it first.'};
   return started.ok ? {ok:true, text:'Sent. A helper starts and reads it first.'} : {ok:true, text:'Saved on the ticket. Start the helper to go on.'};
 }
 // The helper's screen as plain text: colours and cursor codes dropped (the kit's dock shows text only).
 function talkScreenText(screen) { return String(screen || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b[@-_]/g, '').replace(/\s+$/, ''); }
+const talkStartOps = new Map();  // ticket id -> the start picked in the Start choice next to Send and start helper
 function ticketTalkLabel(t, run) {
   if (t?.status === 'review') return 'Send back with this';
   return window.DashHelpers.helperAlive(t, run) ? 'Send to helper' : 'Send and start helper';
@@ -1194,10 +1224,10 @@ function ticketTalk(host, tid) {
   const dock = el('div', 'session-dock in-card'); dock.dataset.key = 'ticket-talk-dock'; dock.append(head, body, quiet);
   const box = el('div'); box.id = 'ticket-composer-' + tid;
   host.append(dock, box);
-  const composer = window.UI.composer(box, {label:'Add to this ticket', placeholder:'Write what is new, paste a screenshot or drop files…',
-    sendLabel:ticketTalkLabel(ticketOf(tid), state.runs?.[tid]), interrupt:false, accept:TALK_TYPES, maxFiles:TALK_FILES, maxBytes:TALK_FILE_MAX, maxLength:TALK_TYPED_MAX,
-    hint:'Text files and pictures · Cmd/Ctrl+V pastes a screenshot · Cmd/Ctrl+Enter sends', sendStyle:'outline',  // the page keeps its one filled button (Start, Watch live)
-    acceptError:'Only text files and pictures can be added.', emptyError:'Write something or add a file.',
+  const composer = window.UI.composer(box, {...FEEDBACK_BOX, label:'Add to this ticket', placeholder:'Write what is new, paste a screenshot, drop files or record…',
+    sendLabel:ticketTalkLabel(ticketOf(tid), state.runs?.[tid]), interrupt:false, maxFiles:TALK_FILES, maxBytes:TALK_FILE_MAX, maxLength:TALK_TYPED_MAX,
+    hint:'Text files, pictures and voice notes · Cmd/Ctrl+V pastes a screenshot · Cmd/Ctrl+Enter sends', sendStyle:'outline',  // the page keeps its one filled button (Start, Watch live)
+    emptyError:'Write something or add a file.',
     dropTarget:host, dropLabel:'Drop to add to this ticket', sendingText:'Sending…',
     onSend:async message => { const result = await ticketTalkSend(tid, message); render(); return result; }});
   let timer = null, last = null, busy = false;
@@ -1228,10 +1258,31 @@ function ticketTalk(host, tid) {
     finally { busy = false; }
   }
   const submit = box.querySelector('[type=submit]');
+  // Send and start helper has the caret of the one Start button (ORCH-475, mockup ticket/ticket-start.html): a picked way
+  // to start sends the box first (when something is in it), then starts that way.
+  const caretFacts = () => {
+    const t = ticketOf(tid);
+    return t && typeof startFacts === 'function' ? {...startFacts(t), caretHidden:ticketTalkLabel(t, state.runs?.[tid]) !== 'Send and start helper'} : null;
+  };
+  let caret = null;
+  if (submit && window.UI?.startButton && caretFacts()) {
+    const slot = el('span');
+    submit.before(slot);
+    caret = window.UI.startButton(slot, {ticket:tid, caretOnly:true, mainEl:submit, label:'Send and start helper', send:(op, args) => act(op, args, {quiet:true}),
+      toast:(text, kind) => window.orch.toast(text, kind || 'ok'), ...caretFacts(),
+      before:async ops => {
+        const typed = box.querySelector('textarea')?.value.trim(), staged = box.querySelectorAll('.attachment-tile').length;
+        if (!typed && !staged) return [];  // nothing to send: just start that way
+        talkStartOps.set(tid, ops);
+        box.querySelector('form')?.requestSubmit();
+        return null;
+      }});
+  }
   return {
     update() {
       const label = ticketTalkLabel(ticketOf(tid), state.runs?.[tid]);
       if (submit && submit.textContent !== label) submit.textContent = label;
+      if (caret) { const f = caretFacts(); if (f) caret.update(f); }
       if (!timer) { poll(); timer = setInterval(poll, TALK_POLL); }
     },
     destroy() { clearInterval(timer); timer = null; composer.destroy?.(); },
@@ -1271,27 +1322,27 @@ function ticketChangesEditor(t) {
   const shown = tip ? h('span', {className:'meta', 'data-key':'ticket-review-tip'}, 'Changes up to ', h('code', {}, tip.slice(0, 12))) : null;
   const open = ticketButton('Send back', 'outline sm', () => {
     locks.add(key);
-    let sending = false;
-    // A real text box (ORCH-183): a few lines, its label above it (not repeated inside), Ctrl/Cmd+Enter sends.
-    const fid = 'ticket-changes-text-' + t.id;
-    const input = h('textarea', {className:'input', id:fid, rows:3});
-    const close = () => { if (sending) return; locks.delete(key); host.replaceChildren(row); open.focus(); };
-    const send = ticketButton('Send back', 'primary sm', async () => {
-      if (!input.value.trim() || sending) return;
-      sending = true; send.disabled = true; input.disabled = true; cancel.disabled = true;
-      let sent = false;
-      try { sent = await ticketSendChanges(t, input.value); }
-      finally { sending = false; input.disabled = false; cancel.disabled = false; send.disabled = !input.value.trim(); }
-      if (sent) { close(); render(); }
-    });
-    const cancel = ticketButton(iconEl('x'), 'ghost icon', close, {'aria-label':'Cancel', 'data-key':'ticket-ask-cancel'});
-    send.disabled = true;
-    input.oninput = () => { send.disabled = sending || !input.value.trim(); };
-    input.onkeydown = e => {
-      if (e.key === 'Escape') { e.preventDefault(); close(); }
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); send.click(); }
-    };
-    host.replaceChildren(h('div', {className:'stack-sm'}, h('label', {className:'ticket-ask-label', for:fid}, 'What should change?'), input, h('div', {className:'row'}, send, cancel))); input.focus();
+    // The feedback box (ORCH-422): words, a pasted screenshot, a file or a voice note; Ctrl/Cmd+Enter sends.
+    const box = h('div', {id:'ticket-changes-box-' + t.id});
+    let comp = null, sending = false;
+    const close = () => { if (sending) return; comp?.destroy?.(); locks.delete(key); host.replaceChildren(row); open.focus(); };
+    const cancel = ticketButton('Cancel', 'ghost sm', close, {'data-key':'ticket-ask-cancel'});
+    host.replaceChildren(h('div', {className:'stack-sm'}, h('p', {className:'ticket-ask-label'}, 'What should change?'), box, h('div', {className:'row'}, cancel)));
+    if (!window.UI?.composer) return;
+    comp = window.UI.composer(box, {...FEEDBACK_BOX, label:'What should change?', placeholder:'Write, paste a picture or record', sendLabel:'Send back',
+      interrupt:false, maxLength:TALK_TYPED_MAX, hint:'', emptyError:'Write what should change, or add a file or a voice note.', dropTarget:host, dropLabel:'Drop to send back with this', sendingText:'Sending…',
+      onSend:async message => {
+        sending = true;
+        try {
+          const kept = await ticketAttachFiles(t.id, message.files);
+          if (!kept.ok) return kept;
+          const ok = await ticketSendChanges(t, ticketTalkText(message.text, kept.names));
+          if (ok) { sending = false; close(); render(); return {ok:true, text:''}; }
+          return {ok:false, dropFiles:kept.names.length > 0, text:kept.names.length ? 'The files are on the ticket, but it was not sent back. Try again.' : 'It was not sent back. Try again.'};
+        } finally { sending = false; }
+      }});
+    box.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
+    comp.field.focus();
   });
   row.append(...[done, open, unfinishedNote, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
@@ -1550,6 +1601,7 @@ function ticketStripModel(t, run, fresh) {
     if (s.helper) return m((s.helper.detail || s.word) + '.');
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
+  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press Start to begin now.');
   if (fresh) return m('Not started. Your helper begins when you press Start.');
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
   return m(at ? 'Updated ' + at + '.' : '');
@@ -1653,7 +1705,7 @@ function ticketProperties(t, parent) {
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)),
+    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)), field('Human review needed', humanReviewField(t)),
       ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t), field('Helper strength', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
@@ -1687,7 +1739,6 @@ function missingTicket(id) {
 // The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [], kidsDone = !questions(t).length && !run?.running ? ticketKidsAllDone(t) : null;
-  let startShown = false;
   if (kidsDone) m.sentence = (kidsDone.length === 1 ? 'Its sub-ticket is done.' : 'All ' + kidsDone.length + ' sub-tickets are done.') + ' Mark it Done when nothing else is left.';
   const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
   if (quiet) m.sentence = (/^Updated /.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: No news since replaces Updated
@@ -1697,10 +1748,9 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
     else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', e => focusTicketAnswer(t.id, e?.currentTarget), {'data-key':'ticket-answer'})); }
     else if (kidsDone) actions.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'}));
-    else if (fresh) { startShown = true; actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'})); }
-    else if (ticketPaused(t, run)) { startShown = true; actions.push(ticketButton('Continue', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'})); }
-    // ORCH-255: Continue is on the page in every state while no helper runs; Start helper / Continue (paused) already do that job
-    if (!run?.running && !startShown) actions.push(ticketButton('Continue', actions.length ? 'outline sm' : 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-continue'}));
+    // ORCH-255: a start is on the page in every state while no helper runs. ORCH-475: it is the one Start button (pages/start.js):
+    // Continue when an earlier session can be reopened, else Start helper; the caret opens the Start choice. Never filled (ORCH-415).
+    if (!run?.running) actions.push(startHost(t, 'ticket-start'));
     // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
     const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
     if (focusBtn) actions.push(focusBtn);
@@ -1799,7 +1849,8 @@ function detail(t) {
     ticketTalkCard(t),
     t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
-    note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
+    // also without a note: the screenshots, files and voice notes a person sent with Send back or Add note (ORCH-422)
+    note || inputFiles(t).length ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
     working && helperLive ? sharedFolderLine(t) : null,
     t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
@@ -1863,6 +1914,21 @@ function releaseField(t) {
     if (sw.disabled) return;
     sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
     const result = await act('ticket.edit', {ticket:t.id, release:!on, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); sw.setAttribute('aria-checked', String(on)); }
+    sw.disabled = false;
+  };
+  return sw;
+}
+// ORCH-424: Human review needed. On unless the person turns it off (no field = on, also for older tickets); while
+// it is on nothing on this ticket is accepted without a person. The same switch as Release.
+function humanReviewField(t) {
+  const on = t.human_review !== false;
+  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, nothing is accepted without you' : 'No');
+  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'Human review needed', title:on ? 'Nothing is accepted without you' : 'Work may be accepted without you', 'data-key':'human-review-' + t.id});
+  sw.onclick = async () => {
+    if (sw.disabled) return;
+    sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
+    const result = await act('ticket.edit', {ticket:t.id, human_review:!on, if_revision:(ticketOf(t.id) || t).revision});
     if (!result.ok) { window.orch.toast(changeError(result), 'error'); sw.setAttribute('aria-checked', String(on)); }
     sw.disabled = false;
   };
@@ -2241,11 +2307,12 @@ let embedLooksGoodBusy = false;  // one batch at a time
 async function looksGoodAll(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (!req.clicked) return reply({type:'orch.looksgood.failed', error:NO_CLICK});
-  if (embedLooksGoodBusy) return;
+  // never a silent drop (ORCH-419): the page waits for an answer and says so
+  if (embedLooksGoodBusy) return reply({type:'orch.looksgood.failed', error:'Still saving the last Looks good. Try again in a moment.'});
   embedLooksGoodBusy = true;
   try {
-    try {
-      const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+    try {  // a read that hangs must not hold every later Looks good (ORCH-419)
+      const res = await fetch('/api/state?fresh=1', {cache:'no-store', signal:AbortSignal.timeout(10000)});
       if (res.ok) { mutation++; accept(await res.json()); }
     } catch (_) { /* Fall back to what the page already has. */ }
     // only results of this add-on (tickets that carry its data), as with sending: never another page's tickets

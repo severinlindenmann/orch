@@ -26,7 +26,7 @@ test('sessions by state from the live sessions API: needs you, working, in line,
   assert.deepEqual(keys('run'), ['ORCH-2']);
   assert.deepEqual(keys('queue'), ['ORCH-3']);
   assert.deepEqual(keys('idle'), ['ORCH-4']);
-  assert.deepEqual(keys('more'), ['ORCH-2', 'ORCH-3', 'ORCH-4'], 'More is everything that is not a chip');
+  assert.deepEqual(keys('more'), ['ORCH-5', 'ORCH-2', 'ORCH-3', 'ORCH-4'], 'More (the last fold) is everything that does not need you, pinned too: it has no other place there');
   assert.equal(all.find(o => o.key === 'ORCH-3').word, 'In line');
   assert.equal(all.find(o => o.key === 'ORCH-1').word, 'Needs you');
   assert.equal(all.find(o => o.key === 'ORCH-2').word, 'Working');
@@ -126,4 +126,14 @@ test('the ticket page and every ticket row use the one Focus button; a pane has 
   assert.match(layer, /function liveFocusButton[^]*?livePreviewOn\(\)/, 'only behind the Preview switch');
   assert.match(layer, /'data-key':'live-open-ticket'/);
   assert.match(layer, /'data-key':'live-more-ticket'/);
+});
+
+test('the bar says All calm only when nothing waits on the person (ORCH-464)', () => {
+  assert.equal(bar.liveBarNeedText(0, 0), 'All calm');
+  assert.equal(bar.liveBarNeedText(4, 0), '4 need you');  // four review items, no live session asks
+  assert.equal(bar.liveBarNeedText(1, 0), '1 needs you');
+  assert.equal(bar.liveBarNeedText(0, 2), '2 need you');   // sessions that ask count even when the total is behind
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  assert.ok(src.includes("liveBarNeedText(needTotal(), need.length)"), 'the wide bar reads the one needs-you number');
+  assert.ok(src.includes("'data-key':'lbar-cnt-need'"), 'the phone bar shows the number, linked to Review');
 });
