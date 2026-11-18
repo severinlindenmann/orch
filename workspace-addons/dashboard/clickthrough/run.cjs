@@ -29,7 +29,7 @@ const REPO = path.resolve(__dirname, '..', '..', '..');
 let SIZE = { width: 1280, height: 900 };
 /** Add-ons of this checkout the demo home has installed (off until a click-through turns one on, see server.py):
  *  every orch the run starts sees the same ones. */
-const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory'];
+const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync'];
 const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
   ...ADDONS.flatMap(n => ['--with-editable', path.join(REPO, 'workspace-addons', n)])];
 /** the env of every process of the run: the throw-away home only; ORCH_REPO = this checkout, so the add-ons
@@ -297,7 +297,8 @@ async function main() {
   if (o.out) fs.mkdirSync(o.out, { recursive: true });
   const srv = await serve();
   const { chromium } = playwright();
-  const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic'] });
+  // a fake microphone that is always allowed (ORCH-422: the voice note click-through records with it)
+  const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const done = new Set(), results = [];
   try {
     const ctx = await signIn(browser, srv);

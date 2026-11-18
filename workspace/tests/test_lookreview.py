@@ -159,10 +159,7 @@ def test_accept_marks_done_for_the_owner_with_the_points(proj, run, new_ticket, 
     t = tickets.load(proj, tid)
     assert t["status"] == "done"
     assert _lines(proj, tid)[-3] == "Second look, point by point: the top bar fits one row: shown"
-    assert _lines(proj, tid)[-1] == (
-        "Accepted for you by the Reviewer: second look: top bar fits at 1280, 1920 and 390 "
-        "(1 of 1 points shown)"
-    )
+    assert _lines(proj, tid)[-1] == "Accepted for you by the Reviewer: top bar fits at 1280, 1920 and 390"
     rows = reviewer.accepted(proj, "2000-01-01T00:00:00+00:00")
     assert [r["ticket"] for r in rows] == [tid]
     assert lookreview.read_state(proj)["line"] == {}

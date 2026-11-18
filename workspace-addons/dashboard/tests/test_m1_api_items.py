@@ -94,7 +94,7 @@ def test_warmth_uses_live_activity_and_fake_clock(ws, monkeypatch, mode, running
             },
         }
     }
-    monkeypatch.setattr(data, "load_runs", lambda *args: statuses)
+    monkeypatch.setattr(data, "load_runs", lambda *args, **kw: statuses)
     rows = {t["id"]: t for t in data.load_state(ws)["tickets"]}
     if expected is None:
         assert "warmth" not in rows["t_weekly01"]

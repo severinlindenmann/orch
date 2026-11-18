@@ -213,15 +213,30 @@ def _act_on_answer(root: Path, drv, rec: dict, spec, w: dict) -> str | None:
     q["answer"] = str(answer)[:40]
     _save_watch(root, rec["id"], w)  # written before acting: an answer is acted on once, never twice
     word = str(answer).strip().lower()
+    if word in ("restart", "stop"):
+        try:
+            getattr(drv, word)(spec)
+        except Refused as e:  # the answer is used up: say why on the ticket and ask again on the next pass
+            w["question"] = None
+            _save_watch(root, rec["id"], w)
+            try:  # the tool's own words stay in this output, not on the ticket
+                orch(
+                    root,
+                    "log",
+                    q["ticket"],
+                    f"{rec['name']}: could not {word} it. orch asks again.",
+                    write=True,
+                )
+            except Refused:
+                pass
+            return f"Could not {word} {rec['name']} ({e}); orch asks again (answer on {q['ticket']})."
     if word == "restart":
-        drv.restart(spec)
         store.mark(root, rec["id"], True)
         _rebase(drv, spec, w)
         w.update(failing=False, events=[], healthy_since=None, question=None)
         _save_watch(root, rec["id"], w)
         return f"Restarted {rec['name']} (answer on {q['ticket']})."
     if word == "stop":
-        drv.stop(spec)
         store.mark(root, rec["id"], False)
         w.update(failing=False, events=[], healthy_since=None, question=None)
         _save_watch(root, rec["id"], w)
