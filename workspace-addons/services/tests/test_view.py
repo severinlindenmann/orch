@@ -76,16 +76,16 @@ def test_remove_says_what_happens(cli):
     ]
 
 
-def test_log_shows_the_last_20_lines_masked_and_plain(cli, ws, stored_keys):
+def test_log_shows_the_last_100_lines_masked_and_plain(cli, ws, stored_keys):
     _add(cli, "web", "Web preview", "--start")
     secret = "zq-stored-value-81723"
     stored_keys["k"] = secret
     log = ws / ".orch/addons/services/logs/web.log"
-    lines = [f"line {i}" for i in range(30)] + [f"key loaded: {secret}", "<b>tag</b> done", ""]
+    lines = [f"line {i}" for i in range(130)] + [f"key loaded: {secret}", "<b>tag</b> done", ""]
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
     item = _view(cli)["blocks"][0]["groups"][0]["items"][0]
     got = item["panel"]["log"]["lines"]
-    assert len(got) == 20 and got[0] == "line 12"
+    assert len(got) == 100 and got[0] == "line 32"
     assert secret not in json.dumps(item) and "••••••" in got[-2]
     assert got[-1] == "‹b›tag‹/b› done"
 

@@ -28,6 +28,7 @@ from .store import Refused
 WINDOW = 600  # seconds: failures counted in the last 10 minutes; healthy this long takes the question back
 LIMIT = 3  # failures in the window that make a service failing
 PORT_TIMEOUT = 0.5
+START_GRACE = 90  # seconds after a start or restart through orch in which a silent port is "Starting", not a failure
 OPTIONS = ("Restart", "Stop", "Look into it")
 BY = "agent:services"
 MAX_EVENTS = 20
@@ -54,8 +55,18 @@ def port_answers(port: int) -> bool:
         return False
 
 
-def health(rec: dict, st: drivers.Status | None, wanted: bool = True) -> dict:
-    """{"ok", "how", "text"} in plain words (the mockup's health line)."""
+def just_started(root: Path, sid: str) -> bool:
+    """True within START_GRACE seconds of the last start or restart through orch."""
+    since = store.last_change(root, sid)
+    try:
+        t = datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp() if since else None
+    except ValueError:
+        t = None
+    return t is not None and 0 <= clock() - t < START_GRACE
+
+
+def health(rec: dict, st: drivers.Status | None, wanted: bool = True, starting: bool = False) -> dict:
+    """{"ok", "how", "text"} in plain words (the mockup's health line). `starting`: just started through orch."""
     port = rec.get("port")
     how = "answers on its address" if port else "process alive"
     alive = bool(st and st.running)
@@ -64,6 +75,8 @@ def health(rec: dict, st: drivers.Status | None, wanted: bool = True) -> dict:
     if not alive:
         return {"ok": False, "how": how, "text": "Not alive"}
     if port and not port_answers(port):
+        if starting:
+            return {"ok": False, "starting": True, "how": how, "text": "Starting…"}
         return {"ok": False, "how": how, "text": "Alive, but does not answer on its address"}
     return {"ok": True, "how": how, "text": "Answers on its address" if port else "Process alive"}
 
@@ -101,7 +114,7 @@ def row_extra(root: Path, rec: dict, st: drivers.Status | None) -> dict:
     state = read_state(root, rec["id"])
     w = _watch(state)
     wanted = state.get("running") if isinstance(state.get("running"), bool) else bool(st and st.running)
-    h = health(rec, st, wanted)
+    h = health(rec, st, wanted, just_started(root, rec["id"]))
     failing = w["failing"] and wanted
     n = len([t for t in w["events"] if t > clock() - WINDOW]) if failing else 0
     if n and not h["ok"]:
@@ -283,7 +296,7 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
 
     st = drv.status(spec)
     wanted = wanted_running(root, sid, st)
-    h = health(rec, st, wanted)
+    h = health(rec, st, wanted, just_started(root, sid))
     if not wanted:  # stopped by the person: nothing to watch; an open question is no longer needed
         if w["question"] and w["question"].get("open"):
             _take_back(root, w, f"{rec['name']} was stopped.")
@@ -298,7 +311,7 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
     last = w.get("runs")
     if isinstance(runs, int) and isinstance(last, int) and runs > last:
         new = min(runs - last, MAX_EVENTS)  # the computer started it again by itself
-    if not h["ok"]:
+    if not h["ok"] and not h.get("starting"):
         new = max(new, 1)  # one stop seen twice (not alive now, and started again) is still one failure
     w["runs"] = runs
     w["events"] = (events + [now] * new)[-MAX_EVENTS:]

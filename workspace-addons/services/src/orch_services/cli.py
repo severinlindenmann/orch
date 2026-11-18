@@ -9,10 +9,14 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import drivers, store, watch
 from .store import Refused
+
+START_WAIT_TRIES = 12  # after start / restart: look up to 12 x 0.25 s before saying it did not stay running
+START_WAIT_STEP = 0.25
 
 MASK = "••••••"
 ACT_VERBS = ("start", "stop", "restart", "auto-on", "auto-off", "remove", "adopt")
@@ -430,6 +434,11 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     if verb != "stop":
         watch.note_own_start(root, drv, spec)
     row = _state(root, drv, rec, wid)
+    for _ in range(START_WAIT_TRIES if verb != "stop" else 0):  # a job can take a moment to show as alive
+        if row["state"] == "running":
+            break
+        time.sleep(START_WAIT_STEP)
+        row = _state(root, drv, rec, wid)
     words = {"start": "Started", "stop": "Stopped", "restart": "Restarted"}[verb]
     nxt = f"{words} {rec['name']}."
     if verb != "stop" and row["state"] != "running":
@@ -508,11 +517,9 @@ def cmd_adopt(args, root: Path, fid: str) -> int:
     from . import found
 
     if isinstance(fid, str) and fid.startswith("process:"):
-        it = found.get(root, fid)
-        cmd = " ".join(it["command"])
         raise Refused(
-            f"{it['name']} is a program without a service entry, so orch cannot take it over as it is: to keep it "
-            f'running with orch, stop it yourself, then add it: orch services add "{it["name"]}" --id <id> -- {cmd}'
+            "A plain program has no service entry, so orch cannot take it over. To keep it running with orch, "
+            'stop it yourself, then add it: orch services add "<name>" --id <id> -- <command>'
         )
     it = found.get(root, fid)
     drv = _driver()

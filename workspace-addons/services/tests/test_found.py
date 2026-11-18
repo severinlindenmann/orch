@@ -251,14 +251,6 @@ def test_found_text_and_nothing_found(cli, mac, tools):
 
 
 def test_found_on_linux_keeps_only_the_persons_own_units(cli, linux, tools, monkeypatch, tmp_path, ws):
-    from orch_services import found
-
-    proc = tmp_path / "proc"
-    for pid, cwd in ((900, ws / "app"), (901, tmp_path), (902, ws), (777, ws), (903, ws)):
-        (proc / str(pid)).mkdir(parents=True)
-        (proc / str(pid) / "cwd").symlink_to(cwd)
-    (ws / "app").mkdir()
-    monkeypatch.setattr(found, "PROC", proc)
     tools.set(
         ps=[
             {"pid": 900, "ppid": 1, "tty": "?", "argv": ["node", "server.js", "--key", TOKEN]},
@@ -271,28 +263,23 @@ def test_found_on_linux_keeps_only_the_persons_own_units(cli, linux, tools, monk
     code, out = jrun(cli, "found")
     assert code == 0, out
     items = {i["id"]: i for i in out["found"]}
-    assert set(items) == {"systemd:notes-sync.service", "process:900"}
+    assert set(items) == {"systemd:notes-sync.service"}  # plain programs are never listed (ORCH-639)
     unit = items["systemd:notes-sync.service"]
     assert unit["name"] == "notes-sync" and unit["what"] == "Keeps my notes in sync" and unit["auto"] is True
     assert unit["since"] == "2026-11-17T16:19:15Z" and unit["how"]["unit"] == "notes-sync.service"
-    proc_item = items["process:900"]
-    assert proc_item["name"] == "server.js" and proc_item["how"] == {"kind": "process", "pid": 900}
-    assert proc_item["command"][-1] == "••••••" and TOKEN not in json.dumps(out)
+    assert TOKEN not in json.dumps(out)
 
 
-def test_on_a_mac_processes_come_from_lsof_and_are_skipped_without_it(
-    cli, mac, tools, ws, monkeypatch, tmp_path
-):
+def test_on_a_mac_plain_processes_are_never_listed(cli, mac, tools, ws):
     tools.set(
-        ps=[{"pid": 950, "ppid": 1, "tty": "??", "argv": ["python3", "-m", "watcher"]}],
-        lsof={"950": str(ws)},
+        ps=[
+            {"pid": 950, "ppid": 1, "tty": "??", "argv": ["python3", "-m", "watcher"]},
+            {"pid": 951, "ppid": 1, "tty": "??", "argv": ["tail", "-f", "log.txt"]},
+        ],
+        lsof={"950": str(ws), "951": str(ws)},
     )
     _code, out = jrun(cli, "found")
-    assert "process:950" in {i["id"] for i in out["found"]}
-    (tmp_path / "bin" / "lsof").unlink()
-    monkeypatch.setattr("orch_services.found.LSOF", str(tmp_path / "no-lsof"))
-    _code, out = jrun(cli, "found")
-    assert "process:950" not in {i["id"] for i in out["found"]}
+    assert not [i for i in out["found"] if i["id"].startswith("process:")]
 
 
 def test_found_and_list_never_write_or_change_anything(cli, mac, tools, ws):
@@ -496,5 +483,4 @@ def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
         lsof={"960": str(ws), "961": str(ws), "962": str(ws)},
     )
     found = {i["id"]: i for i in jrun(cli, "found")[1]["found"]}
-    assert "process:960" not in found and "process:961" not in found
-    assert found["process:962"]["name"] == "watcher.py"  # an interpreter shows the script, also as Python
+    assert not [i for i in found if i.startswith("process:")]

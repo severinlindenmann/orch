@@ -962,7 +962,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .split-list .list-row>a:hover{text-decoration:underline}
 .split-list .list-row>a:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--r1)}
 .split-view .subline{display:block;font-size:var(--fs-meta);line-height:16px;font-weight:400;color:var(--text-faint)}
-.split-panel{min-width:0;padding:var(--s4)}
+.split-panel{min-width:0;padding:var(--s4);align-content:start}
 .split-panel[hidden]{display:none}
 .split-panel:focus{outline:none}
 .split-panel:focus-visible{box-shadow:inset var(--focus-ring)}
@@ -977,6 +977,8 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .log-lines ol{list-style:none;margin:0;padding:var(--s3);display:grid;gap:2px;overflow-x:auto}
 .log-lines li{white-space:pre-wrap;overflow-wrap:anywhere}
 .log-lines>p{padding:var(--s3);margin:0}
+.log-lines.log-short li:nth-last-child(n+7){display:none}
+.log-lines.log-full ol{max-height:60vh;overflow:auto}
 @media(max-width:720px){
   .split-view{grid-template-columns:minmax(0,1fr)}
   .split-view>*+*{border-left:0}

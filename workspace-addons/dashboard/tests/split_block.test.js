@@ -13,6 +13,7 @@ class El {
   constructor(tag) { this.tagName = tag.toUpperCase(); this.className = ''; this.dataset = {}; this.attrs = {}; this.kids = []; this.text = ''; this.hidden = false; this.style = {}; }
   get classList() { const self = this; return {
     contains: c => self.className.split(' ').includes(c),
+    add: c => { if (!self.className.split(' ').includes(c)) self.className = (self.className + ' ' + c).trim(); },
     toggle: (c, on) => { const s = new Set(self.className.split(' ').filter(Boolean)); if (on) s.add(c); else s.delete(c); self.className = [...s].join(' '); },
   }; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
@@ -24,6 +25,7 @@ class El {
   append(...c) { for (const x of c) this.kids.push(typeof x === 'string' ? Object.assign(new El('#text'), {text: x}) : x); }
   get childNodes() { return this.kids; }
   focus() { focused = this; }
+  scrollIntoView() {}
   all() { return this.kids.flatMap(k => [k, ...k.all()]); }
   matches(sel) {
     return sel.split(/(?=[.[])/).every(part => part.startsWith('.') ? this.classList.contains(part.slice(1))
@@ -99,4 +101,20 @@ test('Remove says what happens with Keep it and its own word, never a typed word
   assert.match(body, /button\(control\.dataset\.label \|\| 'Yes', 'danger'/);
   assert.doesNotMatch(body, /<input|type=['"]text/);
   assert.match(body, /act_answer\?\.addon === id/);   // the toast uses only the open add-on's own answer
+});
+
+test('Open log shows every line of a long log and Close log goes back to the last six (ORCH-639)', () => {
+  address = '#addon/services';
+  const view = JSON.parse(JSON.stringify(page));
+  const item = view.blocks[0].groups[0].items[0];
+  item.panel.log = {lines: Array.from({length: 30}, (_, i) => 'line ' + i)};
+  const s = B.render(view.blocks, {self: 'services'}).kids[0];
+  const box = s.querySelector('.log-lines'), btn = s.querySelector('[data-split-log]');
+  assert.ok(box.classList.contains('log-short'));
+  B.splitLogShow(s, item.id);
+  assert.ok(box.classList.contains('log-full') && !box.classList.contains('log-short'));
+  assert.equal(btn.textContent, 'Close log');
+  B.splitLogShow(s, item.id);
+  assert.ok(box.classList.contains('log-short') && !box.classList.contains('log-full'));
+  assert.equal(btn.textContent, 'Open log');
 });

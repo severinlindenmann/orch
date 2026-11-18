@@ -291,7 +291,10 @@ const OrchBlocks = (() => {
     const box = el('div', 'log-lines'); box.dataset.log = it.id; box.tabIndex = -1;
     box.setAttribute('role', 'group'); box.setAttribute('aria-label', (log.title || 'Last log lines') + ' of ' + it.title);
     box.append(el('div', 'log-lines-h', log.title || 'Last log lines'));
-    if (arr(log.lines).length) { const ol = el('ol'); arr(log.lines).forEach(l => ol.append(el('li', '', l))); box.append(ol); }
+    if (arr(log.lines).length) {
+      const ol = el('ol'); arr(log.lines).forEach(l => ol.append(el('li', '', l))); box.append(ol);
+      if (arr(log.lines).length > 6) { box.classList.add('log-short'); box.dataset.long = '1'; } // Open log shows every line
+    }
     else box.append(el('p', 'meta', log.empty || 'Nothing written yet.'));
     return box;
   }
@@ -374,6 +377,9 @@ const OrchBlocks = (() => {
   function splitLogShow(section, id) {
     const l = section && [...section.querySelectorAll('[data-log]')].find(n => n.dataset.log === id);
     if (!l) return;
+    const open = !l.classList.contains('log-full');
+    l.classList.toggle('log-full', open); l.classList.toggle('log-short', !open && l.dataset.long === '1');
+    for (const b of section.querySelectorAll('[data-split-log]')) if (b.dataset.splitLog === id) { b.textContent = open ? 'Close log' : 'Open log'; b.setAttribute('aria-label', (open ? 'Close log of ' : 'Open log of ') + (b.getAttribute('aria-label') || '').replace(/^(Open|Close) log of /, '')); }
     l.scrollIntoView({block: 'nearest'}); l.focus({preventScroll: true});
   }
 

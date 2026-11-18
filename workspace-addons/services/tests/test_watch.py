@@ -366,3 +366,30 @@ def test_one_bad_pass_counts_once_even_when_it_was_also_started_again(
     _crash(fake)
     assert _check(cli)["failing"] is True and len(orch.asks()) == 1
     assert "3 times" in orch.ticket()["questions"][0]["text"]
+
+
+def test_a_silent_port_just_after_a_start_is_starting_not_a_failure(monkeypatch):
+    """ORCH-639: Restart on a web preview showed 'does not answer' while it was only starting."""
+    from orch_services import watch
+
+    rec = {"id": "web", "port": 59999}
+    st = watch.drivers.Status(running=True, pid=1)
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    h = watch.health(rec, st, True, starting=True)
+    assert h["text"] == "Starting…" and h["starting"] is True and h["ok"] is False
+    h = watch.health(rec, st, True, starting=False)
+    assert h["text"] == "Alive, but does not answer on its address" and not h.get("starting")
+
+
+def test_just_started_is_true_only_in_the_grace_after_a_start(ws, clock):
+    from orch_services import store, watch
+
+    store.mark(ws, "web", True)
+    since = store.last_change(ws, "web")
+    from datetime import UTC, datetime
+
+    t = datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    clock["t"] = t + 30
+    assert watch.just_started(ws, "web") is True
+    clock["t"] = t + watch.START_GRACE + 5
+    assert watch.just_started(ws, "web") is False
