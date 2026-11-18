@@ -182,3 +182,23 @@ test('Send and start: the page sends its message first, and nothing starts when 
   await tick();
   assert.deepEqual(m.sent.map(s => s[0]), ['run.send', 'run.start']);
 });
+
+test('fresh: the main button is a fresh start on the usual tool and model, with the page word', async () => {
+  const m = mount({fresh: true, label: 'Start fresh', sessions: {sessions: [{id: 's1', title: 'D', reopenable: true, last_used: '2026-11-17T10:00:00Z'}]}});
+  assert.equal(m.main().textContent, 'Start fresh');
+  m.main().click();
+  await tick();
+  assert.deepEqual(m.sent, [['run.start', {ticket: 't_1', fresh: true}]]);
+});
+
+test('caretOnly: only the caret; before gets the start the person picked', async () => {
+  let got = null;
+  const m = mount({caretOnly: true, before: async ops => { got = ops; return [['run.send', {ticket: 't_1', text: 'hi'}]]; }});
+  assert.equal(m.main(), null);
+  m.btn.open();
+  m.q(n => n.dataset.start === 'fresh').click();
+  await tick();
+  assert.deepEqual(got, [['run.start', {ticket: 't_1', fresh: true}]]);
+  assert.deepEqual(m.sent.map(s => s[0]), ['run.send', 'run.start']);
+  assert.equal(m.btn.starting(), true);
+});

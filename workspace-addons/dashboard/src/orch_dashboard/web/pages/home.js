@@ -227,7 +227,15 @@ function helperRow(row, key) {
       [alive ? 'Nudge' : 'Start helper', 'outline sm', () => nudgeHelper(row.ticket, MERGE_ASK), alive ? 'Message sent' : 'Helper started']]
     : [['Nudge', 'outline sm', () => nudgeHelper(row.ticket, NUDGE), 'Message sent'],
       ['Start fresh', 'outline sm', () => restartFresh(row.ticket), 'Helper started fresh']];
+  // ORCH-475: the starts are the one Start button (pages/start.js): Starting… until it runs, the caret opens the Start choice.
+  // Start helper sends the merge ask first; Start fresh stops the idle helper first, then starts fresh on the usual tool.
+  const startOf = label => !t || alive && label === 'Start helper' ? null
+    : label === 'Start helper' ? startHost(t, key + '-start', {label, before:async () => [['run.send', {ticket:row.ticket, text:MERGE_ASK}]]})
+    : label === 'Start fresh' ? startHost(t, key + '-fresh', {label, fresh:true, running:false, before:async () => state.runs?.[row.ticket]?.running === true ? [['run.stop', {ticket:row.ticket}]] : []})
+    : null;
   const controls = snapshot ? [] : acts.map(([label, style, run, done]) => {
+    const kit = startOf(label);
+    if (kit) return kit;
     const control = button(label, style, async () => {
       if (changeUnavailable() || locks.has(key)) return;
       locks.add(key);
@@ -248,7 +256,7 @@ function helperRow(row, key) {
 function startFailedRow(t, sf) {
   return h('div', {className:'card-row home-need', 'data-key':'start-failed-' + t.id}, ticketTitle(t),
     h('p', {}, clean(sf.text)),
-    snapshot ? null : h('div', {className:'row'}, button('Retry', 'outline sm', async () => {
+    snapshot ? null : h('div', {className:'row'}, startHost(t, 'start-failed-' + t.id + '-retry', {label:'Retry', continueLabel:'Retry'}) || button('Retry', 'outline sm', async () => {
       if (changeUnavailable()) return;
       const result = await act('run.start', {ticket:t.id});
       window.orch.toast(result.ok ? 'Starting again' : changeError(result), result.ok ? 'ok' : 'error');

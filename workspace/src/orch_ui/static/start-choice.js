@@ -9,7 +9,12 @@
        align ('start' opens the choice to the right), send(op, args) -> Promise<{ok, text}> (the page's act()),
        sessions (GET /api/sessions/<ticket> answer, null while it loads), runs, settings, line (state.start_line),
        agents (settings.agents), model (the ticket's model), running (a helper works on it now),
-       before() -> ops to send first (Send and start: the message) or null to stop, toast(text, kind)}
+       before(ops) -> ops to send first (Send and start: the message) or null to stop; it gets the start the person
+       picked, toast(text, kind), fresh (true: the main button is a fresh start on the usual tool and model, Home's Start
+       fresh), caretOnly (true: only the caret and the Start choice; the page keeps its own main button, the composer's
+       Send and start helper, given as mainEl: it sits left of the caret and is disabled while it starts), caretHidden
+       (true: no caret now, e.g. a helper already works), inline (true: the Start choice itself, drawn in place with no
+       button or caret: the live page's pane of a ticket with no helper)}
    Returns {el, update(changes), open(), close()}. Pages call update({running, sessions, runs, ...}) on every refresh;
    update({running:true}) also ends Starting. */
 (() => {
@@ -23,7 +28,21 @@
   const picks = new Map(); /* ticket -> {tool, model} the person picked (this page only) */
   /* One starter per page, so two buttons for the same ticket (strip and composer) share the busy state. */
   UI.startStarter = UI.startStarter || null;
-  const starterFor = send => UI.startStarter || (UI.startStarter = S.starter({send: (op, args) => send(op, args)}));
+  /* The notices of a start come once, from the button that started it, even when the page drew that button again
+     (two buttons of one ticket, a notice that closed): ticket -> {name, toast} of the start in progress. */
+  const said = new Map();
+  const starterFor = send => {
+    if (UI.startStarter) return UI.startStarter;
+    const st = UI.startStarter = S.starter({send: (op, args) => send(op, args)});
+    st.subscribe(e => {
+      const w = said.get(e.ticket);
+      if (!w) return;
+      if (e.state === 'queued') w.toast(w.name + ' waits in line for a free helper place.', 'ok');
+      else if (e.state === 'failed' || e.state === 'slow') w.toast(e.text, 'error');
+      if (!['starting', 'started'].includes(e.state)) said.delete(e.ticket);
+    });
+    return st;
+  };
 
   UI.startButton = function startButton(host, o) {
     o = Object.assign({label: 'Start helper', continueLabel: 'Continue', style: 'outline'}, o || {});
@@ -180,9 +199,10 @@
     }
     async function go(ops, how) {
       if (starter.starting(o.ticket)) return;
-      const first = o.before ? await o.before() : [];
+      const first = o.before ? await o.before(ops) : [];
       if (first === null) return;
       isOpen = false;
+      said.set(o.ticket, {name: o.name || 'The ticket', toast});
       starter.start(o.ticket, [...(first || []), ...ops]).then(r => {
         if (r && r.ok && !r.again) {
           picks.delete(o.ticket);
@@ -195,6 +215,13 @@
     }
     function render(focus) {
       const busyNow = starter.starting(o.ticket);
+      if (o.inline) {
+        const had = !!document.activeElement && wrap.contains(document.activeElement);
+        wrap.replaceChildren(body());
+        whyLine.hidden = true;
+        if (had || focus) (wrap.querySelector(focus || '[data-start]:not([disabled])') || null)?.focus({preventScroll: true});
+        return;
+      }
       const v = view(), m = S.main(v, o), reason = S.why('main', ctx());
       const mb = attr(el('button', 'btn ' + o.style + ' sm'), {type: 'button'});
       mb.dataset.start = 'main';
@@ -202,9 +229,13 @@
         attr(mb, {disabled: true, 'aria-busy': 'true'});
         mb.append(attr(el('span', 'spinner'), {'aria-hidden': 'true'}), document.createTextNode('Starting…'));
       } else {
-        mb.textContent = m.label;
+        mb.textContent = o.fresh ? o.label : m.label;
         if (reason) attr(mb, {disabled: true});
-        mb.addEventListener('click', () => go([['run.start', {ticket: o.ticket}]], m.what));
+        mb.addEventListener('click', () => {
+          if (!o.fresh) return go([['run.start', {ticket: o.ticket}]], m.what);
+          const pk = pickOf();
+          go(S.freshOps(o.ticket, pk, pk.tools.usual, pk.cur), 'fresh');
+        });
       }
       const menu = el('details', 'menu');
       if (isOpen && !busyNow) menu.open = true;
@@ -220,33 +251,42 @@
       if (isOpen && !busyNow) pop.append(body());
       menu.addEventListener('toggle', () => { if (menu.open && !pop.firstChild) pop.append(body()); });
       menu.append(pop);
-      const kids = [mb, menu];
+      if (o.caretHidden) menu.hidden = true;
+      if (o.mainEl) {
+        if (busyNow) { o.mainEl.disabled = true; o.mainEl.setAttribute('aria-busy', 'true'); o.mainEl.dataset.startBusy = ''; }
+        else if ('startBusy' in o.mainEl.dataset) { delete o.mainEl.dataset.startBusy; o.mainEl.removeAttribute('aria-busy'); o.mainEl.disabled = false; }
+      }
+      const kids = o.caretOnly ? [o.mainEl, menu].filter(Boolean) : [mb, menu];
       if (busyNow) kids.push(attr(el('span', 'sr-only', 'Starting the helper on ' + (o.name || 'the ticket') + '.'), {role: 'status'}));
       wrap.replaceChildren(...kids);
       /* the main button greyed (no tool, already in line): the reason as a visible line under it */
-      const say = !busyNow && !o.running ? reason : '';
+      const say = !busyNow && !o.running && !o.caretOnly ? reason : '';
       whyLine.textContent = say;
       whyLine.hidden = !say;
       whyLine.id = me + '-main-why';
       if (say) mb.setAttribute('aria-describedby', whyLine.id);
+      else mb.removeAttribute('aria-describedby');
       if (focus) wrap.querySelector(focus)?.focus({preventScroll: true});
     }
     const off = starter.subscribe(e => {
       if (e.ticket !== o.ticket) return;
-      if (e.state === 'queued') toast((o.name || 'The ticket') + ' waits in line for a free helper place.', 'ok');
-      else if (e.state === 'failed') toast(e.text, 'error');
-      else if (e.state === 'slow') toast(e.text, 'error');
       if (wrap.isConnected === false) { off(); return; } /* the page painted a new button */
       const hadFocus = !!document.activeElement && wrap.contains(document.activeElement);
       render(hadFocus ? '[data-start="main"]' : null);
     });
+    let lastSig = '';
     render();
     return {
       el: wrap,
+      starting: () => starter.starting(o.ticket),
       update(changes) {
         Object.assign(o, changes || {});
         if (changes && changes.send) sendNow = changes.send;
         if (o.running) starter.seen(o.ticket, true);
+        /* polling calls this often: draw again only when what the button shows changed, so an open picker stays open */
+        const sig = JSON.stringify([o.sessions, !!o.running, S.places(o.runs, o.settings, o.line), o.agents, o.model, o.label, o.continueLabel, o.style, !!o.caretHidden, !!o.fresh, starter.starting(o.ticket)]);
+        if (sig === lastSig) return;
+        lastSig = sig;
         render();
       },
       open() { isOpen = true; render('summary'); },

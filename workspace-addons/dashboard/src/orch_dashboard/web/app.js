@@ -431,6 +431,7 @@ function render(arrived = new Set()) {
   if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the new live page (Preview), outside main
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
+  if (typeof startMount === 'function') startMount(main);  // every Start button (pages/start.js)
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
@@ -547,7 +548,8 @@ function busyOff(busy) {
   busy.control.removeAttribute('aria-busy');
   if (busy.was === null) busy.control.removeAttribute('aria-disabled'); else busy.control.setAttribute('aria-disabled', busy.was);
 }
-async function act(op, args) {
+// opts.quiet: no "Could not start" notice of its own (the kit's Start button says what went wrong, pages/start.js).
+async function act(op, args, opts = {}) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const busy = busyOn();
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
@@ -573,7 +575,7 @@ async function act(op, args) {
     if (before) {
       starting.delete(args.ticket);
       // a start orch put in line (every helper place in use) is not a failure: the caller says it waits in line
-      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); if (!queued) window.orch.toast('Could not start the helper' + (ticketOf(args.ticket)?.title ? ' on ' + ticketOf(args.ticket).title : '') + '.', 'error'); }
+      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); if (!queued && !opts.quiet) window.orch.toast('Could not start the helper' + (ticketOf(args.ticket)?.title ? ' on ' + ticketOf(args.ticket).title : '') + '.', 'error'); }
       render();
     }
   }
@@ -974,11 +976,18 @@ main.addEventListener('click', async event => {
   if (action === 'start') {
     if (locks.has('background')) return;
     locks.add('background');
+    // Starting… while it starts (ORCH-475): disabled, so a double click starts it once. It starts background work, not a
+    // helper on a ticket, so there is no Start choice here.
+    const was = control.textContent;
     control.disabled = true;
+    control.setAttribute('aria-busy', 'true');
+    control.textContent = 'Starting…';
     const result = await act('addon.start', {});
     if (!result.ok) window.orch.toast(result.text, 'error');
     locks.delete('background');
     control.disabled = false;
+    control.removeAttribute('aria-busy');
+    control.textContent = was;
     render();
   }
 });

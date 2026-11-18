@@ -37,7 +37,19 @@ function context({runs = {}, results = {}, snapshot = false} = {}) {
     act:async (op, args) => { calls.push(JSON.parse(JSON.stringify([op, args]))); return results[op] || {ok:true}; },
   });
   vm.runInContext(fs.readFileSync(path.join(PAGES, 'home.js'), 'utf8'), c);
+  vm.runInContext(fs.readFileSync(path.join(PAGES, 'start.js'), 'utf8'), c);  // the one Start button (ORCH-475)
   return {c, calls, toasts};
+}
+// One click on the main half of a kit Start button (kit/start-choice.js) as the page set it up: the page's ops first
+// (before), then the start: plain, or fresh on the usual tool and model; it stops at the first refusal, as the kit does.
+async function kitClick(c, row, label) {
+  const host = all(row, x => x.attrs?.['data-start-host']).find(x => text(x) === label);
+  assert.ok(host, 'a Start button ' + label);
+  const o = vm.runInContext('startOpts', c).get(host.attrs['data-key']);
+  const ticket = host.attrs['data-start-host'], ops = o.fresh ? [['run.start', {ticket, fresh:true}]] : [['run.start', {ticket}]];
+  const first = o.before ? await o.before(ops) : [];
+  if (first === null) return;
+  for (const [op, args] of [...first, ...ops]) { const r = await c.act(op, args); if (!r.ok) break; }
 }
 
 test('pull request left open: Merge merges exactly the shown commit in one click', async () => {
@@ -60,13 +72,12 @@ test('pull request left open: a refused merge says why and nothing else runs', a
 });
 
 test('pull request left open: Start helper tells the helper what is left, then starts it', async () => {
-  const {c, calls, toasts} = context();
-  await click(buttons(c.needRow(UNMERGED, null))[1]);
+  const {c, calls} = context();
+  await kitClick(c, c.needRow(UNMERGED, null), 'Start helper');
   assert.deepEqual(calls.map(x => x[0]), ['run.send', 'run.start']);
   assert.equal(calls[0][1].ticket, TID);
   assert.match(calls[0][1].text, /passed its checks but is still open/);
   assert.deepEqual(calls[1][1], {ticket:TID});
-  assert.deepEqual(toasts, [['Helper started', 'ok']]);
 });
 
 test('pull request left open with a helper idle on it: the second button is Nudge and starts nothing', async () => {
@@ -85,16 +96,16 @@ test('idle helper: Nudge sends one fixed message, Start fresh stops it and start
   await click(buttons(row)[0]);
   assert.deepEqual(calls.map(x => x[0]), ['run.send']);
   assert.match(calls[0][1].text, /idle for a while/);
-  await click(buttons(row)[1]);
+  await kitClick(c, row, 'Start fresh');
   assert.deepEqual(calls.slice(1), [['run.stop', {ticket:TID}], ['run.start', {ticket:TID, fresh:true}]]);
-  assert.deepEqual(toasts, [['Message sent', 'ok'], ['Helper started fresh', 'ok']]);
+  assert.deepEqual(toasts, [['Message sent', 'ok']]);
 });
 
 test('idle helper: a stop that fails starts nothing', async () => {
   const {c, calls, toasts} = context({runs:{[TID]:{running:true}}, results:{'run.stop':{ok:false, text:'Could not stop it.'}}});
-  await click(buttons(c.needRow(IDLE, null))[1]);
-  assert.deepEqual(calls.map(x => x[0]), ['run.stop']);
-  assert.deepEqual(toasts, [['Could not stop it.', 'error']]);
+  await kitClick(c, c.needRow(IDLE, null), 'Start fresh');
+  assert.deepEqual(calls.map(x => x[0]), ['run.stop']);  // the kit shows the refusal's words and ends Starting
+  assert.deepEqual(toasts, []);
 });
 
 test('a shared read-only copy shows the rows without buttons; other rows are not helper rows', () => {

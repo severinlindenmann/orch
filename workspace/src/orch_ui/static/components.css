@@ -352,7 +352,7 @@ details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-
 .start-pop .live-hist{gap:0;padding:var(--s2) var(--s2) 0}
 .start-pop .live-hist-h{color:var(--text-muted);font-size:var(--fs-meta);font-weight:600}
 .start-pop .live-hist-row{min-height:0;padding:var(--s1) 0}
-.start-pop .live-hist-row[hidden]{display:none}
+.live-start .live-hist-row[hidden]{display:none}
 .start-pop .live-hist-list{max-height:200px;overflow:auto}
 .start-more{align-self:flex-start;margin-top:var(--s1)}
 .start-why{margin:0;color:var(--text-muted);font-size:var(--fs-meta)}
