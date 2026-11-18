@@ -212,12 +212,21 @@ def _add(total: dict, part: dict) -> None:
         t["out"] += v["out"]
 
 
-def _scan(root: Path, ticket: dict, environ: Mapping[str, str] | None, cache: dict, live: set) -> dict:
+def _scan(
+    root: Path,
+    ticket: dict,
+    environ: Mapping[str, str] | None,
+    cache: dict,
+    live: set,
+    bases: dict | None = None,
+) -> dict:
     """{"use": tokens per family, "cost": dollars at list price, "seconds": helper working time} of a ticket's
-    sessions. Time counts the main conversation only: helpers it starts run beside it, not after it."""
+    sessions. Time counts the main conversation only: helpers it starts run beside it, not after it.
+    `bases`: the transcript folder per agent, shared by a pass over many tickets (ORCH-522: looking the agent
+    up again for each of 9,000 finished tickets took 4 s)."""
     total: dict = {}
     cost, secs = 0.0, 0
-    bases: dict = {}
+    bases = {} if bases is None else bases
     for s in ticket.get("sessions") or []:
         if not isinstance(s, dict) or not isinstance(s.get("agent"), str):
             continue
@@ -264,10 +273,11 @@ def spend(root: Path, items: list[dict], environ: Mapping[str, str] | None = Non
     cache = _load_cache(root)
     before = json.dumps(cache, sort_keys=True)
     out = {}
+    bases: dict = {}
     for t in items:
         if not isinstance(t, dict) or not t.get("sessions") or not isinstance(t.get("id"), str):
             continue
-        r = _scan(root, t, environ, cache, set())
+        r = _scan(root, t, environ, cache, set(), bases)
         if r["use"] or r["seconds"]:
             out[t["id"]] = {"cost": r["cost"], "seconds": r["seconds"]}
     if json.dumps(cache, sort_keys=True) != before:
@@ -399,10 +409,11 @@ def estimate_range(root: Path, environ: Mapping[str, str] | None = None) -> dict
     before = json.dumps(cache, sort_keys=True)
     mins: list[float] = []
     costs: list[float] = []
+    bases: dict = {}
     for t in tickets.list_all(root):
         if t.get("status") != "done" or not t.get("sessions"):
             continue
-        r = _scan(root, t, environ, cache, set())
+        r = _scan(root, t, environ, cache, set(), bases)
         if r["seconds"] >= 60:
             mins.append(r["seconds"] / 60)
             if r["cost"] > 0:

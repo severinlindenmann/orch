@@ -251,7 +251,7 @@ def test_estimate_range_from_finished_tickets(proj, env, monkeypatch):
         secs[_finished(proj, f"T{minutes}")] = {"use": {"x": {}}, "seconds": minutes * 60, "cost": cost}
     open_id = _finished(proj, "Still open", status="working")
     secs[open_id] = {"use": {"x": {}}, "seconds": 9999 * 60, "cost": 99.0}  # not finished: never counted
-    monkeypatch.setattr(usage, "_scan", lambda root, t, environ, cache, live: secs[t["id"]])
+    monkeypatch.setattr(usage, "_scan", lambda root, t, environ, cache, live, bases=None: secs[t["id"]])
     rng = usage.estimate_range(proj, env)
     assert rng == {"minutes": [20, 40], "cost": [2.0, 4.0], "n": 5}
     assert usage.range_words(rng) == "about 20-40 min · $2.00-$4.00"
@@ -261,7 +261,9 @@ def test_estimate_range_needs_enough_history(proj, env, monkeypatch):
     for i in range(2):
         _finished(proj, f"Few {i}")
     monkeypatch.setattr(
-        usage, "_scan", lambda root, t, environ, cache, live: {"use": {"x": {}}, "seconds": 1800, "cost": 1.0}
+        usage,
+        "_scan",
+        lambda root, t, environ, cache, live, bases=None: {"use": {"x": {}}, "seconds": 1800, "cost": 1.0},
     )
     assert usage.estimate_range(proj, env) is None
     assert usage.range_words(None) == "" and usage.range_words({"minutes": "x"}) == ""

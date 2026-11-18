@@ -721,7 +721,7 @@ def add_stuck(tickets: list[dict]) -> None:
             t["stuck"] = why
 
 
-def add_spend(root: Path, tickets: list[dict]) -> None:
+def add_spend(root: Path, tickets: list[dict], background: bool = False) -> None:
     """`spend` {cost, seconds} on tickets a helper worked on: helper time and money at list price, read from the
     helpers' conversation files by the core (cached per file). Left out of snapshots (ORCH-189)."""
     try:
@@ -736,18 +736,47 @@ def add_spend(root: Path, tickets: list[dict]) -> None:
         t.pop("spend", None)
         if t.get("id") in got:
             t["spend"] = got[t["id"]]
-    add_range(root, tickets)
+    add_range(root, tickets, background)
 
 
-def add_range(root: Path, tickets: list[dict]) -> None:
-    """`range` ("about 20-40 min · $2.00-$4.00") on tickets nobody has worked on yet: the time and cost range
-    before Start, from this workspace's own finished tickets (the core's usage.estimate_range; ORCH-297)."""
+def _range_now(root: Path) -> str:
     try:
         from orch import usage
 
-        words = usage.range_words(usage.estimate_range(root))
+        return usage.range_words(usage.estimate_range(root))
     except (ImportError, AttributeError, OSError, TypeError, ValueError):
-        words = ""
+        return ""
+
+
+RANGE_TTL = 600.0  # the range moves only when tickets finish: the live page works it out again this often
+_RANGES: dict[str, list] = {}  # workspace -> [worked out at (monotonic), words, a thread is working it out]
+_RANGES_LOCK = threading.Lock()
+
+
+def _range_later(root: Path) -> str:
+    """The live page's range: the last one worked out (at most RANGE_TTL old), worked out again in a thread of
+    its own. It reads every finished ticket (seconds at 10,000), so the state build never waits for it
+    (ORCH-522); until the first one is ready the tickets show none."""
+    key = str(root)
+    with _RANGES_LOCK:
+        at, words, busy = _RANGES.get(key) or [None, "", False]
+        if not busy and (at is None or time.monotonic() - at > RANGE_TTL):
+            _RANGES[key] = [at, words, True]
+
+            def work():
+                got = _range_now(root)
+                with _RANGES_LOCK:
+                    _RANGES[key] = [time.monotonic(), got, False]
+
+            threading.Thread(target=work, name="orch-range", daemon=True).start()
+    return words
+
+
+def add_range(root: Path, tickets: list[dict], background: bool = False) -> None:
+    """`range` ("about 20-40 min · $2.00-$4.00") on tickets nobody has worked on yet: the time and cost range
+    before Start, from this workspace's own finished tickets (the core's usage.estimate_range; ORCH-297).
+    background=True (the live page): the last range worked out, never waiting for a new one."""
+    words = _range_later(root) if background else _range_now(root)
     for t in tickets:
         t.pop("range", None)
         if words and t.get("status") in ("open", "ready") and not t.get("sessions") and "spend" not in t:
@@ -783,9 +812,24 @@ def add_artifact_marks(tickets: list[dict]) -> None:
         t["art"] = art
 
 
+def _hidden_files(root: Path) -> list[Path]:
+    """The ticket files that can hold a conversation (Chat, Manager, sessions without a ticket): only those the
+    ticket index marks hidden when there is one (ORCH-522: every file was read twice per build, 1.5 s at
+    10,000), else every file."""
+    folder = root / ".orch" / "tickets"
+    try:
+        from orch import ticketindex
+
+        rows = ticketindex.rows(root, include_hidden=True)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every file, as before
+        return _json_files(folder)
+    names = sorted(f"{r['id']}.json" for r in rows if r.get("hidden") and isinstance(r.get("id"), str))
+    return [p for p in (folder / n for n in names) if p.is_file() and not p.is_symlink()]
+
+
 def load_general(root: Path) -> dict | None:
     """The General conversation of the phone (the hidden ticket with `general: true`): {id, history}, oldest first."""
-    for f in _json_files(root / ".orch" / "tickets"):
+    for f in _hidden_files(root):
         t = _load(f)
         if (
             isinstance(t, dict)
@@ -822,7 +866,7 @@ def load_sessions(root: Path) -> list[dict]:
     """[{id, kind, title, closed}]: every session without a ticket this workspace made (read from the ticket
     files, no orch call). Whether a helper's is on comes from its run; the plain terminal is open until closed."""
     found: dict[str, dict] = {}
-    for f in _json_files(root / ".orch" / "tickets"):
+    for f in _hidden_files(root):
         t = _load(f)
         if not (isinstance(t, dict) and isinstance(t.get("id"), str) and t["id"] == f.stem):
             continue
@@ -1432,12 +1476,27 @@ def add_warmth(root: Path, tickets: list[dict], statuses: dict) -> None:
         t["warmth"] = {"seconds_left": max(0, int(limit - (now - since)))}
 
 
+def _answered_newest(root: Path, orch_bin: str | None):
+    """`orch review list --answered --json`; on the real server the core's own walk that stops after the newest
+    ANSWERED_MAX (ORCH-522: the command reads every ticket)."""
+    if orch_bin == SELF:
+        try:
+            from orch.cli_review import _answered
+
+            return json.loads(json.dumps(_answered(root, limit=ANSWERED_MAX), ensure_ascii=False))
+        except TypeError:  # an older core without the limit
+            pass
+        except Exception:  # noqa: BLE001 - the command gets its chance
+            pass
+    return run_orch(orch_bin, ["review", "list", "--answered", "--json"], root)
+
+
 def load_review(root: Path, orch_bin: str | None) -> dict:
     """The Review page's data: what waits (`orch review list --json`) and what was decided
     (`orch review list --answered --json`). Empty lists when orch cannot say."""
     with ThreadPoolExecutor(max_workers=3) as pool:
         f_cards = pool.submit(run_orch, orch_bin, ["review", "list", "--json"], root)
-        f_done = pool.submit(run_orch, orch_bin, ["review", "list", "--answered", "--json"], root)
+        f_done = pool.submit(_answered_newest, root, orch_bin)
         f_acc = pool.submit(run_orch, orch_bin, ["review", "accepted", "--json"], root)
     cards, done, acc = f_cards.result(), f_done.result(), f_acc.result()
     acc = acc.get("accepted") if isinstance(acc, dict) else None
@@ -1517,7 +1576,7 @@ def read_ticket(root: Path, orch_bin: str | None, tid: str) -> dict | None:
         return None
     t = _shape_ticket(root, orch_bin, raw, {})
     _mark_tickets(root, [t])
-    add_spend(root, [t])
+    add_spend(root, [t], background=True)
     _shape_refs(root, [t], True)
     add_link_views([t], _KINDS.get(str(root), []))
     rows = _index_rows(root) if orch_bin == SELF else None
@@ -1627,7 +1686,7 @@ def load_state(
         for t in tickets:
             t.pop("ext", None)
     else:
-        add_spend(root, tickets)
+        add_spend(root, tickets, background=with_settings)
     _shape_refs(root, tickets, with_settings)
     kinds = link_kinds(raw) if with_addons else []
     if with_settings:
