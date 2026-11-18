@@ -110,6 +110,10 @@ const STATUS_CHOICES = window.DashHelpers.STATUS_CHOICES, MOVE_CHOICES = window.
 const moveHome = status => status === 'waiting' ? 'active' : window.DashHelpers.columnOf(status);
 const laneHere = t => window.DashHelpers.laneOf(t, shown(t).status, questions(t).length > 0);
 const starting = new Set();
+// A helper's session appears only after it registers, so right after a successful Start the server still says "no session":
+// for a minute the ticket page must not fall back to Not started / Start helper (ORCH-250).
+const startedAt = new Map();
+const justStarted = id => Date.now() - (startedAt.get(id) || 0) < 60000;
 // The one chip of a ticket: what the agent or the person has to do now ('' when nothing).
 function activityInfo(t) {
   const run = state.runs?.[t.id], live = run?.claim?.live;
@@ -383,8 +387,9 @@ function render(arrived = new Set()) {
   menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
   const wait = document.getElementById('topbar-wait');
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
-    const ages = array(state.tickets).filter(t => t.status !== 'done' && questions(t).length).map(t => Date.parse(t.updated_at)).filter(Number.isFinite);
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · longest wait ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
+    // the age of the same needs the number counts (ORCH-407: an old question on a dropped ticket said "19 h ago")
+    const oldest = needCount && typeof needsOldestAt === 'function' ? needsOldestAt() : null;
+    const line = needCount ? window.DashHelpers.needsYou(needCount) + (oldest != null ? ' · longest wait ' + window.DashHelpers.ago(new Date(oldest).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) { wait.textContent = line; wait.title = line; }
   }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
@@ -557,6 +562,7 @@ async function act(op, args) {
     if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
     const next = await res.json();
     succeeded = true;
+    if (before) startedAt.set(args.ticket, Date.now());
     starting.delete(args.ticket);
     accept(next);
     return {ok:true, status:200, state:next};

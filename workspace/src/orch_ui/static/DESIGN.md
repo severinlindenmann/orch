@@ -24,7 +24,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `icons.js` | One icon set, `icon('check', 16)`. |
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
 | `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. |
-| `question-card*.js`, `composer.*` | Question card, chat composer. |
+| `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
 | `COMPONENT-QA.md` | The 13 Nov component audit (QA-01..30). |
@@ -303,6 +303,9 @@ Sessions that need you are orange chips, pinned ones are chips after them, every
 working", "9 in line", "2 idle") that opens a list (`.lbar-pop`, search from 9 sessions). It never wraps: it folds
 (`data-fold` 0 to 4) into counts instead, and on a phone it shows symbols and numbers above the tab bar. Counts in
 words read right: "1 session", "2 sessions". The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
+At its right end **New** opens a `.live-pop` of four `.live-opt` choices for a session without a ticket (Empty helper,
+Chat helper, Plain terminal, Manager), each a `.live-opt-t`: the name, then what it does as `.meta`; one already open
+says "Already open: go to it". The same four are buttons at the top of Focus. A new one is pinned (ORCH-364).
 
 ### Live wall (ORCH-360)
 `.wall` is the new Focus page in Preview (dashboard `pages/livewall.js`): one summary line ("3 need you · 4 working ·

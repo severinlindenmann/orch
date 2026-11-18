@@ -148,10 +148,17 @@ function liveLayerPage() {
 function liveLayerName() {
   return addonLabel(liveLayerPage());
 }
-// A session the layer can show: a ticket of this workspace, named by its key (ORCH-12), never its raw id (sessions without a ticket come with their own task).
+// A session the layer can show: a ticket of this workspace, named by its key (ORCH-12), never its raw id; or an open
+// session without a ticket (state.sessions: empty helper, chat helper, plain terminal, Manager), named by its title.
 function liveLayerSession(key) {
   const t = array(state?.tickets).find(x => x.id === key || x.key === key);
-  if (!t) return null;
+  if (!t) {
+    const x = array(state?.sessions).find(o => o && o.id === key && o.open === true);
+    if (!x) return null;
+    const live = window.LiveSessions?.get(x.id) || null;
+    return {pill:null, key:'', id:x.id, title:clean(x.title) || 'Session', live, kind:x.kind,
+      running:live ? ['working', 'needs-you', 'idle'].includes(live.status) && x.kind !== 'terminal' : !!state.runs?.[x.id]?.running};
+  }
   const run = state.runs?.[t.id], helper = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
   const pill = window.UI?.ticketState && window.UI?.ticketPill ? window.UI.ticketPill(window.UI.ticketState(t, helper)) : null;
   const live = window.LiveSessions?.get(t.id) || null;
@@ -264,7 +271,7 @@ function liveMoreMenu(key, label, where, pinned) {
     h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
     liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
     phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
-    sess ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null);
+    sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null);
 }
 function livePane(key, where, s, o) {
   const sess = liveLayerSession(key), name = liveLayerName(), n = o.n;
@@ -295,14 +302,14 @@ function livePane(key, where, s, o) {
         o.narrow ? liveBtn('btn icon sm ghost', 'menu', 'More for ' + label, 'more', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}) : null,
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned) : null)),
-    sess?.running && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
+    sess?.running && !sess.kind && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
     typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess))
-      : sess && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, window.liveStartBody(sess))
-      : sess ? h('div', {className:'live-pb', 'data-live-body':key},
+      : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, window.liveStartBody(sess))
+      : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
       h('p', {className:'live-now', 'data-live-now':''}),
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       h('p', {className:'meta live-meta', 'data-live-meta':''}),
-      h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'))
+      sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'))
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.')));
 }
 // The live part of a pane, written in place on every answer of the sessions API: no repaint, so the keyboard place,
@@ -311,7 +318,9 @@ function liveLayerFill() {
   for (const body of document.querySelectorAll('#live-dock [data-live-body]')) {
     const live = window.LiveSessions?.get(body.dataset.liveBody) || null;
     const now = body.querySelector('[data-live-now]'), pre = body.querySelector('[data-live-lines]'), meta = body.querySelector('[data-live-meta]');
-    const text = !window.LiveSessions?.ready ? 'Loading…' : live ? liveNow(live) : 'No helper is working on this ticket right now.';
+    const kind = body.dataset.liveKind || '';  // a session without a ticket (ORCH-364)
+    const text = kind === 'terminal' ? 'A plain terminal in this workspace, no helper. The terminal itself comes here next.'
+      : !window.LiveSessions?.ready ? 'Loading…' : live ? liveNow(live) : kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.';
     if (now.textContent !== text) now.textContent = text;
     const lines = live && Array.isArray(live.lines) ? live.lines.join('\n') : '';
     if (pre.textContent !== lines) {
@@ -320,7 +329,7 @@ function liveLayerFill() {
       if (end) pre.scrollTop = pre.scrollHeight;
     }
     pre.hidden = !lines;
-    const m = live ? liveMeta(live).join(' · ') : '';
+    const m = live && kind !== 'terminal' ? liveMeta(live).join(' · ') : '';
     if (meta.textContent !== m) meta.textContent = m;
     meta.hidden = !m;
   }

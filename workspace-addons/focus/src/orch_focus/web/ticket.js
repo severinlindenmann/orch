@@ -296,7 +296,7 @@
     els.tasks.replaceChildren(...checks.flatMap((c, i) => {
       const cls = c.wont_do ? 'wont' : c.done ? 'done' : (c.state === 'doing' ? 'doing' : '');
       const row = h('button', {class: 'fx-task ' + cls, 'data-task': String(i), 'aria-current': String(i === (S.state.sel === 0 && doing >= 0 && !els.tasks.dataset.picked ? doing : S.state.sel))},
-        h('span', {class: 'st', icon: c.done && !c.wont_do ? 'check' : false, text: c.wont_do ? '–' : false}), h('span', {}, h('span', {class: 'tt', text: (c.done && !c.wont_do ? 'Done · ' : '') + c.text}),
+        h('span', {class: 'st', icon: c.done && !c.wont_do ? 'check' : false, text: c.wont_do ? '–' : false}), h('span', {}, h('span', {class: 'tt', text: (c.done && !c.wont_do ? 'Done · ' : '') + (c.origin === 'change_request' ? 'You asked: ' : '') + c.text}),
           h('span', {class: 'sub', text: c.wont_do ? 'Skipped' + (c.reason ? ' · ' + c.reason : '') : [mins(c), evText(c)].filter(Boolean).join(' · ')})));
       row.addEventListener('click', () => { S.views.live.scrollToTask(c.id); S.state.sel = i; els.tasks.dataset.picked = '1'; els.tasks.dataset.k = ''; renderTasks(S.state.view); });
       const reason = c.wont_do && c.reason && h('details', {class: 'fx-task-reason meta'}, h('summary', {text: 'Reason'}), h('span', {text: c.reason}));

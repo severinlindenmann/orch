@@ -263,18 +263,20 @@ Must be seen:
 ## 15. Sessions without a ticket
 
 - Part: sessions (draft D feature 6)
-- State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
+- State: ready, clicked by the script
 - Pictures: `fd-15-no-ticket-1280.png`, `fd-15-no-ticket-1920.png`, `fd-15-no-ticket-390.png`
 
 Do:
 
 1. Open the New menu in the bar.
 2. Start an Empty helper, a Chat helper, a Plain terminal and the Manager.
+3. Open Focus and press one of the four buttons at its top.
 
 Must be seen:
 
 - The four choices are at the top of Focus and in the New menu.
-- Each new session is pinned by itself.
+- Each new session opens in the layer and is pinned by itself.
+- One that is open already says "Already open: go to it" and is not started twice.
 
 ## 16. Tool, model and open time on every session
 

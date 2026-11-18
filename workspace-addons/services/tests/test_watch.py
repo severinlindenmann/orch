@@ -116,7 +116,7 @@ def test_three_failures_in_ten_minutes_raise_exactly_one_question(cli, fake, ws,
         "ticket": "DM1-12",
         "id": "q1",
         "title": "Budget guard keeps stopping",
-        "text": "Restart, Stop or Look into it?",
+        "text": "It failed 4 times in the last 10 minutes. Restart, Stop or Look into it?",
     }
     assert row["health"] == {"ok": True, "how": "process alive", "text": "Process alive"}
 
@@ -324,3 +324,45 @@ def test_systemd_runs_reads_nrestarts(monkeypatch):
     assert seen[0][1].startswith("orch-svc-") and seen[0][2] == "--property=NRestarts"
     monkeypatch.setattr(d, "_run", lambda *a: subprocess.CompletedProcess([], 0, "NRestarts=\n", ""))
     assert d.runs(_spec()) is None
+
+
+def test_an_answer_that_cannot_be_carried_out_is_asked_again(cli, fake, ws, clock, orch, monkeypatch):
+    # review ORCH-378: a refused Stop used the answer up and orch never asked again while the service kept failing
+    from orch_services.store import Refused
+
+    _make_failing(cli, fake, clock)
+    orch.answer("DM1-12", "q1", "Stop")
+
+    def refuse(spec):
+        raise Refused("Could not stop it (busy). Run orch services list and try again.")
+
+    monkeypatch.setattr(fake, "stop", refuse)
+    clock["t"] = T0 + 300
+    res = _check(cli)
+    assert "Could not stop Budget guard" in res["did"] and fake.entries["budget"]["running"] is True
+    logs = [c for c in orch.calls() if c["args"][0] == "log"]
+    assert logs and "busy" not in json.dumps(logs)  # the tool's words stay off the ticket
+    assert len(orch.asks()) == 2  # the same pass asks again, once
+    q = _state(ws)["watch"]["question"]
+    assert q["open"] is True and q["id"] != "q1"
+    clock["t"] = T0 + 360
+    _check(cli)
+    assert len(orch.asks()) == 2
+
+
+def test_one_bad_pass_counts_once_even_when_it_was_also_started_again(
+    cli, fake, ws, clock, orch, monkeypatch
+):
+    # ORCH-371 bug 5: "not alive" and a restart by the computer in the same pass counted as two failures
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    _add(cli, "--port", "5173")
+    for i in range(2):
+        clock["t"] = T0 + 60 * (i + 1)
+        _crash(fake)
+        assert _check(cli)["failing"] is False and not orch.asks()
+    clock["t"] = T0 + 180
+    _crash(fake)
+    assert _check(cli)["failing"] is True and len(orch.asks()) == 1
+    assert "3 times" in orch.ticket()["questions"][0]["text"]

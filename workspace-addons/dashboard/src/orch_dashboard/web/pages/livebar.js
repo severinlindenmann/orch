@@ -21,6 +21,14 @@ const LIVEBAR_LISTS = {
 };
 const LIVEBAR_SEARCH_FROM = 9;  // a list this long gets a search box (draft D)
 
+// The New menu (draft D): sessions without a ticket, in its order; the core starts them (`orch session new <kind>`).
+const LIVEBAR_NEW = [
+  {kind:'empty', title:'Empty helper', what:'A helper with no ticket and no task yet'},
+  {kind:'chat', title:'Chat helper', what:'Ask anything, no ticket'},
+  {kind:'terminal', title:'Plain terminal', what:'An empty terminal in this workspace'},
+  {kind:'manager', title:'Manager', what:'Looks after all helpers'},
+];
+
 // One row per live session: {id, key, title, s: wait|run|queue|idle, word, pin}, from the live sessions API
 // (pages/livesessions.js, ORCH-359): the same list the panes and the wall read.
 const liveBarModel = typeof liveBarRows === 'function' ? liveBarRows : require('./livesessions.js').liveBarRows;
@@ -49,6 +57,10 @@ function liveBarIn(o, l) {
   const w = o.s === 'wait';
   return l === 'wait' ? w : l === 'pin' ? o.pin && !w : l === 'more' ? !w : !w && !o.pin && o.s === l;
 }
+// The open session without a ticket of a kind (state.sessions), or null: New goes to it instead of a second one.
+function liveBarNewOpen(sessions, kind) {
+  return (Array.isArray(sessions) ? sessions : []).find(x => x && x.kind === kind && x.open === true) || null;
+}
 // "1 session", "2 sessions"
 function liveBarSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); }
 // The words of a count at a fold: "3 working", "Pinned (1)", "More (20)"; compact: the number alone.
@@ -57,17 +69,27 @@ function liveBarCountText(l, n, compact) {
   return l === 'pin' ? 'Pinned (' + n + ')' : l === 'more' ? 'More (' + n + ')' : n + ' ' + LIVEBAR_LISTS[l].word;
 }
 
+// The words of the "needs you" end of the bar: what is true for the person, not only for the live sessions. `total` is
+// the one number of things waiting on them (Review badge: questions, results, changes), `sessions` those of it that
+// are a live session. All calm only when nothing waits (ORCH-464).
+function liveBarNeedText(total, sessions) {
+  const n = Math.max(Number(total) || 0, Number(sessions) || 0);
+  if (!n) return 'All calm';
+  return n + (n === 1 ? ' needs you' : ' need you');
+}
+
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, LIVEBAR_LISTS};
+  module.exports = {liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW};
 } else {
   (() => {
-    const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0};
+    const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, busy:''};
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
     const sessions = () => window.LiveSessions?.list || [];
     const pins = () => window.LiveSessions?.pins || [];  // kept by orch for the workspace (ORCH-361)
     const phone = () => window.matchMedia('(max-width: 720px)').matches;
     const link = (a, o) => '#addon/' + encodeURIComponent(a.name) + '/t/' + encodeURIComponent(o.id);
     const label = o => o.name || o.key || o.title;  // a chip shows the session's own name when it has one (draft D)
+    const needTotal = () => { try { return typeof needsYouTotal === 'function' ? needsYouTotal() : 0; } catch (e) { return 0; } };
     const sym = (s, text) => h('span', {className:'lbar-sym', 'data-s':s, 'aria-hidden':'true'}, text);
 
     function chip(a, o) {
@@ -91,10 +113,14 @@ if (typeof module === 'object' && module.exports) {
       if (fold >= 3) {
         const lists = fold >= 4 ? ['wait', 'more'] : ['wait', 'pin', 'run', 'queue', 'idle'];
         const counts = lists.map(l => count(all, l, true)).filter(Boolean);
+        const total = needTotal(), seen = all.filter(o => liveBarIn(o, 'wait')).length;
+        // things waiting on the person that are no live session: one orange count to Review, so the phone bar never reads calm
+        if (total > seen) counts.unshift(h('a', {className:'lbar-cnt', href:'#review', 'data-s':'wait', 'data-key':'lbar-cnt-need', 'aria-label':liveBarNeedText(total, seen)},
+          sym('wait', LIVEBAR_LISTS.wait.sym), h('span', {}, String(total))));
         return counts.length ? counts : [h('span', {className:'lbar-l'}, 'All calm')];
       }
       const need = all.filter(o => liveBarIn(o, 'wait')), pin = all.filter(o => liveBarIn(o, 'pin'));
-      return [group(a, 'wait', need.length ? 'Needs you' : 'All calm', need),
+      return [group(a, 'wait', liveBarNeedText(needTotal(), need.length), need),
         pin.length ? (fold >= 1 ? count(all, 'pin') : group(a, 'pin', '', pin)) : null,
         ...(fold >= 2 ? [count(all, 'more')] : ['run', 'queue', 'idle'].map(l => count(all, l)))].filter(Boolean);
     }
@@ -117,13 +143,59 @@ if (typeof module === 'object' && module.exports) {
           autocomplete:'off', value:bar.q, 'data-lbar-q':'1'}) : null,
         h('div', {className:'lbar-list', 'data-lbar-rows':'1'}, rows(a, all)));
     }
+    // New (draft D): a session without a ticket. One that is open already is offered as "go to it".
+    function newMenu() {
+      return h('div', {className:'live-pop', role:'group', 'aria-label':'New session without a ticket', 'data-key':'lbar-new-menu'},
+        h('p', {className:'live-pop-h'}, 'New session without a ticket'),
+        LIVEBAR_NEW.map(n => {
+          const open = liveBarNewOpen(state.sessions, n.kind);
+          return h('button', {type:'button', className:'live-opt', 'data-lbar-kind':n.kind, 'data-key':'lbar-new-' + n.kind,
+            'aria-busy':bar.busy === n.kind ? 'true' : null, disabled:!!bar.busy},
+          h('span', {className:'live-opt-t'}, h('strong', {}, n.title), h('span', {className:'meta'}, open ? 'Already open: go to it' : n.what)));
+        }));
+    }
+    function newButton(fold) {
+      const tiny = fold >= 3;
+      return h('span', {className:'live-end', 'data-key':'lbar-new-wrap'},
+        h('button', {type:'button', className:'btn sm ghost', 'data-lbar-new':'1', 'data-key':'lbar-new', 'aria-expanded':String(bar.menu),
+          'aria-haspopup':'true', 'aria-label':tiny ? 'New session without a ticket' : null, title:'New session without a ticket'},
+        iconEl('plus'), tiny ? null : h('span', {className:'live-word'}, 'New')),
+        bar.menu ? newMenu() : null);
+    }
     function build(a, all, fold) {
       return h('div', {id:'live-bar', className:bar.docked ? 'lbar lbar-docked' : 'lbar', role:'group', 'aria-label':addonLabel(a) + ' bar', 'data-fold':String(fold)},
         h('a', {className:'lbar-home', href:'#addon/' + encodeURIComponent(a.name), 'data-key':'lbar-home', title:addonLabel(a) + ' start page'}, addonLabel(a)),
         h('nav', {className:'lbar-sw', 'aria-label':'Sessions'}, sessionsRow(a, all, fold)),
-        h('span', {className:'lbar-end'}, typeof bar.end === 'function' ? bar.end() : null),
+        h('span', {className:'lbar-end'}, newButton(fold), typeof bar.end === 'function' ? bar.end() : null),
         pop(a, all));
     }
+    // Opens the session in the layer when there is one, else its page (a chip's link).
+    function openSession(a, id) {
+      if (typeof window.LiveLayer?.open === 'function') window.LiveLayer.open(id);
+      else location.hash = link(a, {id});
+    }
+    // The one start path (core `orch session new`); the new one is pinned (pins stay in this browser until orch keeps
+    // them) and opens in the layer. One already open is only opened.
+    async function startNew(kind) {
+      const a = liveAddon();
+      if (!a || bar.busy) return;
+      const open = liveBarNewOpen(state.sessions, kind);
+      if (open) { bar.menu = false; paint(true); openSession(a, open.id); return; }
+      bar.busy = kind; paint(true);
+      const r = await act('session.new', {kind});
+      bar.busy = '';
+      const made = r.ok ? liveBarNewOpen(state.sessions, kind) : null;
+      bar.menu = !made && !r.ok;
+      if (made) {
+        // a session without a ticket is pinned by orch until it is unpinned (sessionprefs, ORCH-361)
+        window.dispatchEvent(new CustomEvent('orch:live-pins', {detail:{key:made.id, pinned:true}}));
+        await window.LiveSessions?.refresh?.();  // the bar and the panes read the sessions API: show it now
+      }
+      paint(true);
+      if (made) openSession(a, made.id);
+      else window.orch?.toast?.(r.ok ? 'It did not start. Try again.' : (r.text || 'It did not start.'), 'error');
+    }
+    window.LiveNew = {start: startNew, kinds: LIVEBAR_NEW};
     function place() {
       const el = bar.el; if (!el) return;
       const tab = document.getElementById('tabbar');
@@ -146,7 +218,7 @@ if (typeof module === 'object' && module.exports) {
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
       const all = liveBarModel(sessions(), pins());
-      const sig = JSON.stringify([a.name, addonLabel(a), all, bar.list, bar.panes, bar.docked, phone(), window.innerWidth]);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, bar.list, bar.menu, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
       const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';
@@ -178,6 +250,15 @@ if (typeof module === 'object' && module.exports) {
       if (back) bar.el?.querySelector('[data-lbar-list="' + l + '"]')?.focus();
     }
     document.addEventListener('click', e => {
+      const nb = e.target.closest?.('[data-lbar-new]');
+      if (nb && bar.el?.contains(nb)) {
+        bar.menu = !bar.menu; bar.list = ''; bar.q = ''; paint(true);
+        if (bar.menu) bar.el?.querySelector('[data-lbar-kind]')?.focus();
+        return;
+      }
+      const k = e.target.closest?.('[data-lbar-kind]');
+      if (k && bar.el?.contains(k)) { startNew(k.dataset.lbarKind); return; }
+      if (bar.menu && !bar.el?.querySelector('[data-key="lbar-new-wrap"]')?.contains(e.target)) { bar.menu = false; paint(true); }
       const b = e.target.closest?.('[data-lbar-list]');
       if (b && bar.el?.contains(b)) { toggle(b.dataset.lbarList); return; }
       // with the layer there, a chip or row opens its session in the layer instead of changing page
@@ -193,7 +274,11 @@ if (typeof module === 'object' && module.exports) {
       const a = liveAddon(), box = bar.el.querySelector('[data-lbar-rows]');
       if (a && box) box.replaceChildren(...rows(a, liveBarModel(sessions(), pins())));
     });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape' && bar.list && bar.el?.contains(document.activeElement)) { e.stopPropagation(); close(true); } }, true);
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || !bar.el?.contains(document.activeElement)) return;
+      if (bar.menu) { e.stopPropagation(); bar.menu = false; paint(true); bar.el?.querySelector('[data-lbar-new]')?.focus(); }
+      else if (bar.list) { e.stopPropagation(); close(true); }
+    }, true);
     // the layer says which sessions are open ({mode, panes: ticket ids}); their chips are marked current
     window.addEventListener('orch:live-sessions', () => paint());
     window.addEventListener('orch:live-layer', e => { const p = e.detail?.panes; bar.panes = Array.isArray(p) ? p.map(String) : []; paint(); });

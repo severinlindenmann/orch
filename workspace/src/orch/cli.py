@@ -14,6 +14,7 @@ from orch import (
     addons,
     cli_addons,
     cli_chat,
+    cli_checks,
     cli_clients,
     cli_config,
     cli_conn,
@@ -31,6 +32,7 @@ from orch import (
     cli_run,
     cli_screen,
     cli_secret,
+    cli_session,
     cli_shot,
     cli_status,
     diag,
@@ -53,6 +55,8 @@ from orch import (
 )
 from orch import init as init_mod
 from orch.errors import Refused
+
+MAX_CHECK_FILES = 10  # files one `orch check done` may attach
 
 _HINT = "Unset ORCH_ROOT, or point it at a folder with .orch in it."
 _noted = False
@@ -347,7 +351,20 @@ def visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "tokens", "github", "manager", "triage"}
+ADVANCED_TOP = {
+    "update",
+    "wait",
+    "log",
+    "answer",
+    "ref",
+    "ext",
+    "tokens",
+    "github",
+    "manager",
+    "session",
+    "triage",
+    "checks",  # ORCH-529: --help-all only
+}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -466,6 +483,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
+    cli_checks.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -655,8 +673,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("check")
     x.add_argument("--evidence", action="append", default=[], metavar="JSON", help=argparse.SUPPRESS)
-    for k in ("command", "note", "pr", "commit", "file", "url"):
+    for k in ("command", "note", "pr", "commit", "url"):
         x.add_argument(f"--{k}", metavar="TEXT", help=f"evidence: a {k}")
+    # several pictures (1280, 1920, 390) are one step's evidence: each --file is kept, not only the last
+    x.add_argument(
+        "--file", action="append", default=[], metavar="FILE", help="evidence: a file (up to 10 times)"
+    )
     x.add_argument("--title", help="short name of the evidence")
     x.add_argument("--role", help="result, check or support")
     x.add_argument("--summary", help="one line: what came out of this step (shown on the task)")
@@ -737,6 +759,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     g.add_argument("--after", metavar="FILE", help="the file as it would become")
     g.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
+    g.add_argument(
+        "--ci-shots",
+        metavar="PR_URL",
+        help="show the pictures CI took of the dashboard pages this pull request changes "
+        "(1280, 1920 and 390 px); no screenshots of your own",
+    )
     g.add_argument("--open", metavar="URL", help="an http(s) address to look at")
     g.add_argument(
         "--merge",
@@ -825,6 +853,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_look.add_parsers(sub, common)
     cli_chat.add_parsers(sub, common)
     cli_manager.add_parsers(sub, common)
+    cli_session.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
     notes = []
     if addon_lines:
@@ -1023,6 +1052,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
         or cli_health.dispatch(args, root)
+        or cli_checks.dispatch(args, root)
     ):
         pass
     elif (
@@ -1045,6 +1075,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_look.dispatch(args, root)
         or cli_shot.dispatch(args, root)
         or cli_manager.dispatch(args, root)
+        or cli_session.dispatch(args, root)
     ):
         pass
     elif cmd == "ticket" and sub == "new":
@@ -1297,12 +1328,15 @@ def run(args: argparse.Namespace) -> None:
         if args.summary and shorthand and not args.file:
             shorthand[0] = json.dumps({**json.loads(shorthand[0]), "summary": args.summary})
         tickets.refuse_secret_in_evidence(root, args.evidence + shorthand)  # before a file is copied (R5.2)
+        if len(args.file) > MAX_CHECK_FILES:
+            raise Refused(f"At most {MAX_CHECK_FILES} files per step.")
         if args.file:
             tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id
-            attached = tickets.attach_file(
-                root, args.id, args.file, args.title, args.role, args.summary, by=by()
-            )
-            shorthand.append(json.dumps(attached))
+            for i, f in enumerate(args.file):  # the summary goes on the first file only
+                attached = tickets.attach_file(
+                    root, args.id, f, args.title, args.role, args.summary if i == 0 else None, by=by()
+                )
+                shorthand.append(json.dumps(attached))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by(), args.proves)
         ev = c["evidence"][-1]
         copied = args.file and tickets.proof_present(root, ev)
@@ -1366,6 +1400,10 @@ def run(args: argparse.Namespace) -> None:
             )
         if args.merge and not card:
             raise Refused("--merge goes with a link card: --link TITLE --open <pull request address>.")
+        if args.ci_shots and not card:
+            raise Refused(
+                "--ci-shots goes with a card, e.g. --draft TITLE --ci-shots <pull request address>."
+            )
         if args.release and not args.merge:
             raise Refused("--release goes with --merge.")
         if card:  # the card goes where every question goes; a phone shows it from the stack

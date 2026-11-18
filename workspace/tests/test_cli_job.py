@@ -17,7 +17,7 @@ from orch import cli, hider, jobs, record, runs, tickets
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = ROOT / "contracts"
-VECTORS = json.loads((CONTRACTS / "vectors/jobs-v1.json").read_text())
+VECTORS = json.loads((CONTRACTS / "vectors/jobs-v1.json").read_text(encoding="utf-8"))
 SECRET = "KEYVALUE-abc123XYZ-secret"
 SECRETS = {
     SECRET,
@@ -28,12 +28,23 @@ SECRETS = {
 
 
 def _schemas():
-    docs = [json.loads((CONTRACTS / n).read_text()) for n in ("job-event.schema.json", "blocks.schema.json")]
+    names = ("job-event.schema.json", "blocks.schema.json")
+    docs = [json.loads((CONTRACTS / n).read_text(encoding="utf-8")) for n in names]
     return Registry().with_resources([(d["$id"], Resource.from_contents(d)) for d in docs]), docs[0]
 
 
 REG, EVENT_SCHEMA = _schemas()
 STORED = Draft202012Validator(EVENT_SCHEMA, registry=REG)
+
+
+@pytest.fixture(autouse=True)
+def _windows_process_table(monkeypatch):
+    """Windows has no process-tree proof yet (contracts/activity.md: the hook records nothing there), so the
+    ancestors are only this process. The claims here use this process's pid; the proof has its own tests."""
+    if os.name == "nt":
+        from orch import record_hook
+
+        monkeypatch.setattr(record_hook, "_parents", lambda: {})
 
 
 @pytest.fixture
@@ -106,7 +117,8 @@ def test_happy_path_is_stored_in_order_and_valid(live):
     assert all(STORED.is_valid(e) for e in events)
     assert {(e["run"], e["ticket"], e["job"]) for e in events} == {(run, tid, job)}
     assert jobs.state_of(events) == "ok"
-    assert oct(stream_file(root, run, job).stat().st_mode & 0o777) == "0o600"
+    if os.name == "posix":  # Windows has no file modes: its rights are ACLs
+        assert oct(stream_file(root, run, job).stat().st_mode & 0o777) == "0o600"
 
 
 def test_jobs_appear_in_the_record_as_job_events(live):
@@ -432,7 +444,8 @@ def test_huge_and_deep_payloads_are_refused(live):
     for _ in range(5000):
         x["n"] = {}
         x = x["n"]
-    refused("too_large", send, root, job, type="table", table=deep)
+    # json of 5000 levels hits Python's recursion limit sooner on Windows, which refuses it as not valid
+    refused("invalid" if os.name == "nt" else "too_large", send, root, job, type="table", table=deep)
     shallow = x = {}
     for _ in range(300):
         x["n"] = {}

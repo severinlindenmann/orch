@@ -55,15 +55,17 @@ function livePinIds(sessions, pending) {
   const wait = pending && typeof pending === 'object' ? pending : {};
   return (Array.isArray(sessions) ? sessions : []).filter(x => x && x.id && (typeof wait[x.id]?.pinned === 'boolean' ? wait[x.id].pinned : x.pinned === true)).map(x => String(x.id));
 }
-// The bar's rows from the sessions: {id, key, title, name, s: wait|run|queue|idle, word, pin}; closed sessions are
-// left out. title is the name shown (own name, else the title); name is the own name or ''.
+// The bar's rows from the sessions: {id, key, title, name, s: wait|run|queue|idle, word, pin, kind}; closed sessions
+// are left out. title is the name shown (own name, else the title); name is the own name or ''. kind is '' for a
+// ticket's session, else empty | chat | terminal | manager (a session without a ticket, ORCH-364).
 function liveBarRows(sessions, pins) {
   const pinned = new Set(Array.isArray(pins) ? pins.map(String) : livePinIds(sessions)), out = [];
   for (const x of Array.isArray(sessions) ? sessions : []) {
     const s = x && LIVE_STATUS_BAR[x.status];
     if (!s || !x.id) continue;
     out.push({id:String(x.id), key:typeof x.key === 'string' ? x.key : '', title:liveName(x), name:typeof x.name === 'string' ? x.name.trim() : '', s,
-      word:s === 'wait' ? 'Needs you' : s === 'queue' ? 'In line' : String(x.word || ''), pin:pinned.has(String(x.id))});
+      word:s === 'wait' ? 'Needs you' : s === 'queue' ? 'In line' : String(x.word || ''), pin:pinned.has(String(x.id)),
+      kind:typeof x.kind === 'string' ? x.kind : ''});
   }
   const rank = {wait:0, run:1, queue:2, idle:3};
   out.sort((a, b) => rank[a.s] - rank[b.s] || (b.pin ? 1 : 0) - (a.pin ? 1 : 0));
