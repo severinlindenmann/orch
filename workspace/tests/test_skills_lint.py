@@ -43,6 +43,7 @@ HUMAN_ONLY = {
     "uninstall",  # a person takes orch out of a folder
     "start",
     "stop",
+    "restart",
     "status",
     "pause",  # a person's runaway brake
     "resume",
