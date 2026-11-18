@@ -17,7 +17,9 @@
   const WHAT = {limit: t => nameOf(t) + ': limit', period: t => nameOf(t) + ': what the limit counts', order: t => nameOf(t) + ': order',
     on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself',
     for: t => nameOf(t) + ': kinds of work', model: t => nameOf(t) + ': model', remove: t => nameOf(t) + ' removed',
-    together: t => 'All ' + providerWord(t.split(':')[0]) + ' accounts together: limit', add: t => t.split(':').slice(6).join(':') + ' added'};
+    together: t => 'All ' + providerWord(t.split(':')[0]) + ' accounts together: limit', add: t => t.split(':').slice(6).join(':') + ' added',
+    left: t => nameOf(t) + ': left now', restore: t => removedName(t) + ' is back'};
+  const removedName = id => model?.removed?.find(r => r.id === id)?.label || 'It';
   const providerWord = id => model?.providers?.find(p => p.id === id)?.label || id;
 
   function h(tag, props, ...kids) {
@@ -58,6 +60,8 @@
   const num = v => (Math.round(v * 100) / 100).toString();
   const amount = (v, unit) => unit === '$' ? '$' + num(v) : num(v) + '%';
   const day = iso => iso ? iso.slice(0, 10) : '';
+  // dollars as the provider shows them: $73.40, $0.00; a spend under a cent keeps its digits ($0.0042)
+  const usd = v => typeof v !== 'number' ? '?' : v > 0 && v < 0.01 ? '$' + v.toFixed(4) : '$' + v.toFixed(2);
 
   // ---- talking to the dashboard ----
   const asked = new Map();
@@ -249,13 +253,13 @@
   // its key (never the key), the kinds of work, a monthly limit and the day the month starts again.
   function addCard(providers) {
     const box = h('div', {className: 'card pad stack', 'data-add': ''});
-    const open = h('button', {type: 'button', className: 'btn outline sm', onclick: () => { box.replaceChildren(...form()); box.querySelector('input')?.focus(); }}, 'Add an API credit or helper tool');
+    const open = h('button', {type: 'button', className: 'btn outline sm', onclick: () => { box.replaceChildren(...form()); box.querySelector('input')?.focus(); }}, 'Add a helper tool');
     box.append(h('div', {className: 'row'}, open));
     function form() {
       const label = h('input', {className: 'input', autocomplete: 'off', maxlength: '64', 'aria-label': 'Name shown here'});
       const name = h('input', {className: 'input', autocomplete: 'off', maxlength: '32', size: '10', 'aria-label': 'Name the credit skill uses'});
       const provider = h('select', {'aria-label': 'Provider'}, providers.map((p, j) => h('option', {value: p.id, selected: j === 0 || null, text: p.label})));
-      const type = h('select', {'aria-label': 'Type'}, h('option', {value: 'api-key', text: 'API credit'}), h('option', {value: 'helper-tool', text: 'Helper tool'}));
+      const type = h('select', {'aria-label': 'Type'}, h('option', {value: 'helper-tool', text: 'Helper tool'}), h('option', {value: 'api-key', text: 'API credit'}));
       const limit = h('input', {className: 'input', inputmode: 'decimal', size: '6', placeholder: 'none', 'aria-label': 'Limit in $ per month'});
       const resets = datePick('Month starts again on', '', () => {});
       const kinds = new Set();
@@ -271,7 +275,7 @@
           resets.field.value ? day(resets.field.value) : '-', l].join(':'), e.currentTarget);
       }}, 'Add');
       return [
-        h('h3', {text: 'Add an API credit or helper tool'}),
+        h('h3', {text: 'Add a helper tool'}),
         h('div', {className: 'row'}, h('label', {className: 'field meta'}, 'Name shown here', label),
           h('label', {className: 'field meta'}, 'Provider', provider), h('label', {className: 'field meta'}, 'Type', type)),
         h('div', {className: 'row'}, h('label', {className: 'field meta'}, 'Name the credit skill uses', name),
@@ -283,10 +287,95 @@
     return box;
   }
 
-  function section(title, note, list) {
+  // An API credit (ORCH-628): what is left (the owner's figure minus the spend since), spent today and this month,
+  // the field 'Left now', On, the kinds of work, an end, order and Remove. Never a key: only names and numbers.
+  function creditLines(a) {
+    const c = a.credit || {};
+    if (c.left == null) {
+      return [h('p', {}, h('strong', {text: 'Left: not set yet'})),
+        h('p', {className: 'meta', text: 'Type what the provider shows as left. Until then calls go ahead and are counted.'})];
+    }
+    const at = whenWords(c.set_at);
+    let since = 'Set to ' + usd(c.set) + (/^\d/.test(at) ? ' on ' : ' ') + at;
+    if (c.left === 0 && !c.over && !c.spent_since) since += '. Calls are refused until you set more.';
+    else since += ', minus ' + usd(c.spent_since || 0) + ' spent since' + (c.over ? ', ' + usd(c.over) + ' over' : '');
+    return [h('p', {}, h('strong', {text: 'Left: ' + usd(c.left)})), h('p', {className: 'meta', text: since})];
+  }
+
+  // An end at the end of a day is kept as the next day 00:00: say the day itself, 23:59, like the draft.
+  function endWords(iso) {
+    const d = new Date(iso);
+    if (d.getHours() === 0 && d.getMinutes() === 0) d.setMinutes(-1);
+    return whenWords(d.toISOString());
+  }
+
+  function creditEnd(a) {
+    const ends = a.credit?.ends;
+    const pick = datePick('End date for ' + a.label, '', d => act('end', a.id + ':' + d, pick.toggle));
+    pick.node.hidden = true;
+    if (ends) {
+      return h('div', {className: 'row'}, h('span', {className: 'pill', text: 'Ends ' + endWords(ends)}),
+        h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':none', e.currentTarget)}, 'Keep it, no end'));
+    }
+    return h('div', {className: 'row'}, h('button', {type: 'button', className: 'btn ghost sm', onclick: () => pick.toggle.click()}, 'Add an end'), pick.node);
+  }
+
+  function creditCard(a, i, list) {
+    const c = a.credit || {};
+    let [stateText, stateClass] = STATE[a.state] || STATE.ready;
+    if (a.on && c.left == null) [stateText, stateClass] = ['Not set yet', 'pill attn'];
+    if (c.ends && new Date(c.ends) <= new Date()) [stateText, stateClass] = ['Ended', 'pill'];
+    const move = (way, to) => h('button', {type: 'button', className: 'btn ghost sm', disabled: !to || null,
+      'aria-label': (way === 'up' ? 'Use ' + a.label + ' earlier' : 'Use ' + a.label + ' later'),
+      onclick: e => act('order', a.id + ':' + to.order, e.currentTarget)}, way === 'up' ? '↑' : '↓');
+    const on = h('input', {className: 'switch', type: 'checkbox', checked: a.on || null, 'aria-label': 'Use ' + a.label});
+    on.addEventListener('change', () => act(on.checked ? 'on' : 'off', a.id, on));
+    const value = h('input', {className: 'input amount', inputmode: 'decimal', autocomplete: 'off',
+      placeholder: c.left != null ? c.left.toFixed(2) : 'e.g. 50', 'aria-label': 'Left now for ' + a.label});
+    const set = h('button', {type: 'button', className: 'btn outline sm'}, 'Set');
+    const save = () => {
+      let v = value.value.trim().replace(/[\s$]/g, '');
+      if (/^\d+,\d{1,2}$/.test(v)) v = v.replace(',', '.');  // 73,40 is 73.40 (a decimal comma), never 7340
+      if (!v) { value.setAttribute('aria-invalid', 'true'); return say('Type what the provider shows as left, like 50, or 0.', 'error'); }
+      if (!/^\d{1,7}(\.\d{1,4})?$/.test(v)) { value.setAttribute('aria-invalid', 'true'); return say('Write an amount, like 73.40, or 0.', 'error'); }
+      value.removeAttribute('aria-invalid');
+      act('left', a.id + ':' + v, set);
+    };
+    set.addEventListener('click', save);
+    value.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+    const from = [a.provider_label, c.skill ? 'from the skill ' + c.skill : ''].filter(Boolean).join(' · ');
+    return h('div', {className: 'card pad stack', role: 'listitem', 'data-acc': a.id, 'data-credit': ''},
+      h('div', {className: 'row between'},
+        h('div', {className: 'row'}, h('span', {className: 'badge', text: String(i + 1)}), h('h3', {text: a.label})),
+        list.length > 1 ? h('div', {className: 'row'}, move('up', list[i - 1]), move('down', list[i + 1])) : null),
+      h('div', {className: 'row'}, from ? h('span', {className: 'meta', text: from}) : null, h('span', {className: stateClass, text: stateText})),
+      creditLines(a),
+      h('p', {className: 'meta', text: 'Spent today ' + usd(c.spent_today || 0) + ' · this month ' + usd(c.spent_month || 0)}),
+      // a $ limit the credit already has (from its skill or set earlier) stays changeable; new credits have none
+      a.limits.length ? h('div', {className: 'row'}, h('span', {className: 'meta', text: 'Also stops at'}), a.limits.map(l => limitRow(a, l, false))) : null,
+      h('div', {className: 'row between'},
+        h('div', {className: 'field meta'}, h('span', {text: 'Left now in $', 'aria-hidden': 'true'}), h('div', {className: 'row'}, value, set)),
+        h('label', {className: 'row'}, h('span', {className: 'meta', text: 'On'}), on)),
+      kindsRow(a),
+      h('div', {className: 'row between'}, creditEnd(a),
+        h('button', {type: 'button', className: 'btn ghost sm', 'aria-label': 'Remove ' + a.label,
+          onclick: e => act('remove', a.id, e.currentTarget)}, 'Remove')));
+  }
+
+  // Removed credits and helper tools stay with their history; one click brings one back (rule and amount left kept).
+  function removedRow(list, what) {
+    if (!list.length) return null;
+    const head = list.length === 1 ? '1 removed ' + what : list.length + ' removed ' + what + 's';
+    return h('div', {className: 'stack'}, h('span', {className: 'meta', text: head}),
+      list.map(r => h('div', {className: 'row'}, h('span', {className: 'meta', text: r.label}),
+        h('button', {type: 'button', className: 'btn ghost sm', 'aria-label': 'Bring back ' + r.label,
+          onclick: e => act('restore', r.id, e.currentTarget)}, 'Bring back'))));
+  }
+
+  function section(title, note, list, draw) {
     return h('section', {className: 'stack'},
       h('div', {className: 'row between'}, h('h2', {text: title}), h('span', {className: 'meta', text: note})),
-      h('div', {className: 'stack', role: 'list'}, list.map((a, i) => card(a, i, list))));
+      h('div', {className: 'stack', role: 'list'}, list.map((a, i) => (draw || card)(a, i, list))));
   }
 
   function history(rows) {
@@ -304,7 +393,8 @@
     // one account: the empty card below says why switching is off; no second sentence up here
     note.hidden = m.switcher || !embedded;
     note.textContent = m.switcher ? '' : 'Switching needs the account switcher on this computer. Usage shows and warns.';
-    const subs = m.accounts.filter(a => a.type === 'subscription'), other = m.accounts.filter(a => a.type !== 'subscription');
+    const subs = m.accounts.filter(a => a.type === 'subscription'), credits = m.accounts.filter(a => a.type === 'api-key'),
+      tools = m.accounts.filter(a => a.type === 'helper-tool');
     const parts = [];
     if (m.all_at_limit) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
@@ -326,10 +416,22 @@
     }
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
     if (subs.length) parts.push(section('Subscriptions', subsNote, subs));
-    const apiSection = section('API keys and helper tools', 'Each one stops at its limit.', other);
-    for (const t of m.together || []) apiSection.append(togetherCard(t));
-    apiSection.append(addCard(m.providers || []));
-    parts.push(apiSection);
+    // API credits: each its own account, never added together per provider (owner, ORCH-624)
+    const gone = m.removed || [];
+    if (credits.length || gone.some(r => r.type === 'api-key')) {
+      const creditSection = section('API credits', 'Type what the provider shows as left; orch counts down from it. At 0, off or ended, calls are refused.', credits, creditCard);
+      const back = removedRow(gone.filter(r => r.type === 'api-key'), 'credit');
+      if (back) creditSection.append(back);
+      parts.push(creditSection);
+    }
+    const toolSection = section('Helper tools', 'Helpers ask here which one to use and stop at the limit.', tools);
+    // a limit over all accounts of a provider is not offered any more (owner, ORCH-624); one saved earlier still
+    // counts, so it shows here until it is cleared
+    for (const t of m.together || []) if (t.limit != null) toolSection.append(togetherCard(t));
+    const toolsBack = removedRow(gone.filter(r => r.type === 'helper-tool'), 'helper tool');
+    if (toolsBack) toolSection.append(toolsBack);
+    toolSection.append(addCard(m.providers || []));
+    parts.push(toolSection);
     parts.push(history(m.history || []));
     parts.push(h('p', {className: 'meta', text: 'Logins and keys are never shown or kept here.'}));
     if (!embedded) {

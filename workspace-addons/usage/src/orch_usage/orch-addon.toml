@@ -66,6 +66,14 @@ who = "people"
 summary = "Take an API credit or helper tool off the list"
 who = "people"
 
+[acts.left]
+summary = "Say what is left on an API credit now, as read at the provider"
+who = "people"
+
+[acts.restore]
+summary = "Bring back an API credit or helper tool that was removed"
+who = "people"
+
 [acts.switching]
 summary = "Switch accounts by itself, or only show and warn"
 who = "people"

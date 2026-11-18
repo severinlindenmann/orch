@@ -204,6 +204,7 @@ def gather(root: Path) -> dict:
     for a in d["accounts"]:
         row = {k: v for k, v in a.items() if k != "source"}
         row["reader"] = a.get("source", {}).get("reader", "none")
+        row["skill"] = a.get("source", {}).get("skill")  # the skill that declared the credit (its name only)
         use: dict = {}
         src = a.get("source", {})
         if a["type"] == "subscription":

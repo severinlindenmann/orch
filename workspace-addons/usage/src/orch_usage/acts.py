@@ -14,6 +14,8 @@ the rules, refusals and history lines are the CLI's own:
     add        <provider>:<api-key|helper-tool>:<name>:<kinds|any>:<value|none>:<YYYY-MM-DD|->:<label>
                name: what the credit skill calls it (never the key); the day: when its month starts again
     remove     <account>
+    restore    <account>                                            a removed API credit or helper tool comes back
+    left       <account>:<value>                                   value: $74, 0 or none (what is left now)
     switching  on | off
 """
 
@@ -38,6 +40,8 @@ VERBS = (
     "together",
     "add",
     "remove",
+    "left",
+    "restore",
 )
 _ACC = r"a_[a-z0-9]{6}"
 _PERIOD = r"5h|week|month|until"
@@ -64,6 +68,8 @@ PATTERNS = {
         rf"({_PROVIDER}):(api-key|helper-tool):({_NAME}):({_KINDS}):({_MONEY}):({_DAY}|-):({_LABEL})"
     ),
     "remove": re.compile(rf"({_ACC})"),
+    "left": re.compile(rf"({_ACC}):({_MONEY})"),
+    "restore": re.compile(rf"({_ACC})"),
 }
 NOT_THIS = "That is not something Usage can change. Reload the page and try again."
 
@@ -108,6 +114,8 @@ def argv_for(root: Path, verb: str, target: str, by: str | None) -> list[str]:
         out += ["--limit", value] if value != "none" else []
         out += ["--resets", resets] if resets != "-" else []
         return [*out, *who]
-    if verb == "remove":
-        return ["remove", g[0], *who]
+    if verb in ("remove", "restore"):
+        return [verb, g[0], *who]
+    if verb == "left":
+        return ["left", g[0], g[1], *who]
     return ["switching", g[0], *who]
