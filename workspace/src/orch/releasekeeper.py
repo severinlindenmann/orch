@@ -103,6 +103,8 @@ SETTINGS = {
     "github.release_deploy_script": "the install command the deploy helper runs after the owner's go",
     "github.release_security_paths": "files whose change needs a security review before a release "
     "(default: servers, sign-in, secrets, what leaves this computer, CI)",
+    "github.security_reviews_per_day": "security review helpers the keeper starts for one release "
+    f"(default {secreview.PER_DAY}; counts again after each release)",
     "github.release_walks": "walks every release needs before its Merge card, each a name or name=skill, "
     "e.g. install=release-walk,services,clickthrough",
 }
@@ -169,6 +171,8 @@ def set_setting(root: Path, key: str, value: str) -> str | None:
         v = _path_ok(v)
     elif name == "release_security_paths":
         v = secreview.check_patterns(v)
+    elif name == "security_reviews_per_day":
+        v = secreview.check_limit(v)
     elif name == "release_walks":
         parts = [x.strip() for x in v.split(",") if x.strip()]
         if not parts or any(not WALK_RE.match(x) for x in parts):
@@ -223,6 +227,7 @@ class Cfg:
         self.deploy_key = Path(g("deploy_key")) if g("deploy_key") else None
         self.deploy_script = g("deploy_script")
         self.security_paths = g("security_paths")
+        self.security_limit = over.get("security_limit", _raw(root, "security_reviews_per_day"))
         self.walks = walks(g("walks"))
         self.run_dir = runs.run_dir(root) if root is not None else Path(over.get("run_dir") or ".")
 
