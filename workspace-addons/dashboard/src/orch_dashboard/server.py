@@ -887,15 +887,25 @@ class Handler(BaseHTTPRequestHandler):
             code, body, ctype, extra = ticketfiles.read_file(
                 self.root, one("t"), one("k"), one("n"), one("dl") == "1"
             )
+            # the content security policy this file is served with; a 304 below carries the same one
+            if one("k") == "reviewed":  # a card's own copy: inert, sandboxed, never sniffed
+                csp = ticketfiles.REVIEWED_CSP
+            elif ctype == "application/pdf":
+                csp = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; object-src 'self'"
+            else:
+                csp = "default-src 'none'; img-src 'self'; media-src 'self'; sandbox"
             if code == 200 and not self.headers.get("Range"):
                 # ORCH-517: the same pictures were sent again on every redraw (no-store). Now the browser keeps
-                # them and asks "still this?" by content hash; an unchanged file answers 304 with no body.
+                # them and asks "still this?" by content hash; an unchanged file answers 304 with no body, and
+                # with the file's own sandbox rule (a 304's headers update the kept copy's headers).
                 tag = '"' + hashlib.blake2b(body, digest_size=12).hexdigest() + '"'
                 extra = {**extra, "ETag": tag, "Cache-Control": "private, no-cache"}
                 if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
-                    return self._send(304, b"", ctype, {"ETag": tag, "Cache-Control": "private, no-cache"})
-            if one("k") == "reviewed":  # a card's own copy: inert, sandboxed, never sniffed
-                return self._send(code, body, ctype, extra, csp=ticketfiles.REVIEWED_CSP)
+                    return self._send(
+                        304, b"", ctype, {"ETag": tag, "Cache-Control": "private, no-cache"}, csp=csp
+                    )
+            if one("k") == "reviewed":
+                return self._send(code, body, ctype, extra, csp=csp)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
             if (
                 code == 200
@@ -925,11 +935,7 @@ class Handler(BaseHTTPRequestHandler):
                 body,
                 ctype,
                 {"Accept-Ranges": "bytes", **extra} if ctype.startswith(("audio/", "video/")) else extra,
-                csp=(
-                    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; object-src 'self'"
-                    if ctype == "application/pdf"
-                    else "default-src 'none'; img-src 'self'; media-src 'self'; sandbox"
-                ),
+                csp=csp,
             )
         # a listed read-only add-on verb (the Sync card's status): the rights of /api/state, no page secret (ORCH-413)
         if path == "/api/addon-read":
