@@ -506,6 +506,29 @@ def _raw_list(root: Path, orch_bin: str | None) -> list[tuple]:
     return items
 
 
+def _read_many(root: Path, ids: list[str]) -> list[dict]:
+    """These tickets as `orch ticket show <id> --json` prints each, read in this process in one pass: the active
+    add-ons and the history proof worked out once for all of them (ORCH-522). A ticket that cannot be read is
+    left out."""
+    try:
+        from orch import addons, history
+        from orch import tickets as core
+        from orch.cli import visible
+        from orch.errors import Refused
+
+        on = set(addons.active(root))
+        visible(root, {}, on)  # an older core without `on`: TypeError, each ticket alone below
+    except (ImportError, TypeError):
+        return [t for t in (_show_here(root, tid) for tid in ids) if t is not None]
+    out = []
+    for tid in ids:
+        try:
+            out.append(visible(root, core.load(root, tid), on))
+        except (Refused, OSError, ValueError, KeyError, TypeError):
+            continue
+    return json.loads(json.dumps(history.shown_json(root, out), ensure_ascii=False))
+
+
 def _show_here(root: Path, tid: str):
     """One ticket as `orch ticket show <id> --json` prints it, read in this process (the real server only)."""
     try:
@@ -537,8 +560,7 @@ def load_live_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dic
     rows = _index_rows(root) if orch_bin == SELF else None
     if rows is not None:
         ids = live_ids(rows)
-        items = [(_show_here(root, tid), None) for tid in ids]
-        tickets, skipped, _ = _shape_items(root, orch_bin, [(t, s) for t, s in items if t is not None])
+        tickets, skipped, _ = _shape_items(root, orch_bin, [(t, None) for t in _read_many(root, ids)])
         counts = ticket_counts(rows)
     else:  # no index (an older core, a test's orch): the full list, cut before it is shaped
         items = _raw_list(root, orch_bin)
@@ -571,7 +593,7 @@ def _shape_items(root: Path, orch_bin: str | None, items: list[tuple]) -> tuple[
         if not _valid_ticket(t, stem):
             skipped += 1
             continue
-        tickets.append(_shape_ticket(root, orch_bin, t, branch_cache))
+        tickets.append(_shape_ticket(root, orch_bin, t, branch_cache, from_file=stem is not None))
     _mark_tickets(root, tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     rows = [
@@ -666,9 +688,14 @@ def ticket_rows_view(tickets: list[dict]) -> list[dict]:
     return [slim_row(t) for t in tickets]
 
 
-def _shape_ticket(root: Path, orch_bin: str | None, t: dict, branch_cache: dict) -> dict:
-    """One ticket as the page reads it (a full build does this for every ticket, a click for its own)."""
-    t = shown(root, t)  # the CLI listing is shown already; the file fallback is not (idempotent)
+def _shape_ticket(
+    root: Path, orch_bin: str | None, t: dict, branch_cache: dict, from_file: bool = True
+) -> dict:
+    """One ticket as the page reads it (a full build does this for every ticket, a click for its own).
+    from_file=False: the core's answer, already shown as provable here (ORCH-522: doing it again for every
+    ticket took 7 s at 10,000); a ticket read from its file is shown here."""
+    if from_file:
+        t = shown(root, t)
     for k in ("checklist", "refs", "questions", "history"):
         if not isinstance(t.get(k), list):
             t[k] = []
@@ -1593,7 +1620,7 @@ def read_ticket(root: Path, orch_bin: str | None, tid: str) -> dict | None:
             raw["status"], raw["verdict_needed"] = "review", True
     if not (isinstance(raw, dict) and raw.get("general") is not True and _valid_ticket(raw)):
         return None
-    t = _shape_ticket(root, orch_bin, raw, {})
+    t = _shape_ticket(root, orch_bin, raw, {}, from_file=not orch_bin)
     _mark_tickets(root, [t])
     add_spend(root, [t], background=True)
     _shape_refs(root, [t], True)
@@ -1620,7 +1647,7 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
         return None
     with ThreadPoolExecutor(max_workers=2) as pool:
         f_review = pool.submit(load_review, root, orch_bin)
-        t = _shape_ticket(root, orch_bin, raw, {})
+        t = _shape_ticket(root, orch_bin, raw, {}, from_file=not orch_bin)
         _mark_tickets(root, [t])
         _shape_refs(root, [t], True)
         add_link_views([t], _KINDS.get(str(root), []))

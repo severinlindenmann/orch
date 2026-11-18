@@ -341,12 +341,14 @@ def _tree(all_: list[dict], t: dict, prefix: str = "", seen: frozenset = frozens
 CORE_EXT = {"relay"}  # ext keys the core itself writes (relay-created tickets)
 
 
-def visible(root: Path, t: dict) -> dict:
-    """Ticket data as the CLI shows it: ext keys of add-ons that are not on stay in the file, hidden."""
+def visible(root: Path, t: dict, on: set[str] | None = None) -> dict:
+    """Ticket data as the CLI shows it: ext keys of add-ons that are not on stay in the file, hidden.
+    `on`: the active add-ons, worked out once by a caller that shows many tickets (ORCH-522: asking again for
+    each ticket took 13 s for 1,700 tickets)."""
     ext = t.get("ext")
     if not ext:
         return t
-    on = set(addons.active(root)) | CORE_EXT
+    on = (set(addons.active(root)) if on is None else set(on)) | CORE_EXT
     return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
