@@ -619,14 +619,14 @@ def test_the_wait_says_once_a_minute_what_it_waits_for():
                {"name": "lint", "state": "SUCCESS", "bucket": "pass"}]  # fmt: skip
     done = [{"name": "build", "state": "SUCCESS", "bucket": "pass"},
             {"name": "lint", "state": "SUCCESS", "bucket": "pass"},
-            {"name": "gate", "state": "SUCCESS", "bucket": "pass"}]  # fmt: skip
-    src = prwait.Replay({"required": ["gate"], "polls": [[], running, running, done]})
+            {"name": "needed", "state": "SUCCESS", "bucket": "pass"}]  # fmt: skip
+    src = prwait.Replay({"required": ["needed"], "polls": [[], running, running, done]})
     src.url = PR
     assert prwait.wait(src).green
     lines = [text for _, text in src.said]
     assert len(lines) == 3  # one per minute of waiting, none after the verdict
     assert "to start (none reported yet)" in lines[0]
-    assert "1 of 2 still running (build)" in lines[1] and "required not reported yet: gate" in lines[1]
+    assert "1 of 2 still running (build)" in lines[1] and "required not reported yet: needed" in lines[1]
     assert all(PR in x for x in lines)
 
 
