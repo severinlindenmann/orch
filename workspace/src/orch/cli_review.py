@@ -492,8 +492,9 @@ def _answer(args, root: Path) -> None:
     digest = given or current
     # ORCH-582: a draft, or the Check of a ticket that carries one, needs the signed-in dashboard's one-time
     # person grant (a paired phone answers through the relay); never a script or a helper's shell
+    granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
     needs = ownerpick.is_draft_card(q) if q is not None else ownerpick.carries_draft(t)
-    person = needs and ownerpick.person_granted(root, who)
+    person = needs and granted
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
     entry = _guard(
         fn,

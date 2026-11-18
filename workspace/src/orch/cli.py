@@ -1496,7 +1496,8 @@ def run(args: argparse.Namespace) -> None:
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         # ORCH-582: a draft is answered only with the signed-in dashboard's one-time person grant
-        person = ownerpick.is_draft_card(shown_q) and ownerpick.person_granted(root, who)
+        granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+        person = ownerpick.is_draft_card(shown_q) and granted
         t, q = tickets.answer(
             root,
             args.id,

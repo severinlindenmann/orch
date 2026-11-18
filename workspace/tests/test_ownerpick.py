@@ -338,3 +338,30 @@ def test_the_morning_list_with_only_a_draft_waiting(proj, run, new_ticket):
     assert data["sent"] is False and data.get(
         "not_sent"
     )  # a draft waiting is worth a message (no relay here)
+
+
+def test_accepting_a_review_checks_the_draft_under_the_lock(proj, run, new_ticket):
+    """The Check's snapshot may be older than the ticket: the write itself refuses a ticket with a draft."""
+    tid = _finished(proj, run, new_ticket)
+    q = _draft(run, tid)
+    _picked(proj, tid, q["id"])
+    tickets.set_status(proj, tid, "review", "human:tester")
+    with pytest.raises(Refused, match="This ticket carries a draft"):
+        tickets.accept_review(proj, tid, ME, "dashboard")
+    assert tickets.load(proj, tid)["status"] == "review"
+    tickets.accept_review(proj, tid, ME, "phone", person=True)
+    assert tickets.load(proj, tid)["status"] == "done"
+
+
+def test_an_unneeded_grant_is_used_up_and_never_reaches_a_child(proj, run, new_ticket, person_grant):
+    import os
+
+    from orch import renew
+
+    tid = new_ticket()
+    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--by", "agent:x")
+    person_grant(proj)
+    code, out, err = run("answer", tid, "q1", "Yes", "--by", ME)
+    assert code == 0, out + err
+    assert renew.GRANT_ENV not in os.environ and renew.GRANT_ENV + "_FD" not in os.environ
+    assert list(renew._grants(proj).iterdir()) == []  # the grant file is gone too

@@ -1225,7 +1225,7 @@ def _decide_check(
     n = _note_bv(note)
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
-        tickets.accept_review(root, tid, by, via)
+        tickets.accept_review(root, tid, by, via, person=person)
     else:
         changes = _what_changes(n)
         if not changes:

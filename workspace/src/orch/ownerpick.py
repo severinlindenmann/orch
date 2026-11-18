@@ -77,13 +77,15 @@ def person_granted(root: Path, by: str | None) -> bool:
 
     from orch import renew, tickets
 
+    # used up FIRST, needed or not: a grant never stays in this process's environment for a later child
+    got = renew._take_grant(root) == "once"  # noqa: SLF001 - the one grant reader, never cached per process
     if (
         (by or "").startswith("agent:")
         or tickets.agent_tool()
         or any(os.environ.get(k) for k in renew.RUN_MARKS)
     ):
         return False
-    return renew._take_grant(root) == "once"  # noqa: SLF001 - the one grant reader, never cached per process
+    return got
 
 
 def waiting_rows(root: Path) -> list[dict]:

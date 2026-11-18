@@ -1306,11 +1306,12 @@ def note_history(root: Path, tid: str, by: str, text: str, via: str | None = Non
     apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via), by=by)
 
 
-def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
+def accept_review(root: Path, tid: str, by: str, via: str = "phone", *, person: bool = False) -> dict:
     """A person accepts a ticket in Review: Review -> Done, like the dashboard's Accept. Refused for an agent
     (an agent in the environment, or any `by` that is not human:) and when the ticket is not in Review, so a
     second accept is refused. The relay's phone path calls it for an answer to the current review question
-    (relay._apply_review_answer)."""
+    (relay._apply_review_answer). person: a signed-in person or a paired phone; a ticket that carries a draft
+    is accepted only then, checked under the ticket's lock (ORCH-582)."""
     if not by.startswith("human:") or agent_tool():
         raise Refused("Only a person can accept.")
 
@@ -1319,6 +1320,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
             raise Refused("This ticket is not waiting for your review.")
+        ownerpick.refuse_ticket(ticket, person)
         ticket["status"] = "done"
         ticket["waiting_on"] = None
         add_history(ticket, by, "Status review -> done", via)
