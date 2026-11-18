@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       windows:
-        description: "also run the Windows jobs (merge queue groups and pull requests that change file, process or path code run them by themselves)"
+        description: "also run the Windows jobs (pushes to develop, the nightly run and pull requests that change file, process or path code run them by themselves)"
         type: boolean
         default: false
   push:
@@ -91,14 +91,16 @@ jobs:
     if: needs.changes.outputs.workspace == 'true' || github.event_name == 'schedule'
     uses: ./.github/workflows/workspace.yml
     with:
-      # PRs into develop: Linux only (+ the CLI smoke on Windows/macOS below). Everything else (push to develop/main,
-      # PRs into main, merge queue groups, manual, nightly): + macOS.
-      # A merge queue group is the pull request from an orch-queue/... branch (the pull-requests add-on): it is what
-      # lands on develop, so it runs on all three systems, each split into parts under 15 minutes (ORCH-315).
-      full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' || startsWith(github.head_ref, 'orch-queue/') }}
-      # Windows: merge queue groups, pull requests that change file, process or path code
-      # (scripts/touches_os_code.py), the nightly run and a manual run with windows=true.
-      windows: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.windows) || startsWith(github.head_ref, 'orch-queue/') || needs.changes.outputs.oscode == 'true' }}
+      # PRs into develop and merge queue groups: Linux only (+ the CLI smoke on Windows/macOS below). macOS and
+      # Windows run on develop itself: every push (never cancelled, see concurrency), the nightly run and the
+      # release check (the keeper's manual run with windows=true); a red one opens the release keeper's
+      # red-develop ticket (releasekeeper.develop_red). Merge queue groups ran all three systems for a day
+      # (PR 1428) and waited 50+ minutes on GitHub's 5 macOS machines at once (18 Nov, ORCH-315).
+      # PRs into main and manual runs keep macOS too. Each system stays split into parts under 15 minutes.
+      full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      # Windows: every push to develop, the nightly run, a manual run with windows=true and pull requests that
+      # change file, process or path code (scripts/touches_os_code.py), except merge queue groups.
+      windows: ${{ github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.windows) || (needs.changes.outputs.oscode == 'true' && !startsWith(github.head_ref, 'orch-queue/')) }}
   # Fast CLI smoke on Windows + macOS for PRs that touch the CLI or an add-on (R1.6, R3.4); the full suite is nightly.
   cli-smoke:
     needs: changes
