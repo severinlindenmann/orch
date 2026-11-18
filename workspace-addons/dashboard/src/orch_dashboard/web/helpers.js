@@ -803,8 +803,9 @@
   function startCostWords(t, model) {
     const est = t && t.estimate, spent = Number(t && t.spend && t.spend.cost) || 0;
     const parts = [];
-    if (est && typeof est.cost === 'number' && est.cost > 0) parts.push('estimate about ' + moneyWords(est.cost));
-    if (spent > 0) parts.push(moneyWords(spent) + ' used so far');
+    if (est && typeof est.cost === 'number' && est.cost >= 0.005) parts.push('estimate about ' + moneyWords(est.cost));
+    else if (!spent && t && typeof t.range === 'string' && t.range) parts.push(t.range);  // before the first start (ORCH-297)
+    if (spent >= 0.005) parts.push(moneyWords(spent) + ' used so far');
     const money = parts.length ? parts.join(', ') : 'a start uses paid helper time';
     return model ? 'On ' + model + ' · ' + money : money.charAt(0).toUpperCase() + money.slice(1);
   }

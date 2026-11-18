@@ -1541,7 +1541,8 @@ const stripHelperPill = helper => { const p = window.UI.helperPill(helper.state,
 function ticketStripModel(t, run, fresh) {
   const q = questions(t)[0], asked = window.DashHelpers.askedAt(t, typeof needsList === 'function' ? needsList() : []), at = asked ? time(asked) : '';
   // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
-  const s = window.UI.ticketState(t, run?.running ? window.DashHelpers.helperState(run, t) : null);
+  // ORCH-415: a helper that may be stuck is passed too (helperState gives null when none runs), so the pill never says no helper
+  const s = window.UI.ticketState(t, window.DashHelpers.helperState(run, t));
   const m = sentence => ({pill:s.pill, word:s.word, helper:s.helper || undefined, sentence});
   if (t.status === 'done') {
     const ev = ticketDoneEvent(t), when = window.DashHelpers.doneAt(t);
@@ -1562,7 +1563,7 @@ function ticketStripModel(t, run, fresh) {
     return m('Helper finished' + (at ? ' ' + at : '') + '.');
   }
   if (t.bring_back?.state === 'waiting') return m('Helper has changes waiting for you.');
-  if (run?.running) {
+  if (run?.running || run?.state === 'maybe-stale') {
     // the core's one helper state (ORCH-61): a helper that sits idle or is stuck never reads "Working" here
     if (s.helper) return m((s.helper.detail || s.word) + '.');
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
@@ -1570,7 +1571,7 @@ function ticketStripModel(t, run, fresh) {
   if (fresh) return m('Not started. Your helper begins when you press Start.');
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
   // ORCH-415: In progress with no helper says so, as the Add to this ticket box below does
-  if (t.status === 'active') return m('No helper is working on it right now.');
+  if (t.status === 'active' && run?.state !== 'maybe-stale') return m('No helper is working on it right now.');
   return m(at ? 'Updated ' + at + '.' : '');
 }
 const taskTitle = task => clean(changeTask(task.text, task.origin)?.title || task.text);
@@ -1720,7 +1721,9 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     else if (fresh) { startShown = true; actions.push(ticketStartPick(t, 'Start helper', 'ticket-start')); }
     else if (ticketPaused(t, run)) { startShown = true; actions.push(ticketStartPick(t, 'Continue', 'ticket-resume')); }
     // ORCH-255: Continue is on the page in every state while no helper runs; Start helper / Continue (paused) already do that job
-    if (!run?.running && !startShown) actions.push(ticketStartPick(t, 'Continue', 'ticket-continue'));
+    // ORCH-415: a helper that may be stuck is started again with the agent bar's Start anyway; next to Reopen, Answer
+    // or the changes box the Continue stays a plain outlined button without the cost line
+    if (!run?.running && !startShown && run?.state !== 'maybe-stale') actions.push(ticketStartPick(t, 'Continue', 'ticket-continue', actions.length > 0));
     // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
     const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
     if (focusBtn) actions.push(focusBtn);
@@ -1738,16 +1741,24 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
 // ORCH-415 (UX D2): the start button outlined, its cost in one line above it and, on a strong model, the same start
 // on Sonnet beside it (orch's small first pick; it sets the ticket's model, then starts).
 const START_CHEAPER = {opus:'sonnet', fable:'sonnet'};
-function ticketStartPick(t, verb, key) {
-  const m = modelChoice(t), cheaper = m ? START_CHEAPER[m.name] : '';
-  const start = ticketButton(verb, 'outline sm', () => act('run.start', {ticket:t.id}), {'data-key':key});
-  const alt = cheaper ? ticketButton(verb + ' on ' + MODEL_NAMES[cheaper], 'outline sm', async () => {
-    const result = await act('ticket.model', {ticket:t.id, model:cheaper});
-    if (!result.ok) { window.orch.toast(changeError(result), 'error'); return; }
-    await act('run.start', {ticket:t.id});
-  }, {'data-key':key + '-cheaper'}) : null;
-  return h('div', {className:'cost-pick', 'data-key':'ticket-start-pick'},
-    h('p', {className:'meta', 'data-key':'ticket-start-cost'}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
+function ticketStartPick(t, verb, key, compact = false) {
+  if (compact) return ticketButton(verb, 'outline sm', () => act('run.start', {ticket:t.id}), {'data-key':key});
+  const m = modelChoice(t), cheaper = m ? START_CHEAPER[m.name] : '', costId = 'start-cost-' + t.id;
+  let start = null, alt = null;
+  const busy = on => { for (const b of [start, alt]) if (b) b.disabled = on; };
+  start = ticketButton(verb, 'outline sm', async () => { busy(true); try { await act('run.start', {ticket:t.id}); } finally { busy(false); } },
+    {'data-key':key, 'aria-describedby':costId});
+  alt = cheaper ? ticketButton(verb + ' on ' + MODEL_NAMES[cheaper], 'outline sm', async () => {
+    busy(true);
+    try {
+      const result = await act('ticket.model', {ticket:t.id, model:cheaper});
+      if (!result.ok) { window.orch.toast(changeError(result), 'error'); return; }
+      window.orch.toast('This ticket now uses ' + MODEL_NAMES[cheaper] + '. Change it under Helper strength.');
+      await act('run.start', {ticket:t.id});
+    } finally { busy(false); }
+  }, {'data-key':key + '-cheaper', 'aria-describedby':costId, title:'Sets this ticket to ' + MODEL_NAMES[cheaper] + ', then starts'}) : null;
+  return h('div', {className:'cost-pick', 'data-key':'ticket-start-pick', role:'group', 'aria-label':verb},
+    h('p', {className:'meta', 'data-key':'ticket-start-cost', id:costId}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
     h('div', {className:'row'}, start, alt));
 }
 // ORCH-70 (owner 16 Nov, as drawn): while a helper runs the header holds it all. One line above the title (key, the

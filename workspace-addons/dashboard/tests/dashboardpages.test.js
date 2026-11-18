@@ -859,4 +859,7 @@ test('ORCH-415: Working only while a helper runs; In progress with none, so the 
   assert.equal(helpers.startCostWords({estimate:{cost:1.2}, spend:{cost:0.4}}, 'Opus'), 'On Opus · estimate about $1.20, $0.40 used so far');
   assert.equal(helpers.startCostWords({}, ''), 'A start uses paid helper time');
   assert.equal(helpers.startCostWords({spend:{cost:0}}, 'Sonnet'), 'On Sonnet · a start uses paid helper time');
+  // before the first start the server's range is shown; tiny amounts never print $0.00
+  assert.equal(helpers.startCostWords({range:'about 20-40 min · $2.00-$4.00'}, 'Opus'), 'On Opus · about 20-40 min · $2.00-$4.00');
+  assert.equal(helpers.startCostWords({spend:{cost:0.004}}, 'Opus'), 'On Opus · a start uses paid helper time');
 });
