@@ -274,47 +274,7 @@ src = src.replace(
 )
 
 # ---------- the page: draft D's page, one folder deeper, plus one layout block on tokens ----------
-CSS = """
-/* Draft 344 on draft D: layout for the group only. Tokens only, no colours of its own. Listed in NOTES.md. */
-body.mk-focus-v4d .gd-tile{grid-column:span 2}
-.gd-tree{display:flex;flex-direction:column;gap:var(--s1);min-width:0}
-.gd-rw{display:flex;align-items:center;gap:var(--s1);min-width:0}
-.gd-rw[data-d="1"],.gd-rw[data-d="2"]{margin-left:var(--s3);padding-left:var(--s2);border-left:1px solid var(--border-strong)}
-.gd-rw[data-d="2"]{padding-left:var(--s5)}
-.gd-row{flex:1;display:grid;gap:var(--s1);min-width:0;padding:var(--s2);border:0;border-radius:var(--r1);background:transparent;color:var(--text-muted);font:inherit;text-align:left}
-button.gd-row:hover{background:var(--surface-2)}
-.gd-row[aria-current=true]{background:var(--surface-2);color:var(--text);box-shadow:inset 2px 0 0 var(--brand)}
-.gd-t{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;min-width:0;color:var(--text)}
-.gd-s{display:flex;align-items:center;gap:var(--s2);min-width:0}
-.gd-e{margin:var(--s3) var(--s2) 0}
-.gd-th{display:grid;gap:var(--s2);padding:var(--s2);margin-bottom:var(--s2);border-bottom:1px solid var(--border)}
-.gd-tree:not([data-mode=tree]) .gd-row{display:flex;align-items:center;gap:var(--s2);padding:var(--s1) var(--s2);font-size:var(--fs-meta)}
-.gd-tree:not([data-mode=tree]) .gd-t{flex-wrap:nowrap;white-space:nowrap}
-.gd-tree:not([data-mode=tree]) .gd-t strong{font-weight:500;overflow:hidden;text-overflow:ellipsis}
-.gd-tree[data-mode=mini]{gap:0;margin-top:var(--s1);padding:var(--s2);border-radius:var(--r1);background:var(--sidebar)}
-.gd-tree[data-mode=tree]{align-self:stretch;padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--sidebar);overflow:auto}
-.gd-tree[data-mode=strip]{flex:none;flex-direction:row;gap:var(--s2);padding:var(--s2);overflow-x:auto;border-bottom:1px solid var(--border)}
-.gd-tree[data-mode=strip] .gd-rw{flex:none;margin:0;padding:0;border:0}
-.gd-tree[data-mode=strip] .gd-row{min-height:var(--touch);border:1px solid var(--border)}
-.gd-tree[data-mode=strip] .gd-row[aria-current=true]{border-color:var(--brand);box-shadow:none}
-body.mk-focus-v4d .gd-zoom{display:flex;flex-direction:column}
-.gd-cols{flex:1;display:grid;grid-template-columns:calc(var(--panel-width) + var(--s7)) minmax(0,1fr);gap:var(--s3);min-height:0}
-body.mk-focus-v4d .gd-strip{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2) var(--s4)}
-.gd-qw{flex:1 1 calc(var(--s9)*4);display:grid;gap:var(--s1)}
-body.mk-focus-v4d .gd-stop{border-color:var(--failed);background:var(--danger-soft)}
-body.mk-focus-v4d .mw-st[data-s=stop]{color:var(--failed)}
-.gd-n{padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text)}
-.gd-to{margin:0}
-.gd-watch{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s3);padding:var(--s3);border:1px dashed var(--border-strong);border-radius:var(--r1)}
-.gd-watch p{flex:1 1 calc(var(--s9)*4);margin:0}
-.gd-swrap{flex:1 1 0;display:grid;grid-template-columns:var(--panel-width) minmax(0,1fr);min-height:0;min-width:0}
-.gd-swrap>.gd-tree[data-mode=sw]{padding:var(--s2);border-right:1px solid var(--border);background:var(--sidebar);overflow:auto}
-.gd-swrap[data-strip]{display:flex;flex-direction:column}
-.gd-swrap>.mw-pmain{flex:1 1 0}
-.gd-links{display:flex;gap:var(--s1);align-items:center}
-@media(max-width:900px){.gd-cols{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:720px){body.mk-focus-v4d .gd-tile{grid-column:auto}.gd-cols>.gd-tree[data-mode=strip]{border:0;padding:0}}
-"""
+# The group's mockup-only layout (.gd-*) lives in the master mockup.css (style lint R6.2: no <style> block here).
 for name in (
     "home",
     "board",
@@ -340,7 +300,6 @@ page = rep(
     "<title>An Epic in the new Focus · draft A on draft D · orch</title>",
     page,
 )
-page = rep("</head>", "<style>" + CSS + "</style></head>", page)
 page = rep(
     '<span class="pill">Draft D · demo data</span>',
     '<span class="pill">Draft A on draft D · sample data</span>',
