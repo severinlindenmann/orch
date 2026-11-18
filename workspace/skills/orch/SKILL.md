@@ -269,11 +269,12 @@ by itself. It is not your ticket's work: do not stop to wait for it, and do not 
     orch checks init                                   # the folder .orch/checks with a documented template
     orch checks run [<name>]                           # check now
     orch checks remove <name>
-    orch checks approve <name>                         # the PERSON only, in their own terminal
+    orch checks approve <name> --hash <h>              # the PERSON only, in their own terminal
 
 Your own check (any command or a small script, for example an API call with a key) goes in
 `.orch/checks/<name>.json`, written from `_template.json`. A new or changed check file runs only after the person
-approved it; you cannot approve it. Tell them to look at the file and run the approve command.
+approved it; you cannot approve it. Tell them to look at the file and run the approve command that
+`orch checks list` prints (it carries the file's short hash; a file changed after they looked is refused).
 
 **End of every run**
 
