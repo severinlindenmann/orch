@@ -311,7 +311,9 @@ def run(args) -> int:
                 if lim["period"] == "until" and "since" not in lim:
                     lim["since"] = store.now()
         elif cmd == "order":
-            store.set_order(accounts, a, rows, who, args.place)
+            if not re.fullmatch(r"\d+", args.place.strip()):
+                raise Refused(f"'{args.place}' is not a place. Write a number such as 1 or 2.")
+            store.set_order(accounts, a, rows, who, int(args.place))
         elif cmd in ("on", "off"):
             store.set_on(a, rows, who, cmd == "on")
         elif cmd == "end":
@@ -411,6 +413,8 @@ def _loop_cmd(args, root: Path) -> int:
         return 0 if pid else 1
     # switching on|off
     who = _actor(args.by)
+    if args.state not in ("on", "off"):
+        raise Refused(f"'{args.state}' is not on or off. Write: orch usage switching on, or off.")
     on = args.state == "on"
     changed = switching.set_switching(root, who, on)
     if on and not cswap.command():
@@ -443,55 +447,61 @@ def _look_text(r: dict) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="orch usage")
-    ap.add_argument("--dir", default=os.environ.get("ORCH_ROOT", "."))
+    ap.add_argument(
+        "--dir", default=os.environ.get("ORCH_ROOT", "."), help="the workspace folder (default: where you are)"
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    def p(name, **kw):
-        s = sub.add_parser(name, **kw)
-        s.add_argument("--json", action="store_true")
+    def p(name, help_text, **kw):
+        s = sub.add_parser(name, help=help_text, description=help_text, **kw)
+        s.add_argument("--json", action="store_true", help="print the answer as JSON")
         return s
 
-    p("list")
-    s = p("history")
-    s.add_argument("--account")
-    s = p("limit")
-    s.add_argument("account")
-    s.add_argument("value")
-    s.add_argument("--period")
-    s.add_argument("--until")
-    s.add_argument("--end")
-    s.add_argument("--by")
-    s = p("period")
-    s.add_argument("account")
-    s.add_argument("new")
-    s.add_argument("--of")
-    s.add_argument("--until")
-    s.add_argument("--end")
-    s.add_argument("--by")
-    s = p("order")
-    s.add_argument("account")
-    s.add_argument("place", type=int)
-    s.add_argument("--by")
+    ACC = "the account: its name, or its number from `orch usage list`"
+    BY = "who makes the change, for the history (default: you)"
+    END = "make the rule temporary: it ends then (YYYY-MM-DD or YYYY-MM-DDTHH:MM) and the old rule returns"
+
+    p("list", "Show the accounts, their order, rules and use.")
+    s = p("history", "Show what was changed, and by whom.")
+    s.add_argument("--account", help="only this account (name or number)")
+    s = p("limit", "Set a limit on an account, or remove it with none.")
+    s.add_argument("account", help=ACC)
+    s.add_argument("value", help="the limit: 90 or 90%% (subscription), $100 (credit), or none to remove it")
+    s.add_argument("--period", help="which limit it is: 5h, week, month or until (needed when there are two)")
+    s.add_argument("--until", help="for an until limit: the last day it counts (YYYY-MM-DD)")
+    s.add_argument("--end", help=END)
+    s.add_argument("--by", help=BY)
+    s = p("period", "Change what period a limit counts over.")
+    s.add_argument("account", help=ACC)
+    s.add_argument("new", help="the new period: 5h, week, month or until")
+    s.add_argument("--of", help="which limit to change: 5h, week, month or until (needed when there are two)")
+    s.add_argument("--until", help="for until: the last day it counts (YYYY-MM-DD)")
+    s.add_argument("--end", help=END)
+    s.add_argument("--by", help=BY)
+    s = p("order", "Move an account to a place in the order helpers use.")
+    s.add_argument("account", help=ACC)
+    s.add_argument("place", help="the new place: 1 is used first, up to the number of accounts")
+    s.add_argument("--by", help=BY)
     for name in ("on", "off"):
-        s = p(name)
-        s.add_argument("account")
-        s.add_argument("--by")
-    s = p("end")
-    s.add_argument("account")
-    s.add_argument("when")
-    s.add_argument("--by")
-    s = p("switching")
-    s.add_argument("state", choices=("on", "off"))
-    s.add_argument("--by")
-    s = p("act")
-    s.add_argument("verb")
-    s.add_argument("target")
-    s.add_argument("--by")
-    s = p("run")
-    s.add_argument("--once", action="store_true")
+        s = p(name, f"Turn an account {name}.")
+        s.add_argument("account", help=ACC)
+        s.add_argument("--by", help=BY)
+    s = p("end", "Set when the current rule ends (then the rule before it returns), or keep it for good.")
+    s.add_argument("account", help=ACC)
+    s.add_argument("when", help="when it ends (YYYY-MM-DD or YYYY-MM-DDTHH:MM), or none to keep the rule")
+    s.add_argument("--by", help=BY)
+    s = p("switching", "Turn automatic switching of the account on or off.")
+    s.add_argument("state", help="on or off")
+    s.add_argument("--by", help=BY)
+    s = p("act", "Run a change a page button asks for (used by the dashboard).")
+    s.add_argument("verb", help="limit, period, order, on, off, end or switching")
+    s.add_argument("target", help="what to change, for example main:90")
+    s.add_argument("--by", help=BY)
+    s = p("run", "Run the Usage loop in this terminal.")
+    s.add_argument("--once", action="store_true", help="look once and stop")
     s.add_argument("--port", type=int, default=None, help=argparse.SUPPRESS)
-    for name in ("start", "stop", "status"):
-        p(name)
+    for name, h in (("start", "Start Usage in the background."), ("stop", "Stop Usage."), ("status", "Say if Usage runs.")):
+        p(name, h)
     args = ap.parse_args(argv)
     args.json = bool(getattr(args, "json", False)) or "--json" in (argv if argv is not None else sys.argv)
     try:

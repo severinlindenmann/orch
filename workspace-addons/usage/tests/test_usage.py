@@ -82,7 +82,10 @@ def test_any_number_is_a_limit(cli, fake_switcher, ws, value):
         (("limit", "second", "50", "--end", "2020-01-01"), "already passed"),
         (("limit", "second", "none"), "no week limit"),
         (("period", "second", "week"), "no limit yet"),
-        (("order", "second", "x"), None),
+        (("order", "second", "x"), "not a place"),
+        (("order", "second", "9"), "from 1 to 3"),
+        (("order", "second", "0"), "from 1 to 3"),
+        (("switching", "maybe"), "not on or off"),
     ],
 )
 def test_bad_input_is_refused_and_changes_nothing(cli, fake_switcher, ws, args, words):
@@ -237,7 +240,7 @@ def test_no_workspace_is_refused(tmp_path, monkeypatch, capsys):
 def test_order_moves_and_keeps_places_whole(cli, fake_switcher, ws):
     jrun(cli, "list")
     jrun(cli, "order", "TEAMCO", "1")
-    jrun(cli, "order", "first", "99")  # past the end: last
+    jrun(cli, "order", "first", "3")
     assert [(a["label"], a["order"]) for a in store.load(ws)["accounts"]] == [
         ("TEAMCO", 1),
         ("second", 2),
@@ -272,3 +275,37 @@ def test_plain_history_shows_local_time(cli, fake_switcher, ws):
     row = store.history(ws)[-1]
     local = store.to_time(row["at"]).astimezone().strftime("%Y-%m-%d %H:%M")
     assert local in text
+
+
+def test_list_numbers_work_as_the_account(cli, fake_switcher, ws):
+    jrun(cli, "list")
+    code, d = jrun(cli, "limit", "2", "90")
+    assert code == 0 and d["account"]["order"] == 2
+    code, d = jrun(cli, "limit", "7", "90")
+    assert code == 2 and "No account called '7'" in d["error"]
+
+
+def test_too_high_percent_is_named_before_which_limit(cli, fake_switcher, ws):
+    _seed(cli)
+    code, d = jrun(cli, "limit", "first", "101")
+    assert code == 2 and "at most 100%" in d["error"], d
+
+
+def test_every_argument_has_a_help_line(monkeypatch, capsys):
+    import argparse
+
+    from orch_usage import cli as c
+
+    seen = []
+    real = argparse.ArgumentParser.add_argument
+
+    def spy(self, *names, **kw):
+        seen.append((names, kw.get("help")))
+        return real(self, *names, **kw)
+
+    monkeypatch.setattr(argparse.ArgumentParser, "add_argument", spy)
+    with pytest.raises(SystemExit):
+        c.main(["list", "--help"])
+    capsys.readouterr()
+    assert len(seen) > 20
+    assert [n for n, h in seen if not h] == []
