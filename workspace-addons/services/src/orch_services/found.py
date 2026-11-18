@@ -12,6 +12,7 @@ processes are skipped, because without the folder there is no way to tell a work
 
 from __future__ import annotations
 
+import hashlib
 import os
 import plistlib
 import re
@@ -33,6 +34,8 @@ INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "bash", "sh"
 PROC = Path("/proc")
 LSOF = "/usr/sbin/lsof"
 ID_RE = re.compile(r"(launchd|systemd):[A-Za-z0-9@._-]{1,200}|process:\d{1,10}")
+PAGE_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,63}")  # a plain item id of the page (addon-view schema)
+HASHED_ID = re.compile(r"found-[0-9a-f]{12}")
 TOOL_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 WINDOWS_NOTE = (
     "On Windows orch cannot look for other background jobs yet; services orch adds are listed as usual."
@@ -78,7 +81,7 @@ def script_name(argv: list[str]) -> str:
     if not argv:
         return "?"
     prog = Path(argv[0]).name
-    if re.sub(r"[\d.]+$", "", prog) in INTERPRETERS:
+    if _interpreter(prog):
         for a in argv[1:]:
             if a == "-m" or a in ("run", "exec"):  # a tuple holding "-m" looks like a spawn to the lint
                 continue
@@ -93,13 +96,28 @@ def _masked(root: Path, argv: list[str]) -> list[str]:
     return _masked_command(root, argv) if argv else []
 
 
+def _shown(root: Path, text: str) -> str:
+    """A found job's name or description as shown (and the default name on adopt); one with a secret is masked."""
+    from .cli import MASK, _masked_command
+
+    return MASK if text and _masked_command(root, [text]) != [text] else text
+
+
+def page_id(fid: str) -> str:
+    """The id the page uses for a found item: the found id when it is a plain page id, else a stable hash of it.
+    `get` takes either, so Manage with orch on the page sends the page id and adopt finds the real job."""
+    if PAGE_ID.fullmatch(fid):
+        return fid
+    return "found-" + hashlib.sha1(fid.encode("utf-8")).hexdigest()[:12]
+
+
 def _item(root: Path, fid: str, name: str, running: bool, since, what: str, how: dict, argv, auto) -> dict:
     return {
         "id": fid,
-        "name": name[: store.MAX_NAME] or fid,
+        "name": _shown(root, name[: store.MAX_NAME]) or fid,
         "running": bool(running),
         "since": since,
-        "what": what,
+        "what": _shown(root, what),
         "how": how,
         "command": _masked(root, list(argv)),
         "auto": bool(auto),
@@ -284,9 +302,25 @@ def _cwds_lsof(pids: list[int]) -> dict[int, Path]:
     return out
 
 
+def _interpreter(prog: str) -> bool:
+    """python3.12, Python (the macOS framework app), node ... count as interpreters."""
+    return re.sub(r"[\d.]+$", "", prog.lower()) in INTERPRETERS
+
+
 def _is_orch(argv: list[str]) -> bool:
+    """orch itself, or one of its own parts (orch_dashboard, orch_automation ...), also behind interpreter flags
+    such as `Python -P -m orch_dashboard`: orch's own background pages are never found items."""
     prog = Path(argv[0]).name if argv else ""
-    return prog == "orch" or any(a == "orch" or a.startswith("orch_") for a in argv[1:3])
+    if prog == "orch" or any(a == "orch" or a.startswith("orch_") for a in argv[1:3]):
+        return True
+    if not _interpreter(prog):
+        return False
+    for a in argv[1:6]:
+        if a.startswith("-"):
+            continue
+        name = Path(a).name
+        return name == "orch" or name.startswith("orch_") or "/orch_" in a
+    return False
 
 
 def _processes(root: Path, skip: set[int]) -> list[dict]:
@@ -327,7 +361,7 @@ def _processes(root: Path, skip: set[int]) -> list[dict]:
         cwds = _cwds_lsof(cand)  # no lsof: no processes (see the module comment)
     base = root.resolve()
     items = []
-    for pid in sorted(cwds):
+    for pid in sorted(set(cwds) & set(cand)):  # only the candidates, whatever lsof answered
         try:
             cwds[pid].resolve().relative_to(base)
         except (ValueError, OSError):
@@ -400,9 +434,9 @@ def note() -> str | None:
 
 
 def get(root: Path, fid: str) -> dict:
-    if not isinstance(fid, str) or not ID_RE.fullmatch(fid):
+    if not isinstance(fid, str) or not (ID_RE.fullmatch(fid) or HASHED_ID.fullmatch(fid)):
         raise Refused(f"'{fid}' is not a found service. Run orch services found to see them.")
     for it in scan(root):
-        if it["id"] == fid:
+        if it["id"] == fid or (HASHED_ID.fullmatch(fid) and page_id(it["id"]) == fid):
             return it
     raise Refused(f"There is no found service {fid} (any more). Run orch services found to see them.")

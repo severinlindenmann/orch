@@ -304,6 +304,8 @@ def test_record_and_proof_state_never_execute(repo, run, new_ticket, monkeypatch
     seen = []
 
     def only_git(argv, *a, **k):
+        if os.name == "nt" and os.path.basename(argv[0]).lower() == "taskkill.exe":
+            return real_popen(argv, *a, **k)  # safegit ends a git process tree this way on Windows
         assert (
             isinstance(argv, list) and os.path.basename(argv[0]) in ("git", "git.exe") and not k.get("shell")
         ), argv
@@ -338,8 +340,9 @@ def _hostile_repo(proj, marker):
     (proj / "a.txt").write_text("one\n", encoding="utf-8")
     _git(proj, "add", "a.txt")
     _git(proj, "commit", "-q", "-m", "first")
-    _git(proj, "config", "filter.evil.clean", f"touch {marker}; cat")
-    _git(proj, "config", "filter.evil.process", f"touch {marker}")
+    m = marker.as_posix()  # git runs the filter through sh: backslashes would be eaten
+    _git(proj, "config", "filter.evil.clean", f"touch {m}; cat")
+    _git(proj, "config", "filter.evil.process", f"touch {m}")
     (proj / ".gitattributes").write_text("* filter=evil\n", encoding="utf-8")
     (proj / ".git" / "info" / "attributes").write_text("* filter=evil\n", encoding="utf-8")
     (proj / "a.txt").write_text("edited so git must look at it\n", encoding="utf-8")
@@ -430,7 +433,11 @@ def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):
     assert not marker.exists()
     seen = []
     real = subprocess.Popen
-    monkeypatch.setattr(safegit.subprocess, "Popen", lambda a, **k: seen.append(k["env"]) or real(a, **k))
+    monkeypatch.setattr(
+        safegit.subprocess,
+        "Popen",
+        lambda a, **k: (seen.append(k["env"]) if "env" in k else None) or real(a, **k),
+    )
     filesig.files_sig(repo)
     assert seen and all(not any(k.startswith("GIT_") and k not in OURS for k in e) for e in seen)
 
@@ -554,6 +561,9 @@ def test_fallback_check_wants_the_path_itself_to_be_the_file(proj, tmp_path):
     os.close(got[0])
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows never takes this path: it opens through _open_windows"
+)
 def test_open_checked_closes_the_fd_when_a_stat_fails(proj, monkeypatch):
     f = proj / "f.txt"
     f.write_text("x", encoding="utf-8")

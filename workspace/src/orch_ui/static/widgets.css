@@ -618,6 +618,15 @@ dialog.report-dialog .actions{margin-top:12px}
 .blk-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 .blk-head .blk-title{padding-left:0;padding-right:0;font-size:14px;line-height:20px}
 .card>.blk-head{padding:0 16px 0 0}
+/* One left edge in a block card (ORCH-432, SX-3 16 px rows): its heading, list rows and table cells all start 16 px
+   in. The tone dot of a list row is never drawn (it has no look), so it only speaks to screen readers and takes no
+   room: the row's words line up with the heading. Compact and paired blocks keep their own heading padding. */
+.card:not(.blk-compact):not(.blk-pair>.blk)>.blk-head{padding:0 16px}
+.card:not(.blk-compact):not(.blk-pair>.blk)>.blk-title{padding-left:16px;padding-right:16px}
+.blk.card .li-row{padding-left:16px;padding-right:16px}
+.blk.card .li-row>.tdot{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+@media(min-width:721px){.blk.card .blk-table th:first-child,.blk.card .blk-table td:first-child{padding-left:16px}
+.blk.card .blk-table th:last-child,.blk.card .blk-table td:last-child{padding-right:16px}}
 .blk-above>.blk-head{padding:0 4px 8px}.blk-above>.blk-head .blk-title,.blk-above>.blk-title{padding:0;font-size:14px;line-height:20px}
 .blk-above{display:block;margin-top:8px}
 .blk-above .blk-list{padding:0}
@@ -978,6 +987,11 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .swipe-preview:has(>.doc) .swipe-expand{top:8px;bottom:auto}
 @media(max-width:720px){.doc-row{flex-wrap:wrap}.doc-row-title{flex-basis:100%}}
 
+/* A terminal command to copy (UI.commandCopy, ORCH-218): the command in mono on the sunken surface, Copy beside it;
+   a long command wraps inside its box, never past the card. */
+.cmd-copy{display:flex;flex-direction:column;gap:4px;margin-top:6px;min-width:0}
+.cmd-copy-row{display:flex;align-items:center;gap:8px;min-width:0}
+.cmd-copy-text{flex:1 1 auto;min-width:0;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);font-family:var(--font-mono);font-size:13px;line-height:20px;overflow-wrap:anywhere;user-select:all}
 /* Live layer (ORCH-338, Focus draft D): one dock under every page, outside the page content so it stays open when the
    page changes. The page (pages/live-layer.js) sets data-mode on .live-dock and the size in --live-h / --live-w, and
    body[data-live-layer] plus --live-pad / --live-padr keep the page usable behind it. Modes: bar (only the bar), bottom
@@ -1151,3 +1165,6 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
+
+/* a toast never covers the comment sheet's buttons: while a sheet is open it shows at the top (ORCH-422 look check) */
+body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:auto}

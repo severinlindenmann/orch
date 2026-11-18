@@ -101,7 +101,7 @@ test('the deck is text only by default: voice is off', async () => {
   assert.equal(decks[0].o.voice, false);
   const w = read('widgets.js');
   assert.match(w, /if\(o\.voice\)voice\.append\(mic,wave\)/);
-  assert.match(w, /if\(o\.voice\)sh\.append\(voice,clips\)/);
+  assert.match(w, /if\(o\.voice&&!box\)sh\.append\(voice,clips\)/);  // the feedback box (o.attach) brings its own Record
   assert.match(w, /clips:o\.voice\?dr\.clips\.slice\(\):\[\]/);
 });
 
@@ -115,6 +115,38 @@ test('an answer is sent with id, digest, verdict, picked and the words', async (
   d.o.onDecide(d.items[0], 'ok', null);
   await flush();
   assert.equal(sent[1].verdict, 'ok'); assert.equal(sent[1].note, null);
+});
+
+test('ORCH-422: with api.attach the sheet gets the feedback box; files land on the ticket before the answer, named in the note', async () => {
+  const sent = [], attached = [];
+  const api = {...fakeApi([[card('a')]], async b => { sent.push(JSON.parse(JSON.stringify(b))); return {ok: true}; }),
+    box: {voice: true, accept: ['png', 'webm']},
+    attach: async ({ticket, files}) => { attached.push([ticket, files.map(f => f.name)]); return {ok: true, names: ['shot (2).png', 'voice-note-0931.webm']}; }};
+  const {decks} = await mount(api);
+  const d = decks[0];
+  assert.equal(d.o.attach.voice, true, 'the comment sheet gets the box with Record');
+  const files = [{name: 'shot.png', url: 'data:image/png;base64,iVBO'}, {name: 'voice-note-0931.webm', url: 'data:audio/webm;base64,GkXf'}];
+  d.o.onDecide(d.items[0], 'talk', {changes: {text: 'Bigger', clips: [], pins: [], files}});
+  await flush(); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(attached)), [['T-1', ['shot.png', 'voice-note-0931.webm']]]);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].files, undefined, 'the files are never sent with the answer');
+  assert.match(sent[0].note.text, /^Bigger\n\nI added 2 files to this ticket: shot \(2\)\.png, voice-note-0931\.webm\. Read them first\.$/);
+  // files alone, no words: still a note naming them
+  d.o.onDecide(d.items[0], 'talk', {changes: {text: '', clips: [], pins: [], files: files.slice(0, 1)}});
+  await flush(); await flush();
+  assert.match(sent[1].note.text, /^I added 2 files to this ticket/);
+});
+
+test('ORCH-422: files that could not be added: no answer is saved, the card comes back', async () => {
+  const sent = [];
+  const api = {...fakeApi([[card('a')]], async b => { sent.push(b); return {ok: true}; }), box: {voice: true},
+    attach: async () => ({ok: false, error: {code: 'error', message: 'x.pdf: no'}})};
+  const {decks, toasts} = await mount(api);
+  decks[0].o.onDecide(decks[0].items[0], 'talk', {changes: {text: 'see', clips: [], pins: [], files: [{name: 'x.pdf', url: 'data:,x'}]}});
+  await flush(); await flush();
+  assert.equal(sent.length, 0);
+  assert.equal(toasts[0].m, 'x.pdf: no'); assert.equal(toasts[0].k, 'error');
 });
 
 test('changed: toast, reload the stack and show the new version', async () => {
@@ -171,6 +203,12 @@ const entry = (decision, extra = {}) => ({
   card: {kind: 'choice', title: 'Home: which layout?', preview: {type: 'options', options: [{id: 'A', title: 'As today', preview: {type: 'page', src: 'reviewed/aa/a.html'}}, {id: 'C', title: 'Questions first', preview: {type: 'page', src: 'reviewed/aa/c.html'}}]}},
   shown: {digest: 'x', copy: 'reviewed/aa/', files: {'c.html': 'h'}},
   decision, ...extra,
+});
+
+test('answerRecord: a sent-back Check says what happens next', () => {
+  const {UI} = load();
+  const t = UI.answerRecord(entry({action: 'send_back', changes: ['Add shipping']}, {card: {kind: 'check', title: 'Result'}}), {now: NOW}).textContent;
+  assert.match(t, /Your note went to the helper for a new version\./); assert.doesNotMatch(t, /Kept exactly/);
 });
 
 test('answerRecord: title, verdict words, by · via · time, taken option, pins and words', () => {

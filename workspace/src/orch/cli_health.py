@@ -48,8 +48,11 @@ def add_parsers(sub, common) -> None:
     a.add_argument("--kind", choices=health.KINDS, help=argparse.SUPPRESS)
     a.add_argument("--key", help=argparse.SUPPRESS)
     a.add_argument("--how", help=argparse.SUPPRESS)
+    a.add_argument("--sign-in", dest="sign_in", help=argparse.SUPPRESS)  # the terminal command (ORCH-218)
     d = acts.add_parser("remove", parents=[common], help=argparse.SUPPRESS)
     d.add_argument("name")
+    # ORCH-529: the background run checks only what is due (each check keeps its own interval)
+    p.add_argument("--due-only", action="store_true", dest="due_only", help=argparse.SUPPRESS)
 
 
 def line(r: dict) -> str:
@@ -60,7 +63,7 @@ def line(r: dict) -> str:
     n = len(r["stops"])
     on = "; ".join(f"{t['key']} {t['title']}".strip() for t in r["stops"])
     work = f"{n} ticket{'' if n == 1 else 's'}: {on}"
-    how = f" {r['how']}" if r.get("how") and not r.get("renew") else ""
+    how = f" {health.how_words(r)}" if health.how_words(r) and not r.get("renew") else ""
     if r["state"] == "renew":
         text = f"The {label} {kind} ran out {when}." if when else f"The {label} {kind} no longer works."
         text += f" The helper cannot go on with {work}." if n else ""
@@ -71,6 +74,10 @@ def line(r: dict) -> str:
         return text + how
     if r["state"] == "works":
         return f"The {label} {kind} works until {when}." if when else f"The {label} {kind} works."
+    if r.get("approve") == "broken":
+        return f"{label}: {r.get('how') or 'the check file cannot be read.'}"
+    if r.get("approve"):
+        return f"{label} waits until you approve it: run orch checks approve {r['name']}"
     return f"{label} did not answer, so orch cannot tell whether its {kind} works."
 
 
@@ -130,7 +137,7 @@ def dispatch(args, root: Path) -> bool:
         except ValueError:
             command = []
         doc = {"label": args.label, "command": command, "works": args.works, "ends": args.ends}
-        doc |= {"kind": args.kind, "key": args.key, "how": args.how}
+        doc |= {"kind": args.kind, "key": args.key, "how": args.how, "sign_in": args.sign_in}
         r = health.add_recipe(root, args.name, doc)
         _out(
             args, {"added": r["name"], "label": r["label"]}, f"orch now checks {r['label']} with the others."
@@ -152,6 +159,7 @@ def dispatch(args, root: Path) -> bool:
             text += " Helpers go on with " + ", ".join(res["went_on"]) + "."
         _out(args, res, text)
         return True
-    doc = health.check(root)
-    _out(args, doc, "\n".join(line(r) for r in doc["items"]) or NONE_SET)
+    doc = health.check(root, due_only=bool(getattr(args, "due_only", False)))
+    text = "\n".join(line(r) for r in doc["items"]) or NONE_SET
+    _out(args, doc, text + (f"\n{doc['notice']}" if doc.get("notice") else ""))
     return True

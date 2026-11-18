@@ -710,6 +710,11 @@ def test_the_file_pass_only_reads_its_own_addon_and_the_pass_never_rides_in_an_a
     assert (
         call(base + f"/addon/focus/api/order/o1/file/a.png?orch-frame={got['file']}", headers=img)[0] == 200
     )
+    # a built task's picture on a Factory stage review (ORCH-419), only with plain ticket ids and a plain name
+    result = f"/addon/focus/api/order/t_abcdef/result/t_bcdefg/home-1280.png?orch-frame={got['file']}"
+    assert call(base + result, headers=img)[0] == 200
+    bad = f"/addon/focus/api/order/t_abcdef/result/t_bcdefg/sub/a.png?orch-frame={got['file']}"
+    assert call(base + bad, headers=img)[0] == 401
     n = len(SEEN)
     assert (
         call(base + f"/addon/focus/api/tickets?orch-frame={got['file']}", headers=img)[0] == 401

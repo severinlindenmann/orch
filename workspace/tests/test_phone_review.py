@@ -70,7 +70,7 @@ def test_review_question_matches_the_contract(proj, run, new_ticket, conn):
         "review": True,
     }
     q["body"].update(digest=digest, card=card)
-    schema = json.loads((CONTRACTS / "message.schema.json").read_text())
+    schema = json.loads((CONTRACTS / "message.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema).validate({**q, "schema": "orch.msg/1"})
     assert phone_view.sync_reviews(proj) == [] and len(review_questions(conn)) == 1  # once per review
 
@@ -202,7 +202,7 @@ def test_agents_cannot_accept_directly(proj, new_ticket, run, monkeypatch):
 
 def test_vector_cases(proj, run, new_ticket, conn):
     """Every outcome of contracts/vectors/review-question-v1.json."""
-    vec = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text())
+    vec = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text(encoding="utf-8"))
     asked_round = int(vec["question"]["body"]["question_id"].split("-")[1])
     for i, case in enumerate(vec["cases"]):
         tid = new_ticket(case["name"])
@@ -348,7 +348,7 @@ def test_a_signed_done_sends_no_review_question(proj, run, new_ticket, conn):
 
 def test_verdict_cases(proj, run, new_ticket, conn):
     """Every verdict case of contracts/vectors/review-question-v1.json (a swipe on the Check card)."""
-    vec = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text())
+    vec = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text(encoding="utf-8"))
     asked_round = int(vec["question"]["body"]["question_id"].split("-")[1])
     for i, case in enumerate(vec["verdict_cases"]):
         tid = new_ticket(case["name"])

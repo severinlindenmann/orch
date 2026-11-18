@@ -1,0 +1,45 @@
+name: dash-shots
+# Proof pictures of a dashboard pull request (ORCH-312): the pages the change shows on, on the real dashboard with
+# sample tickets, at 1280, 1920 and 390 px, taken with `orch shot` (e2e/dash_ci_shots.py). Kept as the artifact
+# dashboard-shots for 14 days; `orch ask ... --ci-shots <pull request>` puts them on the review card, so a helper
+# never takes its own screenshots (keychain window, cut-off phone pictures, the mockup instead of the product).
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # the pull request's merge commit and its first parent (develop)
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Chromium for orch shot
+        run: |
+          npx --yes playwright@1.64.1 install --with-deps chromium
+          # Ubuntu 24.04 blocks the user namespaces Chrome's sandbox needs; this runner only
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          b=$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux*/chrome | head -1)
+          test -x "$b"
+          echo "ORCH_SHOT_BROWSER=$b" >> "$GITHUB_ENV"
+      - name: Pictures of the changed pages
+        id: shots
+        timeout-minutes: 10
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 e2e/dash_ci_shots.py --out "$RUNNER_TEMP/dashboard-shots" --base HEAD^1 --head "$HEAD_SHA" --pr "$PR"
+      - if: steps.shots.outputs.pages != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-shots
+          path: ${{ runner.temp }}/dashboard-shots
+          retention-days: 14
+          if-no-files-found: error

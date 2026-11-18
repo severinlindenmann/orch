@@ -55,8 +55,10 @@ def tk(ws, tid):
 
 
 def history_rows(ws):
+    """Finished lines only: a line still being appended (no newline yet) is not read (ORCH-489)."""
     p = ws / ".orch/addons/automation/runs.jsonl"
-    return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+    text = p.read_text() if p.exists() else ""
+    return [json.loads(x) for x in text[: text.rfind("\n") + 1].splitlines()]
 
 
 def py(code: str) -> list[str]:

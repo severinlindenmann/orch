@@ -11,6 +11,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..store import Refused
 from . import Driver, Spec, Status, Unavailable, adopted_gone, run_tool, tool_failed
 
 
@@ -67,6 +68,12 @@ def _utc(text: str) -> str | None:
     return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+HOME_ELSEWHERE = (
+    "This shell uses another home folder than your account's, and Linux runs your services only from your "
+    "account's own folder. Open a normal shell and try again."
+)
+
+
 class Systemd(Driver):
     name = "systemd"
 
@@ -84,6 +91,7 @@ class Systemd(Driver):
     def _write(self, spec: Spec) -> None:
         if spec.external:  # adopted: the person's own unit file is never rewritten
             return
+        self._own_home_or_refuse()
         p = self.entry_path(spec)
         p.parent.mkdir(parents=True, exist_ok=True)
         spec.log.parent.mkdir(parents=True, exist_ok=True)
@@ -91,6 +99,23 @@ class Systemd(Driver):
         tmp.write_text(render(spec), encoding="utf-8")
         os.replace(tmp, p)
         self._do("reload the service list", "daemon-reload")
+
+    def _own_home_or_refuse(self) -> None:
+        """The user service manager reads units only from its own home (its HOME, usually the account's). With HOME
+        set elsewhere (a test home, sudo -E ...) a unit written there is never seen: refuse in plain words instead
+        of a raw systemd line later."""
+        cp = self._run("show-environment")
+        if cp.returncode != 0:
+            return
+        for line in cp.stdout.splitlines():
+            if line.startswith("HOME="):
+                try:
+                    same = Path(line[5:]).resolve() == Path.home().resolve()
+                except OSError:
+                    return
+                if not same:
+                    raise Refused(HOME_ELSEWHERE)
+                return
 
     def check(self) -> None:
         if not shutil.which("systemctl"):
@@ -172,7 +197,9 @@ class Systemd(Driver):
             return
         p = self.entry_path(spec)
         if p.exists():
-            self._run("stop", unit_name(spec))
+            self.stop(
+                spec
+            )  # refused when it does not stop: the unit file and the record stay, nothing runs unseen
             self._run("disable", unit_name(spec))
             p.unlink()
         self._run("daemon-reload")

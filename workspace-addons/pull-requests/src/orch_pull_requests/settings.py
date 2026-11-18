@@ -8,6 +8,8 @@
 - `alone_paths`: a pull request that changes a file under one of these runs alone in its own queue group (never
   with others), so its green run is the proof before it counts. Default: CI (`.github/`) and the merge queue's
   own code in the orch repository.
+- `max_group`: how many pull requests go into one queue group at most. Default 5, from 1 to 20; any other value
+  means the default. Read at the start of every round, so a change counts without restarting the runner.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ DEFAULT_ALONE = (
     "workspace/src/orch/prwait.py",
     "workspace/src/orch/ghlimit.py",
 )
+DEFAULT_MAX_GROUP, MOST_GROUP = 5, 20
 
 
 def _table(root: Path) -> dict:
@@ -56,3 +59,10 @@ def alone_paths(root: Path) -> list[str]:
     if not isinstance(got, list) or not all(isinstance(x, str) for x in got):
         return list(DEFAULT_ALONE)
     return [x.strip().lstrip("/") for x in got if x.strip()]
+
+
+def max_group(root: Path) -> int:
+    got = _table(root).get("max_group")
+    if isinstance(got, bool) or not isinstance(got, int) or not 1 <= got <= MOST_GROUP:
+        return DEFAULT_MAX_GROUP
+    return got
