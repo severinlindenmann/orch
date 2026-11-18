@@ -999,6 +999,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     from orch.config import (
         agents_may_finish,
+        auto_reviewer_on,
         copies_max,
         copies_mode,
         copy_setup,
@@ -1024,6 +1025,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     return {
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
+        "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         "copies": copies_mode(root),
         "copies_max": copies_max(root),

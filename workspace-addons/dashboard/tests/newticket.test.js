@@ -182,6 +182,20 @@ test('Human review needed is ticked by default; unticking it sends human_review 
   assert.equal(u.calls[0].args.human_review, false);
 });
 
+test('with the Auto Reviewer on, Human review needed starts unticked; ticking it sends human_review true (ORCH-424)', async () => {
+  const s = setupWith({auto_reviewer_on:true});
+  s.input.value = 'Spring campaign'; await s.input.fire('input');
+  const box = walk(s.d).find(n => n.name === 'human_review');
+  assert.equal(box.checked, false);
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].args.human_review, undefined);  // the workspace default: nothing to send
+  const u = setupWith({auto_reviewer_on:true});
+  u.input.value = 'Spring campaign'; await u.input.fire('input');
+  walk(u.d).find(n => n.name === 'human_review').checked = true;
+  await u.form.fire('submit');
+  assert.equal(u.calls[0].args.human_review, true);
+});
+
 test('long typed text moved to a chip on submit shrinks the text box back', async () => {
   const s = setup();
   s.input.style = {};

@@ -785,9 +785,11 @@ async fn send(
                 b.insert(k.into(), v[k].clone());
             }
         }
-        // ORCH-424: Human review needed turned off for the ticket a new topic starts; only on a new topic.
-        if v["human_review"] == false && ticket.is_none() && v["general"] != true {
-            b.insert("human_review".into(), false.into());
+        // ORCH-424: the Human review needed choice for the ticket a new topic starts; only on a new topic.
+        if let Some(on) = v["human_review"].as_bool() {
+            if ticket.is_none() && v["general"] != true {
+                b.insert("human_review".into(), on.into());
+            }
         }
         let body = Value::Object(b);
         // Same schema check as workspace messages.

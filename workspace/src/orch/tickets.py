@@ -939,9 +939,10 @@ def create(
     plan_first: bool = False,
     epic: bool = False,
     release: bool = False,
-    human_review: bool = True,
+    human_review: bool | None = None,
 ) -> dict:
-    """`human_review`: the Human review needed switch (ORCH-424); on unless the person turns it off.
+    """`human_review`: the Human review needed switch (ORCH-424); None = the workspace default (on, or off
+    while the Auto Reviewer is on: config.auto_reviewer_on).
     `title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
     tid lets callers persist a reserved id before this write."""
@@ -985,6 +986,8 @@ def create(
         release
     ):  # ORCH-37: a release holds the epics and tickets that ship together (set_release changes it later)
         ticket["release"] = True
+    if human_review is None:
+        human_review = not config.auto_reviewer_on(root)
     if not human_review:  # ORCH-424: stored only when off; no field = on (also every older ticket)
         ticket["human_review"] = False
         add_history(ticket, by, HUMAN_REVIEW_OFF, at=t)
@@ -2028,7 +2031,7 @@ def create_from_input(
     parent: str | None = None,
     fields: dict | None = None,
     ext: dict[str, dict] | None = None,
-    human_review: bool = True,
+    human_review: bool | None = None,
 ) -> dict:
     """THE way a ticket is made from what a person wrote or said (dashboard paste box, phone text, Open
     agent): the title is the first words (a placeholder, flag `title_auto`, when the text is long or has

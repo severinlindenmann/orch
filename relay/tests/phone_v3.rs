@@ -1341,7 +1341,19 @@ async fn send_human_review_off_only_on_a_new_topic() {
             assert_eq!(m["body"]["human_review"], json!(false));
         }
     }
-    // only false is a valid value
-    let (s, _) = send(&t, &p, json!({"to": a.id, "client_id": "d0000000-0000-4000-8000-000000000424", "text": "x", "human_review": true})).await;
+    // true (turned on while the Auto Reviewer is on) is kept too; any other value is refused
+    let body = json!({"to": a.id, "client_id": "d0000000-0000-4000-8000-000000000424", "text": "x", "human_review": true});
+    let (s, v) = send(&t, &p, body).await;
+    assert_eq!(s, 201, "{v}");
+    let id = v["id"].clone();
+    let m = t
+        .inbox(&a)
+        .await
+        .into_iter()
+        .find(|m| m["id"] == id)
+        .expect("stored");
+    assert_eq!(m["body"]["human_review"], json!(true));
+    let body = json!({"to": a.id, "client_id": "e0000000-0000-4000-8000-000000000424", "text": "x", "human_review": "no"});
+    let (s, _) = send(&t, &p, body).await;
     assert_eq!(s, 422);
 }

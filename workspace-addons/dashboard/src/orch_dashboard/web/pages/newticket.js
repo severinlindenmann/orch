@@ -314,13 +314,14 @@ function ticketForm(t) {
   let startAfter = !t;
   // One main button (Start) and Cancel; the plan choice is a plain box, "Create without starting" a text link.
   let planBox = null, reviewBox = null;
+  const reviewDefault = !(typeof state !== 'undefined' && state && state.settings?.auto_reviewer_on === true);
   if (!t) {
     const planLabel = el('label', 'new-ticket-check');
     planBox = el('input'); planBox.type = 'checkbox'; planBox.name = 'plan_first';
     planLabel.append(planBox, el('span', '', 'Show me the plan first'), el('span', 'meta', 'The helper waits for your OK before work starts.'));
-    // ORCH-424: on unless the person unticks it, so nothing is accepted without them until they choose so.
+    // ORCH-424: ticked unless the Auto Reviewer is on (owner: it then checks every new ticket unless they tick it).
     const reviewLabel = el('label', 'new-ticket-check');
-    reviewBox = el('input'); reviewBox.type = 'checkbox'; reviewBox.name = 'human_review'; reviewBox.checked = true;
+    reviewBox = el('input'); reviewBox.type = 'checkbox'; reviewBox.name = 'human_review'; reviewBox.checked = reviewDefault;
     reviewLabel.append(reviewBox, el('span', '', 'Human review needed'), el('span', 'meta', 'Nothing is accepted without you.'));
     for (const box of [planLabel, reviewLabel]) {
       if (doneWrap && typeof fields.insertBefore === 'function' && doneWrap.parentNode === fields) fields.insertBefore(box, doneWrap); else fields.append(box);
@@ -381,7 +382,7 @@ function ticketForm(t) {
         const previous = new Set(tickets().map(t => t.id));
         const planFirst = startAfter && !!planBox?.checked;
         const epic = epicMade = steps.some(step => ticketStepArgs(step.input.value, step.files, 'x'));
-        const args = {...base, ...(planFirst ? {plan_first:true} : {}), ...(epic ? {epic:true} : {}), ...(reviewBox && !reviewBox.checked ? {human_review:false} : {}), ...Object.fromEntries(['owner', 'due', 'done_when'].filter(k => values[k]).map(k => [k, values[k]]))};
+        const args = {...base, ...(planFirst ? {plan_first:true} : {}), ...(epic ? {epic:true} : {}), ...(reviewBox && reviewBox.checked !== reviewDefault ? {human_review:reviewBox.checked} : {}), ...Object.fromEntries(['owner', 'due', 'done_when'].filter(k => values[k]).map(k => [k, values[k]]))};
         // ORCH-185: the epic and its tickets go in ONE request (all checked before anything is made) when they fit; a
         // bigger set (many pictures) still goes one ticket at a time, as before.
         const filled = epic ? steps.filter(step => ticketStepArgs(step.input.value, step.files, 'x')) : [];
@@ -417,7 +418,7 @@ function ticketForm(t) {
         for (const step of togetherDone ? [] : [...steps]) {
           const args = ticketStepArgs(step.input.value, step.files, created.id, values.owner);
           if (!args) continue;
-          if (reviewBox && !reviewBox.checked) args.human_review = false;  // ORCH-424: like the epic above
+          if (reviewBox && reviewBox.checked !== reviewDefault) args.human_review = reviewBox.checked;  // ORCH-424: like the epic above
           const made = await act('ticket.new', args);
           if (made.ok) {
             if (made.state?.attached?.failed?.length) window.orch.toast('Ticket ' + (steps.indexOf(step) + 1) + ' was created. Not saved: ' + made.state.attached.failed.join(', '), 'error');

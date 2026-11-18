@@ -10,7 +10,7 @@ def test_new_ticket_is_on_unless_unticked():
         "human-review" in x for x in actions.build_argv("ticket.new", {"title": "Spring campaign"})
     )
     on = actions.build_argv("ticket.new", {"title": "Spring campaign", "human_review": True})
-    assert not any("human-review" in x for x in on)
+    assert "--human-review=yes" in on  # ticked while the Auto Reviewer is on
     off = actions.build_argv("ticket.new", {"title": "Spring campaign", "human_review": False})
     assert "--human-review=no" in off
 

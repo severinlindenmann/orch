@@ -302,12 +302,11 @@ def _ticket_new(a):
         ),
     )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
-    # ORCH-424: the Human review needed box is on unless the person unticks it
+    # ORCH-424: the Human review needed box; sent only when the person changed it from the workspace default
     if "human_review" in a:
         if not isinstance(a["human_review"], bool):
             raise BadRequest("human_review is true or false.")
-        if not a["human_review"]:
-            flags.append("--human-review=no")
+        flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
     if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
         flags.append("--title-auto")
     if _flag(a.get("plan_first")):

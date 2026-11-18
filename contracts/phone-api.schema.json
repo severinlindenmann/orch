@@ -74,7 +74,7 @@
         "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
         "ticket": { "oneOf": [{ "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, { "type": "null" }] },
         "general": { "type": "boolean" },
-        "human_review": { "const": false, "description": "Optional (ORCH-424): the person turned Human review needed off for the ticket a new topic starts (no ticket, no general). No field = on." },
+        "human_review": { "type": "boolean", "description": "Optional (ORCH-424): the person's Human review needed choice for the ticket a new topic starts (no ticket, no general). No field = the workspace default." },
         "reply_to": { "oneOf": [{ "$ref": "#/$defs/msg_id" }, { "type": "null" }] },
         "attachments": { "$ref": "message.schema.json#/$defs/text/properties/attachments" },
         "voice": { "$ref": "message.schema.json#/$defs/text/properties/voice" },

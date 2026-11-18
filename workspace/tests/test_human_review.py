@@ -95,3 +95,34 @@ def test_from_input_keeps_the_choice(proj):
     assert t["human_review"] is False
     t = tickets.create_from_input(proj, "Check the autumn numbers", "agent:relay from ph_x")
     assert tickets.human_review(t) is True
+
+
+def test_auto_reviewer_on_makes_new_tickets_start_off(proj, run, validate):
+    """Owner 18 Nov (q2): with the Auto Reviewer on, new tickets start off unless the person turns it on."""
+    code, _, err = run("config", "set", "workflow.auto_reviewer", "on", "--by", "human:tester")
+    assert code == 0, err
+    code, out, err = run("ticket", "new", "Spring campaign", "--json", "--by", "agent:claude")
+    assert code == 0, err  # the owner's setting, not the agent's choice
+    t = read(proj, _id(out))
+    validate(t)
+    assert t["human_review"] is False
+    code, out, err = run(
+        "ticket", "new", "Price list", "--human-review", "yes", "--json", "--by", "agent:claude"
+    )
+    assert code == 0, err
+    assert tickets.human_review(read(proj, _id(out))) is True
+    t = tickets.create_from_input(proj, "Autumn numbers", "agent:relay from ph_x")
+    assert t["human_review"] is False
+    t = tickets.create_from_input(proj, "Winter numbers", "agent:relay from ph_x", human_review=True)
+    assert tickets.human_review(t) is True
+    code, _, err = run("config", "set", "workflow.auto_reviewer", "off", "--by", "human:tester")
+    assert code == 0, err
+    code, out, _ = run("ticket", "new", "Board lanes", "--json", "--by", "human:tester")
+    assert "human_review" not in read(proj, _id(out))
+
+
+def test_only_a_person_turns_the_auto_reviewer_on(proj, run):
+    code, _, err = run("config", "set", "workflow.auto_reviewer", "on", "--by", "agent:claude")
+    assert code == 2 and "Only the owner" in err
+    code, out, _ = run("config", "get", "workflow.auto_reviewer")
+    assert code == 0 and out.strip() == "False"

@@ -508,8 +508,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--human-review",
         choices=("yes", "no"),
-        default="yes",
-        help="Human review needed (default yes: nothing is accepted without a person); only a person says no",
+        help="Human review needed (default yes; no while the Auto Reviewer is on); only a person says no",
     )
     x.add_argument(
         "--ext",
@@ -1084,7 +1083,7 @@ def run(args: argparse.Namespace) -> None:
             plan_first=args.plan_first,
             epic=args.epic,
             release=args.release,
-            human_review=args.human_review != "no",
+            human_review=None if args.human_review is None else args.human_review == "yes",
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
