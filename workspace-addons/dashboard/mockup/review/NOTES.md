@@ -39,12 +39,6 @@
   edge (it scrolls) instead of a half-cut line; "All cards" puts no heading over a set of one card of its own ticket;
   the subtitle counts the cards when the needs-you number is 0 (a card put off on Home), so it never says "Nothing
   waits" above a Waiting tab with cards. `orch check done` keeps every `--file` (before: only the last).
-- 18 Nov (ORCH-420): the "What should change?" box takes a voice note (the microphone, recorded as a sound file; the
-  words are written on this computer where the browser can, never by a speech service on the internet), pictures
-  and files by "Add file or picture", paste (Cmd/Ctrl+V) or drop. Each shows as a row with its size or length and an
-  x to remove it; a picture or file alone is enough to send back. They are kept in the ticket's feedback folder (the
-  Files tab lists them; the Check card keeps showing only the helper's result) and the words name them, with what
-  each voice note said. Types: pictures, text, PDF, voice notes; 25 MB each, 10 per answer.
 - 18 Nov (ORCH-421, owner review of the ORCH-420 walk): what just happened ("Moved to the end: Spring sale email",
   "Looks good: PIL-8", "Back: …") is one line in the deck's top row next to its Undo for six seconds, never a floating
   box (before: the toast cut the title mid-word, took four lines and sat in the header corner); a title over 48

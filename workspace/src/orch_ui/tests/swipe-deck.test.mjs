@@ -182,37 +182,6 @@ test('ORCH-295: without onNote there is no Add note button', () => {
   talkBtn.click();
   assert.equal(host.querySelectorAll('button').some(b => b.textContent === 'Add note'), false);
 });
-
-test('ORCH-420: with attach on, a picture added or pasted is enough to send back, and it goes with the words; a refused one says why', async () => {
-  const extraUI = {feedbackAccept: 'image/png', feedbackSize: n => n + ' B', pastedFiles: e => [...e.clipboardData.files],
-    feedbackFileProblem: (f, have) => /\.exe$/.test(f.name) ? f.name + ': pictures, text, PDF and voice notes can be added.' : ''};
-  const toasts = [], UI = {toast: m => toasts.push(m), statusIcon: () => new N('span'), ...extraUI};
-  vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window: {UI}, document: doc, setTimeout, clearTimeout, performance, console, Promise});
-  const host = new N('section'), decided = [], noted = [];
-  UI.swipeDeck(host, [check('a'), check('b')], {mode: 'desk', voice: false, attach: true, onDecide: (it, v, note) => decided.push({v, note}), onNote: async (it, text, files) => { noted.push({text, files}); return {ok: true}; }});
-  const [, , acts] = host.children; acts.children[0].click();
-  const sheet = host.querySelector('.swipe-sheet');
-  const add = sheet.querySelectorAll('button').find(b => b.textContent === 'Add file or picture');
-  assert.ok(add, 'an Add file or picture button');
-  const send = sheet.querySelectorAll('button').find(b => b.textContent === 'Send back for changes');
-  assert.equal(send.disabled, true);
-  const pick = sheet.querySelector('input');
-  pick.files = [{name: 'virus.exe', size: 3, type: ''}]; pick.onchange();
-  assert.equal(send.disabled, true, 'a refused file is not added');
-  assert.match(sheet.textContent, /virus\.exe: pictures, text, PDF and voice notes can be added/);
-  sheet.listeners.paste.forEach(f => f({clipboardData: {files: [{name: 'Screenshot 09-30.png', size: 4, type: 'image/png'}]}, preventDefault() {}}));
-  assert.equal(send.disabled, false, 'a pasted picture alone is enough');
-  assert.match(sheet.textContent, /Screenshot 09-30\.png/);
-  send.click(); await wait(260);
-  assert.equal(decided.length, 1);
-  assert.equal(decided[0].note.changes.files.map(f => f.name).join(), 'Screenshot 09-30.png');
-});
-test('ORCH-420: without attach the box has no Add file button (the plain review page)', () => {
-  const {host, noBtn} = deck([check('a')]);
-  noBtn.click();
-  assert.equal(host.querySelector('.swipe-sheet').querySelectorAll('button').some(b => b.textContent === 'Add file or picture'), false);
-});
-
 test('what just happened is one line in the top row, a long title goes by its ticket, never cut mid-word (ORCH-421)', async () => {
   const long = {...check('a'), title: 'Move every summer and autumn product photo to the new picture service and check each page', ticket: 'PIL-8'};
   const {okBtn, note, toasts} = deck([long, check('b')]);

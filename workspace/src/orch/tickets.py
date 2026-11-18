@@ -4081,10 +4081,10 @@ def artifacts_dir(root: Path, tid: str) -> Path:
         return _artifacts_dir_raw(root, tid)
 
 
-def _artifacts_dir_raw(root: Path, tid: str, sub: tuple = ()) -> Path:
-    d = artifacts_path(root, tid).joinpath(*sub)
+def _artifacts_dir_raw(root: Path, tid: str) -> Path:
+    d = artifacts_path(root, tid)
     cur = root / ".orch"
-    for part in ("tickets", tid, "artifacts", *sub):
+    for part in ("tickets", tid, "artifacts"):
         cur = cur / part
         if cur.is_symlink():
             raise Refused("The artifacts folder of this ticket is a link. orch will not use it.")
@@ -4106,15 +4106,6 @@ ATTACH_IMAGES = {
     "gif": (b"GIF87a", b"GIF89a"),
     "webp": (b"RIFF",),
 }
-# PDFs and voice notes from review feedback (ORCH-420): kept as files, never opened or run by orch;
-# each must start with its type's own bytes, like a picture.
-ATTACH_MEDIA = {
-    "pdf": (b"%PDF-",),
-    "webm": (b"\x1a\x45\xdf\xa3",),
-    "ogg": (b"OggS",),
-    "wav": (b"RIFF",),
-    "m4a": (),  # an MP4 box: bytes 4-8 are "ftyp" (checked in _check_attach)
-}
 ATTACH_MAX = 25 * 1024 * 1024  # one attached file: the one limit (dashboard and Focus use it too)
 LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
 PASTED_NAME = "note.md"
@@ -4129,12 +4120,8 @@ def attach_name(hint) -> str:
     stem, dot, ext = base.rpartition(".")
     ext = ext.lower()
     stem = stem.strip()[:80].strip(". ")
-    if (
-        not dot
-        or not stem.strip("._ -")
-        or (ext not in ATTACH_TEXT and ext not in ATTACH_IMAGES and ext not in ATTACH_MEDIA)
-    ):
-        raise Refused("That kind of file cannot be attached. Text files, pictures, PDFs and voice notes can.")
+    if not dot or not stem.strip("._ -") or (ext not in ATTACH_TEXT and ext not in ATTACH_IMAGES):
+        raise Refused("That kind of file cannot be attached. Text files and pictures can.")
     if stem.split(".")[0].lower() in _WIN_RESERVED:
         stem = "_" + stem
     return stem + "." + ext
@@ -4149,10 +4136,6 @@ def _check_attach(name: str, data) -> str:
     if ext in ATTACH_IMAGES:
         if not data.startswith(ATTACH_IMAGES[ext]) or (ext == "webp" and data[8:12] != b"WEBP"):
             raise Refused("That picture is not what its name says.")
-    elif ext in ATTACH_MEDIA:
-        ok = data[4:8] == b"ftyp" if ext == "m4a" else data.startswith(ATTACH_MEDIA[ext])
-        if not ok or (ext == "wav" and data[8:12] != b"WAVE"):
-            raise Refused("That file is not what its name says.")
     else:
         if b"\x00" in data:
             raise Refused("That file is not plain text.")
@@ -4163,13 +4146,13 @@ def _check_attach(name: str, data) -> str:
     return ext
 
 
-def _open_artifacts_fd(root: Path, tid: str, sub: tuple = ()) -> int:
+def _open_artifacts_fd(root: Path, tid: str) -> int:
     """A handle on .orch/tickets/<id>/artifacts (created), every folder opened from the workspace root with
     O_NOFOLLOW|O_DIRECTORY: a folder swapped for a link meanwhile is refused, never followed."""
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for part in (".orch", "tickets", tid, "artifacts", *sub):
+        for part in (".orch", "tickets", tid, "artifacts"):
             try:
                 nxt = os.open(part, flags, dir_fd=fd)
             except FileNotFoundError:
@@ -4185,27 +4168,17 @@ def _open_artifacts_fd(root: Path, tid: str, sub: tuple = ()) -> int:
         ) from None
 
 
-# A person's feedback files (pictures, files, voice notes sent with an answer on Review, ORCH-420) go in
-# this sub-folder of the artifacts: the Files tab lists them, but a Check card shows only the helper's own
-# result files, so adding feedback never makes the card the person is answering look changed.
-FEEDBACK_DIR = "feedback"
-
-
-def attach(
-    root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None, folder: str | None = None
-) -> dict:
+def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None) -> dict:
     """The file is written under gate -> ticket lock; the history line (its own lock) comes after.
     Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
     ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
     without NUL bytes, a picture must start with its type's signature. One history line says what was
     attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
-    means it was done before (returned with existed=True, nothing written). `folder`: only FEEDBACK_DIR."""
-    if folder not in (None, FEEDBACK_DIR):
-        raise Refused("That folder is not allowed.")
+    means it was done before (returned with existed=True, nothing written)."""
     ticket_path(root, tid)
     with _locked(root, tid):
         _refuse_closed_agent(root, tid, by)  # before the file is written
-        res = _attach_write(root, tid, hint, data, exact, (folder,) if folder else ())
+        res = _attach_write(root, tid, hint, data, exact)
     text = f"Attached {res['name']}"
     if res.get("existed"):
         # done before: only the history line may be missing (an earlier call was refused as busy after the
@@ -4225,7 +4198,7 @@ def attach(
     return res
 
 
-def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, sub: tuple = ()) -> dict:
+def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) -> dict:
     load(root, tid)  # the id has the shape of a ticket id and the ticket exists
     name = attach_name(exact or hint)
     if exact and name != exact:
@@ -4234,7 +4207,7 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, su
     stem = name[: -len(ext) - 1]
     wflags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     if hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd:
-        dfd = _open_artifacts_fd(root, tid, sub)
+        dfd = _open_artifacts_fd(root, tid)
         opener = lambda n: os.open(n, wflags, 0o644, dir_fd=dfd)  # noqa: E731
         remove = lambda n: os.unlink(n, dir_fd=dfd)  # noqa: E731
         linker = lambda a, b: os.link(a, b, src_dir_fd=dfd, dst_dir_fd=dfd, **_nofollow_link())  # noqa: E731
@@ -4242,7 +4215,7 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, su
         names = lambda: os.listdir(dfd)  # noqa: E731
         close = lambda: os.close(dfd)  # noqa: E731
     else:  # Windows: no handles on folders; the folders are checked one by one
-        d0 = _artifacts_dir_raw(root, tid, sub)
+        d0 = _artifacts_dir_raw(root, tid)
         opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
         remove = lambda n: (d0 / n).unlink()  # noqa: E731
         linker = lambda a, b: os.link(d0 / a, d0 / b, **_nofollow_link())  # noqa: E731
@@ -4272,9 +4245,9 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, su
                 except FileExistsError:
                     if exact:
                         return {
-                            "name": "/".join((*sub, final)),
+                            "name": final,
                             "size": len(data),
-                            "path": _art_rel(tid, "/".join((*sub, final))),
+                            "path": _art_rel(tid, final),
                             "existed": True,
                         }
                     continue
@@ -4286,11 +4259,7 @@ def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, su
                 remove(tmp)
     finally:
         close()
-    return {
-        "name": "/".join((*sub, final)),
-        "size": len(data),
-        "path": _art_rel(tid, "/".join((*sub, final))),
-    }
+    return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
 
 
 def _nofollow_link() -> dict:

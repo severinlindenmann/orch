@@ -38,8 +38,7 @@ except ImportError:  # standalone use without orch: nothing runs
 MAX_TEXT = 2000
 LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
 MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
-# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_MEDIA/ATTACH_MAX): refuse early, before a ticket
-# is made. orch decides.
+# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
 ATTACH_EXT = frozenset(
     {
         "txt",
@@ -57,11 +56,6 @@ ATTACH_EXT = frozenset(
         "jpeg",
         "gif",
         "webp",
-        "pdf",
-        "webm",
-        "ogg",
-        "wav",
-        "m4a",
     }
 )
 ATTACH_MAX = 25 * 1024 * 1024
@@ -354,9 +348,7 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
             raise BadRequest("That file could not be read.")
         ext = f["name"].rsplit(".", 1)[-1].lower() if "." in f["name"] else ""
         if ext not in ATTACH_EXT:
-            raise BadRequest(
-                f"{f['name'][:60]}: only text files, pictures, PDFs and voice notes can be added."
-            )
+            raise BadRequest(f"{f['name'][:60]}: only text files and pictures can be added.")
         if len(raw) > ATTACH_MAX:
             raise BadRequest(f"{f['name'][:60]} is over 25 MB. Choose a smaller file.")
         out.append((f["name"], raw))
@@ -366,11 +358,9 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
 def _ticket_attach(a):
     """Files added to a ticket that already exists (a ticket page composer): one line in the history, the files go through
     `orch ticket attach` after it (see attachments / run_op)."""
-    _only(a, ("ticket", "files", "feedback"))
+    _only(a, ("ticket", "files"))
     if not isinstance(a.get("files"), list) or not a["files"]:
         raise BadRequest("Choose a file to add.")
-    if a.get("feedback") not in (None, True, False):
-        raise BadRequest("feedback is true or false.")
     return ["log", _tid(a.get("ticket"))], [], ["Added files to the ticket"]
 
 
@@ -1300,26 +1290,14 @@ def _without_agent(environ) -> dict:
         ) from None
 
 
-def _attach_all(
-    root: Path, orch_bin: str, tid: str, files: list[tuple[str, bytes]], feedback: bool = False
-) -> dict:
+def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, bytes]]) -> dict:
     """Keep each file with the new ticket through `orch ticket attach` (orch picks the name and checks type,
     content and size). A file that is refused does not undo the ticket: it is listed as failed."""
     saved, failed = [], []
     for hint, raw in files:
         try:
             r = _run(
-                [
-                    *argv0(orch_bin),
-                    "ticket",
-                    "attach",
-                    tid,
-                    f"--name={hint}",
-                    *(["--feedback"] if feedback else []),
-                    "--by",
-                    actor(root),
-                    "--json",
-                ],
+                [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(root), "--json"],
                 check=False,
                 cwd=root,
                 capture_output=True,
@@ -1618,13 +1596,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         if files and op == "ticket.attach":
             out = {**(out if isinstance(out, dict) else {}), "id": args["ticket"]}
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
-            out["attached"] = _attach_all(
-                root,
-                orch_bin,
-                out["id"],
-                files,
-                feedback=op == "ticket.attach" and args.get("feedback") is True,
-            )
+            out["attached"] = _attach_all(root, orch_bin, out["id"], files)
         return 200, "", out if isinstance(out, dict) else None
     if op == "review.answer":  # JSON the page reads: the code decides what it says (changed = look again)
         return 422, review_error(out, r.stderr, r.returncode), None
