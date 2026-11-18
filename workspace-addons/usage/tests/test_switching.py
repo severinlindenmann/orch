@@ -331,6 +331,18 @@ def test_a_warning_comes_back_only_after_it_cleared_and_started_again(cli, switc
     assert again and again != first  # it came back: a new row the person is told about once more
 
 
+def test_a_warning_gone_ten_minutes_starts_anew_even_without_a_look_between():
+    t = T0
+    a = switching._episodes({}, {"all-at-limit": {}}, t)
+    b = switching._episodes(a, {}, t + timedelta(seconds=30))
+    assert b["all-at-limit"]["since"] == a["all-at-limit"]["since"] and b["all-at-limit"]["cleared"]
+    later = t + timedelta(seconds=30, minutes=switching.CLEAR_MINUTES)
+    c = switching._episodes(b, {"all-at-limit": {}}, later)
+    assert c["all-at-limit"] == {"since": switching._iso(later)}
+    d = switching._episodes(b, {"all-at-limit": {}}, later - timedelta(seconds=1))
+    assert d["all-at-limit"] == {"since": a["all-at-limit"]["since"]}  # back in time: the same warning
+
+
 def test_got_it_hides_a_warning_until_it_comes_back(cli, switcher, ws):
     seed(cli)
     jrun(cli, "switching", "on", "--by", "human:owner")

@@ -188,6 +188,9 @@ def _episodes(old, now: dict, at: datetime) -> dict:
         prev = old.get(k) if isinstance(old.get(k), dict) else None
         if prev and not isinstance(prev.get("since"), str):
             prev = None
+        gone = prev and isinstance(prev.get("cleared"), str) and at - store.to_time(prev["cleared"])
+        if gone and gone >= timedelta(minutes=CLEAR_MINUTES):
+            prev = None  # gone long enough (also when no look came between): it starts anew
         if k in now:
             same = prev and prev.get("to") == now[k].get("to")
             out[k] = {**now[k], "since": prev["since"] if same else _iso(at)}
