@@ -86,7 +86,9 @@ function reviewApi() {
   };
 }
 // The deck list: one section per set of cards (the helper's group, else the ticket) with its own count, one line
-// per card, the one on screen in bold, answered ones quiet with their word.
+// per card, the one on screen in bold, answered ones quiet with their word. ORCH-477 (owner pick B): the list stands on
+// the left; every waiting card (and every option of a choice with pictures) has a tick; two ticked stand side by side
+// in the deck (deck.tickBox / deck.optionRefs from the kit); a click on a line opens that card alone.
 function reviewGroupOf(it) { return it.group || it.ticketTitle || it.ticket || ''; }
 function reviewDrawSide(queue, deck) {
   if (!queue || !deck) return;
@@ -96,15 +98,28 @@ function reviewDrawSide(queue, deck) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(i);
   });
+  const pair = !!deck.comparing, open = i => { deck.compare?.([]); deck.jump(i); };
+  const hint = queue.parentElement?.querySelector?.('.review-side-hint'), n = (deck.ticked || []).length;
+  if (hint) hint.textContent = n === 2 ? 'Two ticked. Untick one to pick another.' : n ? 'One ticked. Tick one more.' : 'Tick two to see them side by side.';
+  const tick = (ref, label) => deck.tickBox ? deck.tickBox(ref, label) : el('span', 'review-tick');
   const row = i => {
-    const it = deck.items[i], a = deck.answers[it.id], r = el('button', 'btn ghost sm review-queue-row' + (i === deck.index && !a ? ' is-now' : '') + (a ? ' is-done' : ''));
-    r.type = 'button'; r.setAttribute('role', 'listitem');
+    const it = deck.items[i], a = deck.answers[it.id], now = i === deck.index && !a && !pair, r = el('button', 'btn ghost sm review-queue-row' + (now ? ' is-now' : '') + (a ? ' is-done' : ''));
+    r.type = 'button';
     const label = [it.ticket, it.title].filter(Boolean).join(' · '), title = el('span', 'review-queue-title', label); title.title = label;  // two lines, and the whole title on hover (F4: cut titles looked repeated)
     r.append(iconEl(it.icon), title);
-    const word = a ? reviewWord(a) : i === deck.index ? 'Now' : '';
+    const word = a ? reviewWord(a) : now ? 'Now' : '';
     if (word) r.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));
-    r.onclick = () => deck.jump(i);
-    return r;
+    r.onclick = () => open(i);
+    const line = el('div', 'review-queue-item'); line.setAttribute('role', 'listitem');
+    line.append(a ? el('span', 'review-tick') : tick(it.id, label), r);
+    if (a) return [line];
+    // a choice with two or more option pictures: one ticked line per option, so two options stand side by side
+    return [line, ...(deck.optionRefs?.(it) || []).map(x => {
+      const sub = el('div', 'review-queue-item sub'), b = el('button', 'btn ghost sm review-queue-row');
+      b.type = 'button'; b.append(el('span', 'review-queue-title', x.label)); b.onclick = () => open(i);
+      sub.setAttribute('role', 'listitem'); sub.append(tick(x.ref, x.label), b);
+      return sub;
+    })];
   };
   const one = groups.size < 2;
   queue.replaceChildren(...[...groups].map(([name, rows]) => {
@@ -119,7 +134,7 @@ function reviewDrawSide(queue, deck) {
       head.append(el('span', '', name || 'Cards'), el('span', 'meta', left ? left + ' of ' + rows.length + ' waiting' : 'All ' + rows.length + ' answered'));
       sec.append(head);
     }
-    sec.append(...rows.map(row));
+    sec.append(...rows.flatMap(row));
     return sec;
   }));
 }
@@ -183,13 +198,14 @@ function reviewAcceptedCard() {
 function reviewPage() {
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':''},
     h('h2', {}, 'All cards'),
-    h('p', {className:'meta'}, 'Click one to jump there.'),
+    h('p', {className:'meta review-side-hint'}, 'Tick two to see them side by side.'),
     h('div', {className:'review-queue', 'aria-label':'All cards', 'data-review-queue':''}));
   return fragment(
     heading('Review', reviewSubtitle()),
+    // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477)
     h('div', {className:'review-layout', 'data-key':'review-layout'},
-      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})),
-      h('div', {className:'stack', 'data-key':'review-rail'}, side, reviewAcceptedCard())));
+      h('div', {className:'stack review-rail', 'data-key':'review-rail'}, side, reviewAcceptedCard()),
+      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'}))));
 }
 // Mount the kit page once per host (render() calls this after every reconcile; the mounted host is left alone).
 function mountReview(main) {

@@ -127,7 +127,14 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    ↑ Later (stays unanswered, goes to the end); Space bigger, B before/after, O all, Z undo. A tap on an option picks
    it, a tap on the picture opens it bigger. The answered card fades; nothing flies. Every card says what happens
    when you approve (it.then). Item extras: text (the question), group, suggest ('ok'|'no'), links [{label,url}].
-   verdicts: ok | no | talk | later. note: {picked, changes:{text, clips, pins:[{n,on,x,y,text}]}, about} */
+   verdicts: ok | no | talk | later. note: {picked, changes:{text, clips, pins:[{n,on,x,y,text}]}, about}
+   ORCH-477 (owner pick B, 18 Nov): a card is as tall as what it holds (no fixed frame); the answers sit in one bar pinned
+   to the bottom of the screen with the "If you approve" line in it, so nothing hides under the bar. A result's files
+   open large in the page (UI.reviewViewer, review.js), a PDF tile shows its first page (FileViewer.thumb). Compare:
+   tick two cards, or two options of one choice, and they stand side by side, each with its own answers; Close goes
+   back to one card. deck.tick(ref), deck.compare([ref, ref]), deck.ticked, deck.tickBox(ref, label) (the checkbox the
+   "All cards" lists use), deck.optionRefs(item) ([{ref, label}] for a choice with two or more option pictures).
+   A phone shows "All cards · 1 of N" with ← → above the card; the list (with its ticks) is one tap away. */
 /* The words box of a card (UI.docBox(preview, headingTag)): heading, paras, numbered steps, and the little structure
    a merge card carries (ORCH-183): a status line with a tone (done | working | failed, a pill with its icon), rows
    (title, a ticket key chip, the number on the right) and a small footer. Text only via textContent. */
@@ -148,13 +155,13 @@ UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
  if(Array.isArray(p.details)&&p.details.length){const dt=el('div','doc-details');p.details.forEach(x=>dt.append(el('p','meta',x)));d.append(dt)}
  return d};
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
- let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
+ let idx=o.start||0,overlay=null,cur=null,busy=false,ticked=[],pairSide=0;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
  Object.assign(pins,o.pins);Object.entries(o.answered||{}).forEach(([id,a])=>{const it=items.find(x=>x.id===id);if(it)ans[id]={verdict:a.verdict,note:a.note||null,item:it}});
  host.classList.add('swipe','swipe-'+mode);host.tabIndex=0;host.setAttribute('role','region');host.setAttribute('aria-label','Review, one item at a time');
  const btn=(cls,children,label)=>{const b=el('button',cls);b.type='button';children.forEach(c=>b.append(c));if(label)b.setAttribute('aria-label',label);return b};
  /* top: progress words, All, Undo */
  const top=el('div','swipe-top'),count=el('span'),bar=el('div','progress'),fill=el('span');bar.append(fill);
- const allBtn=btn('btn ghost sm',[ic('cards',16),'All'],'All cards');allBtn.onclick=()=>openOverview();
+ const allBtn=btn('btn ghost sm swipe-all',[ic('cards',16),'All'],'All cards');allBtn.onclick=()=>openOverview();
  const undoBtn=btn('btn ghost sm',[ic('undo',16),'Undo']);undoBtn.onclick=()=>undo();
  /* Undo only while the last move can still be taken back (a Later always; an answer while o.canUndo says so) */
  const undoable=()=>{const l=done[done.length-1];return !!l&&(l.laterOnly||!o.canUndo||!!o.canUndo(l.item))};
@@ -162,7 +169,10 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     card, the answers or the page header (ORCH-421, owner review 18 Nov) */
  const note=el('span','swipe-note');note.hidden=true;note.setAttribute('aria-hidden','true');let noteT=0;
  const say=msg=>{note.textContent=msg;note.hidden=false;clearTimeout(noteT);noteT=setTimeout(()=>{note.hidden=true},6000)};
- top.append(count,note,bar,allBtn,undoBtn);
+ /* a phone: "All cards · 1 of N" and ← → above the card (the whole list with its ticks is one tap away) */
+ const jumpRow=el('div','swipe-jump phone-only'),jPos=el('span','meta'),jAll=btn('btn outline swipe-jump-all',[ic('cards',16),el('span','','All cards'),jPos]),jPrev=btn('btn outline',['←'],'Previous card'),jNext=btn('btn outline',['→'],'Next card');
+ jAll.onclick=()=>openOverview();jPrev.onclick=()=>step(-1);jNext.onclick=()=>step(1);jumpRow.append(jAll,jPrev,jNext);
+ top.append(count,note,bar,allBtn,undoBtn,jumpRow);
  const stage=el('div','swipe-stage'),live=el('div','sr-only');live.setAttribute('aria-live','polite');
  /* bottom: the three answers + Later */
  const acts=el('div','swipe-actions');
@@ -170,8 +180,10 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const noBtn=mk('no','x',"Don't do",'←',()=>fly('no')),talkBtn=mk('talk',o.voice?'mic':'comment','Comment','↓',()=>fly('talk')),okBtn=mk('ok','check','Looks good','→',()=>fly('ok'));
  const laterBtn=btn('btn ghost sm swipe-later',['Later']);laterBtn.append(el('kbd','','↑'));laterBtn.onclick=()=>fly('later');
  const ownRow=el('div','swipe-own');ownRow.hidden=true;
- acts.append(noBtn,talkBtn,okBtn,ownRow);const laterRow=el('div','swipe-later-row');laterRow.append(laterBtn);
- host.replaceChildren(top,stage,acts,laterRow,live);
+ /* the line that says what an answer does is part of the pinned bar, so the bar never hides it (ORCH-477) */
+ const thenEl=el('p','swipe-then swipe-bar-then');thenEl.hidden=true;
+ const laterRow=el('div','swipe-later-row');laterRow.append(laterBtn);acts.append(noBtn,talkBtn,okBtn,ownRow,thenEl,laterRow);
+ host.replaceChildren(top,stage,acts,live);
  /* words */
  const isOpt=it=>!!(it&&it.preview&&it.preview.type==='options');
  const ownAnswers=it=>{const a=it&&Array.isArray(it.answers)?it.answers.filter(x=>x&&x.label&&x.picked):[];return a.length?a:null};
@@ -195,8 +207,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const buildCompare=(it,big)=>{const p=it.preview,w=el('div','swipe-compare');const views=big?[['slide','Slide'],['both','Side by side'],['before','Before'],['after','After']]:[['before','Before'],['after','After'],['both','Both']];
   const ctl=el('div','segmented swipe-cmp-ctl');ctl.setAttribute('role','group');ctl.setAttribute('aria-label','Before and after');
   const set=v=>{w.dataset.view=v;ctl.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)))};
-  const pane=side=>{const d=el('div','cmp-pane '+side);d.dataset.on=side;d.append(buildPreview({title:it.title+' '+side,preview:p[side]},big),el('span','cmp-tag',side==='before'?'Before':'After'));
-   if(!big){const z=btn('btn icon sm cmp-zoom',[ic('expand',16)],side==='before'?'Make before bigger':'Make after bigger');z.dataset.side=side;z.addEventListener('pointerdown',e=>e.stopPropagation());z.onclick=e=>{e.stopPropagation();openViewer(side)};d.append(z)}return d};
+  const pane=side=>{const d=el('div','cmp-pane '+side);d.dataset.on=side;d.dataset.type=(p[side]||{}).type||'doc';d.append(buildPreview({title:it.title+' '+side,preview:p[side]},big),el('span','cmp-tag',side==='before'?'Before':'After'));
+   if(!big){const z=btn('btn icon sm cmp-zoom',[ic('expand',16)],side==='before'?'Make before bigger':'Make after bigger');z.dataset.side=side;z.addEventListener('pointerdown',e=>e.stopPropagation());z.onclick=e=>{e.stopPropagation();openViewer(side,it)};d.append(z)}return d};
   views.forEach(([v,l])=>{const b=btn('btn sm',[l]);b.dataset.v=v;b.onclick=e=>{e.stopPropagation();set(v)};ctl.append(b)});
   ctl.addEventListener('pointerdown',e=>e.stopPropagation());
   w.append(pane('before'),pane('after'),ctl);
@@ -218,23 +230,24 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    const th=el('span','opt-thumb');th.append(buildPreview({title:'Today',preview:p.before},big));t.append(h,th);if(p.beforeText)t.append(el('span','opt-text',p.beforeText));w.append(t)}
   (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
    const h=el('span','opt-h');if(lt)h.append(el('b','opt-letter',lt));h.append(el('span','opt-title',op.title||op.id));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
-   b.append(h);if(op.preview){const th=el('span','opt-thumb');th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
+   b.append(h);if(op.preview){const th=el('span','opt-thumb');th.dataset.type=op.preview.type||'doc';th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
    if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
-   b.onclick=e=>{e.stopPropagation();if(b.closest('.swipe-card')&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */pick(it,picked[it.id]===op.id?null:op.id)};
+   b.onclick=e=>{e.stopPropagation();const c=b.closest('.swipe-card');if(c&&c===cur&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */pick(it,picked[it.id]===op.id?null:op.id)};
    w.append(b)});
   return w};
  const pick=(it,id)=>{if(!it)return;if(id)picked[it.id]=id;else delete picked[it.id];
-  host.querySelectorAll('.swipe-opt').forEach(b=>{if(b.closest('.swipe-card:not(.under):not(.under2),.swipe-viewer'))b.setAttribute('aria-pressed',String(b.dataset.opt===picked[it.id]))});
+  host.querySelectorAll('.swipe-opt').forEach(b=>{const c=b.closest('.swipe-card,.swipe-viewer');if(c&&c.dataset.item===it.id)b.setAttribute('aria-pressed',String(b.dataset.opt===picked[it.id]))});
+  host.querySelectorAll('.swipe-pair-ok').forEach(b=>{if(b.dataset.item===it.id)drawOk(b,it)});
   syncWords();live.textContent=id?'Picked '+id:'Nothing picked'};
  const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
-  okBtn.classList.toggle('wait',okWord(it)==='Pick one');talkBtn.hidden=sendsBack(it);
+  okBtn.classList.toggle('wait',okWord(it)==='Pick one');talkBtn.hidden=sendsBack(it);thenLine(thenEl,it);
   const own=ownAnswers(it);[noBtn,okBtn].forEach(b=>{b.hidden=!!own});if(own)talkBtn.hidden=true;ownRow.hidden=!own;
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
- const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);
+ const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);c.dataset.item=it.id;
   const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.group)m.append(el('span','swipe-group',it.group));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
   const sw=it.suggest==='ok'?okWord(it):it.suggest==='no'?noWord(it):isOpt(it)?(((it.preview.options||[]).find(x=>x.suggested)||{}).id):null;if(sw&&sw!=='Pick one')m.append(el('span','swipe-sug','Suggested: '+sw));
   h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));const t0=String(it.title||'').replace(/[\s….]+$/,''),cut=!!(it.text&&t0&&it.text.startsWith(t0));/* the title is only a cut copy of the question: show the question once */
@@ -242,23 +255,28 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(it.text&&(cut||it.text!==it.title))h.append(el('p','swipe-text',it.text));/* the whole question; a long one scrolls inside the head */
   if(it.why)h.append(el('p','swipe-why',it.why));
   const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
-  if(pv){pv.append(buildPreview(it,false));
-  if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex)}
+  if(pv){pv.dataset.type=it.preview.type;pv.append(buildPreview(it,false));
+  if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer(null,it)};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const fl=filesRow(it);
-  const ft=el('footer','swipe-foot');
-  if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
+  const ft=el('footer','swipe-foot');/* "If you approve" is in the pinned answers bar (ORCH-477) */
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
-  ft.append(row);
+  ft.append(row);if(row.children.length<2)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
   c.append(...[h,pv,fl,ft].filter(Boolean));return c};
- /* The result's own files (a picture, a page, a PDF): tiles that open the file in a new tab */
+ /* The result's own files (a picture, a page, a PDF): tiles that open the file large inside the page, ← → to the card's
+    other files, with "Open in new tab" in the viewer (UI.reviewViewer, ORCH-477). A PDF tile shows its first page through
+    the browser's own PDF view, small and without its toolbar (FileViewer.thumb); without a PDF view the icon stays. */
+ const openFile=(fs,i,it)=>{const f=fs[i];if(!f)return;
+  if(UI.reviewViewer)return UI.reviewViewer(fs.map(x=>({label:x.label,src:x.src,open:x.src,preview:{type:x.type==='img'||x.type==='page'||x.type==='pdf'?x.type:'file'}})),i,{title:it.title});
+  if(typeof window.open==='function')window.open(f.src,'_blank','noopener')};
  const filesRow=it=>{const fs=(Array.isArray(it.files)?it.files:[]).filter(f=>f&&f.src&&f.label);if(!fs.length)return null;
   const r=el('div','swipe-files');r.setAttribute('role','list');r.setAttribute('aria-label','Files');
-  const one=f=>{const a=el('a','swipe-file');a.href=f.src;a.target='_blank';a.rel='noopener';a.setAttribute('role','listitem');a.setAttribute('aria-label','Open '+f.label);a.addEventListener('pointerdown',e=>e.stopPropagation());
-   const th=el('span','swipe-file-thumb');if(f.type==='img'){const i=el('img');i.src=f.src;i.alt='';i.draggable=false;i.loading='lazy';th.append(i)}else if(f.type==='page')th.append(frame(f.src,f.label));else th.append(ic('file',24));
+  const one=f=>{const a=btn('swipe-file'+(f.type==='pdf'?' pdf':''),[]);a.dataset.src=f.src;a.setAttribute('role','listitem');a.setAttribute('aria-label','Open '+f.label+' large');a.addEventListener('pointerdown',e=>e.stopPropagation());a.onclick=e=>{e.stopPropagation();openFile(fs,fs.indexOf(f),it)};
+   const th=el('span','swipe-file-thumb');if(f.type==='img'){const i=el('img');i.src=f.src;i.alt='';i.draggable=false;i.loading='lazy';th.append(i)}else if(f.type==='page')th.append(frame(f.src,f.label));
+   else{th.append(ic('file',24));const FV=window.FileViewer,nm=/\.pdf$/i.test(f.label)?f.label:f.label+'.pdf',pt=f.type==='pdf'&&FV&&FV.thumb?FV.thumb({src:f.src,name:nm,tid:'',kind:'review'}):null;if(pt)th.append(pt)}
    a.append(th,el('span','swipe-file-name',f.label));return a};
   /* more than 6 files: 5 tiles and one "+N more" tile that shows the rest in place, never a silent cut (ORCH-421) */
   const tile=fs.length>6?fs.slice(0,5):fs;tile.forEach(f=>r.append(one(f)));
@@ -271,12 +289,62 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  let ready=false;const change=()=>{if(ready&&o.onChange)o.onChange()};/* the first onChange comes after the constructor returns, so a handler may use the deck */
  const render=()=>{stage.replaceChildren();cur=null;const n=items.length,k=Object.keys(ans).length;
   count.textContent=k+' answered · '+(n-k)+' waiting';fill.style.width=(k/n*100)+'%';undoBtn.disabled=!undoable();
-  if(idx>=n){acts.hidden=laterRow.hidden=true;stage.append(summary());change();return}acts.hidden=laterRow.hidden=false;
-  const behind=waiting().filter(i=>i!==idx);
-  if(behind[1]!=null)stage.append(card(items[behind[1]],'under2'));if(behind[0]!=null)stage.append(card(items[behind[0]],'under'));
+  ticked=ticked.filter(r=>parseRef(r));const pr=pairNow();host.classList.toggle('pairing',!!pr);syncJump(pr);
+  if(idx>=n&&!pr){acts.hidden=true;stage.append(summary());change();return}
+  /* two side by side: each side has its own answers, the shared bar steps aside (ORCH-477) */
+  if(pr){acts.hidden=true;stage.append(pairView(pr));change();return}acts.hidden=false;
   cur=card(items[idx]);const a=ans[items[idx].id];
-  if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');cur.querySelector('.swipe-foot').prepend(t)}
+  if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');const sf=cur.querySelector('.swipe-foot');sf.classList.remove('empty');sf.prepend(t)}
   stage.append(cur);syncWords();wire(cur);change()};
+ const thenLine=(t,it)=>{t.replaceChildren();t.hidden=!(it&&it.then);if(t.hidden)return;t.append(el('b','',isOpt(it)?'If you pick one: ':'If you approve: '),it.then)};
+ /* ---- compare (ORCH-477): a side is a card ("<id>") or one option of a choice ("<id>\n<option id>") */
+ const SEP='\n',optsWithPreview=it=>isOpt(it)?(it.preview.options||[]).filter(op=>op&&op.preview):[];
+ const optionRefs=it=>{const ops=optsWithPreview(it);return ops.length>1?ops.map(op=>({ref:it.id+SEP+op.id,label:(optLetter(op)?optLetter(op)+': ':'')+(op.title||op.id)})):[]};
+ const parseRef=r=>{const s=String(r||''),k=s.indexOf(SEP),id=k<0?s:s.slice(0,k),it=items.find(x=>x.id===id);if(!it||ans[it.id])return null;if(k<0)return {ref:s,it,op:null};
+  const op=optsWithPreview(it).find(x=>String(x.id)===s.slice(k+1));return op?{ref:s,it,op}:null};
+ const refName=r=>r.op?(optLetter(r.op)?optLetter(r.op)+': ':'')+(r.op.title||r.op.id):r.it.title;
+ const pairNow=()=>{const p=ticked.map(parseRef).filter(Boolean);return p.length===2?p:null};
+ const tick=ref=>{if(overlay&&!overlay.classList.contains('swipe-overview'))return;const on=ticked.includes(ref);if(!on&&(ticked.length>=2||!parseRef(ref)))return;ticked=on?ticked.filter(x=>x!==ref):ticked.concat(ref);pairSide=0;render();syncBoxes()};
+ const compare=refs=>{ticked=(refs||[]).filter(r=>parseRef(r)).slice(0,2);pairSide=0;closeOverlay();render();syncBoxes()};
+ const syncBox=cb=>{const on=ticked.includes(cb.dataset.ref);cb.checked=on;cb.disabled=!on&&ticked.length>=2};
+ const syncBoxes=()=>{if(overlay)overlay.querySelectorAll('.review-tick-box').forEach(syncBox);const go=overlay&&overlay.querySelector('.swipe-ov-compare');if(go)go.hidden=!pairNow()};
+ /* the checkbox both "All cards" lists use (the page's list beside the deck and the deck's own overview) */
+ const tickBox=(ref,label)=>{const l=el('label','review-tick'),cb=el('input','review-tick-box');cb.type='checkbox';cb.dataset.ref=ref;cb.setAttribute('aria-label','Compare '+label);syncBox(cb);cb.addEventListener('change',()=>tick(ref));l.append(cb);return l};
+ /* the filled button is the suggested answer only, and only one on screen: two suggested sides keep both outlined */
+ const sugSide=r=>r.op?!!r.op.suggested:sugOf(r.it)==='ok';
+ const drawOk=(b,it)=>{const w=okWord(it),wait=w==='Pick one';b.className='btn '+(b.dataset.fill==='1'&&!wait?'primary':'outline')+' swipe-pair-ok';b.replaceChildren(...(wait?[]:[ic('check',16)]),el('span','',w))};
+ const sideBar=(it,fill,op)=>{const bar=el('div','swipe-pair-bar'),t=el('p','swipe-then');thenLine(t,it);if(!t.hidden)bar.append(t);
+  const row=el('div','swipe-pair-acts'),own=ownAnswers(it);
+  if(op){const u=btn('btn '+(fill?'primary':'outline'),[ic('check',16),el('span','','Use '+(optLetter(op)||op.title||op.id))]);u.onclick=()=>answerIn(it,'ok',op.id);row.append(u)}
+  else{const lt=btn('btn ghost swipe-pair-later',['Later']),ans=el('div','swipe-pair-answers');lt.onclick=()=>answerIn(it,'later');row.append(lt,ans);
+   if(own)own.forEach(a=>{const b=btn('btn outline',[a.label]);b.onclick=()=>answerIn(it,'ok',a.picked);ans.append(b)});
+   else{if(!sendsBack(it)){const c=btn('btn ghost',[ic('comment',16),el('span','','Comment')]);c.onclick=()=>answerIn(it,'talk');ans.append(c)}
+    const no=btn('btn outline',[ic('x',16),el('span','',noWord(it))]);no.onclick=()=>answerIn(it,'no');
+    const ok=btn('btn outline swipe-pair-ok',[]);ok.dataset.item=it.id;ok.dataset.fill=fill?'1':'';ok.onclick=()=>answerIn(it,'ok');drawOk(ok,it);ans.append(no,ok)}}
+  bar.append(row);return bar};
+ /* one option of a choice as its own card, so two options stand side by side at full size */
+ const optionCard=(it,op,fill)=>{const c=el('article','swipe-card in-pair swipe-optcard');c.dataset.item=it.id;c.setAttribute('aria-label',refName({it,op}));
+  const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'cards',14),it.kindLabel||it.kind||'');m.append(k);if(it.ticket)m.append(el('span','',it.ticket));if(op.suggested)m.append(el('span','swipe-sug','Suggested'));
+  h.append(m,el('h3','',refName({it,op})),el('p','swipe-why','One of '+(it.preview.options||[]).length+' options of “'+it.title+'”'));c.append(h);
+  const pv=el('div','swipe-preview');pv.dataset.type=op.preview.type||'doc';pv.append(buildPreview({title:op.title||op.id,preview:op.preview},false));c.append(pv);
+  if(op.text){const d=el('div','doc swipe-optcard-text');d.append(el('p','',op.text));c.append(d)}
+  c.append(sideBar(it,fill,op));return c};
+ const pairView=pr=>{const box=el('section','swipe-pair');box.setAttribute('aria-label','Compare');
+  const head=el('div','swipe-pair-head');head.append(el('h2','','Compare'));
+  if(pr[0].it===pr[1].it)head.append(el('p','meta swipe-pair-of',(pr[0].it.preview.options||[]).length+' options of “'+pr[0].it.title+'”'));
+  /* a phone shows one side at a time; the switch names both in full */
+  const sw=el('div','segmented phone-only swipe-pair-switch'),panes=el('div','swipe-pair-panes');sw.setAttribute('role','group');sw.setAttribute('aria-label','Which one to show');panes.dataset.side=String(pairSide);
+  pr.forEach((r,i)=>{const b=btn('btn sm',[el('span','',refName(r))]);b.setAttribute('aria-pressed',String(i===pairSide));b.onclick=()=>{pairSide=i;panes.dataset.side=String(i);sw.querySelectorAll('button').forEach((x,k)=>x.setAttribute('aria-pressed',String(k===i)))};sw.append(b)});
+  const close=btn('btn outline sm swipe-pair-close',[ic('x',16),el('span','','Close')]);close.onclick=()=>{const back=pr[pairSide]||pr[0];compare([]);const at=items.indexOf(back.it);if(at>=0)jump(at)};
+  head.append(sw,el('span','grow'),close);
+  const sug=pr.map(sugSide),fillAt=sug.filter(Boolean).length===1?sug.indexOf(true):-1;
+  pr.forEach((r,i)=>{const pane=el('div','swipe-pair-pane');
+   if(r.op)pane.append(optionCard(r.it,r.op,i===fillAt));
+   else{const c=card(r.it,'in-pair');c.append(sideBar(r.it,i===fillAt,null));pane.append(c)}
+   panes.append(pane)});
+  box.append(head,panes);return box};
+ const step=d=>{const w=waiting(),at=w.indexOf(idx),to=w[at+d];if(to!=null)jump(to)};
+ const syncJump=pr=>{const w=waiting(),at=w.indexOf(idx);jPos.textContent=pr?'2 side by side':w.length?(Math.max(at,0)+1)+' of '+w.length:'';jPrev.hidden=jNext.hidden=!!pr||w.length<2;jPrev.disabled=at<=0;jNext.disabled=at<0||at>=w.length-1};
  const summary=()=>{const d=el('div','swipe-done');d.append(UI.statusIcon('done'),el('h3','',"You've answered everything in this review."));
   const t=el('div','tally'),c=v=>Object.values(ans).filter(x=>x.verdict===v).length;[['ok','check','approved'],['no','x','not done'],['talk','mic','sent back for changes']].forEach(([v,i,l])=>{const s=el('span');s.append(ic(i,16),c(v)+' '+l);t.append(s)});
   d.append(t,el('p','',"Each ticket shows what happens next. Answers are on the ticket, under its questions."));return d};
@@ -305,10 +373,18 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
   busy=true;c.classList.add('leaving');/* a short fade, no swipe */
   setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
- const defer=it=>{later.add(it.id);done.push({item:it,verdict:'later',idx,laterOnly:true});const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length;
+ /* an answer on one side of Compare: the same words and the same rules as the shared bar (ORCH-477) */
+ const answerIn=(it,verdict,pick)=>{if(!it||overlay||busy)return;
+  if(verdict==='later')return defer(it);
+  if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment(it);
+  if(verdict==='ok'&&!pick&&isOpt(it)){if(!picked[it.id]){live.textContent='Tap the option you want first.';if(!o.quiet)say('Tap the option you want first.');return}pick=picked[it.id]}
+  commit(verdict,pick?{picked:pick}:null,it)};
+ const defer=it=>{const at=items.indexOf(it);later.add(it.id);done.push({item:it,verdict:'later',idx:at,laterOnly:true});if(!pairNow()){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
   live.textContent='Later: '+it.title;render();if(!o.quiet)say('Moved to the end: '+shortName(it))};
- const commit=(verdict,note)=>{const it=items[idx];done.push({item:it,verdict,note,idx,prev:ans[it.id],prevPick:ans[it.id]&&ans[it.id].note?ans[it.id].note.picked:undefined});ans[it.id]={verdict,note,item:it};later.delete(it.id);
-  const from=idx;idx=nextIdx(from)===from?items.length:nextIdx(from);if(idx===from)idx=items.length;
+ const commit=(verdict,note,item)=>{const it=item||items[idx],at=items.indexOf(it);done.push({item:it,verdict,note,idx:at,prev:ans[it.id],prevPick:ans[it.id]&&ans[it.id].note?ans[it.id].note.picked:undefined});ans[it.id]={verdict,note,item:it};later.delete(it.id);
+  /* answered on one side of Compare: the other side stays ticked and shows as the card */
+  ticked=ticked.filter(r=>parseRef(r));const rest=ticked.length?parseRef(ticked[0]):null;
+  if(rest)idx=items.indexOf(rest.it);else{const from=at;idx=nextIdx(from)===from?items.length:nextIdx(from);if(idx===from)idx=items.length}
   const word=ansWord(ans[it.id]);live.textContent=word+': '+it.title;o.onDecide&&o.onDecide(it,verdict,note);render();
   if(!o.quiet)say(word+': '+shortName(it))};
  const undo=()=>{if(!undoable())return;const last=done.pop();if(last.laterOnly)later.delete(last.item.id);else if(last.prev){ans[last.item.id]=last.prev;if(last.prevPick)picked[last.item.id]=last.prevPick}else delete ans[last.item.id];
@@ -323,6 +399,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const openOverview=()=>{if(overlay)closeOverlay();const v=el('div','swipe-viewer swipe-overview');v.setAttribute('role','dialog');v.setAttribute('aria-label','All cards');
   const b=el('div','swipe-viewer-bar'),x=btn('btn ghost icon sm',[ic('x',18)],'Close');x.onclick=()=>{closeOverlay();render()};
   const k=Object.keys(ans).length;b.append(x,el('strong','','All cards · '+(items.length-k)+' waiting'));
+  /* tick two (cards, or options of one choice) to see them side by side (ORCH-477) */
+  const go=btn('btn outline sm swipe-ov-compare',[ic('compare',16),el('span','','Compare')]);go.hidden=!pairNow();go.onclick=()=>{closeOverlay();render()};b.append(go);
   /* a short list: ticket, question, age, state; one click opens that card */
   const tile=i=>{const it=items[i],a=ans[it.id],t=btn('swipe-ov'+(i===idx?' current':'')+(a?' answered':''),[]);
    const st=el('span','swipe-ov-state '+(a?a.verdict:later.has(it.id)?'later':'wait'),a?ansWord(a):later.has(it.id)?'Later':i===idx?'Now':'Waiting');
@@ -333,14 +411,17 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    if(it.about){if(!t.tasks.has(it.task||it.about))t.tasks.set(it.task||it.about,{about:it.about,rows:[]});t.tasks.get(it.task||it.about).rows.push(i)}else t.plain.push(i)});
   const body=el('div','swipe-viewer-body');
   const head=(text,tag,cls)=>{const h=el(tag,cls,text);h.style.cssText='margin:0;padding:var(--s3) var(--s4) 0';body.append(h)};
-  const grid=rows=>{const gr=el('div','swipe-ov-grid');rows.forEach(i=>gr.append(tile(i)));body.append(gr)};
+  const row=i=>{const it=items[i],a=ans[it.id],r=el('div','swipe-ov-row');r.append(a?el('span','review-tick'):tickBox(it.id,it.title),tile(i));const out=[r];
+   if(!a)optionRefs(it).forEach(x=>{const s=el('div','swipe-ov-row sub'),j=btn('btn ghost sm swipe-ov-sub',[x.label]);j.onclick=()=>jump(i);s.append(tickBox(x.ref,x.label),j);out.push(s)});return out};
+  const grid=rows=>{const gr=el('div','swipe-ov-grid');rows.forEach(i=>gr.append(...row(i)));body.append(gr)};
+  body.append(el('p','meta swipe-ov-hint','Tick two to see them side by side.'));
   if(![...tk.values()].some(t=>t.title||t.tasks.size))grid(order);
   else tk.forEach(t=>{const left=t.rows.filter(i=>!ans[items[i].id]).length;head((t.title?(t.key&&t.key!==t.title?t.title+' · '+t.key:t.title):t.key)+' · '+(left?left+' of '+t.rows.length+' waiting':'all '+t.rows.length+' answered'),'h3');
    t.tasks.forEach(k=>{head('About: '+k.about,'p','meta');grid(k.rows)});if(t.plain.length)grid(t.plain)});
   v.append(b,body);openOverlay(v,body.querySelector('.current')||x);return v};
  /* Comment sheet. The subject (which option) and the outcome are separate: the buttons say what happens.
     Voice: hold to talk, or tap once to start and once to stop; clips can be removed. The draft is kept per card. */
- const openComment=()=>{const it=items[idx];if(!it)return null;const dr=drafts[it.id]=drafts[it.id]||{text:'',clips:[]};
+ const openComment=item=>{const it=item||items[idx];if(!it)return null;const dr=drafts[it.id]=drafts[it.id]||{text:'',clips:[]};
   const scr=el('div','swipe-scrim'),sh=el('div','swipe-sheet');sh.setAttribute('role','dialog');sh.setAttribute('aria-label','Comment on '+it.title);
   const grab=el('div','grab');grab.title='Pull down to close; your words are kept';
   const ttl=el('h2','','What should change?'),sub=el('p','meta',it.title);sub.style.margin='0';
@@ -373,8 +454,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):it.kind==='choice'?'The helper gets your words as the answer.':'The helper gets your words and makes a new version. Nothing is approved.'+(note?' “Add note” only saves your words: the card stays and the work goes on.':'')};
   ta.addEventListener('input',sync);
   const close=()=>{box&&box.comp.recorder&&box.comp.recorder.stop();closeOverlay();reset(cur)};cancel.onclick=close;
-  const leave=(verdict,note)=>{box&&box.comp.recorder&&box.comp.recorder.destroy();closeOverlay();const c=cur;busy=true;c.classList.add('leaving');
-   setTimeout(()=>{busy=false;delete drafts[it.id];commit(verdict,note)},220)};
+  const leave=(verdict,note)=>{box&&box.comp.recorder&&box.comp.recorder.destroy();closeOverlay();const c=cur;busy=true;if(c&&c.dataset.item===it.id)c.classList.add('leaving');
+   setTimeout(()=>{busy=false;delete drafts[it.id];commit(verdict,note,it)},220)};
   const sent=()=>box?box.comp.files().map(({name,size,type,url})=>({name,size,type,url})):[];
   const words=()=>({text:ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice(),...(box?{files:sent()}:{})});
   back.onclick=()=>leave('talk',{changes:words(),about:about?about.v:null});
@@ -392,7 +473,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(about)setAbout(picked[it.id]||'all');drawClips();sync();openOverlay(scr,o.state?null:ta);return {mic,start,stop,ta,send:back,use,setAbout,sync}};
  /* Viewer: bigger, zoom, Open, and spots (tap “Spot”, tap the place, say or type what to change; the spot remembers
     which option or side it is on). */
- const openViewer=side=>{const it=items[idx];if(!it)return null;side=side==='before'||side==='after'?side:null;const v=el('div','swipe-viewer');v.setAttribute('role','dialog');v.setAttribute('aria-label',it.title);
+ const openViewer=(side,item)=>{const it=item||items[idx];if(!it)return null;side=side==='before'||side==='after'?side:null;const v=el('div','swipe-viewer');v.dataset.item=it.id;v.setAttribute('role','dialog');v.setAttribute('aria-label',it.title);
   const barEl=el('div','swipe-viewer-bar'),close=btn('btn ghost icon sm',[ic('x',18)],'Close');close.onclick=()=>{closeOverlay();render()};
   let z=1;const zo=btn('btn icon sm',[ic('minus',16)],'Zoom out'),zi=btn('btn icon sm',[ic('plus',16)],'Zoom in');
   const pinBtn=btn('btn sm',[ic('pin',16),mode==='phone'?'Spot':'Mark a spot'],'Mark a spot and say what to change');pinBtn.setAttribute('aria-pressed','false');
@@ -425,10 +506,13 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(overlay){if(e.key==='Escape'){e.preventDefault();const wasViewer=overlay.classList.contains('swipe-viewer');closeOverlay();wasViewer?render():reset(cur);return}
    if((e.key==='b'||e.key==='B')&&!t.closest('input,textarea')){const w=overlay.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}return}
   if(e.repeat)return;if(t!==host&&t.closest('button,a,input,textarea,select'))return;
-  const k=e.key;if(k==='ArrowRight'){e.preventDefault();fly('ok')}else if(k==='ArrowLeft'){e.preventDefault();fly('no')}else if(k==='ArrowDown'){e.preventDefault();fly('talk')}else if(k==='ArrowUp'){e.preventDefault();fly('later')}
+  const k=e.key;/* side by side: the arrows do not answer (which side?); Esc goes back to one card */
+  if(pairNow()){if(k==='Escape'){e.preventDefault();compare([])}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}return}
+  if(k==='ArrowRight'){e.preventDefault();fly('ok')}else if(k==='ArrowLeft'){e.preventDefault();fly('no')}else if(k==='ArrowDown'){e.preventDefault();fly('talk')}else if(k==='ArrowUp'){e.preventDefault();fly('later')}
   else if(k===' '){e.preventDefault();cur&&hasPreview(items[idx])&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
   else if((k==='b'||k==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
  if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
- return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>{undoBtn.disabled=!undoable()},pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx}}};
+ return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>{undoBtn.disabled=!undoable()},pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx},
+  tick,compare,tickBox,optionRefs,openFile,get ticked(){return ticked.slice()},get comparing(){return !!pairNow()}}};
 })();

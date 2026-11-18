@@ -52,3 +52,12 @@
   holds and the page scrolls: the whole title and the whole summary are always readable (no "…", no words box that
   cuts a line); the answers and Later stay pinned at the bottom above the tab bar; files wrap into rows so "+N more"
   is in sight; the summary line is 16 px and clear of the "Make bigger" button.
+- 18 Nov (ORCH-477, owner pick B "List and ticks"): the "All cards" list stands on the left at every desk width (before:
+  it folded away below 1440, so at 1280 it was gone) with a tick per card and per option of a choice with pictures;
+  tick two to see them side by side, each with its own answers (only the suggested answer is filled); Close or Esc goes
+  back to one card. A result's files open large inside the page with ← → and "Open in new tab" in the viewer (before:
+  a new tab); a PDF tile shows its first page (before: a file icon). Every card is as tall as what it holds at 1280, 1920
+  and 390 (before: a fixed frame, half empty at 1920), and the answers are one bar pinned to the bottom of the screen
+  with the "If you approve" line in it, so nothing hides under it. A phone opens on the first card with "All cards · 1
+  of N" and ← → above it; the list with its ticks is one tap away; Compare shows one side at a time with a switch that
+  names both. The draft folder of that round (draft-orch-477) is gone; its pictures are in assets/.

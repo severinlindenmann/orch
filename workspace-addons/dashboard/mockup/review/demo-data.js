@@ -3,6 +3,29 @@
    shows why it waits on you (need). Order: most urgent first. */
 window.SWIPE_KIT='../../../../workspace/src/orch_ui/static/';
 window.SWIPE_ITEMS=[
+ /* ORCH-477 (owner pick B, 18 Nov): a result with its files (pictures and a PDF that open large in the page), a second
+    result to put beside it, a choice whose options have pictures (tick two options to compare them) and a short yes/no
+    card that is as tall as its words. */
+ {id:'s1',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-53',ticketId:'DT-53',ticketTitle:'Spring sale',when:'today 09:40',need:'Sends Friday 08:00',title:'Spring sale email',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',
+  then:'The ticket is done. The email goes out on Friday 08:00 to 312 people.',
+  files:[{label:'Email on a computer',type:'img',src:'assets/email-desktop.png'},{label:'Email on a phone',type:'img',src:'assets/email-phone.png'},{label:'Website banner',type:'img',src:'assets/sale-banner.png'},{label:'Flyer for the counter.pdf',type:'pdf',src:'assets/spring-flyer.pdf'}],
+  preview:{type:'doc',heading:'What was done',paras:['In short: the spring sale email is written, with a version for phones, a banner for the website and a flyer for the counter.','The offer is 20% off all beans from 20 to 27 March with the code SPRING20, as you wrote in the ticket.','The list has 312 people: regulars, online shop customers and people who only get the newsletter.']}},
+ {id:'s2',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-51',ticketId:'DT-51',ticketTitle:'Weekly report for the café',when:'today 08:15',title:'Weekly report for the café',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',
+  then:'The ticket is done. The report goes to the team.',
+  files:[{label:'Weekly report.pdf',type:'pdf',src:'assets/weekly-report.pdf'}],
+  preview:{type:'doc',heading:'What was done',paras:['In short: the report for 10 to 16 November is written, two pages, with sales per day and the survey.','Sales were 8,420, 6% above last week. The first Sunday opening brought 900 in four hours.','One thing to check: the report proposes a second person on the till on Saturday.']}},
+ {id:'s3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-46',ticketId:'DT-46',ticketTitle:'New start page',when:'today 10:20',need:'Blocks the new start page',title:'Start page: which layout?',
+  why:'Three ways to show the start page. Pick the one you want.',
+  then:'The helper builds the one you pick. You check it before it goes live.',
+  preview:{type:'options',options:[
+   {id:'A',title:'As today',preview:{type:'img',src:'assets/layout-a.png',alt:'Layout A'},text:'Three cards: questions, results and work.'},
+   {id:'B',title:'Recent changes first',suggested:true,preview:{type:'img',src:'assets/layout-b.png',alt:'Layout B'},text:'Adds a list of what changed since yesterday.'},
+   {id:'C',title:'Questions first',preview:{type:'img',src:'assets/layout-c.png',alt:'Layout C'},text:'One list, most urgent first.'}]}},
+ {id:'s4',kind:'question',kindLabel:'Question',icon:'comment',ticket:'DT-47',ticketId:'DT-47',ticketTitle:'Friday newsletter',when:'today 10:31',need:'Sends Friday 08:00',title:'Send the newsletter on Friday?',
+  text:'The text was checked yesterday. It goes to 312 people at 08:00.',preview:{type:'doc'},
+  answers:[{label:'No',picked:'No'},{label:'Yes',picked:'Yes'}]},
  /* A design review as one set of cards (16 Nov, ORCH-65): the question text on the card, full-page pictures that fit the
     pane on a dark ground with a zoom per side, a marked suggestion, a choice with how it is today. */
  {id:'g1',kind:'draft',kindLabel:'Draft',icon:'page',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:02',title:'Home: one list of what needs you',

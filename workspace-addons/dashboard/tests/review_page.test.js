@@ -86,13 +86,35 @@ test('the All cards list: the card on screen in bold, answered ones quiet with t
   c.document = {createElement: t => h(t)}; c.reviewDrawSide(queue, deck);
   assert.equal(rows.length, 1, 'one set: one section without a heading');
   assert.ok(!nodes(rows[0]).some(n => /review-group-head/.test(n.attrs?.className || '')));
-  rows.splice(0, 1, ...rows[0].children);
+  rows.splice(0, 1, ...rows[0].children.map(line => line.children[1]));  // each line: its tick, then the card's button (ORCH-477)
   assert.equal(rows.length, 3);
   assert.match(rows[0].attrs.className, /is-done/); assert.match(text(rows[0]), /Build it/);
   assert.match(rows[1].attrs.className, /is-now/); assert.match(text(rows[1]), /Now/);
   assert.match(text(rows[2]), /Don't do/);
   rows[2].onclick(); assert.equal(deck.index, 2);
   assert.doesNotThrow(() => c.reviewDrawSide(null, deck));
+});
+// ORCH-477 (owner pick B): a tick on every waiting card and on every option of a choice with pictures; two ticked stand
+// side by side in the deck; a click on a line closes Compare and opens that card; the list stands left of the deck.
+test('the All cards list: a tick per waiting card and per option picture, a click opens that card alone (ORCH-477)', () => {
+  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
+  const secs = []; const queue = {replaceChildren(...r) { secs.push(...r); }};
+  const item = (id, extra) => ({id, title:'Card ' + id, icon:'page', kind:'draft', preview:{type:'page'}, ...extra});
+  const ticks = [], calls = [];
+  const deck = {items:[item('a'), item('b', {kind:'choice'}), item('c')], index:0, answers:{c:{verdict:'ok', item:item('c')}}, ticked:['a'], comparing:false,
+    tickBox:(ref, label) => { ticks.push([ref, label]); return h('label', {className:'review-tick'}); },
+    optionRefs:it => it.id === 'b' ? [{ref:'b\nA', label:'A: Short'}, {ref:'b\nB', label:'B: Long'}] : [],
+    compare:refs => calls.push(['compare', refs]), jump:i => calls.push(['jump', i])};
+  c.reviewDrawSide(queue, deck);
+  assert.deepEqual(ticks, [['a', 'Card a'], ['b', 'Card b'], ['b\nA', 'A: Short'], ['b\nB', 'B: Long']], 'no tick on an answered card');
+  const lines = secs[0].children;
+  assert.equal(lines.length, 5);
+  assert.match(lines[2].attrs.className, /review-queue-item sub/);
+  lines[2].children[1].onclick();
+  assert.equal(JSON.stringify(calls), JSON.stringify([['compare', []], ['jump', 1]]));
+  const page = nodes(c.reviewPage()), layout = page.find(n => n.attrs?.['data-key'] === 'review-layout');
+  assert.equal(layout.children[0].attrs['data-key'], 'review-rail', 'the list is on the left');
+  assert.match(text(page.find(n => /review-side-hint/.test(n.attrs?.className || ''))), /Tick two to see them side by side/);
 });
 test('the page keeps its host and side list out of the reconcile (mounted once), and leaving destroys the page', () => {
   const calls = [];

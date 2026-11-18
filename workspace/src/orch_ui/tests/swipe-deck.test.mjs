@@ -40,14 +40,14 @@ class N {
 }
 const doc = {createElement: t => new N(t), createElementNS: (_, t) => new N(t), createDocumentFragment: () => new N('#fragment'), activeElement: null, body: new N('body')};
 
-function deck(items, o = {}) {
-  const toasts = [], UI = {toast: (m, undo) => toasts.push({m, undo}), statusIcon: () => new N('span')};
-  const window = {UI};
+function deck(items, o = {}, extra = {}) {
+  const toasts = [], viewed = [], UI = {toast: (m, undo) => toasts.push({m, undo}), statusIcon: () => new N('span'), reviewViewer: (shots, i, vo) => viewed.push({shots, i, vo})};
+  const window = {UI, ...extra};
   vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window, document: doc, setTimeout, clearTimeout, performance, console, Promise});
   const host = new N('section'), decided = [];
   const d = UI.swipeDeck(host, items, {mode: 'desk', voice: false, onDecide: (it, v, note) => decided.push({id: it.id, v, note}), ...o});
   const [top, , acts] = host.children, [noBtn, talkBtn, okBtn] = acts.children, undoBtn = top.children[4], note = top.children[1];
-  return {d, host, decided, toasts, noBtn, talkBtn, okBtn, undoBtn, note};
+  return {d, host, decided, toasts, viewed, noBtn, talkBtn, okBtn, undoBtn, note};
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const check = (id, extra = {}) => ({id, kind: 'check', kindLabel: 'Check', title: 'Spring catalogue ' + id, okLabel: 'Looks good', preview: {type: 'doc', heading: 'What was done', paras: ['In short: done.']}, ...extra});
@@ -96,11 +96,17 @@ test('Undo is offered only while canUndo says the answer can still be taken back
   assert.equal(d.index, 0, 'back on the card');
 });
 
-test('a Check card shows its own files as tiles that open them', () => {
-  const {host} = deck([check('a', {files: [{label: 'Cover photo', type: 'img', src: '/api/file?t=t_x&k=evidence&n=shop.png'}, {label: 'Result', type: 'page', src: '/view/t_x/evidence/result.html'}, {label: 'No src', type: 'img', src: ''}]})]);
+// ORCH-477 (owner pick B): a tile opens the file large inside the page (UI.reviewViewer), never a new tab; the viewer
+// steps to the card's other files and keeps "Open in new tab" inside it.
+test('a Check card shows its own files as tiles that open them large in the page', () => {
+  const {host, viewed} = deck([check('a', {files: [{label: 'Cover photo', type: 'img', src: '/api/file?t=t_x&k=evidence&n=shop.png'}, {label: 'Result', type: 'page', src: '/view/t_x/evidence/result.html'}, {label: 'No src', type: 'img', src: ''}]})]);
   const tiles = host.querySelectorAll('.swipe-file');
-  assert.deepEqual(tiles.map(t => t.href), ['/api/file?t=t_x&k=evidence&n=shop.png', '/view/t_x/evidence/result.html']);
-  assert.deepEqual(tiles.map(t => t.target), ['_blank', '_blank']);
+  assert.deepEqual(tiles.map(t => t.dataset.src), ['/api/file?t=t_x&k=evidence&n=shop.png', '/view/t_x/evidence/result.html']);
+  assert.deepEqual(tiles.map(t => t.tag), ['button', 'button'], 'no link to a new tab');
+  assert.ok(tiles.every(t => t.target === undefined));
+  tiles[1].click();
+  assert.equal(viewed.length, 1); assert.equal(viewed[0].i, 1);
+  assert.deepEqual(viewed[0].shots.map(s => [s.label, s.preview.type, s.open]), [['Cover photo', 'img', '/api/file?t=t_x&k=evidence&n=shop.png'], ['Result', 'page', '/view/t_x/evidence/result.html']]);
   assert.equal(tiles[0].querySelector('img').src, '/api/file?t=t_x&k=evidence&n=shop.png');
   assert.equal(tiles[1].querySelector('iframe').getAttribute('sandbox'), '', 'a page only in a sandboxed frame');
   assert.equal(deck([check('b')]).host.querySelector('.swipe-files'), null, 'no files: no empty row');
@@ -192,6 +198,88 @@ test('what just happened is one line in the top row, a long title goes by its ti
   assert.equal(toasts.length, 0, 'no floating box over the card or the header');
 });
 
+// ORCH-477 (owner pick B): tick two cards (or two options of one choice) to see them side by side, each with its own
+// answers; the filled button is the suggested answer only, never "the left one"; Close goes back to one card.
+const choice = {id: 'c', kind: 'choice', kindLabel: 'Choose', title: 'Which layout?', then: 'The helper builds it.', preview: {type: 'options', options: [
+  {id: 'A', title: 'As today', preview: {type: 'img', src: '/a.png'}}, {id: 'B', title: 'Changes first', suggested: true, preview: {type: 'img', src: '/b.png'}}, {id: 'C', title: 'Plain'}]}};
+const panes = host => host.querySelectorAll('.swipe-pair-pane');
+const filled = host => host.querySelectorAll('.btn').filter(b => b.classList.contains('primary'));
+test('tick two cards: they stand side by side, each with its own answers, and the shared bar steps aside', async () => {
+  const {d, host, decided} = deck([check('a', {then: 'Done.'}), check('b'), draft('x')]);
+  d.tick('a'); assert.equal(d.comparing, false, 'one tick: still one card');
+  d.tick('b'); assert.equal(d.comparing, true);
+  assert.equal(host.querySelector('.swipe-actions').hidden, true, 'no shared bar: each side answers itself');
+  assert.equal(panes(host).length, 2);
+  assert.match(panes(host)[0].querySelector('.swipe-then').textContent, /If you approve: Done\./);
+  d.tick('x'); assert.deepEqual([...d.ticked], ['a', 'b'], 'a third tick is refused');
+  const ok = panes(host)[1].querySelector('.swipe-pair-ok'); ok.click();
+  assert.deepEqual(decided.map(x => [x.id, x.v]), [['b', 'ok']]);
+  assert.equal(d.comparing, false, 'one side answered: back to one card');
+  assert.equal(d.items[d.index].id, 'a', 'the other side shows'); assert.deepEqual([...d.ticked], ['a']);
+});
+test('two options of one choice side by side: Use B is the one filled button (the suggested option)', () => {
+  const {d, host, decided} = deck([choice, check('b')]);
+  assert.deepEqual(d.optionRefs(choice).map(x => x.label), ['A: As today', 'B: Changes first'], 'only options with a picture');
+  d.compare(['c\nA', 'c\nB']);
+  assert.match(host.querySelector('.swipe-pair-of').textContent, /3 options of “Which layout\?”/);
+  assert.deepEqual(filled(host).map(b => b.textContent), ['Use B']);
+  assert.deepEqual(host.querySelector('.swipe-pair-switch').querySelectorAll('button').map(b => b.textContent), ['A: As today', 'B: Changes first'], 'the phone switch names both in full');
+  panes(host)[0].querySelector('.btn').click();
+  assert.deepEqual(decided.map(x => [x.id, x.v, x.note.picked]), [['c', 'ok', 'A']]);
+  assert.equal(d.comparing, false);
+});
+test('no suggestion, or both sides suggested: every answer outlined (never "the left one")', () => {
+  const {d, host} = deck([check('a'), check('b')]);
+  d.compare(['a', 'b']); assert.equal(filled(host).length, 0);
+  const two = deck([check('a', {suggest: 'ok'}), check('b', {suggest: 'ok'})]);
+  two.d.compare(['a', 'b']); assert.equal(filled(two.host).length, 0);
+  const one = deck([check('a'), check('b', {suggest: 'ok'})]);
+  one.d.compare(['a', 'b']); assert.deepEqual(filled(one.host).map(b => b.dataset.item), ['b']);
+});
+test('Send back on one side opens the words box for that card; Close goes back to one card', async () => {
+  const {d, host, decided} = deck([check('a'), check('b')]);
+  d.compare(['a', 'b']);
+  panes(host)[1].querySelectorAll('.btn').find(b => /Send back/.test(b.textContent)).click();
+  const sheet = host.querySelector('.swipe-sheet');
+  assert.ok(sheet); assert.equal(sheet.children[2].textContent, 'Spring catalogue b');
+  host.querySelector('.swipe-sheet textarea').value = 'Shorter'; host.querySelector('.swipe-sheet textarea').listeners.input[0]();
+  sheet.querySelectorAll('button').find(b => b.textContent === 'Send back for changes').click(); await wait(260);
+  assert.deepEqual(decided.map(x => [x.id, x.v]), [['b', 'talk']]);
+  const e = deck([check('a'), check('b')]); e.d.compare(['a', 'b']);
+  e.host.querySelector('.swipe-pair-close').click();
+  assert.equal(e.d.comparing, false); assert.deepEqual([...e.d.ticked], []);
+});
+test('the "All cards" overview has the ticks too, and Compare once two are ticked', () => {
+  const {d, host} = deck([check('a'), choice]);
+  d.openOverview();
+  const boxes = host.querySelectorAll('.review-tick-box');
+  assert.deepEqual(boxes.map(b => b.dataset.ref), ['a', 'c', 'c\nA', 'c\nB']);
+  boxes[2].listeners.change[0](); boxes[3].listeners.change[0]();
+  assert.equal(d.comparing, true);
+  assert.equal(host.querySelector('.swipe-ov-compare').hidden, false);
+  assert.equal(boxes[0].disabled, true, 'two ticked: the others wait');
+});
+test('a phone shows "All cards · 1 of N" with ← → above the card', () => {
+  const {d, host} = deck([check('a'), check('b'), check('c')]);
+  const jump = host.querySelector('.swipe-jump');
+  assert.match(jump.textContent, /All cards1 of 3/);
+  jump.children[2].click(); assert.equal(d.index, 1);
+  assert.match(jump.textContent, /2 of 3/);
+});
+test('a PDF tile shows its first page through the browser\'s own PDF view (FileViewer.thumb), and opens large', () => {
+  const asked = [];
+  const {host, viewed} = deck([check('a', {files: [{label: 'Weekly report.pdf', type: 'pdf', src: '/api/file?n=r.pdf'}]})], {}, {FileViewer: {thumb: f => { asked.push(f); return new N('span'); }}});
+  assert.deepEqual(asked.map(f => [f.src, f.name]), [['/api/file?n=r.pdf', 'Weekly report.pdf']]);
+  host.querySelector('.swipe-file').click();
+  assert.equal(viewed[0].shots[0].preview.type, 'pdf');
+});
+test('the "If you approve" line is in the pinned answers bar, not at the card\'s end', () => {
+  const {host} = deck([check('a', {then: 'The ticket is done.'})]);
+  const bar = host.querySelector('.swipe-actions');
+  assert.match(bar.querySelector('.swipe-bar-then').textContent, /If you approve: The ticket is done\./);
+  assert.equal(host.querySelector('.swipe-card').querySelector('.swipe-then'), null);
+});
+
 test('more than six files: five tiles and a "+N more" tile that shows the rest, none dropped (ORCH-421)', () => {
   const files = Array.from({length: 8}, (_, i) => ({label: 'photo-' + i + '.png', type: 'img', src: '/f/' + i}));
   const {host} = deck([check('a', {files})]);
@@ -200,6 +288,6 @@ test('more than six files: five tiles and a "+N more" tile that shows the rest, 
   assert.match(more.children[1].textContent, /3 more files/);
   more.click();
   const tiles = host.querySelectorAll('.swipe-file');
-  assert.deepEqual(tiles.map(t => t.href), files.map(f => f.src), 'all eight, in order');
+  assert.deepEqual(tiles.map(t => t.dataset.src), files.map(f => f.src), 'all eight, in order');
   assert.equal(host.querySelector('.swipe-file-more'), null);
 });
