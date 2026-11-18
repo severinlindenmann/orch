@@ -219,3 +219,18 @@ jobs:
       - run: npm install -g playwright@1.64.1
       - run: playwright install --with-deps chromium
       - run: node e2e/focus_insights_smoke.cjs
+  dashboard-clickthroughs:
+    # Every dashboard feature done like a person on a seeded workspace with the real dashboard server and local
+    # stand-ins for relay, publish, GitHub and add-ons (workspace-addons/dashboard/clickthrough, ORCH-308/384); a
+    # feature nobody clicked fails by name. Its own job: next to the page checks it no longer fit in 10 minutes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g playwright@1.64.1
+      - run: playwright install --with-deps chromium
+      - run: PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs

@@ -1,6 +1,6 @@
 // Every dashboard feature brings its click-through (ORCH-308). The feature list is read from the code
 // (clickthrough/catalogue.cjs): every op the page can send and every page of the router. A new button that sends a
-// new op, or a new page, fails here by name until a file in clickthrough/features/ claims it; the page-smoke job
+// new op, or a new page, fails here by name until a file in clickthrough/features/ claims it; the dashboard-clickthroughs job
 // then runs that click-through and fails if it never really did the feature.
 const test = require('node:test');
 const assert = require('node:assert/strict');

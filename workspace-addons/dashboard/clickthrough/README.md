@@ -6,7 +6,7 @@ with the real dashboard server and this checkout's orch (`server.py`), so a clic
 reload shows what really happened.
 
 **Rule: a new dashboard feature brings its click-through in the same pull request.** The `dashboard` CI job
-(`tests/clickthrough_catalogue.test.js`) fails and names the feature when nothing claims it; the `page-smoke` job
+(`tests/clickthrough_catalogue.test.js`) fails and names the feature when nothing claims it; the `dashboard-clickthroughs` job
 runs every click-through and fails when one breaks, or claims a feature it never really did.
 
 ## What counts as a feature
