@@ -14,6 +14,7 @@ from orch import (
     addons,
     cli_addons,
     cli_chat,
+    cli_checks,
     cli_clients,
     cli_config,
     cli_conn,
@@ -374,6 +375,7 @@ ADVANCED_TOP = {
     "manager",
     "session",
     "triage",
+    "checks",  # ORCH-529: --help-all only
 }
 ADVANCED_SUB = {"relay": {"allow"}}
 
@@ -493,6 +495,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
+    cli_checks.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -778,6 +781,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     g.add_argument("--after", metavar="FILE", help="the file as it would become")
     g.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
+    g.add_argument(
+        "--ci-shots",
+        metavar="PR_URL",
+        help="show the pictures CI took of the dashboard pages this pull request changes "
+        "(1280, 1920 and 390 px); no screenshots of your own",
+    )
     g.add_argument("--open", metavar="URL", help="an http(s) address to look at")
     g.add_argument(
         "--merge",
@@ -1065,6 +1074,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
         or cli_health.dispatch(args, root)
+        or cli_checks.dispatch(args, root)
     ):
         pass
     elif (
@@ -1428,6 +1438,10 @@ def run(args: argparse.Namespace) -> None:
             )
         if args.merge and not card:
             raise Refused("--merge goes with a link card: --link TITLE --open <pull request address>.")
+        if args.ci_shots and not card:
+            raise Refused(
+                "--ci-shots goes with a card, e.g. --draft TITLE --ci-shots <pull request address>."
+            )
         if args.release and not args.merge:
             raise Refused("--release goes with --merge.")
         if card:  # the card goes where every question goes; a phone shows it from the stack

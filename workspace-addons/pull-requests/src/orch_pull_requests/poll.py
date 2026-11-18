@@ -253,7 +253,9 @@ def apply(root: Path, ts: list[dict], data: dict) -> list[str]:
     """Refresh each ticket whose links show something else now. Returns the ticket ids refreshed."""
     done = []
     for t in ts:
-        if not links(t):
+        # the core refuses every write by an add-on to a closed ticket (guard closed_ticket): asking each pass
+        # only fills the debug log and trips the ticket_op_refused health check (ORCH-418)
+        if not links(t) or not open_ticket(t):
             continue
         res = answer(t, data)
         if res["refs"] and differs(t, res):
