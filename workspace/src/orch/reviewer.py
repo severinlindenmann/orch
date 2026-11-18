@@ -5,8 +5,11 @@ concept, technical) wait for his answer. A program decides from facts, never a m
 
 - **Accept for you** (Review -> Done) when every task is done with evidence, every part of Done when has a
   task, no question waits, every linked pull request is merged with its checks green, and the change is
-  small by its files (`size_reasons`).
-- **Leave it for you** when the change is not small, there is no pull request to check, a part of Done when
+  small by its files (`size_reasons`), and the ticket's kind is one the workspace lists
+  (`workflow.reviewer_kinds`, default bugs; ORCH-645). A ticket without a kind (made before kinds) is
+  judged by its facts alone.
+- **Leave it for you** when a ticket is a draft, mockup or design (kind `draft`, never accepted), its kind
+  is not listed, or when the change is not small, there is no pull request to check, a part of Done when
   has no task (ORCH-220: a missing link is a question for you, not work for a helper), or it was already sent
   back once. One line in the history says why.
 - **Send it back to the helper** when work is missing (a pull request not merged, checks not green, a task
@@ -257,6 +260,13 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
     proof = tickets.proof_state(ticket, root)
+    kind = tickets.kind(ticket)
+    if kind == "draft":  # ORCH-645 / ORCH-582: never accepted by an automation
+        return {
+            "verdict": "leave",
+            "why": "drafts, mockups and designs are only accepted by you.",
+            "kind_block": True,
+        }
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
@@ -303,6 +313,19 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         return _back_or_leave("; ".join(missing[:2]), sent_back)
     if open_part:
         return {"verdict": "leave", "why": open_part}
+    allowed = config.reviewer_kinds(root)  # ORCH-645: which kinds this workspace lets the Reviewer accept
+    if not allowed:
+        return {
+            "verdict": "leave",
+            "why": "this workspace lets the Reviewer accept no kind of work by itself.",
+            "kind_block": True,
+        }
+    if kind and kind not in allowed:
+        return {
+            "verdict": "leave",
+            "why": f"{tickets.KINDS[kind].lower()} work is not accepted by itself here (Settings).",
+            "kind_block": True,  # the second look leaves it too: the owner's setting covers every automation
+        }
     why: list[str] = []
     files = lines = all_files = all_lines = 0
     for f in facts:

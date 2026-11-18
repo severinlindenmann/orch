@@ -1150,9 +1150,12 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
             "sentences, from their note), and a done-when line (what must be true when it is done; when they "
             "wrote one, keep it). Fill the owner and due date only where the person's text says them: "
             "Also estimate the helper time in minutes and the cost in dollars at list price for the whole "
-            "ticket (shown on the ticket, next to what it really took): "
+            "ticket (shown on the ticket, next to what it really took), and say what kind of work it is "
+            "(--kind: bug, small_bug, feature, small_feature, draft or other; small = a few files, no new "
+            "command or setting, no change of look or words; draft = it has a draft, mockup, design or look "
+            "change in it, also when it fixes a bug): "
             f'orch ticket tidy {tid} "<short clear title>" --description "<what and why>" '
-            '--done-when "<one plain line>" --estimate-minutes <n> --estimate-cost <dollars> '
+            '--done-when "<one plain line>" --estimate-minutes <n> --estimate-cost <dollars> --kind <kind> '
             "[--owner <name>] [--due YYYY-MM-DD]. "
             "Their original title stays in the history. The steps come next, as tasks. "
             "Do this before you add tasks.",

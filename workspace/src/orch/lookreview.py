@@ -89,6 +89,8 @@ def triage(ticket: dict, facts: list[dict], res: dict, sent_back: int) -> dict |
 
     if res.get("verdict") != "leave" or tickets._open_questions(ticket):
         return None
+    if res.get("kind_block"):  # ORCH-645: a draft, or a kind this workspace does not accept by itself
+        return None
     if str(res.get("why") or "").startswith("sent back once already"):
         return None
     kinds: set[str] = set()
