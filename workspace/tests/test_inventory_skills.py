@@ -34,7 +34,7 @@ def counts(capsys, *argv):
 def test_skill_version_matches_the_reference(tmp_path):
     folder = skill(tmp_path, "a", extra={"topics/10.md": "t", "b.md": "b", ".DS_Store": "junk"})
     files = {
-        p.relative_to(folder).as_posix(): p.read_text()
+        p.relative_to(folder).as_posix(): p.read_text(encoding="utf-8")
         for p in folder.rglob("*")
         if p.is_file() and not p.name.startswith(".")
     }
