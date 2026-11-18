@@ -820,6 +820,28 @@ def test_fresh_prompt_summary_names_writer_and_proof(repo, run, new_ticket):
     assert len(prompt) <= 12000
 
 
+def test_a_yes_on_the_dashboard_counts_when_the_server_runs_under_a_helper(
+    proj, run, new_ticket, monkeypatch
+):
+    """#1354: the dashboard was started from a helper's session, so its environment shows an agent tool
+    and a person's click on yes did nothing. Through the dashboard or a phone the click is the person;
+    at the CLI the environment still decides."""
+    tid = with_checks(proj, run, new_ticket)
+    for c in ("c2", "c3"):
+        code, out, err = run(
+            "ask", tid, f"Mark step {c} as won't do?", "--option", "yes",
+            "--option", "No, run it in CI", "--check", c,
+        )  # fmt: skip
+        assert code == 0, (out, err)
+    q1, q2 = (q["id"] for q in read(proj, tid)["questions"])
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    root = proj
+    tickets.answer(root, tid, q1, "yes", "human:owner", "dashboard")
+    assert read(proj, tid)["checklist"][1]["wont_do"] is True
+    tickets.answer(root, tid, q2, "yes", "human:owner", "cli")  # a command in an agent's terminal: no
+    assert "wont_do" not in read(proj, tid)["checklist"][2]
+
+
 def test_ask_says_to_keep_working(proj, run, new_ticket):
     """R2.6 + R2.7: the ask output names the next step: go on with what does not need the answer."""
     tid = with_checks(proj, run, new_ticket)
