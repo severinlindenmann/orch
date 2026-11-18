@@ -11,7 +11,7 @@
     "pull.merge", "ticket.field"
   ],
   "needs add-ons installed in the seeded home (Focus switches, a background add-on, an add-on with verbs)": [
-    "typing.set", "focus_preview.set", "addon.start", "addon.act", "addon.uninstall"
+    "typing.set", "focus_preview.set", "addon.start", "addon.uninstall"
   ],
   "needs a stand-in update source (Update would really download and install orch)": [
     "update.start", "update.note.dismiss"

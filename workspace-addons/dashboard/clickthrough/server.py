@@ -157,7 +157,20 @@ def seed() -> dict:
     return ids
 
 
+def register_sync() -> None:
+    """The Sync add-on installed in the throw-away home (ORCH-386: the Sync page against the real server). Its
+    package comes from this checkout (run.cjs starts this server with it layered on); the home's add-on list says
+    it is installed, as `orch addon add sync` would. It stays off until the person turns it on in the page."""
+    from orch import addons
+
+    if "sync" not in {n for n, _ in addons._entry_points()}:
+        sys.exit("the sync add-on package is not importable here: run.cjs starts this server with it")
+    reg = [e for e in addons.registry() if e["name"] != "sync"] + [{"name": "sync", "source": "built-in"}]
+    addons._save_registry(reg)
+
+
 IDS = seed()
+register_sync()
 (D / "seed.json").write_text(json.dumps(IDS))
 
 from orch import pagelaunch

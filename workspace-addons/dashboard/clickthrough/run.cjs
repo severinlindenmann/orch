@@ -62,7 +62,7 @@ async function serve() {
   const env = { HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1', PATH: process.env.PATH,
     LANG: 'en_US.UTF-8', UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache', 'uv') };
   const child = spawn('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), 'uv', 'run', '-q', '--project', 'workspace',
-    'python', path.join(__dirname, 'server.py'), dir, String(port)], { cwd: REPO, stdio: ['pipe', 'pipe', 'pipe'] });
+    '--with-editable', 'workspace-addons/sync', 'python', path.join(__dirname, 'server.py'), dir, String(port)], { cwd: REPO, stdio: ['pipe', 'pipe', 'pipe'] });
   let log = '';
   child.stderr.on('data', d => { log = (log + d).slice(-4000); });
   const lines = readline.createInterface({ input: child.stdout });
