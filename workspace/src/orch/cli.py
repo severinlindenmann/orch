@@ -41,6 +41,7 @@ from orch import (
     mobile_mode,
     net,
     nextstep,
+    people,
     refs,
     relay,
     review,
@@ -307,7 +308,7 @@ def _show(t: dict, root: Path) -> str:
     if shown_lines := history.lines(root, t):
         out.append("\nRecent:")
         out += [
-            f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'], t['checklist'])}"
+            f"  {net.when(h['at'])}  {history.author(h)}: {tickets.history_line(h['text'], t['checklist'])}"
             for h in shown_lines[-3:]
         ]
     return "\n".join(out)
@@ -1315,7 +1316,7 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
         h = history.lines(root, t)[-1]
-        _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
+        _out(args, h, f"{h['at']} {history.author(h)}: {tickets.history_line(h['text'], t['checklist'])}")
     elif cmd == "ask" and args.in_conversation:
         if (
             args.take_back
@@ -1756,6 +1757,7 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
 
     try:
         root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
+        people.bind(root)  # who works here: the person picked in the dashboard (orch.people)
         diag.bind(root, "cli")  # the debug log: one trace per invocation (joins an inherited TRACEPARENT)
         diag.new_trace(os.environ.get("TRACEPARENT"))
         lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None

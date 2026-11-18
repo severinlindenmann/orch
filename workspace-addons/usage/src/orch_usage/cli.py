@@ -46,12 +46,14 @@ def _actor(explicit: str | None) -> str:
     if inside_run or tool:
         name = re.sub(r"[^A-Za-z0-9_.@-]", "_", os.environ.get("ORCH_AGENT") or tool or "helper")[:64]
         return f"agent:{name or 'helper'}"
-    try:
+    try:  # the person picked in the dashboard ("You: <name>", orch.people), else the computer's user
+        from orch import people
+
+        return people.person_actor().replace(" ", "_")
+    except Exception:  # noqa: BLE001 - an old core
         import getpass
 
         user = getpass.getuser()
-    except Exception:  # noqa: BLE001
-        user = "user"
     return "human:" + (re.sub(r"[^A-Za-z0-9_.@-]", "_", user)[:64] or "user")
 
 

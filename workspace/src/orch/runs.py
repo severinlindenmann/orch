@@ -1194,7 +1194,7 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
     if hist:
         out.append(
             "What changed lately:\n"
-            + "\n".join(f"- {h.get('by', '?')}: {_clip(h.get('text', ''), 300)}" for h in hist)
+            + "\n".join(f"- {history.author(h)}: {_clip(h.get('text', ''), 300)}" for h in hist)
         )
     if items:
         out.append("New since the work was asked for:\n" + _items_text(items))
@@ -1210,7 +1210,7 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
             continue
         if h.get("by") == f"agent:{agent}" and not history.is_reserved_label(h.get("by")):
             continue
-        news.append(f"- {h.get('by', '?')}: {_clip(h.get('text', ''), 300)}")
+        news.append(f"- {history.author(h)}: {_clip(h.get('text', ''), 300)}")
     parts = _description_plan(ticket)
     if parts:
         parts.append(f"The person's description: {ticket['note']}")
@@ -1911,6 +1911,6 @@ def footer(root: Path, argv_by: str | None, tid_hint: str | None = None) -> str 
     renew(root, tid, run, ticket, seen=True)
     if not news:
         return None
-    shown = "; ".join(f"{_clip(h.get('text', ''), 160)} ({h.get('by', '?')})" for h in news[:3])
+    shown = "; ".join(f"{_clip(h.get('text', ''), 160)} ({history.author(h)})" for h in news[:3])
     more = f" (+{len(news) - 3} more)" if len(news) > 3 else ""
     return f"New on {tid} since you looked: {shown}{more}"

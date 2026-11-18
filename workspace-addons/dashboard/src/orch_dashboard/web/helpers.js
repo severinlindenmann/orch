@@ -197,6 +197,16 @@
     return /^human:/.test(String(by || '')) && me && s.login && b === s.login ? me : b;
   }
 
+  /* ORCH-417: who a helper's history line is by. A helper that worked for a person (the line's "for": who started
+     its run) reads "Helper - <person>"; one that ran on its own (automation, factory, reviewer, older lines) "Helper".
+     null for a line that is not a helper's. `nameOf` turns a person's name into the shown name. */
+  function agentWho(entry, nameOf) {
+    const by = String((entry && entry.by) || '');
+    if (!/^agent:/.test(by)) return null;
+    const who = entry && typeof entry.for === 'string' && entry.for ? (nameOf ? nameOf(entry.for) : entry.for) : '';
+    return who ? 'Helper - ' + who : 'Helper';
+  }
+
   function historyWho(by, me) {
     const b = String(by || '');
     if (me && b === me) return 'You';
@@ -815,5 +825,5 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
-  return {historyChange, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
+  return {historyChange, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, agentWho, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needItems, needWarnings, needTickets};
 });

@@ -9,7 +9,7 @@ shown ticket itself is listed too, and the lint checks that it calls `history.sh
 
 ## Fields
 
-`history[].by` (and its text), `checklist[].evidence[].by`, `checklist[].by`, `checklist[].wont_by`,
+`history[].by` (and its text, and `for`: whom a helper worked for, ORCH-417), `checklist[].evidence[].by`, `checklist[].by`, `checklist[].wont_by`,
 `verdicts[].person`, `questions[].answered_by`, `refs[].by`, `plan.by`, `description_by`.
 
 A value that is a plain agent label (`agent:` + `[a-z0-9._-]{1,40}` in ASCII, not `relay`, `phone`, `ph_`) needs no

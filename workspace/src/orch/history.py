@@ -156,6 +156,34 @@ def created(kind: str, obj) -> None:
         _CREATED[id(obj)] = (kind, obj)
 
 
+def created_lines(ticket: dict) -> list[dict]:
+    """The history lines of `ticket` core made in this process and has not written yet (by identity), kept
+    marked: tickets._write adds who a helper works for (`for`) before the line is recorded."""
+    with _CREATED_LOCK:
+        if not _CREATED:
+            return []
+        out = []
+        for h in ticket.get("history") if isinstance(ticket.get("history"), list) else []:
+            hit = _CREATED.get(id(h))
+            if hit is not None and hit[1] is h and hit[0] == "lines":
+                out.append(h)
+        return out
+
+
+def author(h) -> str:
+    """Who a SHOWN history line is by, for plain text: `agent:claude for Severin` when a helper worked for a
+    person (`for`, orch.people), else its `by` as written."""
+    by = str(h.get("by", "?")) if isinstance(h, dict) else "?"
+    who = h.get("for") if isinstance(h, dict) else None
+    return f"{by} for {who}" if isinstance(who, str) and who and by.startswith("agent:") else by
+
+
+def line_needs_proof(h) -> bool:
+    """A history line is believed as written only with proof when its author is not a plain agent label, or
+    when it says whom a helper worked for (`for`, a person's name)."""
+    return isinstance(h, dict) and (needs_proof(h.get("by")) or h.get("for") is not None)
+
+
 def _take_created(ticket: dict) -> dict[str, list]:
     """The marked objects that are in `ticket` (by identity, never by content), removed from the marks."""
     found: dict[str, list] = {k: [] for k in KINDS}
@@ -527,6 +555,7 @@ class _Proof:
 
 
 def _demoted_line(h: dict) -> dict:
+    h = {k: v for k, v in h.items() if k != "for"}  # whom a helper worked for is a person field too
     return {**h, "by": SYNC_BY, "text": SYNCED_UNVERIFIED + str(h.get("text", ""))}
 
 
@@ -538,10 +567,10 @@ def _shown(proof: _Proof, t: dict) -> dict:
     changed = False
 
     hist = t.get("history") if isinstance(t.get("history"), list) else None
-    if hist is not None and any(isinstance(h, dict) and needs_proof(h.get("by")) for h in hist):
+    if hist is not None and any(line_needs_proof(h) for h in hist):
         new_hist = []
         for h in hist:
-            if isinstance(h, dict) and needs_proof(h.get("by")) and not has("lines", h):
+            if line_needs_proof(h) and not has("lines", h):
                 new_hist.append(_demoted_line(h))
                 continue
             new_hist.append(h)
@@ -673,9 +702,7 @@ def shown_ticket(root: Path, ticket, _proof: _Proof | None = None):
 def _all_demoted(t: dict) -> dict:
     out = dict(t)
     if isinstance(t.get("history"), list):
-        out["history"] = [
-            _demoted_line(h) if isinstance(h, dict) and needs_proof(h.get("by")) else h for h in t["history"]
-        ]
+        out["history"] = [_demoted_line(h) if line_needs_proof(h) else h for h in t["history"]]
     if isinstance(t.get("checklist"), list):
         out["checklist"] = [
             {

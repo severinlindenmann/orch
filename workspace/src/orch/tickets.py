@@ -6,7 +6,6 @@ Unknown fields are kept: a ticket is loaded as a plain dict, changed, saved whol
 from __future__ import annotations
 
 import contextlib
-import getpass
 import hashlib
 import json
 import os
@@ -136,17 +135,16 @@ def require_human(question: str, what: str) -> None:
 
 
 def current_actor(explicit: str | None = None) -> str:
-    """--by, else the agent tool seen in the environment, else human:<os user>."""
+    """--by, else the agent tool seen in the environment, else the person picked in the dashboard
+    ("You: <name>", orch.people), else human:<os user>."""
     if explicit:
         who = explicit
     elif agent_tool():
         who = "agent:" + str(agent_tool())
     else:
-        try:
-            user = getpass.getuser()
-        except Exception:
-            user = "user"
-        who = "human:" + re.sub(r"[^A-Za-z0-9_.@ -]", "_", user)[:64]
+        from orch import people
+
+        who = people.person_actor()
     if not re.fullmatch(r"(agent|human):[A-Za-z0-9_.@ -]{1,64}", who):
         raise Refused(f"'{who}' is not a valid actor. Use agent:<tool> or human:<name>.")
     if history.is_reserved_label(who):
@@ -453,9 +451,38 @@ def _get(ticket: dict, path: str):
     return cur
 
 
+def own_agent_label() -> str | None:
+    """agent:<tool> of the helper this process runs in (its tool's environment, else the run's ORCH_AGENT)."""
+    tool = agent_tool() or os.environ.get("ORCH_AGENT")
+    label = f"agent:{tool}" if tool else None
+    return label if label and re.fullmatch(r"agent:[A-Za-z0-9_.-]{1,40}", label) else None
+
+
+def _stamp_for(root: Path, ticket: dict) -> None:
+    """A helper's own new history lines get `for: <person>` when a person started its run (orch.people):
+    shown as "Agent - <person>". A helper that runs on its own (automation, factory, reviewer) gets none."""
+    try:
+        label = own_agent_label()
+        lines = (
+            [h for h in history.created_lines(ticket) if h.get("by") == label and "for" not in h]
+            if label
+            else []
+        )
+        if not lines:
+            return
+        from orch import people
+
+        who = people.acting_for(root)
+        for h in lines if who else ():
+            h["for"] = who
+    except Exception:  # noqa: BLE001 - attribution only: a line without `for` reads "Agent"
+        return
+
+
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
     p = ticket_path(root, ticket["id"])
+    _stamp_for(root, ticket)  # whom a helper works for, on its new lines (before they are recorded)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
@@ -952,7 +979,13 @@ def create(
     if parent is not None:
         # the parent must exist (a new ticket has no children, so no loop; set_parent checks loops later)
         parent_ticket = load(root, parent)
-    fields = fields or {}
+    fields = dict(fields or {})
+    if not fields.get("owner") and (by.startswith("human:") or by == own_agent_label()):
+        from orch import people
+
+        owner = people.owner_for(root, by)  # the person who makes it, or whom the helper works for
+        if owner:
+            fields["owner"] = owner
     for k, v in fields.items():
         clean_field(k, v)
     t = now()

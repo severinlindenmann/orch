@@ -799,6 +799,13 @@ function artifactsPanel(t) {
     [0, 1, 2].map(i => h('div', {className:'file-tile skeleton-tile', 'data-key':'skeleton-' + i})))];
   return [all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
+/* ORCH-417: a helper's history line says whom it worked for ("for": the person who started its run): "Helper - Severin".
+   A helper's line without it ran on its own (automation, factory, reviewer, older lines): "Helper". */
+function historyActor(entry) {
+  const by = String(entry?.by || '');
+  if (typeof chatDmName === 'function' && chatDmName(by)) return ticketActor(by);
+  return window.DashHelpers.agentWho(entry, n => name(window.DashHelpers.personName('human:' + n, state))) || ticketActor(by);
+}
 function ticketActor(by) {
   if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(window.DashHelpers.personName(by, state));
@@ -1114,7 +1121,7 @@ function ticketHistoryPanel(t) {
     const day = ticketHistoryDay(entry.at);
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')),
+      h('p', {}, view.sentence ? clean(view.sentence) : [historyActor(entry), clean(view.line)].filter(Boolean).join(' · ')),
       (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
   const controls = snapshot ? null : h('div', {className:'ticket-history-filters', role:'group', 'aria-label':'Show'}, ['All', 'People', 'Helper'].map(label => ticketButton(label, 'outline sm', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label)})));

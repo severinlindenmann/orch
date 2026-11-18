@@ -306,18 +306,23 @@ OPS = {
     "check.reopen": _check_plain("reopen"),
 }
 BY = {
-    "run.start": "focus",
     "manager.start": "focus",
     "mobile.set": "focus",
-}  # who a start is recorded as (the page is the starter); other ops: the person
+}  # who these are recorded as (the page); every other op, a helper's start too: the person (its run works for them)
 
 
 def actor() -> str:
+    """The person picked in the dashboard ("You: <name>", orch.people), else the computer's user."""
     try:
-        who = re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:64]
-    except (OSError, KeyError, ImportError):
-        who = ""
-    return f"human:{who or 'focus'}"
+        from orch import people
+
+        return people.person_actor(fallback="focus")
+    except Exception:  # noqa: BLE001 - an old core: the computer's user
+        try:
+            who = re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:64]
+        except (OSError, KeyError, ImportError):
+            who = ""
+        return f"human:{who or 'focus'}"
 
 
 def build_argv(op, args) -> list[str]:
