@@ -6,6 +6,8 @@
 
 // --- the model (plain data, tested in tests/live_history.test.js) ---
 const LIVE_HIST_MAX = 10;
+// Why the list can be empty: a helper that goes on with the same conversation (a daily run) keeps ONE session.
+const LIVE_HIST_EMPTY = 'Nothing earlier to reopen. This helper goes on with the same conversation each time; a session is added here when it starts a fresh one. orch keeps the last ' + LIVE_HIST_MAX + '.';
 const liveHistPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 // One row as the list shows it: when, what it was about, a fact line; whether Reopen is offered.
 function liveHistRow(r, now, when) {
@@ -65,7 +67,9 @@ function liveHistBody(sess) {
   const head = h('h3', {className:'live-hist-h', id:'live-hist-h-' + sess.id}, 'Earlier sessions');
   if (v.state === 'loading') return h('div', {className:'live-hist', 'aria-busy':'true'}, head, h('p', {className:'meta'}, 'Loading the earlier sessions…'));
   if (v.state === 'error') return h('div', {className:'live-hist'}, head, h('p', {className:'meta'}, 'The earlier sessions could not be loaded.'));
-  if (v.state === 'empty') return h('div', {className:'live-hist'}, head, h('p', {className:'meta'}, 'No earlier sessions yet. orch keeps the last ' + LIVE_HIST_MAX + ' of this ticket here.'));
+  if (v.state === 'empty') return h('div', {className:'live-hist'}, head,
+    v.rows.length ? liveHistRows(sess, v, working, busy, 'live-hist-h-' + sess.id) : null,
+    h('p', {className:'meta'}, LIVE_HIST_EMPTY));
   return h('div', {className:'live-hist'}, head,
     working ? h('p', {className:'meta'}, 'Stop the helper to reopen an earlier session.') : null,
     liveHistRows(sess, v, working, busy, 'live-hist-h-' + sess.id),
