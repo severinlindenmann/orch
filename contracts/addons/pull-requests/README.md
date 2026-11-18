@@ -115,7 +115,7 @@ group is closed afterwards. Green: its head gets the mark ("Checked green in a q
 Merge card is made on its ticket when there is none (the person's click merges it), and the entry ends `out`
 with reference state `owner merges` (nobody woken). Red: it leaves like any red group of one. Red (a check failed): the group is closed and only its members are split by what
 failed (ORCH-558): the words of the failed checks' names (`addons / dashboard-clickthroughs` -> addons, dashboard,
-clickthroughs; words like test, ubuntu, gate left out) are compared with the words of each member's changed paths;
+clickthroughs; words like test or ubuntu left out) are compared with the words of each member's changed paths;
 the members sharing the most are the suspects. The others run again together first, the suspects after. No member
 shares a word, or all share as many: split in halves. Either way recursively. Neither green nor red (GitHub did not answer: branch rules unreadable, no checks or no verdict in
 time, the pull request unreadable; a failed fetch or push; GitHub did not merge): back to the front with a

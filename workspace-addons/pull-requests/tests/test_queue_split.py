@@ -31,7 +31,7 @@ def _ten(bad_files=("workspace-addons/dashboard/clickthrough/features/g-github.c
 
 
 def test_suspects_are_the_members_sharing_most_words_with_the_failed_checks():
-    failed = ["addons / dashboard-clickthroughs", "gate"]
+    failed = ["addons / dashboard-clickthroughs"]
     members = [
         ("a", ["workspace-addons/sync/src/x.py"]),  # addons: 1
         ("b", ["workspace-addons/dashboard/clickthrough/run.cjs"]),  # addons, dashboard: 2
@@ -56,7 +56,7 @@ def test_a_red_group_of_ten_runs_the_nine_first_and_the_suspect_alone(ws):
     """Done-when of ORCH-558: the member touching the failing area alone, the other 9 merge, 2 more full runs."""
     for n in TEN:
         store.add(ws, url(n), None, "agent:t", login="bot")
-    gh = NamedChecks(_ten(), frozenset({"addons / dashboard-clickthroughs", "gate"}))
+    gh = NamedChecks(_ten(), frozenset({"addons / dashboard-clickthroughs"}))
     lines = []
     r, calls = make(ws, gh, FakeGit(), red_on_base={7}, log=lines.append)
     (ws / ".orch").mkdir(exist_ok=True)

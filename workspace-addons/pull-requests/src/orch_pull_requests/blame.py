@@ -17,7 +17,7 @@ _WORD = re.compile(r"[a-z0-9]+")
 # words of check names that say nothing about where the failure is
 NOISE = frozenset(
     {"test", "tests", "check", "checks", "job", "jobs", "ci", "run", "ubuntu", "macos", "windows", "latest",
-     "linux", "part", "parts", "gate", "final", "the", "and", "of", "src", "py", "js", "cjs", "mjs", "md", "json", "toml"}
+     "linux", "part", "parts", "the", "and", "of", "src", "py", "js", "cjs", "mjs", "md", "json", "toml"}
 )  # fmt: skip
 
 
