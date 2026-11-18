@@ -13,36 +13,40 @@ steps are marked `continue-on-error`, so its check stays green and only a warnin
   every called job passed or was skipped) and **banned-words** (the `rules` workflow).
 - The orch merge queue (pull-requests add-on) reads **every** check of a queue group: one failed, cancelled or
   timed-out check drops the group. So a known-red part must never report a failed check: known red sits on the
-  steps, never on the job (`brand/tests/test_ci_known_red.py` keeps it so). Night 17/18 Nov, before that fix, a
-  known-red Windows check stopped the queue for 75 minutes.
+  steps, never on the job (`brand/tests/test_ci_known_red.py` keeps it so), and since PR 1473 queue groups run
+  no Windows or macOS part at all. Night 17/18 Nov, before both, a known-red Windows check stopped the queue for
+  75 minutes.
 - `main` has no required check on GitHub; the owner merges a release after its pull request into `main` is green.
 
 ## The list
 
-| Check | Pull request into develop | Queue group (`orch-queue/…`) | Release (pull request into main) | Push to develop | Nightly |
+| Check | Pull request into develop | Queue group (`orch-queue/…`) | Push to develop | Nightly | Release (pull request into main + release check) |
 |---|---|---|---|---|---|
-| final ci check (last job of `ci.yml`) | required | required | required | runs | runs |
-| banned-words (rules) | required | required | skipped for `release/*` (already checked) | | |
-| workspace, Linux (2 parts) | required | required | required | runs | runs |
-| workspace, macOS (5 parts) | | required | required | runs | runs |
-| workspace, Windows (10 parts) | not while known red ¹ | shown (known red) | shown (known red) | | shown (known red) |
-| Windows install as a standard user | not while Windows is known red ¹ | required | required | | runs |
-| CLI smoke, Windows + macOS | required | required | required | | |
-| e2e smoke (5 minutes) | required | required | required | | |
-| add-on suites, page smoke, click-throughs | required | required | required | runs | |
-| clock (suites at 22:30 and 23:59:40 UTC) | required | required | required | runs | runs |
-| contracts, publish, relay | required | required | required | runs | |
-| mobile | required | required | required | runs | runs, with phone UI tests |
-| brand (words, tokens, CI time limits) | required | required | required | runs | runs |
-| full e2e (`e2e` workflow, 03:17 UTC) | | | | | runs |
+| final ci check (last job of `ci.yml`) | required | required | runs | runs | required |
+| banned-words (rules) | required | required | | | skipped for `release/*` (already checked) |
+| workspace, Linux (2 parts) | required | required | runs | runs | required |
+| workspace, macOS (5 parts) | | | runs | runs | required |
+| workspace, Windows (10 parts) | not while known red ¹ | | shown (known red) | shown (known red) | shown (known red), in the release check |
+| Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
+| CLI smoke, Windows + macOS | required | required | | | required |
+| e2e smoke (5 minutes) | required | required | | | required |
+| add-on suites, page smoke, click-throughs | required | required | runs | | required |
+| clock (suites at 22:30 and 23:59:40 UTC) | required | required | runs | runs | required |
+| contracts, publish, relay | required | required | runs | | required |
+| mobile | required | required | runs | runs, with phone UI tests | required |
+| brand (words, tokens, CI time limits) | required | required | runs | runs | required |
+| full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
 
 On a pull request, a queue group and a release, a check runs only when the change touches files it reads (paths
-filter in `ci.yml`); a skipped check counts as passed. On a push to develop and at night there is no merge left to
-stop: red there means develop is red, and the next queue group shows it.
+filter in `ci.yml`); a skipped check counts as passed. Queue groups run Linux only (ORCH-315, PR 1473): macOS and
+Windows run on develop itself, on every push (never cancelled), at night and in the release check (the release
+keeper's manual `ci` run with `windows=true`). On a push to develop and at night there is no merge left to stop: a
+red part there (known red aside) opens the release keeper's red-develop ticket, to be fixed by a pull request first
+in the queue.
 
 ¹ While Windows is known red, `scripts/touches_os_code.py --pr` answers `false` on every pull request, so the
-Windows parts run only on queue groups, release pull requests, nightly and a manual run with `windows=true`. Once
-Windows is green (KNOWN_RED empty), a pull request that changes file, process or path code runs them again.
+Windows parts run only on develop pushes, nightly and the release check (or a manual run with `windows=true`).
+Once Windows is green (KNOWN_RED empty), a pull request that changes file, process or path code runs them again.
 
 A draft pull request gets no CI run; marking it ready starts one.
 

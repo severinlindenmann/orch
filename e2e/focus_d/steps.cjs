@@ -720,6 +720,107 @@ async function split(page, dash, width) {
   await noSideways(page);
 }
 
+// Step 15. Sessions without a ticket (ORCH-364). The test dashboard has no orch to start helpers, so the step answers
+// the one start call (session.new) like the server does: the core makes the session (`orch session new <kind>`, tested
+// in workspace/tests/test_sessions.py) and the next state lists it in state.sessions, a helper with its run; the live
+// sessions API (/api/sessions) lists the open ones with their kind, as sessions.py no_ticket builds them. Everything
+// else is the real page: the bar's New menu, the buttons at the top of Focus, the layer, the pins.
+const NO_TICKET = [['empty', 'Empty helper', 't_ntempty01'], ['chat', 'Chat helper', 't_ntchat001'],
+  ['terminal', 'Plain terminal', 't_ntterm001'], ['manager', 'Manager', 't_ntmanag01']];
+async function noTicket(page, dash, width) {
+  const phone = width <= 720;
+  const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
+    description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
+    dashboard: { label: 'Focus', icon: 'target', order: 20 } };
+  const made = [], calls = [];
+  let last = null;
+  const dress = st => {
+    st.addons = [...(st.addons || []).filter(a => a.name !== live.name), live];
+    st.settings = { ...(st.settings || {}), focus_preview_on: true };
+    st.sessions = made.map(([kind, title, id]) => ({ id, kind, title, open: true }));
+    st.runs = { ...(st.runs || {}) };
+    made.forEach(([kind, , id]) => { if (kind !== 'terminal') st.runs[id] = { running: true, helper: { state: kind === 'empty' ? 'working' : 'idle' }, claim: { agent: 'agent:claude' } }; });
+    st.rev = 'nt-' + made.length;
+    last = st;
+    return st;
+  };
+  await page.route(/\/api\/state(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    if (res.status() !== 200) return route.fulfill({ response: res });
+    const st = await res.json();
+    route.fulfill({ response: res, json: st.unchanged && last ? dress({ ...last }) : dress(st) });
+  });
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: made.map(([kind, title, id]) => ({
+    id, key: '', title, kind, status: kind === 'empty' ? 'working' : 'idle', word: kind === 'empty' ? 'Working' : kind === 'terminal' ? 'Open' : 'Idle',
+    detail: '', waiting_on: [], question: null, lines: [], tool: kind === 'terminal' ? null : 'Claude Code', model: null,
+    mode: kind === 'terminal' ? null : 'live', opened_at: null, open_seconds: null, idle_seconds: null, closes_in_seconds: null, last_at: null })) } }));
+  await page.route('**/api/act', async route => {
+    const body = route.request().postDataJSON();
+    if (body.op !== 'session.new') return route.continue();
+    calls.push(body.args.kind);
+    const one = NO_TICKET.find(n => n[0] === body.args.kind);
+    if (!one) return route.fulfill({ status: 400, body: 'Choose an empty helper, a chat helper, a plain terminal or the Manager.' });
+    if (!made.includes(one)) made.push(one);
+    route.fulfill({ json: dress({ ...last }) });
+  });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.waitForSelector('#live-bar [data-lbar-new]', { timeout: 10000 });
+  const menu = async () => {
+    await page.click('#live-bar [data-lbar-new]');
+    await page.waitForSelector('#live-bar [data-key="lbar-new-menu"]', { timeout: 5000 });
+    return page.$$eval('#live-bar [data-lbar-kind]', els => els.map(el => [el.dataset.lbarKind, el.innerText.replace(/\s+/g, ' ').trim()]));
+  };
+  // the New menu: four choices with draft D's words; Esc closes it
+  const first = await menu();
+  const words = first.map(x => x[1]).join(' | ');
+  for (const [kind, title] of NO_TICKET) if (!first.some(x => x[0] === kind && x[1].startsWith(title))) throw new Error(`the New menu has no ${title}: ${words}`);
+  if (!/A helper with no ticket and no task yet/.test(words) || !/Looks after all helpers/.test(words)) throw new Error(`the New menu does not say what each one does: ${words}`);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#live-bar [data-key="lbar-new-menu"]', { state: 'detached', timeout: 5000 });
+  // start each one from the menu: it opens in the layer and is pinned by itself
+  for (const [kind, title, id] of NO_TICKET) {
+    await menu();
+    await page.click(`#live-bar [data-lbar-kind="${kind}"]`);
+    await page.waitForSelector(`#live-dock .live-pane[data-session="${id}"]`, { timeout: 10000 });
+    const head = await page.textContent(`#live-dock .live-pane[data-session="${id}"] .live-pt`);
+    if (head.trim() !== title) throw new Error(`the pane of the ${title} says "${head.trim()}"`);
+    const pins = await page.evaluate(() => JSON.parse(localStorage.getItem('orch.live.pins') || '[]'));
+    if (!pins.includes(id)) throw new Error(`the ${title} is not pinned`);
+    if (await page.$(`#live-dock .live-pane[data-session="${id}"] [data-key="live-open-ticket"]`)) throw new Error(`the ${title} offers Open ticket`);
+  }
+  if (calls.join() !== 'empty,chat,terminal,manager') throw new Error(`the start calls were ${calls.join()}`);
+  // the bar shows them as pinned sessions: chips by name on a wide screen, the pinned count on a phone
+  const barText = await page.textContent('#live-bar');
+  if (phone) {
+    const pinned = await page.getAttribute('#live-bar [data-lbar-list="pin"]', 'aria-label');
+    if (pinned !== 'Pinned: 4 sessions') throw new Error(`the bar says "${pinned}", not 4 pinned sessions`);
+  } else {
+    for (const [, title] of NO_TICKET) {
+      if (!barText.includes(title) && !await page.$('#live-bar [data-lbar-list="pin"]')) throw new Error(`the bar does not show the ${title}`);
+    }
+  }
+  // the menu now offers to go to the open ones; a second New starts nothing
+  const again = await menu();
+  if (!again.every(x => /Already open: go to it/.test(x[1]))) throw new Error(`the New menu does not say they are open: ${again.map(x => x[1]).join(' | ')}`);
+  await page.click('#live-bar [data-lbar-kind="manager"]');
+  await page.waitForSelector('#live-bar [data-key="lbar-new-menu"]', { state: 'detached', timeout: 5000 });
+  if (calls.length !== 4) throw new Error('a second New of the Manager started another one');
+  // the same four at the top of Focus, and the open sessions on the page
+  await page.locator('#live-dock [data-key="live-min"]:visible').first().click().catch(() => {});
+  await page.evaluate(() => { location.hash = '#addon/focus'; });
+  await page.waitForSelector('[data-key="live-new"] [data-live-new="empty"]', { timeout: 10000 });
+  const buttons = await page.$$eval('[data-key="live-new"] [data-live-new]', els => els.map(el => el.innerText.trim()));
+  if (buttons.join('|') !== NO_TICKET.map(n => n[1]).join('|')) throw new Error(`the top of Focus has ${buttons.join(', ')}`);
+  const rows = await page.$$eval('[data-key="live-no-ticket"] .lbar-row', els => els.map(el => el.innerText.replace(/\s+/g, ' ').trim()));
+  if (rows.length !== 4) throw new Error(`Focus shows ${rows.length} sessions without a ticket, not 4`);
+  await page.click('[data-key="live-new"] [data-live-new="chat"]');
+  await page.waitForSelector('#live-dock .live-pane[data-session="t_ntchat001"]', { timeout: 10000 });
+  if (calls.length !== 4) throw new Error('the Chat helper button on Focus started a second one');
+  await menu();  // the picture: Focus with the New menu open, as in draft D
+  await noSideways(page);
+}
+
 // Step 6: the Focus button on the ticket page and on every ticket row, and Open ticket back from the session. The test
 // workspace has one ticket, so the step adds four with the run states the button speaks for (Preview on).
 const FOCUS_TICKETS = [['run', 'ORCH-189', 'New price list for the shop', 'Watch'], ['wait', 'ORCH-190', 'Send the weekly summary', 'Answer'],
@@ -979,9 +1080,13 @@ const STEPS = [
   },
   {
     n: 15, pic: 'fd-15-no-ticket', area: 'sessions', title: 'Sessions without a ticket', feature: [6],
-    waits: T.sessions,
-    do: ['Open the New menu in the bar.', 'Start an Empty helper, a Chat helper, a Plain terminal and the Manager.'],
-    see: ['The four choices are at the top of Focus and in the New menu.', 'Each new session is pinned by itself.'],
+    do: ['Open the New menu in the bar.', 'Start an Empty helper, a Chat helper, a Plain terminal and the Manager.',
+      'Open Focus and press one of the four buttons at its top.'],
+    see: ['The four choices are at the top of Focus and in the New menu.', 'Each new session opens in the layer and is pinned by itself.',
+      'One that is open already says "Already open: go to it" and is not started twice.'],
+    async run({ page, dash, width }) {
+      await noTicket(page, dash, width);
+    },
     draft: { q: '?page=focus&menu=new' },
   },
   {

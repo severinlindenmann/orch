@@ -1028,3 +1028,54 @@ def test_ci_never_cancels_a_develop_push_run():
     group = re.search(r"group: (ci-.+)", ci).group(1)
     assert "github.ref != 'refs/heads/develop'" in cancel  # develop pushes are never cancelled ...
     assert "format('develop-{0}', github.sha)" in group  # ... and never replaced by a newer pending run
+
+
+# macOS and Windows run only on develop, not in the merge queue (ORCH-315): a red develop run opens the
+# red-develop ticket by itself, once per commit.
+def test_red_develop_push_run_opens_the_red_develop_ticket_once(tmp_path, capsys):
+    runs = {"ci.yml": [run(DEV, "push", "failure", rid=7)], "e2e.yml": []}
+    jobs = {
+        "7": [
+            job("workspace / test (macos-latest, 2/5)", "failure"),
+            job("workspace / test (ubuntu-latest, 1/2)"),
+        ]
+    }
+    out = go(tmp_path, capsys, runs=runs, jobs=jobs)
+    assert "ticket:ci run is red on develop (dddddddd)" in out["did"]
+    assert out["state"]["develop_red_sha"] == DEV
+    again = go(tmp_path, capsys, state=out["state"], runs=runs, jobs=jobs)
+    assert not any(d.startswith("ticket:") for d in again["did"])
+
+
+def test_red_develop_with_an_open_ticket_makes_no_second(tmp_path, capsys):
+    runs = {"ci.yml": [run(DEV, "schedule", "failure")], "e2e.yml": []}
+    open_t = [
+        {
+            "id": "t_1",
+            "key": "ORCH-393",
+            "status": "open",
+            "title": "ci run is red on develop (release 34 blocked)",
+        }
+    ]
+    out = go(tmp_path, capsys, runs=runs, tickets=open_t)
+    assert not any(d.startswith("ticket:") for d in out["did"])
+
+
+def test_a_running_newer_develop_run_is_skipped_and_green_opens_nothing(tmp_path, capsys):
+    newer = run("n" * 40, "push", "", status="in_progress", at="2026-11-17T02:00:00Z")
+    runs = {"ci.yml": [newer, run(DEV, "push")], "e2e.yml": []}
+    out = go(tmp_path, capsys, runs=runs)
+    assert not any(d.startswith("ticket:") for d in out["did"])
+    assert "develop_red_sha" not in out["state"]
+
+
+def test_known_red_windows_on_develop_opens_nothing(tmp_path, capsys):
+    runs = {"ci.yml": [run(DEV, "push", "failure", rid=8)], "e2e.yml": []}
+    jobs = {
+        "8": [
+            job("workspace / test (windows-latest, 3/10)", "failure"),
+            job("workspace / test (macos-latest, 1/5)"),
+        ]
+    }
+    out = go(tmp_path, capsys, runs=runs, jobs=jobs)
+    assert not any(d.startswith("ticket:") for d in out["did"])
