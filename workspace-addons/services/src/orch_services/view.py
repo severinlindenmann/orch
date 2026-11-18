@@ -8,7 +8,6 @@ footnote to Automation. The dashboard draws the block; every button sends `addon
 
 from __future__ import annotations
 
-import hashlib
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,7 +19,6 @@ WORD = {"running": "Running", "stopped": "Stopped", "failing": "Failing"}
 TONE = {"running": "good", "stopped": "neutral", "failing": "bad"}
 AUTO_WORDS = {True: "Yes, after this computer restarts", False: "No, you start it by hand"}
 TICKET_ID = re.compile(r"t_[a-z0-9]{6,16}")
-ITEM_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,63}")
 
 
 def _plain(text: str, n: int = 200) -> str:
@@ -82,17 +80,31 @@ def _made_by(root: Path, made: object) -> dict:
     return {"label": "Made by", "value": "Added by hand"}
 
 
-def _log(root: Path, sid: str) -> list[str]:
-    from .cli import tail_masked
+def _adopted(r: dict) -> bool:
+    made = r.get("made_by")
+    return isinstance(made, dict) and bool(made.get("found"))
+
+
+def _log(root: Path, r: dict) -> list[str]:
+    """The last log lines, masked; an adopted job's own log (its plist log or journal), as orch services log shows."""
+    from .cli import _log_lines, tail_masked
 
     try:
-        lines = tail_masked(root, store.log_path(root, sid), LOG_LINES * 2)  # blank lines are dropped below
+        if _adopted(r):
+            lines = _log_lines(root, store.get(root, r["id"]), LOG_LINES * 2)  # blank lines are dropped below
+        else:
+            lines = tail_masked(root, store.log_path(root, r["id"]), LOG_LINES * 2)
     except store.Refused:
         return []
     return [_plain(ln) for ln in lines if ln.strip()][-LOG_LINES:]
 
 
 def _remove_lines(r: dict, depends: list[str]) -> list[str]:
+    if _adopted(r):  # remove only forgets an adopted job (cli.cmd_simple): say that, not "it stops now"
+        return [
+            "orch stops managing it and it leaves this list.",
+            "The job itself is left as it is on this computer.",
+        ]
     stopped = r["state"] == "stopped"
     lines = [
         "It stays stopped and leaves this list." if stopped else "It stops now and leaves this list.",
@@ -148,7 +160,7 @@ def _service_item(root: Path, r: dict) -> dict:
         "panel": {
             "buttons": [main] if stopped else [main, _btn("Restart", "restart", sid)],
             "facts": facts,
-            "log": {"lines": _log(root, sid), "empty": _plain(f"{name} has not written anything yet.")},
+            "log": {"lines": _log(root, r), "empty": _plain(f"{name} has not written anything yet.")},
             "danger": {
                 "label": "Remove",
                 "note": "Remove takes it off this list for good.",
@@ -168,8 +180,11 @@ def _found_item(f: dict) -> dict | None:
     if not (isinstance(sid, str) and 0 < len(sid) <= 200 and isinstance(name, str) and name.strip()):
         return None
     # Found ids keep the platform's label (often with capitals); the page takes only a plain id, so the item gets
-    # a stable one of its own and Manage with orch still sends the real found id.
-    vid = sid if ITEM_ID.fullmatch(sid) else "found-" + hashlib.sha1(sid.encode("utf-8")).hexdigest()[:12]
+    # a stable one of its own. Manage with orch sends that id (the page only draws a button aimed at its own item)
+    # and adopt finds the real job from it (found.get).
+    from .found import page_id
+
+    vid = page_id(sid)
     since = _when(f.get("since"))
     facts = [
         {"label": "Found", "value": (f"Running since {since}" if since else "Running") + ", not made by orch"}
@@ -183,7 +198,7 @@ def _found_item(f: dict) -> dict | None:
         "panel": {
             "facts": facts,
             "note": "orch leaves it alone until you say so.",
-            "buttons": [_btn("Manage with orch", "adopt", sid)],
+            "buttons": [_btn("Manage with orch", "adopt", vid)],
         },
     }
 
