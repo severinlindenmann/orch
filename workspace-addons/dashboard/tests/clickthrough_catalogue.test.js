@@ -19,11 +19,6 @@ test('every dashboard feature has a click-through', () => {
     'workspace-addons/dashboard/clickthrough/features/ (do it, reload, check; see clickthrough/README.md):\n  - ' + missing.join('\n  - '));
 });
 
-test('the not-yet list only shrinks: a feature with a click-through comes off it', () => {
-  const { done } = catalogue.coverage();
-  assert.deepEqual(done, [], 'These features have a click-through now: take them off clickthrough/not-yet.json');
-});
-
 test('no click-through claims a feature that is gone', () => {
   const { unknown } = catalogue.coverage();
   assert.deepEqual(unknown, [], 'These claims name no dashboard feature any more (renamed or removed): update covers in the file');

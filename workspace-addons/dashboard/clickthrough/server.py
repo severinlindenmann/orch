@@ -10,16 +10,18 @@ orch_bin=SELF: every click in the page runs the real `python -I -m orch` and wri
 reload shows what really happened.
 
 Prints `ready <base url>` once it listens. Every line `token` on stdin prints `token <one-time sign-in token>`
-(a browser context signs in with <base>/#launch=<token>). Writes only under <dir>.
+(a browser context signs in with <base>/#launch=<token>); `forget-update-info` drops the cached newest version. Writes only under <dir>.
 """
 
 import json
 import os
 import pwd
 import re
+import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 D, PORT = Path(sys.argv[1]).resolve(), int(sys.argv[2])
@@ -38,9 +40,41 @@ WS.mkdir(parents=True, exist_ok=True)
 # line, waits a little (so Stop has something to stop) and ends.
 STUB = (
     "#!/bin/sh\n"
-    'echo "$(date) $(basename "$0") $*" >> "$(dirname "$0")/../fake-agent.log"\n'
-    'case " $* " in *" --session-id "*|*" -p "*|*" exec "*) sleep 20 ;; *) echo "stand-in 0.0 (not a real agent)" ;; esac\n'
+    'D="$(dirname "$0")/.."\n'
+    'echo "$(date) $(basename "$0") $*" >> "$D/fake-agent.log"\n'
+    'case " $* " in\n'
+    '  *" --session-id "*|*" -p "*|*" exec "*) sleep 20 ;;\n'
+    # the login check: signed out until the stand-in sign-in below finished
+    '  *" auth status "*) if [ -f "$D/standin-logged-in" ]; then echo \'{"loggedIn": true}\';'
+    " else echo '{\"loggedIn\": false}'; fi ;;\n"
+    # the sign-in: a link that goes nowhere, then one line (the code) on stdin, then signed in
+    '  *" auth login "*) echo "Open https://claude.ai/standin-sign-in to sign in"; read -r code;'
+    ' echo "$code" > "$D/standin-logged-in" ;;\n'
+    '  *) echo "stand-in 0.0 (not a real agent)" ;;\n'
+    "esac\n"
 )  # a version or help question is answered at once (orch asks it to list the agents); only a session waits
+
+# GitHub is never reached: a stand-in `gh` answers the few questions orch asks about a pull request (open, green,
+# not reviewed, one head commit) and "merges" by writing a line. Only pull requests of the made-up repository
+# standin/lunch answer; anything else fails like an unknown repository.
+HEAD = "c0ffee" + "0" * 34
+GH = (
+    "#!/bin/sh\n"
+    'D="$(dirname "$0")/.."\n'
+    'echo "$(date) gh $*" >> "$D/fake-gh.log"\n'
+    'case " $* " in *" https://github.com/standin/lunch/pull/"*|*" api user "*) ;;'
+    ' *) echo "not found" >&2; exit 1 ;; esac\n'
+    'CHECK=\'{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}\'\n'
+    'case " $* " in\n'
+    '  *" api user "*) echo standin ;;\n'
+    f'  *" pr view "*"reviewDecision"*) printf \'OPEN\\t\\t{HEAD}\\n\' ;;\n'
+    f'  *" pr view "*"isDraft"*) echo \'{{"state":"OPEN","isDraft":false,"headRefOid":"{HEAD}",'
+    '"statusCheckRollup":[\'"$CHECK"\']}\' ;;\n'
+    '  *" pr view "*"statusCheckRollup"*) echo \'{"statusCheckRollup":[\'"$CHECK"\']}\' ;;\n'
+    '  *" pr merge "*) echo "$*" >> "$D/standin-merged" ;;\n'
+    '  *) echo "stand-in gh: not answered: $*" >&2; exit 1 ;;\n'
+    "esac\n"
+)
 BIN = D / "bin"
 BIN.mkdir(exist_ok=True)
 from orch import adapters
@@ -51,8 +85,10 @@ PROGRAMS = sorted(
 )
 if not PROGRAMS:
     sys.exit("no built-in agent programs found in orch's adapter list: refusing to start")
-for name in PROGRAMS:
-    (BIN / name).write_text(STUB)
+if "gh" in PROGRAMS:
+    sys.exit("an agent program is named gh: refusing to start")
+for name, body in [*((n, STUB) for n in PROGRAMS), ("gh", GH)]:
+    (BIN / name).write_text(body)
     (BIN / name).chmod(0o755)
 os.environ["PATH"] = f"{BIN}{os.pathsep}{os.environ.get('PATH', '')}"
 
@@ -105,6 +141,22 @@ def seed() -> dict:
     for name in PROGRAMS:
         if adapters.find_binary(name) != str(BIN / name):
             sys.exit(f"{name} would not be the stand-in here: refusing to start (a real agent could run)")
+    if shutil.which("gh") != str(BIN / "gh"):
+        sys.exit("gh would not be the stand-in here: refusing to start (GitHub could be reached)")
+    # Add-ons of this checkout (run.cjs layers them into every orch of the run): installed in the demo home and
+    # allowed for this workspace, but off; a click-through turns one on itself (`addon add <name> --project-only`)
+    # and off again, so the other click-throughs see the workspace as before.
+    from orch import addons
+
+    names = ["focus", "lessons", "pull-requests"]
+    addons.registry_path().write_text(
+        json.dumps([{"name": n, "source": "built-in", "version": "0.1.0"} for n in names])
+    )
+    found = addons.discover()
+    for n in names:
+        if n not in found:
+            sys.exit(f"the {n} add-on of this checkout is not installed in the demo home: refusing to start")
+        addons.record_consent(WS, n)
     ids = {}
 
     def new(key: str, title: str, *steps: str) -> str:
@@ -160,6 +212,76 @@ def seed() -> dict:
 IDS = seed()
 (D / "seed.json").write_text(json.dumps(IDS))
 
+# Stand-ins for what lives outside this computer, on 127.0.0.1 only. They are started here but stay unused until a
+# click-through turns the relay or publish on itself (both are off and invisible until a person turns them on).
+sys.path.insert(0, str(ROOT / "workspace" / "tests"))
+import fakes  # the same fakes the workspace tests use
+
+SOON = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 7 * 86400))
+LATER = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 14 * 86400))
+
+
+def standin_publish() -> fakes.Fake:
+    f = fakes.make_publish()
+    expires = {}
+
+    def post_file(
+        m, q, body
+    ):  # the shared file: as the fake does, but it ends in a week (the fake's date is past)
+        status, out = first_post(m, q, body)
+        expires[out["id"]] = SOON
+        return status, {**out, "expires_at": SOON}
+
+    def list_files(m, q, b):
+        status, out = first_list(m, q, b)
+        return status, {**out, "items": [{**i, "expires_at": expires.get(i["id"])} for i in out["items"]]}
+
+    def extend(m, q, body):
+        if m.group(1) not in f.files:
+            return 404, {"error": "not_found", "message": "No such file."}
+        expires[m.group(1)] = LATER
+        return 200, {"id": m.group(1), "expires_at": LATER}
+
+    first_post = next(fn for meth, rx, fn in f.routes if (meth, rx) == ("POST", "/v1/files"))
+    first_list = next(fn for meth, rx, fn in f.routes if (meth, rx) == ("GET", "/v1/files"))
+    f.routes[:0] = [
+        ("POST", "/v1/files", post_file),
+        ("GET", "/v1/files", list_files),
+        ("PATCH", r"/v1/files/(f_[a-z0-9]+)", extend),
+    ]
+    return f
+
+
+def standin_relay() -> fakes.Fake:
+    f = fakes.make_relay()
+    f.snapshot["workspaces"]["workspaces"] = [
+        {
+            "id": "ws_kitchen001",
+            "name": "Kitchen",
+            "description": "Cooks the team lunch.",
+            "tags": [],
+            "online": True,
+            "last_seen": SOON,
+            "can_send": {"text": True, "files": True, "delegate": False, "start": False},
+            "accepts_from": {"text": True, "files": True, "delegate": False, "start": False},
+        }
+    ]
+    f.snapshot["workspaces"]["phones"] = [{"id": "ph_anna000001", "name": "Anna's phone", "online": True}]
+    f.route("POST", "/v1/heartbeat", lambda m, q, b: (200, {}))
+    return f
+
+
+PUBLISH, RELAY = standin_publish(), standin_relay()
+(D / "standins.json").write_text(
+    json.dumps(
+        {
+            "publish": {"url": PUBLISH.url, "workspace": fakes.WS, "token": PUBLISH.token},
+            "relay": {"url": RELAY.url, "workspace": fakes.WS, "token": RELAY.token},
+            "head": HEAD,
+        }
+    )
+)
+
 from orch import pagelaunch
 from orch.pagesession import SELF
 
@@ -173,6 +295,11 @@ def tokens() -> None:
     for line in sys.stdin:
         if line.strip() == "token":
             print(f"token {pagelaunch.write_launch_token(WS, 'dashboard')}", flush=True)
+        elif line.strip() == "forget-update-info":  # the page server keeps "the newest orch" for 10 minutes
+            from orch import updateinfo
+
+            updateinfo.forget()
+            print("forgot update-info", flush=True)
 
 
 threading.Thread(target=tokens, daemon=True).start()
