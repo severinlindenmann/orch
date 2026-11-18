@@ -176,3 +176,29 @@ def test_the_second_look_leaves_a_kind_the_workspace_does_not_accept(proj, run, 
     res = reviewer.decide(proj, t, [facts])
     assert res["verdict"] == "leave" and res["kind_block"]
     assert lookreview.triage(t, [facts], res, 0) is None
+
+
+def test_a_helper_cannot_pose_as_a_person_or_turn_a_draft_into_a_bug(proj, run, new_ticket, monkeypatch):
+    tid = new_ticket("new look")
+    assert run("ticket", "kind", tid, "draft", "--by", "agent:claude")[0] == 0
+    code, out, err = run("ticket", "kind", tid, "small_bug", "--by", "agent:claude")
+    assert code == 2 and "Only a person moves a ticket out of Draft or design" in out + err
+    other = new_ticket("fix login")
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")  # a helper that says --by human:...
+    t = tickets.set_kind(proj, other, "bug", "human:tester")
+    assert t["kind"]["by"] == "agent:claude" and not tickets.kind_by_person(t)
+
+
+def test_a_helper_cannot_change_the_kind_of_finished_work(proj, run, new_ticket):
+    tid = new_ticket("fix login")
+    assert run("ticket", "kind", tid, "feature", "--by", "agent:claude")[0] == 0
+    tickets.set_status(proj, tid, "review", "human:tester")
+    code, out, err = run("ticket", "kind", tid, "small_bug", "--by", "agent:claude")
+    assert code == 2 and "only a person changes its kind now" in out + err
+    assert run("ticket", "kind", tid, "small_bug", "--by", "human:tester")[0] == 0
+
+
+def test_a_ticket_without_a_kind_counts_as_a_small_bug(proj, run, new_ticket, facts, on):
+    assert run("config", "set", "workflow.reviewer_kinds", "bug,small_feature", "--by", "human:t")[0] == 0
+    _finished(proj, run, new_ticket)
+    assert _verdict(proj) == [("leave", "small bug work is not accepted by itself here (Settings).")]

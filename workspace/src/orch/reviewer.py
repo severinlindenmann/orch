@@ -6,8 +6,8 @@ concept, technical) wait for his answer. A program decides from facts, never a m
 - **Accept for you** (Review -> Done) when every task is done with evidence, every part of Done when has a
   task, no question waits, every linked pull request is merged with its checks green, and the change is
   small by its files (`size_reasons`), and the ticket's kind is one the workspace lists
-  (`workflow.reviewer_kinds`, default bugs; ORCH-645). A ticket without a kind (made before kinds) is
-  judged by its facts alone.
+  (`workflow.reviewer_kinds`, default bugs; ORCH-645). A ticket without a kind (made before kinds)
+  counts as a small bug.
 - **Leave it for you** when a ticket is a draft, mockup or design (kind `draft`, never accepted), its kind
   is not listed, or when the change is not small, there is no pull request to check, a part of Done when
   has no task (ORCH-220: a missing link is a question for you, not work for a helper), or it was already sent
@@ -320,10 +320,10 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
             "why": "this workspace lets the Reviewer accept no kind of work by itself.",
             "kind_block": True,
         }
-    if kind and kind not in allowed:
+    if (kind or "small_bug") not in allowed:  # no kind (older tickets): counts as a small bug, today's rule
         return {
             "verdict": "leave",
-            "why": f"{tickets.KINDS[kind].lower()} work is not accepted by itself here (Settings).",
+            "why": f"{tickets.KINDS[kind or 'small_bug'].lower()} work is not accepted by itself here (Settings).",
             "kind_block": True,  # the second look leaves it too: the owner's setting covers every automation
         }
     why: list[str] = []

@@ -2230,13 +2230,23 @@ def _put_kind(ticket: dict, name: str, by: str) -> bool:
     changes it."""
     if kind(ticket) == name:
         return False
-    if kind_by_person(ticket) and not _is_person(by):
-        raise Refused(
-            f"A person set this ticket's kind ({KINDS[kind(ticket)]}); only a person changes it. "
-            f'Ask instead: orch ask {ticket.get("id", "<id>")} "Change the kind to {KINDS[name]}?" '
-            "--option yes --option no"
-        )
     old = kind(ticket)
+    person = _is_person(by)
+    ask = (
+        f'Ask instead: orch ask {ticket.get("id", "<id>")} "Change the kind to {KINDS[name]}?" '
+        "--option yes --option no"
+    )
+    if not person:
+        if kind_by_person(ticket):
+            raise Refused(f"A person set this ticket's kind ({KINDS[old]}); only a person changes it. {ask}")
+        if old == "draft":  # a helper never turns a draft into work the Reviewer may accept
+            raise Refused(f"Only a person moves a ticket out of Draft or design. {ask}")
+        if old and ticket.get("status") in ("review", "done", "closed"):
+            raise Refused(f"The work is finished: only a person changes its kind now. {ask}")
+        if by.startswith(
+            "human:"
+        ):  # --by human:... from inside a helper: stored as the helper (never a lock)
+            by = "agent:" + str(agent_tool() or "helper")
     ticket["kind"] = {"name": name, "by": by[:100]}
     add_history(ticket, by, f"Kind: {KINDS[name]}" + (f" (was: {KINDS[old]})" if old else ""))
     return True
