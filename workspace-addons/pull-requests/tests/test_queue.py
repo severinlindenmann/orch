@@ -269,6 +269,22 @@ def test_a_lone_pull_request_marked_but_not_merged_gets_its_mark_taken_back(ws):
     assert store.find(store.read(ws), url(1))["state"] == "waiting"
 
 
+def test_a_waiter_that_fails_after_the_mark_still_takes_every_mark_back(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = FakeGitHub({1: {"fresh": True}})
+    r, _ = make(ws, gh, FakeGit())
+
+    def waiter(u, before_merge=None, merge=True):
+        head = gh.pr(u)["headRefOid"]
+        assert before_merge(head) is None and before_merge(head) is None  # asked twice: marked twice
+        raise RuntimeError("the waiter broke")
+
+    r.waiter = waiter
+    with pytest.raises(RuntimeError):
+        r.process(r.next_batch())
+    assert gh.marks == [] and gh.unmarked == [f"{1:040d}"]  # taken back once per head
+
+
 def test_one_pull_request_alone_is_checked_in_a_group_of_one_on_top_of_the_base(ws):
     """develop changed files it changes since it took develop in (the fake waiter's default): a group of one."""
     store.add(ws, url(1), None, "agent:t", login="bot")

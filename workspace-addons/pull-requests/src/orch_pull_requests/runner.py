@@ -452,9 +452,14 @@ class Runner:
             self.on_base(e, why)
             return
         marked: list[str] = []
-        o = self.waiter(e["url"], lambda head: self.before_direct(e, base, head, marked))
-        if marked and not (o.ok and o.status == "merged"):  # marked, then not merged: the mark is taken back
-            self.unmark(e["repo"], marked[-1], f"Not merged by the queue: {o.status or 'no verdict'}")
+        o = None
+        try:
+            o = self.waiter(e["url"], lambda head: self.before_direct(e, base, head, marked))
+        finally:  # marked, then not merged (also when the waiter failed): every mark it set is taken back
+            if marked and not (o is not None and o.ok and o.status == "merged"):
+                why_not = (o.status if o is not None else "") or "no verdict"
+                for sha in dict.fromkeys(marked):
+                    self.unmark(e["repo"], sha, f"Not merged by the queue: {why_not}")
         line = o.line + (f" ({why})" if why else "")
         unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
         if o.ok and o.status == "merged":
