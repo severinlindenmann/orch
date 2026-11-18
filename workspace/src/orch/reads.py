@@ -9,7 +9,10 @@ the caller starts the command as before."""
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
 from orch import history, review, tickets
@@ -63,6 +66,36 @@ def review_answered(root: Path) -> list[dict]:
     return _answered(root)
 
 
+def _record_args(argv: list[str]):
+    """argv (`record query ...`, without --json) parsed by the command's own parser, or NotHere."""
+    from orch import cli_record
+
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true")
+    common.add_argument("--by")
+    cli_record.add_parsers(parser.add_subparsers(dest="cmd"), common)
+    try:
+        args, rest = parser.parse_known_args(argv)
+    except (argparse.ArgumentError, SystemExit, ValueError):
+        raise NotHere(" ".join(argv)) from None
+    if rest or args.cmd != "record" or args.sub != "query" or args.detail is not None:
+        raise NotHere(" ".join(argv))
+    return args
+
+
+def record_query(root: Path, argv: list[str]) -> dict:
+    """`orch record query --ticket <id> ... --json` with the long-running reader's memory of run files
+    (record.read_run_for): only run files that changed are parsed again. Without --ticket it is not answered
+    here (a whole-record query is rare and would keep every line in memory)."""
+    from orch import cli_record
+
+    args = _record_args(argv)
+    if not args.ticket:
+        raise NotHere(" ".join(argv))
+    return cli_record.query(root, args, cached=True)
+
+
 def _plain(root: Path, data):
     """As the command prints it with --json: tickets shown as provable here, then through JSON (a copy that
     shares nothing with the core's own objects)."""
@@ -101,8 +134,67 @@ def answer(root: Path, argv: list[str]):
         from orch import runwatch
 
         return {"screens": runwatch.tails(root, a[2:-2], int(a[-1]))}
+    if a[:2] == ["record", "query"]:
+        return record_query(root, a)
+    if a == ["needs"]:
+        from orch import needs
+
+        return json.loads(json.dumps(needs.needs(root), ensure_ascii=False))
     if a == ["review", "list"]:
         return _plain(root, review_cards(root))
     if a == ["review", "list", "--answered"]:
         return _plain(root, review_answered(root))
     raise NotHere(" ".join(argv))
+
+
+def same_orch(orch_bin: str | None) -> bool:
+    """True when `orch_bin` is this very orch: `orch:self` (pagesession.SELF), or the `orch` console script of
+    the Python this process runs (its first line names this interpreter). Anything else (a test's fake orch,
+    another install) keeps its own process for every read."""
+    if orch_bin == "orch:self":
+        return True
+    if not orch_bin or os.name == "nt":
+        return False
+    try:
+        with open(orch_bin, "rb") as f:
+            head = f.read(512)
+    except OSError:
+        return False
+    first = head.split(b"\n", 1)[0]
+    if not first.startswith(b"#!") or b"orch_entry" not in head:
+        return False
+    interp = first[2:].strip().decode("utf-8", "replace")
+    return os.path.abspath(interp) == os.path.abspath(sys.executable)
+
+
+READS = {"here": 0, "worker": 0}  # per process: reads answered in this process, and by the read worker
+
+
+def call(root: Path, argv: list[str], *, timeout: float = 10.0, environ=None) -> tuple[int, object] | None:
+    """`orch <argv>` (a read, ending in --json) for a caller in this orch's own interpreter, without a new
+    process per read: (exit code, the parsed JSON it prints), answered here (answer) or by the caller's read
+    worker (orch.readworker). None: neither could answer, the caller starts the command as before. Exit 2
+    comes with the command's own `{"error", ...}` object."""
+    try:
+        value = answer(root, argv)
+        READS["here"] += 1
+        return 0, value
+    except NotHere:
+        pass
+    except Refused as e:
+        READS["here"] += 1
+        return 2, {"error": str(e), **getattr(e, "extra", {})}
+    except Exception:  # noqa: BLE001 - anything unexpected: the worker (the command itself) gets its chance
+        pass
+    from orch import readworker
+
+    got = readworker.run(root, argv, timeout=timeout, environ=environ)
+    if got is None:
+        return None
+    code, out = got
+    try:
+        value = json.loads(out)
+    except ValueError:
+        value = None
+    READS["worker"] += 1
+    return code, value

@@ -28,6 +28,8 @@ RUN = "r_8k2m01"
 DETAIL = {"input": "hello", "output": "world"}
 LINK = "reparse" if os.name == "nt" else "link"  # Windows sees a symlink as a reparse point first
 CORE = {
+    "_identity",  # ORCH-634: fstat of an fd the core opened (the long-running reader's memory)
+    "_quick",  # ORCH-634: lstat through _path_info of a run file and its pending folder
     "_io_setup",
     "_try_lock",
     "_release_lock",
@@ -110,6 +112,10 @@ SAFE_ATTRIBUTE_CALLS = {
     "(_json(event) + '\\n').encode",
     "ReadResult.from_error",
     "_ALERTED.add",
+    "_RUN_SEEN.pop",  # ORCH-634: the long-running reader memory (record.read_run_for)
+    "_RUN_SEEN.clear",  # ORCH-634: the long-running reader memory (record.read_run_for)
+    "seen[3].get",  # ORCH-634: the long-running reader memory (record.read_run_for)
+    "_RUN_SEEN.get",  # ORCH-634: the long-running reader memory (record.read_run_for)
     "_CHANGE_VALIDATOR.is_valid",
     "_DETAIL_VALIDATOR.is_valid",
     "_META_VALIDATOR.is_valid",
@@ -257,6 +263,7 @@ ERROR_BOUNDARIES = {
     "lost_in",  # ORCH-189: counts the lost-hook alerts for Insights; never raises, like note_lost
     "_note",
     "read_run",
+    "read_run_for",  # ORCH-634: read_run for a long-running reader; errors go through _report like read_run
     "run_lines",
     "_pending_count",
     "apply_retention",

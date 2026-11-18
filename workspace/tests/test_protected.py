@@ -100,13 +100,46 @@ def test_hook_answers_with_a_refusal(proj, monkeypatch, capsys):
     assert run_hook(monkeypatch, capsys, read, proj, t["id"]) == ""
 
 
-def test_hook_is_wired_before_bash_only():
+def test_hook_is_wired_before_bash_only(monkeypatch):
+    """Where the record hook runs (POSIX) the guard is part of it (`orch record hook --with claude`, one
+    process per tool event, ORCH-634; the guard itself answers only for Bash); without it (Windows) its own
+    group, Bash only."""
     doc = adapters.reminder_doc("claude")
     if doc is None:
         pytest.skip("hooks not importable here")
     groups = doc["hooks"]["PreToolUse"]
+    assert [g["hooks"][0]["command"].split(" -m orch ")[1] for g in groups] == ["record hook --with claude"]
+    monkeypatch.setattr(adapters, "_is_windows", lambda: True)
+    groups = adapters.reminder_doc("claude")["hooks"]["PreToolUse"]
     guards = [g for g in groups if "protected-check" in g["hooks"][0]["command"]]
-    assert len(guards) == 1 and guards[0]["matcher"] == "Bash"
+    assert len(guards) == 1 and guards[0]["matcher"] == "Bash" and len(groups) == 1
+
+
+def test_the_record_hook_with_the_tool_answers_the_guard_too(proj, monkeypatch, capsys):
+    """`orch record hook --with claude` (ORCH-634): one process reads the payload once, records (here:
+    nothing, not inside a run) and still refuses the command for a protected machine, exit 0 as every hook."""
+    from orch import cli_record
+
+    config.set_protected_machines(proj, "orch-dev")
+    t = tickets.create(proj, "Try", "human:t")
+    monkeypatch.setenv("ORCH_ROOT", str(proj))
+    monkeypatch.setenv("ORCH_TICKET", t["id"])
+
+    def hook(payload):
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload) + "\n"))
+        assert cli_record.hook_main(["record", "hook", "--with", "claude"]) == 0
+        return capsys.readouterr().out
+
+    bash = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": str(proj),
+            "tool_input": {"command": "ssh orch-dev pytest"}, "tool_use_id": "toolu_x1"}  # fmt: skip
+    out = json.loads(hook(bash))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert hook({**bash, "tool_input": {"command": "ls"}}) == ""
+    assert hook({**bash, "hook_event_name": "PostToolUse", "tool_response": {"stdout": "x"}}) == ""
+    assert (
+        hook({"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": "orch-dev"}})
+        == ""
+    )
 
 
 def test_a_question_never_offers_a_protected_machine_for_tests(proj, home, monkeypatch):

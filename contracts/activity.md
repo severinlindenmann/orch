@@ -88,16 +88,20 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   Where the process tree cannot be read (**Windows today: the hook records nothing**, reason `not_provable`, until the
   token below or a Windows process-tree proof exists) nothing is written. Nested runs: the check accepts the claim's own
   pids anywhere among the caller's ancestors, so a call from a child run's tree can still name its parent run; telling
-  them apart needs the token below. `orch record hook` always exits 0 with nothing on stdout and at most one stderr
-  line (a tool's hook exit 2 would block the tool call) unless `--strict` (then 2): any `orch record [flags] hook
+  them apart needs the token below. `orch record hook` always exits 0 with nothing of its own on stdout and at most one
+  stderr line (a tool's hook exit 2 would block the tool call) unless `--strict` (then 2): any `orch record [flags] hook
   [anything]` is taken before the parser, the Chat guard and the notices. The `orch` console script's own entry
   (`orch_entry:main`, stdlib only) checks this first, before orch is imported and before the update check: its
   watchdog starts before the import, and anything that still fails (an update in progress, an import of a broken
   install that raises or hangs, a SystemExit) ends with the same exit; `python -m orch` does the same. Only `--by`
   is known as a flag that takes a value: a global flag before `record` (`orch --json record hook`) or another flag
   with a value before `hook` is not this form and goes to the parser (which can exit 2). The hook wiring calls
-  exactly `orch record hook` (optionally `--strict`): the root comes from `ORCH_ROOT` or the working folder only;
-  other flags are ignored. The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
+  exactly `orch record hook` (optionally `--strict`, and `--with <tool>`): the root comes from `ORCH_ROOT` or the
+  working folder only; other flags are ignored. `--with <tool>` (ORCH-634: one process per tool event instead of up
+  to three) reads the payload once and, after the record write, runs that tool's own hooks of the step in the same
+  process: before a call its guard (`guard_hooks`, the protected-machines refusal), after one its step notice
+  (`step_hooks`, the waiting-input notice); their one JSON line is the only stdout. The record part is unchanged
+  (same run check, same exit rule). The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
   never ends the process inside a write. *Follow-up:* the per-run hook file token
   (made at claim time) would replace the ancestry rule; it needs the claim code (runs.py).
   The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`, `toolu_…`) put there by the caller

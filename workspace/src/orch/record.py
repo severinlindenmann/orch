@@ -1400,6 +1400,116 @@ def read_run(workspace, run, *, seen_by="reader") -> RunRead:
         return _report(workspace, error, "run", run, seen_by)
 
 
+# A long-running reader's memory of run files it read (ORCH-634): (workspace, run) -> (identity of the file,
+# lines that did not count, the tickets its lines name, {ticket: that ticket's shown lines}, the quick look at
+# the run file and its pending folder when it was read, the pending writes then). Only tickets someone asked
+# for keep their lines, so a reader that asks about a few tickets does not hold the whole record.
+_RUN_SEEN: dict = {}
+_RUN_SEEN_MAX = (
+    4096  # runs remembered per process; past it the memory starts over (a fresh read is always right)
+)
+
+
+def _identity(fd) -> tuple:
+    """What changes whenever the file's bytes can have changed: device, inode, size, modification and change
+    time (a write, a rename over it or a touch of the times moves the change time, which no caller sets)."""
+    with _io():
+        st = os.fstat(fd)
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def _quick(workspace, run):
+    """(identity of the run file, identity of its pending folder or None) from a plain look (_path_info: a
+    link, a foreign owner or anything but a regular file is refused), or None when either cannot be looked at.
+    Equal to what was verified before = the same bytes and the same pending writes (adding or removing a
+    pending write moves the folder's times)."""
+    base = record_dir(workspace)
+    try:
+        with _io():
+            st = _path_info(base / "runs" / f"{run}.jsonl")
+    except (RecordTampered, RecordUnavailable):
+        return None
+    try:
+        with _io():
+            p = _path_info(base / "pending" / run, want_dir=True)
+        pend = (p.st_dev, p.st_ino, p.st_mtime_ns, p.st_ctime_ns)
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            return None
+        pend = None
+    except RecordTampered:
+        return None
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns), pend
+
+
+def read_run_for(workspace, run, ticket, *, seen_by="reader") -> RunRead:
+    """read_run, only the lines of `ticket`, for a reader that lives long and asks often (the dashboard, the
+    Factory watcher; orch.reads). A run file is read on the same checked path as read_run; when it is the same
+    file as last time (`_identity`) its lines are not parsed again, and when a plain look (`_quick`) shows the
+    run file and its pending folder exactly as they were when they were last checked, the answer from then is
+    used without opening anything. A run that cannot be read goes through read_run's own report, never memory.
+    """
+    _name(run, _RUN)
+    key = (str(workspace), run)
+    seen = _RUN_SEEN.get(key)
+    quick = _quick(workspace, run)
+    if (
+        seen is not None
+        and quick is not None
+        and seen[4] == quick
+        and quick[0] == seen[0]
+        and (ticket not in seen[2] or ticket in seen[3])
+    ):
+        changed, mine, pending = seen[1], seen[3].get(ticket, []), seen[5]
+        return _for_result(mine, changed, pending)
+    pending = 0
+    try:
+        pending = _pending_count(workspace, run)
+        fd = _open(workspace, ("runs", run + ".jsonl"), "read")
+        try:
+            ident = _identity(fd)
+            if seen is not None and seen[0] == ident and (ticket not in seen[2] or ticket in seen[3]):
+                changed, mine, names, kept = seen[1], seen[3].get(ticket, []), seen[2], seen[3]
+            else:
+                view = _verified(workspace, run, _read_bytes(fd))
+                shown = _dedupe(view.events, run)
+                mine = [e for e in shown if e.get("ticket") == ticket]
+                changed = view.changed
+                names = frozenset(e.get("ticket") for e in shown if isinstance(e.get("ticket"), str))
+                kept = dict(seen[3]) if seen is not None and seen[0] == ident else {}
+                kept[ticket] = mine
+            still = _identity(fd) == ident  # unchanged while it was read: safe to remember
+        finally:
+            _close(fd)
+        after = _pending_count(workspace, run)
+        steady = still and after == pending and quick is not None and quick[0] == ident
+        pending = max(pending, after)
+        if steady and _quick(workspace, run) == quick:
+            if len(_RUN_SEEN) >= _RUN_SEEN_MAX and key not in _RUN_SEEN:
+                _RUN_SEEN.clear()
+            _RUN_SEEN[key] = (ident, changed, names, kept, quick, pending)
+        elif still:
+            _RUN_SEEN[key] = (ident, changed, names, kept, None, pending)  # lines remembered, no quick answer
+        return _for_result(mine, changed, pending)
+    except (RecordTampered, RecordUnavailable) as error:
+        _RUN_SEEN.pop(key, None)
+        if isinstance(error, RecordUnavailable) and error.reason == "missing" and pending:
+            return ReadResult("ok", [], reason="pending", message=_MESSAGES["pending"], pending=pending)
+        return _report(workspace, error, "run", run, seen_by)
+
+
+def _for_result(mine, changed, pending) -> RunRead:
+    reason = "content" if changed else ("pending" if pending else None)
+    return ReadResult(
+        "ok",
+        [dict(e) for e in mine],
+        changed=changed,
+        pending=pending,
+        reason=reason,
+        message=_MESSAGES[reason] if reason else None,
+    )
+
+
 def _read_json(ws, rel):
     return _json_of(_read_file(ws, rel))
 
