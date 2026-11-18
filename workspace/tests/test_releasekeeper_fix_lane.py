@@ -4,9 +4,16 @@ newest release, ships at once as N.1 from main with only that change; no pace, n
 import subprocess
 
 import pytest
-from test_releasekeeper import DEV, MAIN, ROLLUP_DONE, cfg, go
+from test_releasekeeper import DEV, MAIN, ROLLUP_DONE, cfg, go, run
 
 from orch import releasekeeper as rk
+
+
+def cut_release(tmp_path) -> dict:
+    """A normal release 31 just cut (pull request open, checks next), as the keeper itself leaves it."""
+    green = {"ci.yml": [run(DEV, "schedule")], "e2e.yml": [run(DEV, "schedule")]}
+    return go(tmp_path / "normal", runs=green)["state"]["release"]
+
 
 FIX = {"number": 50, "release": 30, "sha": "5" * 40, "title": "Factory takes orders again",
        "url": "https://github.com/x/y/pull/50"}  # fmt: skip
@@ -32,7 +39,8 @@ def test_a_fix_ships_at_once_as_n_point_1_without_the_pace(tmp_path, capsys):
     out = go(tmp_path, capsys, last_release_at=rk.now().isoformat(), fixes=[FIX])
     assert out["did"] == ["cut:release 30.1 with #50"]
     rel = out["state"]["release"]
-    assert rel["n"] == "30.1" and rel["fix"] == 50 and rel["phase"] == "gate" and rel["unreleased"] == []
+    assert rel["n"] == "30.1" and rel["fix"] == 50 and rel["unreleased"] == []
+    assert rel["phase"] == cut_release(tmp_path)["phase"]  # right where a normal release is after its cut
     assert out["state"]["fixes_shipped"] == [50]
     assert "fix release 30.1: cut with only #50" in out["lines"][-1]
 
@@ -69,7 +77,7 @@ def test_a_fix_goes_before_a_release_in_testing(tmp_path, capsys):
 
 
 def test_a_fix_waits_while_a_release_pull_request_is_open(tmp_path, capsys):
-    gate = {"n": 31, "sha": DEV, "phase": "gate", "pr": 9031, "wt": "/x", "main_before": MAIN}
+    normal = cut_release(tmp_path)
     prs = {
         "9031": {
             "url": "u",
@@ -77,7 +85,7 @@ def test_a_fix_waits_while_a_release_pull_request_is_open(tmp_path, capsys):
             "statusCheckRollup": [{"name": "t", "status": "IN_PROGRESS"}, ROLLUP_DONE],
         }
     }
-    out = go(tmp_path, capsys, fixes=[FIX], state={"release": gate}, open_release={"number": 9031}, prs=prs)
+    out = go(tmp_path, capsys, fixes=[FIX], state={"release": normal}, open_release={"number": 9031}, prs=prs)
     assert out["state"]["release"]["n"] == 31 and "cut:release 30.1 with #50" not in out["did"]
 
 
@@ -86,9 +94,9 @@ def test_hold_stops_the_fix_lane_too(tmp_path, capsys):
     assert out["did"] == [] and "on hold" in out["lines"][0]
 
 
-def test_a_fix_release_gate_has_no_walks_and_gets_the_merge_card(tmp_path, capsys):
-    rel = {"n": "30.1", "fix": 50, "sha": "f" * 40, "phase": "gate", "pr": 9550, "wt": "/x"}
-    rel.update(main_before=MAIN, unreleased=[])
+def test_a_fix_release_has_no_walks_and_gets_the_merge_card(tmp_path, capsys):
+    rel = go(tmp_path / "cut", fixes=[FIX])["state"]["release"]  # as the fix lane leaves it
+    assert rel["pr"] == 9550
     green = [{"name": "t", "status": "COMPLETED", "conclusion": "SUCCESS"}, ROLLUP_DONE]
     prs = {"9550": {"url": "https://github.com/x/y/pull/9550", "state": "OPEN", "statusCheckRollup": green}}
     sim = {"heads": {"develop": DEV, "main": MAIN, "unreleased": []}, "last_release": 30}
