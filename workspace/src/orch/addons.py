@@ -2896,6 +2896,13 @@ def update(
             report.extend(lines)
         if notes is not None:
             notes.extend(restart_lines)  # for --json: restarted, skipped and failed services
+        from orch import selfcheck
+
+        check_lines = selfcheck.after_update(root, before.get("release"), new_release)
+        if check_lines and not json_output:
+            _say("\n".join(check_lines))
+        if notes is not None:
+            notes.extend(check_lines)
         reg = registry()
         for entry in reg:
             if entry["name"] in found:

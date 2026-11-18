@@ -523,3 +523,14 @@ def _no_update_info_network(monkeypatch):
     from orch import updateinfo
 
     monkeypatch.setattr(updateinfo, "_fetch_messages", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_selfcheck_after_update(request, monkeypatch):
+    """The check after an update runs the installed orch as child processes: tests of the update itself skip
+    it (test_selfcheck tests it on its own)."""
+    if request.module.__name__.rsplit(".", 1)[-1] == "test_selfcheck":
+        return
+    from orch import selfcheck
+
+    monkeypatch.setattr(selfcheck, "after_update", lambda *a, **k: [])

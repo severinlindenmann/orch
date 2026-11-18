@@ -4,6 +4,7 @@ Also the automatic update (off until a person turns it on): a background thread 
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from pathlib import Path
@@ -17,6 +18,11 @@ except ImportError:  # standalone use without orch: nothing runs
 
 
 BUILDS = ("release", "development")
+_RELEASE_NO = re.compile(r"[1-9][0-9]{0,5}")  # "Go back to release N" (the card after a failed self-check)
+
+
+def target_ok(to) -> bool:
+    return to is None or to in BUILDS or (isinstance(to, str) and bool(_RELEASE_NO.fullmatch(to)))
 
 
 def start_update(
@@ -27,8 +33,8 @@ def start_update(
     without a page session is refused by the caller before this runs."""
     if pagelaunch is None:
         return 503, "Updating is not available in this install."
-    if to is not None and to not in BUILDS:
-        return 400, "Choose release or development build."
+    if not target_ok(to):
+        return 400, "Choose release, development build or a release number."
     if session is not None:
         pagelaunch.write_resume_cookie(root, session.server, session.cookie, session.secret)
     try:
@@ -149,6 +155,25 @@ def dismiss_auto_note() -> None:
 
         autoupdate.dismiss_note()
     except Exception:  # noqa: BLE001, S110 - the note stays; the next click tries again
+        pass
+
+
+def check_card() -> dict | None:
+    """The Home card after an update whose self-check failed ("Go back to release N?")."""
+    try:
+        from orch import selfcheck
+
+        return selfcheck.card()
+    except Exception:  # noqa: BLE001 - an older orch: no card
+        return None
+
+
+def dismiss_check_card() -> None:
+    try:
+        from orch import selfcheck
+
+        selfcheck.dismiss()
+    except Exception:  # noqa: BLE001, S110 - the card stays; the next click tries again
         pass
 
 
