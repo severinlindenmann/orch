@@ -1522,7 +1522,7 @@ def _ref_merge(args, root: Path, who: str) -> None:
 def _queue_bases(root: Path) -> list[str]:
     """The base branches the pull-requests add-on's merge queue merges into (`[pull_requests] bases`, default
     develop, never main or master); empty when the add-on is not turned on here."""
-    from orch import addons, config
+    from orch import config
 
     try:
         if "pull-requests" not in addons.active(root):

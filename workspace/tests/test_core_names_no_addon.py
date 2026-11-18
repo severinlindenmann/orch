@@ -18,7 +18,11 @@ _TOKENS = "the record kind 'usage' / the providers' JSON key for token use, not 
 _KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), not the add-on"
 ALLOW = {
     "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
-    "orch/cli.py": {"dashboard": _MANIFEST},
+    "orch/cli.py": {
+        "dashboard": _MANIFEST,
+        "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
+        "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
+    },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
