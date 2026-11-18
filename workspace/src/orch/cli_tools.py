@@ -58,6 +58,8 @@ def dispatch(args, root) -> bool:
     out = cli_health._out
     if action == "list":
         doc = toolupdates.status(root, refresh=getattr(args, "refresh", False))
+        if toolupdates.in_helper():
+            doc = toolupdates.for_helper(doc)
         text = "\n".join(_line(t) for t in doc["tools"]) or "No tools orch knows how to check are used here."
         job = doc.get("job")
         if job and job.get("status") == "running":
@@ -68,8 +70,15 @@ def dispatch(args, root) -> bool:
         doc = toolupdates.status(root, refresh=args.refresh, only=args.name)
         if not doc["tools"]:
             raise Refused(f"There is no tool called {args.name} here. See them with: orch tools")
+        if toolupdates.in_helper():
+            doc = toolupdates.for_helper(doc)
         t = doc["tools"][0]
         body = _notes_text(t) if t.get("update") else ""
+        if t.get("notes_hidden"):
+            body = (
+                "The notes are shown to the person: Settings > About & updates, or orch tools notes "
+                + t["name"]
+            )
         out(args, t, _line(t) + ("\n" + body if body else ""))
         return True
     if action == "update":

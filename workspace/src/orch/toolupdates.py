@@ -70,7 +70,7 @@ _BREW = re.compile(r"[a-z0-9][a-z0-9@._+-]{0,99}")
 _PREFIX = re.compile(r"[A-Za-z0-9._-]{0,20}")
 _LABEL = re.compile(r"[^\x00-\x1f\x7f<>]{1,40}")
 _VERSION = re.compile(
-    r"(?<![\w.])v?(\d+\.\d+(?:\.\d+){0,2})((?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?![\w])"
+    r"(?<![\w.])v?(\d+\.\d+\.\d+(?:\.\d+)?)((?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?![\w])"
 )
 _PLAIN = re.compile(r"\d+(?:\.\d+){1,3}")
 _HEADING = re.compile(r"^##\s+\[?v?(\d+(?:\.\d+){1,3})\]?", re.MULTILINE)
@@ -372,7 +372,10 @@ def _allowed(url: str) -> bool:
 
 
 def get(url: str) -> bytes:
-    """One GET to an allowed host, size-limited; raises OSError/ValueError on any problem."""
+    """One GET to an allowed host, size-limited; raises OSError/ValueError on any problem. ORCH_NO_TOOL_CHECK
+    (demo and test installs) turns every outside question off."""
+    if os.environ.get("ORCH_NO_TOOL_CHECK"):
+        raise OSError("outside checks are off here")
     if not _allowed(url):
         raise ValueError("not an allowed address")
     from orch import net
@@ -652,10 +655,23 @@ def job_state() -> dict | None:
     }
 
 
-def _person() -> None:
+def in_helper() -> bool:
+    """This command runs inside a helper (an agent tool or a helper run)."""
     from orch import renew, tickets
 
-    if tickets.agent_tool() or any(os.environ.get(k) for k in renew.RUN_MARKS):
+    return bool(tickets.agent_tool() or any(os.environ.get(k) for k in renew.RUN_MARKS))
+
+
+def for_helper(doc: dict) -> dict:
+    """The same answer without the release notes: they are text from outside and never go to a helper."""
+    tools = [
+        {**t, "notes": [], "more": 0, "notes_hidden": bool(t.get("notes"))} for t in doc.get("tools") or []
+    ]
+    return {**doc, "tools": tools}
+
+
+def _person() -> None:
+    if in_helper():
         raise Refused(
             "Only a person starts a tool update. Tell them it is there: orch tools (or Settings > About & "
             "updates)."
