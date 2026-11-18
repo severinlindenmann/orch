@@ -31,7 +31,10 @@ def run(connections, team=None):
     view = json.dumps({"tabs": {"connections": connections}})
     data = json.loads(
         subprocess.run(
-            ["node", "-e", RUNNER, str(JS), view, json.dumps(team)], capture_output=True, text=True, check=True
+            ["node", "-e", RUNNER, str(JS), view, json.dumps(team)],
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
     )
     assert not data.get("missing"), (
