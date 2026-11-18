@@ -1,4 +1,5 @@
-"""The merge queue on a red base branch (ORCH-391): no groups, fixes first, nobody blamed for the base's failures."""
+"""The merge queue on a red base branch (ORCH-391, the repair lane of ORCH-450): no groups of several, fixes
+first and still checked in their group of one on top of the base, nobody blamed for the base's failures."""
 
 from __future__ import annotations
 
@@ -14,7 +15,8 @@ RED = frozenset({"lint", "addons / page-smoke"})
 
 
 class RedGitHub(FakeGitHub):
-    """prs[n]['jobs']: the checks that fail when n is red (its own checks with 'failed', or a group with n)."""
+    """prs[n]['jobs']: the checks that fail when n is red (its own checks with 'failed' or once the waiter ran
+    them, or a group with n)."""
 
     def __init__(self, prs, red=(RED,)):
         super().__init__(prs)
@@ -30,7 +32,9 @@ class RedGitHub(FakeGitHub):
         out = set()
         for m in members:
             p = self.prs[m]
-            if p.get("failed") or p.get("ran_red") or u in self.groups:
+            if (
+                p.get("failed") or p.get("ran_red") or u in self.groups or u in self.direct
+            ):  # it ran: its jobs
                 out |= set(p.get("jobs", {"own"}))
         return frozenset(out)
 
@@ -43,15 +47,17 @@ def row(ws, n):
     return next(r for r in reversed(store.read(ws)) if r["number"] == n)
 
 
-def test_red_base_builds_no_groups_and_the_fix_goes_first(ws):
-    for n in (1, 2, 3):
+def test_red_base_repair_lane_the_fix_goes_first_and_is_still_checked(ws):
+    for n in range(1, 8):
         add(ws, n)
-    add(ws, 4, first=True)  # the fix of develop, added last
-    gh = RedGitHub({n: {} for n in (1, 2, 3, 4)})
+    add(ws, 8, first=False)  # the night of 17/18 Nov: the fix sat at place 8
+    store.add(ws, url(8), None, "agent:t", first=True)  # marked as the fix: moved up, not twice
+    gh = RedGitHub({n: {} for n in range(1, 9)})
     r, calls = make(ws, gh, FakeGit())
     r.run()
-    assert not gh.groups  # every one alone: no group run on top of red develop
-    assert calls[0] == url(4) and states(ws) == {1: "merged", 2: "merged", 3: "merged", 4: "merged"}
+    assert all(len(g) == 1 for g in gh.groups.values())  # one at a time on top of red develop
+    assert gh.groups[calls[0]] == [8]  # first in line, checked in its own group, then merged
+    assert set(states(ws).values()) == {"merged"} and len(calls) == 8
 
 
 def test_first_goes_ahead_of_the_line_but_behind_earlier_fixes(ws):
@@ -104,18 +110,22 @@ def test_a_fix_still_red_in_the_same_checks_uses_a_try(ws):
     add(ws, 1, first=True)
     gh = RedGitHub({1: {"jobs": {"lint"}}})
     r, calls = make(ws, gh, FakeGit(), bad={1})
-    batch = r.next_batch()
-    gh.prs[1]["ran_red"] = True  # its checks ran and failed where develop fails
-    r.process(batch)
-    assert calls == [url(1)] and row(ws, 1)["state"] == "waiting" and row(ws, 1)["tries"] == 1
+    r.process(r.next_batch())  # its own checks failed where develop fails: no group run needed to see that
+    assert calls == [] and gh.direct == [url(1)]
+    assert row(ws, 1)["state"] == "waiting" and row(ws, 1)["tries"] == 1
 
 
-def test_behind_waits_for_green_base_instead_of_a_doomed_check(ws):
+def test_red_only_where_develop_is_red_in_its_group_of_one_waits_without_a_try(ws):
     add(ws, 1)
-    gh = RedGitHub({1: {}})
-    r, _ = make(ws, gh, FakeGit(), behind={1})
+    gh = RedGitHub({1: {"jobs": {"lint"}}})
+    r, calls = make(ws, gh, FakeGit(), red_on_base={1})
     r.process(r.next_batch())
-    assert not gh.groups and row(ws, 1)["state"] == "waiting" and "is red" in row(ws, 1)["why"]
+    assert [gh.groups[c] for c in calls] == [[1]]
+    assert (
+        row(ws, 1)["state"] == "waiting"
+        and not row(ws, 1).get("tries")
+        and "same checks" in row(ws, 1)["why"]
+    )
 
 
 def test_base_looked_at_once_a_minute(ws):

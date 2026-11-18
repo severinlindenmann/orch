@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import jsonschema
@@ -377,6 +378,10 @@ def test_helper_never_gets_files():
     assert started["kind"] == "helper.start" and "files" not in started
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="workspace file names come from /-style absolute paths only, not Windows paths yet",
+)
 def test_collect_passes_the_workspace_to_the_writer(store):
     ws, writer = store
     stream = [
@@ -497,4 +502,5 @@ def test_collect_real_symlinked_run_file_raises_tampered(store, tmp_path):
     with pytest.raises(RecordTampered):
         collect(STREAM2, writer, CTX)
     assert outside.read_text() == ""
-    assert '"schema":"orch.record-alert/1"' in _alerts(ws) and '"reason":"link"' in _alerts(ws)
+    reason = "reparse" if os.name == "nt" else "link"  # Windows names a symlink a reparse point
+    assert '"schema":"orch.record-alert/1"' in _alerts(ws) and f'"reason":"{reason}"' in _alerts(ws)

@@ -827,5 +827,32 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
-  return {historyChange, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  // ORCH-517: a poll that held a recent revision gets only what changed (state_delta.py). Returns the new state,
+  // or null when the delta does not fit the state held (the caller then fetches the whole state). Unchanged
+  // tickets stay the same objects.
+  function applyStateDelta(state, d) {
+    if (!state || !d || d.delta !== true || !state.rev || d.base !== state.rev || !Array.isArray(d.keys)) return null;
+    const next = {};
+    for (const k of d.keys) next[k] = Object.prototype.hasOwnProperty.call(d.set || {}, k) ? d.set[k] : state[k];
+    const byId = new Map(arr(state.tickets).map(t => [t && t.id, t]));
+    for (const id of arr(d.remove)) byId.delete(id);
+    for (const row of arr(d.upsert)) {
+      if (!row || typeof row.id !== 'string') return null;
+      const old = byId.get(row.id);
+      const t = old ? {...old, ...row} : {...row};
+      const append = row['~append'] && typeof row['~append'] === 'object' ? row['~append'] : {};
+      for (const k of Object.keys(append)) {
+        if (!old || !Array.isArray(old[k])) return null;
+        t[k] = [...old[k], ...arr(append[k])];
+      }
+      for (const k of arr(row['~drop'])) delete t[k];
+      delete t['~drop']; delete t['~append'];
+      byId.set(row.id, t);
+    }
+    const order = Array.isArray(d.order) ? d.order : arr(state.tickets).map(t => t && t.id).filter(id => byId.has(id));
+    if (order.length !== byId.size || order.some(id => !byId.has(id))) return null;
+    next.tickets = order.map(id => byId.get(id));
+    return next;
+  }
+  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });

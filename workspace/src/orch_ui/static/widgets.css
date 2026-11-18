@@ -618,6 +618,15 @@ dialog.report-dialog .actions{margin-top:12px}
 .blk-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 .blk-head .blk-title{padding-left:0;padding-right:0;font-size:14px;line-height:20px}
 .card>.blk-head{padding:0 16px 0 0}
+/* One left edge in a block card (ORCH-432, SX-3 16 px rows): its heading, list rows and table cells all start 16 px
+   in. The tone dot of a list row is never drawn (it has no look), so it only speaks to screen readers and takes no
+   room: the row's words line up with the heading. Compact and paired blocks keep their own heading padding. */
+.card:not(.blk-compact):not(.blk-pair>.blk)>.blk-head{padding:0 16px}
+.card:not(.blk-compact):not(.blk-pair>.blk)>.blk-title{padding-left:16px;padding-right:16px}
+.blk.card .li-row{padding-left:16px;padding-right:16px}
+.blk.card .li-row>.tdot{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+@media(min-width:721px){.blk.card .blk-table th:first-child,.blk.card .blk-table td:first-child{padding-left:16px}
+.blk.card .blk-table th:last-child,.blk.card .blk-table td:last-child{padding-right:16px}}
 .blk-above>.blk-head{padding:0 4px 8px}.blk-above>.blk-head .blk-title,.blk-above>.blk-title{padding:0;font-size:14px;line-height:20px}
 .blk-above{display:block;margin-top:8px}
 .blk-above .blk-list{padding:0}
@@ -1028,6 +1037,8 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-pt{flex:1 1 0;min-width:0;overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 button.live-pt{min-height:32px;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;font-weight:600;text-align:left;cursor:pointer}
 button.live-pt:hover{color:var(--brand)}
+.live-ren{display:flex;flex:1 1 0;gap:var(--s2);align-items:center;min-width:0}
+.live-ren .input{flex:1 1 0;min-width:0}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0}
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
@@ -1157,5 +1168,125 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
 
+/* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
+   filter, then bands that fold away (Pinned, Needs you and working, In line, Idle and no session). Needs-you tiles are
+   orange and come first; a working tile shows one sentence and a peek of its last lines. In line and idle are one
+   line each. From 12 sessions (data-many) a long band scrolls inside itself; at 1100 px and wider the bands sit side by
+   side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
+.wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
+.wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
+.wall-tools .input{max-width:360px}
+.wall-body{display:contents}
+.wall-sum{order:-2;display:grid;gap:var(--s1)}
+.wall-sum>.meta{margin:0}
+.wall-hero{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);margin:0}
+.wall-hero .wall-st{font-size:var(--fs-4);line-height:28px;font-weight:600}
+.wall-st{display:inline-flex;align-items:center;gap:var(--s1);font-size:var(--fs-meta);line-height:16px;font-weight:600;color:var(--text-muted);white-space:nowrap}
+.wall-st[data-s=needs-you]{color:var(--needs-you)}
+.wall-st[data-s=working]{color:var(--working)}
+.wall-sym{font-family:var(--font-mono)}
+.wall-key{font-family:var(--font-mono);font-size:var(--fs-meta);color:var(--text-muted);white-space:nowrap}
+.wall-bands{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4);align-items:start}
+.wall-band{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s2);min-width:0}
+.wall-bh{margin:0;font-size:var(--fs-body);line-height:20px;letter-spacing:0;color:var(--text-muted)}
+.wall-bt{display:inline-flex;gap:var(--s2);align-items:center;min-height:var(--s6);padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer}
+.wall-bt:hover{color:var(--text)}
+.wall-chev{width:12px;color:var(--text-faint)}
+.wall-none{margin:0}
+.wall-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,264px),1fr));gap:var(--s3);align-content:start}
+.wall-tile{display:flex;flex-direction:column;gap:var(--s2);min-width:0;padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);transition:border-color var(--dur-base) var(--ease-out),transform var(--dur-base) var(--ease-out)}
+.wall-tile:hover{border-color:var(--border-strong)}
+.wall-tile[data-s=needs-you]{border-color:var(--needs-you);background:var(--warning-soft)}
+.wall-open{display:flex;flex-direction:column;gap:var(--s1);flex:1;min-width:0;width:100%;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.wall-open:active{transform:scale(.99)}
+.wall-th{display:flex;gap:var(--s2);align-items:center;justify-content:space-between}
+.wall-tt{font-weight:600;overflow-wrap:anywhere}
+.wall-now{color:var(--text);overflow-wrap:anywhere}
+.wall-tile[data-s=needs-you] .wall-now{font-weight:600}
+.wall-peek{display:block;height:56px;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-meta);line-height:16px;white-space:pre;overflow:hidden;overflow-wrap:normal}
+.wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
+.wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
+.wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
+.wall-steps .progress{width:60px}
+.wall-steps .meta{margin:0}
+.wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}
+.wall-lines{display:grid;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden;container-type:inline-size}
+.wall-line{display:flex;gap:var(--s2);align-items:center;min-height:var(--touch);padding:var(--s1) var(--s3)}
+.wall-line+.wall-line{border-top:1px solid var(--border)}
+.wall-line:hover{background:var(--surface-2)}
+.wall-lopen{display:flex;gap:var(--s1) var(--s3);align-items:center;flex:1;min-width:0;min-height:var(--s7);padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.wall-line .wall-tt{white-space:nowrap}
+.wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
+.wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
+.wall-bands[data-many] [data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
+@container (max-width:900px){.wall-lmeta{display:none}}
+@container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
+@media(min-width:1100px){
+  .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .wall-band{grid-column:1/-1}
+  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=pin]){grid-column:span 2}
+  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=need]){grid-column:span 4}
+  .wall-bands:has([data-band=queue]) .wall-band:is([data-band=queue],[data-band=idle]){grid-column:span 3}
+}
+@media(max-width:720px){
+  .wall-tools .input{max-width:none}
+  .wall-tiles{grid-template-columns:minmax(0,1fr)}
+  .wall-bands[data-many] [data-many]{max-height:none}
+  .wall-lopen{flex-wrap:wrap}
+  .wall-lnow{flex-basis:100%;white-space:normal}
+}
+@media(prefers-reduced-motion:reduce){.wall-tile,.wall-open{transition:none}.wall-open:active{transform:none}}
+/* Review on a short screen (ORCH-420, owner's picture at 1144x755 and the 1280x800 walk): toasts sit top right while the
+   answer buttons are on screen, so they never cover them; file tiles get smaller so the words box keeps its room; and a
+   words box with more below shows a soft edge at the bottom (it scrolls), never a line cut in half. */
+body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bottom:auto}
+@media(max-width:720px){body:has(>.tabbar):has(.swipe-actions:not([hidden])) .ui-toasts{top:var(--s4);bottom:auto}}
+/* ORCH-421 (owner review 18 Nov). What just happened ("Moved to the end: …", "Looks good: …") is one line in the deck's
+   top row next to its Undo, never a box over the card or the page header; on a narrow deck it takes the progress bar's
+   place for those seconds. A card with no picture (plain answers, a short question) is as tall as its words, up to the
+   usual card height, so two short options never sit above a big empty block. */
+.swipe-note{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:500}
+.swipe-note[hidden]{display:none}
+@container (max-width:560px){.swipe-top:has(>.swipe-note:not([hidden])) .progress{display:none}.swipe-note{order:5;flex-basis:100%}}
+.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)){flex:none;min-height:0}
+.swipe-stage>.swipe-card.short:not(.under):not(.under2){position:relative;inset:auto;max-height:var(--swipe-card-h)}
+.device-phone .swipe-stage>.swipe-card{max-height:none}
+.swipe-file-more{padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
+.swipe-file-more .swipe-file-thumb{display:grid;place-items:center;font-size:16px;line-height:24px;font-weight:600;color:var(--text-muted)}
+.swipe-file-more:hover .swipe-file-thumb{background:var(--surface-2)}.swipe-file-more:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--radius)}
+.swipe-files.all{flex-wrap:wrap;overflow:visible}
+/* ORCH-421 round 3 (owner review 18 Nov). Pictures hug their own shape: the card's colour beside a picture, never a
+   black band left and right (single picture, Before/After panes, option pictures). A words box keeps its first line
+   clear of the "Make bigger" button. */
+.swipe-preview:has(>img){background:none;border-color:transparent}
+.swipe-preview>img,.cmp-pane>img,.opt-thumb>img{position:absolute;inset:0;margin:auto;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;border-radius:var(--radius);background:var(--paper)}
+.swipe-compare:has(.cmp-pane>img){background:none;gap:var(--s2)}.swipe-compare .cmp-pane:has(>img){background:var(--surface)}
+.opt-thumb:has(>img){background:none;border-color:transparent}
+.swipe-preview:has(>.swipe-compare .cmp-pane>img),.swipe-preview:has(>.swipe-opts .opt-thumb>img){background:none;border-color:transparent}
+.swipe-opts:has(.opt-thumb>img){padding:0}.swipe-opt:has(.opt-thumb>img){background:var(--surface)}
+.swipe-zoomed>img,.swipe-zoomed .cmp-pane>img{position:static;margin:0;width:100%;height:auto;max-height:none}
+.swipe-preview:has(>.doc)>.doc>:first-child{padding-right:40px}
+/* A narrow deck (phone): the card is as tall as all it holds and the page scrolls, so the whole title and the whole
+   summary are always there to read (no "…", no box that cuts a line in half); the answers stay at the bottom of the
+   screen, above the tab bar; files wrap into rows so "+N more" is in sight. */
+@container (max-width:560px){
+ .swipe-stage{flex:none;min-height:0}
+ .swipe-stage>.swipe-card:not(.under):not(.under2){position:relative;inset:auto;max-height:none;overflow:visible}
+ .swipe-stage>.swipe-card.under,.swipe-stage>.swipe-card.under2{display:none}
+ .swipe-head,.swipe-head:has(+ .swipe-preview:not(.plain)){max-height:none;overflow:visible}
+ .swipe-preview{flex:none;height:240px}
+ .swipe .swipe-preview:has(>.doc),.swipe .swipe-preview.plain{height:auto;overflow:visible}
+ .swipe .swipe-preview:has(>.doc){background:var(--ink)}
+ .swipe-preview:has(>.swipe-opts:not(.plain)){height:auto}
+ .swipe-preview>.swipe-opts:not(.plain){position:relative;inset:auto;grid-auto-rows:112px;overflow:visible}
+ .swipe-files{flex-wrap:wrap;overflow:visible}
+ .swipe-preview .doc .doc-headline{font-size:16px;line-height:24px;margin-bottom:var(--s2)}
+ .swipe-actions{position:sticky;bottom:52px;z-index:3;padding:var(--s2) 0 var(--s1);background:var(--bg);box-shadow:0 -1px 0 var(--border),0 -12px 16px -12px color-mix(in srgb,var(--bg) 80%,transparent)}
+ .swipe-later-row{position:sticky;bottom:0;z-index:3;height:52px;margin-top:0;align-items:center;background:var(--bg)}
+ body:has(>.tabbar) .swipe-actions{bottom:calc(var(--touch) + 52px + env(safe-area-inset-bottom))}
+ body:has(>.tabbar) .swipe-later-row{bottom:calc(var(--touch) + env(safe-area-inset-bottom))}
+}
+@media(max-height:900px){.swipe-file{width:112px}.swipe-file-thumb{height:64px}.swipe-files{padding-top:var(--s2)}}
+.swipe-preview:has(>.doc):not(:has(.doc-rows)){background:linear-gradient(transparent,var(--ink) 70%) 0 100%/100% 32px no-repeat local,linear-gradient(transparent,color-mix(in srgb,var(--text) 22%,transparent)) 0 100%/100% 16px no-repeat scroll,var(--ink)}
 /* a toast never covers the comment sheet's buttons: while a sheet is open it shows at the top (ORCH-422 look check) */
 body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:auto}

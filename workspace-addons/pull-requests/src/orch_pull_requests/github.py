@@ -10,9 +10,12 @@ from .store import Refused
 
 VIEW = (
     "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,"
-    "reviewDecision,reviews,labels"
+    "reviewDecision,reviews,labels,files"
 )
+# the commit status the queue sets on what it checked (a develop rule can require it)
+MARK = "orch/merge-queue"
 GONE = ("reference does not exist", "not found", "http 404")
+RUNS_MOST = 1000  # GitHub's limit for a search of workflow runs by time
 
 
 class GitHub:
@@ -129,6 +132,57 @@ class GitHub:
             x.strip() for x in (got.stdout or "").splitlines() if x.strip().startswith("https://github.com/")
         ]
         return lines[-1] if got.returncode == 0 and lines else None
+
+    def set_status(
+        self, repo: str, sha: str, description: str, target: str = "", state: str = "success"
+    ) -> bool:
+        """Set the queue's mark (commit status MARK, success) on one commit, or take it back (state failure: the
+        newest status of a context is the one GitHub uses). A write: the caller takes a slot."""
+        args = [
+            "api", "-X", "POST", f"repos/{repo}/statuses/{sha}", "-f", f"state={state}",
+            "-f", f"context={MARK}", "-f", f"description={description[:140]}",
+        ]  # fmt: skip
+        if target:
+            args += ["-f", f"target_url={target}"]
+        return self._run(*args).returncode == 0
+
+    def has_mark(self, repo: str, sha: str) -> bool | None:
+        """True when the commit carries the queue's mark as success; None when GitHub did not answer."""
+        v = self._json("api", f"repos/{repo}/commits/{sha}/status")
+        if not isinstance(v, dict):
+            return None
+        rows = v.get("statuses") or []
+        return any(
+            isinstance(r, dict) and r.get("context") == MARK and r.get("state") == "success" for r in rows
+        )
+
+    def merged_prs(self, repo: str, base: str, since: str) -> list[dict] | None:
+        """Pull requests merged into base since an ISO time: {number, title, headRefName, headRefOid, mergedAt,
+        url}, None when GitHub did not answer."""
+        v = self._json(
+            "pr", "list", "--repo", repo, "--base", base, "--state", "merged", "--limit", "300",
+            "--search", f"merged:>={since}", "--json", "number,title,headRefName,headRefOid,mergedAt,url",
+        )  # fmt: skip
+        return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else None
+
+    def runs(self, repo: str, since: str, until: str) -> list[dict] | None:
+        """Workflow runs started between two ISO times: {head_sha, event, head_branch, name}, None when GitHub did
+        not answer. GitHub lists at most RUNS_MOST of one such search."""
+        got = self._run(
+            "api", "--paginate", f"repos/{repo}/actions/runs?created={since}..{until}&per_page=100",
+            "--jq", ".workflow_runs[] | {head_sha, event, head_branch, name}", timeout=120,
+        )  # fmt: skip
+        if got.returncode != 0:
+            return None
+        out = []
+        for line in (got.stdout or "").splitlines():
+            try:
+                v = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(v, dict):
+                out.append(v)
+        return out
 
     def close(self, url: str) -> bool:
         """Close a group pull request (its branch is deleted on its own, one more write)."""

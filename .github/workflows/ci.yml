@@ -45,6 +45,15 @@ jobs:
       dashshots: ${{ steps.f.outputs.dashshots }}
       clock: ${{ steps.f.outputs.clock }}
       oscode: ${{ steps.os.outputs.oscode }}
+      # ORCH-545: light = a pull request into develop on its own (one light job, ~5 min); queue = a merge queue
+      # group (orch-queue/...: the full suite once, whatever files it touches); proven = a push to develop with the
+      # files of a green queue group (no suite again). docs/ci-checks.md.
+      light: ${{ steps.place.outputs.light }}
+      queue: ${{ steps.place.outputs.queue }}
+      proven: ${{ steps.proven.outputs.proven }}
+    permissions:
+      contents: read
+      actions: read  # ci_proven.py reads the queue group's ci run
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,16 +95,61 @@ jobs:
         env:
           BASE: origin/${{ github.base_ref }}
         run: echo "oscode=$(python3 scripts/touches_os_code.py --base "$BASE" --pr --why)" >> "$GITHUB_OUTPUT"
+      - id: place
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          queue=false; light=false
+          if [ "$EVENT" = pull_request ]; then
+            case "$HEAD_REF" in
+              orch-queue/*) queue=true ;;
+              *) [ "$BASE_REF" = develop ] && light=true ;;
+            esac
+          fi
+          echo "light=$light queue=$queue"
+          echo "light=$light" >> "$GITHUB_OUTPUT"
+          echo "queue=$queue" >> "$GITHUB_OUTPUT"
+      - id: proven
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "proven=$(python3 scripts/ci_proven.py --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY")" >> "$GITHUB_OUTPUT"
       # A known-red system with no owner or end date, or past its end date: a warning on the run, never a red check.
       - name: known red has an owner and an end date (docs/ci-checks.md)
         run: python3 scripts/ci_known_red.py --warn
+  # The light set of a pull request into develop on its own: words, style, ruff, the workspace tests that read the
+  # changed code and the suites of the changed add-ons, one job (scripts/ci_light.py, ORCH-556). The rest runs once
+  # in its merge queue group.
+  light:
+    needs: changes
+    if: needs.changes.outputs.light == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the diff against the base branch
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: pip install pytest
+      - run: python3 scripts/ci_light.py --base "origin/${{ github.base_ref }}"
   contracts:
     needs: changes
-    if: needs.changes.outputs.contracts == 'true'
+    if: needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true')
     uses: ./.github/workflows/contracts.yml
   workspace:
     needs: changes
-    if: needs.changes.outputs.workspace == 'true' || github.event_name == 'schedule'
+    # light pull requests skip it, except one that changes file, process or path code while Windows is green (oscode)
+    if: needs.changes.outputs.proven != 'true' && ((needs.changes.outputs.light != 'true' && (needs.changes.outputs.workspace == 'true' || needs.changes.outputs.queue == 'true')) || needs.changes.outputs.oscode == 'true' || github.event_name == 'schedule')
     uses: ./.github/workflows/workspace.yml
     with:
       # PRs into develop and merge queue groups: Linux only (+ the CLI smoke on Windows/macOS below). macOS and
@@ -110,41 +164,42 @@ jobs:
       # merge queue groups. Which check is required where: docs/ci-checks.md.
       windows: ${{ github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.windows) || (needs.changes.outputs.oscode == 'true' && !startsWith(github.head_ref, 'orch-queue/')) }}
   # Fast CLI smoke on Windows + macOS for PRs that touch the CLI or an add-on (R1.6, R3.4); the full suite is nightly.
+  # Queue groups always; pull requests into main when they touch it. Not on a pull request into develop alone.
   cli-smoke:
     needs: changes
-    if: needs.changes.outputs.smoke == 'true' && github.event_name == 'pull_request'
+    if: needs.changes.outputs.queue == 'true' || (needs.changes.outputs.smoke == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.light != 'true')
     uses: ./.github/workflows/cli-smoke.yml
   # The 5-minute e2e smoke set on every pull request that can change what it tests (R3.4); the full suite is nightly.
   e2e-smoke:
     needs: changes
-    if: needs.changes.outputs.e2e == 'true' && github.event_name == 'pull_request'
+    if: needs.changes.outputs.queue == 'true' || (needs.changes.outputs.e2e == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.light != 'true')
     uses: ./.github/workflows/e2e-smoke.yml
   addons:
     needs: changes
-    if: needs.changes.outputs.addons == 'true'
+    if: needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true')
     uses: ./.github/workflows/addons.yml
   publish:
     needs: changes
-    if: needs.changes.outputs.publish == 'true'
+    if: needs.changes.outputs.proven != 'true' && needs.changes.outputs.publish == 'true'
     uses: ./.github/workflows/publish.yml
   relay:
     needs: changes
-    if: needs.changes.outputs.relay == 'true'
+    if: needs.changes.outputs.proven != 'true' && needs.changes.outputs.relay == 'true'
     uses: ./.github/workflows/relay.yml
   mobile:
     needs: changes
-    if: needs.changes.outputs.mobile == 'true' || github.event_name == 'schedule'
+    if: (needs.changes.outputs.proven != 'true' && needs.changes.outputs.mobile == 'true') || github.event_name == 'schedule'
     uses: ./.github/workflows/mobile.yml
   # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
   # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
   clock:
     needs: changes
-    if: needs.changes.outputs.clock == 'true' || github.event_name == 'schedule'
+    if: needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.clock == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')
     uses: ./.github/workflows/clock.yml
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
     needs: changes
-    if: needs.changes.outputs.brand == 'true' || github.event_name == 'schedule'
+    if: needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.brand == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -162,7 +217,7 @@ jobs:
     uses: ./.github/workflows/dash-shots.yml
   gate:
     if: always()
-    needs: [changes, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
+    needs: [changes, light, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

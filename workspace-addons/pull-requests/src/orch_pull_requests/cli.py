@@ -320,6 +320,12 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--json", action="store_true")
     ls = q.add_parser("list", help="what waits and what happened lately")
     ls.add_argument("--json", action="store_true")
+    au = q.add_parser(
+        "audit",
+        help="merges past the queue, times it stood still, check runs per merge and minutes to merged, for the last hours",
+    )
+    au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
+    au.add_argument("--json", action="store_true")
     rm = q.add_parser("remove", help="take a waiting pull request out of the queue")
     rm.add_argument("url")
     q.add_parser(
@@ -380,8 +386,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"entries": rows, "running": runner_alive(root)}, indent=1))
             elif not rows:
                 print("The merge queue is empty.")
-            else:
-                print("\n".join(_show(x) for x in rows))
+            else:  # what waits, and the last 50 that ended (the file keeps more for the audit)
+                done = [x for x in rows if x.get("state") in FINISHED]
+                shown = done[-50:] + [x for x in rows if x.get("state") not in FINISHED]
+                print("\n".join(_show(x) for x in rows if x in shown))
+            return 0
+        if args.sub == "audit":
+            from . import audit
+
+            if args.hours <= 0:
+                raise Refused("--hours is a number of hours above 0.")
+            report = audit.run(root, _github(), args.hours)
+            print(json.dumps(audit.as_json(report), indent=1) if args.json else audit.text(report))
             return 0
         if args.sub == "remove":
             if store.remove(root, args.url, _actor()):

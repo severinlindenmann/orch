@@ -397,6 +397,32 @@ def test_a_ticket_without_the_pull_request_is_refused(tk, run, fake_gh):
     assert code == 2 and "orch ref add" in err
 
 
+def test_with_the_merge_queue_on_no_merge_into_its_base_goes_past_it(proj, tk, run, fake_gh, monkeypatch):
+    """ORCH-450: every merge into develop is checked in a queue group, so ref wait --merge refuses it."""
+    from orch import addons
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
+    code, _, err = run("ref", "wait", tk, "--merge")
+    assert code == 2 and merges == [] and "go through the merge queue" in err
+    assert f"orch pull-requests queue add {PR} --ticket" in err
+    code, _, _ = run("ref", "wait", tk)  # only waiting for the checks stays allowed
+    assert code == 0 and merges == []
+
+
+def test_the_queue_refusal_counts_only_for_the_queues_base_branches(proj, tk, run, fake_gh, monkeypatch):
+    from orch import addons
+
+    pulls, merges = fake_gh
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
+    (proj / ".orch" / "config.toml").write_text('[pull_requests]\nbases = ["next"]\n', encoding="utf-8")
+    code, out, _ = run("ref", "wait", tk, "--merge")
+    assert code == 0, out
+    assert merges == [["/fake/gh", "pr", "merge", PR, "--merge", "--match-head-commit", HEAD]]
+
+
 def test_a_persons_merge_card_is_never_merged_here(proj, tk, run, fake_gh, monkeypatch):
     pulls, merges = fake_gh
 

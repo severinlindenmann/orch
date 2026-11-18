@@ -224,6 +224,20 @@ def remove_setup(root: Path) -> bool:
 # ------------------------------------------------------------------------------------------------ probes
 
 
+def drop_forks(rows: list[str]) -> list[str]:
+    """The command lines of `ps -o pid=,ppid=,command=` rows, without forked children.
+
+    A shell script forks child shells for pipes and $(...); they carry the parent's exact command line,
+    so a check that counts command lines would see one script as two. A process whose parent has the
+    same command line is that parent's fork and is left out."""
+    procs = {}
+    for row in rows:
+        parts = row.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit() and parts[2].strip():
+            procs[parts[0]] = (parts[1], parts[2].strip())
+    return [cmd for ppid, cmd in procs.values() if procs.get(ppid, (None, None))[1] != cmd]
+
+
 class Probes:
     """What the checks read from the machine. Tests pass `sim` ({"disk_free_gb", "load", "http": {url: code},
     "procs": [command lines], "launch_agents": {label: bool}, "logins": [rows], "repeats": [tickets],
@@ -266,8 +280,8 @@ class Probes:
             return list(self.sim["procs"])
         if os.name == "nt":
             return []
-        r = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True, timeout=30)
-        return [x for x in r.stdout.splitlines() if x.strip()]
+        r = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True, timeout=30)
+        return drop_forks(r.stdout.splitlines())
 
     def launch_agent(self, label: str) -> bool | None:
         """True when the launch agent runs, False when it does not, None when it cannot be known here."""

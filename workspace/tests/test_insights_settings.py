@@ -794,7 +794,8 @@ def test_find_detail_files_skips_an_unsafe_file_or_run_and_refuses_only_an_unsaf
     detail.rename(tmp_path / "moved")
     detail.symlink_to(tmp_path / "moved", target_is_directory=True)
     got = record.find_detail_files(ws, items)
-    assert got.status == "tampered" and got.reason == "link"
+    link = "reparse" if os.name == "nt" else "link"  # Windows sees a symlink as a reparse point first
+    assert got.status == "tampered" and got.reason == link
 
 
 @pytest.mark.parametrize("how", ["file", "folder"])

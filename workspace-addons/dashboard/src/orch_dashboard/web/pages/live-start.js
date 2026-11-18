@@ -67,96 +67,28 @@ if (typeof module === 'object' && module.exports) {
     liveStartModel, liveStartFresh, liveStartLast, liveStartQueued};
 } else {
   // --- the page ---
-  const liveStartPick = new Map();  // ticket id -> {tool, model} the person picked (this page only)
-  const liveStartBusy = new Set();
+  // ORCH-475: the pane shows the kit's Start choice itself (UI.startButton inline, kit/start-choice.js; facts from
+  // pages/start.js), the same one every Start button's caret opens: Starting… until the helper runs, one run for a double
+  // click, greyed choices say why. The functions above stay the plain model the tests check.
   const placesNow = () => liveStartPlaces(state?.runs, state?.settings, state?.start_line);
   const ticketOfId = id => (Array.isArray(state?.tickets) ? state.tickets : []).find(t => t.id === id) || null;
-  const pickOf = id => {
-    const t = ticketOfId(id), tools = liveStartTools(state?.settings?.agents), was = liveStartPick.get(id) || {};
-    const tool = tools.tools.some(x => x.name === was.tool) ? was.tool : tools.usual;
-    return {tools, tool, model:was.model || liveStartModel(t).name, cur:liveStartModel(t)};
-  };
-  window.liveStartKey = () => {
-    const p = placesNow();
-    return [p.used, p.max, p.waiting, [...liveStartPick], [...liveStartBusy], [...liveHistData].map(([k, x]) => [k, JSON.stringify(x.data || null)]), (state?.settings?.agents || []).map(a => [a.name, a.found, a.chosen, a.models])];
-  };
-  const seg = (label, list, cur, what, id) => h('span', {className:'segmented', role:'group', 'aria-label':label},
-    list.map(([v, text]) => h('button', {type:'button', className:'btn sm', 'data-live-start':'pick', 'data-what':what, 'data-v':v,
-      'data-session':id, 'aria-pressed':String(cur === v)}, text)));
-  // Tool and model of a fresh start: the usual ones preselected; a tool orch passes no model to says so.
-  function pickRow(id) {
-    const p = pickOf(id), tool = p.tools.tools.find(x => x.name === p.tool);
-    return h('div', {className:'live-pick', role:'group', 'aria-label':'Runs on', 'data-key':'live-start-pick'},
-      h('span', {className:'live-pick-l'}, 'Runs on'),
-      p.tools.tools.length > 1 ? seg('Tool', p.tools.tools.map(x => [x.name, x.label]), p.tool, 'tool', id)
-        : tool ? h('span', {className:'chip'}, tool.label) : null,
-      !tool || tool.models ? seg('Model', LIVE_START_MODELS, p.model, 'model', id)
-        : h('span', {className:'meta'}, 'This tool uses its own model.'));
-  }
-  // The pane body of a ticket with no helper: the Start choice, or where it waits in line.
+  const built = new WeakMap();  // pane host -> the kit's Start choice
+  // the layer draws its panes again when the line changes (the choice says where the ticket waits)
+  window.liveStartKey = () => { const p = placesNow(); return [p.max, p.waiting]; };
+  // The pane body of a ticket with no helper: a host the kit fills after the layer painted (liveStartMount).
   window.liveStartBody = function liveStartBody(sess) {
-    const p = placesNow(), line = liveStartInLine(p, sess.id), busy = liveStartBusy.has(sess.id);
-    const places = h('p', {className:'meta live-places', 'data-key':'live-start-places', 'data-full':p.full ? '' : null}, liveStartPlacesText(p));
-    if (line) return h('div', {className:'live-start', 'data-key':'live-start'},
-      h('h3', {className:'live-start-h'}, 'In line'),
-      h('p', {}, (sess.key || 'This ticket') + ' is number ' + line.at + ' of ' + line.of + ' in line. It starts by itself when a place is free.'),
-      places);
-    if (typeof liveHistLoad === 'function') liveHistLoad(sess.id);
-    const v = typeof liveHistView === 'function' ? liveHistView(liveHistData.get(sess.id)?.data, new Date(),
-      window.UI?.stamp ? (at, now) => window.UI.stamp(at.toISOString(), {now:now.toISOString()}) : null) : {state:'empty', rows:[]};
-    const last = liveStartLast(v.rows), hasLast = !!last || v.state === 'loading';
-    const label = sess.key || sess.title;
-    return h('div', {className:'live-start', 'data-key':'live-start', 'aria-busy':busy ? 'true' : null},
-      h('h3', {className:'live-start-h'}, 'Start a helper on this ticket'),
-      places,
-      h('div', {className:'live-choices'},
-        hasLast ? h('div', {className:'live-choice', 'data-key':'live-start-continue'},
-          h('h4', {}, 'Continue where it stopped'),
-          h('p', {className:'meta'}, 'Keeps the last conversation' + (last ? ' from ' + last.day : '') + '. Best when the work is half done.'),
-          h('button', {type:'button', className:'btn outline sm', 'data-live-start':'continue', 'data-session':sess.id, disabled:busy,
-            'aria-label':'Continue the last conversation on ' + label}, 'Continue')) : null,
-        h('div', {className:'live-choice', 'data-key':'live-start-fresh'},
-          h('h4', {}, 'Fresh start'),
-          h('p', {className:'meta'}, hasLast ? 'The helper reads the ticket again. The earlier talk is not used. Best when it went off track.' : 'The helper reads the ticket and starts on the first step.'),
-          pickRow(sess.id),
-          h('button', {type:'button', className:'btn outline sm', 'data-live-start':'fresh', 'data-session':sess.id, disabled:busy,
-            'aria-label':'Fresh start on ' + label}, hasLast ? 'Start again' : 'Start'))),
-      v.state === 'list' && typeof liveHistList === 'function' ? liveHistList(sess, v, false, busy) : null);
+    return h('div', {className:'live-start-host', 'data-key':'live-start', 'data-live-start-host':sess.id});
   };
-  const toast = (text, kind) => window.orch?.toast?.(text, kind);
-  async function go(id, ops, how) {
-    const key = ticketOfId(id) && window.DashHelpers?.ticketKey ? window.DashHelpers.ticketKey(ticketOfId(id)) : 'the ticket';
-    liveStartBusy.add(id);
-    if (typeof liveLayerPaint === 'function') liveLayerPaint();
-    let r = {ok:true};
-    for (const [op, args] of ops) {
-      r = await act(op, args);
-      if (!r.ok) break;
-    }
-    liveStartBusy.delete(id);
-    if (r.ok) {
-      liveStartPick.delete(id);
-      if (typeof liveHistData !== 'undefined') liveHistData.delete(id);
-      toast(how === 'continue' ? 'The helper continues the last conversation on ' + key + '.' : 'Fresh start on ' + key + ': the helper reads the ticket again.', 'ok');
-    } else if (liveStartQueued(r.text)) toast(key + ' waits in line for a free helper place.', 'ok');
-    else toast(r.text || 'Could not start the helper.', 'error');
-    if (typeof liveLayerPaint === 'function') liveLayerPaint();
-    document.querySelector(`#live-dock .live-pane[data-session="${id.replace(/["\\]/g, '')}"] [data-key="live-close"]`)?.focus({preventScroll:true});
-  }
-  document.addEventListener('click', e => {
-    const b = e.target.closest?.('#live-dock [data-live-start]');
-    if (!b || b.disabled) return;
-    const id = b.dataset.session, what = b.dataset.liveStart;
-    if (!id || liveStartBusy.has(id)) return;
-    if (what === 'pick') {
-      const p = pickOf(id), next = {tool:p.tool, model:p.model};
-      if (b.dataset.what === 'tool') next.tool = b.dataset.v; else next.model = b.dataset.v;
-      liveStartPick.set(id, next);
-      if (typeof liveLayerPaint === 'function') liveLayerPaint();
-      document.querySelector(`#live-dock .live-pane[data-session="${id.replace(/["\\]/g, '')}"] [data-live-start="pick"][data-what="${b.dataset.what}"][aria-pressed="true"]`)?.focus({preventScroll:true});
-      return;
-    }
-    if (what === 'continue') go(id, [['run.start', {ticket:id}]], 'continue');
-    else if (what === 'fresh') { const p = pickOf(id); go(id, liveStartFresh(id, p, p.tools.usual, p.cur), 'fresh'); }
-  });
+  window.liveStartMount = function liveStartMount() {
+    if (!window.UI?.startButton || typeof startFacts !== 'function') return;
+    document.querySelectorAll('#live-dock [data-live-start-host]').forEach(host => {
+      const t = ticketOfId(host.dataset.liveStartHost);
+      if (!t) return;
+      const facts = {...startFacts(t), running:false};  // the pane shows only while no helper runs on it
+      const w = built.get(host);
+      if (w) { w.update(facts); return; }
+      built.set(host, window.UI.startButton(host, {ticket:t.id, inline:true, send:(op, args) => act(op, args, {quiet:true}),
+        toast:(text, kind) => window.orch?.toast?.(text, kind || 'ok'), ...facts}));
+    });
+  };
 }
