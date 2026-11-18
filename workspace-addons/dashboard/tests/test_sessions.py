@@ -142,10 +142,20 @@ def test_the_api_serves_the_sessions(tmp_path, screens):
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     try:
         with urllib.request.urlopen(base + "/api/sessions?lines=3") as r:
-            assert r.headers["Cache-Control"] == "no-store"
+            assert r.headers["Cache-Control"] == "private, no-cache"
+            tag = r.headers["ETag"]
             body = json.loads(r.read())
         assert body["lines"] == 3 and body["age_ms"] == 250 and len(body["sessions"]) == 6
         assert body["sessions"][0]["key"] == "ORCH-2"
+        # an unchanged list (even with another clock and state age) answers 304 with no body
+        srv.state_cache.get = lambda: (_state(), 2.5)
+        again = urllib.request.Request(base + "/api/sessions?lines=3", headers={"If-None-Match": tag})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(again)
+        assert e.value.code == 304 and e.value.read() == b""
+        other = urllib.request.Request(base + "/api/sessions?lines=3", headers={"If-None-Match": '"x"'})
+        with urllib.request.urlopen(other) as r:
+            assert r.status == 200
         req = urllib.request.Request(base + "/api/sessions", headers={"Origin": "http://evil.example"})
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(req)
