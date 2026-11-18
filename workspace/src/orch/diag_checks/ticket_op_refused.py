@@ -43,7 +43,8 @@ def check(snap):
         if kv.get("actor"):
             who.setdefault(key, set()).add(str(kv["actor"]))
     bad = [
-        f"{t}{'' if op in (None, 'op') else ' ' + op}: refused {n}x in the last hour (guard {g}){_by(who.get((t, op, g)))}"
+        f"{t}{'' if op in (None, 'op') else ' ' + op}: refused {n}x in the last hour (guard {g})"
+        + _by(who.get((t, op, g)))
         for (t, op, g), n in seen.items()
         if n >= TIMES
     ]

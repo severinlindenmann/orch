@@ -141,7 +141,8 @@ def test_ticket_op_refused_names_the_caller(proj):
         diag.log("ticket.op_refused", "warn", root=proj, ticket="t_cccccc", op="op", guard="closed_ticket",
                  actor="agent:pull-requests")  # fmt: skip
     c = one(proj, "ticket_op_refused")
-    assert c["evidence"] == ["t_cccccc: refused 3x in the last hour (guard closed_ticket), by agent:pull-requests"]
+    want = "t_cccccc: refused 3x in the last hour (guard closed_ticket), by agent:pull-requests"
+    assert c["evidence"] == [want]
 
 
 def _refused_at(proj, at: float, guard: str, ticket="t_bbbbbb"):
