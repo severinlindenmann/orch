@@ -365,8 +365,8 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-pick .fx-proc a+a{border-top:0}
 .fx-confirm .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 .fx-group-done .row{align-items:center;gap:12px;margin-bottom:12px}
-.fx-group-done .row h2{margin:0}
-.fx-group-done input[type=search]{max-width:260px}
+.fx-group-done .row h2{margin:0;flex:none;white-space:nowrap}
+.fx-group-done input[type=search]{max-width:260px;flex:1 1 120px;min-width:0}
 .fx-none{padding:12px 16px;margin:0}
 
 /* fb16: "Add a task" is always visible, also at phone width where the task list is folded */
