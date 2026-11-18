@@ -135,3 +135,25 @@ test('commandCopy: the command as text, a lead line and one Copy button named fo
   assert.equal(b.attrs['aria-label'], 'Copy az login');
   assert.deepEqual(texts(UI.commandCopy('gh auth login')), ['gh auth login', 'Copy']);
 });
+
+// ORCH-476: one count source. The page reads the core's numbers (state.counts from orch/counts.py) and only takes off
+// what it hides for a moment; the step and the task counts are the core's too.
+test('ORCH-476: the needs-you number is the core items minus the rows this page hides', () => {
+  const counts = {needs_you:{count:3, questions:2, results:1, items:[{ticket:'t_a', question:'q1'}, {ticket:'t_a', question:'q2'}, {ticket:'t_r', question:null}]}};
+  assert.deepEqual({...helpers.needsYouFrom(counts, [])}.count, 3);
+  const hid = helpers.needsYouFrom(counts, [{ticket:'t_a', answer:{question:'q2'}}]);
+  assert.equal(hid.count, 2); assert.equal(hid.questions, 1); assert.equal(hid.results, 1);
+  assert.equal(helpers.needsYouFrom(null, []), null, 'an older core: the page counts as before');
+});
+
+test('ORCH-476: step and progress come from the core, with the same rule for an older core', () => {
+  const t = {id:'t_d', status:'active', checklist:[{done:true}, {wont_do:true}, {done:true}, {state:'doing'}]};
+  assert.deepEqual({...helpers.stepOf(null, t)}, {n:4, of:4});
+  assert.deepEqual({...helpers.stepOf({tickets:{t_d:{step:{n:2, of:9}}}}, t)}, {n:2, of:9}, 'the core wins');
+  const p = helpers.progressOf(null, t);
+  assert.deepEqual([p.done, p.wont_do, p.doing, p.todo, p.finished, p.total], [2, 1, 1, 0, 3, 4]);
+  assert.equal(helpers.stepOf(null, {...t, status:'done'}), null);
+  const rows = helpers.helperRows([t], {t_d:{running:true, helper:{state:'working'}}}, {tickets:{t_d:{step:{n:3, of:4}}}});
+  assert.deepEqual({...rows[0].step}, {n:3, of:4});
+  assert.equal(helpers.WONT_DO, "Won't do");
+});

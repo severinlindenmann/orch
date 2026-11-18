@@ -416,11 +416,12 @@ function clearOldButton() {
   };
   return b;
 }
-function attentionSummary(groups, failed, results, changes) {
+function attentionSummary(groups, failed, results, changes, questions = null, soon = 0) {
   // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
   // (failed starts, notes without a question, changes to add) follows "also", so title, subtitle and rows agree (ORCH-184)
   // questions = the one number minus the results (every open question counts, also a same-worded one on two tickets)
-  const questionsAsked = Math.max(0, needsYouTotal() - results), other = groups.filter(g => !g.row.answer?.question).length + failed.length;
+  const questionsAsked = questions == null ? Math.max(0, needsYouTotal() - results) : questions;
+  const other = groups.filter(g => !g.asked).length + failed.length + soon;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
   const counted = [part(questionsAsked, 'question', 'questions'), part(results, 'result to check', 'results to check')].filter(Boolean).join(' · ');
   const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
@@ -435,14 +436,17 @@ function homeNeeds(rows) {
   const groups = new Map(), out = [], byQuestion = new Map();
   for (const row of rows) {
     const key = row.ticket || row.id;
-    if (!groups.has(key)) groups.set(key, {row, count:0, same:[]});
-    groups.get(key).count++;
+    if (!groups.has(key)) groups.set(key, {row, count:0, same:[], asked:0});
+    const g = groups.get(key);
+    if (g.row !== row && !g.row.answer?.question && row.answer?.question) g.row = row;  // a question leads its ticket's row
+    g.count++;
+    if (row.ticket && row.answer?.question) g.asked++;
   }
   for (const g of groups.values()) {
     const options = array(g.row.answer?.options);
     const sig = g.count === 1 && g.row.ticket && options.length && !needActs(g.row).length ? clean(needQuestion(g.row)).toLowerCase() + '\n' + options.join('\n') : null;
     const first = sig && byQuestion.get(sig);
-    if (first) { first.same.push(g.row); continue; }
+    if (first) { first.same.push(g.row); first.asked += g.asked; continue; }
     if (sig) byQuestion.set(sig, g);
     out.push(g);
   }
@@ -458,6 +462,7 @@ function notesLine(notices) {
 }
 // What needs the person today (Home, the Home badge and the Menu count all use this): the parts of the Home subtitle, summed.
 function needsToday() {
+  const hidden = needsList().filter(r => laterToday(r) || pendingAnswers.has(r.id));
   const live = needsList().filter(r => !laterToday(r) && !pendingAnswers.has(r.id));
   const notices = live.filter(window.DashHelpers.isNotice);
   const needs = live.filter(r => !window.DashHelpers.isNotice(r) && !window.DashHelpers.isBringBack(r));
@@ -469,7 +474,10 @@ function needsToday() {
   // what helpers need: a login that runs out soon is a row of Home's list and counts in Home's title only (as drawn: the
   // menu badges count questions and results, which the Review page holds); the stopped ones are the banner
   const logins = loginWarnings();
-  return {needs, notices, failed, groups, review, changes, asked, logins, count:window.DashHelpers.needsYouCount(needs, results)};
+  // ORCH-476: THE number is the core's (state.counts); an older core without it: counted here as before
+  const core = window.DashHelpers.needsYouFrom(state.counts, hidden);
+  const count = core ? core.count : window.DashHelpers.needsYouCount(needs, results);
+  return {needs, notices, failed, groups, review, changes, asked, logins, count, questions:core ? core.questions : Math.max(0, count - results.length)};
 }
 // The one needs-you number: the Review menu entry, Menu, top bar, Home, Review and Tickets headers all read it.
 function needsYouTotal() { return state ? needsToday().count : 0; }
@@ -608,10 +616,10 @@ function lineBanner() {
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further
 // question, result to check and change to add (one button each); the notes that need no answer are one quiet line.
 function home() {
-  const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, count:counted} = needsToday(), all = tickets();
+  const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, count:counted, questions:asked} = needsToday(), all = tickets();
   const needCount = counted;  // THE number: title, Needs you pill, Review all, Review badge and Tickets pill; a login is a row and a banner
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
-  const helpers = window.DashHelpers.helperRows(all, state.runs);
+  const helpers = window.DashHelpers.helperRows(all, state.runs, state.counts);
   const quiet = working.filter(t => t.quiet_since);
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
@@ -623,7 +631,7 @@ function home() {
   // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
   const shownCount = needCount;
   const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
-  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length);
+  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length, asked, logins.soon.length);
   const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
   const notes = notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : [];
@@ -635,9 +643,12 @@ function home() {
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
-  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
-  const list = [first ? needRow(first.row, newest, first.count, first.same) : null, ...logins.soon.map(loginSoonRow), ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
-    ...results.map(resultRow), ...changes.map(changeRow), ...notes];
+  // data-counts on every row of the list: how much of THE number it carries (its questions, its results; 0 for a row
+  // that is shown but not counted), so the rows always add up to the title (the browser check sums them, ORCH-476)
+  const weigh = (el, n) => { if (el && el.setAttribute) el.setAttribute('data-counts', String(n)); return el; };
+  const further = groupedNeeds.filter(g => g !== first).map(g => { const {row, count, same} = g; return weigh(needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same), g.asked); });
+  const list = [first ? weigh(needRow(first.row, newest, first.count, first.same), first.asked) : null, ...logins.soon.map(r => weigh(loginSoonRow(r), 0)), ...further, ...failed.map(([t, sf]) => weigh(startFailedRow(t, sf), 0)),
+    ...results.map(g => weigh(resultRow(g), g.length)), ...changes.map(t => weigh(changeRow(t), 0)), ...notes];
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
       anyNeeds ? attentionCard('needs-you', needCount ? 'Needs you · ' + needCount : 'Needs you', 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', [clearOldButton(), reviewAllButton()]) : null),
