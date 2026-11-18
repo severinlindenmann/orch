@@ -99,9 +99,11 @@ test('mapCard carries the question text, the set, the suggestion and a choice\'s
 test('the deck is text only by default: voice is off', async () => {
   const {decks} = await mount(fakeApi([[card('a')]]));
   assert.equal(decks[0].o.voice, false);
+  // ORCH-420: real recording and files only where the page's api keeps files with the ticket (the dashboard)
+  assert.equal(decks[0].o.record, false); assert.equal(decks[0].o.attach, false);
   const w = read('widgets.js');
-  assert.match(w, /if\(o\.voice\)voice\.append\(mic,wave\)/);
-  assert.match(w, /if\(o\.voice\)sh\.append\(voice,clips\)/);
+  assert.match(w, /if\(talk\)voice\.append\(mic,wave\)/);
+  assert.match(w, /if\(o\.voice\|\|live\)sh\.append\(voice,clips\)/);
   assert.match(w, /clips:o\.voice\?dr\.clips\.slice\(\):\[\]/);
 });
 

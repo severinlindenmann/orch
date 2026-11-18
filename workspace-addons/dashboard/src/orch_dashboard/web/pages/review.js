@@ -35,10 +35,49 @@ function reviewWord(answer) {
   if (answer.verdict === 'no') return it.preview?.type === 'options' ? 'None' : it.kind === 'check' ? 'Sent back' : "Don't do";
   return 'Sent back';
 }
+// Feedback with pictures, files and voice notes (ORCH-420): the files are kept with the ticket first (op ticket.attach,
+// orch checks type, content and size), then the words name them, so the helper reads them before it changes anything.
+async function reviewFileData(f) {
+  const b = new Uint8Array(await f.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+async function reviewKeepFiles(ticket, files) {
+  const list = [];
+  for (const f of files) list.push({name:String(f.name || 'file'), data:await reviewFileData(f)});
+  const r = await act('ticket.attach', {ticket, files:list, feedback:true});  // the feedback folder: the card stays the same
+  if (!r.ok) return {ok:false, message:String(r.text || 'Could not add the files.').replace(/^Refused: /, '').slice(0, 300)};
+  const kept = r.state?.attached || {};
+  if (Array.isArray(kept.failed) && kept.failed.length) return {ok:false, message:'These files could not be added: ' + kept.failed.join(', ') + '. Nothing was sent.'};
+  return {ok:true, saved:Array.isArray(kept.saved) && kept.saved.length ? kept.saved : files.map(f => f.name)};
+}
+// The lines the helper reads: what was said in each voice note, then which files were added (one change each, so the
+// 500-character limit of a change holds).
+function reviewFileLines(files, saved) {
+  const lines = [];
+  files.forEach((f, i) => {
+    const v = f.orchVoice;
+    if (!v) return;
+    const secs = '0:' + String(v.secs || 0).padStart(2, '0');
+    lines.push((v.text ? 'Voice note (' + secs + '): ' + v.text : 'Voice note (' + secs + ') with no written words: ' + (saved[i] || f.name) + '.').slice(0, 500));
+  });
+  const count = saved.length === 1 ? 'a file' : saved.length + ' files';
+  let names = 'I added ' + count + ' to this ticket: ' + saved.join(', ') + '. Read ' + (saved.length === 1 ? 'it' : 'them') + ' first.';
+  if (names.length > 500) names = 'I added ' + count + ' to this ticket. Read ' + (saved.length === 1 ? 'it' : 'them') + ' first.';
+  return [...lines, names];
+}
+function reviewNoteWithFiles(note, files, saved) {
+  const text = String(note?.text || '').trim();
+  const voice = files.map((f, i) => f.orchVoice ? {secs:f.orchVoice.secs || 0, text:f.orchVoice.text || '', file:saved[i] || f.name} : null).filter(Boolean);
+  return {...(note || {}), text, changes:[...(text ? [text] : []), ...reviewFileLines(files, saved)], words:{text, voice}};
+}
 // What the page's api needs, from the dashboard: state in, one signed click out, files through /api/file.
 function reviewApi() {
   return {
     get workspace() { return clean(state?.workspace || ''); },
+    attach:!snapshot,  // the Comment box takes pictures, files and voice notes (ORCH-420)
+    speech:'local',    // the words of a voice note only on this computer, never a speech service on the internet
     stack: async () => reviewCards(),
     answered: async () => reviewAnswered(),
     fileUrl: (c, ref) => {
@@ -53,14 +92,26 @@ function reviewApi() {
         : '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=' + f[1] + '&n=' + encodeURIComponent(f[2]);
     },
     // "Add note" on the Comment sheet: the words go to the ticket's helper (queued if none is running); no verdict, the card stays.
-    note: async ({ticket, text}) => {
-      if (snapshot || typeof ticket !== 'string' || !String(text || '').trim()) return {ok:false, error:{code:'refused', message:'Write your note first.'}};
-      const r = await act('run.send', {ticket, text:String(text).trim()});
+    note: async ({ticket, text, files}) => {
+      files = Array.isArray(files) ? files : [];
+      if (snapshot || typeof ticket !== 'string' || (!String(text || '').trim() && !files.length)) return {ok:false, error:{code:'refused', message:'Write your note first.'}};
+      let words = String(text || '').trim();
+      if (files.length) {
+        const kept = await reviewKeepFiles(ticket, files);
+        if (!kept.ok) return {ok:false, error:{code:'error', message:kept.message}};
+        words = [words, ...reviewFileLines(files, kept.saved)].filter(Boolean).join('\n\n');
+      }
+      const r = await act('run.send', {ticket, text:words});
       return r.ok ? {ok:true} : {ok:false, error:{code:'error', message:String(r.text || 'Could not save the note.').slice(0, 300)}};
     },
-    answer: async ({id, digest, verdict, picked, note}) => {
+    answer: async ({id, digest, verdict, picked, note, files}) => {
       const m = REVIEW_ID.exec(String(id || ''));
       if (!m) return {ok:false, error:{code:'not_found', message:'That card is not here any more.'}};
+      if (Array.isArray(files) && files.length) {
+        const kept = await reviewKeepFiles(m[1] || m[3], files);
+        if (!kept.ok) return {ok:false, error:{code:'error', message:kept.message}};
+        note = reviewNoteWithFiles(note, files, kept.saved);
+      }
       const args = {ticket:m[1] || m[3], key:m[2] || 'review', verdict, digest};
       if (picked) args.picked = picked;
       if (note) args.note = note;

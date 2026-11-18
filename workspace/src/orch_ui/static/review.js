@@ -196,7 +196,8 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  /* answers go to orch; a failed one brings the card back */
  const send=(it,verdict,note)=>{const body={id:it.id,digest:it.digest,verdict,picked:null,note:null};
   if(note&&note.picked)body.picked=note.picked;else if(note&&note.about&&note.about!=='all')body.picked=note.about;
-  const w=note&&note.changes;if(w&&(w.text||(w.pins||[]).length))body.note={text:w.text||'',pins:(w.pins||[]).map((p,i)=>({n:p.n||i+1,on:p.on||'',x:p.x,y:p.y,text:p.text}))};
+  const w=note&&note.changes;if(w&&(w.text||(w.pins||[]).length||(w.files||[]).length))body.note={text:w.text||'',pins:(w.pins||[]).map((p,i)=>({n:p.n||i+1,on:p.on||'',x:p.x,y:p.y,text:p.text}))};
+  if(w&&(w.files||[]).length&&api.attach)body.files=w.files.slice();/* the page's api keeps them with the ticket first (ORCH-420) */
   gone.add(sig(it));
   /* held for o.hold ms first: Undo in that time takes the answer back for real (nothing was saved); leaving the page
      or a newer answer saves it at once */
@@ -214,7 +215,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{deckEl.replaceChildren();
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onNote:api.note?(it,text)=>api.note({id:it.id,ticket:it.ticketId,text}):undefined,canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,record:!!api.attach,attach:!!api.attach,speech:api.speech||null,start,later,pins,onDecide:send,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:api.attach?files||[]:[]}):undefined,canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus({preventScroll:true})};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));

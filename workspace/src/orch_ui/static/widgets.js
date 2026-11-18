@@ -323,18 +323,34 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   v.append(b,body);openOverlay(v,body.querySelector('.current')||x);return v};
  /* Comment sheet. The subject (which option) and the outcome are separate: the buttons say what happens.
     Voice: hold to talk, or tap once to start and once to stop; clips can be removed. The draft is kept per card. */
- const openComment=()=>{const it=items[idx];if(!it)return null;const dr=drafts[it.id]=drafts[it.id]||{text:'',clips:[]};
+ const openComment=()=>{const it=items[idx];if(!it)return null;const dr=drafts[it.id]=drafts[it.id]||{text:'',clips:[]};dr.files=dr.files||[];
   const scr=el('div','swipe-scrim'),sh=el('div','swipe-sheet');sh.setAttribute('role','dialog');sh.setAttribute('aria-label','Comment on '+it.title);
   const grab=el('div','grab');grab.title='Pull down to close; your words are kept';
   const ttl=el('h2','','What should change?'),sub=el('p','meta',it.title);sub.style.margin='0';
-  const ta=el('textarea');ta.placeholder=o.voice?'Type, or hold the mic and talk':'Type what should change';ta.setAttribute('aria-label','What should change');ta.value=dr.text;
+  const ta=el('textarea');ta.placeholder=o.attach&&(o.voice||o.record)?'Type, paste a screenshot, or hold the mic and talk':o.attach?'Type, or paste a screenshot':o.voice||o.record?'Type, or hold the mic and talk':'Type what should change';ta.setAttribute('aria-label','What should change');ta.value=dr.text;
   const voice=el('div','swipe-voice'),mic=btn('swipe-mic',[ic('mic',18),el('span','','Hold or tap to talk')]),wave=el('div','swipe-wave');for(let i=0;i<18;i++){const b=el('i');b.style.animationDelay=(i%6)*0.09+'s';wave.append(b)}
-  if(o.voice)voice.append(mic,wave);const clips=el('div','swipe-clips');
+  /* Real feedback (ORCH-420): o.record records the microphone into a sound file (o.speech:'local' also writes the words,
+     on this computer only, where the browser can); o.attach adds pictures and files by Attach, paste or drop. Both go
+     with the words as dr.files; a sound file carries {secs,text} so the helper reads what was said. */
+  const canRecord=!!(o.record&&typeof navigator!=='undefined'&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&typeof MediaRecorder!=='undefined'),canAttach=!!o.attach,live=canRecord||canAttach,talk=o.voice||canRecord;
+  const pick=el('input');pick.type='file';pick.multiple=true;pick.hidden=true;pick.accept=UI.feedbackAccept;
+  const addBtn=btn('btn sm',[ic('file',16),'Add file or picture'],'Add a file or picture (or paste a screenshot)');addBtn.onclick=()=>pick.click();
+  if(talk)voice.append(mic,wave);if(canAttach)voice.append(addBtn,pick);const clips=el('div','swipe-clips');
+  const addFiles=list=>{let why='';for(const f of list){const no=UI.feedbackFileProblem(f,dr.files.length);if(no){why=no;continue}dr.files.push(f)}drawClips();sync();if(why)hint.textContent=why};
+  pick.onchange=()=>{addFiles([...pick.files]);pick.value=''};
   const drawClips=()=>{clips.replaceChildren();dr.clips.forEach((cl,i)=>{const c=el('div','swipe-clip');const rm=btn('btn ghost icon xs',[ic('x',12)],'Remove this recording');rm.onclick=()=>{dr.clips.splice(i,1);drawClips();sync()};
-   c.append(ic('play',14),el('span','','0:'+String(cl.secs).padStart(2,'0')),el('q','',cl.text),rm);clips.append(c)})};
-  let t0=0,toggled=false;const rec=()=>mic.classList.contains('rec');
-  const start=()=>{if(rec())return;mic.classList.add('rec');mic.lastChild.textContent='Listening… tap or let go to stop';t0=Date.now()};
-  const stop=()=>{if(!rec())return;mic.classList.remove('rec');mic.lastChild.textContent='Hold or tap to talk';dr.clips.push({secs:Math.max(1,Math.round((Date.now()-t0)/1000)),text:o.transcript||'Make the button bigger and put it above the fold.'});drawClips();sync()};
+   c.append(ic('play',14),el('span','','0:'+String(cl.secs).padStart(2,'0')),el('q','',cl.text),rm);clips.append(c)});
+   dr.files.forEach((f,i)=>{const c=el('div','swipe-clip'),v=f.orchVoice,rm=btn('btn ghost icon xs',[ic('x',12)],v?'Remove this recording':'Remove '+f.name);rm.onclick=()=>{dr.files.splice(i,1);drawClips();sync()};
+    c.append(ic(v?'mic':/^image\//.test(f.type)?'image':'file',14),el('span','',v?'0:'+String(v.secs).padStart(2,'0'):f.name),el('q','',v?(v.text||'Voice note'):UI.feedbackSize(f.size)),rm);clips.append(c)})};
+  let t0=0,toggled=false,mr=null,heard='',sr=null;const rec=()=>mic.classList.contains('rec');
+  const startReal=async()=>{let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){mic.classList.remove('rec');mic.lastChild.textContent='Hold or tap to talk';hint.textContent='The microphone is blocked. Allow it for this page in the browser, or type.';return}
+   if(!rec()){stream.getTracks().forEach(t=>t.stop());return}const parts=[];heard='';mr=new MediaRecorder(stream);mr.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data)};
+   mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());const type=(mr.mimeType||'audio/webm').split(';')[0],ext=/mp4|m4a|aac/.test(type)?'m4a':/ogg/.test(type)?'ogg':'webm';
+    const f=new File(parts,UI.voiceName(ext),{type});f.orchVoice={secs:Math.max(1,Math.round((Date.now()-t0)/1000)),text:''};mr=null;
+    const done=()=>{f.orchVoice.text=heard.trim();addFiles([f])};if(sr){const r=sr;sr=null;r.onend=done;try{r.stop()}catch(e){done()}}else done()};
+   mr.start();sr=await UI.localSpeech(o.speech,w=>{heard+=(heard?' ':'')+w})};
+  const start=()=>{if(rec())return;mic.classList.add('rec');mic.lastChild.textContent='Listening… tap or let go to stop';t0=Date.now();if(canRecord)startReal()};
+  const stop=()=>{if(!rec())return;mic.classList.remove('rec');mic.lastChild.textContent='Hold or tap to talk';if(canRecord){if(mr&&mr.state!=='inactive')mr.stop();return}dr.clips.push({secs:Math.max(1,Math.round((Date.now()-t0)/1000)),text:o.transcript||'Make the button bigger and put it above the fold.'});drawClips();sync()};
   mic.addEventListener('pointerdown',e=>{e.preventDefault();if(rec()){toggled=false;stop();return}start();toggled=false});
   mic.addEventListener('pointerup',()=>{if(!rec())return;if(Date.now()-t0<350){toggled=true;return}/* a quick tap keeps listening */stop()});
   mic.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();rec()?stop():start()}});
@@ -344,7 +360,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    about.append(el('span','meta about-label','About'));[...(it.preview.options||[]).map(x=>[x.id,x.id]),['all','All']].forEach(([v,l])=>{const b=btn('btn sm',[l],v==='all'?'About all options':'About option '+v);b.dataset.v=v;b.onclick=()=>setAbout(v);about.append(b)})}
   const foot=el('div','swipe-sheet-foot'),cancel=btn('btn',['Cancel']),back=btn('btn',[it.kind==='choice'?'Send my answer':'Send back for changes']),use=btn('btn primary',['']),note=o.onNote&&it.kind!=='choice'?btn('btn',['Add note'],'Add note, the card stays and the work goes on'):null;
   const setAbout=v=>{about.v=v;about.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)));sync()};
-  const sync=()=>{const has=!!ta.value.trim()||(o.voice&&dr.clips.length);dr.text=ta.value;back.disabled=use.disabled=!has;if(note)note.disabled=!has;
+  const sync=()=>{const has=!!ta.value.trim()||(o.voice&&dr.clips.length)||dr.files.length>0;dr.text=ta.value;back.disabled=use.disabled=!has;if(note)note.disabled=!has;
    const opt=about&&about.v!=='all'?about.v:null;use.hidden=!opt;if(opt)use.textContent='Use '+opt+' with these changes';
    back.className=opt?'btn':'btn primary';
    hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):it.kind==='choice'?'The helper gets your words as the answer.':'The helper gets your words and makes a new version. Nothing is approved.'+(note?' “Add note” only saves your words: the card stays and the work goes on.':'')};
@@ -352,18 +368,21 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const close=()=>{closeOverlay();reset(cur)};cancel.onclick=close;
   const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');
    setTimeout(()=>{busy=false;delete drafts[it.id];commit(verdict,note)},220)};
-  const words=()=>({text:ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice()});
+  const words=()=>({text:ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice(),files:dr.files.slice()});
   back.onclick=()=>leave('talk',{changes:words(),about:about?about.v:null});
   use.onclick=()=>{picked[it.id]=about.v;leave('ok',{picked:about.v,changes:words()})};
-  if(note)note.onclick=async()=>{const text=ta.value.trim();if(!text||note.disabled)return;note.disabled=back.disabled=use.disabled=true;
-   let r;try{r=await o.onNote(it,text)}catch(e){r={ok:false}}
+  if(note)note.onclick=async()=>{const text=ta.value.trim(),files=dr.files.slice();if((!text&&!files.length)||note.disabled)return;note.disabled=back.disabled=use.disabled=true;
+   let r;try{r=await o.onNote(it,text,files)}catch(e){r={ok:false}}
    if(r&&r.ok){delete drafts[it.id];closeOverlay();reset(cur);if(UI.toast&&!o.quiet)UI.toast('Note added. The card stays; the work goes on.')}
    else{hint.textContent=(r&&r.error&&r.error.message)||'Could not save the note. Your words are kept.';sync()}};
   foot.append(cancel,...(note?[note]:[]),back,use);
   /* pull the handle down to close (the words stay) */
   grab.addEventListener('pointerdown',e=>{const y0=e.clientY;grab.setPointerCapture(e.pointerId);const mv=ev=>{sh.style.transform=`translateY(${Math.max(0,ev.clientY-y0)}px)`};
    grab.addEventListener('pointermove',mv);grab.addEventListener('pointerup',ev=>{grab.removeEventListener('pointermove',mv);if(ev.clientY-y0>80)close();else sh.style.transform=''},{once:true})});
-  sh.append(grab,ttl,sub);if(about)sh.append(about);sh.append(hint);if(o.voice)sh.append(voice,clips);sh.append(ta,foot);scr.append(sh);
+  sh.append(grab,ttl,sub);if(about)sh.append(about);sh.append(hint);if(o.voice||live)sh.append(voice,clips);sh.append(ta,foot);scr.append(sh);
+  if(canAttach){sh.addEventListener('paste',e=>{const got=UI.pastedFiles?UI.pastedFiles(e):[];if(got.length){e.preventDefault();addFiles(got)}});
+   sh.addEventListener('dragover',e=>{if([...(e.dataTransfer?.types||[])].includes('Files')){e.preventDefault();sh.classList.add('drop')}});sh.addEventListener('dragleave',e=>{if(e.target===sh)sh.classList.remove('drop')});
+   sh.addEventListener('drop',e=>{sh.classList.remove('drop');const got=[...(e.dataTransfer?.files||[])];if(got.length){e.preventDefault();addFiles(got)}})}
   scr.addEventListener('pointerdown',e=>{if(e.target===scr)close()});
   if(about)setAbout(picked[it.id]||'all');drawClips();sync();openOverlay(scr,o.state?null:ta);return {mic,start,stop,ta,send:back,use,setAbout,sync}};
  /* Viewer: bigger, zoom, Open, and spots (tap “Spot”, tap the place, say or type what to change; the spot remembers

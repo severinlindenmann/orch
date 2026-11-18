@@ -11,6 +11,22 @@ UI.showLink=(value,title)=>{value=String(value);const d=document.createElement('
    (local time, " (2)" when taken). One place for the chat box and New ticket. */
 const pastedNames=new Set();
 UI.pastedFiles=event=>{const list=Array.from(event?.clipboardData?.files||[]);return list.map(f=>{if(!/^image\.[a-z0-9]+$/i.test(f.name||''))return f;const t=new Date(),pad=n=>String(n).padStart(2,'0'),ext=f.name.split('.').pop().toLowerCase(),base='Screenshot '+pad(t.getHours())+'-'+pad(t.getMinutes());let name=base+'.'+ext,n=2;while(pastedNames.has(name))name=base+' ('+n++ +').'+ext;pastedNames.add(name);return new File([f],name,{type:f.type,lastModified:f.lastModified})})};
+/* Feedback files on a card (ORCH-420): pictures, text, PDF and voice notes, each at most 25 MB, at most 10 per answer. The
+   server checks them again (type, content, size); this only says it early, in plain words. */
+UI.feedbackAccept='image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.tsv,.json,.log,.pdf,audio/webm,audio/mp4,audio/ogg,audio/wav,.webm,.m4a,.ogg,.wav';
+UI.feedbackFileProblem=(f,have)=>{const ext=String(f&&f.name||'').split('.').pop().toLowerCase();
+ if(have>=10)return 'At most 10 files with one answer.';
+ if(!['png','jpg','jpeg','gif','webp','txt','md','csv','tsv','json','log','pdf','webm','m4a','ogg','wav'].includes(ext))return (f.name||'That file')+': pictures, text, PDF and voice notes can be added.';
+ if(!f.size)return (f.name||'That file')+' is empty.';if(f.size>25*1024*1024)return f.name+' is over 25 MB. Choose a smaller file.';return ''};
+UI.feedbackSize=n=>n<1024?n+' B':n<1048576?Math.round(n/1024)+' KB':(n/1048576).toFixed(1)+' MB';
+UI.voiceName=ext=>{const t=new Date(),pad=n=>String(n).padStart(2,'0');return 'Voice '+pad(t.getHours())+'-'+pad(t.getMinutes())+'-'+pad(t.getSeconds())+'.'+ext};
+/* The words of a voice note, on this computer only (mode 'local'): the browser's speech recognition with processLocally,
+   used only when the browser says it can do it here; never a speech service on the internet. Returns the running
+   recogniser (stop() ends it) or null. */
+UI.localSpeech=async(mode,onWords)=>{const SR=typeof window!=='undefined'&&(window.SpeechRecognition||window.webkitSpeechRecognition);if(mode!=='local'||!SR||typeof SR.available!=='function')return null;
+ const lang=(typeof navigator!=='undefined'&&navigator.language)||'en-US';
+ try{const a=await SR.available({langs:[lang],processLocally:true});if(a!=='available')return null;const r=new SR();r.lang=lang;r.processLocally=true;r.continuous=true;r.interimResults=false;
+  r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)onWords(e.results[i][0].transcript.trim())};r.start();return r}catch(e){return null}};
 UI.copy=async value=>{if(await UI.copyText(value))UI.toast('Link copied');else UI.showLink(value)};
 let openMenu=null;
 UI.closePopover=()=>{if(UI.closeSelect?.())return true;if(openMenu?.open){const d=openMenu;d.open=false;d.querySelector('summary')?.focus();openMenu=null;return true}return false};

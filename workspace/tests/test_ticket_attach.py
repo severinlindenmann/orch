@@ -68,6 +68,70 @@ def test_attach_checks_content_and_size(proj, run):
     assert ok["name"] == "p.png"
 
 
+@pytest.mark.parametrize(
+    "name,data",
+    [
+        ("Voice 09-30-12.webm", b"\x1a\x45\xdf\xa3" + b"\x00" * 40),
+        ("Voice 09-30-12.m4a", b"\x00\x00\x00\x20ftypM4A " + b"\x00" * 40),
+        ("Voice.ogg", b"OggS" + b"\x00" * 40),
+        ("Voice.wav", b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 40),
+        ("brief.pdf", b"%PDF-1.7\n" + b"\x00" * 40),
+    ],
+)
+def test_attach_keeps_voice_notes_and_pdfs_by_their_own_bytes(proj, run, name, data):
+    # ORCH-420: review feedback brings voice notes and PDFs; each must start with its type's own bytes
+    tid = _new(run)
+    r = tickets.attach(proj, tid, name, data, "human:t")
+    assert r["name"] == name and (proj / r["path"]).read_bytes() == data
+
+
+@pytest.mark.parametrize(
+    "name,data",
+    [
+        ("Voice.webm", b"#!/bin/sh\necho hi\n"),
+        ("Voice.m4a", b"\x00\x00\x00\x20moov" + b"\x00" * 40),
+        ("Voice.wav", b"RIFF\x24\x00\x00\x00AVI " + b"\x00" * 40),
+        ("brief.pdf", b"<html><script>x</script>"),
+        ("Voice.ogg", b""),
+    ],
+)
+def test_attach_refuses_a_voice_note_or_pdf_that_is_something_else(proj, run, name, data):
+    tid = _new(run)
+    with pytest.raises(Refused):
+        tickets.attach(proj, tid, name, data, "human:t")
+
+
+def test_feedback_files_go_in_their_folder_and_leave_the_check_card_as_it_was(proj, run):
+    # ORCH-420: a person's feedback picture must not make the card they are answering look changed
+    from orch import review
+
+    tid = _new(run)
+    tickets.attach(proj, tid, "result.png", b"\x89PNG\r\n\x1a\n" + b"0" * 20, "agent:x")
+    r = tickets.attach(
+        proj, tid, "Screenshot 09-30.png", b"\x89PNG\r\n\x1a\n" + b"1" * 20, "human:t", folder="feedback"
+    )
+    assert r["name"] == "feedback/Screenshot 09-30.png"
+    assert r["path"] == f".orch/tickets/{tid}/artifacts/feedback/Screenshot 09-30.png"
+    assert (proj / r["path"]).read_bytes().endswith(b"1" * 20)
+    t = tickets.load(proj, tid)
+    assert t["history"][-1]["text"] == "Attached feedback/Screenshot 09-30.png"
+    assert [f["name"] for f in review.check_card(t, proj).get("files", [])] == ["result.png"]
+    assert "feedback/Screenshot 09-30.png" in [f["name"] for f in tickets.artifacts_list(proj, tid)]
+    with pytest.raises(Refused):
+        tickets.attach(proj, tid, "x.png", b"\x89PNG\r\n\x1a\n", "human:t", folder="../evil")
+
+
+def test_cli_attach_feedback_flag(proj, run, monkeypatch):
+    import io
+
+    tid = _new(run)
+    monkeypatch.setattr(sys, "stdin", type("S", (), {"buffer": io.BytesIO(b"hello")})())
+    code, out, _ = run(
+        "ticket", "attach", tid, "--name", "note.txt", "--feedback", "--by", "human:t", "--json"
+    )
+    assert code == 0 and json.loads(out)["name"] == "feedback/note.txt"
+
+
 def test_attach_takes_20_mb_and_refuses_26_mb_plainly(proj, run):
     tid = _new(run)
     r = tickets.attach(proj, tid, "big.txt", b"x" * (20 * 1024 * 1024), "human:t")

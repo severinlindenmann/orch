@@ -1157,3 +1157,8 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
 @media(max-width:720px){body:has(>.tabbar):has(.swipe-actions:not([hidden])) .ui-toasts{top:var(--s4);bottom:auto}}
 @media(max-height:900px){.swipe-file{width:112px}.swipe-file-thumb{height:64px}.swipe-files{padding-top:var(--s2)}}
 .swipe-preview:has(>.doc):not(:has(.doc-rows)){background:linear-gradient(transparent,var(--ink) 70%) 0 100%/100% 32px no-repeat local,linear-gradient(transparent,color-mix(in srgb,var(--text) 22%,transparent)) 0 100%/100% 16px no-repeat scroll,var(--ink)}
+/* Feedback with pictures, files and voice (ORCH-420): the mic and "Add file or picture" share one row that wraps on a
+   phone; a file dragged over the sheet shows the drop place with the accent edge. */
+.swipe-voice{flex-wrap:wrap}
+.swipe-sheet.drop{box-shadow:var(--focus-ring)}
+.swipe-clip>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:50%}
