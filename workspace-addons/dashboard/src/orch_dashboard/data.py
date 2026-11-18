@@ -1085,6 +1085,12 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "consent": _consent(r),
                 "detail": _addon_detail(root, r["name"]),
                 "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
+                # the add-on page of a live-session add-on carries the Typing and Preview switches
+                **(
+                    {"page": {"live_session": True}}
+                    if isinstance(r.get("page"), dict) and r["page"].get("live_session") is True
+                    else {}
+                ),
             }
             for r in _addon_rows(rows)
             if r.get("installed") is not False
@@ -1168,11 +1174,8 @@ def load_runs(
             _RUN_SIGNATURES[str(root)] = signature
     claims = root / ".orch" / "run" / "tickets"  # a done ticket can still have its live session open
     ids = [t["id"] for t in tickets if t["status"] not in ("done", "dropped")][:RUNS_MAX]
-    ids += [
-        t["id"]
-        for t in tickets
-        if t["status"] in ("done", "dropped") and (claims / f"{t['id']}.json").exists()
-    ]
+    first = set(ids)  # every ticket with a run claim too: a live session past the first RUNS_MAX (ORCH-359)
+    ids += [t["id"] for t in tickets if t["id"] not in first and (claims / f"{t['id']}.json").exists()]
     ids += [i for i in extra or [] if i not in ids]  # sessions without a ticket (their tickets are hidden)
     now = time.monotonic()
     todo = [

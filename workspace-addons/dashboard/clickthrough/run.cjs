@@ -5,6 +5,7 @@
 //   node workspace-addons/dashboard/clickthrough/run.cjs --only home,checks   only these files (features/<name>.cjs)
 //   node workspace-addons/dashboard/clickthrough/run.cjs --list           the features and who covers them, no browser
 //   node workspace-addons/dashboard/clickthrough/run.cjs --out DIR        keep a picture of each click-through's end
+//   node workspace-addons/dashboard/clickthrough/run.cjs --size 390x844   another window size (default 1280x900)
 //
 // Each click-through (features/*.cjs) does a thing, reloads the page, checks the result is still there, and fails on
 // any console error or uncaught exception. The server is the real dashboard with working actions (server.py): a click
@@ -25,7 +26,19 @@ const { spawn, execFileSync } = require('node:child_process');
 const catalogue = require('./catalogue.cjs');
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
-const SIZE = { width: 1280, height: 900 };
+let SIZE = { width: 1280, height: 900 };
+/** Add-ons of this checkout the demo home has installed (off until a click-through turns one on, see server.py):
+ *  every orch the run starts sees the same ones. */
+const ADDONS = ['focus', 'lessons', 'pull-requests'];
+const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
+  ...ADDONS.flatMap(n => ['--with-editable', path.join(REPO, 'workspace-addons', n)])];
+/** the env of every process of the run: the throw-away home only; ORCH_REPO = this checkout, so the add-ons
+ *  above count as shipped and "the newest orch" is read from here, never from the internet */
+const runEnv = dir => ({ HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1',
+  // the stand-in programs of server.py (agent tools, gh) first, for every orch the run starts, not only the server
+  PATH: `${path.join(dir, 'bin')}${path.delimiter}${process.env.PATH}`, LANG: 'en_US.UTF-8', ORCH_REPO: REPO,
+  UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache', 'uv') });
+const envArgs = env => ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`)];
 
 function args(argv) {
   const o = { only: null, out: null, list: false };
@@ -34,6 +47,7 @@ function args(argv) {
     if (a === '--list') o.list = true;
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(s => s.replace(/\.cjs$/, '')));
     else if (a === '--out') o.out = path.resolve(argv[++i]);
+    else if (a === '--size') { const [w, h] = argv[++i].split('x').map(Number); SIZE = { width: w, height: h }; }
     else throw new Error(`unknown option ${a}`);
   }
   return o;
@@ -47,6 +61,9 @@ function playwright() {
   return require(path.join(execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim(), 'playwright'));
 }
 
+/** an answer that did the thing: 200, or 202 for what runs on by itself (Update) */
+const ok = status => status >= 200 && status < 300;
+
 const freePort = () => new Promise((ok, no) => {
   const s = net.createServer();
   s.once('error', no);
@@ -59,14 +76,13 @@ async function serve() {
   fs.mkdirSync(root, { recursive: true });
   const dir = fs.mkdtempSync(path.join(root, 'clickthrough-'));
   const port = await freePort();
-  const env = { HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1', PATH: process.env.PATH,
-    LANG: 'en_US.UTF-8', UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache', 'uv') };
-  const child = spawn('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), 'uv', 'run', '-q', '--project', 'workspace',
-    'python', path.join(__dirname, 'server.py'), dir, String(port)], { cwd: REPO, stdio: ['pipe', 'pipe', 'pipe'] });
+  const env = runEnv(dir);
+  const child = spawn('env', [...envArgs(env), ...UV_RUN, 'python', path.join(__dirname, 'server.py'), dir, String(port)],
+    { cwd: REPO, stdio: ['pipe', 'pipe', 'pipe'] });
   let log = '';
   child.stderr.on('data', d => { log = (log + d).slice(-4000); });
   const lines = readline.createInterface({ input: child.stdout });
-  const waiting = [];
+  const waiting = [], forgetting = [];
   let ready;
   const started = new Promise((ok, no) => {
     ready = ok;
@@ -76,14 +92,15 @@ async function serve() {
   lines.on('line', l => {
     if (l.startsWith('ready ')) { const [, base, ...rest] = l.split(' '); ready({ base, ids: JSON.parse(rest.join(' ')) }); }
     else if (l.startsWith('token ') && waiting.length) waiting.shift()(l.slice(6).trim());
+    else if (l === 'forgot update-info' && forgetting.length) forgetting.shift()();
   });
   const stop = () => {
     // first the workspace's own services (dashboard, add-on pages): they keep writing into .orch while it is removed
     for (const ws of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
       if (!fs.existsSync(path.join(dir, ws, '.orch'))) continue;
       try {
-        execFileSync('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), 'uv', 'run', '-q', '--project',
-          path.join(REPO, 'workspace'), 'python', '-I', '-m', 'orch', 'stop'], { cwd: path.join(dir, ws), stdio: 'ignore', timeout: 60000 });
+        execFileSync('env', [...envArgs(env), ...UV_RUN, 'python', '-I', '-m', 'orch', 'stop'],
+          { cwd: path.join(dir, ws), stdio: 'ignore', timeout: 60000 });
       } catch (e) { /* nothing running */ }
     }
     try { child.stdin.end(); process.kill(child.pid); } catch (e) { /* gone */ }
@@ -105,7 +122,8 @@ async function serve() {
   try {
     const { base, ids } = await started;
     const token = () => new Promise(ok => { waiting.push(ok); child.stdin.write('token\n'); });
-    return { base, ids, dir, token, stop, log: () => log };
+    const forgetUpdateInfo = () => new Promise(ok => { forgetting.push(ok); child.stdin.write('forget-update-info\n'); });
+    return { base, ids, dir, token, forgetUpdateInfo, stop, log: () => log };
   } catch (e) { stop(); throw e; }
 }
 
@@ -122,14 +140,16 @@ async function signIn(browser, srv) {
 
 /** Record what the page does: ops sent (with their answer) and the router kinds it showed. */
 function recorder(page, base) {
-  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set() };
+  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [] };
+  page.on('response', r => { if (r.status() >= 400) rec.failed.push(`${r.status()} ${r.request().method()} ${r.url().replace(base, '')}`); });
   page.on('pageerror', e => rec.errors.push(`uncaught exception: ${String(e.message).slice(0, 300)}`));
   page.on('console', m => {
     if (m.type() !== 'error') return;
     const t = m.text();
     // Chromium logs every 4xx answer as a console error; an action a click-through expects to be refused is fine
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
-    rec.errors.push(`console error: ${t.slice(0, 300)}`);
+    // name the address of a failed load (Chromium's line does not)
+    rec.errors.push(`console error: ${t.slice(0, 300)}${/Failed to load resource/.test(t) && rec.failed.length ? ` (${rec.failed.at(-1)})` : ''}`);
   });
   page.on('response', async r => {
     const req = r.request();
@@ -138,7 +158,7 @@ function recorder(page, base) {
     if (!op) try { op = JSON.parse(req.postData() || '{}').op; } catch (e) { /* not JSON */ }
     const hit = { op, status: r.status(), text: '' };
     rec.ops.push(hit);  // before any await: the console line of a 4xx comes right after the answer
-    if (r.status() !== 200) try { hit.text = (await r.text()).slice(0, 200); } catch (e) { /* gone */ }
+    if (!ok(r.status())) try { hit.text = (await r.text()).slice(0, 200); } catch (e) { /* gone */ }
   });
   return rec;
 }
@@ -152,7 +172,7 @@ const PAGE_KIND = () => {
 };
 
 /** The helpers a click-through gets. */
-function tools(page, srv, rec) {
+function tools(page, srv, rec, shots = null) {
   const settle = async () => {
     await page.waitForFunction(() => document.querySelector('main') && !document.querySelector('main .sk-title'), null, { timeout: 20000 });
     await page.waitForTimeout(150);
@@ -163,14 +183,38 @@ function tools(page, srv, rec) {
     page, ids: srv.ids, base: srv.base,
     /** the demo workspace folder (in the throw-away home) */
     workspace: path.join(srv.dir, 'Pilatus'),
+    /** the throw-away home itself (stand-in programs leave their marks here) */
+    home: srv.dir,
+    /** where the local stand-ins listen (server.py): {publish: {url, workspace, token}, relay: {...}, head} */
+    get standins() { return JSON.parse(fs.readFileSync(path.join(srv.dir, 'standins.json'), 'utf8')); },
     /** run this checkout's orch in the demo workspace as the stand-in helper would (env -i, the throw-away home);
      *  for what only a helper can do (a chat reply, a proposal). Returns stdout; throws on a non-zero exit. */
     orch(...words) {
-      const env = { HOME: srv.dir, USERPROFILE: srv.dir, ORCH_HOME: path.join(srv.dir, 'orch'), ORCH_HOME_STRICT: '1',
-        PATH: process.env.PATH, LANG: 'en_US.UTF-8', ORCH_AGENT: 'standin',
-        UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache', 'uv') };
-      return execFileSync('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), 'uv', 'run', '-q', '--project',
-        path.join(REPO, 'workspace'), 'python', '-I', '-m', 'orch', ...words], { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
+      return execFileSync('env', [...envArgs({ ...runEnv(srv.dir), ORCH_AGENT: 'standin' }), ...UV_RUN, 'python', '-I', '-m', 'orch', ...words],
+        { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
+    },
+    /** like orch(...), but as the person at the computer (no helper mark): what a person types in a terminal */
+    orchAsPerson(...words) {
+      return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-m', 'orch', ...words],
+        { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
+    },
+    /** orch as the person at the computer in another folder of the throw-away home (a second workspace) */
+    orchIn(dir, ...words) {
+      if (!path.resolve(dir).startsWith(srv.dir + path.sep)) throw new Error('orchIn: not inside the throw-away home: ' + dir);
+      return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-m', 'orch', ...words],
+        { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    },
+    /** git in a folder of the throw-away home, with no settings of this computer and a made-up author */
+    git(dir, ...words) {
+      if (!path.resolve(dir).startsWith(srv.dir + path.sep)) throw new Error('git: not inside the throw-away home: ' + dir);
+      return execFileSync('env', [...envArgs({ PATH: process.env.PATH, HOME: srv.dir, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
+        GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com' }), 'git', ...words],
+      { cwd: dir, encoding: 'utf8', timeout: 60000 });
+    },
+    /** run a short Python snippet with this checkout's orch importable (same env as orch(...)); args follow */
+    python(code, ...rest) {
+      return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-c', code, ...rest],
+        { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
     },
     /** open a dashboard address (`#tickets`, `#ticket/<id>`, `#settings/agent`) and wait until it is drawn */
     async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); },
@@ -187,14 +231,49 @@ function tools(page, srv, rec) {
       while (Date.now() - t0 < timeout) {
         const hit = rec.ops.slice(before).find(o => o.op === op);
         if (hit) {
-          if (!refused && hit.status !== 200) throw new Error(`${op} was refused (${hit.status}): ${hit.text}`);
-          if (refused && hit.status === 200) throw new Error(`${op} was expected to be refused, but went through`);
+          if (!refused && !ok(hit.status)) throw new Error(`${op} was refused (${hit.status}): ${hit.text}`);
+          if (refused && ok(hit.status)) throw new Error(`${op} was expected to be refused, but went through`);
           await page.waitForTimeout(200);
           return hit;
         }
         await page.waitForTimeout(100);
       }
       throw new Error(`the page did not send ${op}`);
+    },
+    /** after a change made outside the page (orch(...), a file): tell the page's server a settings file changed and
+     *  wait until its /api/state passes check(state) (checked here in Node). Returns that state. */
+    async until(check, what, secs = 60) {
+      const cfg = path.join(srv.dir, 'Pilatus', '.orch', 'config.toml');
+      let s = null;
+      for (let i = 0; i < secs * 2; i++) {
+        if (i % 6 === 0) { const now = new Date(); fs.utimesSync(cfg, now, now); }
+        s = await page.evaluate(async () => (await fetch('/api/state', { cache: 'no-store' })).json());
+        if (check(s)) return s;
+        await page.waitForTimeout(500);
+      }
+      throw new Error(`the page's state never showed ${what}`);
+    },
+    /** the page server checks for a newer orch at most every 10 minutes: forget its last answer */
+    forgetUpdateInfo: () => srv.forgetUpdateInfo(),
+    /** turn on an add-on of this checkout that server.py installed (a person's consent here, then on) */
+    addonOn(name) {
+      t.python('import sys; from pathlib import Path; from orch import addons; addons.record_consent(Path(sys.argv[1]), sys.argv[2])',
+        path.join(srv.dir, 'Pilatus'), name);
+      return t.orchAsPerson('addon', 'add', name, '--project-only');
+    },
+    /** with --out: keep pictures of the page now at the UX checklist sizes, <file>-<name>-<w>.png (a state worth
+     *  showing in a review), with `el` (a locator) scrolled into view; the window goes back to its size after */
+    async shot(name, el = null) {
+      if (!shots) return;
+      const was = page.viewportSize();
+      for (const [w, h] of [[1280, 800], [1920, 1080], [390, 844]]) {
+        await page.setViewportSize({ width: w, height: h });
+        await page.waitForTimeout(400);
+        if (el) await el.scrollIntoViewIfNeeded().catch(() => {});
+        await page.screenshot({ path: `${shots}-${name}-${w}.png` });
+      }
+      await page.setViewportSize(was);
+      await page.waitForTimeout(200);
     },
     /** fail with a plain message unless cond */
     must(cond, msg) { if (!cond) throw new Error(msg); },
@@ -228,14 +307,14 @@ async function main() {
       const problems = [];
       const t0 = Date.now();
       try {
-        await c.run(tools(page, srv, rec));
+        await c.run(tools(page, srv, rec, o.out ? path.join(o.out, c.file.replace(/\.cjs$/, '')) : null));
       } catch (e) {
         problems.push(String(e.message).split('\n')[0]);
       }
       if (o.out) await page.screenshot({ path: path.join(o.out, c.file.replace(/\.cjs$/, '.png')) }).catch(() => {});
       await page.close();
       problems.push(...new Set(rec.errors));
-      const did = new Set([...rec.ops.filter(x => x.status === 200 || rec.refusedOk.has(x.op)).map(x => x.op), ...rec.pages]);
+      const did = new Set([...rec.ops.filter(x => ok(x.status) || rec.refusedOk.has(x.op)).map(x => x.op), ...rec.pages]);
       const claimedNotDone = (c.covers || []).filter(k => !did.has(k));
       if (!problems.length && claimedNotDone.length) problems.push(`says it covers ${claimedNotDone.join(', ')} but never did it`);
       if (!problems.length) for (const k of c.covers || []) done.add(k);
@@ -251,15 +330,13 @@ async function main() {
   const failed = results.filter(r => r.problems.length);
   let missing = [];
   if (!o.only) {
-    const later = catalogue.notYet();
-    missing = catalogue.features().filter(k => !done.has(k) && !later.has(k));
+    missing = catalogue.features().filter(k => !done.has(k));
     if (missing.length) {
       console.log('\nThese dashboard features have no passing click-through (add one in workspace-addons/dashboard/clickthrough/features/):');
       for (const k of missing) console.log(`  - ${k}`);
     }
   }
-  const waiting = catalogue.notYet().size;
-  console.log(`\n${results.length - failed.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${catalogue.features().length - missing.length - waiting} of ${catalogue.features().length} features done, ${waiting} on the not-yet list (clickthrough/not-yet.json)`}.`);
+  console.log(`\n${results.length - failed.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${catalogue.features().length - missing.length} of ${catalogue.features().length} features done`}.`);
   return failed.length || missing.length ? 1 : 0;
 }
 

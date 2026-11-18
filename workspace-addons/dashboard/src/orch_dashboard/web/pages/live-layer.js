@@ -5,7 +5,8 @@
 // browser. Esc goes one step back: an open menu, then full screen, then the panel to the bar. The split (ORCH-339):
 // 1, 2 or 3 sessions side by side (stacked on the right), one of them selected; each pane has pin, add beside, place,
 // full screen, minimise and close (pin and place fold into More when the pane is narrow). On a phone
-// only the selected session shows. The pane is a placeholder until the chat and terminal tasks fill it.
+// only the selected session shows. A pane shows the session's live data (pages/livesessions.js, ORCH-359): what it
+// does now, its last lines, tool and model, open time; the chat and terminal tasks fill it further.
 // Look: the kit's .live-* rules (widgets.css). The bar's session chips go into [data-key="live-bar-sessions"].
 const LIVE_LAYER_KEY = 'orch.live.layer';
 const LIVE_PLACES = ['bottom', 'right'];
@@ -149,19 +150,22 @@ function liveLayerSession(key) {
   const t = array(state?.tickets).find(x => x.id === key || x.key === key);
   if (!t) {
     const x = array(state?.sessions).find(o => o && o.id === key && o.open === true);
-    return x ? {pill:null, key:'', id:x.id, title:clean(x.title) || 'Session', running:!!state.runs?.[x.id]?.running, kind:x.kind} : null;
+    if (!x) return null;
+    const live = window.LiveSessions?.get(x.id) || null;
+    return {pill:null, key:'', id:x.id, title:clean(x.title) || 'Session', live, kind:x.kind,
+      running:live ? ['working', 'needs-you', 'idle'].includes(live.status) && x.kind !== 'terminal' : !!state.runs?.[x.id]?.running};
   }
   const run = state.runs?.[t.id], helper = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
   const pill = window.UI?.ticketState && window.UI?.ticketPill ? window.UI.ticketPill(window.UI.ticketState(t, helper)) : null;
-  return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(t.title) || 'Untitled', running:!!state.runs?.[t.id]?.running};
+  const live = window.LiveSessions?.get(t.id) || null;
+  return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(t.title) || 'Untitled', live,
+    running:live ? ['working', 'needs-you', 'idle'].includes(live.status) : !!state.runs?.[t.id]?.running};
 }
 // The live sessions in the bar's order (needs you, pinned, working, idle; pages/livebar.js), else the ticket order.
 function liveLayerLive() {
-  const live = [...array(state?.tickets).filter(x => state.runs?.[x.id]?.running).map(x => x.id),
-    ...array(state?.sessions).filter(x => x && x.open === true).map(x => x.id)];
-  if (typeof liveBarModel !== 'function' || !window.DashHelpers?.helperState) return live;
-  const order = liveBarModel(state.tickets, state.runs, liveLayerPins(), window.DashHelpers.helperState, state.sessions).map(o => o.id);
-  return live.sort((a, b) => (order.indexOf(a) + 1 || 1e6) - (order.indexOf(b) + 1 || 1e6));
+  const list = array(window.LiveSessions?.list).filter(x => ['working', 'needs-you', 'idle'].includes(x.status));
+  if (typeof liveBarModel !== 'function') return list.map(x => x.id);
+  return liveBarModel(list, liveLayerPins()).map(o => o.id);
 }
 // What Open shows when nothing was open yet: the first working helper.
 function liveLayerFirst() {
@@ -265,11 +269,35 @@ function livePane(key, where, s, o) {
         o.narrow ? liveBtn('btn icon sm ghost', 'menu', 'More for ' + label, 'more', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}) : null,
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned) : null)),
-    typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess)) : h('div', {className:'live-pb'},
-      h('p', {}, !sess ? 'This session is no longer in the list.' : sess.kind === 'terminal' ? 'A plain terminal in this workspace, no helper.'
-        : sess.running ? 'The helper’s session shows here.' : sess.kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.'),
-      sess && !sess.kind ? h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket') : null,
-      h('p', {className:'meta'}, sess?.kind === 'terminal' ? 'The terminal itself comes here next.' : 'The chat and the terminal of ' + name + ' come here next.')));
+    typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess))
+      : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
+      h('p', {className:'live-now', 'data-live-now':''}),
+      h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
+      h('p', {className:'meta live-meta', 'data-live-meta':''}),
+      sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'))
+      : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.')));
+}
+// The live part of a pane, written in place on every answer of the sessions API: no repaint, so the keyboard place,
+// an open menu and the scroll of the lines stay.
+function liveLayerFill() {
+  for (const body of document.querySelectorAll('#live-dock [data-live-body]')) {
+    const live = window.LiveSessions?.get(body.dataset.liveBody) || null;
+    const now = body.querySelector('[data-live-now]'), pre = body.querySelector('[data-live-lines]'), meta = body.querySelector('[data-live-meta]');
+    const kind = body.dataset.liveKind || '';  // a session without a ticket (ORCH-364)
+    const text = kind === 'terminal' ? 'A plain terminal in this workspace, no helper. The terminal itself comes here next.'
+      : !window.LiveSessions?.ready ? 'Loading…' : live ? liveNow(live) : kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.';
+    if (now.textContent !== text) now.textContent = text;
+    const lines = live && Array.isArray(live.lines) ? live.lines.join('\n') : '';
+    if (pre.textContent !== lines) {
+      const end = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 8;  // following the end: keep following it
+      pre.textContent = lines;
+      if (end) pre.scrollTop = pre.scrollHeight;
+    }
+    pre.hidden = !lines;
+    const m = live && kind !== 'terminal' ? liveMeta(live).join(' · ') : '';
+    if (meta.textContent !== m) meta.textContent = m;
+    meta.hidden = !m;
+  }
 }
 // The layer's part of the bar: Open (when only the bar shows), Place with its menu, and in full screen the way out.
 function liveBarEnd(where, s) {
@@ -340,6 +368,7 @@ function liveLayerPaint() {
     liveLayerWas = where;
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...s.panes];
   }
+  liveLayerFill();
   document.body.dataset.liveLayer = where;
   liveLayerInert(where === 'full');
   liveLayerPad();
@@ -383,9 +412,12 @@ function liveLayerOff() {
 }
 // Called after every page render (app.js): on with the Preview switch, gone without it.
 function liveDockSync() {
+  window.LiveSessions?.sync();
   if (!livePreviewOn() || !liveLayerPage()) { liveLayerOff(); return; }
   liveLayerPaint();
 }
+// A new answer of the sessions API: the panes' live part in place; the dock itself only when what it shows changed.
+window.addEventListener('orch:live-sessions', () => { if (document.getElementById('live-dock')) liveLayerPaint(); });
 // For the bar, the wall and the ticket page: open a session in the layer.
 window.LiveLayer = {
   open(key, into = false) {  // the bar marks chips by ticket id; a ticket's session button moves the keyboard into the pane

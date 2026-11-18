@@ -26,8 +26,7 @@ function liveNewButtons() {
 function liveNoTicketList(addon) {
   const open = liveSessions().filter(x => x && x.open === true);
   if (!open.length) return null;
-  const all = typeof liveBarModel === 'function' && liveWin().DashHelpers?.helperState
-    ? liveBarModel([], state.runs, [], liveWin().DashHelpers.helperState, liveSessions()) : [];
+  const all = typeof liveBarModel === 'function' ? liveBarModel(liveWin().LiveSessions?.list, []).filter(o => o.kind) : [];
   return h('section', {className:'card pad stack-sm', 'data-key':'live-no-ticket', 'aria-label':'Sessions without a ticket'},
     h('h2', {}, 'Sessions without a ticket (' + open.length + ')'),
     h('div', {className:'lbar-list'}, all.map(o => h('a', {className:'lbar-row', href:'#addon/' + encodeURIComponent(addon) + '/t/' + encodeURIComponent(o.id), 'data-live-open':o.id, 'data-key':'live-nt-' + o.id},

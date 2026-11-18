@@ -64,7 +64,12 @@ def add_parsers(sub, common) -> None:
             x.add_argument("--dry-run", action="store_true", help="only say what it would do")
             continue
         x.add_argument(
-            "ticket", nargs="?" if name in ("event", "done", "input") else "+" if name == "status" else None
+            "ticket",
+            nargs="?"
+            if name in ("event", "done", "input")
+            else "+"
+            if name in ("status", "screen")
+            else None,
         )
         if name in ("claim", "argv"):
             x.add_argument("--mode", choices=("oneshot", "live"), default="oneshot")
@@ -455,8 +460,17 @@ def dispatch(args, root: Path) -> bool:
     if sub == "screen":  # read-only: nothing is typed into the session
         if not args.ticket:
             raise Refused("Say which ticket: orch run screen <ticket>")
-        data = runwatch.screen(root, args.ticket, args.lines)
-        _out(args, data, "\n".join(data["lines"]))
+        ids = args.ticket if isinstance(args.ticket, list) else [args.ticket]
+        if len(ids) == 1:  # the one-ticket answer is unchanged
+            data = runwatch.screen(root, ids[0], args.lines)
+            _out(args, data, "\n".join(data["lines"]))
+            return True
+        # several sessions in one tmux call (the dashboard's live sessions): only the lines, sessions that are
+        # gone are left out; orch.reads answers the same in-process
+        ids = [tickets.resolve(root, i) for i in ids]
+        shots = runwatch.tails(root, ids, args.lines)
+        text = "\n\n".join(f"{runs_live.ref(root, t)}:\n" + "\n".join(v["lines"]) for t, v in shots.items())
+        _out(args, {"screens": shots}, text or "No live session among these tickets.")
         return True
     if sub != "event":  # a hook must stay quiet; everything else first closes sessions idle for an hour
         with contextlib.suppress(Exception):

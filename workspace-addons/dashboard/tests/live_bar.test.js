@@ -9,17 +9,17 @@ const bar = require('../src/orch_dashboard/web/pages/livebar.js');
 
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
 const KIT = path.join(__dirname, '../../../workspace/src/orch_ui/static');
-const run = state => ({running:true, helper:{state}, claim:{agent:'agent:claude'}});
-const t = (id, key, extra = {}) => ({id, key, title:'Title of ' + key, status:'active', questions:[], ...extra});
 
-test('sessions by state: needs you, working, in line, idle; pinned is taken out of the counts', () => {
-  const tickets = [t('t_a', 'ORCH-1'), t('t_b', 'ORCH-2'), t('t_c', 'ORCH-3'), t('t_d', 'ORCH-4'), t('t_e', 'ORCH-5'),
-    t('t_f', 'ORCH-6'), t('t_g', 'ORCH-7', {status:'dropped'})];
-  const runs = {t_a:run('you'), t_b:run('working'), t_c:{running:false, hold:'Waits for a free place'}, t_d:run('idle'),
-    t_e:run('working'), t_g:run('working')};
-  const all = bar.liveBarModel(tickets, runs, ['t_e', 't_a'], helpers.helperState);
+const run = state => ({running:true, helper:{state}, claim:{agent:'agent:claude'}});  // for the ticket's session button
+const t = (id, key, extra = {}) => ({id, key, title:'Title of ' + key, status:'active', questions:[], ...extra});
+const sess = (id, key, status, extra = {}) => ({id, key, title:'Title of ' + key, status, word:status === 'working' ? 'Working' : '', ...extra});
+
+test('sessions by state from the live sessions API: needs you, working, in line, idle; pinned is taken out of the counts', () => {
+  const list = [sess('t_a', 'ORCH-1', 'needs-you'), sess('t_b', 'ORCH-2', 'working'), sess('t_c', 'ORCH-3', 'in-line'),
+    sess('t_d', 'ORCH-4', 'idle'), sess('t_e', 'ORCH-5', 'working'), sess('t_f', 'ORCH-6', 'closed')];
+  const all = bar.liveBarModel(list, ['t_e', 't_a']);
   assert.deepEqual(all.map(o => [o.key, o.s, o.pin]), [['ORCH-1', 'wait', true], ['ORCH-5', 'run', true], ['ORCH-2', 'run', false],
-    ['ORCH-3', 'queue', false], ['ORCH-4', 'idle', false]], 'no helper (ORCH-6) and dropped (ORCH-7) are not sessions');
+    ['ORCH-3', 'queue', false], ['ORCH-4', 'idle', false]], 'a closed session (ORCH-6) is not in the bar');
   const keys = l => all.filter(o => bar.liveBarIn(o, l)).map(o => o.key);
   assert.deepEqual(keys('wait'), ['ORCH-1'], 'needs you wins over pinned');
   assert.deepEqual(keys('pin'), ['ORCH-5']);
@@ -29,14 +29,8 @@ test('sessions by state: needs you, working, in line, idle; pinned is taken out 
   assert.deepEqual(keys('more'), ['ORCH-2', 'ORCH-3', 'ORCH-4'], 'More is everything that is not a chip');
   assert.equal(all.find(o => o.key === 'ORCH-3').word, 'In line');
   assert.equal(all.find(o => o.key === 'ORCH-1').word, 'Needs you');
-});
-
-test('an open question with the helper at its prompt needs you; nothing running is no session', () => {
-  const all = bar.liveBarModel([t('t_a', 'ORCH-1', {questions:[{id:'q1', text:'Which?'}]})],
-    {t_a:{running:true, claim:{live:{state:'idle'}}}}, [], helpers.helperState);
-  assert.equal(all[0].s, 'wait');
-  assert.deepEqual(bar.liveBarModel([t('t_a', 'ORCH-1')], {t_a:{running:false}}, [], helpers.helperState), []);
-  assert.deepEqual(bar.liveBarModel(null, null, null, helpers.helperState), []);
+  assert.equal(all.find(o => o.key === 'ORCH-2').word, 'Working');
+  assert.deepEqual(bar.liveBarModel(null, null), []);
 });
 
 test('counts read right: "1 session", "2 sessions", "9 in line", "Pinned (1)", "More (20)"', () => {
@@ -53,7 +47,7 @@ test('loaded before app.js, served as a page module, painted on every render, na
   const index = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
   assert.ok(index.indexOf('pages/livebar.js') > 0 && index.indexOf('pages/livebar.js') < index.indexOf('src="app.js"'));
   const server = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8');
-  assert.match(server, /\|livebar\)\\\.js/);
+  assert.match(server, /\|livebar\|/);
   assert.match(fs.readFileSync(path.join(WEB, 'app.js'), 'utf8'), /window\.paintLiveBar\?\.\(\)/);
   const src = fs.readFileSync(path.join(WEB, 'pages/livebar.js'), 'utf8');
   assert.doesNotMatch(src.replace(/\.focus\(\)|focusKey/g, ''), /\b(focus|automation|factory|insights|relay)\b/i, 'found by its live_session capability, never by name');
@@ -92,10 +86,12 @@ test('sessions without a ticket (ORCH-364): open ones join the bar by their titl
     {id:'t_man', kind:'manager', title:'Manager', open:true},
     {id:'t_odd', kind:'ticket', title:'Not a kind', open:true},
   ];
-  const runs = {t_emp:run('working'), t_man:run('idle')};
-  const all = bar.liveBarModel([t('t_a', 'ORCH-1')], {...runs, t_a:run('working')}, ['t_emp', 't_term', 't_man'], helpers.helperState, sessions);
+  // the sessions API lists the open ones with their kind (sessions.py no_ticket): a plain terminal is idle, word Open
+  const list = [sess('t_emp', '', 'working', {title:'Empty helper', kind:'empty'}), sess('t_a', 'ORCH-1', 'working'),
+    sess('t_term', '', 'idle', {title:'Plain terminal', kind:'terminal', word:'Open'}), sess('t_man', '', 'idle', {title:'Manager', kind:'manager', word:'Idle'})];
+  const all = bar.liveBarModel(list, ['t_emp', 't_term', 't_man']);
   assert.deepEqual(all.map(o => [o.key || o.title, o.s, o.pin, o.kind]), [['Empty helper', 'run', true, 'empty'], ['ORCH-1', 'run', false, ''],
-    ['Plain terminal', 'idle', true, 'terminal'], ['Manager', 'idle', true, 'manager']], 'a closed one and an unknown kind are left out');
+    ['Plain terminal', 'idle', true, 'terminal'], ['Manager', 'idle', true, 'manager']]);
   assert.equal(all.find(o => o.kind === 'terminal').word, 'Open');
   assert.deepEqual(all.filter(o => bar.liveBarIn(o, 'pin')).map(o => o.title), ['Empty helper', 'Plain terminal', 'Manager'], 'a new one is pinned: a chip');
   assert.equal(bar.liveBarNewOpen(sessions, 'manager').id, 't_man');

@@ -1,6 +1,6 @@
 // Every dashboard feature brings its click-through (ORCH-308). The feature list is read from the code
 // (clickthrough/catalogue.cjs): every op the page can send and every page of the router. A new button that sends a
-// new op, or a new page, fails here by name until a file in clickthrough/features/ claims it; the page-smoke job
+// new op, or a new page, fails here by name until a file in clickthrough/features/ claims it; the dashboard-clickthroughs job
 // then runs that click-through and fails if it never really did the feature.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -17,11 +17,6 @@ test('every dashboard feature has a click-through', () => {
   const { missing } = catalogue.coverage();
   assert.deepEqual(missing, [], 'These dashboard features have no click-through. A new feature brings its click-through: add one in ' +
     'workspace-addons/dashboard/clickthrough/features/ (do it, reload, check; see clickthrough/README.md):\n  - ' + missing.join('\n  - '));
-});
-
-test('the not-yet list only shrinks: a feature with a click-through comes off it', () => {
-  const { done } = catalogue.coverage();
-  assert.deepEqual(done, [], 'These features have a click-through now: take them off clickthrough/not-yet.json');
 });
 
 test('no click-through claims a feature that is gone', () => {

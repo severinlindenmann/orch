@@ -184,12 +184,21 @@ def change(root: Path, fn):
 
 
 def find(rows: list[dict], url: str) -> dict | None:
-    """The newest entry for this pull request."""
-    return next((r for r in reversed(rows) if r.get("url") == url), None)
+    """The entry of this pull request that is not finished (there is at most one), else the newest one. Not by
+    place alone: an entry moved to the front (back_to_front, --first) can stand before an older finished one."""
+    mine = [r for r in rows if r.get("url") == url]
+    return next((r for r in mine if r.get("state") not in FINISHED), mine[-1] if mine else None)
 
 
-def add(root: Path, url: str, ticket: str | None, by: str, **extra) -> tuple[dict, bool]:
+def _to_front(rows: list[dict], row: dict) -> None:
+    """Insert row before every waiting entry not marked first (running entries keep their place)."""
+    at = next((i for i, r in enumerate(rows) if r.get("state") == WAITING and not r.get("first")), len(rows))
+    rows.insert(at, row)
+
+
+def add(root: Path, url: str, ticket: str | None, by: str, first: bool = False, **extra) -> tuple[dict, bool]:
     """Put a pull request at the end of the line. Already waiting or running: that entry, not a second one.
+    first: it fixes the red base branch; it goes ahead of every waiting entry not marked first.
     extra: what was seen at add time (base, login)."""
     repo, number = parse_url(url)
     url = f"https://github.com/{repo}/pull/{number}"
@@ -199,10 +208,19 @@ def add(root: Path, url: str, ticket: str | None, by: str, **extra) -> tuple[dic
         if old and old.get("state") not in FINISHED:
             if ticket and not old.get("ticket"):
                 old["ticket"] = ticket
+            if first and not old.get("first"):
+                old["first"] = True
+                if old.get("state") == WAITING:
+                    rows.remove(old)
+                    _to_front(rows, old)
             return dict(old), False
         row = {"url": url, "repo": repo, "number": number, "ticket": ticket, "by": by, "added": now()}
         row.update(extra, state=WAITING, why="waiting in line")
-        rows.append(row)
+        if first:
+            row["first"] = True
+            _to_front(rows, row)
+        else:
+            rows.append(row)
         return dict(row), True
 
     return change(root, go)
