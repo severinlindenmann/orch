@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import store
+from . import store, when
 from .readers import SubscriptionUse, cswap
 
 EVERY_SECONDS = 30
@@ -331,8 +331,9 @@ def look(root: Path, at: datetime | None = None, switch=_switch) -> dict:
     if found is None:
         return {"at": _iso(at), "switcher": False, "did": "nothing", "note": error or "no account switcher"}
 
+    tz = when.zone(root)
     with store.change(root) as (accounts, rows):
-        store.expire(accounts, rows, at)
+        store.expire(accounts, rows, at, say=lambda ends: when.words(ends, tz))
         store.sync_found(accounts, rows, found, provider="anthropic", reader="cswap")
     accounts = store.load(root)["accounts"]
 
