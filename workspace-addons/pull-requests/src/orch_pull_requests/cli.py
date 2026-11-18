@@ -106,12 +106,19 @@ def _run(root: Path) -> int:
     ran = False
     while _hold_runner(root):
         ran = True
+        new_code = False
         try:
             r = Runner(root, _github(), lambda repo: Git(folder, repo), log=lambda s: print(s, flush=True))
             r.run()
-            more = r.has_work()  # an add that came while the lock was still ours started no runner
+            new_code = r.new_code
+            more = (
+                not new_code and r.has_work()
+            )  # an add that came while the lock was still ours started no runner
         finally:
             store._drop_lock(_runner_lock(root))
+        if new_code:  # this process still has the old code loaded: a new process takes over the line
+            start_runner(root)
+            return 0
         if not more:
             other = len(store.waiting(root))
             print(

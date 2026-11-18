@@ -32,6 +32,11 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--all", action="store_true", help="stop every running workspace")
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
+    sub.add_parser(
+        "restart",
+        parents=[common],
+        help="start the background add-ons here again on the installed code; helpers keep working",
+    )
     x = sub.add_parser("pause", parents=[common], help="stop all automation in this workspace")
     x.add_argument("--reason", help="why, in one short line (shown when a start is held back)")
     sub.add_parser("resume", parents=[common], help="turn automation back on after orch pause")
@@ -149,6 +154,8 @@ def _services_cmd(args, root: Path) -> None:
         bad = [r for r in rows if r.get("error")]
         if bad:
             raise Refused(", ".join(r["addon"] for r in bad) + " did not start (see above).")
+    elif args.cmd == "restart":
+        _restart(args, root)
     elif args.cmd == "status":
         ws = services.status()
         if (root / ".orch").is_dir():  # this workspace: one row per background add-on, stopped ones too
@@ -207,6 +214,24 @@ def _services_cmd(args, root: Path) -> None:
                 f"Stopped in {Path(d['workspace']).name}: " + (", ".join(names) or "nothing was running")
             )
         _out(args, done, "\n".join(lines) or "Nothing was stopped.")
+
+
+def _restart(args, root: Path) -> None:
+    """Stop and start every background add-on of this workspace, so each runs the code installed now (after
+    an orch update or a fixed add-on file). Unlike orch stop it never ends a helper's session; the merge queue
+    runner switches to new code by itself between two rounds (ORCH-435)."""
+    root = services._workspace_root(root)
+    stopped = services.stop(root)
+    rows = services.start(root)
+    data = {"workspace": str(root.resolve()), "stopped": stopped, "addons": rows}
+    if not rows:
+        text = "No add-on that is on here runs in the background. Nothing to restart."
+    else:
+        text = "\n".join([f"Restarted in {root.name}:", *(_service_line(r) for r in rows)])
+    _out(args, data, text)
+    bad = [r for r in rows if r.get("error")]
+    if bad:
+        raise Refused(", ".join(r["addon"] for r in bad) + " did not start again (see above).")
 
 
 def _with_known(ws: list) -> list:
@@ -338,7 +363,7 @@ def dispatch(args, root: Path) -> bool:
     if args.cmd in ("pause", "resume"):
         _brake_cmd(args, root)
         return True
-    if args.cmd not in ("start", "stop", "status"):
+    if args.cmd not in ("start", "stop", "status", "restart"):
         return False
     _services_cmd(args, root)
     return True

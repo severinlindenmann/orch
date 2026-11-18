@@ -153,6 +153,8 @@ test('waitWords: a date with a reason, another ticket, the outside, nothing', ()
 test('ORCH-255: Continue is on the ticket page in every state while no helper runs', () => {
   const label = (patch, st) => { const cc = st ? ctx({state:st}) : ctx(); const strip = nodes(cc.detail({...base, ...patch})).find(n => /(^| )strip( |$)/.test(n.attrs.className || '')); return nodes(strip).filter(n => n.tag === 'button').map(text); };
   assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Continue'), 'Needs you');
+  assert.ok(label({status:'waiting', waiting_on:{kind:'time', until:'2030-01-07T08:00:00Z'}}).includes('Continue'), 'Waiting on a time (ORCH-435)');
+  assert.ok(label({status:'waiting', waiting_on:null}).includes('Continue'), 'Waiting on nothing (ORCH-435)');
   assert.ok(label({status:'review'}).includes('Continue'), 'Check');
   assert.ok(label({status:'done'}).includes('Continue'), 'Done');
   assert.ok(label({status:'active', sessions:[{id:'s'}]}).includes('Continue'), 'active, helper not running');
