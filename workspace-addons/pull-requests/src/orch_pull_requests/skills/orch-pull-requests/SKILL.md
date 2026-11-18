@@ -28,6 +28,10 @@ with that reason: fix it, push and add it again. The pull request must go into a
 says otherwise; never main). Do not take the base branch in by hand to get it merged: a pull request that fell
 behind is checked once on top of the base branch by the queue.
 
+Your pull request fixes a red develop (the base branch itself fails its checks): add `--first`, so it goes ahead
+of the line and alone. While develop is red the queue builds no groups, and a pull request that fails only in the
+checks develop fails waits for the fix instead of leaving the queue.
+
 Only when a person asks you to stay until it is merged: add `--wait` and run it bare, not through a pipe. Exit 0 =
 merged (alone or with its group); exit 1 = it left the queue, the last line says why.
 

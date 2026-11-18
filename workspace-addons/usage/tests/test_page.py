@@ -1,6 +1,7 @@
 """The Usage page: its model (GET /api/page), the clicks (`orch usage act`) and the page server's fence."""
 
 import json
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -208,6 +209,16 @@ def test_server_serves_page_model_and_kit_only(served):
     assert _get(served, "/web/usage.js")[0] == 200
     assert _get(served, "/web/../server.py")[0] == 404
     assert _get(served, "/kit/gallery.html")[0] == 404
+
+
+def test_page_loads_the_frame_code_first(served):
+    # The dashboard shows this page in a sandboxed frame (origin "null"): without kit/frame.js first, its fetch of
+    # api/page carries no frame pass and the browser blocks it ("Failed to fetch", ORCH-381 / ORCH-397).
+    code, body, _ = _get(served, "/", {"X-Forwarded-Prefix": "/addon/usage"})
+    scripts = re.findall(rb'<script src="([^"]+)"([^>]*)>', body)
+    assert code == 200 and scripts[0] == (b"/addon/usage/kit/frame.js", b"")  # first, and not deferred
+    code, body, _ = _get(served, "/kit/frame.js")
+    assert code == 200 and b"X-Orch-Frame" in body
 
 
 def test_server_only_reads_and_proves_its_start(served):

@@ -230,10 +230,22 @@ def ts(s) -> datetime | None:
     return d if d is None or d.tzinfo else d.replace(tzinfo=UTC)
 
 
+def known_name(name: str, names) -> str | None:
+    """The entry of `names` that covers job `name`: the same name, or the job without its part. A job split
+    into parts (ORCH-315, "workspace / test (windows-latest, 3/6)") is covered by "workspace / test
+    (windows-latest)", so a known-red entry keeps working when CI splits the job."""
+    if name in names:
+        return name
+    for n in names:
+        if n.endswith(")") and name.startswith(n[:-1] + ", "):
+            return n
+    return None
+
+
 def checks_green(rollup, ignore=frozenset()) -> str:
     """green, red or pending for a pull request's statusCheckRollup (newest run of each check counts); checks
     named in `ignore` (known red, roll-ups) do not count."""
-    rollup = [c for c in rollup or [] if (c.get("name") or c.get("context")) not in ignore]
+    rollup = [c for c in rollup or [] if known_name(c.get("name") or c.get("context") or "", ignore) is None]
     if not rollup:
         return "pending"
     last: dict = {}
@@ -284,7 +296,7 @@ def not_reported(rollup, names) -> list[str]:
 def failed_checks(rollup, ignore=frozenset()) -> list[str]:
     out = []
     for c in rollup or []:
-        if (c.get("name") or c.get("context")) in ignore:
+        if known_name(c.get("name") or c.get("context") or "", ignore) is not None:
             continue
         word = c.get("conclusion") if "status" in c else c.get("state")
         if (c.get("status") in (None, "COMPLETED")) and word not in PASSED and word not in (None, "PENDING"):
@@ -379,28 +391,53 @@ class World:
         )
 
     # ---- reads
+    def green_develop(self) -> str | None:
+        """The newest develop commit whose own push run finished green (ORCH-314), judged job by job like any
+        other run (known-red jobs and the roll-up do not count). develop's push runs are never cancelled, so
+        every commit has an answer. None when none of the last ten push runs is green."""
+        wf = self.cfg.workflows[0][0] if self.cfg.workflows else "ci.yml"
+        known = self.known_red()
+        seen: set[str] = set()
+        for r in sorted(self.runs(wf, "push"), key=lambda x: str(x.get("createdAt")), reverse=True):
+            sha = r.get("headSha")
+            if not sha or sha in seen:
+                continue
+            seen.add(sha)
+            if run_state(self, wf, sha, None, ("push",), known)[0] == "green":
+                return sha
+        return None
+
     def heads(self) -> dict:
-        """{"develop": sha, "main": sha, "unreleased": [{sha, at, subject, title}]} after a fetch. title is
-        the pull request's own title: GitHub writes it as the first line of the merge commit's body."""
+        """{"develop": sha, "green": sha|None, "main": sha, "unreleased": [{sha, at, subject, title}]} after a
+        fetch. green = the last fully green develop commit; unreleased = the merges main does not have, up to
+        green (a release is cut from green only). title is the pull request's own title: GitHub writes it as
+        the first line of the merge commit's body."""
         if self.sim is not None:
-            return self.sim["heads"]
+            return {"green": self.sim["heads"]["develop"], **self.sim["heads"]}
         self._git("fetch", "-q", "origin", timeout=180)
         dev = self._git("rev-parse", "origin/develop").stdout.strip()
         main = self._git("rev-parse", "origin/main").stdout.strip()
-        lg = self._git(
-            "log",
-            "--first-parent",
-            "--merges",
-            "--format=%H%x1f%cI%x1f%s%x1f%b%x1e",
-            "origin/main..origin/develop",
-        ).stdout
+        green = self.green_develop()
+        if green and self._git("merge-base", "--is-ancestor", green, dev).returncode != 0:
+            green = None  # not on develop's history any more
+        lg = (
+            self._git(
+                "log",
+                "--first-parent",
+                "--merges",
+                "--format=%H%x1f%cI%x1f%s%x1f%b%x1e",
+                f"origin/main..{green}",
+            ).stdout
+            if green
+            else ""
+        )
         rows = []
         for rec in lg.split("\x1e"):
             p = rec.strip("\n").split("\x1f")
             if len(p) == 4:
                 title = next((ln.strip() for ln in p[3].splitlines() if ln.strip()), "")
                 rows.append({"sha": p[0], "at": p[1], "subject": p[2], "title": title})
-        return {"develop": dev, "main": main, "unreleased": rows}
+        return {"develop": dev, "green": green, "main": main, "unreleased": rows}
 
     def open_release(self) -> dict | None:
         if self.sim is not None:
@@ -1125,9 +1162,10 @@ def run_state(
         name = j.get("name") or ""
         if name in ROLLUP_JOBS:
             continue
-        if name in known:
+        entry = known_name(name, known)
+        if entry is not None:
             if j.get("status") == "completed" and j.get("conclusion") not in ("success", "skipped"):
-                noted.append(f"{name} ({known[name]})")
+                noted.append(f"{name} ({known[entry]})")
             continue  # neither waited for nor a blocker
         if j.get("status") != "completed":
             state = "pending" if state == "green" else state
@@ -1197,7 +1235,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                 return out + [f"release {rel['n']}: release checks still running"]
             if g == "red":
                 bad = ", ".join(failed_checks(p.get("statusCheckRollup"), ignore)) or "see the pull request"
-                if h["develop"] != rel["sha"] and not open_red_ticket(
+                if h.get("green") != rel["sha"] and not open_red_ticket(
                     w.tickets(), f"Release {rel['n']} checks"
                 ):
                     w.close_release(rel)
@@ -1304,8 +1342,10 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         return out
     # idle
     un = h["unreleased"]
+    if not h.get("green"):
+        return out + ["no develop commit is fully green yet: nothing is cut"]
     if not un:
-        return out + ["develop has nothing main does not have"]
+        return out + ["green develop has nothing main does not have"]
     if hold:
         return out + [f"on hold: {hold}"]
     if sec_holds:
@@ -1319,7 +1359,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             f"{len(un)} unreleased pull request(s); last release {gap_h:.1f} h ago, next after "
             f"{MIN_GAP_H} h (or at once for an {URGENT_LABEL} one)"
         ]
-    sha = h["develop"]
+    sha = h["green"]  # never develop's head: only a commit whose own push run finished green (ORCH-314)
     if st.get("skip_sha") == sha:
         return out + [f"develop {sha[:8]} was red; waiting for develop to move"]
     n = w.last_release() + 1
@@ -1657,6 +1697,36 @@ def record_deployed(root: Path, spec: str, by: str) -> dict:
     sha = r.stdout.strip()
     w.record_deployed(parts, sha, by)
     return {"parts": parts, "sha": sha}
+
+
+def green_status(root: Path) -> dict:
+    """`orch github develop-green`: the last fully green develop commit and how far develop is ahead of it."""
+    cfg = Cfg(root)
+    if cfg.clone is None:
+        raise Refused("Set the local clone first: orch config set github.release_clone <folder>")
+    w = World(root, cfg)
+    h = w.heads()
+    ahead = 0
+    if h.get("green"):
+        r = w._git("rev-list", "--count", f"{h['green']}..{h['develop']}")
+        ahead = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
+    return {
+        "green": h.get("green"),
+        "develop": h["develop"],
+        "ahead": ahead,
+        "unreleased": len(h["unreleased"]),
+    }
+
+
+def green_text(res: dict) -> str:
+    if not res.get("green"):
+        return f"No develop commit is fully green yet (develop is at {res['develop'][:8]})."
+    if res["green"] == res["develop"]:
+        return f"Develop is green: {res['green'][:8]} is the newest commit and its checks all passed."
+    return (
+        f"Last green develop commit: {res['green'][:8]}; develop is {res['ahead']} commit(s) ahead, "
+        "still being checked. Releases are cut from the green one."
+    )
 
 
 def text(res: dict, dry_run: bool = False) -> str:
