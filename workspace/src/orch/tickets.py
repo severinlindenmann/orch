@@ -671,21 +671,26 @@ def save(root: Path, ticket: dict) -> None:
         _write(root, ticket)
 
 
-def list_all(root: Path, include_general: bool = False) -> list[dict]:
+def list_all(root: Path, include_general: bool = False, ext: str | None = None) -> list[dict]:
     """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
     `general: true`) and the hidden Manager ticket (flag `manager: true`) are left out unless include_general:
-    they are not tickets anyone lists, counts or closes."""
+    they are not tickets anyone lists, counts or closes. `ext`: only tickets with add-on data under that name;
+    a file whose text does not name it is not parsed (ORCH-603: an add-on reads its own tickets fast)."""
     d = tickets_dir(root)
     out = []
+    mark = json.dumps(ext) if ext is not None else None
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                t = json.loads(
-                    p.read_text(encoding="utf-8")
-                )  # no retry: a listing never stalls on a bad file
+                text = p.read_text(encoding="utf-8")
+                if mark is not None and mark not in text:
+                    continue
+                t = json.loads(text)  # no retry: a listing never stalls on a bad file
             except (OSError, ValueError):
                 continue
             if not isinstance(t, dict) or t.get("id") != p.stem:
+                continue
+            if ext is not None and not (isinstance(t.get("ext"), dict) and ext in t["ext"]):
                 continue
             if _newer_format(t):
                 continue  # a newer orch's file: not shown here, never rewritten

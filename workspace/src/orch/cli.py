@@ -540,6 +540,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("list", parents=[common])
     x.add_argument("--status", choices=tickets.STATUSES)
     x.add_argument("--all", action="store_true", help="include done and dropped tickets")
+    x.add_argument(
+        "--ext",
+        metavar="ADDON",
+        help="only tickets with this add-on's data (no children counts); fast for an add-on's own tickets",
+    )
     x = t.add_parser("show", parents=[common])
     x.add_argument("id")
     x = t.add_parser("status", parents=[common])
@@ -1129,15 +1134,18 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "list":
         from orch import reads
 
-        ts = reads.ticket_rows(root, args.status, args.all)  # the dashboard reads the same rows in-process
-        everything = tickets.list_all(root)
+        ts = reads.ticket_rows(root, args.status, args.all, args.ext)  # the dashboard reads these in-process
+        everything = [] if args.ext else tickets.list_all(root)  # --ext: an add-on's own tickets, read once
         ids = {x["id"] for x in everything}
         hidden = (
-            0 if args.status or args.all else sum(1 for t in everything if t["status"] in ("done", "dropped"))
+            0
+            if args.status or args.all or args.ext
+            else sum(1 for t in everything if t["status"] in ("done", "dropped"))
         )
         txt = (
             "\n".join(
-                _line(t) + (" - parent missing" if t.get("parent") and t["parent"] not in ids else "")
+                _line(t)
+                + (" - parent missing" if not args.ext and t.get("parent") and t["parent"] not in ids else "")
                 for t in ts
             )
             or "No open tickets."
