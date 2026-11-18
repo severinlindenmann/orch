@@ -3,6 +3,7 @@
 import json
 import shlex
 import subprocess
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from test_step import ART, TICKET, configure, run, save, success
@@ -209,7 +210,8 @@ def test_secret_row_without_a_file_to_leave_out_offers_no_answer_buttons(root, m
     """fb14: a "Keep mine / Keep theirs" question with no buttons of its own could only fail in the dashboard."""
     paused = {
         "files": ["ticket-counter.json"],
-        "since": "2026-11-11T10:12:00Z",
+        # an hour ago: a fixed date grew past 7 days on 18 Nov and added the "paused for 7 days" row (ORCH-390)
+        "since": (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
         "reason": "a secret was found",
     }
     monkeypatch.setattr(cli, "read", lambda *a: {})
