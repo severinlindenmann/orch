@@ -6,24 +6,30 @@ on:
   workflow_dispatch:
     inputs:
       windows:
-        description: "also run the Windows jobs (pushes to develop, the nightly run and pull requests that change file, process or path code run them by themselves)"
+        description: "also run the Windows jobs (the nightly run, the 3-hourly develop run and pull requests that change file, process or path code run them by themselves)"
         type: boolean
         default: false
   push:
     branches: [develop, main]
-  # Nightly on develop (the default branch): the mobile suite with UI tests, even when no push ran it to the end.
+  # Cron is UTC. 01:00 = the nightly run on develop (the default branch): every suite, the mobile UI tests too.
+  # The other one = the full macOS and Windows run on develop's newest commit every 3 hours (ORCH-452); it does
+  # nothing when that commit already had a finished scheduled run (see "fresh" below). The release keeper starts the
+  # same full run by hand before a release when no scheduled run on the release commit is green.
   schedule:
     - cron: "0 1 * * *"
-# one run per PR: a new push cancels the PR's older run. A push to develop is NEVER cancelled (ORCH-314): every
-# develop commit gets a group of its own (its sha) and runs to the end, so "last green develop commit" is a fact the
-# release keeper can read (before, the next merge cancelled the running macOS suite and no develop commit was known
-# green). A group with a cancel-free run still lets a newer PENDING run replace a waiting one, hence one group per sha.
-# Pushes to main keep one group per branch and cancel the older run. Schedule and manual runs keep their own group.
+    - cron: "0 4,7,10,13,16,19,22 * * *"
+# One run per PR: a new push cancels the PR's older run.
+# Develop runs once per new state (ORCH-452): a push to develop runs the Linux checks only (the merge queue group
+# already checked that state on top of develop), all pushes share ONE group and a started develop run is never
+# cancelled. A newer push only replaces a run that is still WAITING (GitHub drops it before it starts, 0 minutes),
+# so develop never burns minutes in cancelled runs (night of 17/18 Nov: 1469 minutes) and a burst of merges ends in
+# one run on the newest commit. The 3-hourly full run has one such group too; the nightly run has its own.
+# Pushes to main keep one group per branch and cancel the older run. Manual runs keep their own group.
 # A re-run (run_attempt > 1) replays its ORIGINAL event, so it is not news about the PR: it gets a group of its own
 # and cancels nothing. Before, re-running the red job of a draft-time run joined the PR's group and cancelled the real
 # run that marking the PR ready had started (16 Nov, ORCH-7).
 concurrency:
-  group: ci-${{ (github.run_attempt > 1 && format('rerun-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && format('develop-{0}', github.sha)) || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.run_id) }}
+  group: ci-${{ (github.run_attempt > 1 && format('rerun-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && 'develop-push') || (github.event_name == 'push' && format('push-{0}', github.ref)) || (github.event_name == 'schedule' && github.event.schedule == '0 1 * * *' && 'nightly') || (github.event_name == 'schedule' && 'develop-full') || format('{0}-{1}', github.event_name, github.run_id) }}
   cancel-in-progress: ${{ github.run_attempt == 1 && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/develop')) }}
 permissions:
   contents: read
@@ -32,7 +38,13 @@ jobs:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read  # the "fresh" step reads this workflow's earlier scheduled runs
     outputs:
+      # schedule runs only: "nightly" (01:00, every suite), "full" (3-hourly macOS + Windows on a new develop
+      # commit) or "none" (3-hourly, but that commit already had a finished scheduled run: nothing runs)
+      sched: ${{ steps.sched.outputs.sched }}
       contracts: ${{ steps.f.outputs.contracts }}
       workspace: ${{ steps.f.outputs.workspace }}
       smoke: ${{ steps.f.outputs.smoke }}
@@ -45,7 +57,25 @@ jobs:
       clock: ${{ steps.f.outputs.clock }}
       oscode: ${{ steps.os.outputs.oscode }}
     steps:
+      - id: sched
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CRON: ${{ github.event.schedule }}
+        run: |
+          if [ "$CRON" = "0 1 * * *" ]; then echo "sched=nightly" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # the newest scheduled run on develop that ran to the end (a dropped or cancelled one does not count)
+          last="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch develop --event schedule \
+            --status completed --limit 20 --json headSha,conclusion \
+            --jq '[.[] | select(.conclusion == "success" or .conclusion == "failure")][0].headSha // ""')" || last=""
+          if [ -n "$last" ] && [ "$last" = "$GITHUB_SHA" ]; then
+            echo "develop ${GITHUB_SHA:0:8} already had its full run: nothing to do"
+            echo "sched=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "sched=full" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
+        if: github.event_name != 'schedule'
         with:
           fetch-depth: 0  # the Windows check and the main release base below read the history
       # On main (release push or manual run) compare with the previous release, not with develop: after a release
@@ -88,19 +118,21 @@ jobs:
     uses: ./.github/workflows/contracts.yml
   workspace:
     needs: changes
-    if: needs.changes.outputs.workspace == 'true' || github.event_name == 'schedule'
+    if: needs.changes.outputs.workspace == 'true' || needs.changes.outputs.sched == 'nightly' || needs.changes.outputs.sched == 'full'
     uses: ./.github/workflows/workspace.yml
     with:
-      # PRs into develop and merge queue groups: Linux only (+ the CLI smoke on Windows/macOS below). macOS and
-      # Windows run on develop itself: every push (never cancelled, see concurrency), the nightly run and the
-      # release check (the keeper's manual run with windows=true); a red one opens the release keeper's
-      # red-develop ticket (releasekeeper.develop_red). Merge queue groups ran all three systems for a day
-      # (PR 1428) and waited 50+ minutes on GitHub's 5 macOS machines at once (18 Nov, ORCH-315).
-      # PRs into main and manual runs keep macOS too. Each system stays split into parts under 15 minutes.
-      full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
-      # Windows: every push to develop, the nightly run, a manual run with windows=true and pull requests that
-      # change file, process or path code (scripts/touches_os_code.py), except merge queue groups.
-      windows: ${{ github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.windows) || (needs.changes.outputs.oscode == 'true' && !startsWith(github.head_ref, 'orch-queue/')) }}
+      # PRs into develop, merge queue groups and pushes to develop: Linux only (+ the CLI smoke on Windows/macOS
+      # below on PRs). macOS and Windows run on develop's newest commit every 3 hours, in the nightly run and in the
+      # release check (the keeper's manual run with windows=true); a red one opens the release keeper's red-develop
+      # ticket (releasekeeper.develop_red). Merge queue groups ran all three systems for a day (PR 1428) and waited
+      # 50+ minutes on GitHub's 5 macOS machines at once (18 Nov, ORCH-315); every push to develop ran macOS too and
+      # took 1558 macOS minutes in one night (ORCH-452), for states the queue group had already checked.
+      # PRs into main, pushes to main and manual runs keep macOS too. Each system stays split into parts under 15
+      # minutes.
+      full: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && github.ref != 'refs/heads/develop') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      # Windows: the nightly and 3-hourly runs, a manual run with windows=true and pull requests that change file,
+      # process or path code (scripts/touches_os_code.py), except merge queue groups.
+      windows: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.windows) || (needs.changes.outputs.oscode == 'true' && !startsWith(github.head_ref, 'orch-queue/')) }}
   # Fast CLI smoke on Windows + macOS for PRs that touch the CLI or an add-on (R1.6, R3.4); the full suite is nightly.
   cli-smoke:
     needs: changes
@@ -125,18 +157,18 @@ jobs:
     uses: ./.github/workflows/relay.yml
   mobile:
     needs: changes
-    if: needs.changes.outputs.mobile == 'true' || github.event_name == 'schedule'
+    if: needs.changes.outputs.mobile == 'true' || needs.changes.outputs.sched == 'nightly'
     uses: ./.github/workflows/mobile.yml
   # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
   # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
   clock:
     needs: changes
-    if: needs.changes.outputs.clock == 'true' || github.event_name == 'schedule'
+    if: needs.changes.outputs.clock == 'true' || needs.changes.outputs.sched == 'nightly'
     uses: ./.github/workflows/clock.yml
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
     needs: changes
-    if: needs.changes.outputs.brand == 'true' || github.event_name == 'schedule'
+    if: needs.changes.outputs.brand == 'true' || needs.changes.outputs.sched == 'nightly'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

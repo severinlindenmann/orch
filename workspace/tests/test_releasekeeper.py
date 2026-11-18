@@ -963,7 +963,7 @@ def test_a_known_red_job_covers_its_parts():
     assert rk.checks_green([red, green]) == "red"
 
 
-# ---- ORCH-314: develop's push runs are never cancelled; releases are cut only from the last green commit
+# ---- ORCH-314/452: a started develop push run is never cancelled; releases are cut only from the last green commit
 G1, G2 = "a" * 40, "b" * 40
 
 
@@ -1019,15 +1019,55 @@ def test_the_full_signal_is_started_on_the_green_commit(tmp_path):
     assert out["state"]["release"]["sha"] == G1 and out["state"]["release"]["phase"] == "testing"
 
 
-def test_ci_never_cancels_a_develop_push_run():
-    import re
+def _ci_yml() -> str:
     from pathlib import Path
 
-    ci = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+    return (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+
+
+def test_ci_never_cancels_a_started_develop_push_run():
+    import re
+
+    ci = _ci_yml()
     cancel = re.search(r"cancel-in-progress: (.+)", ci).group(1)
     group = re.search(r"group: (ci-.+)", ci).group(1)
-    assert "github.ref != 'refs/heads/develop'" in cancel  # develop pushes are never cancelled ...
-    assert "format('develop-{0}', github.sha)" in group  # ... and never replaced by a newer pending run
+    assert "github.ref != 'refs/heads/develop'" in cancel  # a started develop run is never cancelled ...
+    # ... and all develop pushes share one group, so a newer push drops a WAITING run before it starts (ORCH-452)
+    assert "github.ref == 'refs/heads/develop' && 'develop-push')" in group
+    assert "github.sha" not in group
+    # the 3-hourly full run has one group too; the nightly run its own
+    assert "'nightly')" in group and "'develop-full')" in group
+
+
+def test_ci_develop_push_is_linux_only_and_the_full_run_comes_every_3_hours():
+    import re
+
+    ci = _ci_yml()
+    full = re.search(r"\n      full: \$\{\{ (.+) \}\}", ci).group(1)
+    windows = re.search(r"\n      windows: \$\{\{ (.+) \}\}", ci).group(1)
+    # a push to develop gets macOS only through "push and not develop": never on develop (ORCH-452)
+    assert "(github.event_name == 'push' && github.ref != 'refs/heads/develop')" in full
+    assert "github.event_name != 'pull_request'" not in full
+    assert "refs/heads/develop" not in windows
+    assert 'cron: "0 1 * * *"' in ci and 'cron: "0 4,7,10,13,16,19,22 * * *"' in ci
+    # the 3-hourly run starts nothing but the full workspace suite, and nothing when the commit had its run
+    assert "needs.changes.outputs.sched == 'full'" in ci and "sched=none" in ci
+    for job in ("mobile", "clock", "brand"):
+        assert f"needs.changes.outputs.{job} == 'true' || needs.changes.outputs.sched == 'nightly'" in ci
+
+
+def test_a_dropped_develop_run_is_not_red(tmp_path, capsys):
+    """A newer push drops develop's waiting run (cancelled, no jobs): no red-develop ticket for it (ORCH-452)."""
+    runs = {
+        "ci.yml": [
+            run(DEV, "push", "cancelled", at="2026-11-17T03:00:00Z", rid=8),
+            run(G1, "push", at="2026-11-17T02:00:00Z", rid=7),
+        ],
+        "e2e.yml": [],
+    }
+    out = go(tmp_path, capsys, runs=runs, jobs={"8": [], "7": CI_JOBS})
+    assert not any(d.startswith("ticket:") for d in out["did"])
+    assert "develop_red_sha" not in out["state"]
 
 
 # macOS and Windows run only on develop, not in the merge queue (ORCH-315): a red develop run opens the

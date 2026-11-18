@@ -393,8 +393,10 @@ class World:
     # ---- reads
     def green_develop(self) -> str | None:
         """The newest develop commit whose own push run finished green (ORCH-314), judged job by job like any
-        other run (known-red jobs and the roll-up do not count). develop's push runs are never cancelled, so
-        every commit has an answer. None when none of the last ten push runs is green."""
+        other run (known-red jobs and the roll-up do not count). A started push run is never cancelled; a
+        waiting one is dropped when a newer push comes (ORCH-452), so a commit of a burst may have no answer and
+        is skipped. The push run is Linux only: the release still needs a green scheduled or manual full run on
+        that commit (release flow below). None when none of the last ten push runs is green."""
         wf = self.cfg.workflows[0][0] if self.cfg.workflows else "ci.yml"
         known = self.known_red()
         seen: set[str] = set()
@@ -1136,11 +1138,18 @@ def highlight_block(items: list[str], budget: int) -> str:
 
 
 def run_state(
-    w: World, workflow: str, sha: str, since: datetime | None, events: tuple[str, ...], known: dict[str, str]
+    w: World,
+    workflow: str,
+    sha: str,
+    since: datetime | None,
+    events: tuple[str, ...],
+    known: dict[str, str],
+    skip_cancelled: bool = False,
 ) -> tuple[str, dict | None, list[str]]:
     """(green / red / pending / none, the run, known-red jobs that failed) for the newest run on `sha` of the
     given events (created after `since`). Judged job by job: a known-red job and the roll-up job do not count,
-    so the run's own conclusion (red through them) is not the signal."""
+    so the run's own conclusion (red through them) is not the signal. skip_cancelled: a cancelled run is no
+    answer (develop's waiting runs are dropped before they start when a newer push comes, ORCH-452)."""
     mine = [
         r
         for e in events
@@ -1148,6 +1157,7 @@ def run_state(
         if r.get("headSha") == sha
         and r.get("event") in events
         and (since is None or (ts(r.get("createdAt")) or since) >= since)
+        and not (skip_cancelled and r.get("conclusion") == "cancelled")
     ]
     if not mine:
         return "none", None, []
@@ -1198,19 +1208,25 @@ def red(w: World, st: dict, role: str, title: str, words: str, note: str, done_w
 
 
 def develop_red(w: World, st: dict, role: str) -> list[str]:
-    """macOS and Windows run on develop only (every push, at night, the release check), not in the merge
-    queue (ORCH-315): the newest FINISHED push or nightly run on develop that is red opens the red-develop
-    ticket, once per commit (the same words as a red release run, so it is one ticket). Judged job by job."""
+    """macOS and Windows run on develop only (every 3 hours, at night, the release check), not in the merge
+    queue (ORCH-315, ORCH-452): the newest FINISHED push or scheduled run on develop that is red opens the
+    red-develop ticket, once per commit (the same words as a red release run, so it is one ticket). Judged job
+    by job. A cancelled run is no answer: develop drops a waiting run when a newer push comes (ORCH-452)."""
     wf = w.cfg.workflows[0][0] if w.cfg.workflows else "ci.yml"
     known = w.known_red()
-    rows = [r for e in ("push", "schedule") for r in w.runs(wf, e) if r.get("event") == e]
+    rows = [
+        r
+        for e in ("push", "schedule")
+        for r in w.runs(wf, e)
+        if r.get("event") == e and r.get("conclusion") != "cancelled"
+    ]
     seen: set[str] = set()
     for r in sorted(rows, key=lambda x: str(x.get("createdAt")), reverse=True):
         sha = r.get("headSha")
         if not sha or sha in seen:
             continue
         seen.add(sha)
-        state, run_, _ = run_state(w, wf, sha, None, ("push", "schedule"), known)
+        state, run_, _ = run_state(w, wf, sha, None, ("push", "schedule"), known, skip_cancelled=True)
         if state in ("pending", "none"):
             continue
         if state == "green" or st.get("develop_red_sha") == sha:

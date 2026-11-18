@@ -3,11 +3,11 @@ on:
   workflow_call:
     inputs:
       full:
-        description: "also run macOS (push to develop/main, PRs into main, nightly, manual runs; not merge queue groups)"
+        description: "also run macOS (push to main, PRs into main, the nightly and 3-hourly develop runs, manual runs; not merge queue groups or pushes to develop)"
         type: boolean
         default: false
       windows:
-        description: "also run Windows (push to develop, PRs that change file, process or path code, nightly, manual)"
+        description: "also run Windows (PRs that change file, process or path code, the nightly and 3-hourly develop runs, manual)"
         type: boolean
         default: false
 jobs:
