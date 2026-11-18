@@ -26,6 +26,7 @@ from .store import Refused
 DEFAULT_PORT = 8433
 MAX_BODY = 8192
 KIT_FILES = (
+    "frame.js",
     "tokens.css",
     "components.css",
     "motion.css",
@@ -140,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self._vouched():
                 return self._send(403, FROM_DASHBOARD.encode())
             return self._api_get(path, parse_qs(query))
-        if path == "/":
+        if path in ("/", "/notes", "/parts"):  # the screens: one page, the path picks the first screen
             prefix = self.headers.get("X-Forwarded-Prefix") or ""
             prefix = prefix if PREFIX.fullmatch(prefix) else ""
             return self._send(200, _web("index.html").replace(b"__P__", prefix.encode()), TYPES["html"])

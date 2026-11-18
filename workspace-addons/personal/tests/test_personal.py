@@ -45,6 +45,8 @@ def test_helper_sees_only_attached_notes(cli, vault, monkeypatch, fake_orch, ws)
     as_helper(monkeypatch)
     assert jrun(cli, "notes", "list")[1]["notes"] == []
     assert jrun(cli, "notes", "find", "Helvetia")[1]["notes"] == []
+    tile = jrun(cli, "today")[1]["parts"][0]
+    assert tile["status"] == "0 notes you may read" and "Helvetia" not in json.dumps(tile)
     code, d = jrun(cli, "notes", "show", "Helvetia Logistik")
     assert code == 2 and "not attached to your ticket" in d["error"]
     # a helper cannot hand itself a note while the rule is "attached"
@@ -121,7 +123,7 @@ def test_secrets_never_reach_a_helper(cli, vault, monkeypatch):
     code, d = jrun(cli, "notes", "show", "Keys")
     assert code == 2 and "secret" in d["error"]
     hits = jrun(cli, "notes", "find", "key")[1]["notes"]
-    assert all(key not in h["snippet"] for h in hits)
+    assert hits == []  # the note with the secret is left out entirely, not only its snippet
     code, d = jrun(cli, "notes", "write", "Leak", "--text", key)
     assert code == 2
 

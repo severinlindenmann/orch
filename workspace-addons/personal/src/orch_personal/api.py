@@ -46,7 +46,7 @@ def today(root: Path, who: Who) -> dict:
             continue
         tile = {"part": name, "label": meta["label"], "uses": helper_uses(name, p)}
         if name == "notes":
-            tile.update(_notes_tile(root, p, needs))
+            tile.update(_notes_tile(root, p, needs, who))
         tiles.append(tile)
     added = [n for n, p in s.items() if p["on"]]
     can_add = [
@@ -61,7 +61,7 @@ def today(root: Path, who: Who) -> dict:
         "can_add": can_add,
         "soon": [{"part": k, "label": v[0], "text": v[1]} for k, v in store.SOON.items()],
         "later": [{"part": k, "label": v[0], "text": v[1]} for k, v in store.LATER.items()],
-        "activity": [] if who.helper else store.activity(root),
+        "activity": [] if who.helper else _with_keys(root, store.activity(root)),
     }
 
 
@@ -81,7 +81,7 @@ def helper_uses(name: str, p: dict) -> str:
     return "nothing"
 
 
-def _notes_tile(root: Path, p: dict, needs: list) -> dict:
+def _notes_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
     if not p["folder"]:
         needs.append(
             {
@@ -104,11 +104,33 @@ def _notes_tile(root: Path, p: dict, needs: list) -> dict:
                 "action": "Choose folder",
             }
         )
-        return {"state": "stopped", "status": "Folder not found", "line": p["folder"]}
+        return {"state": "stopped", "status": "Folder not found", "line": "Choose the folder again."}
+    if who.helper:  # a helper's glance follows the read rule: only what it may read
+        allowed = (
+            None
+            if p["read"] == "all"
+            else store.used_on(root, who.ticket, "notes")
+            if p["read"] == "attached"
+            else set()
+        )
+        items = [n for n in items if allowed is None or n.id in allowed]
+        if not items:
+            return {
+                "state": "ok",
+                "status": "0 notes you may read",
+                "line": "Ask the person to attach a note.",
+            }
+        last = items[0]
+        return {
+            "state": "ok",
+            "status": f"{_count(len(items))} you may read",
+            "line": last.title,
+            "changed": _iso(last.changed),
+        }
     last = items[0] if items else None
     return {
         "state": "ok",
-        "status": f"{len(items)} notes",
+        "status": _count(len(items)),
         "line": last.title if last else "No notes in this folder yet.",
         "changed": _iso(last.changed) if last else None,
         "source": f"Folder “{Path(p['folder']).name}” on this computer",
@@ -154,8 +176,6 @@ def notes_list(root: Path, who: Who, group: str | None = None) -> dict:
     allowed = _visible(root, who, p)
     rows = [_row(v, n, allowed) for n in v.notes(group) if allowed is None or n.id in allowed]
     groups = v.groups() if allowed is None else []
-    if who.helper:
-        store.log(root, "notes", f"listed {len(rows)} notes", who.by, who.ticket)
     return {
         "schema": "orch.personal.notes/1",
         "notes": rows,
@@ -174,8 +194,8 @@ def notes_find(root: Path, who: Who, words: str) -> dict:
     for n, snippet in v.find(words, limit=50):
         if allowed is not None and n.id not in allowed:
             continue
-        if who.helper and _secret(root, snippet):
-            snippet = ""
+        if who.helper and _secret(root, v.text(n.id)):
+            continue  # a note holding a secret never shows up for a helper, not even as a hit
         out.append({**_row(v, n, allowed), "snippet": snippet})
         if len(out) >= 20:
             break
@@ -285,7 +305,8 @@ def use(root: Path, who: Who, ticket: str, part: str, ref: str) -> dict:
     name = f"{n.title}.md"
     attached = _attach(root, ticket, name, body, who.by)
     store.mark_used(root, ticket, "notes", n.id, who.by, attached)
-    store.log(root, "notes", f"attached “{n.title}”", who.by, ticket)
+    if who.helper:
+        store.log(root, "notes", f"attached “{n.title}”", who.by, ticket)
     return {
         "schema": "orch.personal.used/1",
         "ticket": ticket,
@@ -370,6 +391,31 @@ def _no_secret(root: Path, text: str) -> None:
     found = secretscan.find(text, root)
     if found:
         raise Refused(secretscan.refusal(found))
+
+
+def _with_keys(root: Path, rows: list[dict]) -> list[dict]:
+    """The ticket's short key (DM-1) next to each row, read from the ticket file; the id when it has none."""
+    import json
+
+    keys: dict[str, str] = {}
+    for r in rows:
+        t = r.get("ticket")
+        if t and t not in keys:
+            try:
+                keys[t] = (
+                    json.loads((root / ".orch" / "tickets" / f"{t}.json").read_text(encoding="utf-8")).get(
+                        "key"
+                    )
+                    or t
+                )
+            except (OSError, ValueError, AttributeError):
+                keys[t] = t
+        r["ticket_key"] = keys.get(t) if t else None
+    return rows
+
+
+def _count(n: int) -> str:
+    return f"{n} note" if n == 1 else f"{n} notes"
 
 
 def _iso(t: float) -> str:

@@ -29,24 +29,30 @@
     if (now - d < 6 * 864e5) return d.toLocaleDateString([], {weekday: 'short'}) + ' ' + hm;
     return d.toLocaleDateString([], {day: 'numeric', month: 'short'});
   }
+  // action: {label, onClick}; the master empty state draws the one button itself
   function state(kind, title, text, action) {
     const host = el('section', 'state-host');
-    if (window.UI && UI.state) host.append(UI.state({kind, title, text}));
-    else host.append(el('p', null, title + (text ? ' ' + text : '')));
-    if (action) host.append(action);
+    if (window.UI && UI.state) host.append(UI.state({kind, title, text, action}));
+    else host.append(el('p', null, title + (text ? ' ' + text : '')), action ? button(action.label, 'btn primary', action.onClick) : null);
     return host;
   }
 
+  const NO_REACH = 'Personal does not answer. Reload the page; if it stays, run orch start.';
   async function read(path) {
-    const r = await fetch(prefix + path, {signal: AbortSignal.timeout(15000), credentials: 'same-origin'});
+    let r;
+    try { r = await fetch(prefix + path, {signal: AbortSignal.timeout(15000), credentials: 'same-origin'}); }
+    catch (e) { throw new Error(NO_REACH); }
     const body = await r.json().catch(() => null);
     if (r.status === 409 && body && body.error) throw new Error(body.error);
     if (!r.ok || !body) throw new Error(r.status === 403 ? 'Open Personal from the dashboard.' : 'Personal could not be read. Reload the page.');
     return body;
   }
   async function act(op, args) {
-    const r = await fetch(prefix + '/api/act', {method: 'POST', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({op, args})});
+    let r;
+    try {
+      r = await fetch(prefix + '/api/act', {method: 'POST', credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({op, args})});
+    } catch (e) { throw new Error(NO_REACH); }
     const body = await r.json().catch(() => null);
     if (!r.ok || !body || body.error) throw new Error((body && body.error) || 'That did not work. Reload the page and try again.');
     return body.result;
@@ -58,7 +64,7 @@
     card.append(el('div', 'card-h', el('h2', null, 'Needs you now'), el('span', 'meta', needs.length + (needs.length === 1 ? ' thing' : ' things'))));
     for (const n of needs) {
       const row = el('div', 'list-row');
-      row.append(el('span', 'dot-attn'), el('span', 'grow', el('strong', null, n.title), el('span', 'subline', n.text)));
+      row.append(el('span', 'dot-warn'), el('div', 'grow', el('strong', null, n.title), el('p', 'meta', n.text)));
       row.append(button(n.action, 'btn outline sm', () => openFolder()));
       card.append(row);
     }
@@ -79,7 +85,7 @@
     if (!rows.length) card.append(el('p', 'pad muted', 'Helpers have not used Personal yet.'));
     for (const a of rows) {
       card.append(el('div', 'list-row', el('span', 'meta', when(a.at)), el('span', 'grow', (a.part === 'notes' ? 'Notes: ' : '') + a.what),
-        a.ticket ? el('span', 'meta', a.ticket) : null));
+        a.ticket_key ? el('span', 'chip', a.ticket_key) : null));
     }
     return card;
   }
@@ -163,15 +169,17 @@
   async function notesScreen(id) {
     let rules;
     try { rules = await read('/api/rules'); } catch (e) { return [state('error', 'Notes can’t be shown', e.message)]; }
-    if (!rules.notes || !rules.notes.on) return [state('empty', 'Notes is not added yet', 'Add it to see your notes here.', button('Add Notes', 'btn primary', addNotes))];
+    if (!rules.notes || !rules.notes.on) return [state('empty', 'Notes is not added yet', 'Add it to see your notes here.', {label: 'Add Notes', onClick: addNotes})];
     if (!rules.notes.folder) {
       return [state('empty', 'No notes yet', 'Choose the folder with your notes. They show up here with their links, and nothing in the folder is changed.',
-        button('Choose folder', 'btn primary', openFolder)), rulesCard(rules)];
+        {label: 'Choose folder', onClick: openFolder}), rulesCard(rules)];
     }
-    try { notes = await read('/api/notes'); } catch (e) { return [state('error', 'Your notes can’t be read', e.message, button('Choose folder', 'btn outline', openFolder)), rulesCard(rules)]; }
+    try { notes = await read('/api/notes'); } catch (e) { return [state('error', 'Your notes can’t be read', e.message, {label: 'Choose folder', onClick: openFolder}), rulesCard(rules)]; }
     if (!notes.notes.length) return [state('empty', 'This folder has no notes yet', 'Notes are .md files. Add one in your notes app and reload.'), rulesCard(rules)];
+    if (!id && matchMedia('(min-width: 721px)').matches) id = notes.notes[0].id;  // wide: the newest note is open, as in the draft
+    const picked = location.hash.startsWith('#notes/');
     const split = el('section', 'split-view');
-    if (id) split.dataset.picked = '';
+    if (picked) split.dataset.picked = '';
     const list = el('div', 'split-list card');
     const find = el('input', 'input');
     find.type = 'search'; find.placeholder = 'Find in your notes'; find.setAttribute('aria-label', 'Find in your notes');
@@ -210,7 +218,7 @@
 
   // --- Add a part ------------------------------------------------------------------------------------------
   function partRow(title, text, through, right) {
-    return el('div', 'list-row', el('span', 'grow', el('strong', null, title), el('span', 'subline', text), through ? el('span', 'subline meta', 'Connects through: ' + through) : null), right);
+    return el('div', 'list-row', el('div', 'grow', el('strong', null, title), el('p', 'meta', text), through ? el('p', 'meta', 'Connects through: ' + through) : null), right);
   }
   function addScreen() {
     const yours = el('section', 'card');
@@ -250,7 +258,7 @@
     if (!list.length) box.append(el('p', 'muted', 'There is no open ticket. Make one on Tickets first.'));
     list.forEach((t, i) => {
       const r = el('input'); r.type = 'radio'; r.name = 'use-ticket'; r.value = t.id; r.checked = i === 0;
-      box.append(el('label', 'list-row', r, el('span', 'grow', el('strong', null, (t.key ? t.key + ' ' : '') + t.title), el('span', 'subline', t.status))));
+      box.append(el('label', 'list-row', r, el('div', 'grow', el('strong', null, (t.key ? t.key + ' ' : '') + t.title), el('p', 'meta', t.status))));
     });
     $('use-ok').disabled = !list.length;
     $('use-dialog').showModal();
@@ -272,15 +280,17 @@
     box.hidden = today.parts.length === 0;
   }
   async function route() {
-    const h = decodeURIComponent(location.hash.slice(1));
+    const start = location.pathname.split('/').pop();  // /addon/personal/notes opens Notes (the dashboard's deep link)
+    const h = decodeURIComponent(location.hash.slice(1)) || (['notes', 'parts'].includes(start) ? start : '');
     view.setAttribute('aria-busy', 'true');
     try { if (!today) today = await read('/api/today'); }
     catch (e) { view.replaceChildren(state('error', 'Personal can’t be shown right now', e.message)); view.setAttribute('aria-busy', 'false'); return; }
     let out;
     const [screen, ...rest] = h.split('/');
-    if (screen === 'notes') { $('page-title').firstChild.textContent = 'Notes '; out = await notesScreen(rest.join('/') || null); }
-    else if (screen === 'parts') { $('page-title').firstChild.textContent = 'Add a part '; out = addScreen(); }
-    else { $('page-title').firstChild.textContent = 'Personal '; out = home(); }
+    const head = (title, sub) => { $('page-title').firstChild.textContent = title + ' '; $('page-sub').textContent = sub; };
+    if (screen === 'notes') { head('Notes', 'What you and your helpers know, as linked notes. Click a link to follow it.'); out = await notesScreen(rest.join('/') || null); }
+    else if (screen === 'parts') { head('Add a part', 'One click adds it. You choose what helpers may do before anything is read.'); out = addScreen(); }
+    else { head('Personal', 'What needs you, then each part at a glance. You see everything; helpers use only what you turned on.'); out = home(); }
     $('add-link').hidden = screen === 'parts';
     nav(screen === 'parts' ? null : (screen || ''));
     view.replaceChildren(...out);
