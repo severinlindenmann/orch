@@ -3,6 +3,7 @@
 // orch CLI's bundle()), a png, a pdf, a md, a .py and a csv, checks each preview and screenshots it.
 // Usage: node publish-previews.mjs [out dir]   (default ~/orch-dev/state/fresh-start-2026-11-04/ux5/publish)
 import { chromium } from 'playwright';
+import headless from '../headless.cjs'; // the keychain options (ORCH-615)
 import { spawn, spawnSync } from 'node:child_process';
 import { webcrypto as crypto } from 'node:crypto';
 import fs from 'node:fs';
@@ -69,7 +70,7 @@ try {
   }
 
   // fixtures
-  browser = await chromium.launch({ channel: 'chromium' }); // full Chromium (new headless) has the PDF viewer
+  browser = await headless.launch(chromium, { channel: 'chromium' }); // full Chromium (new headless) has the PDF viewer
   const shot = await browser.newPage({ viewport: { width: 900, height: 520 } });
   await shot.setContent('<body style="margin:0;background:linear-gradient(135deg,#1e3a8a,#60a5fa);font:600 48px system-ui;color:#fff;display:grid;place-items:center;height:100vh">Quarterly chart<br><span style="font-size:22px">a PNG preview</span></body>');
   const png = await shot.screenshot();

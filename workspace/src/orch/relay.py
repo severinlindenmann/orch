@@ -2610,10 +2610,12 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     if tid is None:
         spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
         said = str(body.get("text") or spoken or "")
+        # ORCH-424: the person's Human review needed choice on the phone; no field = the workspace default
+        review = body["human_review"] if isinstance(body.get("human_review"), bool) else None
         t = (
-            tickets.create_from_input(root, said, by)
+            tickets.create_from_input(root, said, by, human_review=review)
             if said.strip()
-            else tickets.create(root, _phone_title(root, said, frm), by)
+            else tickets.create(root, _phone_title(root, said, frm), by, human_review=review)
         )
         tid = t["id"]
         tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
